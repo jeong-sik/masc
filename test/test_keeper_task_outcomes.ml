@@ -768,6 +768,104 @@ let test_default_done_is_terminal () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+(* task-540: an oversized artifact: evidence list must be refused at the
+   keeper_task_done boundary with the byte count and the note: escape hatch,
+   not submitted as a truncated prefix that stalls the completion authority.
+   A same-size list under the limit must still submit. *)
+let test_done_refuses_oversized_artifact_evidence () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let agent_name = "keeper-task-create-test-agent" in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       ignore
+         (Masc.Workspace.add_task
+            config
+            ~title:"Oversized evidence refusal"
+            ~priority:2
+            ~description:"");
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name
+            ~capabilities:[]
+            ());
+       (match
+          Masc.Workspace.claim_task_r
+            config
+            ~agent_name
+            ~task_id:"task-001"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail ("claim failed: " ^ Masc_domain.masc_error_to_string error));
+       let meta = keeper_meta () in
+       (* Producer playground fixture: the artifact size check resolves
+          [artifact:<path>] against the agent's sandbox root, so the file
+          must exist there for the byte count to be measurable at all. *)
+       let producer_root =
+         Keeper_sandbox_config.host_root_abs_of_agent
+           ~base_path:
+             (Workspace_verification_store.project_root_of_base_path
+                config.base_path)
+           ~agent_name
+       in
+       let rec mkdir_p dir =
+         if not (Sys.file_exists dir)
+         then (
+           mkdir_p (Filename.dirname dir);
+           try Unix.mkdir dir 0o755
+           with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+       in
+       mkdir_p producer_root;
+       let run_done evidence =
+         Task.handle_keeper_task_tool
+           ~config
+           ~meta
+           ~name:"keeper_task_done"
+           ~args:
+             (`Assoc
+               [ "task_id", `String "task-001"
+               ; "result", `String "implementation complete"
+               ; "evidence_refs", `List evidence
+               ])
+       in
+       let expected_limit = 512 in
+       let expected_total = 513 in
+       let big_artifact =
+         Filename.concat producer_root (Printf.sprintf "big-%d.txt" expected_total)
+       in
+       Out_channel.with_open_text big_artifact (fun oc ->
+         output_string oc (String.make expected_total 'x'));
+       let payload =
+         Task.with_evidence_total_bytes_limit expected_limit @@ fun () ->
+         run_done
+           [ `String
+               (Printf.sprintf "artifact:big-%d.txt" expected_total)
+           ]
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "oversized submit is not ok" false
+         (json |> U.member "ok" |> U.to_bool);
+       check bool "rejection names the measured total" true
+         (String_util.contains_substring
+            payload
+            (Printf.sprintf "artifact total size %d bytes" expected_total));
+       check bool "rejection names the limit" true
+         (String_util.contains_substring
+            payload
+            (Printf.sprintf "exceeds limit %d bytes" expected_limit));
+       check bool "rejection names the note: escape hatch" true
+         (String_util.contains_substring payload "use note:");
+       check bool "task stays claimed, not submitted" true
+         (match Masc.Workspace.get_tasks_raw config with
+          | [ { task_status = Masc_domain.Claimed _; _ } ] -> true
+          | _ -> false))
+;;
+
 (* Without an Eio fs context the workspace backend falls back to Memory
    (workspace_utils_backend_setup.ml), and three cases here reach past that
    backend: two write a corrupt backlog file directly to drive the recovery
@@ -821,5 +919,8 @@ let () =
             `Quick test_strict_done_submits_for_verification
         ; test_case "default done submits for verification"
             `Quick test_default_done_is_terminal
+        ; test_case
+            "done refuses oversized artifact evidence (task-540)"
+            `Quick test_done_refuses_oversized_artifact_evidence
         ] )
     ]

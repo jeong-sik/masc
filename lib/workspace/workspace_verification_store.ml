@@ -710,6 +710,40 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
   | Note_reference note -> Evidence_note note
   | Unresolvable_reference -> Evidence_invalid_reference
 
+(* Size-only pre-check for the submit boundary. Reads the same
+   descriptor-validated file the snapshot would read — with a 1-byte prefix so
+   no content is materialized — and reports the descriptor's real [file_size],
+   so an oversized artifact is refused at keeper_task_done time with the byte
+   count the operator needs, instead of stalling the completion authority on a
+   truncated prefix it cannot use (task-540: four tasks sat 8-16h in
+   evaluator_unavailable). A file that cannot be read is not this check's
+   business: the snapshot layer reports those as typed unreadable reasons, and
+   duplicating that taxonomy here would drift. [None] means "no artifact
+   reference / not measurable here", which callers treat as pass-through. *)
+let artifact_reference_size ~base_path ~worker reference =
+  match classify_evidence_reference reference with
+  | Artifact_reference relative_path ->
+    if not (valid_producer_relative_path relative_path)
+    then None
+    else
+      let project_root = project_root_of_base_path base_path in
+      let ownership_root =
+        Keeper_sandbox_config.host_root_abs_of_agent
+          ~base_path:project_root
+          ~agent_name:worker
+        |> Env_config_core.strip_trailing_slashes
+      in
+      let target = Filename.concat ownership_root relative_path in
+      (match
+         Fs_compat.load_owned_regular_file_prefix
+           ~ownership_root
+           ~max_bytes:1
+           target
+       with
+       | Ok (Some prefix) -> Some prefix.file_size
+       | Ok None | Error _ -> None)
+  | Note_reference _ | Unresolvable_reference -> None
+
 let snapshot_submitted_evidence_json ~base_path ~worker references =
   `List
     (List.map

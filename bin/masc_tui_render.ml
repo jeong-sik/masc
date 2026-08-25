@@ -4353,8 +4353,8 @@ module Diff = Masc_tui_diff
 let diff_row_span ~width (row : Diff.row) =
   let background, marker, text =
     match row with
-    | Diff.Removed line -> (Span.bg Ansi.bg_removed, "-", line)
-    | Diff.Added line -> (Span.bg Ansi.bg_added, "+", line)
+    | Diff.Removed line -> (Span.bg Theme.Syntax.diff_removed_bg, "-", line)
+    | Diff.Added line -> (Span.bg Theme.Syntax.diff_added_bg, "+", line)
     | Diff.Context line -> (Span.plain, " ", line)
   in
   (* Context is dim so the changed lines are what an eye lands on. The marker
@@ -4575,8 +4575,8 @@ let render_changes_list (state : state) =
 let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   let background, marker =
     match row.Masc.Tui_decode.gdr_kind with
-    | Masc.Tui_decode.Gd_removed -> (Span.bg Ansi.bg_removed, "-")
-    | Masc.Tui_decode.Gd_added -> (Span.bg Ansi.bg_added, "+")
+    | Masc.Tui_decode.Gd_removed -> (Span.bg Theme.Syntax.diff_removed_bg, "-")
+    | Masc.Tui_decode.Gd_added -> (Span.bg Theme.Syntax.diff_added_bg, "+")
     | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
   in
   let gutter =

@@ -36,6 +36,8 @@ Each path below must appear exactly once and use one owner from the table above.
 
 - `lib/keeper/keeper_tool_board_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_board_runtime.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_code_query.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_code_query.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_filesystem_runtime.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_filesystem_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_ide_runtime.ml` - execution-dispatch

@@ -2877,7 +2877,7 @@
 (test
  (name test_tui_context_inspector)
  (modules test_tui_context_inspector)
- (libraries alcotest masc_tui_context_inspector masc masc.masc_types))
+ (libraries alcotest digestif masc_tui_context_inspector masc masc.masc_types))
 
 (test
  (name test_tui_frame_presenter)

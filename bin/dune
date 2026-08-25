@@ -417,7 +417,7 @@
  (name masc_tui_context_inspector)
  (wrapped false)
  (modules masc_tui_context_inspector)
- (libraries masc masc.masc_types yojson))
+ (libraries digestif masc masc.masc_types yojson))
 
 (library
  (name masc_tui_observation_layout)

@@ -4407,13 +4407,18 @@ def message_origin_badge_interaction(
     )
     update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
     frame = bytes(output[pane_start:update_end])
-    for needle, description in (
-        (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
-        (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
-        (b"\x1b[36m\xe2\x94\x82\x1b[0m \x1b[0moperator-body-neutral", "gutter-marked operator body"),
-        (b"\x1b[34m\xe2\x94\x82\x1b[0m \x1b[0mkeeper-body-neutral", "gutter-marked Keeper body"),
+    plain_frame = CSI_RE.sub(b"", frame)
+    for pattern, description in (
+        (
+            b"\xe2\x96\xb6\\s+(?:turn \xc2\xb7 )?vincent {2}operator-body-neutral",
+            "operator mark, origin, and separated body",
+        ),
+        (
+            b"\xe2\x97\x8f\\s+(?:turn \xc2\xb7 )?alpha {2}keeper-body-neutral",
+            "Keeper mark, origin, and separated body",
+        ),
     ):
-        if needle not in frame:
+        if re.search(pattern, plain_frame) is None:
             raise AssertionError(f"chat frame omitted {description}: {frame!r}")
     for forbidden, description in (
         (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),

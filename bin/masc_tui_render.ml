@@ -200,9 +200,11 @@ let tool_projection_mode (state : state) =
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Body ->
-      (* The two indent cells the layout reserves become a gutter in the
-         block's own colour, so where one block ends and the next begins
-         reads at a glance instead of from the headings alone. *)
+      (* The two cells reserved by the layout separate the activity column from
+         its body. The semantic lead lives with the origin label, so wrapped
+         prose starts at one stable column without drawing a rail on every row.
+         That rail gave a continuation equal visual weight to a new event and
+         made a busy turn look like a table. *)
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
       let dress rest =
@@ -233,13 +235,10 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         let rest = String.sub text 2 (String.length text - 2) in
         if context.ambient_background then
           box_line_styled buf cols ~style:context.opening
-            (Printf.sprintf "%s%s\xe2\x94\x82%s %s" margin
-               (Chat_theme.origin row.style) context.inline_restore
-               (dress rest))
+            (Printf.sprintf "%s  %s" margin (dress rest))
         else
           box_line buf cols
-            (Printf.sprintf "%s%s\xe2\x94\x82%s %s%s%s" margin
-               (Chat_theme.origin row.style) Ansi.reset
+            (Printf.sprintf "%s  %s%s%s" margin
                (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
         box_line_styled buf cols ~style:context.opening (dress text)

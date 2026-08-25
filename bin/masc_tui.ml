@@ -5383,7 +5383,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               with
               | Ok snapshot ->
                   state.runtime_surface <- Some snapshot;
-                  state.runtime_surface_error <- None
+                  state.runtime_surface_error <- probe_error
               | Error detail -> state.runtime_surface_error <- Some detail)
          | Error detail ->
              (* The last joined reading remains visible. An authority read or
@@ -7372,7 +7372,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_older
@@ -7566,7 +7566,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows
+                    overview_layout state ~terminal_rows:(surface_rows ())
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_newer

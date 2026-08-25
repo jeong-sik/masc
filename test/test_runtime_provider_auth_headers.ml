@@ -1361,6 +1361,52 @@ let test_dashboard_runtime_probe_reachability_contracts () =
   let runtime = runtime_or_fail ~provider () in
   assert_dashboard_runtime_probe_missing_auth runtime
 
+let test_dashboard_runtime_probe_groups_models_by_provider () =
+  let second_model =
+    { qwen_model with Runtime_schema.id = "qwen-2"; api_name = "qwen-2" }
+  in
+  let second_binding =
+    { runpod_binding with
+      Runtime_schema.model_id = second_model.id
+    ; is_default = false
+    }
+  in
+  let config =
+    { Runtime_schema.providers = [ runpod_provider ]
+    ; models = [ qwen_model; second_model ]
+    ; bindings = [ runpod_binding; second_binding ]
+    ; default_runtime_id = Some "runpod_mtp.qwen"
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  let runtime binding =
+    match Runtime.of_binding config binding with
+    | Ok runtime -> runtime
+    | Error reason ->
+      failf "expected grouped runtime to materialize: %s" (Runtime.string_of_drop_reason reason)
+  in
+  let calls = ref 0 in
+  let json =
+    with_dashboard_probe_http_get
+      (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
+         incr calls;
+         Ok (200, [ "content-type", "application/json" ], {|{"data":[]}|}))
+      (fun () ->
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
+           ~default_id:"runpod_mtp.qwen"
+           [ runtime runpod_binding; runtime second_binding ])
+  in
+  check int "one provider metadata request" 1 !calls;
+  let providers = Yojson.Safe.Util.(member "providers" json |> to_list) in
+  check (list string) "runtime rows preserved"
+    [ "runpod_mtp.qwen"; "runpod_mtp.qwen-2" ]
+    (List.map Yojson.Safe.Util.(fun row -> member "runtime_id" row |> to_string) providers);
+  check int "reachable runtime projections" 2
+    Yojson.Safe.Util.(member "summary" json |> member "reachable" |> to_int)
+
 let test_runtime_agent_terminal_observation_uses_runtime_identity () =
   let config =
     Runtime_agent.default_config
@@ -2235,6 +2281,10 @@ let () =
             "dashboard runtime provider reachability contracts"
             `Quick
             test_dashboard_runtime_probe_reachability_contracts
+        ; test_case
+            "dashboard runtime probe groups models by provider"
+            `Quick
+            test_dashboard_runtime_probe_groups_models_by_provider
         ; test_case
             "clock fail-fast raises when idle set without clock (Agent Core contract)"
             `Quick

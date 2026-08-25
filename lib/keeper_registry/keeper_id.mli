@@ -6,6 +6,11 @@ module Keeper_name : sig
   (** Keeper name parsed with the shared portable-name grammar
       [[A-Za-z0-9._-]+] used by {!Keeper_config.validate_name}, excluding the
       reserved path components [.] and [..]. *)
+  val max_length : int
+  (** Longest accepted name. The name becomes a filesystem component
+      ([.masc/keepers/<name>/]), so it is bounded for the same reason
+      {!Trace_id} is. *)
+
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool

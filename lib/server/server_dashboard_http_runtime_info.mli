@@ -139,13 +139,12 @@ val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t
     skew, etc). *)
 
 val dashboard_tools_http_json :
-  ?actor:string ->
+  ?keeper:string ->
   ?timing:Server_timing.t ->
   Workspace.config ->
   Yojson.Safe.t
-(** Renders the dashboard tools projection.  [?actor]
-    selects the per-agent tool catalogue when present;
-    otherwise the full registry surface is returned.  When [?timing] is
+(** Renders the registered catalog plus, when [?keeper] is supplied, the
+    exact effective dynamic-tool surface for that Keeper. When [?timing] is
     provided, internal phases (config_resolution, runtime_resolution,
     tools_compute) are accumulated into the [Server_timing.t] for surfacing
     via the [Server-Timing] response header. *)

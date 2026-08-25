@@ -1,5 +1,10 @@
 ; Test Environment Configuration
 
+(test
+ (name test_keeper_effective_tool_surface)
+ (modules test_keeper_effective_tool_surface)
+ (libraries masc masc_test_deps alcotest))
+
 (env
  (_
   (env-vars

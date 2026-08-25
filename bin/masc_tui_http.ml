@@ -1101,10 +1101,18 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
 
-(** Fetch /api/v1/dashboard/tools. *)
-let fetch_dashboard_tools ~(host : string) ~(port : int) :
+(** Fetch /api/v1/dashboard/tools, optionally including one Keeper's exact
+    effective turn surface beside the global registered catalog. *)
+let fetch_dashboard_tools ~(host : string) ~(port : int) ?keeper () :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/tools"
+  let path =
+    match keeper with
+    | None -> "/api/v1/dashboard/tools"
+    | Some keeper_name ->
+        "/api/v1/dashboard/tools?keeper="
+        ^ percent_encode_query_value keeper_name
+  in
+  get_json ~host ~port ~path
 
 (** Fetch /api/v1/gate/connectors. *)
 let fetch_connectors ~(host : string) ~(port : int) :

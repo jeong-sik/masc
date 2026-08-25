@@ -1405,9 +1405,9 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json tools =
+let tool_snapshot_json ?effective tools =
   `Assoc
-    [ ("generated_at", `String "2026-08-23T09:00:00Z")
+    ([ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
     ; ("runtime_resolution", `Assoc [])
     ; ( "tool_inventory"
@@ -1418,6 +1418,10 @@ let tool_snapshot_json tools =
           ] )
     ; ("tool_usage", `Assoc [])
     ]
+    @
+    match effective with
+    | None -> []
+    | Some value -> [ "effective_keeper_surface", value ])
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
@@ -1490,6 +1494,78 @@ let test_decode_tool_snapshot_without_inventory_is_an_error () =
   with
   | Ok _ -> Alcotest.fail "an envelope with no inventory should not decode"
   | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
+
+let test_decode_effective_keeper_surface_keeps_provenance () =
+  let effective =
+    `Assoc
+      [ "status", `String "available"
+      ; "keeper_name", `String "codex-mcp-client"
+      ; "runtime_id", `String "openai.codex"
+      ; "official_client_kind", `String "codex"
+      ; "native_posture", `String "read"
+      ; "tool_groups", `List [ `String "filesystem" ]
+      ; "instruction_skills", `List [ `String "ocaml-coding" ]
+      ; "composition_skills", `List [ `String "mission-snapshot" ]
+      ; "count", `Int 1
+      ; ( "tools"
+        , `List
+            [ `Assoc
+                [ "name", `String "keeper_compose_mission-snapshot"
+                ; ( "origin"
+                  , `Assoc
+                      [ "kind", `String "composition_skill"
+                      ; "skill_source"
+                        , `String "skills/mission-snapshot/SKILL.md"
+                      ] )
+                ] ] )
+      ; "tool_surface_sha256", `String (String.make 64 'a')
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok
+      { Tui_decode.ts_effective =
+          Some
+            (Tui_decode.Effective_surface_available
+               { ets_keeper_name;
+                 ets_native_posture = Some native;
+                 ets_instruction_skills;
+                 ets_tools = [ tool ];
+                 ets_tool_surface_sha256 = Some digest;
+                 _
+               });
+        _ } ->
+      Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
+      Alcotest.(check string) "native posture" "read" native;
+      Alcotest.(check (list string)) "declared instruction skill"
+        [ "ocaml-coding" ] ets_instruction_skills;
+      Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      Alcotest.(check (option string)) "SKILL.md source"
+        (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
+      Alcotest.(check int) "digest length" 64 (String.length digest)
+  | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
+
+let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
+  let effective =
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "keeper_name", `String "analyst"
+      ; "reason", `String "declared_skill_missing"
+      ; "detail", `String "current task declares missing skill"
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Ok
+      { Tui_decode.ts_effective =
+          Some
+            (Tui_decode.Effective_surface_unavailable
+               { ets_reason; ets_detail; _ });
+        _ } ->
+      Alcotest.(check string) "typed reason" "declared_skill_missing" ets_reason;
+      Alcotest.(check bool) "diagnostic preserved" true
+        (String.length ets_detail > 0)
+  | Ok _ -> Alcotest.fail "expected an unavailable effective Keeper surface"
+  | Error err -> Alcotest.failf "decode failed: %s" err
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
@@ -2668,6 +2744,10 @@ let () =
           test_decode_tool_absent_direct_call_is_off;
         Alcotest.test_case "no inventory is an error" `Quick
           test_decode_tool_snapshot_without_inventory_is_an_error;
+        Alcotest.test_case "effective surface keeps provenance" `Quick
+          test_decode_effective_keeper_surface_keeps_provenance;
+        Alcotest.test_case "effective unavailable stays explicit" `Quick
+          test_decode_effective_keeper_surface_does_not_hide_unavailable;
       ] );
     ( "decode_connectors",
       [

@@ -802,10 +802,11 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
 
-(** Load the tool inventory from /api/v1/dashboard/tools *)
-let load_tools ~(host : string) ~(port : int) :
+(** Load the registered tool inventory and, when selected, one Keeper's exact
+    effective turn surface from /api/v1/dashboard/tools. *)
+let load_tools ~(host : string) ~(port : int) ?keeper () :
     (Tui_decode.tool_snapshot, string) result =
-  match fetch_dashboard_tools ~host ~port with
+  match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
   | Ok json -> Tui_decode.decode_tool_snapshot json
 

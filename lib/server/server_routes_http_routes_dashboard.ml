@@ -1725,16 +1725,12 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
            let timing = Server_timing.create () in
            (* RFC-0138 Phase 3 Step 2: wait-free read via
-              [Dashboard_snapshot.current ()] when an actor filter is
-              not requested.  Per-actor variant continues through
-              [dashboard_tools_http_json] until the snapshot type
-              grows an [Actor_filter] arm. *)
+              [Dashboard_snapshot.current ()] for the global catalog. An exact
+              Keeper selector computes the effective surface beside it. *)
            let json =
              Server_dashboard_snapshot_select.select_tools_json
                ~timing
-               ?actor:
-                 (dashboard_actor_for_request
-                    ~base_path:(Mcp_server.workspace_config state).base_path request)
+               ?keeper:(Server_utils.query_param request "keeper")
                (Mcp_server.workspace_config state)
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd

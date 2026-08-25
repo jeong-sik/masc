@@ -1501,9 +1501,12 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 let launch_tools_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
+  let keeper =
+    Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
+  in
   let run () =
     let result =
-      try Masc_tui_loader.load_tools ~host ~port with
+      try Masc_tui_loader.load_tools ~host ~port ?keeper () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -1515,6 +1518,18 @@ let launch_tools_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
+
+let cycle_tools_keeper state ~mailbox ~delta =
+  let count = List.length state.keepers in
+  if count > 0 then begin
+    let next = (state.keeper_cursor + delta + count) mod count in
+    state.keeper_cursor <- next;
+    state.tools_inventory <- None;
+    state.tools_error <- None;
+    state.tools_scroll <- 0;
+    launch_tools_load state ~mailbox
+  end
+;;
 
 let launch_schedules_load state ~mailbox =
   let host = server_peer_host in
@@ -6934,6 +6949,10 @@ let main () =
        | Some (("[" | "]") as bracket)
          when state.view = Changes && not compact_viewport ->
            cycle_changes_keeper state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
+       | Some (("[" | "]") as bracket)
+         when state.view = Tools && not compact_viewport ->
+           cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail

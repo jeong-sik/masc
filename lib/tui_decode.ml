@@ -1423,10 +1423,37 @@ type inventory_freshness =
   | Warming
   | Settled
 
+type effective_tool = {
+  et_name : string;
+  et_origin : string;
+  et_group : string option;
+  et_skill_source : string option;
+}
+
+type effective_tool_surface =
+  | Effective_surface_available of {
+      ets_keeper_name : string;
+      ets_runtime_id : string;
+      ets_official_client_kind : string;
+      ets_native_posture : string option;
+      ets_tool_groups : string list;
+      ets_instruction_skills : string list;
+      ets_composition_skills : string list;
+      ets_tools : effective_tool list;
+      ets_tool_surface_sha256 : string option;
+    }
+  | Effective_surface_unavailable of {
+      ets_keeper_name : string;
+      ets_reason : string;
+      ets_detail : string;
+    }
+  | Effective_surface_warming of { ets_keeper_name : string }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
+  ts_effective : effective_tool_surface option;
 }
 
 type connector = {
@@ -1632,6 +1659,63 @@ let decode_tool_entry json =
   in
   Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
 
+let decode_effective_tool json =
+  let* et_name = required_string_field json "name" in
+  let* origin = required_object_field json "origin" in
+  let* et_origin = required_string_field origin "kind" in
+  let* et_group = optional_string_field origin "group" in
+  let* et_skill_source = optional_string_field origin "skill_source" in
+  Ok { et_name; et_origin; et_group; et_skill_source }
+
+let decode_effective_tool_surface json =
+  let* status = required_string_field json "status" in
+  let* ets_keeper_name = required_string_field json "keeper_name" in
+  match status with
+  | "warming" -> Ok (Effective_surface_warming { ets_keeper_name })
+  | "unavailable" ->
+      let* ets_reason = required_string_field json "reason" in
+      let* ets_detail = required_string_field json "detail" in
+      Ok
+        (Effective_surface_unavailable
+           { ets_keeper_name; ets_reason; ets_detail })
+  | "available" ->
+      let* ets_runtime_id = required_string_field json "runtime_id" in
+      let* ets_official_client_kind =
+        required_string_field json "official_client_kind"
+      in
+      let* ets_native_posture = optional_string_field json "native_posture" in
+      let* ets_tool_groups = decode_string_name_list json "tool_groups" in
+      let* ets_instruction_skills =
+        decode_string_name_list json "instruction_skills"
+      in
+      let* ets_composition_skills =
+        decode_string_name_list json "composition_skills"
+      in
+      let* tools_json = required_list_field json "tools" in
+      let* ets_tools =
+        decode_list "effective_keeper_surface.tools" decode_effective_tool
+          tools_json
+      in
+      let* ets_tool_surface_sha256 =
+        optional_string_field json "tool_surface_sha256"
+      in
+      Ok
+        (Effective_surface_available
+           { ets_keeper_name;
+             ets_runtime_id;
+             ets_official_client_kind;
+             ets_native_posture;
+             ets_tool_groups;
+             ets_instruction_skills;
+             ets_composition_skills;
+             ets_tools;
+             ets_tool_surface_sha256;
+           })
+  | unknown ->
+      Error
+        (Printf.sprintf
+           "effective_keeper_surface.status has unknown value %S" unknown)
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
      inventory; this reads the inventory and leaves the rest to the dashboard,
@@ -1649,7 +1733,13 @@ let decode_tool_snapshot json =
   let ts_freshness =
     match warming with Some true -> Warming | Some false | None -> Settled
   in
-  Ok { ts_tools; ts_count; ts_freshness }
+  let* effective_json = optional_object_field json "effective_keeper_surface" in
+  let* ts_effective =
+    match effective_json with
+    | None -> Ok None
+    | Some value -> Result.map Option.some (decode_effective_tool_surface value)
+  in
+  Ok { ts_tools; ts_count; ts_freshness; ts_effective }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in

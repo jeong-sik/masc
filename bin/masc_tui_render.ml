@@ -5488,56 +5488,31 @@ let render_runtime (state : state) =
             scroll_hint));
   finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
 
-(* The tools a keeper can reach.
-
-   Surfaces is the column that carries the reading: a tool registered and
-   projected nowhere is reachable by nothing, which the name and description
-   do not say. *)
+(* Two deliberately separate readings: the selected Keeper's exact turn
+   surface, then the process-wide registered catalog. A registered tool is not
+   evidence that a Keeper can call it. *)
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
-  let tools =
+  let registered_tools =
     match state.tools_inventory with
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
-  let tool_rows = Tool_tree.rows tools in
-  let shown = List.length tools in
+  let registered_rows = Tool_tree.rows registered_tools in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
-  let unprojected =
-    List.length
-      (List.filter
-         (fun (t : Masc.Tui_decode.tool_entry) ->
-           t.Masc.Tui_decode.tl_surfaces = [])
-         tools)
-  in
   let header =
-    match state.tools_inventory with
-    | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Tools") timestamp
-          (connection_badge state.connection_status)
-    | Some _ when unprojected > 0 ->
-        Printf.sprintf "%s (%d, %d on no surface)  %s  %s"
-          (screen_title " MASC Tools") shown
-          unprojected timestamp (connection_badge state.connection_status)
-    | Some _ ->
-        Printf.sprintf "%s (%d)  %s  %s"
-          (screen_title " MASC Tools") shown timestamp
-          (connection_badge state.connection_status)
+    Printf.sprintf "%s  effective Keeper + registered catalog  %s  %s"
+      (screen_title " MASC Tools") timestamp
+      (connection_badge state.connection_status)
   in
   box_top buf cols;
   box_line buf cols header;
-  box_divider buf cols;
-  let col_hdr =
-    Printf.sprintf "  %-32s %-8s %s" "Tool" "Direct" "Surfaces"
-  in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()
@@ -5545,75 +5520,140 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:Theme.bad
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
+  let effective_lines =
+    match state.tools_inventory with
+    | None -> [ Theme.warn, " Effective Keeper Surface — not loaded" ]
+    | Some { Masc.Tui_decode.ts_effective = None; _ } ->
+        [ Theme.warn, " Effective Keeper Surface — no Keeper selected" ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_warming { ets_keeper_name });
+          _ } ->
+        [ Theme.warn,
+          Printf.sprintf " Effective Keeper Surface — %s — warming"
+            (Terminal_text.single_line ets_keeper_name) ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_unavailable
+                 { ets_keeper_name; ets_reason; ets_detail });
+          _ } ->
+        [ Theme.bad,
+          Printf.sprintf " Effective Keeper Surface — %s — unavailable (%s)"
+            (Terminal_text.single_line ets_keeper_name)
+            (Terminal_text.single_line ets_reason);
+          Theme.bad, "   " ^ Terminal_text.single_line ets_detail ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_available
+                 { ets_keeper_name;
+                   ets_runtime_id;
+                   ets_official_client_kind;
+                   ets_native_posture;
+                   ets_tool_groups;
+                   ets_instruction_skills;
+                   ets_composition_skills;
+                   ets_tools;
+                   ets_tool_surface_sha256;
+                 });
+          _ } ->
+        let native = Option.value ~default:"n/a" ets_native_posture in
+        let groups =
+          match ets_tool_groups with [] -> "all" | xs -> String.concat "," xs
+        in
+        let instruction =
+          match ets_instruction_skills with
+          | [] -> "none"
+          | xs -> String.concat "," xs
+        in
+        let composition =
+          match ets_composition_skills with
+          | [] -> "none"
+          | xs -> String.concat "," xs
+        in
+        let digest =
+          match ets_tool_surface_sha256 with
+          | None -> "n/a (Agent Core owns the turn)"
+          | Some value -> value
+        in
+        let tool_lines =
+          List.map
+            (fun (tool : Masc.Tui_decode.effective_tool) ->
+               let source =
+                 match tool.et_skill_source, tool.et_group with
+                 | Some source, _ -> tool.et_origin ^ ":" ^ source
+                 | None, Some group -> tool.et_origin ^ ":" ^ group
+                 | None, None -> tool.et_origin
+               in
+               Ansi.dim,
+               Printf.sprintf "   %-34s %s"
+                 (Terminal_text.single_line tool.et_name)
+                 (Terminal_text.single_line source))
+            ets_tools
+        in
+        [ Ansi.bold,
+          Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
+            (Terminal_text.single_line ets_keeper_name)
+            (List.length ets_tools);
+          Ansi.dim,
+          Printf.sprintf "   runtime=%s  client=%s  native=%s  groups=%s"
+            (Terminal_text.single_line ets_runtime_id)
+            (Terminal_text.single_line ets_official_client_kind)
+            native (Terminal_text.single_line groups);
+          Ansi.dim,
+          Printf.sprintf "   instruction skills=%s  composition skills=%s"
+            (Terminal_text.single_line instruction)
+            (Terminal_text.single_line composition);
+          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest;
+          Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
+        @ tool_lines
+  in
+  let catalog_lines =
+    let heading =
+      [ Ansi.bold,
+        Printf.sprintf " Registered Catalog — %d tools"
+          (List.length registered_tools);
+        Ansi.dim, Printf.sprintf "   %-32s %-8s %s" "Tool" "Direct" "Surfaces" ]
+    in
+    heading
+    @ List.map
+        (function
+          | Tool_tree.Domain { name; count } ->
+              ( Ansi.bold,
+                Printf.sprintf " %s (%d) ─────────────────────"
+                  (Terminal_text.single_line name) count )
+          | Tool_tree.Family { name; count } ->
+              Ansi.bold,
+              Printf.sprintf "    %s (%d)" (Terminal_text.single_line name) count
+          | Tool_tree.Tool tool ->
+              let surfaces =
+                match tool.Masc.Tui_decode.tl_surfaces with
+                | [] -> "none"
+                | names -> String.concat ", " names
+              in
+              ( (if tool.tl_surfaces = [] then Theme.warn else Ansi.dim),
+                Printf.sprintf "      %-30s %-8s %s"
+                  (Terminal_text.single_line tool.tl_name)
+                  (if tool.tl_direct_call then "yes" else "no")
+                  (Terminal_text.single_line surfaces) ))
+        registered_rows
+  in
+  let display_lines = effective_lines @ [ Ansi.dim, "" ] @ catalog_lines in
+  let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
   let content_height = max 1 (rows - chrome_rows) in
-  let drawable = List.length tool_rows in
+  let drawable = List.length display_lines in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
-  if shown = 0 then begin
-    let warming =
-      match state.tools_inventory with
-      | Some { Masc.Tui_decode.ts_freshness = Masc.Tui_decode.Warming; _ } -> true
-      | Some _ | None -> false
-    in
-    let empty =
-      (* A server still building its inventory answers with an empty list, and
-         reading that as "none" told an operator their workspace had no tools
-         when it has a hundred. The payload says which of the two it is. *)
-      if warming then "  (the server is still building its tool inventory)"
-      else
-        match
-          empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
-        with
-        | Page_failed -> "  (load failed; nothing here is a reading)"
-        | Page_unread -> "  (not loaded yet)"
-        | Page_empty -> "  (no tools registered)"
-    in
-    box_line_styled buf cols ~style:Ansi.dim empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt tool_rows idx with
-      | None -> box_empty buf cols
-      | Some (Tool_tree.Domain { name; count }) ->
-          (* A rule line after the name: the domain is the question the
-             section answers, and a heavier separation than the family's
-             plain bold keeps the three depths readable apart. The rule is a
-             fixed length rather than filling the row -- box_line_styled
-             pads, and a domain heading that shouts across the full width
-             would outrank the surface header above it. *)
-          let rule = "─────────────────────" in
-          box_line_styled buf cols ~style:Ansi.bold
-            (Printf.sprintf " %s (%d) %s" (Terminal_text.single_line name) count rule)
-      | Some (Tool_tree.Family { name; count }) ->
-          box_line_styled buf cols ~style:Ansi.bold
-            (Printf.sprintf "    %s  (%d)" (Terminal_text.single_line name) count)
-      | Some (Tool_tree.Tool t) ->
-          let open Masc.Tui_decode in
-          let surfaces =
-            match t.tl_surfaces with
-            | [] -> "none"
-            | names -> String.concat ", " names
-          in
-          (* Indented under the family heading above it, one deeper than the
-             family sits under its domain, so the name column reads as a
-             three-level tree rather than as a hundred equals. *)
-          let line =
-            Printf.sprintf "      %-30s %-8s %s"
-              (Terminal_text.single_line t.tl_name)
-              (if t.tl_direct_call then "yes" else "no")
-              (Terminal_text.single_line surfaces)
-          in
-          let style = if t.tl_surfaces = [] then Theme.warn else Ansi.dim in
-          box_line_styled buf cols ~style line
-    done;
+  for i = 0 to content_height - 1 do
+    match List.nth_opt display_lines (i + scroll) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
   if drawable > content_height then
     box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
+      (Printf.sprintf "[%d rows, scroll %d]" drawable scroll);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));

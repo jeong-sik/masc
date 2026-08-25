@@ -29,6 +29,17 @@ let connection_status_label = function
   | Disconnected -> "disconnected"
 ;;
 
+(* A successful probe is the current server even when the peer address did not
+   change. A failed probe is unread, not permission to present the previous
+   process as current. Keeping this projection pure lets the same-port restart
+   rule be tested without a live server. *)
+let server_identity_of_refresh
+    (reading : (Tui_decode.server_identity, string) result) =
+  match reading with
+  | Ok current -> Some current
+  | Error _ -> None
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -656,8 +667,9 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
-  (* Read once and kept: the server names itself at startup and only a
-     restart changes the answer. *)
+  (* Current successful /health identity. Every HTTP refresh revalidates it so
+     a different process on the same endpoint replaces this projection, while
+     a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather

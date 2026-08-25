@@ -1032,7 +1032,9 @@ type http_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
-  http_server_identity: (Tui_decode.server_identity, string) result option;
+  (* Mandatory on every refresh: the same endpoint may name a different
+     server after a restart, without a failed request reaching this process. *)
+  http_server_identity: (Tui_decode.server_identity, string) result;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -3319,7 +3321,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~identity_known
+let load_http_surfaces ~host ~port ~approval_generation
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
@@ -3348,11 +3350,10 @@ let load_http_surfaces ~host ~port ~approval_generation ~identity_known
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  (* Asked for only while the answer is missing. The server names itself once;
-     a restart drops the connection, and the reconnect asks again. *)
-  let http_server_identity =
-    when_needed (not identity_known) (fun () -> load_server_identity ~host ~port)
-  in
+  (* A process can disappear and another bind the same endpoint between two
+     successful ticks. The compact /health identity is therefore revalidated
+     on every refresh rather than inferred from connection failure. *)
+  let http_server_identity = load_server_identity ~host ~port in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
         load_keeper_roster ~host ~port)
@@ -3376,14 +3377,11 @@ let apply_http_surfaces state results =
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
-  (* A failed read leaves the previous answer standing: the identity is the
-     same server it was, and blanking the footer on one bad tick would say
-     the opposite. *)
-  Option.iter
-    (function
-      | Ok identity -> state.server_identity <- Some identity
-      | Error _ -> ())
-    results.http_server_identity;
+  (* This is a current reading, not a last-known cache. A failed probe makes
+     the projection unread; every following refresh asks again, so a same-port
+     replacement still moves A -> B as soon as /health succeeds. *)
+  state.server_identity <-
+    Masc_tui_types.server_identity_of_refresh results.http_server_identity;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -3509,8 +3507,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation
-               ~identity_known:(Option.is_some state.server_identity) ~needs))
+             (load_http_surfaces ~host ~port ~approval_generation ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -3527,8 +3524,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation
-               ~identity_known:(Option.is_some state.server_identity) ~needs))
+               (load_http_surfaces ~host ~port ~approval_generation ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -4436,7 +4432,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         (fun ao_generation ->
            apply_approval_observation state
              { ao_generation; ao_result = Error err })
-        approval_generation;
+      approval_generation;
+      state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
   | Board_post_refresh_done (request, result) ->

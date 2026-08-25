@@ -18,6 +18,14 @@ let check_at_most_cells label max_cells text =
   Alcotest.(check bool) label true
     (Masc_tui_message_layout.display_width text <= max_cells)
 
+let check_one_line label text =
+  let newlines =
+    String.fold_left
+      (fun count char -> if Char.equal char '\n' then count + 1 else count)
+      0 text
+  in
+  Alcotest.(check int) label 1 newlines
+
 let test_port_closes_every_footer () =
   check_string "port closes a plain footer"
     "<dim>  j/k:move  Tab:next  | Port: 8935<reset>\n"
@@ -86,11 +94,30 @@ let test_a_half_read_build_still_says_what_it_knows () =
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
        ~hints:"q:quit" ())
 
+let test_base_path_reads_between_build_and_port () =
+  check_string "base path follows the build and precedes the endpoint"
+    "<dim>  q:quit  | v0.24.0 030fa90 | Base: /Users/dancer/me | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Server_build
+             { version = "0.24.0"; commit = "030fa9043aafc" }
+         ; Masc_tui_footer.Server_base_path "/Users/dancer/me"
+         ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  check_string "path characters are not trimmed into another authority"
+    "<dim>  q:quit  | Base:  /work/masc | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:[ Masc_tui_footer.Server_base_path " /work/masc" ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:80 ~port:8935
+       ~hints:"q:quit" ())
+
 let test_width_omits_whole_status_items () =
   let status =
     [ Masc_tui_footer.Refresh_interval 5.0
     ; Masc_tui_footer.Server_build
         { version = "0.24.0"; commit = "030fa9043aafc5c2003f830c86720afff8e8e2ff" }
+    ; Masc_tui_footer.Server_base_path "/work/masc"
     ]
   in
   let hints = "j/k:move  Enter:detail  r:refresh  Tab:next" in
@@ -102,13 +129,17 @@ let test_width_omits_whole_status_items () =
   check_at_most_cells "120 cells" 120 wide;
   check_bool "wide keeps refresh" true (contains ~needle:"Refresh: 5s" wide);
   check_bool "wide keeps build" true (contains ~needle:"v0.24.0 030fa90" wide);
+  check_bool "wide keeps base path" true
+    (contains ~needle:"Base: /work/masc" wide);
   check_bool "wide keeps port" true (contains ~needle:"Port: 8935" wide);
   let medium = render 80 in
   check_at_most_cells "80 cells" 80 medium;
   check_bool "medium omits the whole refresh item" false
     (contains ~needle:"Refresh:" medium);
-  check_bool "medium keeps the whole build item" true
+  check_bool "medium omits build before workspace" false
     (contains ~needle:"v0.24.0 030fa90" medium);
+  check_bool "medium keeps the whole base-path item" true
+    (contains ~needle:"Base: /work/masc" medium);
   check_bool "medium keeps the whole port item" true
     (contains ~needle:"Port: 8935" medium);
   let compact = render 60 in
@@ -117,13 +148,78 @@ let test_width_omits_whole_status_items () =
     (contains ~needle:"Refresh:" compact);
   check_bool "compact omits build before endpoint" false
     (contains ~needle:"v0.24.0" compact);
+  check_bool "compact omits workspace before endpoint" false
+    (contains ~needle:"Base:" compact);
   check_bool "compact retains endpoint last" true
     (contains ~needle:"Port: 8935" compact);
   let narrow = render 40 in
   check_at_most_cells "40 cells" 40 narrow;
   check_bool "narrow never leaves a partial status item" false
     (contains ~needle:"Refresh:" narrow || contains ~needle:"v0.24" narrow
-     || contains ~needle:"Port:" narrow)
+     || contains ~needle:"Base:" narrow || contains ~needle:"Port:" narrow)
+
+let test_chat_hint_widths_keep_one_row_and_whole_items () =
+  let status =
+    [ Masc_tui_footer.Server_build
+        { version = "0.24.0"; commit = "030fa9043aafc" }
+    ; Masc_tui_footer.Server_base_path "/Users/dancer/me"
+    ]
+  in
+  let idle_hints =
+    "Enter:send  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  \
+     PgUp:scroll back  Esc:list  Ctrl-U:clear"
+  in
+  let render hints max_cells =
+    Masc_tui_footer.line ~status ~dim:"\x1b[2m" ~reset:"\x1b[0m"
+      ~max_cells ~port:8935 ~hints ()
+  in
+  List.iter
+    (fun width ->
+      let line = render idle_hints width in
+      check_at_most_cells (Printf.sprintf "idle footer fits %d cells" width)
+        width line;
+      check_one_line (Printf.sprintf "idle footer stays one row at %d" width)
+        line)
+    [ 240; 200; 160; 120; 80 ];
+  let wide = render idle_hints 200 in
+  check_bool "ordinary wide chat keeps its base path" true
+    (contains ~needle:"Base: /Users/dancer/me" wide);
+  check_bool "ordinary wide chat keeps one endpoint" true
+    (contains ~needle:"Port: 8935" wide);
+  let narrow = render idle_hints 120 in
+  check_bool "narrow chat never shows a partial base-path item" false
+    (contains ~needle:"Base:" narrow || contains ~needle:"/Users/dancer" narrow);
+  (* This is the real active-chat shape: queue controls, transcript paging,
+     Keeper switching, and interrupt status can all be present together. Its
+     hints exceed 200 cells; #30465 deliberately keeps hints before facts. *)
+  let active_hints =
+    "Enter:queue (12 waiting)  Ctrl-K:cancel last  Ctrl-P:edit last  \
+     Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  \
+     \226\134\145/\226\134\147:line  PgUp/PgDn:page  Ctrl-E:newest  (999 back)  \
+     Ctrl-G:next Keeper  Esc:interrupt turn  Ctrl-U:clear"
+  in
+  let active = render active_hints 240 in
+  check_at_most_cells "worst-case active footer fits 240 cells" 240 active;
+  check_one_line "worst-case active footer stays one row" active;
+  check_bool "worst-case active footer omits the whole path" false
+    (contains ~needle:"Base:" active || contains ~needle:"/Users/dancer" active)
+
+let test_korean_base_path_is_measured_by_cells () =
+  let render max_cells =
+    Masc_tui_footer.line
+      ~status:[ Masc_tui_footer.Server_base_path "/작업/마스" ]
+      ~dim:"" ~reset:"" ~max_cells ~port:8935 ~hints:"q" ()
+  in
+  let exact = render 36 in
+  check_at_most_cells "Korean path fits its exact cell width" 36 exact;
+  check_bool "cell measurement retains the whole Korean path" true
+    (contains ~needle:"Base: /작업/마스" exact);
+  let compact = render 35 in
+  check_at_most_cells "compact Korean footer stays in bounds" 35 compact;
+  check_bool "one fewer cell omits the whole Korean path" false
+    (contains ~needle:"Base:" compact || contains ~needle:"/작업" compact);
+  check_bool "endpoint survives Korean path omission" true
+    (contains ~needle:"Port: 8935" compact)
 
 let test_unavailable_status_is_omitted () =
   check_string "zero and unread facts are absent"
@@ -132,6 +228,7 @@ let test_unavailable_status_is_omitted () =
        ~status:
          [ Masc_tui_footer.Refresh_interval 0.
          ; Masc_tui_footer.Server_build { version = ""; commit = "" }
+         ; Masc_tui_footer.Server_base_path ""
          ]
        ~dim:"<dim>" ~reset:"<reset>" ~max_cells:80 ~port:0 ~hints:"q:quit"
        ())
@@ -156,10 +253,16 @@ let tests =
           test_a_short_commit_is_not_padded
       ; Alcotest.test_case "a half-read build still says what it knows" `Quick
           test_a_half_read_build_still_says_what_it_knows
+      ; Alcotest.test_case "base path reads between build and port" `Quick
+          test_base_path_reads_between_build_and_port
       ; Alcotest.test_case "hints do not change the tail" `Quick
           test_hints_do_not_change_the_tail
       ; Alcotest.test_case "40/80/120 omit whole status items" `Quick
           test_width_omits_whole_status_items
+      ; Alcotest.test_case "chat widths keep one row and whole items" `Quick
+          test_chat_hint_widths_keep_one_row_and_whole_items
+      ; Alcotest.test_case "Korean base path is measured by cells" `Quick
+          test_korean_base_path_is_measured_by_cells
       ; Alcotest.test_case "unavailable status is omitted" `Quick
           test_unavailable_status_is_omitted
       ; Alcotest.test_case "ANSI Korean hint truncates by cells" `Quick

@@ -11,6 +11,7 @@ type status_item =
       { version : string
       ; commit : string
       }
+  | Server_base_path of string
   | Port of int
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -25,6 +26,7 @@ let short_commit commit =
 
 type retention =
   | Endpoint_identity
+  | Workspace_identity
   | Build_identity
   | Refresh_context
 
@@ -52,6 +54,9 @@ let status_item_projection = function
          { text = Printf.sprintf "v%s %s" version commit
          ; retention = Build_identity
          })
+  | Server_base_path "" -> None
+  | Server_base_path path ->
+    Some { text = "Base: " ^ path; retention = Workspace_identity }
   | Port port when port > 0 ->
     Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity }
   | Port _ -> None
@@ -63,7 +68,8 @@ let body hints statuses =
     Printf.sprintf "  %s  | %s" hints
       (String.concat " | " (List.map (fun status -> status.text) statuses))
 
-let omission_order = [ Refresh_context; Build_identity; Endpoint_identity ]
+let omission_order =
+  [ Refresh_context; Build_identity; Workspace_identity; Endpoint_identity ]
 
 let rec fit_body ~max_cells ~hints ~omissions statuses =
   let rendered = body hints statuses in
@@ -81,9 +87,9 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
     only the extra facts a surface has, in the order they should read.
 
     Key hints retain the row before status facts do. When the facts do not fit,
-    whole typed items are omitted in this order: refresh interval, build, port.
-    Only an overlong surface-owned hint uses cell-safe truncation as the final
-    fallback. *)
+    whole typed items are omitted in this order: refresh interval, build, base
+    path, port. Only an overlong surface-owned hint uses cell-safe truncation
+    as the final fallback. *)
 let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =
     List.filter_map status_item_projection (status @ [ Port port ])

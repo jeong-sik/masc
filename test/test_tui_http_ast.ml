@@ -423,11 +423,16 @@ let test_user_message_background_has_one_render_snapshot () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
-  (* Three sites close back onto the row's own style rather than resetting:
-     a bare link, the folded-origin margin, and the origin drawn left of the
-     rule. A reset at any of them would strip the ambient background from
-     everything after it on the row. *)
-  check int "link, margin, and rule each restore the captured row" 3
+  (* Two sites close back onto the row's own style rather than resetting: a
+     bare link and the folded-origin margin. A reset at either would strip the
+     ambient background from everything after it on the row.
+
+     There were three. #30654 stopped drawing the rule between the margin and
+     the body -- a rail on every row gave a continuation the same weight as a
+     new event -- so the site that closed after the rule went with it. The
+     count is what is drawn, so removing a drawn thing lowers it; a reset
+     appearing at either surviving site is still what this catches. *)
+  check int "link and margin each restore the captured row" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);

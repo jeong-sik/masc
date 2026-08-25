@@ -6750,6 +6750,17 @@ let main () =
                  capture.Masc.Keeper_prompt_capture.blocks
              | Some _ | None -> []
            in
+           let input_map_rows () =
+             match state.context_inspector_reading with
+             | Some
+                 ( _
+                 , { Masc_tui_context_inspector.turn = Ok record
+                   ; prompt
+                   } ) ->
+                 let capture = match prompt with Ok value -> Some value | Error _ -> None in
+                 Masc_tui_context_inspector.input_map_rows record capture
+             | Some _ | None -> []
+           in
            let close () =
              state.context_inspector_open <- false;
              state.context_inspector_exact <- None;
@@ -6772,11 +6783,19 @@ let main () =
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Composition;
                 state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
             | "2" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Prompt_blocks;
                 state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
+                state.context_inspector_scroll <- 0
+            | "3" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Input_map;
+                state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
                 state.context_inspector_tab <-
@@ -6784,6 +6803,8 @@ let main () =
                    | Masc_tui_context_inspector.Composition ->
                        Masc_tui_context_inspector.Prompt_blocks
                    | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Input_map
+                   | Masc_tui_context_inspector.Input_map ->
                        Masc_tui_context_inspector.Composition);
                 state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
@@ -6802,7 +6823,15 @@ let main () =
                 state.context_inspector_scroll <-
                   move ~count ~height state.context_inspector_scroll
             | "j" | "down" ->
-                let last = max 0 (List.length (prompt_blocks ()) - 1) in
+                let count =
+                  match state.context_inspector_tab with
+                  | Masc_tui_context_inspector.Prompt_blocks ->
+                      List.length (prompt_blocks ())
+                  | Masc_tui_context_inspector.Input_map ->
+                      List.length (input_map_rows ())
+                  | Masc_tui_context_inspector.Composition -> 0
+                in
+                let last = max 0 (count - 1) in
                 state.context_inspector_cursor <-
                   min last (state.context_inspector_cursor + 1)
             | "k" | "up" ->
@@ -6819,6 +6848,20 @@ let main () =
                         Some state.context_inspector_cursor;
                       state.context_inspector_scroll <- 0
                   | None -> ()
+                end
+                else if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Input_map
+                then begin
+                  match
+                    List.nth_opt (input_map_rows ())
+                      state.context_inspector_cursor
+                  with
+                  | Some { Masc_tui_context_inspector.exact_text = Some _; _ } ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | Some _ | None -> ()
                 end
             | _ -> ())
        (* The help overlay is modal: it answers scrolling and closing, and

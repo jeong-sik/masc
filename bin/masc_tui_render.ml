@@ -7244,6 +7244,68 @@ let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
           ^ Ansi.reset
         ]
 
+let context_input_map_lines state (record : Turn_record.t)
+    (capture : Masc.Keeper_prompt_capture.capture option) =
+  let module Inspector = Masc_tui_context_inspector in
+  let rows = Inspector.input_map_rows record capture in
+  match state.context_inspector_exact with
+  | Some index ->
+      (match List.nth_opt rows index with
+       | Some ({ exact_text = Some text; _ } as row) ->
+           let width = max 8 (snd (get_terminal_size ()) - 6) in
+           let heading =
+             Printf.sprintf "  %s%s%s  ·  %s  ·  included by %s"
+               Ansi.bold
+               (Inspector.input_component_label row.component)
+               Ansi.reset
+               (Inspector.format_bytes row.bytes)
+               row.included_by
+           in
+           let body =
+             Message_layout.wrap_body ~max_cells:width
+               ~sanitize:Keeper_chat.terminal_safe_text text
+             |> List.map (fun line -> "  " ^ line)
+           in
+           heading :: "" :: body
+       | Some _ | None ->
+           [ Theme.bad ^ "  Exact text is not retained for this component"
+             ^ Ansi.reset ])
+  | None ->
+      let identity =
+        Printf.sprintf "  Provider request map  %s#%d"
+          (Keeper_chat.terminal_safe_text record.trace_id)
+          record.absolute_turn
+      in
+      let mapped =
+        List.mapi
+          (fun index (row : Inspector.input_map_row) ->
+             let selected = index = state.context_inspector_cursor in
+             let marker, selection =
+               if selected then ">", Theme.selection else " ", Ansi.reset
+             in
+             let branch = if index = List.length rows - 1 then "└─" else "├─" in
+             Printf.sprintf "%s %s %s %s%-22s%s %9s  included by %s · %s%s"
+               selection marker branch
+               (context_component_style row.component)
+               (Inspector.input_component_label row.component)
+               Ansi.reset
+               (Inspector.format_bytes row.bytes)
+               row.included_by row.retention
+               Ansi.reset)
+          rows
+      in
+      identity
+      :: [ ""
+         ; Ansi.bold ^ "  What reached the provider, and why" ^ Ansi.reset
+         ]
+      @ (if mapped = [] then [ "  (exact component attribution unavailable)" ]
+         else mapped)
+      @ [ ""
+        ; Ansi.dim
+          ^ "  Enter opens only text verified against this turn's digest. Other rows remain byte-only evidence."
+          ^ Ansi.reset
+        ]
+
 let context_inspector_content_lines state =
   match state.context_inspector_reading with
   | None ->
@@ -7262,7 +7324,19 @@ let context_inspector_content_lines state =
             | Ok capture -> context_prompt_lines state capture
             | Error detail ->
                 [ Theme.bad ^ "  Prompt text unavailable: "
-                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]))
+                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
+       | Masc_tui_context_inspector.Input_map ->
+           (match reading.turn with
+            | Error detail ->
+                [ Theme.bad ^ "  Input map unavailable: "
+                  ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
+            | Ok record ->
+                let capture =
+                  match reading.prompt with
+                  | Ok capture -> Some capture
+                  | Error _ -> None
+                in
+                context_input_map_lines state record capture))
 
 let context_inspector_viewport state =
   let terminal_rows, _ = get_terminal_size () in
@@ -7291,7 +7365,9 @@ let render_context_inspector state =
     (Printf.sprintf "%s Context  %s%s  %s  %s"
        (screen_title "") keeper refreshing
        (tab_label Masc_tui_context_inspector.Composition "1" "composition")
-       (tab_label Masc_tui_context_inspector.Prompt_blocks "2" "prompt"));
+       (tab_label Masc_tui_context_inspector.Prompt_blocks "2" "prompt")
+       ^ "  "
+       ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;
   let lines = context_inspector_content_lines state in
   let content_height = max 1 (rows - 5) in
@@ -7309,8 +7385,8 @@ let render_context_inspector state =
   framed_bottom buf cols;
   let hints =
     match state.context_inspector_exact with
-    | Some _ -> "j/k:scroll  Esc:prompt blocks"
-    | None -> "1/2 or Tab:switch  j/k:move  Enter:exact text  r:refresh  Esc:close"
+    | Some _ -> "j/k:scroll  Esc:list"
+    | None -> "1/2/3 or Tab:switch  j/k:move  Enter:verified text  r:refresh  Esc:close"
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"context-inspector" ~rows:terminal_rows

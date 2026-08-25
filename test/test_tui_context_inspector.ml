@@ -8,7 +8,7 @@ let turn_ref trace turn =
   | Ok value -> value
   | Error detail -> fail detail
 
-let record ?input_components ~trace ~turn () : Turn_record.t =
+let record ?(blocks = []) ?input_components ~trace ~turn () : Turn_record.t =
   { execution_ids = []
   ; keeper = "omega"
   ; agent_name = "keeper-omega"
@@ -16,7 +16,7 @@ let record ?input_components ~trace ~turn () : Turn_record.t =
   ; trace_id = trace
   ; absolute_turn = turn
   ; turn_ref = turn_ref trace turn
-  ; blocks = []
+  ; blocks
   ; input_components
   ; runtime_profile = "glm-coding"
   ; selected_model = Some "glm-5.3"
@@ -126,6 +126,62 @@ let test_prompt_capture_binds_keeper () =
       check string "memory label" "Memory recall"
         (Inspector.prompt_block_label (List.hd capture.blocks).id)
 
+let digest text = Digestif.SHA256.(digest_string text |> to_hex)
+
+let test_input_map_joins_only_verified_prompt_text () =
+  let text = "remember the operator preference" in
+  let prompt_block : Turn_record.prompt_block =
+    { block = Prompt_block_id.Memory_os_recall
+    ; bytes = String.length text
+    ; digest = digest text
+    }
+  in
+  let observed =
+    record ~trace:"trace-map" ~turn:9 ~blocks:[ prompt_block ]
+      ~input_components:
+        [ { component = Prompt_block Prompt_block_id.Memory_os_recall
+          ; bytes = String.length text
+          }
+        ; { component = Tool_schemas; bytes = 2048 }
+        ]
+      ()
+  in
+  let capture : Masc.Keeper_prompt_capture.capture =
+    { captured_at = 1_787_600_000.
+    ; trace_id = "trace-map"
+    ; absolute_turn = 9
+    ; blocks = [ { id = Prompt_block_id.Memory_os_recall; text } ]
+    ; assembled = Some text
+    }
+  in
+  let rows = Inspector.input_map_rows observed (Some capture) in
+  let memory = List.nth rows 0 in
+  let tools = List.nth rows 1 in
+  check (option string) "matching capture exposes exact text" (Some text)
+    memory.exact_text;
+  check string "matching capture is verified" "verified exact text"
+    memory.retention;
+  check (option string) "tool schemas stay byte-only" None tools.exact_text;
+  check string "tool source is explicit" "effective tool surface"
+    tools.included_by;
+  let stale = { capture with absolute_turn = 8 } in
+  let stale_memory = List.hd (Inspector.input_map_rows observed (Some stale)) in
+  check (option string) "another turn is not joined" None stale_memory.exact_text;
+  let changed =
+    { capture with
+      blocks =
+        [ { id = Prompt_block_id.Memory_os_recall
+          ; text = "different text with same authority"
+          }
+        ]
+    }
+  in
+  let changed_memory =
+    List.hd (Inspector.input_map_rows observed (Some changed))
+  in
+  check (option string) "digest mismatch is not joined" None
+    changed_memory.exact_text
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -135,5 +191,7 @@ let () =
             test_malformed_row_is_not_dropped
         ; test_case "binds exact prompt to Keeper" `Quick
             test_prompt_capture_binds_keeper
+        ; test_case "joins only verified prompt text" `Quick
+            test_input_map_joins_only_verified_prompt_text
         ] )
     ]

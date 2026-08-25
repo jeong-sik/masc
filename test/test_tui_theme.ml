@@ -99,17 +99,23 @@ let test_strip_sgr_removes_only_styles () =
 
 (* Diff backgrounds are content, so they carry a reading's name and not a
    colour's. The renderer used to reach into [Sgr] for them, which is what the
-   module's own boundary says a renderer does not do -- and the values are the
-   part a reader checks, so they are spelled here rather than described. *)
+   module's own boundary says a renderer does not do.
+
+   The escapes themselves are already pinned in [conditional_tokens], with the
+   NO_COLOR fold applied. Repeating them here would state the value twice and
+   get the fold wrong the second time -- as the first draft of this test did,
+   asserting the raw escape under a flag that empties it. What is left to
+   check is that the reading names that entry and does not grow a second
+   spelling of the same colour.
+
+   Under NO_COLOR this says nothing: every token folds to the empty string, so
+   any wrong entry passes. That is the flag doing its job rather than a hole
+   in the check -- with no colour there is no mapping left to get wrong -- and
+   it is written down because a green run there is weaker than it looks. *)
 let test_diff_backgrounds_are_named_as_content () =
-  check str "added is the dark green cube entry" "\027[48;5;22m"
+  check str "added names the Sgr entry" Masc_tui_theme.Sgr.bg_added
     Masc_tui_theme.Syntax.diff_added_bg;
-  check str "removed is the dark red one" "\027[48;5;52m"
-    Masc_tui_theme.Syntax.diff_removed_bg;
-  (* Same string as the primitive, reached by the name that says why. *)
-  check str "added is the Sgr entry" Masc_tui_theme.Sgr.bg_added
-    Masc_tui_theme.Syntax.diff_added_bg;
-  check str "removed is the Sgr entry" Masc_tui_theme.Sgr.bg_removed
+  check str "removed names the Sgr entry" Masc_tui_theme.Sgr.bg_removed
     Masc_tui_theme.Syntax.diff_removed_bg
 
 let () =

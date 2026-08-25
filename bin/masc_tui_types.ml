@@ -769,6 +769,12 @@ type state = {
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
+  (* The list draws each ask on one row; this opens the selected one whole.
+     Keyed on the cursor rather than a token so an ask that resolves while it
+     is open closes with the row instead of stranding a detail for something
+     that is gone. *)
+  mutable approval_detail_open: bool;
+  mutable approval_detail_scroll: int;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
@@ -1162,6 +1168,8 @@ let create_state
   keeper_tool_approvals_error = None;
   keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
+  approval_detail_open = false;
+  approval_detail_scroll = 0;
   approval_cursor = 0;
   pending_approval_action = None;
   board_posts = [];

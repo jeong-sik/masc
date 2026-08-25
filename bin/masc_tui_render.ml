@@ -19,6 +19,7 @@ module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
 
@@ -977,6 +978,66 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
+(* The ask, whole. The list row is one line through [single_line], which
+   turns a newline into the six characters [\x0A] and then cuts; an [Edit]
+   carrying a page of code read as its first forty characters and there was
+   no second screen. This is that screen. *)
+let render_approval_detail (state : state) (row : approval_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let width = max 8 (cols - 6) in
+  let fields =
+    match row with
+    | Keeper_tool_row held ->
+      [ "keeper", held.Tui_decode.kta_keeper
+      ; "tool", held.Tui_decode.kta_tool
+      ; "call", held.Tui_decode.kta_tool_call_id
+      ; "question", held.Tui_decode.kta_question
+      ; "args", held.Tui_decode.kta_args
+      ]
+    | Operator_row a ->
+      [ "actor", a.Masc_tui_operator_projection.ap_actor
+      ; "action", a.Masc_tui_operator_projection.ap_action_type
+      ; "target", a.Masc_tui_operator_projection.ap_target_type
+      ; "summary", a.Masc_tui_operator_projection.ap_summary
+      ; "payload",
+        Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
+      ]
+  in
+  let lines = Approval_detail.of_fields ~width fields in
+  box_top buf cols;
+  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
+    ^ "Esc: back to the list" ^ Ansi.reset);
+  box_divider buf cols;
+  let content_height = max 1 (rows - 6) in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines) ~height:content_height
+      state.approval_detail_scroll
+  in
+  let drawn =
+    lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  in
+  List.iter
+    (fun (line : Approval_detail.line) ->
+      let text = line.Approval_detail.text in
+      match line.Approval_detail.label with
+      | Some _ ->
+        box_line buf cols
+          (Printf.sprintf "  %s%s%s" Ansi.bold (fit_width text (cols - 6)) Ansi.reset)
+      | None ->
+        box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
+    drawn;
+  for _ = 1 to content_height - List.length drawn do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  y:confirm  n:deny  Esc:back");
+  finish_surface state ~surface_key:"approval-detail" ~rows:terminal_rows
+    ~cols buf
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -6268,7 +6329,17 @@ let render_surface (state : state) =
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
-  | Approvals -> render_approvals state
+  | Approvals ->
+      (* Open on the row the cursor is on. An ask that resolves while it is
+         open takes the row with it, so the detail closes rather than showing
+         something the queue no longer holds. *)
+      (match
+         if state.approval_detail_open then
+           List.nth_opt (approval_items state) state.approval_cursor
+         else None
+       with
+       | Some row -> render_approval_detail state row
+       | None -> render_approvals state)
   | Verification -> render_verification state
   | Harness -> render_harness state
   | Fusion ->

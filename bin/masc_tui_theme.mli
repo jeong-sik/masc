@@ -95,6 +95,15 @@ val border_focus : string
 module Syntax : sig
   val keyword : string
   val string_ : string
+
+  val diff_added_bg : string
+  val diff_removed_bg : string
+  (** Diff-row backgrounds.
+
+      Content rather than state, the same way a keyword is: a green line says
+      the file gained it, not that something is healthy. A renderer asks for
+      these instead of reaching into {!Sgr}, so one remap moves every diff at
+      once. *)
 end
 
 val strip_sgr : string -> string

@@ -97,6 +97,21 @@ let test_strip_sgr_removes_only_styles () =
     (Masc_tui_theme.strip_sgr "tail\027[31");
   check str "empty stays empty" "" (Masc_tui_theme.strip_sgr "")
 
+(* Diff backgrounds are content, so they carry a reading's name and not a
+   colour's. The renderer used to reach into [Sgr] for them, which is what the
+   module's own boundary says a renderer does not do -- and the values are the
+   part a reader checks, so they are spelled here rather than described. *)
+let test_diff_backgrounds_are_named_as_content () =
+  check str "added is the dark green cube entry" "\027[48;5;22m"
+    Masc_tui_theme.Syntax.diff_added_bg;
+  check str "removed is the dark red one" "\027[48;5;52m"
+    Masc_tui_theme.Syntax.diff_removed_bg;
+  (* Same string as the primitive, reached by the name that says why. *)
+  check str "added is the Sgr entry" Masc_tui_theme.Sgr.bg_added
+    Masc_tui_theme.Syntax.diff_added_bg;
+  check str "removed is the Sgr entry" Masc_tui_theme.Sgr.bg_removed
+    Masc_tui_theme.Syntax.diff_removed_bg
+
 let () =
   Alcotest.run "masc_tui_theme"
     [ ( "unconditional"
@@ -110,7 +125,9 @@ let () =
             test_the_shim_is_the_same_strings
         ] )
     ; ( "semantic"
-      , [ Alcotest.test_case "status names the exact hues" `Quick
+      , [ Alcotest.test_case "diff backgrounds are named as content" `Quick
+            test_diff_backgrounds_are_named_as_content
+        ; Alcotest.test_case "status names the exact hues" `Quick
             test_status_names_the_exact_hues
         ; Alcotest.test_case "tone has three values" `Quick
             test_tone_is_three_values

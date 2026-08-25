@@ -37,7 +37,7 @@ module Core_cache = Server_dashboard_http_core_cache
 module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
-let start_operator_digest_refresh_loop ~state ~sw ~clock =
+let start_operator_digest_refresh_loop ~state ~sw ~clock ~broadcast_digest =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -102,7 +102,7 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success Core_operator.operator_digest_cache json;
-      Core_operator.broadcast_operator_digest
+      broadcast_digest
         (cached_surface_json Core_operator.operator_digest_cache
          |> Core_operator_query.with_operator_digest_metadata
               ~config

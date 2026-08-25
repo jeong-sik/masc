@@ -15,12 +15,6 @@ type operator_snapshot_compute =
   ; sequence : int
   }
 
-val set_operator_snapshot_broadcaster :
-  (operator_snapshot_publication -> unit) -> unit
-
-val set_operator_digest_broadcaster : (Yojson.Safe.t -> unit) -> unit
-val broadcast_operator_snapshot : operator_snapshot_publication -> unit
-val broadcast_operator_digest : Yojson.Safe.t -> unit
 val operator_snapshot_publication : unit -> operator_snapshot_publication
 val operator_snapshot_publication_with_freshness :
   unit -> operator_snapshot_publication * bool
@@ -53,10 +47,6 @@ val operator_refresh_interval_s : float
 val operator_snapshot_extra : unit -> (string * Yojson.Safe.t) list
 
 module For_testing : sig
-  val replace_operator_snapshot_broadcaster :
-    (operator_snapshot_publication -> unit) ->
-    (operator_snapshot_publication -> unit)
-
   val publish_operator_snapshot_success :
     ?fresh_for_s:float ->
     Yojson.Safe.t ->

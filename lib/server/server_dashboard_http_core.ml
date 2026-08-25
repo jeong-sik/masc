@@ -38,16 +38,10 @@ let dashboard_briefing_timeout_s = Server_dashboard_http_core_cache.dashboard_br
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-let set_operator_snapshot_broadcaster =
-  Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
 ;;
 
-let set_operator_digest_broadcaster =
-  Server_dashboard_http_core_operator.set_operator_digest_broadcaster
 ;;
 
-let broadcast_operator_snapshot =
-  Server_dashboard_http_core_operator.broadcast_operator_snapshot
 ;;
 let operator_snapshot_cache_diagnostics_json =
   Server_dashboard_http_core_operator.operator_snapshot_cache_diagnostics_json

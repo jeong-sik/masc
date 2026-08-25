@@ -19,7 +19,7 @@ module Core_operator_query = Server_dashboard_http_core_operator_query
    loop siblings (#17358/#17384) and the digest handler sibling (#17389). *)
 open Server_dashboard_http_runtime_support
 
-let operator_snapshot_http_json ~state ~sw ~clock request =
+let operator_snapshot_http_json ~state ~sw ~clock ~broadcast_snapshot request =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -102,7 +102,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
         let publication =
           match Core_operator.mark_operator_snapshot_error_if_current ~compute exn with
           | Some publication ->
-            Core_operator.broadcast_operator_snapshot publication;
+            broadcast_snapshot publication;
             publication
           | None -> Core_operator.operator_snapshot_publication ()
         in

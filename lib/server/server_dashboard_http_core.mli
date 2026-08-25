@@ -43,11 +43,6 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 type operator_snapshot_publication =
   Server_dashboard_http_core_operator.operator_snapshot_publication
 
-val set_operator_snapshot_broadcaster :
-  (operator_snapshot_publication -> unit) -> unit
-
-val set_operator_digest_broadcaster : (Yojson.Safe.t -> unit) -> unit
-val broadcast_operator_snapshot : operator_snapshot_publication -> unit
 val mission_cache : cached_surface
 
 (** {1 Dashboard Timeout} *)
@@ -78,18 +73,21 @@ val start_operator_snapshot_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
   unit
 
 val start_operator_digest_refresh_loop :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_digest:(Yojson.Safe.t -> unit) ->
   unit
 
 val operator_snapshot_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  broadcast_snapshot:(operator_snapshot_publication -> unit) ->
   Httpun.Request.t ->
   Yojson.Safe.t
 

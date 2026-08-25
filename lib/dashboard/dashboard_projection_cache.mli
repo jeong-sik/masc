@@ -26,6 +26,11 @@ val with_snapshot_publication_generation : (int -> 'a) -> 'a
     process-local generation. Invalidation uses the same guard. *)
 
 val register_snapshot_generation_observer : (int -> unit) -> unit
+
+val snapshot_invalidation_generation : unit -> int
+(** The generation [invalidate_snapshot_json] most recently installed. Readers
+    pair it with the publication owner's CAS rather than fabricating an
+    envelope from a later cache read. *)
 (** Register the transport observer for generation invalidations. The observer
     runs after the publication guard is released and may therefore observe
     callbacks out of order. It must ask the serialized publication owner for a

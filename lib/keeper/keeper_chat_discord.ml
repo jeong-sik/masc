@@ -125,13 +125,21 @@ let truncate_to ~max_len s =
 
 (* ── Rich block delivery helpers ─────────────────────────────────── *)
 
+(* Fold after resolving, not inside one branch. The env value is a base URL
+   the same way the argument is, and it arrives unfolded: MASC_HTTP_BASE_URL
+   is taken verbatim, and [Server_bootstrap_http.make_http_config] leaves an
+   existing one alone. Folding only the argument made the two branches answer
+   differently for one server, and made this file disagree with its Slack
+   sibling (#30476). *)
 let public_voice_audio_url ?base_url token =
   let base =
     match base_url with
-    | Some b -> Masc_network_defaults.normalize_loopback_base_url b
+    | Some b -> b
     | None -> Env_config_core.masc_http_base_url ()
   in
-  base ^ "/api/v1/voice/audio/" ^ token
+  Masc_network_defaults.normalize_loopback_base_url base
+  ^ "/api/v1/voice/audio/"
+  ^ token
 
 let send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image () =
   let embed =
@@ -276,11 +284,6 @@ let combine_delivery_results primary overflow =
 let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     ~edit_message ~send_message ?show_activity ?clock ?base_url
     ?(on_send_result = fun _ -> ()) () =
-  let base_url =
-    match base_url with
-    | Some b -> Some (Masc_network_defaults.normalize_loopback_base_url b)
-    | None -> None
-  in
   let external_effect_completed = ref false in
   let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let activity_error_logged = ref false in

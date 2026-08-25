@@ -174,10 +174,24 @@ let test_grpc_events_dropped () =
     3.0 (after -. before)
 
 let test_grpc_runtime_listening_cache () =
+  (* [grpc_listening] is [grpc_enabled () && runtime_listening], and the flag
+     is off by default, so the runtime half only shows with the config half
+     named. The test used to rely on the default being on, which made it a
+     test of two things while reading as a test of one. *)
+  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
+  Unix.putenv "MASC_GRPC_ENABLED" "1";
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
+    (fun () ->
+      TM.set_grpc_runtime_listening true;
+      check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
+      TM.set_grpc_runtime_listening false;
+      check bool "grpc listening resets" false (TM.grpc_listening ()));
+  (* And the config half alone is not enough either. *)
   TM.set_grpc_runtime_listening true;
-  check bool "grpc listening uses runtime cache" true (TM.grpc_listening ());
-  TM.set_grpc_runtime_listening false;
-  check bool "grpc listening resets" false (TM.grpc_listening ())
+  check bool "a disabled flag keeps it not listening" false (TM.grpc_listening ());
+  TM.set_grpc_runtime_listening false
 
 let test_ws_sessions () =
   TM.set_ws_sessions 4;
@@ -511,6 +525,13 @@ let test_transport_health_json () =
    ============================================================ *)
 
 let test_grpc_listen_status_lifecycle () =
+  (* The status string is independent of the flag; [grpc_listening] is not, so
+     the enabling half is named here rather than inherited from a default. *)
+  let previous = Sys.getenv_opt "MASC_GRPC_ENABLED" in
+  Unix.putenv "MASC_GRPC_ENABLED" "1";
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "MASC_GRPC_ENABLED" (Option.value previous ~default:"0"))
+  @@ fun () ->
   check string "grpc status after init" "not_started"
     (Atomic.get TM.grpc_listen_status);
   TM.set_grpc_listen_status "listening";

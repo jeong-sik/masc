@@ -6060,6 +6060,7 @@ let render_code (state : state) =
   in
   let content_pane pane_buf pane_cols =
     let history_showing = state.code_history_open in
+    let diff_showing = state.code_diff_open in
     let title =
       match state.code_file with
       | Some (path, _) ->
@@ -6067,12 +6068,17 @@ let render_code (state : state) =
           let path =
             (* Say the view is shifted; a pane that silently starts at
                column 41 reads as a file whose lines begin mid-word. *)
-            if state.code_file_hscroll > 0 && not history_showing then
+            if
+              state.code_file_hscroll > 0 && not history_showing
+              && not diff_showing
+            then
               Printf.sprintf "%s  (col %d)" path
                 (state.code_file_hscroll + 1)
             else path
           in
-          if history_showing then "history: " ^ path else path
+          if diff_showing then "diff vs HEAD: " ^ path
+          else if history_showing then "history: " ^ path
+          else path
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;
@@ -6085,7 +6091,47 @@ let render_code (state : state) =
     (* Five chrome rows: top gap, title, divider, bottom gap, and the
        footer this pane must leave room for. *)
     let content_height = max 1 (rows - 5) in
-    (if history_showing then
+    (if diff_showing then
+       match state.code_diff_error, state.code_diff with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (reading the tree)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, diff) -> (
+           match diff.Masc.Tui_decode.gd_rows with
+           | [] ->
+               box_line pane_buf pane_cols
+                 (Ansi.dim
+                 ^ (if diff.Masc.Tui_decode.gd_has_changes then
+                      "  (the tree reports a change and sent no lines)"
+                    else "  (this file matches its last commit)")
+                 ^ Ansi.reset);
+               for _ = 2 to content_height do
+                 box_empty pane_buf pane_cols
+               done
+           | rows ->
+               let total = List.length rows in
+               let max_scroll = max 0 (total - content_height) in
+               let scroll =
+                 max 0 (min state.code_diff_scroll max_scroll)
+               in
+               for i = 0 to content_height - 1 do
+                 match List.nth_opt rows (scroll + i) with
+                 | Some row ->
+                     box_line_span pane_buf pane_cols
+                       (tree_diff_row_span ~width:(pane_cols - 4) row)
+                 | None -> box_empty pane_buf pane_cols
+               done)
+     else if history_showing then
        match state.code_history_error, state.code_history with
        | Some detail, _ ->
            box_line pane_buf pane_cols
@@ -6189,11 +6235,13 @@ let render_code (state : state) =
          (Printf.sprintf
             "j/k:%s  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
             (if state.code_focus_file then "scroll" else "move")
-            (if state.code_focus_file && not state.code_history_open then
-               "h/l:pan  "
+            (if
+               state.code_focus_file && not state.code_history_open
+               && not state.code_diff_open
+             then "h/l:pan  "
              else "")
-            (if state.code_focus_file then "H:history  " else "")
-            (if state.code_history_open then "code"
+            (if state.code_focus_file then "d:diff  H:history  " else "")
+            (if state.code_history_open || state.code_diff_open then "code"
              else if state.code_focus_file then "list"
              else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf

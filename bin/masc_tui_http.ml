@@ -1128,8 +1128,8 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
     [keeper] names whose playground the path is read under, and the path is
     relative to that playground -- the same address the Changes surface
     already shows. Without a keeper the server reads the project checkout. *)
-let fetch_git_diff ~(host : string) ~(port : int) ~(keeper : string option)
-    ~(path : string) ~(base_ref : string) :
+let fetch_git_diff ?repo ~(host : string) ~(port : int)
+    ~(keeper : string option) ~(path : string) ~(base_ref : string) () :
     (Masc.Tui_decode.git_diff, string) result =
   let query =
     [ Some (Printf.sprintf "path=%s" (percent_encode_query_value path))
@@ -1138,6 +1138,10 @@ let fetch_git_diff ~(host : string) ~(port : int) ~(keeper : string option)
         (fun name ->
           Printf.sprintf "keeper=%s" (percent_encode_query_value name))
         keeper
+    ; Option.map
+        (fun repo_id ->
+          Printf.sprintf "repo_id=%s" (percent_encode_query_value repo_id))
+        repo
     ]
     |> List.filter_map Fun.id
     |> String.concat "&"

@@ -939,6 +939,13 @@ type state = {
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
+  (* The file pane's diff view: d on an open file swaps the content for what
+     the working tree holds against HEAD, keyed the same way. One overlay at
+     a time -- opening this closes the history and vice versa. *)
+  mutable code_diff: (string * Tui_decode.git_diff) option;
+  mutable code_diff_error: string option;
+  mutable code_diff_open: bool;
+  mutable code_diff_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -1326,6 +1333,10 @@ let create_state
   code_history_error = None;
   code_history_open = false;
   code_history_scroll = 0;
+  code_diff = None;
+  code_diff_error = None;
+  code_diff_open = false;
+  code_diff_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;

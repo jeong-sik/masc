@@ -384,6 +384,12 @@
  (modules masc_tui_roster_pane))
 
 (library
+ (name masc_tui_keeper_mark)
+ (wrapped false)
+ (modules masc_tui_keeper_mark)
+ (libraries masc))
+
+(library
  (name masc_tui_footer)
  (wrapped false)
  (modules masc_tui_footer))
@@ -520,6 +526,7 @@
   masc.fusion_core
   masc_tui_footer
   masc_tui_roster_pane
+  masc_tui_keeper_mark
   masc_tui_help
   masc_tui_context_state
   masc_tui_frame_presenter

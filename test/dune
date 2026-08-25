@@ -2931,6 +2931,11 @@
  (libraries alcotest masc_tui_roster_pane))
 
 (test
+ (name test_tui_keeper_mark)
+ (modules test_tui_keeper_mark)
+ (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

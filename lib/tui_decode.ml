@@ -44,6 +44,24 @@ type keeper_health = Keeper_types.keeper_health
 let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
 let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
 
+type keeper_health_reading =
+  | Health_running
+  | Health_idle
+  | Health_offline
+  | Health_stale
+  | Health_degraded
+  | Health_zombie
+
+(* Exhaustive on purpose: a seventh member of [Keeper_types.keeper_health]
+   stops the build here rather than arriving on screen as one of these six. *)
+let keeper_health_reading : keeper_health -> keeper_health_reading = function
+  | Keeper_types.KH_healthy -> Health_running
+  | Keeper_types.KH_idle -> Health_idle
+  | Keeper_types.KH_offline -> Health_offline
+  | Keeper_types.KH_stale -> Health_stale
+  | Keeper_types.KH_degraded -> Health_degraded
+  | Keeper_types.KH_zombie -> Health_zombie
+
 let keeper_next_action_of_string =
   Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string

@@ -1963,13 +1963,8 @@ let keeper_action_color
   | Some Status.Direct_message -> Theme.ok
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
-  match health with
-  | None -> "-"
-  | Some _ when paused -> "\xe2\x97\x8b"
-  | Some value -> (
-      match Tui_decode.keeper_health_to_string value with
-      | "offline" -> "\xc3\x97"
-      | _ -> "\xe2\x97\x8f")
+  Masc_tui_keeper_mark.glyph ~paused
+    (Option.map Tui_decode.keeper_health_reading health)
 
 (* [None] is a roster that was not read, not a health the roster could not
    name: the word says so, and it is the word the header's tally uses for
@@ -2860,14 +2855,28 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
+        (* The same glyph the Keepers surface draws, for the same reading.
+           Without it the pane says a keeper exists and nothing else, so a
+           roster of ten looks identical whether one of them is offline. *)
+        let reading = keeper_reading state k in
+        let glyph =
+          keeper_state_glyph
+            ~paused:reading.Keeper_control.paused
+            ~health:(Keeper_control.health reading)
+        in
         (* Reverse video is the one selection signal every terminal
-           renders, colour or not. *)
+           renders, colour or not, and it owns the whole row: a glyph
+           tinted inside it reads as a second highlight. *)
         let line =
           if selected then
-            Theme.selection ^ " " ^ name
-            ^ String.make (max 0 (cols - 5 - Message_layout.display_width name)) ' '
+            Theme.selection ^ " " ^ glyph ^ " " ^ name
+            ^ String.make
+                (max 0 (cols - 7 - Message_layout.display_width name)) ' '
             ^ Ansi.reset
-          else " " ^ name
+          else
+            " "
+            ^ keeper_action_color (Keeper_control.next_action reading)
+            ^ glyph ^ Ansi.reset ^ " " ^ name
         in
         framed_line buf cols line
     | None -> framed_empty buf cols

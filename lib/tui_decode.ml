@@ -3422,19 +3422,31 @@ let decode_git_diff json =
 
 (* ── git log: who touched this file, most recent first ─────────────── *)
 
+(* Both the git-log route and the ide-regions route stamp their rows with
+   [timestamp_ms]; the history view sorts the two kinds into one timeline
+   by this number. *)
+let timestamp_ms_field json =
+  match member "timestamp_ms" json with
+  | `Intlit s -> (
+      match Float.of_string_opt s with
+      | Some f -> Ok f
+      | None -> Error "timestamp_ms is not a number")
+  | `Int n -> Ok (float_of_int n)
+  | bad -> field_type_error "timestamp_ms" "an integer" bad
+
 type git_log_row = {
   gl_hash : string;
-  gl_date : string;  (** --date=short, as the route formats it *)
+  gl_at_ms : float;
   gl_author : string;
   gl_subject : string;
 }
 
 let decode_git_log_row json =
   let* gl_hash = required_string_field json "hash" in
-  let* gl_date = required_string_field json "date" in
+  let* gl_at_ms = timestamp_ms_field json in
   let* gl_author = required_string_field json "author" in
   let* gl_subject = required_string_field json "subject" in
-  Ok { gl_hash; gl_date; gl_author; gl_subject }
+  Ok { gl_hash; gl_at_ms; gl_author; gl_subject }
 
 let decode_git_log json =
   let* ok = required_bool_field json "ok" in
@@ -3490,15 +3502,7 @@ let decode_ide_region json =
   let* ir_line_start = required_int_field json "line_start" in
   let* ir_line_end = required_int_field json "line_end" in
   let* ir_keeper = required_string_field json "keeper_id" in
-  let* ir_at_ms =
-    match member "timestamp_ms" json with
-    | `Intlit s -> (
-        match Float.of_string_opt s with
-        | Some f -> Ok f
-        | None -> Error "timestamp_ms is not a number")
-    | `Int n -> Ok (float_of_int n)
-    | bad -> field_type_error "timestamp_ms" "an integer" bad
-  in
+  let* ir_at_ms = timestamp_ms_field json in
   let* ir_source =
     match member "source" json with
     | `Assoc _ as source -> (

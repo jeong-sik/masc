@@ -1030,10 +1030,12 @@ val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
     vocabulary is closed, so a fourth word means the server changed, and
     drawing it as unchanged would say the opposite of what happened. *)
 
-(** One [/api/v1/git/log] commit: hash, short date, author, subject. *)
+(** One [/api/v1/git/log] commit: hash, author-time epoch milliseconds,
+    author, subject. The epoch shares its unit with {!ide_region}'s
+    [ir_at_ms] so the two sort into one timeline. *)
 type git_log_row = {
   gl_hash : string;
-  gl_date : string;
+  gl_at_ms : float;
   gl_author : string;
   gl_subject : string;
 }

@@ -1164,15 +1164,13 @@ type async_msg =
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
   | Code_history_loaded of
-      string * (Masc.Tui_decode.git_log_row list, string) result
+      string * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
-  | Code_activity_loaded of
-      string * (Masc.Tui_decode.ide_region list, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
   | Code_lsp_answered of
       string * string * (Masc.Tui_decode.lsp_answer, string) result
@@ -1710,6 +1708,39 @@ let code_history_limit = 50
    read. *)
 let tree_diff_base_ref = "HEAD"
 
+(* The annotation and region routes are scoped by the server-minted codebase
+   slug (RFC-0378), and only a Repositories row carries one -- the other
+   scopes say so instead of guessing a slug. *)
+let code_scope_codebase state =
+  match state.code_scope with
+  | Code_scope_repo repo_id -> (
+      match state.repositories with
+      | None -> Error "the repositories listing is not loaded yet"
+      | Some snapshot -> (
+          match
+            List.find_opt
+              (fun (r : Masc.Tui_decode.repository) ->
+                String.equal r.Masc.Tui_decode.rp_id repo_id)
+              snapshot.Masc.Tui_decode.rs_repositories
+          with
+          | None ->
+              Error ("repository " ^ repo_id ^ " is not in the listing")
+          | Some r -> (
+              match r.Masc.Tui_decode.rp_codebase with
+              | Some slug -> Ok slug
+              | None ->
+                  Error
+                    "this repository's remote has no canonical slug, so \
+                     it has no notes")))
+  | Code_scope_keeper _ ->
+      Error "notes are scoped by repository; open the file from Repos"
+  | Code_scope_project ->
+      Error "the project tree is not a registered repository; no notes here"
+
+let code_history_entry_at_ms = function
+  | Hist_commit (row : Masc.Tui_decode.git_log_row) -> row.gl_at_ms
+  | Hist_edit (region : Masc.Tui_decode.ide_region) -> region.ir_at_ms
+
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -1717,8 +1748,38 @@ let launch_code_history_load state ~mailbox ~path =
     let result =
       try
         let keeper, repo = code_scope_axes state in
-        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
-          ~limit:code_history_limit ()
+        match
+          Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+            ~limit:code_history_limit ()
+        with
+        | Error detail -> Error detail
+        | Ok commits ->
+            (* The recorded keeper edits ride the same listing. A scope
+               without a codebase slug, or a fetch that fails, drops only
+               them -- the commits still show, and the note says what is
+               missing rather than passing the shorter history off as the
+               whole one. *)
+            let edits, chl_edits_note =
+              match code_scope_codebase state with
+              | Error why -> ([], Some ("keeper edits not shown: " ^ why))
+              | Ok codebase -> (
+                  match
+                    Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
+                      ~file_path:path
+                  with
+                  | Error detail ->
+                      ([], Some ("keeper edits not shown: " ^ detail))
+                  | Ok regions -> (regions, None))
+            in
+            let chl_entries =
+              List.stable_sort
+                (fun a b ->
+                  Float.compare (code_history_entry_at_ms b)
+                    (code_history_entry_at_ms a))
+                (List.map (fun c -> Hist_commit c) commits
+                @ List.map (fun r -> Hist_edit r) edits)
+            in
+            Ok { chl_entries; chl_edits_note }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1807,32 +1868,6 @@ let github_pr_url ~remote ~number =
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
-let code_scope_codebase state =
-  match state.code_scope with
-  | Code_scope_repo repo_id -> (
-      match state.repositories with
-      | None -> Error "the repositories listing is not loaded yet"
-      | Some snapshot -> (
-          match
-            List.find_opt
-              (fun (r : Masc.Tui_decode.repository) ->
-                String.equal r.Masc.Tui_decode.rp_id repo_id)
-              snapshot.Masc.Tui_decode.rs_repositories
-          with
-          | None ->
-              Error ("repository " ^ repo_id ^ " is not in the listing")
-          | Some r -> (
-              match r.Masc.Tui_decode.rp_codebase with
-              | Some slug -> Ok slug
-              | None ->
-                  Error
-                    "this repository's remote has no canonical slug, so \
-                     it has no notes")))
-  | Code_scope_keeper _ ->
-      Error "notes are scoped by repository; open the file from Repos"
-  | Code_scope_project ->
-      Error "the project tree is not a registered repository; no notes here"
-
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -1876,29 +1911,6 @@ let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run
   | None -> run ()
-
-let launch_code_activity_load state ~mailbox ~codebase ~path =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
-          ~file_path:path
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_activity_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
 (* Remember where a jump is about to leave from, so B can walk back.
    Bounded: the oldest entry falls off past twenty. *)
@@ -2508,7 +2520,6 @@ let search_row_cursor state =
       if
         state.code_focus_file && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then Some state.code_file_cursor
       else Some state.code_cursor
   | _ -> None
@@ -2549,7 +2560,6 @@ let search_land state index =
       if
         state.code_focus_file && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then begin
         state.code_file_cursor <- index;
         state.code_file_scroll <-
@@ -5063,11 +5073,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0;
-          state.code_activity <- None;
-          state.code_activity_error <- None;
-          state.code_activity_open <- false;
-          state.code_activity_scroll <- 0
+          state.code_notes_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
@@ -5100,19 +5106,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 launch_code_notes_load state ~mailbox ~codebase ~path
             | Error _ -> ())
       | Error detail -> state.code_notes_error <- Some detail)
-  | Code_activity_loaded (path, result) ->
-      let still_current =
-        match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
-        | None -> false
-      in
-      if still_current then (
-        match result with
-        | Ok regions ->
-            state.code_activity <- Some (path, regions);
-            state.code_activity_error <- None;
-            state.code_activity_scroll <- 0
-        | Error detail -> state.code_activity_error <- Some detail)
   | Code_lsp_answered (question, symbol, result) ->
       (match result with
        | Error detail ->
@@ -7070,8 +7063,7 @@ let main () =
                        && Option.is_some state.code_file
                        && not state.code_history_open
                        && not state.code_diff_open
-                       && not state.code_notes_open
-                       && not state.code_activity_open ->
+                       && not state.code_notes_open ->
            (* Ask the language server what a name on the cursor line is. The
               palette collects the name: the pane has no character cursor,
               and the route's address arithmetic wants the literal symbol. *)
@@ -7082,39 +7074,10 @@ let main () =
                        && Option.is_some state.code_file
                        && not state.code_history_open
                        && not state.code_diff_open
-                       && not state.code_notes_open
-                       && not state.code_activity_open ->
+                       && not state.code_notes_open ->
            state.palette_open <- true;
            state.palette_query <- "def ";
            state.palette_cursor <- 0
-       | Some "c" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file ->
-           (* Which keeper wrote which lines of the open file, through what,
-              and when. Repository scope, like the notes: the regions are
-              keyed by the same server-minted codebase slug. *)
-           (match state.code_file with
-            | None -> ()
-            | Some (path, _) ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else
-                  match code_scope_codebase state with
-                  | Error why ->
-                      add_event state "system" ("activity: " ^ why)
-                  | Ok codebase ->
-                      state.code_activity_open <- true;
-                      state.code_notes_open <- false;
-                      state.code_diff_open <- false;
-                      state.code_history_open <- false;
-                      (match state.code_activity with
-                       | Some (loaded_path, _)
-                         when String.equal loaded_path path ->
-                           ()
-                       | Some _ | None ->
-                           state.code_activity <- None;
-                           state.code_activity_error <- None;
-                           launch_code_activity_load state
-                             ~mailbox:async_messages ~codebase ~path))
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
@@ -7136,7 +7099,6 @@ let main () =
                       state.code_notes_open <- true;
                       state.code_diff_open <- false;
                       state.code_history_open <- false;
-                      state.code_activity_open <- false;
                       (match state.code_notes with
                        | Some (loaded_path, _)
                          when String.equal loaded_path path ->
@@ -7160,7 +7122,6 @@ let main () =
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
-                  state.code_activity_open <- false;
                   (match state.code_diff with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -7184,7 +7145,6 @@ let main () =
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
-                  state.code_activity_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -7368,9 +7328,7 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -7491,9 +7449,7 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
@@ -7566,15 +7522,7 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_activity_open then (
-                    match state.code_activity with
-                    | Some (_, regions) ->
-                        state.code_activity_scroll <-
-                          min
-                            (max 0 (List.length regions - 1))
-                            (state.code_activity_scroll + 1)
-                    | None -> ())
-                  else if state.code_notes_open then (
+                  if state.code_notes_open then (
                     match state.code_notes with
                     | Some (_, notes) ->
                         state.code_notes_scroll <-
@@ -7593,10 +7541,10 @@ let main () =
                     | None -> ())
                   else if state.code_history_open then (
                     match state.code_history with
-                    | Some (_, rows) ->
+                    | Some (_, listing) ->
                         state.code_history_scroll <-
                           min
-                            (max 0 (List.length rows - 1))
+                            (max 0 (List.length listing.chl_entries - 1))
                             (state.code_history_scroll + 1)
                     | None -> ())
                   else
@@ -7812,10 +7760,7 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_activity_open then
-                    state.code_activity_scroll <-
-                      max 0 (state.code_activity_scroll - 1)
-                  else if state.code_notes_open then
+                  if state.code_notes_open then
                     state.code_notes_scroll <-
                       max 0 (state.code_notes_scroll - 1)
                   else if state.code_diff_open then
@@ -8022,17 +7967,41 @@ let main () =
            (match state.view with
             | Code -> (
                 if state.code_history_open then (
-                  (* The top visible commit is the selected one, the way the
-                     Changes list treats its scroll. Its subject's "(#N)" is
-                     the PR; the note says the link, or why there is none. *)
+                  (* The top visible row is the selected one, the way the
+                     Changes list treats its scroll. A commit answers with
+                     its PR -- the subject's "(#N)" against the repository's
+                     remote, or why there is no link. A keeper edit jumps
+                     the cursor to the lines it wrote, the way a definition
+                     jump lands, with B holding the way back. *)
                   match state.code_history with
                   | None -> ()
-                  | Some (_, commits) -> (
+                  | Some (_, listing) -> (
                       match
-                        List.nth_opt commits state.code_history_scroll
+                        List.nth_opt listing.chl_entries
+                          state.code_history_scroll
                       with
                       | None -> ()
-                      | Some row ->
+                      | Some (Hist_edit region) -> (
+                          match state.code_file with
+                          | None -> ()
+                          | Some (_, rows) ->
+                              push_code_jump state;
+                              state.code_history_open <- false;
+                              let cursor =
+                                max 0
+                                  (min
+                                     (region.Masc.Tui_decode.ir_line_start
+                                     - 1)
+                                     (List.length rows - 1))
+                              in
+                              state.code_file_cursor <- cursor;
+                              state.code_file_scroll <-
+                                Masc_tui_scroll.ensure_visible ~cursor
+                                  ~height:
+                                    (Masc_tui_render
+                                     .code_pane_content_height ())
+                                  state.code_file_scroll)
+                      | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-
                             Some

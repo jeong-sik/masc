@@ -30,8 +30,6 @@ module Ansi = struct
   let default_fg = Masc_tui_theme.Sgr.default_fg
   let gray = Masc_tui_theme.Sgr.gray
 
-  let bg_removed = Masc_tui_theme.Sgr.bg_removed
-  let bg_added = Masc_tui_theme.Sgr.bg_added
 
   let move_to = Masc_tui_theme.Term.move_to
   let reverse = Masc_tui_theme.Sgr.reverse
@@ -66,6 +64,8 @@ module Theme = struct
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_
+    let diff_added_bg = Masc_tui_theme.Syntax.diff_added_bg
+    let diff_removed_bg = Masc_tui_theme.Syntax.diff_removed_bg
   end
 end
 

@@ -5011,6 +5011,20 @@ def code_lane_fixtures() -> HttpFixtures:
     fixtures[WORKSPACE_FILE_AML_PATH] = file_response
     # uri's Query_value encoding may or may not spell the slash; serve both.
     fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
+    history_response = (
+        200,
+        {
+            "ok": True,
+            "commits": [
+                {"hash": "abc1234", "date": "2026-08-25",
+                 "author": "keeper-alpha", "subject": "feat: add x"},
+                {"hash": "def5678", "date": "2026-08-24",
+                 "author": "vincent", "subject": "chore: seed the file"},
+            ],
+        },
+    )
+    fixtures["/api/v1/git/log?path=lib/a.ml&limit=50"] = history_response
+    fixtures["/api/v1/git/log?path=lib%2Fa.ml&limit=50"] = history_response
     return fixtures
 
 
@@ -5037,6 +5051,22 @@ def code_lane_interaction(
         raise AssertionError(f"no line-number gutter: {opened!r}")
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # H swaps the content for the commits that touched the file; Esc swaps
+    # back (the lexed keyword span is the proof the content returned).
+    # The needle is a commit hash so the wait crosses the "(loading
+    # history)" frame and lands on the fetched listing.
+    history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
+    history_plain = CSI_RE.sub(b"", history).decode("utf-8")
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
+        if needle not in history_plain:
+            raise AssertionError(
+                f"history missed {needle!r}: {history_plain!r}"
+            )
+    if "Esc:code" not in history_plain:
+        raise AssertionError(
+            f"history footer does not offer the way back: {history_plain!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
     os.write(master_fd, b"q")
 
 

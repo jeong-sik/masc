@@ -3288,3 +3288,26 @@ let decode_git_diff json =
   let* rows_json = required_list_field json "unified" in
   let* gd_rows = decode_list "unified" decode_git_diff_row rows_json in
   Ok { gd_has_changes; gd_rows }
+
+(* ── git log: who touched this file, most recent first ─────────────── *)
+
+type git_log_row = {
+  gl_hash : string;
+  gl_date : string;  (** --date=short, as the route formats it *)
+  gl_author : string;
+  gl_subject : string;
+}
+
+let decode_git_log_row json =
+  let* gl_hash = required_string_field json "hash" in
+  let* gl_date = required_string_field json "date" in
+  let* gl_author = required_string_field json "author" in
+  let* gl_subject = required_string_field json "subject" in
+  Ok { gl_hash; gl_date; gl_author; gl_subject }
+
+let decode_git_log json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "git log answered ok=false"
+  else
+    let* rows_json = required_list_field json "commits" in
+    decode_list "commits" decode_git_log_row rows_json

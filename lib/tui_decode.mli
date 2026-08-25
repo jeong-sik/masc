@@ -982,3 +982,14 @@ val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
 (** Reject an unrecognised row kind rather than reading it as context: git's
     vocabulary is closed, so a fourth word means the server changed, and
     drawing it as unchanged would say the opposite of what happened. *)
+
+(** One [/api/v1/git/log] commit: hash, short date, author, subject. *)
+type git_log_row = {
+  gl_hash : string;
+  gl_date : string;
+  gl_author : string;
+  gl_subject : string;
+}
+
+val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
+(** The route's [{ok; commits}] envelope, most recent first. *)

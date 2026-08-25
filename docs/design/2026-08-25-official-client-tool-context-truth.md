@@ -170,7 +170,16 @@ Hierarchy를 다시 제품 기능으로 만들지는 않는다. parent field를 
 ### D7. TUI refuses mixed workspace truth
 
 `/health?full=1`의 effective base path와 TUI local base path를 canonicalize해 비교한다.
-다르면 Context/metrics/local mutation을 로드하지 않고 persistent blocker를 그린다.
+다르면 Context/metrics/local mutation을 로드하지 않는다. 거절은 읽는 자리마다
+(`load_local_workspace_if_safe`, `load_live_context_if_safe`,
+`load_keeper_logs_if_safe`, `handle_composer_key`, `handle_paste`) 일어나고,
+이전에 읽어둔 것은 `clear_local_workspace`가 비운다.
+
+화면 전체를 blocker로 덮지 않는다. 덮으면 Overview·Keepers·Board·Changes 처럼
+서버 응답만 읽는 화면까지 같이 사라지는데, 그 화면들은 이 로컬 파일 시스템을
+건드리지 않는다. 불일치는 surface header 배지(`[workspace mismatch]`)와 footer의
+`MISMATCH local <path>` 로 알린다. 키 입력도 막지 않는다 — 로컬을 건드리는 동작은
+위 다섯 자리에서 이미 거절되고, 나머지는 서버가 답한 사실이다.
 
 ## Work packages and MASC tasks
 
@@ -222,7 +231,7 @@ frontmatter, Read-withheld conflict가 각각 typed rejection; valid skill task 
 
 ### WP6 — Workspace identity guard
 
-- local/server base path compare and blocker render.
+- local/server base path compare, per-read refusal, and a header/footer notice.
 
 **Completion trigger**: matching paths load Context; mismatched paths perform zero local
 Context/metrics reads and display both canonical paths.

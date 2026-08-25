@@ -6480,7 +6480,7 @@ def fusion_list_detail_interaction(
                 )
         footer = (
             b"j/k:move  PgUp / PgDn:page  Right / Enter:detail  "
-            b"Left / Esc:back  r:refresh  Tab:next  q:quit"
+            b"r:refresh  Tab:next  q:quit"
         )
         if footer not in plain:
             raise AssertionError(

@@ -84,7 +84,6 @@ end
 module Local_runtime : sig
   val server_url : string
   val worker_model_opt : unit -> string option
-  val mcp_url : unit -> string
 end
 
 module Ollama : sig

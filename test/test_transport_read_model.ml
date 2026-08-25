@@ -284,6 +284,22 @@ let test_context_from_env_normalizes_loopback_alias_base_url () =
       check string "loopback alias base_url canonicalized"
         "http://127.0.0.1:8935/root" ctx.base_url)
 
+(* [Env_config_runtime.Local_runtime.mcp_url] used to answer this question
+   too, by appending "/mcp" to an unfolded MASC_HTTP_BASE_URL. It had no
+   callers left and was removed; this is the one place that still builds the
+   value, and it builds it from a context whose base URL is already folded.
+   Asserting that here keeps the removed shape from coming back unnoticed. *)
+let test_transport_status_derives_the_mcp_url_from_the_folded_base () =
+  let ctx =
+    TRM.make_http_context ~base_url:"http://0.0.0.0:8935/" ~host:"0.0.0.0" ()
+  in
+  let json = TRM.transport_status_json ctx in
+  let mcp =
+    Yojson.Safe.Util.(json |> member "http" |> member "mcp_url" |> to_string)
+  in
+  check string "the advertised MCP URL is one a client can dial"
+    "http://127.0.0.1:8935/mcp" mcp
+
 let test_normalize_advertised_host_canonicalizes_localhost () =
   check string "localhost normalizes to loopback" "127.0.0.1"
     (TRM.normalize_advertised_host "localhost")
@@ -330,6 +346,8 @@ let () =
             test_context_from_env_trims_explicit_base_url;
           test_case "normalize loopback alias base url" `Quick
             test_context_from_env_normalizes_loopback_alias_base_url;
+          test_case "mcp url comes from the folded base" `Quick
+            test_transport_status_derives_the_mcp_url_from_the_folded_base;
           test_case "normalize localhost" `Quick
             test_normalize_advertised_host_canonicalizes_localhost;
           test_case "normalize ipv6 loopback" `Quick

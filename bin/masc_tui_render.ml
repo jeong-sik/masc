@@ -4834,7 +4834,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
-  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Changes_diff_scroll scroll)
+    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -4930,7 +4931,12 @@ let render_changes_list (state : state) =
   let content_height = max 1 (total_content - preview_height) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
-  let cursor_change = List.nth_opt changes scroll in
+  (* The marked row, not the window's top row. They were the same field, so
+     the mark never left the first drawn row: every row below it was visible
+     and unselectable, and Enter always opened whichever change the window
+     happened to start on. *)
+  let cursor = max 0 (min state.changes_cursor (max 0 (shown - 1))) in
+  let cursor_change = List.nth_opt changes cursor in
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
@@ -4964,7 +4970,7 @@ let render_changes_list (state : state) =
           let style =
             if change.Masc.Tui_decode.fc_succeeded then Ansi.reset else Ansi.dim
           in
-          let marker = if idx = scroll then ">" else " " in
+          let marker = if idx = cursor then ">" else " " in
           box_line_styled buf cols ~style (marker ^ String.sub line 1 (String.length line - 1))
     done;
   (match cursor_change with
@@ -5094,7 +5100,8 @@ let render_changes_tree_diff (state : state)
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
-  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+  finish_surface state ~clamped:(Changes_diff_scroll scroll)
+    ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* The surface has two readings: the list, and one change opened. The open row
    is held as an index, so a refresh that shortens the list closes the diff

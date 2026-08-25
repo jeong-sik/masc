@@ -90,6 +90,7 @@ describe('ConnectorOverviewStrip', () => {
     render(
       html`<${ConnectorOverviewStrip}
         connectors=${[
+          mkConnector({ connector_id: 'telegram', available: true }),
           mkConnector({ connector_id: 'imessage', available: true }),
           mkConnector({ connector_id: 'discord', available: true }),
           mkConnector({ connector_id: 'slack', available: true }),
@@ -100,11 +101,11 @@ describe('ConnectorOverviewStrip', () => {
     )
     const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
     const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
-    // Two of the four connectors run in the server process and have no
-    // sidecar to count, so the bulk buttons see imessage and telegram only:
-    // imessage is up, telegram is absent. discord and slack are up and are
-    // still not in the Stop All total.
-    expect(startBtn.textContent).toContain('(1)')
+    // Three of the four connectors run in the server process and have no
+    // sidecar to count, so the bulk buttons see telegram only: it is up, so
+    // nothing is startable and it is the one thing stoppable. discord, slack
+    // and imessage are up and are in neither total.
+    expect(startBtn.textContent).toContain('(0)')
     expect(stopBtn.textContent).toContain('(1)')
   })
 
@@ -438,12 +439,12 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
   it('renders a Start button (emerald) for a down sidecar', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'imessage', available: false })]}
+        connectors=${[mkConnector({ connector_id: 'telegram', available: false })]}
         keeperCount=${0}
       />`,
       container,
     )
-    const btn = container.querySelector('[data-tile-primary-action="imessage"]') as HTMLButtonElement
+    const btn = container.querySelector('[data-tile-primary-action="telegram"]') as HTMLButtonElement
     expect(btn).toBeTruthy()
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('start')
     expect(btn.textContent?.trim()).toBe('▶ Start')
@@ -453,12 +454,12 @@ describe('TilePrimaryAction component (rendered inside ConnectorOverviewStrip)',
   it('renders a Stop button (bad) for an up sidecar', () => {
     render(
       html`<${ConnectorOverviewStrip}
-        connectors=${[mkConnector({ connector_id: 'imessage', available: true })]}
+        connectors=${[mkConnector({ connector_id: 'telegram', available: true })]}
         keeperCount=${0}
       />`,
       container,
     )
-    const btn = container.querySelector('[data-tile-primary-action="imessage"]') as HTMLButtonElement
+    const btn = container.querySelector('[data-tile-primary-action="telegram"]') as HTMLButtonElement
     expect(btn.getAttribute('data-tile-primary-action-tone')).toBe('stop')
     expect(btn.textContent?.trim()).toBe('■ Stop')
     expect(btn.className).toContain('var(--bad-light)')

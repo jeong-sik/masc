@@ -27,6 +27,10 @@ let slack_channel ~team_id ~channel_id ~thread_ts ~user_id =
   slack ~team_id ~channel_id ~thread_ts ~user_id |> Result.get_ok
 ;;
 
+let imessage_channel ~chat_identifier ~chat_guid ~user_id =
+  imessage ~chat_identifier ~chat_guid ~user_id |> Result.get_ok
+;;
+
 let roundtrip ch =
   match of_yojson (to_yojson ch) with
   | Ok ch' -> assert (ch' = ch)
@@ -423,11 +427,55 @@ let test_discord_thread_parent_preserves_thread_target () =
     assert (reply_to_message_id = None);
     assert (guild_id = Some "G1");
     assert (user_id = "U1")
-  | Dashboard _ | Slack _ | Keeper _ | Unrouted _ ->
+  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ ->
     failwith "Discord thread parent changed connector kind"
+
+(* iMessage (#24497). Before this constructor existed an iMessage-originated
+   keeper resumed as [Unrouted] and its reply was dropped instead of returning
+   to the conversation that asked. *)
+let test_imessage_roundtrip_and_contract () =
+  let with_guid =
+    imessage_channel ~chat_identifier:"+821012345678"
+      ~chat_guid:(Some "iMessage;-;+821012345678") ~user_id:"+821012345678"
+  in
+  let without_guid =
+    imessage_channel ~chat_identifier:"friend@example.com" ~chat_guid:None
+      ~user_id:"friend@example.com"
+  in
+  roundtrip with_guid;
+  roundtrip without_guid;
+  assert (kind_label with_guid = "imessage");
+  assert (is_routable with_guid);
+  (* The conversation is the chat identifier, so two different people writing
+     into the same group chat share one conversation and batch together, while
+     the same person in two chats does not. *)
+  let other_sender =
+    imessage_channel ~chat_identifier:"+821012345678" ~chat_guid:None
+      ~user_id:"+821099999999"
+  in
+  assert (same_conversation with_guid other_sender);
+  assert (not (same_conversation with_guid without_guid));
+  (* [same_route] is stricter: it compares every coordinate. *)
+  assert (same_route with_guid with_guid);
+  assert (not (same_route with_guid other_sender));
+  (* A blank chat identifier has no keeper to belong to, so it is refused
+     rather than accepted and dropped later. *)
+  assert (
+    Result.is_error
+      (imessage ~chat_identifier:"  " ~chat_guid:None ~user_id:"u"));
+  assert (
+    Result.is_error
+      (imessage ~chat_identifier:"c" ~chat_guid:None ~user_id:""));
+  (* A present but blank optional coordinate is a malformed value, not an
+     absent one. *)
+  assert (
+    Result.is_error
+      (imessage ~chat_identifier:"c" ~chat_guid:(Some " ") ~user_id:"u"))
+;;
 
 let () =
   test_codec_roundtrip ();
+  test_imessage_roundtrip_and_contract ();
   test_unknown_kind_is_error ();
   test_missing_field_is_error ();
   test_smart_constructors_reject_blank_coordinates ();

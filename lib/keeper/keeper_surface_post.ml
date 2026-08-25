@@ -263,6 +263,7 @@ let resolve_target ~surface ~channel_id ?continuation_channel
         ( Keeper_continuation_channel.Dashboard _
         | Keeper_continuation_channel.Discord _
         | Keeper_continuation_channel.Slack _
+        | Keeper_continuation_channel.Imessage _
         | Keeper_continuation_channel.Keeper _
         | Keeper_continuation_channel.Unrouted _ )
     | None ->
@@ -401,6 +402,7 @@ let matches_continuation_route target channel =
     , ( Keeper_continuation_channel.Dashboard _
       | Keeper_continuation_channel.Discord _
       | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Imessage _
       | Keeper_continuation_channel.Keeper _
       | Keeper_continuation_channel.Unrouted _ ) ->
     false

@@ -1,7 +1,7 @@
 (** Server Routes — sidecar HTTP API.
 
     Implements [/api/sidecar/<id>/...] for the connector sidecars that run
-    as their own process — imessage and telegram; Discord and Slack moved
+    as their own process — telegram alone now; Discord, Slack and iMessage moved
     in-process (RFC-0203 Phase 3, RFC-0317) and the dashboard hides these
     controls for them.  Serves status, start/stop, log tail, GET/PUT TOML
     config, and schema introspection.
@@ -18,7 +18,7 @@ module Http = Http_server_eio
 (** {1 Sidecar id validation} *)
 
 val known_ids : string list
-(** Hard-coded sidecar id allowlist (["imessage"], ["telegram"]).  Path
+(** Hard-coded sidecar id allowlist (["telegram"]).  Path
     routing rejects anything not in this list. *)
 
 val validate_name : string option -> (string, string) result

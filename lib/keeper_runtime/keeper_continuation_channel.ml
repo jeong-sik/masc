@@ -14,6 +14,11 @@ type t =
       thread_ts : string option;
       user_id : string;
     }
+  | Imessage of {
+      chat_identifier : string;
+      chat_guid : string option;
+      user_id : string;
+    }
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -76,7 +81,7 @@ let discord_thread_parent t ~parent_channel_id =
       ; reply_to_message_id
       ; user_id
       }
-  | Dashboard _ | Slack _ | Keeper _ | Unrouted _ -> t
+  | Dashboard _ | Slack _ | Imessage _ | Keeper _ | Unrouted _ -> t
 ;;
 
 let slack ~team_id ~channel_id ~thread_ts ~user_id =
@@ -87,6 +92,18 @@ let slack ~team_id ~channel_id ~thread_ts ~user_id =
   Ok (Slack { team_id; channel_id; thread_ts; user_id })
 ;;
 
+(* [chat_guid] is optional because it is only needed to reply into the source
+   conversation; in the default self-chat reply mode the target is the
+   note-to-self chat, which the connector resolves for itself. [chat_identifier]
+   is required either way — it is the binding key, so without it the reply has
+   no keeper to belong to. *)
+let imessage ~chat_identifier ~chat_guid ~user_id =
+  let* chat_identifier = validate_nonblank "chat_identifier" chat_identifier in
+  let* chat_guid = validate_optional_nonblank "chat_guid" chat_guid in
+  let* user_id = validate_nonblank "user_id" user_id in
+  Ok (Imessage { chat_identifier; chat_guid; user_id })
+;;
+
 let unrouted reason =
   match validate_nonblank "reason" reason with
   | Ok reason -> Unrouted { reason }
@@ -95,12 +112,13 @@ let unrouted reason =
 
 let is_routable = function
   | Unrouted _ -> false
-  | Dashboard _ | Discord _ | Slack _ | Keeper _ -> true
+  | Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ -> true
 
 let kind_label = function
   | Dashboard _ -> "dashboard"
   | Discord _ -> "discord"
   | Slack _ -> "slack"
+  | Imessage _ -> "imessage"
   | Keeper _ -> "keeper"
   | Unrouted _ -> "unrouted"
 
@@ -134,6 +152,15 @@ let describe = function
       (opt "team" team_id)
       channel_id
       (opt "thread_ts" thread_ts)
+      user_id
+  | Imessage { chat_identifier; chat_guid; user_id } ->
+    let opt label = function
+      | None -> ""
+      | Some value -> Printf.sprintf " %s=%s" label value
+    in
+    Printf.sprintf "imessage chat=%s%s user=%s"
+      chat_identifier
+      (opt "chat_guid" chat_guid)
       user_id
   | Keeper { keeper_name } -> Printf.sprintf "keeper name=%s" keeper_name
   | Unrouted { reason } -> Printf.sprintf "unrouted (%s)" reason
@@ -182,14 +209,27 @@ let same_route a b =
     && String.equal left_channel right_channel
     && same_string_option left_thread right_thread
     && String.equal left_user right_user
+  | ( Imessage
+        { chat_identifier = left_chat
+        ; chat_guid = left_guid
+        ; user_id = left_user
+        }
+    , Imessage
+        { chat_identifier = right_chat
+        ; chat_guid = right_guid
+        ; user_id = right_user
+        } ) ->
+    String.equal left_chat right_chat
+    && same_string_option left_guid right_guid
+    && String.equal left_user right_user
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
   (* Distinct-constructor pairs share no route. Listing the constructors
      explicitly (not [_]) keeps this exhaustive: a new variant forces a
      compile error here rather than silently defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
     -> false
 
 (* RFC-0377: batching pending Connector_attention stimuli needs "is this the
@@ -224,6 +264,12 @@ let same_conversation a b =
   | ( Slack { channel_id = left_channel; _ }
     , Slack { channel_id = right_channel; _ } ) ->
     String.equal left_channel right_channel
+  (* [chat_identifier] is the conversation and [chat_guid] is that same
+     conversation's Messages.app handle, so comparing the identifier alone is
+     exact rather than loose. [user_id] is the author, not the location. *)
+  | ( Imessage { chat_identifier = left_chat; _ }
+    , Imessage { chat_identifier = right_chat; _ } ) ->
+    String.equal left_chat right_chat
   | Keeper { keeper_name = left }, Keeper { keeper_name = right } ->
     String.equal left right
   | Unrouted _, Unrouted _ -> false
@@ -231,8 +277,8 @@ let same_conversation a b =
      constructors explicitly (not [_]) keeps this exhaustive: a new
      connector forces a compile error here rather than silently
      defaulting to [false]. *)
-  | ( (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _)
-    , (Dashboard _ | Discord _ | Slack _ | Keeper _ | Unrouted _) )
+  | ( (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _)
+    , (Dashboard _ | Discord _ | Slack _ | Imessage _ | Keeper _ | Unrouted _) )
     -> false
 
 let option_string_fields fields =
@@ -269,6 +315,13 @@ let to_yojson = function
        ; ("user_id", `String user_id)
        ]
        @ option_string_fields [ ("team_id", team_id); ("thread_ts", thread_ts) ])
+  | Imessage { chat_identifier; chat_guid; user_id } ->
+    `Assoc
+      ([ ("kind", `String "imessage")
+       ; ("chat_identifier", `String chat_identifier)
+       ; ("user_id", `String user_id)
+       ]
+       @ option_string_fields [ ("chat_guid", chat_guid) ])
   | Keeper { keeper_name } ->
     `Assoc [ ("kind", `String "keeper"); ("keeper_name", `String keeper_name) ]
   | Unrouted { reason } ->
@@ -368,6 +421,17 @@ let of_yojson json =
     let* team_id = optional_string_field "team_id" fields in
     let* thread_ts = optional_string_field "thread_ts" fields in
     slack ~team_id ~channel_id ~thread_ts ~user_id
+  | "imessage" ->
+    let* () =
+      validate_allowed_fields
+        ~kind
+        [ "kind"; "chat_identifier"; "chat_guid"; "user_id" ]
+        fields
+    in
+    let* chat_identifier = string_field "chat_identifier" fields in
+    let* user_id = string_field "user_id" fields in
+    let* chat_guid = optional_string_field "chat_guid" fields in
+    imessage ~chat_identifier ~chat_guid ~user_id
   | "keeper" ->
     let* () = validate_allowed_fields ~kind [ "kind"; "keeper_name" ] fields in
     let* keeper_name = string_field "keeper_name" fields in

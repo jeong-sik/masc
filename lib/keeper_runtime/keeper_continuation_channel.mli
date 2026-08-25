@@ -30,6 +30,11 @@ type t = private
       thread_ts : string option;
       user_id : string;
     }
+  | Imessage of {
+      chat_identifier : string;
+      chat_guid : string option;
+      user_id : string;
+    }
   | Keeper of { keeper_name : string }
   | Unrouted of { reason : string }
 
@@ -61,6 +66,18 @@ val slack :
   team_id:string option ->
   channel_id:string ->
   thread_ts:string option ->
+  user_id:string ->
+  (t, string) result
+
+(** [imessage] routes a continuation back to a Messages.app conversation.
+    [chat_identifier] is the conversation and the binding key, so it is
+    required. [chat_guid] is the handle a reply is addressed to and is optional
+    because the connector's default reply mode answers in the note-to-self
+    conversation, whose handle it resolves for itself. Closes the gap that made
+    an iMessage-originated keeper resume as [Unrouted] (#24497). *)
+val imessage :
+  chat_identifier:string ->
+  chat_guid:string option ->
   user_id:string ->
   (t, string) result
 

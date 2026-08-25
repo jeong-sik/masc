@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_skill_snapshot)
+ (public_name masc.skill_snapshot)
+ (wrapped false)
+ (modules skill_catalog_snapshot)
+ (libraries masc.agent_core masc.skill_config digestif yojson unix))

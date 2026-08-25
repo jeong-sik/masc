@@ -1,0 +1,310 @@
+open Alcotest
+
+module Snapshot = Skill_catalog_snapshot
+
+let config_text ?(runtime = "one") sources =
+  Printf.sprintf
+    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n%s\n[runtime]\ndefault = %S\n"
+    sources
+    runtime
+;;
+
+let source_row ~id ~path =
+  Printf.sprintf
+    "[[skills.sources]]\nid = %S\nanchor = \"base-path\"\npath = %S\naccess = \"read-write\"\n"
+    id
+    path
+;;
+
+let parse_config text =
+  match Skill_source_config.parse_text text with
+  | Ok config -> config
+  | Error diagnostics ->
+    fail
+      (String.concat
+         "; "
+         (List.map Skill_source_config.diagnostic_to_string diagnostics))
+;;
+
+let package directory =
+  match Snapshot.package_id_of_directory directory with
+  | Ok package_id -> package_id
+  | Error _ -> failf "invalid package fixture %S" directory
+;;
+
+let document ~name ~description ~body =
+  Printf.sprintf
+    "---\nname: %s\ndescription: %s\n---\n%s"
+    name
+    description
+    body
+;;
+
+let candidate ~directory source_text =
+  Snapshot.Candidate_document { directory; source_text }
+;;
+
+let configured_snapshot ~config scans =
+  match Snapshot.configured ~config scans with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "configured snapshot rejected matching source scans"
+;;
+
+let scans ~base_path config candidates_by_source =
+  List.map2
+    (fun source candidates ->
+       let resolved =
+         Skill_source_config.resolve ~base_path ~user_home:None source
+       in
+       let resolved_path =
+         match resolved.resolution with
+         | Resolved path -> path
+         | _ -> fail "base-path source did not resolve"
+       in
+       { Snapshot.source = resolved
+       ; observation =
+           Source_ready { resolved_path; candidates = List.length candidates }
+       ; candidates
+       })
+    config.Skill_source_config.sources
+    candidates_by_source
+;;
+
+let two_sources =
+  source_row ~id:"first" ~path:"first-skills"
+  ^ source_row ~id:"second" ~path:"second-skills"
+;;
+
+let test_precedence_and_exact_identity () =
+  let text = config_text two_sources in
+  let config = parse_config text in
+  let first = candidate ~directory:"review" (document ~name:"review" ~description:"First" ~body:"first body") in
+  let second = candidate ~directory:"review" (document ~name:"review" ~description:"Second" ~body:"second body") in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ first ]; [ second ] ])
+  in
+  (match Snapshot.find_effective_by_name snapshot "review" with
+   | Some entry -> check string "first source wins" "First" entry.document.description
+   | None -> fail "effective review Skill missing");
+  check int "both exact entries retained" 2 (List.length (Snapshot.entries snapshot));
+  check int "one shadow" 1 (List.length (Snapshot.shadows snapshot));
+  let source_ids = List.map (fun source -> source.Skill_source_config.id) config.sources in
+  match source_ids with
+  | [ first_id; second_id ] ->
+    let first_identity =
+      Snapshot.make_identity
+        ~source_id:first_id
+        ~package_id:(package "review")
+        ~name:"review"
+    in
+    let second_identity =
+      Snapshot.make_identity
+        ~source_id:second_id
+        ~package_id:(package "review")
+        ~name:"review"
+    in
+    check bool "first exact entry" true (Option.is_some (Snapshot.find_exact snapshot first_identity));
+    check bool "second exact entry" true (Option.is_some (Snapshot.find_exact snapshot second_identity))
+  | _ -> fail "expected two configured sources"
+;;
+
+let test_reversing_sources_reverses_winner () =
+  let reversed_sources =
+    source_row ~id:"second" ~path:"second-skills"
+    ^ source_row ~id:"first" ~path:"first-skills"
+  in
+  let config = parse_config (config_text reversed_sources) in
+  let second = candidate ~directory:"review" (document ~name:"review" ~description:"Second" ~body:"second") in
+  let first = candidate ~directory:"review" (document ~name:"review" ~description:"First" ~body:"first") in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ second ]; [ first ] ])
+  in
+  match Snapshot.find_effective_by_name snapshot "review" with
+  | Some entry -> check string "reversed winner" "Second" entry.document.description
+  | None -> fail "effective review Skill missing"
+;;
+
+let test_scan_order_cannot_override_config () =
+  let config = parse_config (config_text two_sources) in
+  let first =
+    candidate
+      ~directory:"review"
+      (document ~name:"review" ~description:"First" ~body:"first")
+  in
+  let second =
+    candidate
+      ~directory:"review"
+      (document ~name:"review" ~description:"Second" ~body:"second")
+  in
+  let scans =
+    scans ~base_path:"/workspace" config [ [ first ]; [ second ] ]
+    |> List.rev
+  in
+  let snapshot = configured_snapshot ~config scans in
+  match Snapshot.find_effective_by_name snapshot "review" with
+  | Some entry ->
+    check string "config order remains authoritative" "First" entry.document.description
+  | None -> fail "effective review Skill missing"
+;;
+
+let test_missing_scan_is_typed_builder_error () =
+  let config =
+    parse_config (config_text (source_row ~id:"only" ~path:"skills"))
+  in
+  match Snapshot.configured ~config [] with
+  | Error [ Snapshot.Missing_source_scan _ ] -> ()
+  | Error _ -> fail "missing scan returned the wrong typed error"
+  | Ok _ -> fail "snapshot accepted a missing configured source scan"
+;;
+
+let test_malformed_sibling_does_not_drop_valid () =
+  let text = config_text (source_row ~id:"only" ~path:"skills") in
+  let config = parse_config text in
+  let malformed = candidate ~directory:"broken" "---\nname: broken\n---\nbody" in
+  let valid = candidate ~directory:"valid" (document ~name:"valid" ~description:"Valid" ~body:"works") in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ malformed; valid ] ])
+  in
+  check int "valid entry survives" 1 (List.length (Snapshot.entries snapshot));
+  check int "rejection retained" 1 (List.length (Snapshot.rejections snapshot));
+  check bool "valid is effective" true (Option.is_some (Snapshot.find_effective_by_name snapshot "valid"))
+;;
+
+let test_revisions_track_only_skill_truth () =
+  let sources = source_row ~id:"only" ~path:"skills" in
+  let text_one = config_text ~runtime:"provider.one" sources in
+  let text_two = config_text ~runtime:"provider.two" sources in
+  let config_one = parse_config text_one in
+  let config_two = parse_config text_two in
+  let original = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"one") in
+  let changed = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"two") in
+  let build config candidate =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ candidate ] ])
+  in
+  let first = build config_one original in
+  let unrelated_runtime_change = build config_two original in
+  let skill_change = build config_one changed in
+  check
+    string
+    "unrelated runtime edit keeps config revision"
+    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string)
+    (Snapshot.config_revision unrelated_runtime_change
+     |> Option.get
+     |> Snapshot.config_revision_to_string);
+  check
+    string
+    "unchanged catalog revision"
+    (Snapshot.catalog_revision first |> Snapshot.catalog_revision_to_string)
+    (Snapshot.catalog_revision unrelated_runtime_change
+     |> Snapshot.catalog_revision_to_string);
+  check bool
+    "Skill bytes change catalog revision"
+    true
+    (Snapshot.catalog_revision_to_string (Snapshot.catalog_revision first)
+     <> Snapshot.catalog_revision_to_string (Snapshot.catalog_revision skill_change));
+  check bool
+    "Skill bytes change snapshot revision"
+    true
+    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
+     <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change))
+;;
+
+let test_exact_duplicate_is_rejected () =
+  let config =
+    parse_config (config_text (source_row ~id:"only" ~path:"skills"))
+  in
+  let duplicate = candidate ~directory:"pkg" (document ~name:"same" ~description:"Same" ~body:"body") in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ duplicate; duplicate ] ])
+  in
+  check int "one exact entry" 1 (List.length (Snapshot.entries snapshot));
+  check int "one exact duplicate rejection" 1 (List.length (Snapshot.rejections snapshot))
+;;
+
+let test_public_projection_redacts_private_content () =
+  let config =
+    parse_config (config_text (source_row ~id:"only" ~path:"skills"))
+  in
+  let private_body = "PRIVATE_SKILL_BODY" in
+  let entry = candidate ~directory:"pkg" (document ~name:"private" ~description:"Private" ~body:private_body) in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/private/host/workspace" config [ [ entry ] ])
+  in
+  let public = Snapshot.to_public_yojson snapshot |> Yojson.Safe.to_string in
+  check bool "body redacted" false (String_util.contains_substring public private_body);
+  check bool
+    "resolved host path redacted"
+    false
+    (String_util.contains_substring public "/private/host/workspace")
+;;
+
+let test_public_projection_redacts_absolute_config_path () =
+  let text =
+    config_text
+      "[[skills.sources]]\nid = \"absolute\"\nanchor = \"absolute\"\npath = \"/private/host/skills\"\naccess = \"read-write\"\n"
+  in
+  let config = parse_config text in
+  let source = List.hd config.Skill_source_config.sources in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let scan =
+    { Snapshot.source = resolved
+    ; observation =
+        Source_ready { resolved_path = "/private/host/skills"; candidates = 0 }
+    ; candidates = []
+    }
+  in
+  let public =
+    configured_snapshot ~config [ scan ]
+    |> Snapshot.to_public_yojson
+    |> Yojson.Safe.to_string
+  in
+  check bool
+    "absolute configured path redacted"
+    false
+    (String_util.contains_substring public "/private/host/skills")
+;;
+
+let test_package_id_is_one_path_segment () =
+  check bool "plain package" true (Result.is_ok (Snapshot.package_id_of_directory "package"));
+  check bool "parent rejected" true (Result.is_error (Snapshot.package_id_of_directory ".."));
+  check bool "separator rejected" true (Result.is_error (Snapshot.package_id_of_directory "a/b"))
+;;
+
+let () =
+  run
+    "skill_catalog_snapshot"
+    [ ( "snapshot"
+      , [ test_case "precedence and exact identity" `Quick
+            test_precedence_and_exact_identity
+        ; test_case "reversed source order" `Quick
+            test_reversing_sources_reverses_winner
+        ; test_case "scan order cannot override config" `Quick
+            test_scan_order_cannot_override_config
+        ; test_case "missing scan is typed" `Quick
+            test_missing_scan_is_typed_builder_error
+        ; test_case "malformed sibling survives" `Quick
+            test_malformed_sibling_does_not_drop_valid
+        ; test_case "revision semantics" `Quick test_revisions_track_only_skill_truth
+        ; test_case "exact duplicate" `Quick test_exact_duplicate_is_rejected
+        ; test_case "public projection redaction" `Quick
+            test_public_projection_redacts_private_content
+        ; test_case "absolute path redaction" `Quick
+            test_public_projection_redacts_absolute_config_path
+        ; test_case "package id" `Quick test_package_id_is_one_path_segment
+        ] )
+    ]
+;;

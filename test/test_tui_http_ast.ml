@@ -390,7 +390,7 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
        ~callee:"replace_board_posts");
-  check int "Board detail success uses shared post replacement" 1
+  check int "Board detail success preserves list order" 0
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"replace_board_posts");
@@ -403,7 +403,7 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui.ml"
        ~binding_name:"start_board_post_refresh"
        ~callee:"Board_detail.start");
-  check int "Board detail success validates the response post identity" 1
+  check int "Board detail success matches response and replacement identities" 2
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_post_load"
        ~callee:"String.equal");

@@ -129,6 +129,32 @@ let test_enable_asks_for_disambiguation_only () =
   check string "disable pops it" "\027[<u" Csi.disable_kitty_keyboard
 ;;
 
+(* SS3: a terminal in application cursor mode sends [ESC O A] for Up rather
+   than [ESC \[ A]. read_input hands those finals here with no parameters, so
+   the same table has to name them -- otherwise the arrows reach the surfaces
+   as "unknown-esc" and move nothing while j/k keep working. *)
+let test_ss3_finals_are_named_without_parameters () =
+  List.iter
+    (fun (final, expected) ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c" final)
+        (Some expected)
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ ('A', "up"); ('B', "down"); ('C', "right"); ('D', "left")
+    ; ('H', "home"); ('F', "end") ]
+
+let test_an_unnamed_ss3_final_stays_unnamed () =
+  (* [Z] is taken -- it is Shift+Tab -- so the check uses a final the table
+     really does not name. Reaching the surfaces as "unknown-esc" is the
+     right answer for those. *)
+  List.iter
+    (fun final ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c is not named" final)
+        None
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ 'P'; 'Q'; 'R'; 'S' ]
+
 let () =
   run "tui_csi"
     [ ( "legacy"
@@ -150,7 +176,11 @@ let () =
         ; test_case "named keys" `Quick test_csi_u_named_keys
         ] )
     ; ( "boundaries"
-      , [ test_case "unknown sequences" `Quick test_unknown_sequences_are_none
+      , [ test_case "SS3 finals are named without parameters" `Quick
+            test_ss3_finals_are_named_without_parameters
+        ; test_case "an unnamed SS3 final stays unnamed" `Quick
+            test_an_unnamed_ss3_final_stays_unnamed
+        ; test_case "unknown sequences" `Quick test_unknown_sequences_are_none
         ; test_case "enable is minimal" `Quick test_enable_asks_for_disambiguation_only
         ] )
     ]

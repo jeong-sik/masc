@@ -295,6 +295,11 @@
  (modules masc_tui_theme))
 
 (library
+ (name masc_tui_terminal_palette)
+ (wrapped false)
+ (modules masc_tui_terminal_palette))
+
+(library
  (name masc_tui_paste)
  (wrapped false)
  (modules masc_tui_paste))
@@ -315,6 +320,12 @@
  (wrapped false)
  (modules masc_tui_graphics)
  (libraries base64))
+
+(library
+ (name masc_tui_terminal_probe)
+ (wrapped false)
+ (modules masc_tui_terminal_probe)
+ (libraries masc_tui_terminal_palette masc_tui_graphics))
 
 (library
  (name masc_tui_diff)
@@ -529,6 +540,8 @@
  (package masc)
  (libraries
   masc_tui_theme
+  masc_tui_terminal_palette
+  masc_tui_terminal_probe
   masc_tui_span
   masc_tui_diff
   masc

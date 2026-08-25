@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import errno
 import fcntl
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -11,7 +12,6 @@ from pathlib import Path
 import re
 import select
 import signal
-import socket
 import struct
 import zlib
 import subprocess
@@ -127,23 +127,23 @@ class GatedHttpResponse:
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
     requests: HttpRequests | None,
-) -> Iterator[tuple[int, Callable[[], None]]]:
-    if fixtures is None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
-            stalled_endpoint.bind(("127.0.0.1", 0))
-            stalled_endpoint.listen(1)
+) -> Iterator[tuple[int, Callable[[], None], Callable[[str], None]]]:
+    fixtures = {} if fixtures is None else fixtures
+    workspace_base_path: str | None = None
 
-            def start_endpoint() -> None:
-                pass
-
-            yield int(stalled_endpoint.getsockname()[1]), start_endpoint
-        return
+    def set_workspace_base_path(base_path: str) -> None:
+        nonlocal workspace_base_path
+        workspace_base_path = base_path
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
             fixture = fixtures.get(
                 self.path,
-                (503, {"error": "fixture endpoint unavailable"}),
+                (200, {})
+                if self.path == "/health"
+                else fleet_safety_fixture()
+                if self.path == "/health?full=1"
+                else (503, {"error": "fixture endpoint unavailable"}),
             )
             resolved = fixture() if callable(fixture) else fixture
             extra_headers: tuple[tuple[str, str], ...] = ()
@@ -154,6 +154,23 @@ def test_http_endpoint(
                 extra_headers = resolved.headers
             else:
                 status, payload = resolved
+                if (
+                    self.path in ("/health", "/health?full=1")
+                    and status == 200
+                    and isinstance(payload, dict)
+                    and workspace_base_path is not None
+                ):
+                    payload = dict(payload)
+                    paths = dict(payload.get("paths", {}))
+                    paths.update(
+                        {
+                            "effective_base_path": workspace_base_path,
+                            "effective_masc_root": os.path.join(
+                                workspace_base_path, ".masc"
+                            ),
+                        }
+                    )
+                    payload["paths"] = paths
                 body = json.dumps(payload).encode()
                 content_type = "application/json"
             self.send_response(status)
@@ -189,7 +206,11 @@ def test_http_endpoint(
             thread.start()
 
         try:
-            yield int(server.server_address[1]), start_endpoint
+            yield (
+                int(server.server_address[1]),
+                start_endpoint,
+                set_workspace_base_path,
+            )
         finally:
             if thread is not None:
                 server.shutdown()
@@ -876,52 +897,6 @@ def fleet_safety_fixture() -> HttpResponse:
     return (200, {"keeper_fleet_safety": {"status": "ok"}})
 
 
-def with_workspace_identity(
-    fixtures: HttpFixtures | None, base_path: str
-) -> HttpFixtures:
-    """Answer /health?full=1 with the workspace the harness actually chose.
-
-    The TUI canonicalises its own base path against the one this reports and
-    refuses local Keeper/context/metrics reads when they differ. A fixture
-    that names no path leaves every scenario reading an unproven workspace,
-    which is not the state any of them mean to describe.
-
-    Scenario-owned health fixtures keep their fields; only the paths block is
-    filled in. A raw or callable response is left alone -- a scenario that
-    writes its own health body owns what it says.
-    """
-    # In place, not a copy: a scenario keeps the dict it handed over and swaps
-    # a response into it mid-run (a lane read that starts failing, a board list
-    # that arrives late). A copy leaves the server reading the original, and
-    # nine scenarios waited out their timeouts for a response that had already
-    # been written somewhere the server could not see.
-    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
-    paths = {
-        "cwd": base_path,
-        "effective_base_path": base_path,
-        "effective_masc_root": os.path.join(base_path, ".masc"),
-        "effective_has_masc_dir": True,
-    }
-    # The identity probe reads the compact /health; the fleet reading reads
-    # /health?full=1. Both carry the paths block, and a scenario may declare
-    # either, so both keys are filled.
-    for key in ("/health", "/health?full=1"):
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = (200, {"paths": paths})
-            continue
-        if isinstance(existing, tuple):
-            status, payload = existing
-            if isinstance(payload, dict):
-                body = dict(cast(dict[str, object], payload))
-                body["paths"] = {
-                    **cast(dict[str, object], body.get("paths", {})),
-                    **paths,
-                }
-                merged[key] = (status, body)
-    return merged
-
-
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
@@ -951,7 +926,6 @@ def overview_event_http_fixtures() -> HttpFixtures:
                 "goals": [],
                 "rollup": {
                     "active_count": 0,
-                    "paused_count": 0,
                     "verifying_count": 0,
                     "done_count": 0,
                     "dropped_count": 0,
@@ -1034,7 +1008,6 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
             "goals": goals,
             "rollup": {
                 "active_count": len(goals),
-                "paused_count": 0,
                 "verifying_count": 0,
                 "done_count": 0,
                 "dropped_count": 0,
@@ -1329,14 +1302,14 @@ def run_terminal_scenario(
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
-        with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
-            with test_http_endpoint(
-                with_workspace_identity(http_fixtures, base_path), http_requests
-            ) as (
-                server_port,
-                start_http_endpoint,
-            ):
+        with test_http_endpoint(http_fixtures, http_requests) as (
+            server_port,
+            start_http_endpoint,
+            set_workspace_base_path,
+        ):
+            with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
                 seed_workspace(base_path)
+                set_workspace_base_path(base_path)
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -1522,7 +1495,7 @@ def navigate_with_arrows_and_quit(
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
         master_fd,
@@ -3992,8 +3965,8 @@ def autonomous_turn_history_interaction() -> Interaction:
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("turn \u00b7 thinking".encode(), "the turn start"),
-            ("\u21b3 tools".encode(), "the nested tool block"),
+            ("TURN \u00b7 THINKING".encode(), "the turn start"),
+            ("\u21b3 TOOLS".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(
@@ -4028,26 +4001,33 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"superseded by provider grouping",
             start=start,
             timeout=5.0,
         )
-        # Waited for one at a time rather than searched once. The row draws
-        # over more than one frame -- the committed line, then the diff box
-        # under it -- and reading the buffer after only the first had landed
-        # passed on a quiet machine and failed inside a full run.
+        last_row_end = output.find(b"superseded by provider grouping", start) + len(
+            b"superseded by provider grouping"
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=last_row_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
+        visible = bytes(output[start:frame_end])
         for needle in (
-            b"[fact] the Runtime probe shares one provider endpoint",
-            b"[constraint] probe every model separately",
+            b"[fact] the Runtime probe shares",
+            b"one provider endpoint",
+            b"[constraint] probe",
+            b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
-            wait_for_output(
-                process, master_fd, output, needle, start=start, timeout=5.0
-            )
-        # Read after the waits above, so the escape check below sees the same
-        # frames the facts arrived in.
-        visible = bytes(output[start:])
+            if needle not in visible:
+                raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
         # The changed facts ride a ```diff fence, which is what colours the two
         # directions and keeps a leading + out of markdown's list grammar. The
@@ -4085,6 +4065,27 @@ def memory_journal_timeline_interaction() -> Interaction:
 
 
 def context_inspector_fixtures() -> HttpFixtures:
+    prompt_texts = {
+        "keeper_instructions": "Keeper instruction text",
+        "dynamic_context": "exact dynamic context from the turn",
+        "memory_os_recall": "remember the operator preference",
+    }
+    assembled_prompt = "\n".join(prompt_texts.values())
+
+    def prompt_record(block_id: str) -> dict[str, object]:
+        text = prompt_texts[block_id]
+        return {
+            "block": block_id,
+            "bytes": len(text.encode()),
+            "digest": hashlib.sha256(text.encode()).hexdigest(),
+        }
+
+    def input_prompt_component(block_id: str) -> dict[str, object]:
+        return {
+            "component": f"prompt.{block_id}",
+            "bytes": len(prompt_texts[block_id].encode()),
+        }
+
     fixtures = keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
@@ -4105,26 +4106,14 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "absolute_turn": 42,
                         "turn_ref": "trace-context#42",
                         "blocks": [
-                            {
-                                "block": "keeper_instructions",
-                                "bytes": 24,
-                                "digest": "a" * 64,
-                            },
-                            {
-                                "block": "dynamic_context",
-                                "bytes": 36,
-                                "digest": "b" * 64,
-                            },
-                            {
-                                "block": "memory_os_recall",
-                                "bytes": 31,
-                                "digest": "c" * 64,
-                            },
+                            prompt_record("keeper_instructions"),
+                            prompt_record("dynamic_context"),
+                            prompt_record("memory_os_recall"),
                         ],
                         "input_components": [
-                            {"component": "prompt.keeper_instructions", "bytes": 24},
-                            {"component": "prompt.dynamic_context", "bytes": 36},
-                            {"component": "prompt.memory_os_recall", "bytes": 31},
+                            input_prompt_component("keeper_instructions"),
+                            input_prompt_component("dynamic_context"),
+                            input_prompt_component("memory_os_recall"),
                             {"component": "tool_schemas", "bytes": 2048},
                             {"component": "message_user", "bytes": 512},
                             {"component": "message_assistant_text", "bytes": 768},
@@ -4160,22 +4149,22 @@ def context_inspector_fixtures() -> HttpFixtures:
             "blocks": [
                 {
                     "id": "keeper_instructions",
-                    "bytes": 24,
-                    "text": "Keeper instruction text",
+                    "bytes": len(prompt_texts["keeper_instructions"].encode()),
+                    "text": prompt_texts["keeper_instructions"],
                 },
                 {
                     "id": "dynamic_context",
-                    "bytes": 36,
-                    "text": "exact dynamic context from the turn",
+                    "bytes": len(prompt_texts["dynamic_context"].encode()),
+                    "text": prompt_texts["dynamic_context"],
                 },
                 {
                     "id": "memory_os_recall",
-                    "bytes": 31,
-                    "text": "remember the operator preference",
+                    "bytes": len(prompt_texts["memory_os_recall"].encode()),
+                    "text": prompt_texts["memory_os_recall"],
                 },
             ],
-            "assembled": "Keeper instruction text\nexact dynamic context from the turn\nremember the operator preference",
-            "assembled_bytes": 93,
+            "assembled": assembled_prompt,
+            "assembled_bytes": len(assembled_prompt.encode()),
         },
     )
     return fixtures
@@ -4238,6 +4227,36 @@ def context_inspector_interaction() -> Interaction:
             raise AssertionError(f"Exact block view retained the list disclosure: {exact!r}")
 
         send_and_wait(process, master_fd, output, b"\x1b", b"Exact turn-added prompt text")
+        input_map = send_and_wait(
+            process, master_fd, output, b"3", b"Provider request map"
+        )
+        input_map_plain = CSI_RE.sub(b"", input_map)
+        for needle in (
+            b"What reached the provider, and why",
+            b"included by turn prompt assembly",
+            b"verified exact text",
+            b"included by effective tool surface",
+            b"schema bytes only",
+            b"content not retained",
+        ):
+            if needle not in input_map_plain:
+                raise AssertionError(
+                    f"Provider request map omitted {needle!r}: {input_map!r}"
+                )
+
+        send_and_wait(process, master_fd, output, b"j", b"included by")
+        send_and_wait(process, master_fd, output, b"j", b"Memory recall")
+        map_exact = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"remember the operator preference",
+        )
+        if b"included by turn prompt assembly" not in CSI_RE.sub(b"", map_exact):
+            raise AssertionError(f"Input map exact view lost provenance: {map_exact!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"Provider request map")
         send_and_wait(
             process,
             master_fd,
@@ -4285,7 +4304,7 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
-        if "turn · tools".encode() not in CSI_RE.sub(b"", initial):
+        if "TURN · TOOLS".encode() not in CSI_RE.sub(b"", initial):
             raise AssertionError(
                 f"the first visible block did not start its turn: {initial!r}"
             )
@@ -4477,11 +4496,11 @@ def message_origin_badge_interaction(
     plain_frame = CSI_RE.sub(b"", frame)
     for pattern, description in (
         (
-            b"\xe2\x96\xb6\\s+(?:turn \xc2\xb7 )?vincent {2}operator-body-neutral",
+            b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
             "operator mark, origin, and separated body",
         ),
         (
-            b"\xe2\x97\x8f\\s+(?:turn \xc2\xb7 )?alpha {2}keeper-body-neutral",
+            b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
             "Keeper mark, origin, and separated body",
         ),
     ):
@@ -4585,12 +4604,21 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        # iTerm reports Ctrl-G as CSI-u after keyboard disambiguation is on.
+        # The visible roster is an input pane: Left focuses it, Down moves its
+        # cursor, and Enter opens that Keeper without changing the draft.
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"Enter:open")
         send_and_wait(
             process,
             master_fd,
             output,
-            b"\x1b[103;5u",
+            b"\x1b[B",
+            b"\x1b[7m \xc2\xb7 beta",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
         )
         wait_for_output(
@@ -5686,13 +5714,21 @@ def code_lane_interaction(
         )
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
-    # l pans the open file sideways by one cell: the keyword span is cut
-    # mid-word but its colour still opens the remainder, and the title says
-    # the view is shifted. h pans back and the full keyword returns.
-    panned = send_and_wait(process, master_fd, output, b"ll", b"(col 3)")
+    # Shift-Right pans the open file sideways by one cell: lowercase h/l now
+    # choose the split pane. The keyword span is cut mid-word but its colour
+    # still opens the remainder, and the title says the view is shifted.
+    panned = send_and_wait(
+        process, master_fd, output, b"\x1b[1;2C\x1b[1;2C", b"(col 3)"
+    )
     if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
-    send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[1;2D\x1b[1;2D",
+        b"\x1b[33mlet\x1b[0m",
+    )
     # With the file focused, "/" searches its lines: typing jumps the line
     # cursor (the reverse gutter) to the match, and Enter keeps the query.
     searched = send_and_wait(process, master_fd, output, b"/hi", b"/hi")

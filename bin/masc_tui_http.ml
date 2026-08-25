@@ -575,6 +575,39 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
        | exception Yojson.Json_error detail ->
            Error ("memory journal was not JSON: " ^ detail))
 
+(** Fetch the two independent observations the context inspector joins. A
+    failure on one stays beside the other instead of blanking the whole view:
+    turn records can still prove composition when exact prompt text was never
+    captured, and the prompt can still be read during a transient record-store
+    failure. *)
+let fetch_keeper_context_inspector ~(host : string) ~(port : int)
+    ~(keeper_name : string) : Masc_tui_context_inspector.reading =
+  let fetch ~label ~path ~decode =
+    match http_get ~host ~port ~path with
+    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+        Error (Printf.sprintf "%s returned %d: %s" label status body)
+    | Ok (_, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> decode json
+         | exception Yojson.Json_error detail ->
+             Error (label ^ " was not JSON: " ^ detail))
+  in
+  let encoded = percent_encode_path_segment keeper_name in
+  let turn =
+    fetch ~label:"turn-records"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=50" encoded)
+      ~decode:Masc_tui_context_inspector.decode_turn_records
+  in
+  let prompt =
+    fetch ~label:"last-prompt"
+      ~path:(Printf.sprintf "/api/v1/keepers/%s/last-prompt" encoded)
+      ~decode:
+        (Masc_tui_context_inspector.decode_prompt_capture
+           ~expected_keeper:keeper_name)
+  in
+  { Masc_tui_context_inspector.turn; prompt }
+
 (** Fetch one page of chat rows older than [before].
 
     [before] absent asks for the newest window, which is what the transcript

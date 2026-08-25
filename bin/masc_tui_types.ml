@@ -704,6 +704,21 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* [/context] opens the last observed provider-input inspector. It is an
+     overlay rather than another surface because it answers "what is in this
+     Keeper's current head" from whichever Keeper surface raised the question.
+     The reading is stamped with the requested Keeper and generation so a late
+     response cannot replace a newer inspection. *)
+  mutable context_inspector_open: bool;
+  mutable context_inspector_keeper: string option;
+  mutable context_inspector_loading: bool;
+  mutable context_inspector_generation: int;
+  mutable context_inspector_reading:
+    (string * Masc_tui_context_inspector.reading) option;
+  mutable context_inspector_tab: Masc_tui_context_inspector.tab;
+  mutable context_inspector_cursor: int;
+  mutable context_inspector_scroll: int;
+  mutable context_inspector_exact: int option;
   (* The roster beside a keeper surface costs the chat 30 columns for a
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
@@ -1202,6 +1217,15 @@ let create_state
   tasks_domain = [];
   task_focus = false;
   help_open = false;
+  context_inspector_open = false;
+  context_inspector_keeper = None;
+  context_inspector_loading = false;
+  context_inspector_generation = 0;
+  context_inspector_reading = None;
+  context_inspector_tab = Masc_tui_context_inspector.Composition;
+  context_inspector_cursor = 0;
+  context_inspector_scroll = 0;
+  context_inspector_exact = None;
   roster_pane_hidden = false;
   server_identity = None;
   help_scroll = 0;

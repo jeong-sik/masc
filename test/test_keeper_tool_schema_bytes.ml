@@ -79,9 +79,14 @@ let measured ~surface =
    other PR until an unrelated review noticed it. What the growth bought is a
    question a Keeper could not ask before: where a name is defined and what its
    type is, answered from the compiler's view of the code rather than from a
-   text match. *)
+   text match.
+
+   Re-pinned again the same day: #30571 taught that tool's [references] to
+   answer across files and its schema grew with the answer. The count did not
+   move — the surface is the same tools describing themselves more fully, which
+   is the distinction this pair of numbers exists to draw. *)
 let all_surface_golden_count = 87
-let all_surface_golden_bytes = 74_267
+let all_surface_golden_bytes = 74_521
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

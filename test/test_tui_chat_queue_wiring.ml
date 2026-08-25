@@ -100,11 +100,9 @@ let test_message_scroll_accepts_the_rendered_clamp () =
 
 (* The header names what is unusual, not what is normal.
 
-   All three modes default to showing everything, so spelling them all made
-   every chat carry "memory:on reasoning:full tools:full" -- and that pushed
-   the port off the right edge at 170 columns, which is real width spent to
-   say nothing. Measured on a live server: with all three spelled the header
-   ended "(port ~"; with only the unusual ones it ends "(port 8935)".
+   Reasoning hidden and tools compact are the quiet defaults: the answer is
+   primary, with work one shortcut away. Spelling those modes in every header
+   would spend width to describe the ordinary case.
 
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
@@ -116,44 +114,33 @@ let test_the_header_names_only_unusual_modes () =
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
   check string "everything at its default says nothing" ""
-    (summary true full tools_full);
-  check string "hidden reasoning alone" "reasoning:hidden"
-    (summary true hidden tools_full);
-  check string "folded reasoning alone" "reasoning:folded"
-    (summary true folded tools_full);
-  check string "compact tools alone" "tools:compact"
-    (summary true full compact);
-  check string "memory off alone" "memory:off" (summary false full tools_full);
-  check string "two of them" "reasoning:hidden tools:compact"
     (summary true hidden compact);
-  check string "all three, in a fixed order"
-    "memory:off reasoning:hidden tools:compact"
+  check string "full reasoning alone" "reasoning:full"
+    (summary true full compact);
+  check string "folded reasoning alone" "reasoning:folded"
+    (summary true folded compact);
+  check string "full tools alone" "tools:full"
+    (summary true hidden tools_full);
+  check string "memory off alone" "memory:off"
     (summary false hidden compact);
-  (* What this actually buys, stated as the two numbers rather than as a
-     bound. Spelling every mode cost 35 columns on every chat; naming only the
-     unusual ones costs nothing at rest, which is the case that was pushing
-     the port off the edge.
-
-     The worst case is six columns wider than the old always-on line, because
-     "hidden" and "compact" are longer words than "full". That is the trade:
-     the common header shrinks to nothing and the rare one grows slightly, and
-     the rare one only happens after an operator changed all three. *)
-  check int "spelling every mode cost this much" 35
-    (String.length "memory:on reasoning:full tools:full");
+  check string "two of them" "reasoning:full tools:full"
+    (summary true full tools_full);
+  check string "all three, in a fixed order"
+    "memory:off reasoning:full tools:full"
+    (summary false full tools_full);
   check int "at rest it now costs nothing" 0
-    (String.length (summary true full tools_full));
-  check int "and the worst case is a little wider than the old always-on line"
-    41
-    (String.length (summary false hidden compact))
+    (String.length (summary true hidden compact));
+  check int "all three deviations still fit as one compact label" 36
+    (String.length (summary false full tools_full))
 ;;
 
 let test_chat_visibility_defaults_and_cycles () =
   let default =
     Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
-  check string "reasoning compatibility default" "full"
+  check string "reasoning starts out of the conversation hierarchy" "hidden"
     (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
-  check string "tool compatibility default" "full"
+  check string "tool calls start as one activity summary" "compact"
     (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
   let configured =
     Tui_types.create_state

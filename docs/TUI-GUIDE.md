@@ -372,22 +372,29 @@ switched away or left and returned is discarded instead of replacing the
 newer transcript. The shortcut is withdrawn while a turn is in flight or the
 roster cannot be read.
 
-`From` is a fixed-width reverse-video badge: operator sources are cyan,
-Keepers blue, tool blocks magenta, status yellow, and errors red. The badge is
-the colour pointer; ordinary operator and Keeper prose uses the terminal's
-default foreground so Markdown, code, links, and emphasis keep their own
-hierarchy. Connector and agent origins remain in the badge label (`vincent ·
-slack`, `taskmaster · agent`) instead of being inferred from row position.
+`From` is a fixed-width reverse-video badge for conversation sources: operator
+sources are cyan, Keepers blue, status yellow, and errors red. Tool and
+reasoning stretches are subordinate activity, so they use a quiet gray section
+label instead of competing with the people speaking. Ordinary operator and
+Keeper prose uses the terminal's default foreground so Markdown, code, links,
+and emphasis keep their own hierarchy. Connector and agent origins remain in
+the badge label (`vincent · slack`, `taskmaster · agent`) instead of being
+inferred from row position.
 
 The pane opens on the keeper's durable transcript. A turn the keeper ran on
-its own is drawn as what it did, not as a blank line: a `thinking` row with
-the reasoning the server kept and a count of the steps it withheld, then a
-`tools` block with one row per call - the finished glyph for a call that
-returned, `✗` for one that returned an error, `·` for one the trace never
-saw finish, `?` for one whose outcome the trace did not record - and then
-whatever the turn said. A call that finished carries its duration, in
-milliseconds as the server records it; a call still open when the trace
-closed has none.
+its own is drawn as what it did, not as a blank line. Reasoning starts hidden
+and tool calls start as one compact activity row, so the answer remains the
+strongest level in the pane. `Ctrl-R` cycles reasoning through hidden, folded,
+and full; `Ctrl-D` toggles compact and full tool details. `/thinking` and
+`/tools` expose the same choices by name. `--reasoning` and `--tool-view` can
+override the initial modes.
+
+The folded tool row retains exact outcome counts. The typed calls themselves
+stay attached to the message, so changing the view does not reconstruct facts
+from rendered glyphs. Expanded calls use the finished glyph for a call that
+returned, `✗` for one that returned an error, `·` for one the trace never saw
+finish, and `?` for one whose outcome the trace did not record. A finished call
+carries its server-recorded duration; an open call has none.
 
 When an autonomous turn says something, its badge is `· auto` instead of the
 Keeper name used for a direct chat reply. A blank autonomous turn with no trace
@@ -395,11 +402,8 @@ still draws one `·` row, so the turn is visible without pretending it answered
 the preceding operator message.
 
 ```
- [21:41:34] thinking
-   (2 reasoning steps, content withheld)
- [21:41:34] tools
-   ✓ masc_task_history · 32ms
-   ✗ tool_execute · 1200ms
+ [21:41:34]  tools
+   ✗ Ran 2 tools · 1 returned, 1 failed · 2 details folded
 ```
 
 Only rows the server marks as autonomous turns are read this way. A turn

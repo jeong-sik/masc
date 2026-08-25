@@ -188,7 +188,7 @@ let folded_thinking_summary body =
     String.split_on_char '\n' body
     |> List.filter (fun line -> String.trim line <> "")
   in
-  Printf.sprintf "(%d reasoning line(s) folded - Ctrl-R to change)"
+  Printf.sprintf "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
     (List.length lines)
 
 let tool_projection_mode (state : state) =
@@ -235,14 +235,21 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         (Printf.sprintf "[%s]" timestamp)
   | Message_layout.Metadata
       (Message_layout.Origin { timestamp; role_label; request_label }) ->
-      let badge =
-        Printf.sprintf "%s%s %s %s" (Chat_theme.origin row.style) Ansi.reverse
-          role_label Ansi.reset
-      in
-      box_line buf cols
-        (Printf.sprintf "%s[%s]%s %sFrom%s %s %s%s%s" Ansi.dim timestamp
-           Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
-           Ansi.reset)
+      (match row.style with
+       | Message_layout.Tool | Message_layout.Thinking ->
+           box_line_styled buf cols ~style:Ansi.dim
+             (Printf.sprintf "[%s]  %s  %s" timestamp
+                (String.trim role_label) request_label)
+       | Message_layout.User | Message_layout.Keeper | Message_layout.Status
+       | Message_layout.Error ->
+           let badge =
+             Printf.sprintf "%s%s %s %s" (Chat_theme.origin row.style)
+               Ansi.reverse role_label Ansi.reset
+           in
+           box_line buf cols
+             (Printf.sprintf "%s[%s]%s %sFrom%s %s %s%s%s" Ansi.dim timestamp
+                Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
+                Ansi.reset))
 
 (* The composer row every surface carries on its last terminal line.
 
@@ -3775,6 +3782,7 @@ let render_keeper_message (state : state) =
     box_bottom chat_buf chat_cols;
 
     (* Footer *)
+    let disposition = send_disposition state ~keeper_name in
     let enter_hint =
       (* What the key does is read once, by [send_disposition]; the in-flight
          kind only names what is happening while it does it. Answering both
@@ -3788,7 +3796,7 @@ let render_keeper_message (state : state) =
               "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
               waiting
       in
-      match send_disposition state ~keeper_name with
+      match disposition with
       | Queues_behind _ -> queue_hint ()
       | Sends ->
           if target_registered then "Enter:send"
@@ -3818,9 +3826,24 @@ let render_keeper_message (state : state) =
       | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
     in
     let footer_hints =
-      Printf.sprintf
-        "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear"
-        enter_hint scroll_hint switch_hint escape_hint
+      if chat_cols < 120 then
+        let compact_enter_hint =
+          match disposition with
+          | Queues_behind _ ->
+              Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
+                (Masc_tui_keeper_chat_queue.length state.msg_queued)
+          | Sends -> enter_hint
+        in
+        let compact_scroll_hint =
+          if scroll = 0 then "PgUp:history" else "PgDn:newest"
+        in
+        Printf.sprintf
+          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  %s  %s"
+          compact_enter_hint compact_scroll_hint escape_hint
+      else
+        Printf.sprintf
+          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear"
+          enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf
       (footer_line state ~max_cells:chat_cols ~hints:footer_hints);

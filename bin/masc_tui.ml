@@ -526,8 +526,8 @@ let parse_args () =
   let workspace = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
-  let reasoning_visibility = ref "full" in
-  let tool_visibility = ref "full" in
+  let reasoning_visibility = ref "hidden" in
+  let tool_visibility = ref "compact" in
 
   let specs = [
     ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
@@ -569,12 +569,14 @@ let parse_args () =
     match !reasoning_visibility with
     | "hidden" -> Reasoning_hidden
     | "folded" -> Reasoning_folded
-    | "full" | _ -> Reasoning_full
+    | "full" -> Reasoning_full
+    | _ -> Reasoning_hidden
   in
   let tool_visibility =
     match !tool_visibility with
     | "compact" -> Tools_compact
-    | "full" | _ -> Tools_full
+    | "full" -> Tools_full
+    | _ -> Tools_compact
   in
   (base, r, !port, !refresh, reasoning_visibility, tool_visibility)
 

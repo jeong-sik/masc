@@ -474,8 +474,10 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   let summary = List.hd compact.rows in
   check bool "the compact row does not hide the failure" true
     (contains ~needle:"1 failed" summary);
-  check bool "the compact row carries the exact hidden count" true
-    (contains ~needle:"3 detail rows hidden" summary);
+  check bool "the compact row reads as one activity summary" true
+    (String.starts_with ~prefix:"✗ Ran 3 tools" summary);
+  check bool "the compact row carries the exact folded count" true
+    (contains ~needle:"3 details folded" summary);
   check string "compact does not count the visible omission as hidden"
     (List.nth full.rows 3) (List.nth compact.rows 1)
 

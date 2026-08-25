@@ -467,11 +467,12 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 let connection_badge : Masc_tui_types.connection_status -> string = function
-  | Connected -> Theme.ok ^ "[connected]" ^ Ansi.reset
-  | Degraded -> Theme.warn ^ "[degraded]" ^ Ansi.reset
-  | Connecting -> Theme.warn ^ "[connecting...]" ^ Ansi.reset
-  | Reconnecting -> Theme.warn ^ "[reconnecting...]" ^ Ansi.reset
-  | Disconnected -> Theme.bad ^ "[disconnected]" ^ Ansi.reset
+  | Connected as status ->
+      Theme.ok ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | (Degraded | Connecting | Reconnecting) as status ->
+      Theme.warn ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | Disconnected as status ->
+      Theme.bad ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
 ;;
 
 let workspace_health_label = function

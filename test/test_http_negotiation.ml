@@ -424,11 +424,16 @@ let test_sse_guard_zero_and_positive_read_through () =
 (* task-538: pin the {e production path} end-to-end.  The two tests above
    pin the reader in isolation; this one drives the transport's real entry
    point, {!Server_mcp_transport_http.check_sse_connect_guard}, with all
-   three knobs set negative.  A clamp anywhere between the env var and the
-   guard's decision — including a regression back to the cached toplevel
-   bindings fixed at process start — turns this check red: the cached
-   bindings still hold the ambient (positive) value, so the guard would
-   reject a reconnect that the operator asked to allow. *)
+   three knobs set negative.  Two classes of regression turn this check
+   red: a cached-binding regression (toplevel bindings fixed at process
+   start still hold the ambient positive value, so the guard would reject
+   a reconnect the operator asked to allow), and a [min_interval_s] clamp
+   to the positive default (a successful connect records
+   [last_connect_at], so the second call would return
+   [Session_cooldown]).  A [connect_window_s] or [connect_max_in_window]
+   clamp alone does {e not} turn this red — two connects stay under the
+   default [max_in_window] threshold — which is why those two knobs keep
+   their isolated reader tests above. *)
 let test_sse_guard_negative_disables_in_production_path () =
   let module Transport = Server_mcp_transport_http in
   with_env_var "MASC_SSE_RECONNECT_MIN_INTERVAL_S" "-1" @@ fun () ->

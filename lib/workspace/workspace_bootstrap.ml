@@ -64,6 +64,10 @@ let reconcile_message_seq config path =
   let filed = resume_message_seq config in
   if filed > 0 then
     match read_json config path with
+    (* Cancellation is not an unreadable file. Absorbing it here would let a
+       shutdown look like state this function chose not to repair, which is the
+       swallow this repo models in TLA+ as CancelledAbsorbed. *)
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
     | exception _ ->
       (* Unreadable state is [read_state]'s to repair; it has the typed
          recovery and this does not. *)

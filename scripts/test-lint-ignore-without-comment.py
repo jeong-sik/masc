@@ -94,6 +94,19 @@ def main() -> int:
     for lineno in sorted(justified - every):
         failures.append(f"  line {lineno} should appear under --all")
 
+    # The scan boundary is the `test/` directory, not a filename prefix.
+    for name, expected_test in (
+        ("lib/exec/test/test_exec_buffer.ml", True),
+        ("lib/keeper/test_helper.ml", False),
+        ("test/test_foo.ml", True),
+        ("lib/keeper/keeper_gate.ml", False),
+    ):
+        got = lint.is_test_path(Path(name))
+        if got != expected_test:
+            failures.append(
+                f"  is_test_path({name!r}) = {got}, expected {expected_test}"
+            )
+
     if failures:
         print("lint-ignore-without-comment mismatches:")
         print("\n".join(failures))

@@ -141,8 +141,14 @@ def blank_noncode(src: str) -> str:
 
 
 def is_test_path(path: Path) -> bool:
-    parts = path.parts
-    return "test" in parts or path.name.startswith("test_")
+    """A `test/` directory anywhere in the path, and nothing else.
+
+    Not the `test_` filename prefix: the shell version this replaced matched
+    `(^|/)test/` only, and narrowing what gets scanned is the same kind of
+    quiet shrink this rewrite exists to undo. Today no `test_*.ml` sits
+    outside a `test/` directory, so the two rules agree -- keep them agreeing.
+    """
+    return "test" in path.parts
 
 
 def collect(target: Path, include_tests: bool) -> list[Path]:
@@ -164,6 +170,10 @@ def sites(path: Path, want_all: bool) -> list[tuple[int, str]]:
     try:
         src = path.read_text(errors="replace")
     except OSError:
+        return []
+    if "ignore" not in src:
+        # Blanking is a character-at-a-time walk; most files never mention
+        # the name at all, and a plain substring test settles those.
         return []
     original = src.splitlines()
     masked = blank_noncode(src).splitlines()

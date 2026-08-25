@@ -4,7 +4,7 @@
 #
 # Usage:
 #   scripts/gen-grpc-descriptors.sh          # print to stdout
-#   scripts/gen-grpc-descriptors.sh --check  # verify current OCaml matches generated
+#   scripts/gen-grpc-descriptors.sh --check  # verify current OCaml matches generated\n#   scripts/gen-grpc-descriptors.sh --write  # rewrite the OCaml in place
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -56,6 +56,30 @@ do_generate() {
   echo ""
 }
 
+# Rewrite the descriptor in place.  Without this the only way to apply a proto
+# change was to copy the generated base64 out of stdout by hand, which is how
+# #30344 shipped a proto whose descriptor still described the old wire schema.
+do_write() {
+  check_protoc
+  local b64
+  b64="$(gen_descriptor_b64 "masc_workspace.proto")"
+  python3 - "${TARGET_ML}" "${b64}" <<'PY'
+import sys
+
+path, b64 = sys.argv[1], sys.argv[2]
+lines = open(path).read().split("\n")
+start = next(i for i, l in enumerate(lines) if "let grpc_masc_descriptor_b64 =" in l)
+concat = next(i for i in range(start, start + 5) if "String.concat" in lines[i])
+end = next(i for i in range(concat + 1, len(lines)) if lines[i].strip() == "]")
+chunks = [b64[i : i + 100] for i in range(0, len(b64), 100)]
+block = [("      [ " if n == 0 else "      ; ") + '"' + c + '"' for n, c in enumerate(chunks)]
+block.append("      ]")
+lines[concat + 1 : end + 1] = block
+open(path, "w").write("\n".join(lines))
+print("wrote %d chunks (%d bytes) to %s" % (len(chunks), len(b64), path))
+PY
+}
+
 do_check() {
   check_protoc
   local masc_gen
@@ -80,13 +104,14 @@ do_check() {
     echo "Generated (first 80 chars): ${masc_gen:0:80}..." >&2
     echo "Current   (first 80 chars): ${masc_current:0:80}..." >&2
     echo "" >&2
-    echo "Regenerate with: scripts/gen-grpc-descriptors.sh" >&2
+    echo "Regenerate with: scripts/gen-grpc-descriptors.sh --write" >&2
     exit 1
   fi
 }
 
 case "${1:-}" in
   --check) do_check ;;
-  --help|-h) echo "Usage: $0 [--check]" ;;
+  --write) do_write ;;
+  --help|-h) echo "Usage: $0 [--check|--write]" ;;
   *) do_generate ;;
 esac

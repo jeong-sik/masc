@@ -159,7 +159,14 @@ let for_surface = function
          one directory level (the /workspace/children route is lazy). Claimed
          from those two facts rather than from the render, so the footer does
          not advertise a key nothing handles. *)
-      [ b Navigate "j/k" "move"; b Act "Enter" "open" ~help:"drill in, or open the file" ]
+      [ b Navigate "j/k" "move"
+      ; b Act "Enter" "open" ~help:"drill in, or open the file"
+        (* Esc walks back out the way Enter came in: it closes an open file
+           first, and only climbs a directory once no file is open
+           (masc_tui.ml:6001). A key that works and is not listed is the same
+           drift as a listed key that does nothing, pointing the other way. *)
+      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
+      ]
       @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta
   | System_logs ->

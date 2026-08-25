@@ -34,6 +34,28 @@ module For_testing : sig
     -> Masc_tui_terminal_palette.t option
     -> string
   (** Pure capability/environment fixture for the production semantic token. *)
+
+  val recede_rgb
+    :  foreground:Masc_tui_terminal_palette.rgb
+    -> background:Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb option
+  (** Pure blend: the terminal's text stepped toward its background, as far as
+      the contrast floor allows and no further. Direction comes from the two
+      colours, so it darkens on a light terminal and lightens on a dark one.
+      [None] where the text is already under the floor and has no room to
+      give. *)
+
+  val recede
+    :  colors_enabled:bool
+    -> dim:string
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:recede}. [dim] is the
+      fallback the production token passes, so a test can tell the computed
+      colour from the fallback without naming an escape. *)
 end
 
 val colors_enabled : bool
@@ -49,6 +71,24 @@ val user_message_background : Masc_tui_terminal_palette.t option -> string
 (** A low-contrast background derived from a known terminal palette and
     projected through the process stdout capability. Missing palette,
     disabled colours, and unsupported projection all produce [""]. *)
+
+val recede : Masc_tui_terminal_palette.t option -> string
+(** What a row draws to sit behind the ones around it.
+
+    [Sgr.dim] is SGR 2, and SGR 2 blends the foreground toward black. On a
+    dark terminal that is a step toward the background and the row recedes.
+    On a light one it is a step away, so the row meant to be quiet comes out
+    darker than its neighbours and the page reads upside down
+    (microsoft/terminal#16493). [Sgr.gray] is no safer: Solarized and its
+    relatives remap the bright colours onto a grey ramp, so it answers to the
+    theme rather than to the background.
+
+    So this computes instead of naming: the terminal's own text stepped
+    toward the terminal's own background, projected through what the process
+    can emit. A terminal that did not answer the palette query -- a
+    multiplexer, an emulator without the reply -- falls back to [Sgr.dim],
+    which is what every row drew before this existed. Disabled colours
+    produce [""]. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is

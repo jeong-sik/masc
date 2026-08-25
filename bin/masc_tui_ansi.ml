@@ -66,6 +66,41 @@ module Theme = struct
   let selection = Masc_tui_theme.selection
   let border_focus = Masc_tui_theme.border_focus
 
+  (* A row drawn behind the ones around it.
+
+     Not a synonym for [Ansi.dim]. SGR 2 modifies whatever colour is already
+     open -- dim red stays red -- so it is the right thing where a coloured
+     run needs to be quieter. This replaces the colour outright, which is only
+     what a row wants when the whole row is the quiet thing. Those are
+     different jobs and both remain.
+
+     The palette arrives after start-up, from the terminal's answer to the
+     OSC query, and can arrive again; the generation is what says which. The
+     escape is rebuilt only when it changes, because this is read once per
+     drawn row. *)
+  let recede_cache : (int * string) option Atomic.t = Atomic.make None
+
+  let rec recede () =
+    (* Named for what it holds rather than [snapshot]: an AST guard counts the
+       palette reads inside the binding [Chat_theme.snapshot], and a local of
+       that name here joins its count. *)
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get recede_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.recede
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set recede_cache previous
+           (Some (generation, style))
+      then style
+      else recede ()
+  ;;
+
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
     let string = Masc_tui_theme.Syntax.string_

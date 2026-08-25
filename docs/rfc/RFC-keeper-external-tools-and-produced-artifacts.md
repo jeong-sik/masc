@@ -78,17 +78,22 @@ enum = ["image/png", "image/jpeg", "image/gif", "image/webp"]
 
 1. `Keeper_tool_filesystem_runtime.resolve_read_file_target`으로 `cwd`와 `path`를
    해석하고 allowed-path 및 sandbox containment를 검사한다.
-2. 현재 Read가 사용하는 backend-aware byte reader를 공용 내부 함수로 추출해 같은
-   방식으로 파일을 읽는다. host path를 새 코드에서 직접 `open_in`하지 않는다.
-3. `Keeper_vision_tool.validate_image_size`와 `media_type_for_request`로 크기와 형식을
-   확인한다. `media_type`이 없으면 bytes에서 sniff한다.
+2. 현재 Read의 path/backend 선택은 재사용하되, window reader 자체는 재사용하지 않는다.
+   그 reader는 `max_bytes`에서 조용히 자른 bytes만 반환하므로 artifact 등록에는 맞지
+   않는다. 새 bounded-exact helper가 `max_image_bytes + 1`까지 읽고
+   `Exact bytes | Too_large`를 돌려준다. `Too_large`에서는 store를 전혀 호출하지 않는다.
+   host path를 새 코드에서 직접 `open_in`하지 않는다.
+3. bytes에서 media type을 항상 sniff한다. 호출자가 `media_type`을 명시했다면 enum만
+   검사하는 것으로 끝내지 않고 sniff 결과와 정확히 같은지도 확인한다.
 4. `Keeper_vision_tool.store_artifact`를 keeper별 `vision_store_dir`에 호출하고 handle을
    반환한다.
 
 이 도구는 source file을 바꾸지 않고 동일 bytes에 동일 handle을 돌려주는 idempotent
-read-side operation이다. descriptor는 `Core_group`, `readonly = true`, `Atomic_tool`로
-선언해 companion인 `analyze_image`와 같은 표면에 둔다. 내부 CAS write는 외부 세계를
-바꾸는 effect로 분류하지 않는다.
+read-side operation이다. 그러나 raw filesystem bytes를 읽는 capability이므로 descriptor는
+`Filesystem_group`, `readonly = true`, `Atomic_tool`로 선언한다. `Core_group`은 축소된
+Keeper surface에서도 항상 남으므로, 그곳에 두면 filesystem group을 제외한 Keeper가 이
+도구로 파일을 읽어 vision provider에 보낼 수 있다. 내부 CAS write는 외부 세계를 바꾸는
+effect로 분류하지 않는다.
 
 ### 2.2 명시적으로 하지 않는 것
 
@@ -106,7 +111,15 @@ consumer가 생기는 구현 PR에서만 다음 닫힌 declaration을 연다.
 ```toml
 name = "jira_issue_get"
 description = "Read one JIRA issue by exact key."
+additional_properties = false
 group = "connector"
+
+[[params]]
+name = "issue_key"
+type = "string"
+required = true
+pattern = "^[A-Z][A-Z0-9_]+-[1-9][0-9]*$"
+description = "Exact JIRA issue key, for example PK-12345."
 
 [external]
 adapter = "atlassian"
@@ -130,11 +143,27 @@ effect = "network_read"
   `[keeper.tools].groups`가 이 그룹의 노출 여부를 결정한다. 모르는 group은 기존처럼
   profile load를 실패시킨다.
 
-처음 허용할 operation은 read-only 두 개(`get_issue`, `search_issues`)로 제한한다.
+`jira_issue_search`도 별도 TOML에서 `additional_properties = false`와 non-empty `jql`,
+bounded `limit`을 명시한다. 처음 허용할 operation은 이 read-only 두 개
+(`get_issue`, `search_issues`)로 제한한다.
 issue 생성·수정은 `Connector_post` replay 계약과 payload 보존 테스트가 준비된 다음
 별도 PR에서 연다.
 
-### 3.1 official-client native posture와의 관계
+### 3.1 transport, credential, replay
+
+TOML의 `adapter = "atlassian"`은 endpoint나 credential을 담지 않는다. 배포 설정은
+adapter instance를 stable id로 선언하고, 그 instance가 transport(stdio 또는 Streamable
+HTTP), base URL, credential reference를 소유한다. raw token과 secret은 tool schema,
+descriptor, trace, replay payload에 들어가지 않는다. Keeper profile은 instance를 새로
+만들 수 없고 operator가 허용한 instance만 참조한다.
+
+`network_read`도 Gate가 승인을 deferred했다면 durable replay를 끝까지 가져야 한다.
+현재 web search/fetch만 지원하는 replay 합타입에 Atlassian read operation을 typed
+constructor로 추가하고, replay dispatch가 저장된 exact input과 adapter instance를 한 번만
+소비해 실행한다. 재요청 payload가 저장된 payload와 다르거나 이미 소비됐으면 실행하지
+않는다. 단순히 gate operation 문자열만 `network_read`로 맞추는 것은 구현 완료가 아니다.
+
+### 3.2 official-client native posture와의 관계
 
 외부 adapter tool은 MASC descriptor와 approval gate를 거치는 MASC tool이다.
 RFC-0390의 `native = none | read | full`은 official client 자체 도구의 자세일 뿐,
@@ -181,8 +210,12 @@ effect가 runtime 문자열에 매달리며, upstream tool rename이 곧 Keeper 
 - allowed path 안 PNG 등록과 handle load 성공
 - allowed path 밖, sandbox 밖, directory path 거부
 - oversized image와 unsupported bytes의 typed 거부
+- oversized input은 truncated artifact를 남기지 않음
+- 명시한 media type과 sniff 결과가 다르면 거부
 - 동일 bytes 재등록 시 동일 handle
 - source file 불변
+- `Filesystem_group` 미선언 Keeper의 surface에서 등록 도구 제외
+- Phase 1 적용 후 full/reduced tool-surface byte ratchet 갱신
 
 ### Phase 2
 
@@ -196,6 +229,8 @@ effect가 runtime 문자열에 매달리며, upstream tool rename이 곧 Keeper 
 - unknown adapter/operation/effect/group 부팅 거부
 - declaration의 operation, effect, group과 descriptor가 1:1 일치
 - read operation이 `network_read` gate만 통과하고 post gate를 타지 않음
+- deferred read가 exact payload로 한 번만 replay되고 changed/reused payload는 거부
+- credential secret이 schema, trace, replay payload에 나타나지 않음
 - connector group 미선언 Keeper의 표면에서 제외
 - native posture 변경이 connector 가시성을 바꾸지 않음
 - 전체 및 축소 tool-surface byte ratchet 유지

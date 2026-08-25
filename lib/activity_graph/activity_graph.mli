@@ -152,6 +152,23 @@ val agent_spans_json :
     to "now".  Returns [`Assoc [agents; spans; time_range;
     window]]. *)
 
+type cache_stats = {
+  past_day_files : int;  (** parsed day files held *)
+  past_day_records : int;  (** events across them *)
+}
+
+val cache_stats : unit -> cache_stats
+(** What the past-day parse cache is holding right now.
+
+    Exists because sizing it from outside the process meant taking RSS,
+    reading [live_words] off /health, and multiplying the on-disk JSONL by a
+    guessed parse factor -- an estimate good to within a factor of two, which
+    settles nothing. [past_day_records] is the number a retention change
+    moves.
+
+    A read rather than a gauge: this module has no metric dependency, and the
+    caller that already exports gauges decides how often to look. *)
+
 module For_testing : sig
   val reset_current_day_cache_for_testing : unit -> unit
   (** Clears the boundary-keyed current-day parse cache and its

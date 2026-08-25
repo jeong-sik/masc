@@ -30,6 +30,13 @@ let metric_gc_compactions = "masc_gc_compactions"
 let metric_gc_promoted_words = "masc_gc_promoted_words"
 let metric_memory_usage_bytes = "masc_memory_usage_bytes"
 
+(* What the activity-events past-day parse cache is holding. Sizing it from
+   outside meant RSS plus [live_words] plus a guessed parse factor over the
+   on-disk JSONL -- an estimate good to a factor of two. The record count is
+   what a retention change moves, so it is the one to watch. *)
+let metric_activity_cache_files = "masc_activity_cache_files"
+let metric_activity_cache_records = "masc_activity_cache_records"
+
 (* Eio main-domain scheduler lag: a 1s-interval fiber measures sleep
    overshoot.  Sustained lag means the single domain is blocked by a
    non-yielding syscall or CPU hog -- the shared root cause of the

@@ -1150,6 +1150,8 @@ type async_msg =
   | Code_file_loaded of string * (string, string) result
   | Code_history_loaded of
       string * (Masc.Tui_decode.git_log_row list, string) result
+  | Code_diff_loaded of
+      string * (Masc.Tui_decode.git_diff, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1658,6 +1660,10 @@ let launch_code_file_load state ~mailbox ~path =
 (* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
 let code_history_limit = 50
 
+(* What the working tree is compared against, everywhere a tree diff is
+   read. *)
+let tree_diff_base_ref = "HEAD"
+
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -1681,6 +1687,30 @@ let launch_code_history_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_history_loaded (path, Error "Eio switch is unavailable"))
+
+let launch_code_diff_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        let keeper, repo = code_scope_axes state in
+        Masc_tui_loader.load_git_diff ?repo ~host ~port ~keeper ~path
+          ~base_ref:tree_diff_base_ref ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_diff_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_diff_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -2054,8 +2084,6 @@ let cycle_changes_keeper state ~mailbox ~delta =
 (* What the tree holds for one file, against its last commit. HEAD rather
    than a branch point: the question the surface answers is "did this survive
    into the tree", and a merge base would answer a different one. *)
-let tree_diff_base_ref = "HEAD"
-
 let launch_git_diff_load state ~mailbox ~keeper ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -2063,7 +2091,7 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
     let result =
       try
         Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-          ~base_ref:tree_diff_base_ref
+          ~base_ref:tree_diff_base_ref ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -4652,13 +4680,31 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 max widest row_width)
               0 rows;
           state.code_focus_file <- true;
-          (* A new file starts on its content; the old file's history would
-             caption the wrong bytes. *)
+          (* A new file starts on its content; the old file's history or
+             diff would caption the wrong bytes. *)
           state.code_history <- None;
           state.code_history_error <- None;
           state.code_history_open <- false;
-          state.code_history_scroll <- 0
+          state.code_history_scroll <- 0;
+          state.code_diff <- None;
+          state.code_diff_error <- None;
+          state.code_diff_open <- false;
+          state.code_diff_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_diff_loaded (path, result) ->
+      (* Keyed to the file still open, as the history is. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok diff ->
+            state.code_diff <- Some (path, diff);
+            state.code_diff_error <- None;
+            state.code_diff_scroll <- 0
+        | Error detail -> state.code_diff_error <- Some detail)
   | Code_history_loaded (path, result) ->
       (* Keyed to the file still open: a listing that raced a file switch
          describes bytes no longer on screen. *)
@@ -6303,6 +6349,29 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "d" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* The working tree against HEAD, over the open file. One overlay
+              at a time: opening this closes the history, and H the reverse.
+              Same key closes it; a diff already fetched for this path is
+              shown as it stands. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_diff_open then state.code_diff_open <- false
+                else begin
+                  state.code_diff_open <- true;
+                  state.code_history_open <- false;
+                  (match state.code_diff with
+                   | Some (loaded_path, _)
+                     when String.equal loaded_path path ->
+                       ()
+                   | Some _ | None ->
+                       state.code_diff <- None;
+                       state.code_diff_error <- None;
+                       launch_code_diff_load state ~mailbox:async_messages
+                         ~path)
+                end)
        | Some "H" when state.view = Code && state.code_focus_file ->
            (* History over the open file. The capital only: h stays free for
               the horizontal scroll the file pane is due. Same key closes it;
@@ -6314,6 +6383,7 @@ let main () =
                   state.code_history_open <- false
                 else begin
                   state.code_history_open <- true;
+                  state.code_diff_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6494,7 +6564,8 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_history_open then
+                if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
@@ -6613,7 +6684,8 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_history_open then
+                if state.code_diff_open then state.code_diff_open <- false
+                else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
@@ -6684,7 +6756,16 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_history_open then (
+                  if state.code_diff_open then (
+                    match state.code_diff with
+                    | Some (_, diff) ->
+                        state.code_diff_scroll <-
+                          min
+                            (max 0
+                               (List.length diff.Masc.Tui_decode.gd_rows - 1))
+                            (state.code_diff_scroll + 1)
+                    | None -> ())
+                  else if state.code_history_open then (
                     match state.code_history with
                     | Some (_, rows) ->
                         state.code_history_scroll <-
@@ -6894,7 +6975,10 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_history_open then
+                  if state.code_diff_open then
+                    state.code_diff_scroll <-
+                      max 0 (state.code_diff_scroll - 1)
+                  else if state.code_history_open then
                     state.code_history_scroll <-
                       max 0 (state.code_history_scroll - 1)
                   else

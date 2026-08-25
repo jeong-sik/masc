@@ -208,6 +208,8 @@ let for_surface = function
           ~help:"close the history, then the file, then climb one directory"
       ; b Navigate "h/l" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
+      ; b Act "d" "diff"
+          ~help:"the open file's working tree against HEAD (d or Esc closes)"
       ; b Act "H" "history"
           ~help:"the commits that touched the open file (H or Esc closes)"
       ]

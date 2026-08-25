@@ -5076,6 +5076,23 @@ def code_lane_fixtures() -> HttpFixtures:
     )
     fixtures["/api/v1/git/log?path=lib/a.ml&limit=50"] = history_response
     fixtures["/api/v1/git/log?path=lib%2Fa.ml&limit=50"] = history_response
+    diff_response = (
+        200,
+        {
+            "has_changes": True,
+            "unified": [
+                {"kind": "delete", "oldLine": 1, "newLine": None,
+                 "text": "let a = 1"},
+                {"kind": "add", "oldLine": None, "newLine": 1,
+                 "text": "let a = 2"},
+            ],
+        },
+    )
+    for diff_path in (
+        "/api/v1/git/diff?path=lib/a.ml&base_ref=HEAD",
+        "/api/v1/git/diff?path=lib%2Fa.ml&base_ref=HEAD",
+    ):
+        fixtures[diff_path] = diff_response
     return fixtures
 
 
@@ -5109,6 +5126,16 @@ def code_lane_interaction(
     if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
     send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    # d swaps the content for the working tree's diff against HEAD; Esc
+    # swaps back to the lexed content.
+    diff_frame = send_and_wait(process, master_fd, output, b"d", b"let a = 2")
+    diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
+    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1"):
+        if needle not in diff_plain:
+            raise AssertionError(
+                f"the diff view missed {needle!r}: {diff_plain!r}"
+            )
+    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).
     # The needle is a commit hash so the wait crosses the "(loading

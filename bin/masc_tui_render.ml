@@ -2069,7 +2069,7 @@ let render_schedule_list (state : state) =
                 (Theme.warn
                 ^ Printf.sprintf
                     "  armed: cancel %s -- same key again to send"
-                    (fit_width schedule_id (cols - 44))
+                    (Terminal_text.single_line schedule_id)
                 ^ Ansi.reset)
           | None -> ());
          (match state.schedule_cancel_error with
@@ -4109,9 +4109,9 @@ let render_verification (state : state) =
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
    | Some task_id ->
-       (* No width padding on the id: padding to a reserved column (the
-          schedule arm's habit) pushes the "same key again" tail past the box
-          on a narrow terminal, and the tail is the half that instructs. *)
+       (* No width padding on the id: padding to a reserved column pushes the
+          "same key again" tail past the box on a narrow terminal, and the
+          tail is the half that instructs. *)
        box_line buf cols
          (Theme.warn
          ^ Printf.sprintf "  armed: approve %s -- same key again to send"

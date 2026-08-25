@@ -488,6 +488,19 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                    match Masc_tui_csi.name ~parameters ~final with
                    | Some named -> key named
                    | None -> key "unknown-esc"))
+          (* [ESC O <final>] is SS3: what a terminal in application cursor
+             mode sends for the arrows and Home/End instead of [ESC \[
+             <final>]. Left unread the [ESC] answered as "esc" and the final
+             byte arrived as the letter [A], so the arrows moved nothing on
+             any surface while j/k kept working. The finals are the same
+             ones CSI uses, so the same table names them. *)
+          | Some 'O' -> (
+              match take_input_byte reader ~timeout:0.05 with
+              | Some final -> (
+                  match Masc_tui_csi.name ~parameters:"" ~final with
+                  | Some named -> key named
+                  | None -> key "unknown-esc")
+              | None -> key "esc")
           (* [ESC _ G] opens an APC the terminal is sending back. Left
              unread its body arrives as keys: "Gi=31" typed into the
              composer, once per image. *)

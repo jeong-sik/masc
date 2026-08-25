@@ -2032,8 +2032,11 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approval_mode_get state request reqd) request reqd)
   |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
-         handle_keeper_tool_approval_mode_set state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"masc_keeper_delegate_cancel"
+         (fun state agent_name _req reqd ->
+           handle_keeper_tool_approval_mode_set ~actor:agent_name state request
+             reqd)
+         request reqd)
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->

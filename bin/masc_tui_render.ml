@@ -221,7 +221,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let margin =
         if String.equal row.gutter "" then ""
         else
-          Printf.sprintf "%s%s%s" Ansi.dim row.gutter
+          Printf.sprintf "%s%s%s%s" Ansi.dim (Chat_theme.origin row.style)
+            row.gutter
             (if context.ambient_background then context.inline_restore
              else Ansi.reset)
       in
@@ -3430,7 +3431,8 @@ let render_keeper_message (state : state) =
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
           let role_label =
-            Message_layout.align_role_label ~column:role_label_column role_label
+            Message_layout.align_role_label ~column:role_label_column ~style
+              role_label
           in
           let body =
             match message.me_role with
@@ -3500,7 +3502,9 @@ let render_keeper_message (state : state) =
               role_label body =
             ({ style;
                timestamp = "live";
-               role_label;
+               role_label =
+                 Message_layout.align_role_label ~column:role_label_column
+                   ~style role_label;
                request_label;
                body;
                markdown_source;

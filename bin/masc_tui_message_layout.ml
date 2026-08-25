@@ -465,18 +465,49 @@ let chat_role_label_width ~pane_cells =
   max chat_role_label_column
     (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
-let align_role_label ?(column = chat_role_label_column) label =
-  let column = max 1 column in
+(* Right-align [label] in [column] cells. An overrun loses its head: these
+   read [agent · surface] and share long prefixes -- every canary starts
+   "keeper-canary-10t-cdx-sol-" -- so the tail is what tells two of them
+   apart. *)
+let fit_name column label =
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
   if cells > column then
-    (* Right-aligned, so the cut is at the head. These labels are
-       [agent · surface] and share long prefixes -- every canary starts
-       "keeper-canary-10t-cdx-sol-" -- so the tail is what tells them apart. *)
     let kept = cell_suffix_of_pieces label pieces (column - 1) in
     let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
     "…" ^ String.make pad ' ' ^ kept
   else String.make (column - cells) ' ' ^ label
+
+(* One glyph per speaker, from the vocabulary the Keepers roster and Acting
+   already use. Colour carries this distinction better, and NO_COLOR takes
+   colour away, so the mark is what still answers "who said this" on a pane
+   with no colour at all. *)
+let speaker_mark : style -> string = function
+  | User -> "\xe2\x96\xb6"      (* the operator sends *)
+  | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
+  | Status -> "?"
+  | Error -> "\xe2\x9c\x97"
+  | Tool -> "\xe2\x96\xa0"
+  | Thinking -> "\xc2\xb7"
+
+let align_role_label ?(column = chat_role_label_column) ~style label =
+  let column = max 1 column in
+  let mark = speaker_mark style in
+  (* The mark is paid for out of the badge, not added beside it: the body's
+     width is taken from what the badge leaves, so charging it to the label
+     keeps every body exactly as wide as it was.
+
+     It is also kept outside the truncation. A label that overruns loses its
+     head, and the mark sits at the head -- inside, the longest names would be
+     the ones that lost the glyph, and those are the names a reader most needs
+     help telling apart. *)
+  let mark_cells = display_width mark + 1 in
+  let inner = column - mark_cells in
+  if inner < 1 then
+    (* A pane too narrow to hold both keeps the name. Losing track of who is
+       talking costs more than losing the shorthand for it. *)
+    fit_name column label
+  else mark ^ " " ^ fit_name inner label
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
@@ -639,6 +670,17 @@ let min_body_cells = 4
    width on a row of their own; in a margin they are paid for once per message.
    Text that is not a clock of that shape is left as it is rather than cut
    blind. *)
+(* Every row's clock takes the same cells. A settled row says "23:38" and the
+   streaming turn says "live", and the gutter's width is what the body's width
+   is taken from, so one cell of difference wrapped the live body differently
+   from the rows it was about to join. *)
+let chat_clock_column = 5
+
+let pad_clock text =
+  let cells = display_width text in
+  if cells >= chat_clock_column then text
+  else String.make (chat_clock_column - cells) ' ' ^ text
+
 let short_clock timestamp =
   if
     String.length timestamp = 8
@@ -663,7 +705,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
   | Origin_inline | Origin_bare ->
       let clock =
         match origin with
-        | Origin_inline -> short_clock entry.timestamp ^ " "
+        | Origin_inline -> pad_clock (short_clock entry.timestamp) ^ " "
         | Origin_row | Origin_bare -> ""
       in
       (* The margin is taken from the body, so it cannot be wider than what

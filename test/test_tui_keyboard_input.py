@@ -246,9 +246,15 @@ def screen_header(name: bytes, rest: bytes = b"") -> re.Pattern[bytes]:
 
 
 def selected_row(post_id: bytes) -> re.Pattern[bytes]:
-    """The highlighted list row for `post_id`, whatever sits in the gutter."""
+    """The highlighted list row for `post_id`, whatever sits in the gutter.
+
+    Selection is drawn two ways while the band conversion is in flight: the
+    legacy reverse-video caret, or a full-row reverse band that opens the
+    row and carries no inner escapes.
+    """
     return re.compile(
-        rb"\x1b\[7m>\x1b\[0m(?:\x1b\[[0-9;]*m|[ \xc2\xb7@?])*" + re.escape(post_id)
+        rb"\x1b\[7m(?:>\x1b\[0m)?(?:\x1b\[[0-9;]*m|[ \xc2\xb7@?])*"
+        + re.escape(post_id)
     )
 
 
@@ -636,16 +642,18 @@ def stable_termios(attributes: list[Any]) -> list[Any]:
 KEEPER_ROW_SCAN_BOUND = 24
 
 
-def keeper_row_selected(name: bytes) -> bytes:
-    """Bytes that appear only while ``name`` is the selected keeper row.
+def keeper_row_selected(name: bytes) -> re.Pattern[bytes]:
+    """A needle that matches only while ``name`` is the selected keeper row.
 
-    The list marks selection twice: a reverse-video marker in the gutter, and
-    the keeper's name in bold. The two are not adjacent -- the status cell sits
-    between them -- so this anchors on the name. The reset immediately before
-    it closes the status cell and is the same for every status value, which
-    keeps the needle from depending on whether the live roster was read.
+    Selection is a full-row reverse band: the row opens with reverse video
+    and, because the band folds every cell colour, carries no other escape
+    before the name. The legacy caret-plus-bold-name shape is still accepted
+    while unconverted builds circulate.
     """
-    return b"\x1b[0m \x1b[1m" + name
+    return re.compile(
+        rb"(?:\x1b\[7m[^\x1b\n]*" + re.escape(name)
+        + rb"|\x1b\[0m \x1b\[1m" + re.escape(name) + rb")"
+    )
 
 
 def keeper_metadata(name: str) -> dict[str, object]:

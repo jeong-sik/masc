@@ -2076,14 +2076,14 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
 (* Each cell is fitted as plain text and styled afterwards, so a long keeper
    name cannot push the columns to its right out of the frame and the style
    bytes never count toward the width. *)
-let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
+let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~yolo ~paused ~health ~next_action ~keeper ~runtime =
   let status_color = keeper_action_color next_action in
   let glyph = keeper_state_glyph ~paused ~health in
-  (* Same gutter marker the Approvals, Board and Planning lists draw. A
-     selection cursor that changes shape when the operator switches surface
-     reads as a different control, not the same one. *)
-  let marker = if selected then Ansi.reverse ^ ">" ^ Ansi.reset else " " in
+  (* Selection is the full-row band the caller draws (box_line_selected over
+     a strip_sgr'd copy of this row), so the row itself carries no marker.
+     The caret's three gutter cells stay as spaces so columns do not shift
+     between the selected row and its neighbours. *)
   let name =
     fit_width (Terminal_text.single_line keeper.k_name) columns.kcol_name
   in
@@ -2094,21 +2094,17 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns) ~selected
       columns.kcol_task
   in
   String.concat ""
-    [ " "
-    ; marker
-    ; " "
+    [ "   "
     ; status_color ^ glyph ^ " "
       ^ fit_width (keeper_health_word health)
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; " "
-    ; (let dressed =
-         (* A keeper whose gate runs every call unasked wears its name in
-            red: the stance has no column of its own, and the name is what
-            the eye finds first. *)
-         if yolo then Theme.bad ^ name ^ Ansi.reset else name
-       in
-       if selected then Ansi.bold ^ dressed ^ Ansi.reset else dressed)
+    ; (* A keeper whose gate runs every call unasked wears its name in
+         red: the stance has no column of its own, and the name is what
+         the eye finds first. On the selected row the band folds this red
+         with every other cell colour. *)
+      (if yolo then Theme.bad ^ name ^ Ansi.reset else name)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
         keeper.k_total_turns Ansi.reset
@@ -2380,14 +2376,17 @@ let render_keeper_list (state : state) =
             | Keeper_control.Present row -> Some row
             | Keeper_control.Absent | Keeper_control.Unobserved -> None
           in
-          box_line buf cols
-            (keeper_row_content ~columns
-               ~selected:(position = state.keeper_cursor)
-               ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
-               ~paused:reading.Keeper_control.paused
-               ~health:(Keeper_control.health reading)
-               ~next_action:(Keeper_control.next_action reading)
-               ~keeper ~runtime)
+          let row =
+            keeper_row_content ~columns
+              ~yolo:(List.mem keeper.k_name state.keeper_yolo_names)
+              ~paused:reading.Keeper_control.paused
+              ~health:(Keeper_control.health reading)
+              ~next_action:(Keeper_control.next_action reading)
+              ~keeper ~runtime
+          in
+          if position = state.keeper_cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
+          else box_line buf cols row
       | Some _, None | None, Some _ | None, None -> box_empty buf cols
     done;
 

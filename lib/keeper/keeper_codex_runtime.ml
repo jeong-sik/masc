@@ -405,7 +405,20 @@ let recovery_failure_of_client_error = function
 
    This states which of the two the session refused. It is a projection of the
    configuration MASC already chose, not an instruction -- what the keeper does
-   about it stays the keeper's. *)
+   about it stays the keeper's.
+
+   Checked against codex-cli 0.149.1 on 2026-08-25. Its app-server schema
+   names [SandboxMode] as [read-only | workspace-write | danger-full-access],
+   and a read-only session refuses a built-in patch with the wording this note
+   contradicts: "patch rejected: writing is blocked by read-only sandbox"
+   (openai/codex#30712, #24806).
+
+   The MASC tools go on working because Codex does not apply the sandbox to
+   MCP-provided tools. That is reported as a hole rather than a promise --
+   openai/codex#4152, closed without an answer -- so it is the assumption to
+   check first if writes start failing. If Codex closes it, [Native_read]
+   leaves a keeper with no write path at all, and the posture is what has to
+   change; a note about which tool to reach for would then be wrong. *)
 let native_posture_note = function
   | Runtime_native_tools.Native_read ->
     [ "Your built-in file edits run under a read-only sandbox in this session, \

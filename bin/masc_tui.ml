@@ -1886,28 +1886,81 @@ let launch_verification_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
 
-(* Move the roster cursor to the next keeper whose name contains [query],
-   scanning forward from [after] and wrapping. A miss moves nothing. *)
-let roster_search_jump state ~query ~after =
+(* Move the active surface's row cursor to the next row whose search text
+   contains [query], scanning from [after] and wrapping; [backwards] walks
+   the other way. A miss moves nothing. The searched list is the one
+   [surface_row_texts] answers -- the same list the row cursor names -- and
+   the window follows the landing so the match is visible. *)
+let search_row_cursor state =
+  match state.view with
+  | Keepers Keeper_list -> Some state.keeper_cursor
+  | Lanes -> Some state.lanes_cursor
+  | Verification -> Some state.verification_cursor
+  | Harness -> Some state.harness_cursor
+  | Repositories -> Some state.repositories_cursor
+  | Connectors -> Some state.connectors_cursor
+  | Runtime -> Some state.runtime_cursor
+  | System_logs -> Some state.system_logs_cursor
+  | _ -> None
+
+let search_land state index =
+  let follow scroll set_scroll =
+    match scrolled_surface state state.view with
+    | None -> ()
+    | Some { sc_count = _; sc_chrome } ->
+        let height = max 1 (surface_rows () - sc_chrome) in
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
+  in
+  match state.view with
+  | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Lanes ->
+      state.lanes_cursor <- index;
+      follow state.lanes_scroll (fun s -> state.lanes_scroll <- s)
+  | Verification ->
+      state.verification_cursor <- index;
+      follow state.verification_scroll (fun s -> state.verification_scroll <- s)
+  | Harness ->
+      state.harness_cursor <- index;
+      follow state.harness_scroll (fun s -> state.harness_scroll <- s)
+  | Repositories ->
+      state.repositories_cursor <- index;
+      follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
+  | Connectors ->
+      state.connectors_cursor <- index;
+      follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
+  | Runtime ->
+      state.runtime_cursor <- index;
+      follow state.runtime_surface_scroll
+        (fun s -> state.runtime_surface_scroll <- s)
+  | System_logs ->
+      state.system_logs_cursor <- index;
+      follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
+  | _ -> ()
+
+let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
-  let total = List.length state.keepers in
-  if String.length query > 0 && total > 0 then begin
-    let matches index =
-      match List.nth_opt state.keepers index with
-      | Some (k : keeper) ->
-          Masc_tui_types.palette_contains ~needle:query k.k_name
-      | None -> false
-    in
-    let rec scan step =
-      if step > total then ()
-      else begin
-        let index = (after + step + total) mod total in
-        if matches index then state.keeper_cursor <- index
-        else scan (step + 1)
+  match surface_row_texts state state.view with
+  | None -> ()
+  | Some texts ->
+      let total = List.length texts in
+      if String.length query > 0 && total > 0 then begin
+        let matches index =
+          match List.nth_opt texts index with
+          | Some text -> Masc_tui_types.palette_contains ~needle:query text
+          | None -> false
+        in
+        let rec scan step =
+          if step > total then ()
+          else begin
+            let index =
+              if backwards then (after - step + (total * 2)) mod total
+              else (after + step + total) mod total
+            in
+            if matches index then search_land state index else scan (step + 1)
+          end
+        in
+        scan 1
       end
-    in
-    scan 1
-  end
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -3980,7 +4033,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.palette_open <- false;
       state.palette_query <- "";
       state.palette_cursor <- 0;
-      state.roster_search <- None;
+      state.search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
@@ -5237,7 +5290,7 @@ let main () =
         (not compact_viewport)
         && (not state.help_open)
         && (not state.palette_open)
-        && Option.is_none state.roster_search
+        && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -5251,7 +5304,7 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
-              && Option.is_none state.roster_search
+              && Option.is_none state.search
               && not
                    (state.view = Board
                    && state.board_mode = Board_compose) ->
@@ -5329,34 +5382,34 @@ let main () =
                 state.palette_query <- state.palette_query ^ s;
                 state.palette_cursor <- 0
             | _ -> ())
-       (* Roster search: typing moves the cursor live to the first match
-          from the top; Enter keeps the query for n/N, Esc keeps nothing.
-          The list itself never narrows -- see [roster_search] in types. *)
+       (* Row search: typing moves the surface's row cursor live to the
+          first match from the top; Enter keeps the query for n/N, Esc keeps
+          nothing. The list itself never narrows -- see [search] in types. *)
        | Some k
-         when state.view = Keepers Keeper_list
-              && Option.is_some state.roster_search
-              && not compact_viewport ->
-           let query = Option.value state.roster_search ~default:"" in
+         when Option.is_some state.search && not compact_viewport ->
+           let query = Option.value state.search ~default:"" in
            (match k with
-            | "esc" -> state.roster_search <- None
+            | "esc" -> state.search <- None
             | "\r" ->
-                state.roster_search <- None;
-                state.roster_search_last <- query
+                state.search <- None;
+                state.search_last <- query
             | "\127" | "\b" ->
                 let shorter =
                   Masc_tui_message_layout.drop_last_utf8_scalar query
                 in
-                state.roster_search <- Some shorter;
-                roster_search_jump state ~query:shorter ~after:(-1)
+                state.search <- Some shorter;
+                search_jump state ~query:shorter ~after:(-1)
             | s
               when (String.length s = 1 && Char.code s.[0] >= 32)
                    || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                 let longer = query ^ s in
-                state.roster_search <- Some longer;
-                roster_search_jump state ~query:longer ~after:(-1)
+                state.search <- Some longer;
+                search_jump state ~query:longer ~after:(-1)
             | _ -> ())
-       | Some "/" when state.view = Keepers Keeper_list && not compact_viewport ->
-           state.roster_search <- Some ""
+       | Some "/"
+         when Option.is_some (surface_row_texts state state.view)
+              && not compact_viewport ->
+           state.search <- Some ""
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail && not compact_viewport ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
@@ -5411,36 +5464,12 @@ let main () =
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources && not compact_viewport ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
-       | Some "n"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           roster_search_jump state ~query:state.roster_search_last
-             ~after:state.keeper_cursor
-       | Some "N"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           (* Backwards: the same wrap walked the other way. *)
-           let total = List.length state.keepers in
-           let query = String.lowercase_ascii state.roster_search_last in
-           if total > 0 then begin
-             let matches index =
-               match List.nth_opt state.keepers index with
-               | Some (k : keeper) ->
-                   Masc_tui_types.palette_contains ~needle:query k.k_name
-               | None -> false
-             in
-             let rec scan step =
-               if step > total then ()
-               else begin
-                 let index =
-                   (state.keeper_cursor - step + (total * 2)) mod total
-                 in
-                 if matches index then state.keeper_cursor <- index
-                 else scan (step + 1)
-               end
-             in
-             scan 1
-           end
+       | Some (("n" | "N") as direction)
+         when state.search_last <> ""
+              && Option.is_some (surface_row_texts state state.view) ->
+           let after = Option.value (search_row_cursor state) ~default:0 in
+           search_jump state ~query:state.search_last ~after
+             ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
@@ -5965,32 +5994,28 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                if state.verification_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.verification_cursor ~scroll:state.verification_scroll
                  in
                  state.verification_cursor <- cursor;
                  state.verification_scroll <- scroll)
             | Lanes ->
-                if state.lanes_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
                  in
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
             | Harness ->
-                if state.harness_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.harness_cursor ~scroll:state.harness_scroll
                  in
                  state.harness_cursor <- cursor;
                  state.harness_scroll <- scroll)
             | Repositories ->
-                if state.repositories_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
                  in
@@ -6007,16 +6032,14 @@ let main () =
                         move_surface_scroll state ~rows:(surface_rows ())
                           ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
-                if state.connectors_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
                  in
                  state.connectors_cursor <- cursor;
                  state.connectors_scroll <- scroll)
             | Runtime ->
-                if state.runtime_surface_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
                  in
@@ -6043,8 +6066,7 @@ let main () =
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                if state.system_logs_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
                  in

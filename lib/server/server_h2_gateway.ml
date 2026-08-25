@@ -124,9 +124,18 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
         beat ());
       Eio.Promise.await stop;
       Mcp_subscriptions.unregister token;
-      ignore (send (Mcp_subscriptions.graceful_closure ~subscription_id)));
+      (* The stop signal fires on a failed write, so by the time this runs the
+         peer is usually already gone and a closure that does not land is the
+         ordinary case rather than an error. *)
+      (* fire-and-forget: best effort on a stream that is already closing. *)
+      ignore
+        (send (Mcp_subscriptions.graceful_closure ~subscription_id) : bool));
     stop_once ();
-    (try H2.Body.Writer.close writer with _ -> ())
+    (* Cancellation travels as an exception in Eio, so a wildcard that ate it
+       here would report a clean exit from a fiber the switch had cancelled. *)
+    (try H2.Body.Writer.close writer with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _ -> ())
   in
 
 let h2_request_handler _client_addr h2_reqd =

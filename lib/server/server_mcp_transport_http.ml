@@ -222,7 +222,10 @@ let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
          request stays open for the life of the subscription. *)
       Eio.Promise.await info.stop_promise;
       Mcp_subscriptions.unregister token;
-      ignore (send (Mcp_subscriptions.graceful_closure ~subscription_id)))
+      (* fire-and-forget: the peer is usually already gone by then, so a closure
+         that does not land is the ordinary case rather than an error. *)
+      ignore
+        (send (Mcp_subscriptions.graceful_closure ~subscription_id) : bool))
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode

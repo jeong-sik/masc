@@ -1254,7 +1254,13 @@ let run_stdio ~handle_request ~sw ~env state =
            "subscriptions/listen requires a non-null request id")
     | Some subscription_id ->
       let key = Yojson.Safe.to_string subscription_id in
-      ignore (close_listen ~mode key subscription_id);
+      (* fire-and-forget: a client re-listening on an id it already used
+         replaces that
+         subscription. Whether one was open is not interesting here -- either
+         way the id ends up bound to the filter this request named. See the
+         reconnect rule: a client re-sends subscriptions/listen and the server
+         holds nothing across the gap. *)
+      ignore (close_listen ~mode key subscription_id : bool);
       let filter =
         Mcp_subscriptions.honoured_filter
           (Mcp_transport_protocol.subscription_filter_of_params

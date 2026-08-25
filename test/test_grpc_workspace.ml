@@ -568,6 +568,48 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
     | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
 ;;
 
+(* #30399. [since_seq] says "resume from this sequence number" and this
+   endpoint serves no backlog, so a resume it cannot honour is refused rather
+   than answered with live events numbered as if the gap were not there. *)
+let subscribe_bytes ~since_seq =
+  Masc_grpc_types.SubscribeRequest_serde.to_bytes
+    T.SubscribeRequest.
+      { agent_name = "resume-probe"; session_id = "s1"; event_types = []; since_seq }
+;;
+
+let test_subscribe_refuses_a_resume_it_cannot_serve () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-subscribe-resume" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+    in
+    match Grpc_eio.Service.get_method service "Subscribe" with
+    | Some { handler = `ServerStreaming handler; _ } ->
+      (match handler (subscribe_bytes ~since_seq:100L) with
+       | _ -> Alcotest.fail "a non-zero since_seq must not open a stream"
+       | exception exn ->
+         let text = Printexc.to_string exn in
+         Alcotest.(check bool)
+           "refused as UNIMPLEMENTED rather than served silently"
+           true
+           (String.starts_with ~prefix:"Grpc_error(UNIMPLEMENTED:" text);
+         Alcotest.(check bool)
+           "the refusal names the value it could not honour"
+           true
+           (String_util.contains_substring text "100"));
+      (* Zero is "from now", which this endpoint does serve. *)
+      (match handler (subscribe_bytes ~since_seq:0L) with
+       | _stream -> ()
+       | exception exn ->
+         Alcotest.failf "since_seq=0 must still stream: %s" (Printexc.to_string exn))
+    | _ -> Alcotest.fail "Subscribe server-streaming handler missing")
+;;
+
 let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
   Eio_main.run
   @@ fun env ->
@@ -835,6 +877,10 @@ let () =
             "subscribe invalid bytes raise grpc status"
             `Quick
             test_subscribe_handler_invalid_bytes_raise_grpc_status
+        ; Alcotest.test_case
+            "subscribe refuses a resume it cannot serve"
+            `Quick
+            test_subscribe_refuses_a_resume_it_cannot_serve
         ; Alcotest.test_case
             "heartbeat invalid bytes warn and continue"
             `Quick

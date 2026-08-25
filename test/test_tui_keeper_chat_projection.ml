@@ -786,6 +786,38 @@ let test_non_image_is_rejected_by_its_bytes () =
            "image/png"))
 ;;
 
+(* A drop has three answers and they are not interchangeable. An image is
+   staged; a source file keeps its path, because naming it is why it was
+   dropped; an image that cannot be staged says so, because answering a drop
+   with a filename hides that the image was refused. *)
+let test_a_dropped_image_is_staged () =
+  with_temp_file ~suffix:".png" png_bytes (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Attach attachment ->
+      Alcotest.(check string) "media type" "image/png" attachment.Chat.mime_type
+    | Masc_tui_attachment.Keep_path -> Alcotest.fail "an image should attach, not keep its path"
+    | Masc_tui_attachment.Refuse error ->
+      Alcotest.failf "an image should attach: %s" (Masc_tui_attachment.error_to_string error))
+;;
+
+let test_a_dropped_non_image_keeps_its_path () =
+  with_temp_file ~suffix:".ml" "let () = print_endline \"hi\"" (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Keep_path -> ()
+    | Masc_tui_attachment.Attach _ -> Alcotest.fail "a source file must not attach"
+    | Masc_tui_attachment.Refuse _ ->
+      Alcotest.fail "a source file is not a refused image; its path is the point")
+;;
+
+let test_an_unstageable_image_is_refused_not_pathed () =
+  with_temp_file ~suffix:".png" "" (fun path ->
+    match Masc_tui_attachment.classify_drop ~path with
+    | Masc_tui_attachment.Refuse _ -> ()
+    | Masc_tui_attachment.Attach _ -> Alcotest.fail "an empty file must not attach"
+    | Masc_tui_attachment.Keep_path ->
+      Alcotest.fail "an empty .png should say so, not silently become a path")
+;;
+
 let test_missing_file_is_named_in_the_error () =
   match Masc_tui_attachment.of_file ~path:"/nonexistent/masc-attach-probe.png" with
   | Ok _ -> Alcotest.fail "a missing path must not attach"
@@ -861,5 +893,11 @@ let () =
             test_non_image_is_rejected_by_its_bytes
         ; test_case "missing file is named" `Quick
             test_missing_file_is_named_in_the_error
+        ; test_case "a dropped image is staged" `Quick
+            test_a_dropped_image_is_staged
+        ; test_case "a dropped non-image keeps its path" `Quick
+            test_a_dropped_non_image_keeps_its_path
+        ; test_case "an unstageable image is refused" `Quick
+            test_an_unstageable_image_is_refused_not_pathed
         ] )
     ]

@@ -24,3 +24,18 @@ val of_file
 
 val error_to_string : error -> string
 (** One line naming the file and what was wrong with it. *)
+
+type drop =
+  | Attach of Masc_tui_keeper_chat_projection.attachment
+      (** An image. Staging it is what the drop meant. *)
+  | Keep_path
+      (** Not an image. The operator dropped a file to name it, so the path is
+          the point and belongs in the draft. *)
+  | Refuse of error
+      (** An image that cannot be staged -- too large, unreadable, empty.
+          Answering with its path instead would leave no sign that the image
+          was refused. *)
+
+val classify_drop : path:string -> drop
+(** What a dropped file should become. Separated from the input loop so the
+    three-way choice can be read and tested without a terminal. *)

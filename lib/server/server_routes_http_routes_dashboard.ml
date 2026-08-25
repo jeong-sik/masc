@@ -242,6 +242,7 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     match protocol.credential_policy with
     | Runtime_toml.Credentials_optional -> "optional"
     | Runtime_toml.Credentials_forbidden -> "forbidden"
+    | Runtime_toml.Credentials_file_required -> "file_required"
   in
   `Assoc
     [ "protocol", `String protocol.protocol
@@ -249,6 +250,9 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     ; "semantics", `String semantics
     ; "credential_policy", `String credential_policy
     ; "requires_non_interactive", `Bool protocol.requires_non_interactive
+    ; "provider_fields", Json_util.json_string_list protocol.provider_fields
+    ; ( "required_provider_fields"
+      , Json_util.json_string_list protocol.required_provider_fields )
     ]
 ;;
 

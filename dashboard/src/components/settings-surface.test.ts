@@ -37,6 +37,8 @@ const runtimeProviderProtocols = [
     semantics: 'http_provider',
     credential_policy: 'optional',
     requires_non_interactive: false,
+    provider_fields: [],
+    required_provider_fields: [],
   },
 ] as const
 import { dashboardLoading, shellAuthSummary, shellConfigResolution, shellRuntimeResolution } from '../store'

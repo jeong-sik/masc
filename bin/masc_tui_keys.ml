@@ -123,7 +123,12 @@ let for_surface = function
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ]
       @ listing_meta
-  | Verification -> b Navigate "j/k" "scroll" :: listing_meta
+  | Verification ->
+      [ b Navigate "j/k" "scroll"
+      ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
+      ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      ]
+      @ listing_meta
   | Harness -> b Navigate "j/k" "scroll" :: listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail

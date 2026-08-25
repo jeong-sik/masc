@@ -1112,6 +1112,8 @@ type async_msg =
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
+  (* (message, noop): [noop = true] says the verdict already stood. *)
+  | Verification_verdict_done of (string * bool, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
@@ -3996,6 +3998,58 @@ let handle_schedule_cancel_key state ~mailbox =
           add_event state "system"
             (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
 
+(* Send the operator's verdict through the verification route. Same
+   fiber-and-mailbox shape as the other writes; whether the task still awaits
+   verification is the route's store rules to say, so the TUI does not
+   pre-guess from the row it rendered a moment ago. *)
+let start_verification_verdict state ~mailbox ~(task_id : string)
+    ~(verdict : [ `Approve | `Reject of string ]) =
+  state.verification_verdict_error <- None;
+  let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
+  add_event state "system" (Printf.sprintf "%s %s" verb task_id);
+  let host = server_peer_host in
+  let port = state.port in
+  let run_verdict () =
+    let result =
+      match Masc_tui_http.post_verification_verdict ~host ~port ~task_id ~verdict with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.verification_verdict_outcome json
+    in
+    enqueue_async mailbox (Verification_verdict_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_verdict
+  | None -> run_verdict ()
+
+(* The row under the Verification cursor, if the list has one. *)
+let verification_cursor_row state =
+  let requests =
+    match state.verification with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  List.nth_opt requests state.verification_cursor
+
+(* The approve key on the row under the cursor. Two presses, like the cancel
+   and vote keys: the first names the task, the same press again sends the
+   verdict. The task id is captured at arm time, so moving the cursor between
+   presses re-arms for the new row rather than approving the one the operator
+   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+let handle_verification_approve_key state ~mailbox =
+  match verification_cursor_row state with
+  | None -> ()
+  | Some row -> (
+      let task_id = row.Masc.Tui_decode.vr_task_id in
+      match state.verification_verdict_armed with
+      | Some armed when String.equal armed task_id ->
+          state.verification_verdict_armed <- None;
+          start_verification_verdict state ~mailbox ~task_id ~verdict:`Approve
+      | Some _ | None ->
+          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_error <- None;
+          add_event state "system"
+            (Printf.sprintf "press a again to approve %s" task_id))
+
 let handle_board_compose_key state ~mailbox (key : string) : bool =
   if
     state.board_compose_armed
@@ -4563,6 +4617,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some err)
+  | Verification_verdict_done result -> (
+      match result with
+      | Ok (message, noop) ->
+          state.verification_verdict_armed <- None;
+          state.verification_verdict_error <- None;
+          add_event state "system"
+            (if noop then
+               Printf.sprintf "Verification: %s (already recorded)" message
+             else "Verification: " ^ message);
+          (* The row shown still says awaiting until this lands; a judged row
+             that stays listed invites a second verdict. *)
+          launch_verification_load state ~mailbox
+      | Error err ->
+          state.verification_verdict_armed <- None;
+          state.verification_verdict_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -5454,6 +5523,46 @@ let main () =
           ~body_json:(Yojson.Safe.to_string json))
       ()
   in
+  (* Verification reject: the reason is required, and $EDITOR is the form we
+     already have. The editor is the confirmation step -- a non-zero exit or
+     an empty reason leaves the task unjudged, so no arming gate sits in
+     front of it the way one sits in front of the single-key approve. *)
+  let handle_verification_reject () =
+    match verification_cursor_row state with
+    | None -> ()
+    | Some row -> (
+        let task_id = row.Masc.Tui_decode.vr_task_id in
+        match Masc_tui_editor.editor_command () with
+        | None ->
+            add_event state "error"
+              "no $EDITOR set; export EDITOR to reject here"
+        | Some _ -> (
+            let stem = "{\n  \"reason\": \"\"\n}\n" in
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | None -> add_event state "system" "reject cancelled"
+            | Some body -> (
+                match Yojson.Safe.from_string body with
+                | exception Yojson.Json_error e ->
+                    add_event state "error" ("reject: body is not JSON: " ^ e)
+                | json ->
+                    let reason =
+                      match json with
+                      | `Assoc fields -> (
+                          match List.assoc_opt "reason" fields with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "")
+                      | _ -> ""
+                    in
+                    if String.equal reason "" then
+                      add_event state "system" "reject cancelled (empty reason)"
+                    else
+                      start_verification_verdict state
+                        ~mailbox:async_messages ~task_id
+                        ~verdict:(`Reject reason))))
+  in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> add_event state "error" "config not loaded yet; r to reload"
@@ -5665,6 +5774,8 @@ let main () =
        | Planning, Some _ -> state.goal_action_armed <- None
        | Schedules, Some ("x" | "X") -> ()
        | Schedules, Some _ -> state.schedule_cancel_armed <- None
+       | Verification, Some ("a" | "A") -> ()
+       | Verification, Some _ -> state.verification_verdict_armed <- None
        | _ -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
@@ -7000,6 +7111,10 @@ let main () =
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
            handle_schedule_cancel_key state ~mailbox:async_messages
+       | Some "x" | Some "X" when state.view = Verification ->
+           (* Reject wants a reason, and $EDITOR is the form we already
+              have; the editor itself is the confirmation step. *)
+           handle_verification_reject ()
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -7134,9 +7249,13 @@ let main () =
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            | Verification ->
+                (* Two presses, like every irreversible action here: the
+                   first names the task, the second sends the approval. *)
+                handle_verification_approve_key state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 

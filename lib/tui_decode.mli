@@ -833,6 +833,13 @@ val decode_json_response_body :
     success. *)
 val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 
+(** The [/api/v1/verification/verdict] success envelope
+    [{ok; message; noop}] as [(message, noop)]. [noop = true] means the
+    verdict already stood and this call changed nothing. Refusals arrive as
+    non-2xx statuses and never reach this decoder. *)
+val verification_verdict_outcome :
+  Yojson.Safe.t -> (string * bool, string) result
+
 (** Decode one SGR mouse report into the [up]/[down] key a wheel turns
     into, or [None] for reports nothing consumes (clicks, releases,
     horizontal wheel). [parameters] is the raw CSI parameter span

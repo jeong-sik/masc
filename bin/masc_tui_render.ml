@@ -5925,9 +5925,12 @@ let render_code (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane pane_buf pane_cols =
+    let history_showing = state.code_history_open in
     let title =
       match state.code_file with
-      | Some (path, _) -> Terminal_text.single_line path
+      | Some (path, _) ->
+          let path = Terminal_text.single_line path in
+          if history_showing then "history: " ^ path else path
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;
@@ -5940,32 +5943,72 @@ let render_code (state : state) =
     (* Five chrome rows: top gap, title, divider, bottom gap, and the
        footer this pane must leave room for. *)
     let content_height = max 1 (rows - 5) in
-    (match state.code_file_error, state.code_file with
-     | Some detail, _ ->
-         box_line pane_buf pane_cols
-           (Theme.bad ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
-         for _ = 2 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, None ->
-         for _ = 1 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, Some (_, file_rows) ->
-         let total_lines = List.length file_rows in
-         let max_scroll = max 0 (total_lines - content_height) in
-         let scroll = max 0 (min state.code_file_scroll max_scroll) in
-         for i = 0 to content_height - 1 do
-           match List.nth_opt file_rows (scroll + i) with
-           | Some segments ->
-               let body =
-                 String.concat "" (List.map span segments)
-               in
-               box_line pane_buf pane_cols
-                 (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
-                    Ansi.reset body)
-           | None -> box_empty pane_buf pane_cols
-         done);
+    (if history_showing then
+       match state.code_history_error, state.code_history with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (loading history)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, []) ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, commits) ->
+           let total = List.length commits in
+           let max_scroll = max 0 (total - content_height) in
+           let scroll = max 0 (min state.code_history_scroll max_scroll) in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt commits (scroll + i) with
+             | Some row ->
+                 let open Masc.Tui_decode in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%s%s  %s%s%s  %s  %s" Ansi.dim
+                      row.gl_date Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      row.gl_hash Ansi.reset
+                      (Terminal_text.single_line row.gl_author)
+                      (Terminal_text.single_line row.gl_subject))
+             | None -> box_empty pane_buf pane_cols
+           done
+     else
+       match state.code_file_error, state.code_file with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           for _ = 1 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, file_rows) ->
+           let total_lines = List.length file_rows in
+           let max_scroll = max 0 (total_lines - content_height) in
+           let scroll = max 0 (min state.code_file_scroll max_scroll) in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt file_rows (scroll + i) with
+             | Some segments ->
+                 let body =
+                   String.concat "" (List.map span segments)
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
+                      Ansi.reset body)
+             | None -> box_empty pane_buf pane_cols
+           done);
     box_bottom pane_buf pane_cols
   in
   (if split then begin
@@ -5995,9 +6038,12 @@ let render_code (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:%s  Enter:open  Esc:%s  r:refresh  Tab:next  q:quit"
+            "j/k:%s  Enter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
             (if state.code_focus_file then "scroll" else "move")
-            (if state.code_focus_file then "list" else "up")));
+            (if state.code_focus_file then "H:history  " else "")
+            (if state.code_history_open then "code"
+             else if state.code_focus_file then "list"
+             else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let render_resources (state : state) =

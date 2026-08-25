@@ -1120,6 +1120,8 @@ type async_msg =
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
+  | Code_history_loaded of
+      string * (Masc.Tui_decode.git_log_row list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1609,6 +1611,32 @@ let launch_code_file_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_file_loaded (path, Error "Eio switch is unavailable"))
+
+(* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
+let code_history_limit = 50
+
+let launch_code_history_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_git_log ~host ~port ~path
+          ~limit:code_history_limit
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_history_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_history_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -4477,8 +4505,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_file <- Some (path, rows);
           state.code_file_error <- None;
           state.code_file_scroll <- 0;
-          state.code_focus_file <- true
+          state.code_focus_file <- true;
+          (* A new file starts on its content; the old file's history would
+             caption the wrong bytes. *)
+          state.code_history <- None;
+          state.code_history_error <- None;
+          state.code_history_open <- false;
+          state.code_history_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_history_loaded (path, result) ->
+      (* Keyed to the file still open: a listing that raced a file switch
+         describes bytes no longer on screen. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok rows ->
+            state.code_history <- Some (path, rows);
+            state.code_history_error <- None;
+            state.code_history_scroll <- 0
+        | Error detail -> state.code_history_error <- Some detail)
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -5985,6 +6034,27 @@ let main () =
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
            state.resource_focus <- not state.resource_focus
+       | Some "H" when state.view = Code && state.code_focus_file ->
+           (* History over the open file. The capital only: h stays free for
+              the horizontal scroll the file pane is due. Same key closes it;
+              a listing already fetched for this path is shown as it stands. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else begin
+                  state.code_history_open <- true;
+                  (match state.code_history with
+                   | Some (loaded_path, _)
+                     when String.equal loaded_path path ->
+                       ()
+                   | Some _ | None ->
+                       state.code_history <- None;
+                       state.code_history_error <- None;
+                       launch_code_history_load state
+                         ~mailbox:async_messages ~path)
+                end)
        | Some ("h" | "H")
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols ->
@@ -6155,7 +6225,9 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_focus_file then state.code_focus_file <- false
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
                   (* Up one directory; "." from Filename.dirname means the
                      root, which this surface spells "". *)
@@ -6258,7 +6330,9 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_focus_file then state.code_focus_file <- false
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
                   let parent = Filename.dirname state.code_dir in
                   state.code_dir <-
@@ -6320,13 +6394,22 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  match state.code_file with
-                  | Some (_, rows) ->
-                      state.code_file_scroll <-
-                        min
-                          (max 0 (List.length rows - 1))
-                          (state.code_file_scroll + 1)
-                  | None -> ())
+                  if state.code_history_open then (
+                    match state.code_history with
+                    | Some (_, rows) ->
+                        state.code_history_scroll <-
+                          min
+                            (max 0 (List.length rows - 1))
+                            (state.code_history_scroll + 1)
+                    | None -> ())
+                  else
+                    match state.code_file with
+                    | Some (_, rows) ->
+                        state.code_file_scroll <-
+                          min
+                            (max 0 (List.length rows - 1))
+                            (state.code_file_scroll + 1)
+                    | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
@@ -6510,8 +6593,13 @@ let main () =
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file then
-                  state.code_file_scroll <- max 0 (state.code_file_scroll - 1)
+                if state.code_focus_file then (
+                  if state.code_history_open then
+                    state.code_history_scroll <-
+                      max 0 (state.code_history_scroll - 1)
+                  else
+                    state.code_file_scroll <-
+                      max 0 (state.code_file_scroll - 1))
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up

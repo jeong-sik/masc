@@ -179,7 +179,9 @@ let for_surface = function
            (masc_tui.ml:6001). A key that works and is not listed is the same
            drift as a listed key that does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
-          ~help:"close the file, then climb one directory"
+          ~help:"close the history, then the file, then climb one directory"
+      ; b Act "H" "history"
+          ~help:"the commits that touched the open file (H or Esc closes)"
       ]
       @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta

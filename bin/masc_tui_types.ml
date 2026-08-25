@@ -856,6 +856,13 @@ type state = {
   mutable code_file_error: string option;
   mutable code_file_scroll: int;
   mutable code_focus_file: bool;
+  (* The file pane's history view: H on an open file swaps the content for
+     the commits that touched it, keyed by the path they were fetched for so
+     opening another file drops a stale listing rather than captioning it. *)
+  mutable code_history: (string * Tui_decode.git_log_row list) option;
+  mutable code_history_error: string option;
+  mutable code_history_open: bool;
+  mutable code_history_scroll: int;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -1217,6 +1224,10 @@ let create_state
   code_file_error = None;
   code_file_scroll = 0;
   code_focus_file = false;
+  code_history = None;
+  code_history_error = None;
+  code_history_open = false;
+  code_history_scroll = 0;
   changes_keeper = None;
   changes = None;
   changes_error = None;

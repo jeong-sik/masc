@@ -439,7 +439,8 @@
 (library
  (name masc_tui_roster_pane)
  (wrapped false)
- (modules masc_tui_roster_pane))
+ (modules masc_tui_roster_pane)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_keeper_mark)

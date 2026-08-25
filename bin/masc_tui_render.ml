@@ -223,14 +223,16 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           ~close_style:context.inline_restore
           rest
       in
-      (* Folded origins are drawn left of the rule, dimmed so the rule still
-         marks where the body starts. An empty gutter adds no bytes at all, so
-         a pane showing origins on their own rows draws exactly what it drew
-         before this margin existed. *)
+      (* Folded origins are the heading of each activity block. Keep them in
+         the role colour and bold while the body stays neutral: after the old
+         rail was removed, leaving this whole column dim made every speaker
+         and tool block look like continuation metadata. An empty gutter adds
+         no bytes at all, so a pane showing origins on their own rows draws
+         exactly what it drew before this margin existed. *)
       let margin =
         if String.equal row.gutter "" then ""
         else
-          Printf.sprintf "%s%s%s%s" Ansi.dim (Chat_theme.origin row.style)
+          Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold
             row.gutter
             (if context.ambient_background then context.inline_restore
              else Ansi.reset)
@@ -465,6 +467,21 @@ let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
 let keeper_roster_pane_shown (state : state) ~cols =
   Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
 
+let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7
+
+(* The main loop uses the target identity to restart the motion when selection
+   changes. A short name has no animation target and therefore costs no idle
+   repaint. *)
+let keeper_roster_marquee_target (state : state) ~cols =
+  if not (keeper_roster_pane_shown state ~cols) then None
+  else
+    match state.view, selected_keeper state with
+    | Keepers (Keeper_detail | Keeper_message), Some keeper ->
+        let name = Terminal_text.single_line keeper.k_name in
+        if Message_layout.display_width name > keeper_roster_name_cells then
+          Some name
+        else None
+    | _ -> None
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -3106,7 +3123,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
   framed_top buf cols;
-  framed_line buf cols (Ansi.dim ^ " Keepers  ^B:hide" ^ Ansi.reset);
+  let title = " KEEPERS" in
+  let hint = "^B HIDE" in
+  let title_gap = max 1 (cols - 4 - String.length title - String.length hint) in
+  framed_line buf cols
+    (Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
+   ^ hint ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -3118,6 +3140,10 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
+        let name =
+          Masc_tui_roster_pane.name_window ~selected
+            ~frame:state.roster_marquee_frame ~width:(max 0 (cols - 7)) name
+        in
         (* The same glyph the Keepers surface draws, for the same reading.
            Without it the pane says a keeper exists and nothing else, so a
            roster of ten looks identical whether one of them is offline. *)
@@ -3132,14 +3158,11 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
            tinted inside it reads as a second highlight. *)
         let line =
           if selected then
-            Theme.selection ^ " " ^ glyph ^ " " ^ name
-            ^ String.make
-                (max 0 (cols - 7 - Message_layout.display_width name)) ' '
-            ^ Ansi.reset
+            Theme.selection ^ " " ^ glyph ^ " " ^ name ^ Ansi.reset
           else
             " "
             ^ keeper_action_color (Keeper_control.next_action reading)
-            ^ glyph ^ Ansi.reset ^ " " ^ name
+            ^ glyph ^ Ansi.reset ^ " " ^ Ansi.dim ^ name ^ Ansi.reset
         in
         framed_line buf cols line
     | None -> framed_empty buf cols
@@ -3397,14 +3420,15 @@ let render_keeper_message (state : state) =
        measures is the badge it draws. *)
     let base_role_label_of (message : Masc_tui_types.msg_entry) =
       match message.me_role with
-      | Message_user speaker -> speaker
+      | Message_user speaker ->
+          if String.equal speaker "you" then "YOU" else speaker
       | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-      | Message_autonomous -> "auto"
-      | Message_status -> "status"
-      | Message_error -> "error"
-      | Message_tool -> "tools"
-      | Message_thinking -> "thinking"
-      | Message_memory -> "memory"
+      | Message_autonomous -> "AUTO"
+      | Message_status -> "STATUS"
+      | Message_error -> "ERROR"
+      | Message_tool -> "TOOLS"
+      | Message_thinking -> "THINKING"
+      | Message_memory -> "MEMORY"
     in
     (* A persisted delivery key or turn_ref is the grouping authority. Rows
        without one keep their old labels; grouping them by adjacency or clock
@@ -3428,7 +3452,7 @@ let render_keeper_message (state : state) =
             let base = base_role_label_of message in
             let role_label =
               if not grouped then base
-              else if starts_turn then "turn · " ^ base
+              else if starts_turn then "TURN · " ^ base
               else "↳ " ^ base
             in
             let next_previous =
@@ -3561,7 +3585,7 @@ let render_keeper_message (state : state) =
                   None
               | Keeper_chat_transcript.Trail_thinking lines ->
                   Some
-                    (entry Message_layout.Thinking "thinking"
+                    (entry Message_layout.Thinking "THINKING"
                        (if state.msg_reasoning_visibility = Reasoning_folded
                         then folded_thinking_summary (String.concat "\n" lines)
                         else String.concat "\n" lines))
@@ -3571,7 +3595,7 @@ let render_keeper_message (state : state) =
                       (tool_projection_mode state) block
                   in
                   Some
-                    (entry Message_layout.Tool "tools"
+                    (entry Message_layout.Tool "TOOLS"
                        (String.concat "\n" projection.rows))
               | Keeper_chat_transcript.Trail_text text ->
                   Some

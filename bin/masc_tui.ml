@@ -28,6 +28,7 @@ exception Break
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
+let roster_marquee_interval_ns = 150_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
@@ -6172,6 +6173,8 @@ let main () =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let roster_marquee_target = ref None in
+  let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -8843,6 +8846,28 @@ let main () =
 
       (* Periodic refresh *)
       let now_ns = Mtime_clock.elapsed_ns () in
+      let _, terminal_cols = get_terminal_size () in
+      let current_marquee_target =
+        keeper_roster_marquee_target state ~cols:terminal_cols
+      in
+      if current_marquee_target <> !roster_marquee_target then begin
+        roster_marquee_target := current_marquee_target;
+        roster_marquee_last_step_ns := now_ns;
+        state.roster_marquee_frame <- 0
+      end
+      else if
+        Option.is_some current_marquee_target
+        && Int64.compare
+             (Int64.sub now_ns !roster_marquee_last_step_ns)
+             roster_marquee_interval_ns
+           >= 0
+      then begin
+        roster_marquee_last_step_ns := now_ns;
+        state.roster_marquee_frame <-
+          if state.roster_marquee_frame = max_int then 0
+          else state.roster_marquee_frame + 1;
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin

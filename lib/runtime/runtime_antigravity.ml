@@ -232,7 +232,11 @@ type wire_event =
       ; step_type : step_type
       }
   | Result of
-      { conversation_id : string option
+      { (* [None] two ways: the CLI refuses a bad invocation with a single
+           result event and never opens a conversation, or a live result
+           restates the identity as blank. Init is the one event that states
+           it. *)
+        conversation_id : string option
       ; status : result_status
       ; response : string
       ; error : string option
@@ -652,9 +656,21 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
            })
   | Result { conversation_id; status; response; error; num_turns; usage } ->
     let stage = "result event" in
-    (match state.init with
-     | None -> protocol_error stage "received result before init"
-     | Some (expected, _, _) ->
+    (match state.init, status with
+     (* A rejected invocation is a well-formed stream, not a broken one: the
+        CLI emits one result event carrying its own account of the refusal and
+        never opens a conversation, so there is no init to match against.
+        Reporting a protocol error here would discard the only description of
+        what went wrong — a missing --effort read as "conversation_id must not
+        be empty" (2026-08-25, gemini-3.7-flash). *)
+     | None, Result_error ->
+       Error
+         (Turn_failed
+            (match error with
+             | Some detail -> detail
+             | None -> "status=ERROR before init"))
+     | None, Success -> protocol_error stage "received result before init"
+     | Some (expected, _, _), _ ->
        let* () = verify_restatement ~stage ~expected conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"

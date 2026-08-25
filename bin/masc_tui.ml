@@ -4587,13 +4587,12 @@ let terminal_title_visible_keeper state =
 
 let terminal_title_runtime state keeper_name =
   Option.bind keeper_name (fun name ->
-    List.find_opt
-      (fun (keeper : keeper) -> String.equal keeper.k_name name)
-      state.keepers
-    |> Option.bind (fun keeper ->
-      match (keeper_reading state keeper).Keeper_control.liveness with
-      | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
-      | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+    Option.bind
+      (List.find_opt (fun (keeper : keeper) -> String.equal keeper.k_name name) state.keepers)
+      (fun keeper ->
+        match (keeper_reading state keeper).Keeper_control.liveness with
+        | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
+        | Keeper_control.Absent | Keeper_control.Unobserved -> None))
 ;;
 
 let terminal_title_snapshot state =

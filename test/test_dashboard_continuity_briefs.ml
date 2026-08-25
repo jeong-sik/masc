@@ -11,7 +11,7 @@ let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
    unreachable and stale could not be told from offline. *)
 let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
     ?(updated_at = "") ?(keepalive_running = false) ?(turn_count = 0)
-    ?(paused = false) () =
+    ?(paused = `Bool false) () =
   `Assoc
     [
       ("name", `String "omega");
@@ -21,7 +21,7 @@ let keeper ?(health = "offline") ?(status = "offline") ?(tool_audit_at = "")
       (* Still on the wire and still passed through to the row, but no longer
          read for any decision here. *)
       ("status", `String status);
-      ("paused", `Bool paused);
+      ("paused", paused);
       ("keepalive_running", `Bool keepalive_running);
       ("turn_count", `Int turn_count);
       ("updated_at", `String updated_at);
@@ -132,7 +132,7 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
       (keeper
          ~health:"healthy"
          ~status:"paused"
-         ~paused:true
+         ~paused:(`Bool true)
          ~tool_audit_at:"2001-09-09T01:46:40Z"
          ~updated_at:"2001-09-09T01:46:40Z"
          ~turn_count:4
@@ -146,7 +146,7 @@ let test_paused_keeper_with_fresh_activity_is_not_healthy () =
 (* A pause is not a liveness failure, so it must not inherit the offline
    verdict either. *)
 let test_paused_keeper_is_not_critical () =
-  let row = build_one (keeper ~paused:true ()) in
+  let row = build_one (keeper ~paused:(`Bool true) ()) in
   check string "state" "warning" (state_of row);
   check string "note" "운영자 일시정지" (note_of row)
 
@@ -159,7 +159,21 @@ let test_unknown_status_is_rejected_even_when_paused () =
     "unknown status stays a rejected parse"
     (Invalid_argument
        "dashboard continuity: unknown keeper health \"suspended\"")
-    (fun () -> ignore (build_one (keeper ~health:"suspended" ~paused:true ())))
+    (fun () ->
+      ignore
+        (build_one
+           (keeper ~health:"suspended" ~paused:(`Bool true) ())))
+
+let test_non_boolean_paused_is_rejected () =
+  check_raises
+    "paused must be a boolean"
+    (Invalid_argument
+       "dashboard continuity: keeper paused is not a boolean: \"true\"")
+    (fun () ->
+      ignore
+        (build_one
+           (keeper ~health:"healthy" ~status:"active"
+              ~paused:(`String "true") ())))
 
 let () =
   run "dashboard_continuity_briefs"
@@ -184,5 +198,7 @@ let () =
             test_paused_keeper_is_not_critical;
           test_case "unknown status is rejected even when paused" `Quick
             test_unknown_status_is_rejected_even_when_paused;
+          test_case "non-boolean paused is rejected" `Quick
+            test_non_boolean_paused_is_rejected;
         ] );
     ]

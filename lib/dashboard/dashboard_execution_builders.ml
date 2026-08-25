@@ -259,9 +259,18 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       invalid_arg
         (Printf.sprintf "dashboard continuity: unknown keeper health %S" raw)
   in
+  let paused =
+    match Json_util.assoc_member_opt "paused" keeper with
+    | None -> false
+    | Some (`Bool value) -> value
+    | Some other ->
+      invalid_arg
+        (Printf.sprintf
+           "dashboard continuity: keeper paused is not a boolean: %s"
+           (Yojson.Safe.to_string other))
+  in
   let liveness =
-    if Option.value ~default:false (Json_util.assoc_bool_opt "paused" keeper)
-    then Cl_paused
+    if paused then Cl_paused
     else
       match health with
       | Keeper_types.KH_offline | KH_zombie -> Cl_offline

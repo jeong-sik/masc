@@ -819,6 +819,11 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_tool_call_id_is_not_invented)
+ (modules test_tool_call_id_is_not_invented)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (deps

@@ -1300,7 +1300,7 @@ let test_operator_digest_default_route_exposes_provenance () =
     check bool "query default namespace" true
       (json |> member "query" |> member "default_namespace_request" |> to_bool);
     check string "cache state" "fresh"
-      (json |> member "cache" |> member "cache_state" |> to_string)
+      (json |> member "projection_diagnostics" |> member "cache_state" |> to_string)
 
 let test_dashboard_shell_timeout_fallback_reports_timing_context () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -3085,7 +3085,9 @@ let write_config_sync_toml config name =
   mkdir_p dir;
   let path = Filename.concat dir (name ^ ".toml") in
   write_file path
-    "[keeper]\nsandbox_profile = \"local\"\nautoboot_enabled = false\nproactive_enabled = false\n";
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"local\"\ninstructions = \"%s config-sync fixture instructions\"\nautoboot_enabled = false\nproactive_enabled = false\n"
+       name);
   path
 
 let post_config ~sw ~clock ~state ~name body =

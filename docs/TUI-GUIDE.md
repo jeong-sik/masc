@@ -658,12 +658,66 @@ claim the post was never written, that the sink failed, or that retention
 expired. A failed refresh leaves the prior reading visible under an explicit
 error instead of redrawing it as an empty result.
 
+### Verification
+
+The queue of tasks a keeper submitted for a verdict, with what each asks
+for and how much evidence rides along. The verdict happens here: `a` on the
+row under the cursor arms an approval and the same key again sends it — the
+armed row is named under the list, and moving the cursor between the two
+presses re-arms for the new row rather than approving the one you left.
+`x` rejects; the reason is required, so `$EDITOR` opens with a one-field
+form and the editor itself is the confirmation — exiting without saving,
+or saving an empty reason, judges nothing.
+
+Both go through `POST /api/v1/verification/verdict` with the admin bearer
+the TUI mints at startup. Whether a task is still awaiting verification is
+the server's store rules to say; a verdict on a row that has moved on comes
+back as the server's own words under the list.
+
 ### Changes
 
 Changes follows the Keeper selected on the Keepers surface. `[` and `]` move
 that selection directly from Changes and reload the 24-hour change window;
 the header always names whose rows are shown. Right or `Enter` opens the
 selected recorded diff, and Left or `Esc` returns without moving the cursor.
+
+`v` opens the row's file on the Code surface, read through the keeper's own
+workspace (`?keeper=`), so the bytes are the keeper's checkout rather than a
+same-named file in the project tree — and the jump aims at the changed line
+when the local copy can say where it is. `o` hands the file to `$EDITOR` /
+Neovim instead. An absolute-path write has no address inside the keeper's
+workspace, so `v` says so and leaves that row to `o`.
+
+### Code
+
+A file browser over the workspace the server serves, one directory level at
+a time (the tree route is lazy). `j`/`k` move the cursor, `/` jumps it to a
+matching entry, Right or `Enter` drills into a directory or opens the file,
+and Left or `Esc` walks back out the way Enter came in.
+
+Which workspace is a scope the header always names: the project tree by
+default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
+or a registered repository after `Enter` on a Repositories row
+(`masc ▸ /`). `Esc` at a scoped root returns to the project tree. The three
+scopes are one field, so the surface cannot read two workspaces at once.
+
+An open file arrives whole and is lexed once — OCaml (nested comments
+included), bash, and JSON colour; a file past 500 KB draws plain rather
+than slowly. The pane then answers three more questions in place:
+
+- `h`/`l` pan sideways by one display cell — the gutter stays put, the
+  title says `(col N)`, and a double-width glyph on the boundary pads
+  rather than splits.
+- `H` swaps the content for the commits that touched the file
+  (`/api/v1/git/log`), most recent first. An untracked file honestly
+  answers "no commit touches this file".
+- `d` swaps it for the working tree's diff against HEAD, drawn by the same
+  renderer the Changes surface uses. A clean file says it matches its last
+  commit.
+
+One overlay at a time — opening the diff closes the history and the other
+way round, so `j`/`k` always has one owner. `Esc` closes the overlay first,
+then the file, then climbs directories.
 
 ### Runtime
 
@@ -756,6 +810,16 @@ Per surface:
 | Right / `Enter` | Fusion | Open exact run evidence detail |
 | `[` / `]` | Changes | Previous / next Keeper |
 | Right / `Enter` | Changes | Open the selected recorded diff |
+| `v` | Changes | View the row's file on the Code surface, in the keeper's workspace |
+| `a` twice | Verification | Approve the row under the cursor |
+| `x` | Verification | Reject it, with a reason through `$EDITOR` |
+| Right / `Enter` | Repositories | Browse the repository's tree on the Code surface |
+| Right / `Enter` | Code | Drill into a directory / open the file |
+| Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
+| `/`, `n` / `N` | Code | Jump the tree cursor to a match |
+| `h` / `l` | Code, file open | Pan the file sideways by one cell |
+| `H` | Code, file open | The commits that touched the file |
+| `d` | Code, file open | The working tree's diff against HEAD |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |

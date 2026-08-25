@@ -23,17 +23,21 @@ type keeper_model_projection =
   | Operator_only
   | Transport_alias of { projected_by : string }
 
-type keeper_tool_group =
-  | Execute_group
-  | Search_files_group
-  | Filesystem_group
-  | Board_group
-  | Voice_group
-  | Workspace_group
-  | Surface_group
-  | Memory_group
-  | Meta_group
-  | Core_group
+(* RFC-0389: the group vocabulary lives in [Keeper_tool_group], a leaf under
+   both this descriptor and the TOML parser, so the parser can reject an
+   unknown group at load time instead of this module stringly re-parsing it
+   at the consumer. The alias keeps every existing constructor use working. *)
+type keeper_tool_group = Keeper_tool_group.t
+
+open Keeper_tool_group
+
+(** Per-Keeper model tool surface (RFC-0389). [All] is the current behavior:
+    every model-visible descriptor. [Declared] narrows the surface to the
+    declared groups; [Core_group] and [Meta_group] are always retained so a
+    Keeper can always introspect its own surface. *)
+type tool_surface =
+  | All
+  | Declared of { groups : keeper_tool_group list }
 
 type input_schema_source =
   | Descriptor_owned
@@ -208,17 +212,38 @@ let keeper_model_projection_to_string = function
 
 ;;
 
-let keeper_tool_group_to_string = function
-  | Execute_group -> "execute"
-  | Search_files_group -> "search_files"
-  | Filesystem_group -> "fs"
-  | Board_group -> "board"
-  | Voice_group -> "voice"
-  | Workspace_group -> "workspace"
-  | Surface_group -> "surface"
-  | Memory_group -> "memory"
-  | Meta_group -> "meta"
-  | Core_group -> "core"
+let keeper_tool_group_to_string = Keeper_tool_group.to_string
+;;
+
+(* RFC-0389: strict inverse of [keeper_tool_group_to_string]. Unknown strings
+   are [None], never a silent fallback — the TOML loader rejects them at
+   load time; this reader is for rows that predate a rename. *)
+let keeper_tool_group_of_string = Keeper_tool_group.of_string
+;;
+
+(* RFC-0389: convert raw TOML group names to a [tool_surface].
+   [None] or empty list → [All] (inherit, no narrowing).
+   Unknown names are logged as warnings and silently excluded (fail-open).
+   Validation at TOML load time is impossible due to the dependency cycle
+   between Keeper_types_profile_defaults and Keeper_tool_descriptor. *)
+let tool_groups_to_surface (groups : string list option) : tool_surface =
+  match groups with
+  | None | Some [] -> All
+  | Some raw ->
+    let parsed =
+      List.filter_map
+        (fun name ->
+          match keeper_tool_group_of_string name with
+          | Some g -> Some g
+          | None ->
+            Log.Keeper.warn
+              "tool_groups: unknown group name %S ignored"
+              name;
+            None)
+        raw
+    in
+    if parsed = [] then All
+    else Declared { groups = parsed }
 ;;
 
 let input_schema_source_to_string = function
@@ -2289,8 +2314,29 @@ let model_visible_descriptors () =
     | [], _ :: _ -> true)
 ;;
 
-let model_visible_schemas () =
+(* RFC-0389: [Core_group] and [Meta_group] are always retained so a Keeper can
+   always introspect its own surface (self-describing tools). *)
+let always_retained_groups = [ Core_group; Meta_group ]
+
+let descriptor_in_surface ~surface descriptor =
+  match surface with
+  | All -> true
+  | Declared { groups } ->
+    List.mem descriptor.keeper_tool_group (groups @ always_retained_groups)
+;;
+
+(* RFC-0389: the model-visible descriptors narrowed to [surface]. [All] returns
+   every model-visible descriptor (the pre-feature behaviour); [Declared]
+   keeps only the declared groups plus the always-retained Core/Meta. This is
+   the descriptor-level projection that [make_tool_bundle] consumes so a
+   declared Keeper's actual turn payload narrows, not just its discovery JSON. *)
+let model_visible_descriptors_for_surface ~surface =
   model_visible_descriptors ()
+  |> List.filter (descriptor_in_surface ~surface)
+;;
+
+let model_visible_schemas ~surface =
+  model_visible_descriptors_for_surface ~surface
   |> List.concat_map (fun descriptor ->
     keeper_model_names descriptor
     |> List.map (fun name ->

@@ -1468,6 +1468,35 @@ let test_thinking_enable_is_satisfied_by_declared_inherent_contract () =
      = None)
 ;;
 
+(* The refusal has to name the value it resolved and where that value came
+   from. On 2026-08-24 this fired 112 times over twenty minutes while
+   runtime.toml already carried the correction from the outage it was
+   supposed to have fixed, and nothing in the logs could say which value the
+   process was holding — the message said only "the resolved typed dialect
+   cannot encode" (#26787). *)
+let test_rejection_reason_names_the_resolved_dialect_and_its_source () =
+  let config = make_config ~model_id:"undeclared" ~enable_thinking:true () in
+  match Complete_common.thinking_control_request_rejection_reason config with
+  | None -> Alcotest.fail "expected a rejection for an undeclared model"
+  | Some reason ->
+    let mentions needle =
+      let rec search from =
+        from + String.length needle <= String.length reason
+        && (String.sub reason from (String.length needle) = needle
+            || search (from + 1))
+      in
+      search 0
+    in
+    Alcotest.(check bool)
+      (Printf.sprintf "names the resolved format: %s" reason)
+      true
+      (mentions "resolved thinking_control_format=");
+    Alcotest.(check bool)
+      (Printf.sprintf "names where it came from: %s" reason)
+      true
+      (mentions "the model capability row" || mentions "the provider default")
+;;
+
 let test_thinking_enable_rejects_without_dialect_or_inherent_contract () =
   let config = make_config ~model_id:"undeclared" ~enable_thinking:true () in
   Alcotest.(check bool)
@@ -1869,6 +1898,10 @@ let () =
             "enable rejects undeclared contract"
             `Quick
             test_thinking_enable_rejects_without_dialect_or_inherent_contract
+        ; Alcotest.test_case
+            "the refusal names the resolved dialect and its source"
+            `Quick
+            test_rejection_reason_names_the_resolved_dialect_and_its_source
         ; Alcotest.test_case
             "reasoning effort requires explicit wire value"
             `Quick

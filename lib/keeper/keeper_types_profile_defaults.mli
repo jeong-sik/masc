@@ -22,6 +22,13 @@ type keeper_profile_defaults = {
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
+  (* RFC-0390: how much of an official client's built-in tool surface this
+     keeper may use. [None] keeps each runtime's own default posture. *)
+  native_tool_posture : Runtime_native_tools.posture option;
+  (* RFC-0389: per-keeper model tool surface. [None] inherits the default
+     (every model-visible tool). A [Some (Declared _)] narrows the surface to
+     the declared groups; [Core_group] and [Meta_group] are always retained. *)
+  tool_groups : string list option;
   (* Keeper runtime assignment lives in runtime.toml [[runtime.assignments]]. *)
   agent_core_env : (string * string) list;
 }

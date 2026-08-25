@@ -777,6 +777,28 @@ module For_testing_blame = struct
   let group_blame_entries = group_blame_entries
 end
 
+(* --- Log parsing --- *)
+
+(* One [git log --pretty=format:%h%x09%ad%x09%an%x09%s] row. Only the first
+   three tabs split -- a subject may carry tabs of its own. A row that does
+   not hold four fields is dropped rather than filled in. *)
+let git_log_row_of_line line =
+  match String.split_on_char '\t' line with
+  | hash :: date :: author :: subject_first :: subject_rest ->
+      let subject = String.concat "\t" (subject_first :: subject_rest) in
+      Some
+        (`Assoc
+           [ ("hash", `String hash)
+           ; ("date", `String date)
+           ; ("author", `String author)
+           ; ("subject", `String subject)
+           ])
+  | _ -> None
+
+module For_testing_log = struct
+  let git_log_row_of_line = git_log_row_of_line
+end
+
 (* --- Diff parsing --- *)
 
 let parse_hunk_header line =
@@ -1052,6 +1074,71 @@ let add_routes router =
                              `List grouped))
                   in
                   json_response_with_source ~status:`OK ~source request reqd json)))
+         request reqd)
+
+  |> Http.Router.get "/api/v1/git/log" (fun request reqd ->
+       with_public_read
+         (fun state _req reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           let limit =
+             match
+               Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
+             with
+             | Some n when n >= 1 -> min n 200
+             | Some _ | None -> 50
+           in
+           match Uri.get_query_param uri "path" with
+           | None | Some "" ->
+             json_response ~status:`Bad_request request reqd
+               (json_error "Missing path parameter")
+           | Some p ->
+             (match resolve_workspace_file base p with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd
+                  (json_error "Invalid path")
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
+                  json_response ~status:`Not_found request reqd
+                    (json_error "File not found")
+                else
+                  (match repository_owning ~base ~path:safe.lexical_path with
+                   | None ->
+                     json_response ~status:`Not_found request reqd
+                       (json_error
+                          "No git repository under this scope owns that path")
+                   | Some repo_root ->
+                     let rel = rel_under repo_root safe.lexical_path in
+                     let cache_key =
+                       Printf.sprintf "git:log:%s:%s:%s:%d" repo_root
+                         (source_to_string source)
+                         rel limit
+                     in
+                     let json =
+                       Dashboard_cache.get_or_compute cache_key
+                         ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                         (fun () ->
+                            Domain_pool_ref.submit_io_or_inline (fun () ->
+                              let lines =
+                                git_run_lines ~cwd:repo_root
+                                  [ "log"
+                                  ; Printf.sprintf "-n%d" limit
+                                  ; "--pretty=format:%h%x09%ad%x09%an%x09%s"
+                                  ; "--date=short"
+                                  ; "--"
+                                  ; rel
+                                  ]
+                              in
+                              `Assoc
+                                [ ("ok", `Bool true)
+                                ; ( "commits"
+                                  , `List
+                                      (List.filter_map git_log_row_of_line
+                                         lines) )
+                                ]))
+                     in
+                     json_response_with_source ~status:`OK ~source request
+                       reqd json)))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->

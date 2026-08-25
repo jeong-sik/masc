@@ -45,6 +45,51 @@ let test_the_caller_owns_the_needle_case () =
     (palette_subsequence ~needle:"KADM" "keeper adm-race")
 ;;
 
+
+let test_the_palette_lists_tasks_and_posts () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+  in
+  state.tasks <-
+    [ { id = "task-532"
+      ; title = "다섯 도구 축 사용 증명"
+      ; status = Masc_domain.Todo
+      ; priority = 2
+      } ];
+  state.board_posts <-
+    [ { bp_id = "p-1"
+      ; bp_author = "alpha"
+      ; bp_title = "release evidence sweep"
+      ; bp_body = ""
+      ; bp_votes = 0
+      ; bp_comment_count = 0
+      ; bp_created_at = "2026-08-25T00:00:00Z"
+      ; bp_hearth = None
+      ; bp_kind = None
+      } ];
+  let labels = List.map fst (palette_entries state) in
+  check_bool "a task is an entry" true
+    (List.exists
+       (fun l -> palette_contains ~needle:"task-532" l)
+       labels);
+  check_bool "a post is an entry" true
+    (List.exists
+       (fun l -> palette_contains ~needle:"release evidence" l)
+       labels);
+  (* The actions carry the ids the executor needs, not list positions that a
+     refresh can move. *)
+  check_bool "the task action carries its id" true
+    (List.exists
+       (function _, Palette_task id -> String.equal id "task-532" | _ -> false)
+       (palette_entries state));
+  check_bool "the post action carries its id" true
+    (List.exists
+       (function
+         | _, Palette_board_post id -> String.equal id "p-1"
+         | _ -> false)
+       (palette_entries state))
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -55,6 +100,10 @@ let () =
             test_subsequence_takes_the_characters_in_order
         ; Alcotest.test_case "the caller owns the needle case" `Quick
             test_the_caller_owns_the_needle_case
+        ] )
+    ; ( "sources"
+      , [ Alcotest.test_case "the palette lists tasks and posts" `Quick
+            test_the_palette_lists_tasks_and_posts
         ] )
     ]
 ;;

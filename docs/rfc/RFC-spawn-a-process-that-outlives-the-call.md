@@ -327,7 +327,32 @@ and "the process ended with its turn" is what the caller is told. The MCP
 endpoint declines the four tools for the same reason -- it has no turn, only
 the server root, which owns its switch for the life of the server.
 
+That answer is narrower than §1 and §7 were written to expect, and the two
+were not updated with it. Stating the gap rather than leaving it implied:
+
+- §1.3's own motivating case is not covered. The agent that reached for
+  `tmux new-session -d` wanted a TUI that survived the turn; a `keeper_spawn`
+  handle does not. It replaces `sleep 9` -- waiting on output instead of a
+  clock -- and not `tmux`.
+- §1.4 lists codex#10767, "no tool call keeps a process alive across turns",
+  among the seven this design is checked against. The shipped surface does not
+  address that one.
+- §7 declares only cross-*run* persistence a non-goal. Turn scope is stricter
+  than that, and §7 now says so.
+
+What it does cover is a process that outlives the *call* inside one turn: a
+server started, waited on until it says it is ready, read from, and stopped,
+all before the turn ends. That is the whole of it today.
+
 Open:
+
+- **Should a spawned process outlive its turn?** The argument for turn scope
+  is that anything longer needs a retention bound on the registry, and a cap
+  with nothing to say is the shape this workspace rejects. The argument
+  against is §1.3: the case that motivated the RFC needs cross-turn liveness,
+  and without it the `tmux` workaround stays. A keeper's switch is the obvious
+  next scope up and is exactly what makes #26382 possible if teardown is
+  wrong, so this needs its own evidence rather than a default.
 
 - **Does `Output_contains` need more than a literal?** A regexp would invite
   inferring meaning from output, which the workspace rules forbid elsewhere
@@ -338,8 +363,10 @@ Open:
 
 - Not a scheduler. Nothing here restarts a process, retries it, or notices it
   died and acts on that.
-- No cross-run persistence. A handle is meaningless after the process that
-  issued it ends, which §3.2 makes explicit rather than accidental.
+- No cross-turn liveness, and so no cross-run persistence either. A handle is
+  meaningless once the turn that issued it ends, because the registry and the
+  processes both belong to that turn's switch (§6). §3.2 makes the identity
+  explicit; §6 makes the scope explicit.
 - Not a terminal. `read` is bytes off a pipe; nothing interprets escape
   sequences or maintains a screen.
 

@@ -97,18 +97,37 @@ graph TB
 
 **Experimental** 상태의 의미: 해당 transport는 코드가 존재하고 로컬 테스트에서 동작하지만, 프로덕션 interop 검증이 미완료. API/프로토콜은 향후 breaking change가 발생할 수 있음. 기본값으로 활성화되어 있으나, 주의해서 사용.
 
-### 3.1 Transport 선택 로직 (에이전트 측)
+### 3.1 Transport 값 (아직 아무것도 고르지 않는다)
 
-`lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
+`lib/config/masc_grpc_transport.ml`이 값을 정의한다:
 
 ```ocaml
 type t = Http | Grpc | Ws | Local
 ```
 
-선택 순서:
-1. API 호출 시 명시된 `~transport` 파라미터
-2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"local"`)
-3. 기본값: `Local` (파일시스템 기반 Workspace 직접 호출)
+`MASC_AGENT_TRANSPORT` 로 값을 정하고 기본은 `Local` 이다. **그런데 값을 바꿔도
+에이전트가 서버에 닿는 경로는 달라지지 않는다.** 코드 전체에서 이 값을 읽는
+곳은 한 군데이고, 하는 일은 로그 한 줄이다.
+
+```ocaml
+(* lib/runtime/runtime_agent.ml:1101 *)
+(match config.transport with
+ | Masc_grpc_transport.Local -> ()
+ | t ->
+   Log.Runtime_agent.info "%s: transport=%s"
+     config.name (Masc_grpc_transport.to_string t));
+```
+
+`grpc` 로 두면 서버 부팅 때 keeper heartbeat 클라이언트가 생기는 효과는 있다
+(`server_runtime_bootstrap.ml`). 그 외 에이전트 트래픽은 값과 무관하게 같은
+경로로 간다.
+
+이 절은 전에 "선택 순서" 를 세 단계로 적어놓고 1번을 `~transport` 파라미터라고
+했는데, 코드에 있는 그 이름의 파라미터는 `Llm_provider.Llm_transport.t` 로
+**에이전트가 LLM 과 말하는 방식**이다. 여기 `Masc_grpc_transport.t`
+(**에이전트가 masc 서버와 말하는 방식**) 와는 타입이 다르다.
+
+배선 여부와 방향은 #30370 에서 다룬다.
 
 ---
 
@@ -701,7 +720,7 @@ sequenceDiagram
 | `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_ENABLED` | 1 | gRPC 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
-| `MASC_AGENT_TRANSPORT` | `local` | 에이전트 측 트랜스포트 선택 |
+| `MASC_AGENT_TRANSPORT` | `local` | 값만 정한다. 경로는 안 바뀐다 (§3.1) |
 
 ### 15.3 인증 설정
 

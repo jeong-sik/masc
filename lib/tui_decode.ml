@@ -3167,6 +3167,40 @@ let decode_file_change json =
   let* fc_succeeded = required_bool_field json "succeeded" in
   Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
 
+(* ── Workspace tree (/api/v1/workspace/tree, /workspace/children) ──────
+
+   The Code surface browses one directory at a time through the lazy
+   /children route; the node shape is the tree family's flat node object.
+   Unknown extra fields are the dashboard's (diff badges, keeper hues) and
+   are ignored here. *)
+
+type workspace_tree_node = {
+  wt_path : string;  (** relative to the workspace base *)
+  wt_label : string;
+  wt_has_children : bool;  (** a directory the /children route can open *)
+}
+
+let decode_workspace_tree_node json =
+  let* wt_path = required_string_field json "path" in
+  let* wt_label = required_string_field json "label" in
+  let* wt_has_children = required_bool_field json "hasChildren" in
+  Ok { wt_path; wt_label; wt_has_children }
+
+let decode_workspace_tree json =
+  match json with
+  | `List nodes -> decode_list "nodes" decode_workspace_tree_node nodes
+  | other ->
+      Error
+        (Printf.sprintf "workspace tree must be a list (received %s)"
+           (Json_util.kind_name other))
+
+(* /api/v1/workspace/file answers {ok, content}; anything else is a decode
+   failure, not an empty file. *)
+let decode_workspace_file json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "workspace file answered ok=false"
+  else required_string_field json "content"
+
 type git_diff_row_kind =
   | Gd_context
   | Gd_added

@@ -494,13 +494,15 @@ let test_blob_store_failure_is_typed () =
           | _ -> Alcotest.fail "expected unknown post-effect failure class")))
 
 (* A caller's own metadata has to survive the manifest step, or a projection
-   attached before it is silently dropped on its way out. [Execute] attaches
-   the rewrite for an escaped shell there (`escaped_shell`), so this is the
-   join it passes through. *)
+   attached before it is silently dropped on its way out. [Execute] used to
+   attach the escaped-shell rewrite here; it does not any more, because
+   agent_core discards [_meta] where a tool result becomes conversation and
+   the advice never reached the caller it was written for. The join is still
+   worth pinning for whatever attaches next. *)
 let test_existing_metadata_survives_the_manifest () =
   let answered =
     Tool_result.with_metadata
-      (`Assoc [ "escaped_shell", `String "kept" ])
+      (`Assoc [ "caller_projection", `String "kept" ])
       (tool_ok "small")
   in
   match B.attach_artifact_manifest ~base_path:"/nonexistent-base" answered with
@@ -508,13 +510,13 @@ let test_existing_metadata_survives_the_manifest () =
   | Ok result ->
     (match Tool_result.metadata result with
      | Some (`Assoc fields) ->
-       (match List.assoc_opt "escaped_shell" fields with
+       (match List.assoc_opt "caller_projection" fields with
         | Some (`String "kept") -> ()
         | Some other ->
           Alcotest.failf
-            "escaped_shell changed on the way through: %s"
+            "caller_projection changed on the way through: %s"
             (Yojson.Safe.to_string other)
-        | None -> Alcotest.fail "escaped_shell was dropped by the manifest step")
+        | None -> Alcotest.fail "caller_projection was dropped by the manifest step")
      | Some other ->
        Alcotest.failf "metadata stopped being an object: %s" (Yojson.Safe.to_string other)
      | None -> Alcotest.fail "metadata was dropped entirely")

@@ -459,9 +459,9 @@ let slot_scheduler_observed
 
 (** Append a caller-supplied addendum to an atd-emitted record JSON.
 
-    Used by [agent_completed] to splice the runtime-local Result projection
-    ([result_fields]) onto the typed base record without forcing the
-    leaf event library to depend on [Agent_core] variant types.
+    Used by [agent_completed] to splice the runtime-local success-response
+    projection ([response_fields]) onto the typed base record without forcing
+    the leaf event library to depend on [Agent_core] response types.
 
     Field order is [<base record fields in atd declaration order> @
     <addendum>], which matches the previous inline `Assoc path in
@@ -482,8 +482,8 @@ let merge_addendum_into_record
 (** Emit an [agent_completed] envelope.  The runtime arm in
     [runtime_event_bridge.ml] retains its [observe_inference_cost]
     side effect (Otel_metric_store histogram) and invokes
-    [agent_completed_result_fields result] to project the
-    [Agent_core] [Result.t] into the [result_fields] addendum. *)
+    [agent_completed_response_fields response] to project the successful
+    [Agent_core] response into the [response_fields] addendum. *)
 let agent_completed
       ~(ts_unix : float)
       ~(correlation_id : string)
@@ -491,7 +491,7 @@ let agent_completed
       ~(agent_name : string)
       ~(task_id : string)
       ~(elapsed_s : float)
-      ~(result_fields : (string * Yojson.Safe.t) list)
+      ~(response_fields : (string * Yojson.Safe.t) list)
   : Yojson.Safe.t
   =
   let base_json =
@@ -500,7 +500,7 @@ let agent_completed
     in
     Yojson.Safe.from_string (Sse_event_j.string_of_agent_completed_payload p)
   in
-  let payload_json = merge_addendum_into_record base_json result_fields in
+  let payload_json = merge_addendum_into_record base_json response_fields in
   wrap_envelope
     { event_type = "agent_completed"
     ; ts_unix

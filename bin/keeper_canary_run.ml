@@ -222,17 +222,7 @@ let parse_args argv =
          ; allow_reused_keeper = !allow_reused_keeper
          })
 
-let iso8601_now () =
-  let t = Unix.gettimeofday () in
-  let tm = Unix.gmtime t in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
+let iso8601_now () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
 
 (* This must testify to the canary executable that is running, not to an
    arbitrary checkout it happens to be launched from.  The trusted runtime
@@ -719,7 +709,16 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
   =
   let ( let* ) = Result.bind in
   (
-    let host = Option.value args.host ~default:(Env_config_core.masc_host ()) in
+    (* [--host] says where to reach the server. Without it the server is the one
+       on this machine, so the fallback is loopback.
+
+       It used to fall back to MASC_HOST, which is the server's bind address:
+       its documented non-default values are the wildcards 0.0.0.0 and ::,
+       which [Masc_network_defaults.is_unspecified_host] names as "every
+       interface" rather than a reachable peer. *)
+    let host =
+      Option.value args.host ~default:Masc_network_defaults.masc_http_loopback_peer
+    in
     let port =
       Option.value args.port ~default:(Env_config_core.masc_http_port_int ())
     in

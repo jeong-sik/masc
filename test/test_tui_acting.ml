@@ -126,6 +126,18 @@ let test_keeper_rows_say_what_the_keeper_did () =
     "\xc2\xb7 bandleader heartbeat | turn_running \xc2\xb7 in turn for 36m29s"
     (text (Acting.row_of_event ~duration_ms:None (heartbeat "bandleader")))
 
+let test_agent_terminal_rows_keep_success_and_failure_distinct () =
+  let completed =
+    agent_core ~kind:Observer.Agent_completed ~task:"task-1" "analyst"
+  in
+  let failed = agent_core ~kind:Observer.Agent_failed ~task:"task-2" "analyst" in
+  check string "a successful run is one completed row"
+    "\xe2\x96\xa0 analyst agent done | task-1"
+    (text (Acting.row_of_event ~duration_ms:None completed));
+  check string "a failed run is one failed row"
+    "\xe2\x9c\x97 analyst agent failed | task-2"
+    (text (Acting.row_of_event ~duration_ms:None failed))
+
 let test_a_lane_named_event_is_attributed_by_its_trace () =
   let on_lane =
     Observer.Agent_core
@@ -168,6 +180,8 @@ let () =
             test_a_return_with_no_start_held_has_no_duration
         ; test_case "keeper rows say what the keeper did" `Quick
             test_keeper_rows_say_what_the_keeper_did
+        ; test_case "agent terminal rows keep success and failure distinct" `Quick
+            test_agent_terminal_rows_keep_success_and_failure_distinct
         ; test_case "a lane-named event is attributed by its trace" `Quick
             test_a_lane_named_event_is_attributed_by_its_trace
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit

@@ -20,6 +20,16 @@ let login_command =
   Printf.sprintf "masc login --agent %s --client-env %s" agent_name
     token_env_var
 
+(* How long a bearer this client mints for itself lasts. The workspace's own
+   window is a day, meant for an operator session someone is sitting in front
+   of; an operator who leaves this running overnight comes back to a refused
+   credential, which is the failure the mint exists to end. No expiry at all
+   goes the other way and leaves an admin secret on disk that nothing retires.
+   A month outlasts any single sitting and still stops answering for a
+   workspace nobody returns to -- and this client mints a replacement on the
+   next start, so crossing it costs the operator nothing. *)
+let self_mint_expiry_hours = 24 * 30
+
 (* A refusal names two situations and only one of them is fixed by providing a
    token. This client finds the bearer masc login left in the workspace, so it
    usually does present one, and then "you have no token" is both false and
@@ -78,10 +88,11 @@ let outcome_notice = function
       Some
         (Printf.sprintf
            "no operator token was present, so this %s minted one for this \
-            workspace and stored it. A server that is already running rebuilds \
-            its credential index on a timer, so the first reads may still be \
-            refused."
-           agent_name)
+            workspace and stored it; it lasts %d days. A server that is \
+            already running rebuilds its credential index on a timer, so the \
+            first reads may still be refused."
+           agent_name
+           (self_mint_expiry_hours / 24))
   | Unavailable detail ->
       Some
         (Printf.sprintf "no operator token, and none could be made: %s — %s"

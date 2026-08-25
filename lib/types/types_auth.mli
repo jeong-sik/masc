@@ -101,6 +101,13 @@ type auth_config = {
 }
 [@@deriving show]
 
+val min_token_expiry_hours : int
+val max_token_expiry_hours : int
+(** The window a bearer credential may be issued for, in hours: an hour at the
+    shortest, a year at the longest. Shared by the config decoder and by callers
+    that name their own window instead of taking the config's, so the two cannot
+    disagree about what the credential store will accept. *)
+
 val default_auth_config : auth_config
 (** [enabled = true; workspace_secret_hash = None; require_token = true;
        token_expiry_hours = 24]. Decoding accepts a workspace hash only as 64

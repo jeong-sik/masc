@@ -589,6 +589,38 @@ let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
 
 (* ── test suite ─────────────────────────────────────────────────────── *)
 
+(* A link row the writer never produces is damage, not an answer. Folding a
+   missing or non-list "task_ids" to [] made a corrupt registry read as "this
+   goal has no linked tasks" — the same shape the [links] guard already
+   refuses one layer out (#29355). *)
+let test_a_link_row_without_task_ids_is_not_an_empty_goal () =
+  with_test_env (fun config ->
+    let path = Workspace_goal_index.goal_task_links_path config in
+    let write contents =
+      Out_channel.with_open_text path (fun oc -> Out_channel.output_string oc contents)
+    in
+    write {|{"links":[{"goal_id":"g-1","task_ids":["t-1"]}]}|};
+    (match Workspace_goal_index.read_goal_task_links_r config with
+     | Ok [ ("g-1", [ "t-1" ]) ] -> ()
+     | Ok other ->
+       Alcotest.failf "a well-formed row must read back: %d link(s)" (List.length other)
+     | Error detail -> Alcotest.failf "a well-formed row must read back: %s" detail);
+    write {|{"links":[{"goal_id":"g-1"}]}|};
+    (match Workspace_goal_index.read_goal_task_links_r config with
+     | Ok links ->
+       Alcotest.failf
+         "a row with no task_ids must not read as a goal with no links (got %d)"
+         (List.length links)
+     | Error _ -> ());
+    write {|{"links":[{"goal_id":"g-1","task_ids":"t-1"}]}|};
+    match Workspace_goal_index.read_goal_task_links_r config with
+    | Ok links ->
+      Alcotest.failf
+        "a row whose task_ids is not a list must not read as empty (got %d)"
+        (List.length links)
+    | Error _ -> ())
+;;
+
 let () =
   Alcotest.run "workspace_goal_index"
     [ ( "build_goal_task_index"
@@ -641,6 +673,10 @@ let () =
               "batch create surfaces rollback failure when backlog write fails"
               `Quick
               test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure
+          ; test_case
+              "a link row without task_ids is not an empty goal"
+              `Quick
+              test_a_link_row_without_task_ids_is_not_an_empty_goal
           ] )
     ]
 ;;

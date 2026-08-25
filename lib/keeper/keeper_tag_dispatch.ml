@@ -127,7 +127,7 @@ let dispatch
       Tool_misc.dispatch
         { Tool_misc.config
         ; agent_name
-        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ()
+        ; help_schemas = Keeper_tool_descriptor.model_visible_schemas ~surface:All
         }
         ~name
         ~args

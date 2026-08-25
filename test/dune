@@ -2751,7 +2751,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc_tui_types))
+ (libraries alcotest masc.masc_types masc_tui_types))
 
 (test
  (name test_tui_acting)
@@ -2786,7 +2786,7 @@
 (test
  (name test_tui_markdown_render_cache)
  (modules test_tui_markdown_render_cache)
- (libraries alcotest masc_tui_markdown_render_cache))
+ (libraries alcotest masc_tui_markdown masc_tui_markdown_render_cache))
 
 (test
  (name test_tui_diff)
@@ -3051,8 +3051,21 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_workspace_git_log.inc)
+(include stanzas/test_tui_code_lexer.inc)
+(include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
+
+(test
+ (name test_tui_terminal_probe)
+ (modules test_tui_terminal_probe)
+ (libraries
+  alcotest
+  masc_tui_terminal_palette
+  masc_tui_terminal_probe
+  masc_tui_graphics))
+
 (include stanzas/test_tui_paste_spill.inc)
 (include stanzas/test_keeper_sandbox_root_by_profile.inc)
 

@@ -244,7 +244,9 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
     Error (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id)
 ;;
 
-let active_top_level_namespaces = [ "providers"; "models"; "runtime"; "web_search" ]
+let active_top_level_namespaces =
+  [ "providers"; "models"; "runtime"; "web_search"; "skills" ]
+;;
 let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
 let is_reserved name = List.mem name reserved_namespaces

@@ -3176,6 +3176,16 @@
  (libraries alcotest masc masc_types))
 
 (test
+ (name test_skill_source_config)
+ (modules test_skill_source_config)
+ (libraries alcotest masc.skill_config))
+
+(test
+ (name test_skill_source_runtime_integration)
+ (modules test_skill_source_runtime_integration)
+ (libraries alcotest masc masc.skill_config))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))

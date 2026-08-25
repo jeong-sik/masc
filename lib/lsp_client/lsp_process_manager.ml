@@ -29,6 +29,12 @@ let pp_spawn_error fmt = function
    independent string matches: adding a language now fails to compile until its
    command, its extensions and its project markers are all given, where before
    a new arm in one match left the others silently answering "unknown". *)
+type reference_index =
+  { artifact_suffix : string
+  ; search_root : string
+  ; build_command : string
+  }
+
 type language =
   | Ocaml
   | Typescript
@@ -76,6 +82,41 @@ let project_markers_of_language = function
   | Python -> [ "pyproject.toml"; "setup.py"; "setup.cfg" ]
   | Rust -> [ "Cargo.toml" ]
   | Go -> [ "go.mod" ]
+;;
+
+(* What a language server needs on disk before it can answer about references
+   in files other than the one it was given. Measured for OCaml: with no
+   .ocaml-index, references on a two-file project answered 1 occurrence where
+   the truth was 3; after `dune build @ocaml-index` (0.33 s on that project) it
+   answered all 3, across both files.
+
+   The other four are [None] because their servers hold the index themselves,
+   and none of them is installed on the host this was measured on -- so [None]
+   here means "no precondition this client checks", not "measured as needing
+   nothing". *)
+let reference_index_of_language = function
+  | Ocaml ->
+    Some
+      { artifact_suffix = ".ocaml-index"
+      ; search_root = "_build"
+      ; build_command = "dune build @ocaml-index"
+      }
+  | Typescript | Javascript | Python | Rust | Go -> None
+;;
+
+(* Variables that redirect this language's toolchain to a build directory other
+   than the one under [~workspace_root]. Inherited from masc they override the
+   root the caller asked for, and the symptom is not an error: measured on a
+   two-file project with its index built, references answered 3 occurrences
+   with a clean environment and 1 with DUNE_BUILD_DIR pointing at another
+   tree's build. Same project, same index, same position.
+
+   The working directory was checked the same way and does not do this:
+   ocamllsp resolves merlin config from rootUri, and a server started in an
+   unrelated directory still answered 3. So the cwd is left alone. *)
+let redirecting_variables_of_language = function
+  | Ocaml -> [ "DUNE_BUILD_DIR"; "DUNE_WORKSPACE" ]
+  | Typescript | Javascript | Python | Rust | Go -> []
 ;;
 
 let language_of_extension ext =
@@ -210,6 +251,23 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
         let stdin_r, stdin_w = Eio.Process.pipe ~sw proc_mgr in
         let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
         let stderr_r, stderr_w = Eio.Process.pipe ~sw proc_mgr in
+        let child_env =
+          match language_of_lang_id lang_id with
+          | None -> Unix.environment ()
+          | Some language ->
+            (match redirecting_variables_of_language language with
+             | [] -> Unix.environment ()
+             | redirecting ->
+               Array.of_list
+                 (List.filter
+                    (fun binding ->
+                      match String.index_opt binding '=' with
+                      | None -> true
+                      | Some at ->
+                        let name = String.sub binding 0 at in
+                        not (List.exists (String.equal name) redirecting))
+                    (Array.to_list (Unix.environment ()))))
+        in
         let proc =
           Eio.Process.spawn
             ~sw
@@ -217,6 +275,7 @@ let spawn ~sw ~lang_id ~workspace_root (proc_mgr : Eio_unix.Process.mgr_ty Eio.R
             ~stdin:stdin_r
             ~stdout:stdout_w
             ~stderr:stderr_w
+            ~env:child_env
             argv
         in
         Eio.Flow.close stdin_r;

@@ -35,6 +35,24 @@ val lang_id_of_language : language -> string
 (** The executable and argv that start this language's server. *)
 val command_of_language : language -> string * string list
 
+(** What has to exist on disk before a language server answers about
+    references outside the file it was given. *)
+type reference_index =
+  { artifact_suffix : string  (** e.g. [".ocaml-index"] *)
+  ; search_root : string  (** directory under the project root to look in *)
+  ; build_command : string  (** what a caller runs to produce it *)
+  }
+
+(** [None] where the server holds its own index and needs nothing on disk.
+
+    Measured for OCaml: with no [.ocaml-index], [textDocument/references] on a
+    two-file project answered one occurrence where the truth was three; after
+    [dune build @ocaml-index] it answered all three, in both files. The other
+    four answer [None] because their servers index themselves — none is
+    installed on the host this was measured on, so that is a statement about
+    what this client checks, not a measurement. *)
+val reference_index_of_language : language -> reference_index option
+
 (** Files whose directory is a project root for this language, nearest first.
     {!Lsp_project_root} walks a file's ancestors looking for these. *)
 val project_markers_of_language : language -> string list

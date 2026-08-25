@@ -54,15 +54,29 @@ let optional_occurrence args =
 let question_of args =
   let* raw = required_string args "question" in
   match Lsp_questions.question_of_string raw with
-  | Some (Lsp_questions.Definition as question) | Some (Lsp_questions.Hover as question) ->
-    Ok question
-  | Some Lsp_questions.References ->
-    (* Measured on this tree as answering only the opened file's occurrences,
-       so it is refused by name rather than answered short (#30504). *)
-    Error
-      "references is not answered here: measured on this repository it returns only the \
-       occurrences in the file it was given. Use Grep for where a name is used."
-  | None -> Error (Printf.sprintf "question must be definition or hover, got %S" raw)
+  | Some question -> Ok question
+  | None ->
+    Error (Printf.sprintf "question must be definition, hover or references, got %S" raw)
+;;
+
+(* A language server with no index answers references with the occurrences it
+   can see, which is the ones in the file it was given -- one where the truth
+   was three, measured. That reads like an answer, so it is caught before the
+   question is asked (#30504). *)
+let reference_index_ready ~question ~language ~project_root =
+  match question with
+  | Lsp_questions.Definition | Lsp_questions.Hover -> Ok ()
+  | Lsp_questions.References ->
+    (match Lsp_reference_index.check ~language ~project_root with
+     | Lsp_reference_index.Present -> Ok ()
+     | Lsp_reference_index.Missing { build_command; searched } ->
+       Error
+         (Printf.sprintf
+            "references needs the project's reference index and none is under %s. Run: %s \
+             -- until then the answer would name only the occurrences in this one file, \
+             which is not the same as there being only one."
+            searched
+            build_command))
 ;;
 
 (* The position arithmetic lives in [Lsp_position] — one owner for this
@@ -152,6 +166,7 @@ let handle ~config ~meta ~start_time ~args =
            column_of ~line ~symbol ~occurrence ~line_number:(line_index + 1)
          in
          let* workspace_root = project_root_of ~language ~path ~boundary in
+         let* () = reference_index_ready ~question ~language ~project_root:workspace_root in
          Ok (language, workspace_root, character)
        in
        (match prepared with

@@ -267,6 +267,15 @@ val resolve_native_posture :
     client cannot disable built-ins) and the downgrade is published as a
     typed event ([masc.keeper.native_posture_degraded]) — the turn keeps
     running, the record says what was declared and why it was not honored.
+
+    Reporting cadence differs by branch (#30408 review): the [full] ->
+    [read] degradation is turn state (the approval mode lives in process
+    memory and can flip), so it emits one event per affected turn. The
+    [none]-on-a-client-without-a-disable-switch case is a static
+    profile-vs-assignment contradiction, so it emits once per process per
+    (keeper, client) pair at the first offending resolution and then goes
+    quiet until a resolution honors the declaration (which re-arms the
+    gate). The effective posture returned is unchanged in both branches.
     The approval stance is in-memory by design; after a restart that means
     a [full] keeper runs degraded-to-[read] turns, each one recorded,
     until an operator re-arms [Yolo]. *)

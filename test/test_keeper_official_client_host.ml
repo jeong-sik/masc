@@ -1089,6 +1089,110 @@ let test_resolve_degrades_instead_of_failing_the_turn () =
           ~none_supported:false))
 ;;
 
+(* #30408 review: the two refusal branches have different lifetimes, so
+   their reporting cadence must differ. [full] under a non-yolo approval
+   mode is turn state — publish every affected turn. [none] on a client
+   without a disable switch is a static profile-vs-assignment
+   contradiction — publish once per process per (keeper, client) pair,
+   then go quiet until a resolution honors the declaration. *)
+let test_static_contradiction_reports_once_until_rearmed () =
+  (* The Event_bus needs a running Eio scheduler; the heartbeat
+     integration tests wrap bus setup in Eio_main.run the same way. *)
+  Eio_main.run @@ fun _env ->
+  (* One persistent subscription for the whole case: events published
+     between drains queue in its buffer instead of being lost with no
+     subscriber attached. *)
+  let bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_masc bus;
+  let subscription =
+    Masc.Runtime_event_bus.subscribe
+      ~capacity:32
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+      ~purpose:"rfc0390-static-contradiction-test"
+      bus
+  in
+  let drained_native_posture_events () =
+    (* Publish routes through a fiber-owned queue; yield once so the
+       pending deliveries reach the subscriber before the drain. *)
+    Eio.Fiber.yield ();
+    List.filter_map
+      (fun (event : Agent_core.Event_bus.event) ->
+        match event.Agent_core.Event_bus.payload with
+        | Agent_core.Event_bus.Custom
+            ("masc.keeper.native_posture_degraded", payload) -> Some payload
+        | _ -> None)
+      (Masc.Runtime_event_bus.drain subscription)
+  in
+  let posture_of = function
+    | Ok p -> Runtime_native_tools.to_string p
+    | Error detail ->
+      failf "runtime call must not die: %s"
+        (Agent_core.Error.to_string detail)
+  in
+  (* All resolutions share one bus; the helper drains whatever arrived
+     since the last drain. [full] must publish on BOTH turns (turn
+     state); [none] exactly once across its four turns, and a previously
+     gated pair must publish again after an honoring resolution re-arms
+     the gate. *)
+  (* [full] under Auto: per-turn publication, two turns -> two events. *)
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto-per-turn"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto-per-turn"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  check int "full under Auto publishes per turn" 2
+    (List.length (drained_native_posture_events ()));
+  (* [none] on Codex: static contradiction, four turns -> one event. *)
+  for _ = 1 to 4 do
+    ignore
+      (posture_of
+         (Host.resolve_native_posture
+            ~base_path:"/nonexistent-rfc0390-base"
+            ~keeper_name:"rfc0390-none-codex-static"
+            ~client_label:"Codex"
+            ~default:Runtime_native_tools.Native_none
+            ~none_supported:false))
+  done;
+  check int "static none contradiction publishes once" 1
+    (List.length (drained_native_posture_events ()));
+  (* A honoring resolution for the same pair re-arms the gate. *)
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-none-codex-static"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_read
+          ~none_supported:false));
+  check int "honoring resolution publishes nothing" 0
+    (List.length (drained_native_posture_events ()));
+  for _ = 1 to 2 do
+    ignore
+      (posture_of
+         (Host.resolve_native_posture
+            ~base_path:"/nonexistent-rfc0390-base"
+            ~keeper_name:"rfc0390-none-codex-static"
+            ~client_label:"Codex"
+            ~default:Runtime_native_tools.Native_none
+            ~none_supported:false))
+  done;
+  check int "re-armed static contradiction publishes once again" 1
+    (List.length (drained_native_posture_events ()));
+  Masc.Runtime_event_bus.unsubscribe bus subscription
+;;
+;;
+
 let () = Random.self_init ()
 
 let reject_detail = "Your call to \"effect\": errors (fix these and call again)"
@@ -1362,6 +1466,10 @@ let () =
             "resolve degrades instead of failing the turn"
             `Quick
             test_resolve_degrades_instead_of_failing_the_turn
+        ; test_case
+            "static contradiction reports once until re-armed"
+            `Quick
+            test_static_contradiction_reports_once_until_rearmed
         ] )
     ; ( "reasoning effort"
       , [ test_case

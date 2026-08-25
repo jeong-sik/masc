@@ -26,12 +26,15 @@ let antigravity_default = Native_read
 let claude_code_read_tool_names = [ "Read"; "Glob"; "Grep" ]
 
 (* RFC-0390 admission review: a declared posture that admission cannot
-   honor degrades to the safest strictly-weaker posture the client can
-   still run, instead of failing the whole runtime call. [full] under a
-   non-yolo approval mode becomes [read] (effects stay behind the gate);
-   [none] on a client without a disable switch becomes [read] (the
-   client's own default). Both keep the turn alive and are reported via
-   a typed event, not silently. *)
+   honor resolves to the posture the client actually runs, instead of
+   failing the whole runtime call. [full] under a non-yolo approval mode
+   becomes [read] (effects stay behind the gate) — a true downgrade,
+   reported per turn because the approval mode is turn state. [none] on
+   a client without a disable switch becomes [read] (the client's own
+   floor: its built-ins keep running no matter what we pass) — this is
+   NOT a downgrade but a static contradiction (profile says [none],
+   runtime.toml assigned a runtime that cannot honor it), so the event
+   is reported once per process, not per turn (#30408 review). *)
 let degrade_on_admission ~posture ~none_supported () =
   match (posture, none_supported) with
   | Native_full, _ -> Native_read

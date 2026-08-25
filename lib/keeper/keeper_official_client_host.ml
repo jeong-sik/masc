@@ -988,6 +988,27 @@ let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
    to the safest weaker posture and the downgrade is recorded as a typed
    event, never silent. Profile load failures remain fail-closed — that
    is a declaration-time error, not an admission-time one. *)
+(* #30408 review: the two refusal branches of [admit_native_posture] have
+   different lifetimes and must not share one reporting cadence.
+
+   [full] under a non-yolo approval mode is TURN state — the mode lives in
+   process memory, reverts to Auto on restart, and can be flipped mid-run,
+   so every affected turn says so (that per-turn event is the P0 fix).
+
+   [none] on a client without a disable switch is a STATIC contradiction:
+   the profile TOML declares [none] while runtime.toml (the assignment
+   SSOT) put this keeper on a client that cannot honor it. Nothing about
+   it changes turn to turn, so repeating the event every turn is noise.
+   It is reported once per process per (keeper, client) pair, at the
+   first posture resolution after boot — the earliest moment both sides
+   of the contradiction coexist, since [keeper_turn_up_create] writes
+   the profile after the assignment exists. The gate clears when a later
+   resolution honors the declaration (operator fixed the profile or the
+   assignment), so a re-introduced contradiction is reported again. *)
+let native_posture_static_contradiction_gate : (string, unit) Hashtbl.t =
+  Hashtbl.create 16
+;;
+
 let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
     ~none_supported =
   match
@@ -1007,11 +1028,19 @@ let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
         (Keeper_tool_approval_mode.shared ())
         ~keeper_name
     in
+    let static_contradiction_key = keeper_name ^ "\000" ^ client_label in
     (match
        admit_native_posture ~posture:declared ~approval_mode ~none_supported
          ~client_label
      with
-     | Ok () -> Ok declared
+     | Ok () ->
+       (* The declaration is honored: any earlier static contradiction for
+          this pair is resolved, so a future re-contradiction reports
+          again instead of being swallowed by the gate. *)
+       Hashtbl.remove
+         native_posture_static_contradiction_gate
+         static_contradiction_key;
+       Ok declared
      | Error detail ->
        let effective =
          Runtime_native_tools.degrade_on_admission
@@ -1019,11 +1048,43 @@ let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
            ~none_supported
            ()
        in
-       Keeper_event_publisher.publish_native_posture_degraded
-         ~keeper_name
-         ~client_label
-         ~declared:(Runtime_native_tools.to_string declared)
-         ~effective:(Runtime_native_tools.to_string effective)
-         ~reason:detail;
+       let static_contradiction =
+         (declared : Runtime_native_tools.posture) = Native_none
+         && not none_supported
+       in
+       if static_contradiction then (
+         if
+           not
+             (Hashtbl.mem
+                native_posture_static_contradiction_gate
+                static_contradiction_key)
+         then (
+           Hashtbl.replace
+             native_posture_static_contradiction_gate
+             static_contradiction_key
+             ();
+           Log.Keeper.warn
+             "%s: static native-posture contradiction (reported once per \
+              boot, not per turn): profile declares native = \"none\" but %s \
+              cannot disable its built-in tools; the lane runs at its \
+              \"read\" floor until the profile or the runtime.toml \
+              assignment changes"
+             keeper_name client_label;
+           Keeper_event_publisher.publish_native_posture_degraded
+             ~keeper_name
+             ~client_label
+             ~declared:(Runtime_native_tools.to_string declared)
+             ~effective:(Runtime_native_tools.to_string effective)
+             ~reason:detail))
+       else
+         (* Turn-scoped degradation ([full] under a non-yolo approval
+            mode): the condition can appear and disappear with the
+            approval mode, so it stays per-turn. *)
+         Keeper_event_publisher.publish_native_posture_degraded
+           ~keeper_name
+           ~client_label
+           ~declared:(Runtime_native_tools.to_string declared)
+           ~effective:(Runtime_native_tools.to_string effective)
+           ~reason:detail;
        Ok effective)
 ;;

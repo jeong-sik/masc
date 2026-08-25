@@ -90,6 +90,30 @@ let test_public_voice_audio_url_strips_trailing_slash () =
   check string "audio URL"
     "https://chat.example.com/api/v1/voice/audio/tok123" url
 
+(* No [Unix.unsetenv] exists in the stdlib, so a variable this helper found
+   absent is restored to "" -- which [Env_config_core.trim_opt] reads as
+   absent, the state the rest of the file expects. *)
+let with_base_url value f =
+  let key = "MASC_HTTP_BASE_URL" in
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+    f
+
+(* The argument and the env fallback name the same server, so the link must
+   not depend on which branch resolved it. Before #30476 this file folded the
+   argument and took the env value verbatim. *)
+let test_public_voice_audio_url_agrees_with_the_env_fallback () =
+  let base = "http://0.0.0.0:8935" in
+  let from_argument = D.public_voice_audio_url ~base_url:base "tok" in
+  let from_env =
+    with_base_url base (fun () -> D.public_voice_audio_url "tok")
+  in
+  check string "a wildcard is not a link anyone can open"
+    "http://127.0.0.1:8935/api/v1/voice/audio/tok" from_argument;
+  check string "both branches build the same link" from_argument from_env
+
 let test_rich_embeds_of_text_projects_links_and_images () =
   let embeds =
     D.rich_embeds_of_text
@@ -390,6 +414,8 @@ let () =
             test_public_voice_audio_url_uses_base_url
         ; test_case "audio URL strips trailing slash" `Quick
             test_public_voice_audio_url_strips_trailing_slash
+        ; test_case "argument and env fallback agree" `Quick
+            test_public_voice_audio_url_agrees_with_the_env_fallback
         ; test_case "projects text links and images to embeds" `Quick
             test_rich_embeds_of_text_projects_links_and_images
         ; test_case "supports code and mermaid as embeds" `Quick

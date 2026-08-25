@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import select
 import signal
-import socket
 import struct
 import zlib
 import subprocess
@@ -128,23 +127,23 @@ class GatedHttpResponse:
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
     requests: HttpRequests | None,
-) -> Iterator[tuple[int, Callable[[], None]]]:
-    if fixtures is None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
-            stalled_endpoint.bind(("127.0.0.1", 0))
-            stalled_endpoint.listen(1)
+) -> Iterator[tuple[int, Callable[[], None], Callable[[str], None]]]:
+    fixtures = {} if fixtures is None else fixtures
+    workspace_base_path: str | None = None
 
-            def start_endpoint() -> None:
-                pass
-
-            yield int(stalled_endpoint.getsockname()[1]), start_endpoint
-        return
+    def set_workspace_base_path(base_path: str) -> None:
+        nonlocal workspace_base_path
+        workspace_base_path = base_path
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
             fixture = fixtures.get(
                 self.path,
-                (503, {"error": "fixture endpoint unavailable"}),
+                (200, {})
+                if self.path == "/health"
+                else fleet_safety_fixture()
+                if self.path == "/health?full=1"
+                else (503, {"error": "fixture endpoint unavailable"}),
             )
             resolved = fixture() if callable(fixture) else fixture
             extra_headers: tuple[tuple[str, str], ...] = ()
@@ -155,6 +154,23 @@ def test_http_endpoint(
                 extra_headers = resolved.headers
             else:
                 status, payload = resolved
+                if (
+                    self.path in ("/health", "/health?full=1")
+                    and status == 200
+                    and isinstance(payload, dict)
+                    and workspace_base_path is not None
+                ):
+                    payload = dict(payload)
+                    paths = dict(payload.get("paths", {}))
+                    paths.update(
+                        {
+                            "effective_base_path": workspace_base_path,
+                            "effective_masc_root": os.path.join(
+                                workspace_base_path, ".masc"
+                            ),
+                        }
+                    )
+                    payload["paths"] = paths
                 body = json.dumps(payload).encode()
                 content_type = "application/json"
             self.send_response(status)
@@ -190,7 +206,11 @@ def test_http_endpoint(
             thread.start()
 
         try:
-            yield int(server.server_address[1]), start_endpoint
+            yield (
+                int(server.server_address[1]),
+                start_endpoint,
+                set_workspace_base_path,
+            )
         finally:
             if thread is not None:
                 server.shutdown()
@@ -877,52 +897,6 @@ def fleet_safety_fixture() -> HttpResponse:
     return (200, {"keeper_fleet_safety": {"status": "ok"}})
 
 
-def with_workspace_identity(
-    fixtures: HttpFixtures | None, base_path: str
-) -> HttpFixtures:
-    """Answer /health?full=1 with the workspace the harness actually chose.
-
-    The TUI canonicalises its own base path against the one this reports and
-    refuses local Keeper/context/metrics reads when they differ. A fixture
-    that names no path leaves every scenario reading an unproven workspace,
-    which is not the state any of them mean to describe.
-
-    Scenario-owned health fixtures keep their fields; only the paths block is
-    filled in. A raw or callable response is left alone -- a scenario that
-    writes its own health body owns what it says.
-    """
-    # In place, not a copy: a scenario keeps the dict it handed over and swaps
-    # a response into it mid-run (a lane read that starts failing, a board list
-    # that arrives late). A copy leaves the server reading the original, and
-    # nine scenarios waited out their timeouts for a response that had already
-    # been written somewhere the server could not see.
-    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
-    paths = {
-        "cwd": base_path,
-        "effective_base_path": base_path,
-        "effective_masc_root": os.path.join(base_path, ".masc"),
-        "effective_has_masc_dir": True,
-    }
-    # The identity probe reads the compact /health; the fleet reading reads
-    # /health?full=1. Both carry the paths block, and a scenario may declare
-    # either, so both keys are filled.
-    for key in ("/health", "/health?full=1"):
-        existing = merged.get(key)
-        if existing is None:
-            merged[key] = (200, {"paths": paths})
-            continue
-        if isinstance(existing, tuple):
-            status, payload = existing
-            if isinstance(payload, dict):
-                body = dict(cast(dict[str, object], payload))
-                body["paths"] = {
-                    **cast(dict[str, object], body.get("paths", {})),
-                    **paths,
-                }
-                merged[key] = (status, body)
-    return merged
-
-
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
@@ -1325,40 +1299,17 @@ def run_terminal_scenario(
     master_fd, slave_fd = os.openpty()
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
-    identity_base_path: list[str | None] = [None]
-    if http_fixtures is not None and "/health" not in http_fixtures:
-
-        def current_workspace_identity() -> HttpResponse:
-            base_path = identity_base_path[0]
-            if base_path is None:
-                return 503, {"error": "PTY workspace is not ready"}
-            return (
-                200,
-                {
-                    "status": "ok",
-                    "paths": {
-                        "effective_base_path": base_path,
-                        "effective_masc_root": str(Path(base_path, ".masc")),
-                    },
-                },
-            )
-
-        # Written into the scenario's own map rather than a copy of it. A
-        # scenario keeps the map it handed over and swaps a response into it
-        # mid-run -- a lane read that starts failing, a board list that
-        # arrives late -- and against a copy the server went on serving the
-        # original while those writes landed where nothing could see them.
-        http_fixtures["/health"] = current_workspace_identity
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
         with test_http_endpoint(http_fixtures, http_requests) as (
             server_port,
             start_http_endpoint,
+            set_workspace_base_path,
         ):
             with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
-                identity_base_path[0] = base_path
                 seed_workspace(base_path)
+                set_workspace_base_path(base_path)
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -4050,26 +4001,33 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"superseded by provider grouping",
             start=start,
             timeout=5.0,
         )
-        # Waited for one at a time rather than searched once. The row draws
-        # over more than one frame -- the committed line, then the diff box
-        # under it -- and reading the buffer after only the first had landed
-        # passed on a quiet machine and failed inside a full run.
+        last_row_end = output.find(b"superseded by provider grouping", start) + len(
+            b"superseded by provider grouping"
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=last_row_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
+        visible = bytes(output[start:frame_end])
         for needle in (
-            b"[fact] the Runtime probe shares one provider endpoint",
-            b"[constraint] probe every model separately",
+            b"[fact] the Runtime probe shares",
+            b"one provider endpoint",
+            b"[constraint] probe",
+            b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
-            wait_for_output(
-                process, master_fd, output, needle, start=start, timeout=5.0
-            )
-        # Read after the waits above, so the escape check below sees the same
-        # frames the facts arrived in.
-        visible = bytes(output[start:])
+            if needle not in visible:
+                raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
 
         # The changed facts ride a ```diff fence, which is what colours the two
         # directions and keeps a leading + out of markdown's list grammar. The
@@ -5756,13 +5714,21 @@ def code_lane_interaction(
         )
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
-    # l pans the open file sideways by one cell: the keyword span is cut
-    # mid-word but its colour still opens the remainder, and the title says
-    # the view is shifted. h pans back and the full keyword returns.
-    panned = send_and_wait(process, master_fd, output, b"ll", b"(col 3)")
+    # Shift-Right pans the open file sideways by one cell: lowercase h/l now
+    # choose the split pane. The keyword span is cut mid-word but its colour
+    # still opens the remainder, and the title says the view is shifted.
+    panned = send_and_wait(
+        process, master_fd, output, b"\x1b[1;2C\x1b[1;2C", b"(col 3)"
+    )
     if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
-    send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[1;2D\x1b[1;2D",
+        b"\x1b[33mlet\x1b[0m",
+    )
     # With the file focused, "/" searches its lines: typing jumps the line
     # cursor (the reverse gutter) to the match, and Enter keeps the query.
     searched = send_and_wait(process, master_fd, output, b"/hi", b"/hi")

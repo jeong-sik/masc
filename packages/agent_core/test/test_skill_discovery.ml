@@ -38,8 +38,15 @@ let contains ~needle haystack =
 (* ── Helpers ─────────────────────────────────────────────── *)
 
 let make_skill name body =
-  Skill.of_markdown
-    (Printf.sprintf "---\nname: %s\ndescription: %s skill\n---\n%s" name name body)
+  match
+    Skill_document.decode
+      ~directory_name:name
+      (Printf.sprintf "---\nname: %s\ndescription: %s skill\n---\n%s" name name body)
+  with
+  | Loaded { document; _ } -> document
+  | Unloadable diagnostics ->
+    Alcotest.fail
+      (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
 ;;
 
 let get_system_prompt agent = (Agent.state agent).config.system_prompt

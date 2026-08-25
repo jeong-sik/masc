@@ -616,12 +616,15 @@ let test_with_skill_appends_prompt () =
   with_net
   @@ fun net ->
   let skill =
-    Skill.of_markdown
-      "---\n\
-       name: reviewer\n\
-       description: Review skill\n\
-       ---\n\
-       State concrete findings first."
+    match
+      Skill_document.decode
+        ~directory_name:"reviewer"
+        "---\nname: reviewer\ndescription: Review skill\n---\nState concrete findings first."
+    with
+    | Loaded { document; _ } -> document
+    | Unloadable diagnostics ->
+      Alcotest.fail
+        (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
   in
   let agent =
     Builder.create ~net ~model:"claude-sonnet-4-6"

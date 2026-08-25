@@ -3171,14 +3171,19 @@
  (libraries alcotest yojson masc.tool_schemas masc.tool_spawn masc_types))
 
 (test
- (name test_skill_definition)
- (modules test_skill_definition)
- (libraries alcotest masc))
-
-(test
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
  (libraries alcotest masc masc_types))
+
+(test
+ (name test_skill_source_config)
+ (modules test_skill_source_config)
+ (libraries alcotest masc.skill_config))
+
+(test
+ (name test_skill_source_runtime_integration)
+ (modules test_skill_source_runtime_integration)
+ (libraries alcotest masc masc.skill_config))
 
 (test
  (name test_asset_sync_report)

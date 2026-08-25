@@ -23,24 +23,16 @@ let validate_name name =
 ;;
 
 let validate_definition ~name contents =
-  if not (Frontmatter.has_frontmatter contents)
-  then Error (Printf.sprintf "task skill %S has no frontmatter" name)
-  else
-    let frontmatter = Frontmatter.parse contents in
-    let declared_name = String.trim (Frontmatter.field frontmatter "name") in
-    let description = String.trim (Frontmatter.field frontmatter "description") in
-    if String.equal declared_name ""
-    then Error (Printf.sprintf "task skill %S has no frontmatter name" name)
-    else if not (String.equal declared_name name)
-    then
-      Error
-        (Printf.sprintf
-           "task skill name %S does not match directory %S"
-           declared_name
-           name)
-    else if String.equal description ""
-    then Error (Printf.sprintf "task skill %S has no description" name)
-    else Ok ()
+  match Agent_core.Skill_document.decode ~directory_name:name contents with
+  | Loaded _ -> Ok ()
+  | Unloadable diagnostics ->
+    Error
+      (Printf.sprintf
+         "task skill %S is invalid: %s"
+         name
+         (String.concat
+            "; "
+            (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics)))
 ;;
 
 let validate_one ~base_path name =

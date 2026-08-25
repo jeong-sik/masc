@@ -5,6 +5,17 @@ open Agent_core
 
 let tc name f = Alcotest.test_case name `Quick f
 
+let skill_exn ~name ~description body =
+  let source =
+    Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
+  in
+  match Skill_document.decode ~directory_name:name source with
+  | Loaded { document; _ } -> document
+  | Unloadable diagnostics ->
+    Alcotest.fail
+      (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
+;;
+
 let test_empty () =
   let contract = Contract.empty in
   Alcotest.(check bool) "empty" true (Contract.is_empty contract);
@@ -44,10 +55,7 @@ let test_prompt_composition () =
 ;;
 
 let test_skill_deduplication () =
-  let skill =
-    Skill.of_markdown
-      "---\nname: review\ndescription: Review skill\n---\nReview carefully."
-  in
+  let skill = skill_exn ~name:"review" ~description:"Review skill" "Review carefully." in
   let contract =
     Contract.empty |> Contract.with_skill skill |> Contract.with_skill skill
   in

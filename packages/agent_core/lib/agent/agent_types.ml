@@ -192,7 +192,8 @@ let card ~supported_interfaces t =
     match t.options.skill_registry with
     | Some reg ->
       List.map
-        (fun (s : Skill.t) -> { Agent_card.name = s.name; description = s.description })
+        (fun (s : Skill_document.t) ->
+           { Agent_card.name = s.name; description = Some s.description })
         (Skill_registry.list reg)
     | None -> []
   in

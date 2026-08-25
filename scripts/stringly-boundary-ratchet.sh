@@ -161,6 +161,11 @@ check() {
       echo "[stringly-boundary-ratchet] DRIFT UP: $name current=$current baseline=$baseline" >&2
       echo "  hint: $hint" >&2
       drift=1
+    elif (( current < baseline )); then
+      # Under the ceiling, so not a failure. Saying nothing is how a baseline
+      # goes stale: the value it guards moved and the file kept the old number,
+      # which left tla-bug-model at 98 against a tree of 47 (#29359).
+      echo "[stringly-boundary-ratchet] IMPROVED: $name current=$current baseline=$baseline — run --regenerate to lower the ceiling"
     fi
   done
   return $drift

@@ -180,6 +180,22 @@ let hints_of_bindings bindings =
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
 
+(* The Overview footer is the same table plus one runtime fact the renderer
+   owns: whether j/k currently drives the task list (task_focus) or the
+   event list. The table stays the SSOT — this projection only relabels
+   j/k and drops the keys that are dead in the current mode (t enters the
+   task list, Enter/Esc act on the focused task), exactly like the old
+   hand-assembled literal did, but without a second key list. *)
+let footer_hints_overview ~task_focus =
+  let dead = if task_focus then [ "t" ] else [ "Enter"; "Esc" ] in
+  for_surface Overview
+  |> List.filter (fun b -> not (List.mem b.key dead))
+  |> List.map (fun b ->
+         if b.key = "j/k" then
+           { b with label = (if task_focus then "tasks" else "events") }
+         else b)
+  |> hints_of_bindings
+
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays
    [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)

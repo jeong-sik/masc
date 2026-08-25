@@ -65,6 +65,8 @@ type msg_role =
           the lines the server kept and the count it withheld. Drawn with the
           live pane's thinking style, so a turn the keeper ran on its own and
           one watched live read alike. *)
+  | Message_memory
+      (** One Memory OS journal pass interleaved by its recorded timestamp. *)
 
 (** Request-correlated message history entry. *)
 type msg_entry = {
@@ -147,12 +149,30 @@ type board_comment = {
     renders as itself rather than disappearing. *)
 type schedule_row = {
   sch_schedule_id: string;
+  sch_schedule_instance_id: string;
   sch_status: string;
+  sch_dispatch_status: string;
   sch_source: string;
+  sch_requested_by: string;
+  sch_scheduled_by: string;
+  sch_requested_at_iso: string;
   sch_due_at_iso: string option;
+  sch_next_due_at_iso: string option;
+  sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
+  sch_payload_digest: string;
+  sch_payload_kind: string option;
+  sch_payload_support: string;
+  sch_payload_dispatch_tool: string option;
   sch_payload_target: string option;
   sch_payload_summary: string option;
+  sch_last_wake_status: string option;
+  sch_last_wake_started_at_iso: string option;
+  sch_last_wake_error: string option;
+  sch_queue_projection_status: string option;
+  sch_queue_pending_count: int option;
+  sch_reaction_projection_status: string option;
+  sch_reaction_latest_at_iso: string option;
 }
 
 (** Schedule list snapshot. [scs_request_count] is [None] exactly when the
@@ -589,9 +609,10 @@ type state = {
   (* [/] on the roster: a search that moves the cursor, not a filter that
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
-     [roster_search_last] feeds n/N after Enter. *)
-  mutable roster_search: string option;
-  mutable roster_search_last: string;
+     [search_last] feeds n/N after Enter. Every surface that answers
+     {!surface_row_texts} searches through the same pair. *)
+  mutable search: string option;
+  mutable search_last: string;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
      read is stamped with the keeper it answers for, so a cursor move cannot
      show one keeper's instructions under another's name. *)
@@ -845,6 +866,9 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  mutable msg_memory_visible: bool;
+  mutable msg_memory_error: string option;
+  mutable msg_memory_dropped: int;
   (* Every full-history GET captures this generation. Keeper identity alone is
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
@@ -983,8 +1007,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
-  roster_search = None;
-  roster_search_last = "";
+  search = None;
+  search_last = "";
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -1147,6 +1171,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_memory_visible = true;
+  msg_memory_error = None;
+  msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_scroll = 0;
   msg_older_cursor = None;
@@ -1230,6 +1257,8 @@ type clamped_scroll =
   | Overview_events of int
   | Task_detail of int
   | Board_read of int
+  | Message_scroll of int
+  | Schedule_detail_scroll of int
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
@@ -1240,6 +1269,8 @@ let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
+  | Message_scroll value -> state.msg_scroll <- value
+  | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
@@ -1314,6 +1345,74 @@ let scrolled_surface (state : state) : surface -> scrolled option =
   | Fusion | Resources ->
       None
 
+(* The text a "/" search reads for each row: the identifiers an operator
+   would type, not the drawn bytes. [Some texts] means the surface is
+   searchable and [texts] is the same decoded list the row cursor names, in
+   the same order -- a match index is a cursor position. [None] keeps "/"
+   closed on that surface. *)
+let surface_row_texts (state : state) : surface -> string list option = function
+  | Keepers Keeper_list ->
+      Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+  | Lanes ->
+      Option.map
+        (fun s ->
+          List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+        state.lanes
+  | Verification ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+              ^ r.Tui_decode.vr_submitted_by)
+            s.Tui_decode.vs_requests)
+        state.verification
+  | Harness ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
+            s.Tui_decode.hs_verdicts)
+        state.harness
+  | Repositories ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
+            s.Tui_decode.rs_repositories)
+        state.repositories
+  | Connectors ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
+            s.Tui_decode.cs_connectors)
+        state.connectors
+  | Runtime ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c ->
+              c.Tui_decode.rcr_lane_id ^ " "
+              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+            s.Tui_decode.rss_candidates)
+        state.runtime_surface
+  | System_logs ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun e ->
+              e.Tui_decode.sl_module ^ " "
+              ^ Option.value ~default:"" e.Tui_decode.sl_keeper
+              ^ " " ^ e.Tui_decode.sl_message)
+            s.Tui_decode.sys_entries)
+        state.system_logs
+  (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion | Resources | Changes | Config | Tools ->
+      None
+
 let keeper_message_status_rows (state : state) =
   let unavailable_target =
     match state.msg_target_keeper_name with
@@ -1345,6 +1444,8 @@ let keeper_message_status_rows (state : state) =
      past the terminal, and the presenter drops whatever ran off the bottom. *)
   + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
+  + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
+  + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)
   + (if state.msg_loaded_dropped > 0 then 1 else 0)
   + (if state.msg_older_loading || Option.is_some state.msg_older_error then 1
      else 0)
@@ -1374,6 +1475,8 @@ let approval_items (state : state) =
 type palette_action =
   | Palette_goto of surface
   | Palette_chat of string
+  | Palette_task of string
+  | Palette_board_post of string
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1396,6 +1499,13 @@ let palette_entries (state : state) =
       (fun (keeper : keeper) ->
         ("keeper " ^ keeper.k_name, Palette_chat keeper.k_name))
       state.keepers
+  @ List.map
+      (fun (t : task) -> ("task " ^ t.id ^ " " ^ t.title, Palette_task t.id))
+      state.tasks
+  @ List.map
+      (fun (p : board_post) ->
+        ("post " ^ p.bp_title, Palette_board_post p.bp_id))
+      state.board_posts
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)

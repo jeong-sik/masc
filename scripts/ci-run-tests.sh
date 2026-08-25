@@ -25,8 +25,19 @@ fi
 
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-0}"
-TEST_TIMEOUT_GRACE_SEC=5
-START_EPOCH="$(date +%s)"
+TEST_TIMEOUT_GRACE_SEC="${CI_TEST_TIMEOUT_GRACE_SEC:-5}"
+
+# Injectable clock: CI_TEST_NOW_CMD overrides the epoch source so tests can
+# drive the deadline with a fake clock instead of the wall clock.
+now_epoch() {
+  if [[ -n "${CI_TEST_NOW_CMD:-}" ]]; then
+    eval "${CI_TEST_NOW_CMD}"
+  else
+    date +%s
+  fi
+}
+
+START_EPOCH="$(now_epoch)"
 TEST_LOG_FILE="${CI_TEST_LOG_FILE:-$(mktemp_ci_log)}"
 DUNE_SOURCEROOT="${DUNE_SOURCEROOT:-$(pwd -P)}"
 export DUNE_SOURCEROOT
@@ -61,7 +72,7 @@ iso_now() {
 
 elapsed_sec() {
   local now
-  now="$(date +%s)"
+  now="$(now_epoch)"
   echo $((now - START_EPOCH))
 }
 
@@ -247,20 +258,20 @@ terminate_active_cmd_tree() {
   while IFS= read -r pid; do
     [[ -n "${pid}" ]] && tree_pids+=("${pid}")
   done < <(active_cmd_tree_pids)
-  local deadline=$(( $(date +%s) + TEST_TIMEOUT_GRACE_SEC ))
+  local deadline=$(( $(now_epoch) + TEST_TIMEOUT_GRACE_SEC ))
   signal_pid_snapshot TERM "${tree_pids[@]}"
   signal_active_cmd_group TERM
   while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
-        && [[ "$(date +%s)" -lt "${deadline}" ]]; do
+        && [[ "$(now_epoch)" -lt "${deadline}" ]]; do
     sleep 1
   done
   # Descendants can be reparented when the root shell handles TERM and exits.
   # Recheck the saved tree, not only the root PID, before escalating.
   signal_pid_snapshot KILL "${tree_pids[@]}"
   signal_active_cmd_group KILL
-  local kill_deadline=$(( $(date +%s) + 2 ))
+  local kill_deadline=$(( $(now_epoch) + 2 ))
   while active_snapshot_or_group_has_survivor "${tree_pids[@]}" \
-        && [[ "$(date +%s)" -lt "${kill_deadline}" ]]; do
+        && [[ "$(now_epoch)" -lt "${kill_deadline}" ]]; do
     sleep 0.1
   done
 }
@@ -282,9 +293,9 @@ run_observed() {
   local cmd="$1"
   local status=0
   local command_start_epoch
-  command_start_epoch="$(date +%s)"
+  command_start_epoch="$(now_epoch)"
   local timed_out=0
-  local next_disk_check=$(( $(date +%s) + CI_TEST_DISK_CHECK_SEC ))
+  local next_disk_check=$(( $(now_epoch) + CI_TEST_DISK_CHECK_SEC ))
 
   tail -n 0 -f "${TEST_LOG_FILE}" &
   ACTIVE_LOG_TAIL_PID=$!
@@ -297,10 +308,10 @@ run_observed() {
   set +m
 
   while kill -0 "${ACTIVE_CMD_PID}" >/dev/null 2>&1; do
-    local now_epoch
-    now_epoch="$(date +%s)"
-    if [[ "${now_epoch}" -ge "${next_disk_check}" ]]; then
-      next_disk_check=$((now_epoch + CI_TEST_DISK_CHECK_SEC))
+    local now_val
+    now_val="$(now_epoch)"
+    if [[ "${now_val}" -ge "${next_disk_check}" ]]; then
+      next_disk_check=$((now_val + CI_TEST_DISK_CHECK_SEC))
       if [[ "${DISK_PRESSURE_REPORTED}" -eq 0 ]] && disk_pressure_detected; then
         DISK_PRESSURE_REPORTED=1
         log_line "[ci-observe] disk_pressure $(disk_pressure_detail)"
@@ -308,7 +319,7 @@ run_observed() {
       fi
     fi
     if [[ "${TEST_TIMEOUT_SEC}" -gt 0 ]] \
-       && [[ $((now_epoch - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
+       && [[ $((now_val - command_start_epoch)) -ge "${TEST_TIMEOUT_SEC}" ]]; then
       log_line "[ci-observe] timeout timeout_sec=${TEST_TIMEOUT_SEC}"
       diag_dump "timeout_${TEST_TIMEOUT_SEC}s"
       terminate_active_cmd_tree

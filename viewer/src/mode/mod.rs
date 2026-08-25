@@ -1746,28 +1746,9 @@ fn seed_masc_panel_snapshot(mode: ViewerMode, doc: web_sys::Document) {
     });
 }
 
-#[cfg(target_arch = "wasm32")]
-fn count_mode_events(mode: ViewerMode, event_log: &crate::sse::masc_bridge::MascEventLog) -> usize {
-    match mode {
-        ViewerMode::Monitor => event_log.entries.len(),
-        ViewerMode::Experiment => event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.event_type.starts_with("experiment_"))
-            .count(),
-        ViewerMode::Social => event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.event_type == "broadcast")
-            .count(),
-        _ => 0,
-    }
-}
-
 fn sync_masc_panel_connection_status(
     mode: Res<State<ViewerMode>>,
     connection: Res<ConnectionStatus>,
-    event_log: Option<Res<crate::sse::masc_bridge::MascEventLog>>,
 ) {
     #[cfg(target_arch = "wasm32")]
     {
@@ -1782,27 +1763,15 @@ fn sync_masc_panel_connection_status(
             return;
         };
 
-        let mode_event_count = event_log
-            .as_ref()
-            .map(|log| count_mode_events(current_mode, log))
-            .unwrap_or(0);
-
         let (status_class, text) = match &*connection {
+            // No event count: the MASC SSE stream that fed it opened routes the
+            // server does not serve, and its plumbing is gone (#27343). The
+            // panels are seeded by their own HTTP snapshot fetches instead.
             ConnectionStatus::Connected => match current_mode {
-                ViewerMode::Social if mode_event_count == 0 => {
+                ViewerMode::Social => {
                     ("status-connected", "연결됨 · 게시글 폴링 중".to_string())
                 }
-                ViewerMode::Social => (
-                    "status-connected",
-                    format!("연결됨 · 게시글 폴링 + 알림 {}건", mode_event_count),
-                ),
-                _ if mode_event_count == 0 => {
-                    ("status-connected", "연결됨 · 이벤트 대기 중".to_string())
-                }
-                _ => (
-                    "status-connected",
-                    format!("연결됨 · 이벤트 {}건 수신", mode_event_count),
-                ),
+                _ => ("status-connected", "연결됨 · 이벤트 대기 중".to_string()),
             },
             ConnectionStatus::Connecting => ("status-connecting", "연결 중...".to_string()),
             ConnectionStatus::Reconnecting(attempt, max) => (
@@ -1817,7 +1786,7 @@ fn sync_masc_panel_connection_status(
         el.set_text_content(Some(&text));
     }
 
-    let _ = (&mode, &connection, &event_log);
+    let _ = (&mode, &connection);
 }
 
 // ─── Generic MASC Panel Enter/Exit ───────────

@@ -112,6 +112,11 @@ let surface_rows () =
   let terminal_rows, _columns = get_terminal_size () in
   max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
 
+(* Page keys move almost one visible body, leaving a few rows of overlap so
+   the reader keeps their place across the jump. Individual renderers clamp
+   the result against their exact wrapped-line count. *)
+let surface_page_rows () = max 1 (surface_rows () - 8)
+
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
@@ -139,12 +144,19 @@ let keeper_log_content_height (state : state) =
    one read whether or not this asks for them one at a time.
 
    The unserved tail is also the pushback: an invalid UTF-8 continuation has
-   to leave the byte it rejected for the next key, and stepping [position]
-   back one is that, with no second place for a byte to hide. *)
+   to leave the byte it rejected for the next key. [last_source] steps back
+   either the terminal probe's replay or [position], with no second reader for
+   a byte to hide in. *)
+type input_source =
+  | Probe_replay
+  | Terminal_buffer
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
   mutable position : int;
+  mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
+  mutable last_source : input_source option;
   mutable partial_scalar : string;
       (** The head of a multi-byte character whose tail has not arrived.
 
@@ -172,6 +184,8 @@ let create_input_reader () =
     bytes = Bytes.create input_buffer_bytes;
     filled = 0;
     position = 0;
+    terminal_probe = None;
+    last_source = None;
     partial_scalar = "";
   }
 
@@ -203,10 +217,9 @@ let refill_input_reader reader ~timeout =
       true
   | None -> false
 
-let take_input_byte reader ~timeout =
+let take_terminal_buffer_byte reader ~timeout =
   if
-    reader.position >= reader.filled
-    && not (refill_input_reader reader ~timeout)
+    reader.position >= reader.filled && not (refill_input_reader reader ~timeout)
   then None
   else begin
     let byte = Bytes.get reader.bytes reader.position in
@@ -214,11 +227,64 @@ let take_input_byte reader ~timeout =
     Some byte
   end
 
-(* Give back the byte just taken. Only ever called on the byte this reader
-   served last, which is still the one before [position] in the same buffer: a
-   refill happens only when the buffer runs out, and taking a byte leaves at
-   least that one behind. *)
-let return_input_byte reader = reader.position <- max 0 (reader.position - 1)
+let take_input_byte reader ~timeout =
+  let timeout_ns =
+    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+  in
+  let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+  let terminal_byte () =
+    let remaining_ns =
+      Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+    in
+    take_terminal_buffer_byte reader
+      ~timeout:
+        (if Int64.compare remaining_ns 0L <= 0 then 0.0
+         else Int64.to_float remaining_ns /. nanoseconds_per_second)
+  in
+  match reader.terminal_probe with
+  | None ->
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder
+    when (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder ->
+    reader.terminal_probe <- None;
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder ->
+    (match Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte with
+     | Some byte ->
+       reader.last_source <- Some Probe_replay;
+       Some byte
+     | None ->
+       if
+         (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder
+       then reader.terminal_probe <- None;
+       reader.last_source <- None;
+       None)
+
+(* Give back the byte just taken. Probe replay and the terminal buffer are two
+   sources inside this reader, not two readers. The source marker puts an
+   invalid UTF-8 continuation back where it came from. *)
+let return_input_byte reader =
+  (match reader.last_source with
+   | Some Probe_replay ->
+     Option.iter Masc_tui_terminal_probe.return_replay reader.terminal_probe
+   | Some Terminal_buffer -> reader.position <- max 0 (reader.position - 1)
+   | None -> ());
+  reader.last_source <- None
+;;
 
 let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
@@ -659,7 +725,7 @@ let own_typed_messages (state : state) =
             | Message_user label -> String.equal label "you"
             | Message_keeper | Message_autonomous | Message_status
             | Message_error | Message_tool
-            | Message_thinking ->
+            | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
     |> List.map (fun entry -> entry.me_text)
@@ -923,7 +989,10 @@ type async_msg =
   | Keeper_chat_interrupt_done of
       Keeper_chat.request * (Masc_tui_http.interrupt_signal, string) result
   | Keeper_chat_history_loaded of
-      int * string * (Keeper_chat_history.decoded, string) result
+      int
+      * string
+      * (Keeper_chat_history.decoded, string) result
+      * (Keeper_chat_history.decoded, string) result
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
   | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
@@ -1886,28 +1955,81 @@ let launch_verification_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Verification_loaded (Error "Eio switch is unavailable"))
 
-(* Move the roster cursor to the next keeper whose name contains [query],
-   scanning forward from [after] and wrapping. A miss moves nothing. *)
-let roster_search_jump state ~query ~after =
+(* Move the active surface's row cursor to the next row whose search text
+   contains [query], scanning from [after] and wrapping; [backwards] walks
+   the other way. A miss moves nothing. The searched list is the one
+   [surface_row_texts] answers -- the same list the row cursor names -- and
+   the window follows the landing so the match is visible. *)
+let search_row_cursor state =
+  match state.view with
+  | Keepers Keeper_list -> Some state.keeper_cursor
+  | Lanes -> Some state.lanes_cursor
+  | Verification -> Some state.verification_cursor
+  | Harness -> Some state.harness_cursor
+  | Repositories -> Some state.repositories_cursor
+  | Connectors -> Some state.connectors_cursor
+  | Runtime -> Some state.runtime_cursor
+  | System_logs -> Some state.system_logs_cursor
+  | _ -> None
+
+let search_land state index =
+  let follow scroll set_scroll =
+    match scrolled_surface state state.view with
+    | None -> ()
+    | Some { sc_count = _; sc_chrome } ->
+        let height = max 1 (surface_rows () - sc_chrome) in
+        set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
+  in
+  match state.view with
+  | Keepers Keeper_list -> state.keeper_cursor <- index
+  | Lanes ->
+      state.lanes_cursor <- index;
+      follow state.lanes_scroll (fun s -> state.lanes_scroll <- s)
+  | Verification ->
+      state.verification_cursor <- index;
+      follow state.verification_scroll (fun s -> state.verification_scroll <- s)
+  | Harness ->
+      state.harness_cursor <- index;
+      follow state.harness_scroll (fun s -> state.harness_scroll <- s)
+  | Repositories ->
+      state.repositories_cursor <- index;
+      follow state.repositories_scroll (fun s -> state.repositories_scroll <- s)
+  | Connectors ->
+      state.connectors_cursor <- index;
+      follow state.connectors_scroll (fun s -> state.connectors_scroll <- s)
+  | Runtime ->
+      state.runtime_cursor <- index;
+      follow state.runtime_surface_scroll
+        (fun s -> state.runtime_surface_scroll <- s)
+  | System_logs ->
+      state.system_logs_cursor <- index;
+      follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
+  | _ -> ()
+
+let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
-  let total = List.length state.keepers in
-  if String.length query > 0 && total > 0 then begin
-    let matches index =
-      match List.nth_opt state.keepers index with
-      | Some (k : keeper) ->
-          Masc_tui_types.palette_contains ~needle:query k.k_name
-      | None -> false
-    in
-    let rec scan step =
-      if step > total then ()
-      else begin
-        let index = (after + step + total) mod total in
-        if matches index then state.keeper_cursor <- index
-        else scan (step + 1)
+  match surface_row_texts state state.view with
+  | None -> ()
+  | Some texts ->
+      let total = List.length texts in
+      if String.length query > 0 && total > 0 then begin
+        let matches index =
+          match List.nth_opt texts index with
+          | Some text -> Masc_tui_types.palette_contains ~needle:query text
+          | None -> false
+        in
+        let rec scan step =
+          if step > total then ()
+          else begin
+            let index =
+              if backwards then (after - step + (total * 2)) mod total
+              else (after + step + total) mod total
+            in
+            if matches index then search_land state index else scan (step + 1)
+          end
+        in
+        scan 1
       end
-    in
-    scan 1
-  end
 
 (* Move to a surface, fetching what that surface shows on arrival. Tab,
    Shift-Tab, and any future jump go through here so no direction can forget
@@ -2004,15 +2126,23 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
   state.msg_older_loading <- false;
+  state.msg_memory_error <- None;
+  state.msg_memory_dropped <- 0;
   let generation = state.msg_history_load_generation in
   let run () =
-    let result =
+    let history_result =
       try Masc_tui_http.fetch_keeper_chat_history ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
+    let memory_result =
+      try Masc_tui_http.fetch_keeper_memory_journal ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
     enqueue_async mailbox
-      (Keeper_chat_history_loaded (generation, keeper_name, result))
+      (Keeper_chat_history_loaded
+         (generation, keeper_name, history_result, memory_result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -2022,7 +2152,10 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_chat_history_loaded
-           (generation, keeper_name, Error "Eio switch is unavailable"))
+           ( generation
+           , keeper_name
+           , Error "Eio switch is unavailable"
+           , Error "Eio switch is unavailable" ))
 
 let switch_to_next_keeper_message state ~mailbox =
   match next_keeper_message_target state with
@@ -2035,6 +2168,8 @@ let switch_to_next_keeper_message state ~mailbox =
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
       state.msg_loaded_dropped <- 0;
+      state.msg_memory_error <- None;
+      state.msg_memory_dropped <- 0;
       state.msg_older_cursor <- None;
       state.msg_older_exist <- false;
       state.msg_older_loading <- false;
@@ -2070,7 +2205,8 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
         | Keeper_chat_history.Said_by_keeper
         | Keeper_chat_history.Autonomous_reply
         | Keeper_chat_history.Tool_calls _
-        | Keeper_chat_history.Reasoning _ -> None)
+        | Keeper_chat_history.Reasoning _
+        | Keeper_chat_history.Memory_activity -> None)
       rows
   in
   state.msg_history <-
@@ -2087,7 +2223,7 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
         | Message_user _ | Message_keeper | Message_autonomous | Message_tool
-        | Message_thinking ->
+        | Message_thinking | Message_memory ->
             false)
       state.msg_history
 
@@ -2105,10 +2241,18 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         (Message_tool, String.concat "\n" (Keeper_chat_history.tool_rows block))
     | Keeper_chat_history.Reasoning lines ->
         (Message_thinking, String.concat "\n" lines)
+    | Keeper_chat_history.Memory_activity -> (Message_memory, row.text)
+  in
+  let timestamp =
+    match row.Keeper_chat_history.kind with
+    | Keeper_chat_history.Memory_activity
+      when Float.equal row.Keeper_chat_history.at 0.0 ->
+        "--:--:--"
+    | _ -> clock_text_of_unix row.Keeper_chat_history.at
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
-  ; me_timestamp = clock_text_of_unix row.Keeper_chat_history.at
+  ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
   ; (* The transcript carries no request id: these rows predate this session, or
        came from another client. The pane shows the compacted id beside a row,
@@ -2594,6 +2738,13 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
         (if state.msg_thinking_collapsed
          then "reasoning folded (/thinking to unfold)"
          else "reasoning unfolded (/thinking to fold)")
+  | Masc_tui_command.Toggle_memory ->
+      Buffer.clear state.msg_input;
+      state.msg_memory_visible <- not state.msg_memory_visible;
+      notice ~role:Message_status
+        (if state.msg_memory_visible
+         then "Librarian/Memory timeline shown (/memory to hide)"
+         else "Librarian/Memory timeline hidden (/memory to show)")
   | Masc_tui_command.Unknown word ->
       add_event state "error"
         (Printf.sprintf
@@ -3186,8 +3337,14 @@ let apply_board_post_load state request result =
     | Ok (post, comments) when String.equal post.bp_id post_id ->
         state.board_detail <-
           Board_detail.complete state.board_detail request (Ok (post, comments));
-        replace_board_posts state
-          (post :: List.filter (fun p -> p.bp_id <> post_id) state.board_posts)
+        (* A detail response enriches one list row; it does not rank the list.
+           Moving the completed post to the front made rapid j/k navigation
+           snap back to row zero as asynchronous responses arrived. *)
+        state.board_posts <-
+          List.map
+            (fun current ->
+              if String.equal current.bp_id post_id then post else current)
+            state.board_posts
     | Ok (post, _) ->
         fail
           (Printf.sprintf
@@ -3839,6 +3996,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Toggle_thinking
+       | Masc_tui_command.Toggle_memory
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
@@ -3980,7 +4138,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.palette_open <- false;
       state.palette_query <- "";
       state.palette_cursor <- 0;
-      state.roster_search <- None;
+      state.search <- None;
       state.msg_scroll <- 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
@@ -4389,7 +4547,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              (Printf.sprintf "Keeper request %s was not dispatched: %s"
                 request.request_id detail)
        | Some _ | None -> ())
-  | Keeper_chat_history_loaded (generation, keeper_name, result) ->
+  | Keeper_chat_history_loaded
+      (generation, keeper_name, history_result, memory_result) ->
       (* The operator can switch while a previous GET is still in flight. The
          pane owns one loaded-history cache, so a late response for the old
          target or an older request for a target revisited since must not
@@ -4399,11 +4558,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         && Option.exists (String.equal keeper_name)
              state.msg_target_keeper_name
       then
-        (match result with
-         | Ok { Keeper_chat_history.rows; dropped } ->
-             state.msg_loaded <-
-               List.map (msg_entry_of_history_row keeper_name) rows;
-             state.msg_loaded_keeper <- Some keeper_name;
+        let prior_loaded =
+          match state.msg_loaded_keeper with
+          | Some loaded_keeper when String.equal loaded_keeper keeper_name ->
+              state.msg_loaded
+          | Some _ | None -> []
+        in
+        let prior_history, prior_memory =
+          List.partition
+            (fun entry -> entry.me_role <> Message_memory)
+            prior_loaded
+        in
+        let history_entries =
+          match history_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
              (* Where reading further back starts. The oldest row this load
@@ -4421,11 +4589,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                  None rows;
              state.msg_older_exist <- Option.is_some state.msg_older_cursor;
              state.msg_older_error <- None;
-             forget_session_rows_the_transcript_holds state keeper_name rows
-         | Error detail ->
+             forget_session_rows_the_transcript_holds state keeper_name rows;
+             List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
                 failed load must not be the reason the pane goes blank. *)
-             state.msg_loaded_error <- Some detail)
+             state.msg_loaded_error <- Some detail;
+             prior_history
+        in
+        let memory_entries =
+          match memory_result with
+          | Ok { Keeper_chat_history.rows; dropped } ->
+              state.msg_memory_error <- None;
+              state.msg_memory_dropped <- dropped;
+              List.map (msg_entry_of_history_row keeper_name) rows
+          | Error detail ->
+              state.msg_memory_error <- Some detail;
+              prior_memory
+        in
+        state.msg_loaded <- history_entries @ memory_entries;
+        state.msg_loaded_keeper <- Some keeper_name
   | Tools_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -4726,11 +4909,45 @@ let toggle_mouse_tracking () =
 
    Written and cleared beside the mouse mode, for the reasons its comment
    gives about when a byte may be put on this stream. *)
-(* How long to wait for the graphics query's answer. A terminal that
-   implements the protocol replies as soon as it has parsed the escape; one
-   that does not never replies, and this is the whole cost of finding that
-   out, paid once at startup. *)
-let graphics_query_wait_seconds = 0.2
+(* How long to wait for the combined palette and graphics answers. A terminal
+   replies as soon as it has parsed a supported query; an unsupported query
+   says nothing, and this is the whole cost of finding that out, paid once at
+   startup. *)
+let terminal_probe_wait_seconds = 0.2
+
+let read_terminal_probe reader ~palette_requested =
+  Eio_guard.run_in_systhread (fun () ->
+      let decoder =
+        Masc_tui_terminal_probe.create ~palette_requested
+      in
+      let timeout_ns =
+        Int64.of_float
+          (terminal_probe_wait_seconds *. nanoseconds_per_second)
+      in
+      let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+      let bytes_read = ref 0 in
+      let finished = ref false in
+      while
+        (not !finished)
+        && !bytes_read < Masc_tui_terminal_probe.max_bytes
+        && not (Masc_tui_terminal_probe.complete decoder)
+      do
+        let remaining_ns =
+          Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+        in
+        if Int64.compare remaining_ns 0L <= 0 then finished := true
+        else
+          match
+            take_terminal_buffer_byte reader
+              ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
+          with
+          | None -> finished := true
+          | Some byte ->
+            incr bytes_read;
+            Masc_tui_terminal_probe.feed decoder byte
+      done;
+      decoder, Masc_tui_terminal_probe.snapshot decoder)
+;;
 
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
@@ -4924,21 +5141,25 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
-  (* Ask once whether this terminal draws pictures, here rather than when one
-     is first asked for: the answer cannot change while the process runs, the
-     stream is quiet between session entry and the first frame, and a query
-     sent later would drop its reply into the middle of the operator's typing.
-     A terminal that does not implement the protocol says nothing at all, so
-     the deadline is the answer for those. *)
-  write_to_terminal Masc_tui_graphics.query;
+  (* Palette and graphics share one bounded startup probe because both replies
+     arrive on the key stream. The probe removes only replies to these exact
+     questions and puts every other consumed byte back into this same reader.
+     NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
+  let palette_requested = Masc_tui_theme.colors_enabled in
+  write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
+  let terminal_probe_decoder, terminal_probe =
+    read_terminal_probe input_reader ~palette_requested
+  in
+  (* Do not finish the decoder at the startup deadline. A terminal may have
+     split OSC 10/11 across that boundary; the same reader continues this
+     exact state before serving its replay or unread terminal-buffer tail. *)
+  input_reader.terminal_probe <- Some terminal_probe_decoder;
+  Masc_tui_terminal_palette.set_current terminal_probe.palette;
   terminal_draws_images :=
     Some
-      (match read_input ~timeout:graphics_query_wait_seconds input_reader () with
-       | Some (Graphics_reply body) -> (
-           match Masc_tui_graphics.parse_query_reply body with
-           | Some Masc_tui_graphics.Supported -> true
-           | Some (Masc_tui_graphics.Refused _) | None -> false)
-       | Some (Key _) | Some (Pasted _) | None -> false);
+      (match terminal_probe.graphics with
+       | Some Masc_tui_graphics.Supported -> true
+       | Some (Masc_tui_graphics.Refused _) | None -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0
@@ -5237,7 +5458,7 @@ let main () =
         (not compact_viewport)
         && (not state.help_open)
         && (not state.palette_open)
-        && Option.is_none state.roster_search
+        && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
@@ -5251,7 +5472,7 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some k
          when Render_schedule.Input_shortcut.is_quit ~message_mode k
-              && Option.is_none state.roster_search
+              && Option.is_none state.search
               && not
                    (state.view = Board
                    && state.board_mode = Board_compose) ->
@@ -5315,6 +5536,36 @@ let main () =
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
+                 | Some (_, Masc_tui_types.Palette_task task_id) ->
+                     (* The palette lands where Enter on the task list would:
+                        Overview with the task's detail open and the cursor
+                        on its row. *)
+                     goto_surface state ~mailbox:async_messages Overview;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     let rec index_of i = function
+                       | [] -> None
+                       | (t : Masc_tui_types.task) :: rest ->
+                           if String.equal t.id task_id then Some i
+                           else index_of (i + 1) rest
+                     in
+                     (match index_of 0 state.tasks with
+                      | Some index -> state.task_cursor <- index
+                      | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_post post_id) ->
+                     goto_surface state ~mailbox:async_messages Board;
+                     let rec find i = function
+                       | [] -> None
+                       | (p : Masc_tui_types.board_post) :: rest ->
+                           if String.equal p.bp_id post_id then Some (i, p)
+                           else find (i + 1) rest
+                     in
+                     (match find 0 state.board_posts with
+                      | Some (index, post) ->
+                          state.board_cursor <- index;
+                          open_board_post state ~mailbox:async_messages
+                            ~focus:Board_detail_pane post
+                      | None -> ())
                  | None -> ())
             | "down" -> state.palette_cursor <- state.palette_cursor + 1
             | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
@@ -5329,34 +5580,34 @@ let main () =
                 state.palette_query <- state.palette_query ^ s;
                 state.palette_cursor <- 0
             | _ -> ())
-       (* Roster search: typing moves the cursor live to the first match
-          from the top; Enter keeps the query for n/N, Esc keeps nothing.
-          The list itself never narrows -- see [roster_search] in types. *)
+       (* Row search: typing moves the surface's row cursor live to the
+          first match from the top; Enter keeps the query for n/N, Esc keeps
+          nothing. The list itself never narrows -- see [search] in types. *)
        | Some k
-         when state.view = Keepers Keeper_list
-              && Option.is_some state.roster_search
-              && not compact_viewport ->
-           let query = Option.value state.roster_search ~default:"" in
+         when Option.is_some state.search && not compact_viewport ->
+           let query = Option.value state.search ~default:"" in
            (match k with
-            | "esc" -> state.roster_search <- None
+            | "esc" -> state.search <- None
             | "\r" ->
-                state.roster_search <- None;
-                state.roster_search_last <- query
+                state.search <- None;
+                state.search_last <- query
             | "\127" | "\b" ->
                 let shorter =
                   Masc_tui_message_layout.drop_last_utf8_scalar query
                 in
-                state.roster_search <- Some shorter;
-                roster_search_jump state ~query:shorter ~after:(-1)
+                state.search <- Some shorter;
+                search_jump state ~query:shorter ~after:(-1)
             | s
               when (String.length s = 1 && Char.code s.[0] >= 32)
                    || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                 let longer = query ^ s in
-                state.roster_search <- Some longer;
-                roster_search_jump state ~query:longer ~after:(-1)
+                state.search <- Some longer;
+                search_jump state ~query:longer ~after:(-1)
             | _ -> ())
-       | Some "/" when state.view = Keepers Keeper_list && not compact_viewport ->
-           state.roster_search <- Some ""
+       | Some "/"
+         when Option.is_some (surface_row_texts state state.view)
+              && not compact_viewport ->
+           state.search <- Some ""
        | Some (("[" | "]") as bracket)
          when state.view = Keepers Keeper_detail && not compact_viewport ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
@@ -5411,36 +5662,12 @@ let main () =
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources && not compact_viewport ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
-       | Some "n"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           roster_search_jump state ~query:state.roster_search_last
-             ~after:state.keeper_cursor
-       | Some "N"
-         when state.view = Keepers Keeper_list
-              && state.roster_search_last <> "" ->
-           (* Backwards: the same wrap walked the other way. *)
-           let total = List.length state.keepers in
-           let query = String.lowercase_ascii state.roster_search_last in
-           if total > 0 then begin
-             let matches index =
-               match List.nth_opt state.keepers index with
-               | Some (k : keeper) ->
-                   Masc_tui_types.palette_contains ~needle:query k.k_name
-               | None -> false
-             in
-             let rec scan step =
-               if step > total then ()
-               else begin
-                 let index =
-                   (state.keeper_cursor - step + (total * 2)) mod total
-                 in
-                 if matches index then state.keeper_cursor <- index
-                 else scan (step + 1)
-               end
-             in
-             scan 1
-           end
+       | Some (("n" | "N") as direction)
+         when state.search_last <> ""
+              && Option.is_some (surface_row_texts state state.view) ->
+           let after = Option.value (search_row_cursor state) ~default:0 in
+           search_jump state ~query:state.search_last ~after
+             ~backwards:(String.equal direction "N")
        | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
@@ -5518,6 +5745,18 @@ let main () =
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
            state.resource_focus <- not state.resource_focus
+       | Some ("h" | "H")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_posts_pane
+            | Board_list | Board_compose -> ())
+       | Some ("l" | "L")
+         when state.view = Board
+              && terminal_columns >= keeper_split_threshold_cols ->
+           (match state.board_mode with
+            | Board_read _ -> state.board_focus <- Board_detail_pane
+            | Board_list | Board_compose -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -5551,6 +5790,57 @@ let main () =
                        ~tool_call_id:held.kta_tool_call_id ~allow:false
                  | None -> ())
             | _ -> ())
+       | Some ("pageup" | "pagedown") ->
+           let page = surface_page_rows () in
+           let direction = if key = Some "pagedown" then 1 else -1 in
+           (match state.view with
+            | Board ->
+                (match state.board_mode with
+                 | Board_list ->
+                     let count = List.length state.board_posts in
+                     state.board_cursor <-
+                       max 0
+                         (min (count - 1) (state.board_cursor + (direction * page)))
+                 | Board_read _ ->
+                     (match state.board_focus with
+                      | Board_posts_pane ->
+                          move_board_posts_pane state ~mailbox:async_messages
+                            ~delta:(direction * page)
+                      | Board_detail_pane ->
+                          state.board_scroll <-
+                            max 0 (state.board_scroll + (direction * page)))
+                 | Board_compose -> ())
+            | Fusion ->
+                (match state.fusion_mode with
+                 | Fusion_list ->
+                     let count =
+                       match state.fusion_runs with
+                       | None -> 0
+                       | Some snapshot -> List.length snapshot.fus_runs
+                     in
+                     state.fusion_cursor <-
+                       max 0
+                         (min (count - 1) (state.fusion_cursor + (direction * page)))
+                 | Fusion_detail _ ->
+                     state.fusion_scroll <-
+                       max 0 (state.fusion_scroll + (direction * page)))
+            | Schedules ->
+                if Option.is_some state.schedule_detail_id then
+                  state.schedule_scroll <-
+                    max 0 (state.schedule_scroll + (direction * page))
+                else
+                  let count =
+                    match state.schedules with
+                    | None -> 0
+                    | Some snapshot -> List.length snapshot.scs_rows
+                  in
+                  state.schedule_cursor <-
+                    max 0
+                      (min (count - 1)
+                         (state.schedule_cursor + (direction * page)))
+            | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
+            | Verification | Harness | Repositories | Changes | Connectors
+            | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
            load_from_masc_dir state base_path;
@@ -5965,32 +6255,28 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                if state.verification_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.verification_cursor ~scroll:state.verification_scroll
                  in
                  state.verification_cursor <- cursor;
                  state.verification_scroll <- scroll)
             | Lanes ->
-                if state.lanes_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
                  in
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
             | Harness ->
-                if state.harness_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.harness_cursor ~scroll:state.harness_scroll
                  in
                  state.harness_cursor <- cursor;
                  state.harness_scroll <- scroll)
             | Repositories ->
-                if state.repositories_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
                  in
@@ -6007,16 +6293,14 @@ let main () =
                         move_surface_scroll state ~rows:(surface_rows ())
                           ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
-                if state.connectors_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
                  in
                  state.connectors_cursor <- cursor;
                  state.connectors_scroll <- scroll)
             | Runtime ->
-                if state.runtime_surface_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
                  in
@@ -6043,8 +6327,7 @@ let main () =
                   if state.acting_scroll = 0 then state.acting_unseen <- 0
                 end
             | System_logs ->
-                if state.system_logs_scroll > 0 then
-                  (let cursor, scroll =
+                (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
                  in

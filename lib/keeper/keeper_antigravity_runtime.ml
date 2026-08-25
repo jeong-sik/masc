@@ -473,6 +473,22 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~oauth_source:config.oauth_source
       |> Result.map_error home_error_to_core_error
     in
+    (* Only the states that changed something or explain a later stall are
+       worth a line; [Present] is every turn after the first. *)
+    (match Runtime_antigravity_home.keychain_state home with
+     | Runtime_antigravity_home.Present | Runtime_antigravity_home.Unsupported -> ()
+     | Runtime_antigravity_home.Provisioned ->
+       Log.Keeper.info
+         ~keeper_name
+         "%s login keychain provisioned for the isolated HOME"
+         runtime_label
+     | Runtime_antigravity_home.Failed _ as state ->
+       Log.Keeper.warn
+         ~keeper_name
+         "%s login keychain unavailable (%s) — a token refresh will stall ~5s \
+          and may raise an operator dialog"
+         runtime_label
+         (Runtime_antigravity_home.keychain_state_to_string state));
     let client_config : Runtime_antigravity.config =
       { cli_path = config.cli_path
       ; cwd = base_path

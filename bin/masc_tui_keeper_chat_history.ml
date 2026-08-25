@@ -32,6 +32,7 @@ type kind =
   | Delivery_failed of { origin_request_id : string option }
   | Tool_calls of Transcript.tool_block
   | Reasoning of string list
+  | Memory_activity
 
 let tool_rows block =
   let projection = Transcript.project_tool_block Transcript.Full block in
@@ -122,6 +123,156 @@ let bool_field fields name =
   match List.assoc_opt name fields with
   | Some (`Bool value) -> value
   | Some _ | None -> false
+
+let bool_field_opt fields name =
+  match List.assoc_opt name fields with
+  | Some (`Bool value) -> Some value
+  | Some _ | None -> None
+
+let list_field (fields : (string * Yojson.Safe.t) list) name =
+  match List.assoc_opt name fields with
+  | Some (`List values) -> Some values
+  | Some _ | None -> None
+
+let memory_fact_line marker (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match string_field fields "category", string_field fields "claim" with
+       | Some category, Some claim ->
+           Some (Printf.sprintf "%s [%s] %s" marker category claim)
+       | Some _, None | None, Some _ | None, None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let memory_drop_line (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+      (match string_field fields "memory_id", string_field fields "reason" with
+       | Some memory_id, Some reason ->
+           Some (Printf.sprintf "drop %s \xe2\x80\x94 %s" memory_id reason)
+       | Some _, None | None, Some _ | None, None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let memory_source_label (fields : (string * Yojson.Safe.t) list) =
+  match List.assoc_opt "source" fields with
+  | Some (`Assoc source) ->
+      (match string_field source "kind" with
+       | Some "librarian" -> "Librarian"
+       | Some "explicit_write" -> "Memory write"
+       | Some value -> "Memory " ^ value
+       | None -> "Memory")
+  | Some _ | None -> "Memory"
+
+let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
+  match
+    float_field fields "recorded_at",
+    int_field fields "revision",
+    List.assoc_opt "change" fields
+  with
+  | Some at, Some revision, Some (`Assoc change) ->
+      (match
+         list_field change "added",
+         list_field change "removed",
+         int_field change "retained"
+       with
+       | Some added, Some removed, Some retained ->
+           let added_lines = List.map (memory_fact_line "+") added in
+           let removed_lines = List.map (memory_fact_line "-") removed in
+           let dropped_lines =
+             match list_field fields "dropped" with
+             | None -> Some []
+             | Some dropped ->
+                 let lines = List.map memory_drop_line dropped in
+                 if List.exists Option.is_none lines
+                 then None
+                 else Some (List.filter_map Fun.id lines)
+           in
+           if List.exists Option.is_none (added_lines @ removed_lines)
+           then None
+           else
+             Option.map
+               (fun dropped_lines ->
+                  let summary =
+                    Printf.sprintf
+                      "%s committed memory revision %d \xc2\xb7 +%d added \xc2\xb7 -%d removed \xc2\xb7 %d retained"
+                      (memory_source_label fields)
+                      revision
+                      (List.length added)
+                      (List.length removed)
+                      retained
+                  in
+                  { at
+                  ; kind = Memory_activity
+                  ; text =
+                      String.concat "\n"
+                        (summary
+                         :: (List.filter_map Fun.id added_lines
+                             @ List.filter_map Fun.id removed_lines
+                             @ dropped_lines))
+                  })
+               dropped_lines
+       | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)
+  | Some _, Some _, Some _
+  | Some _, Some _, None
+  | Some _, None, _
+  | None, _, _ -> None
+
+let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
+  match
+    float_field fields "recorded_at",
+    string_field fields "kind",
+    string_field fields "detail",
+    bool_field_opt fields "snapshot_present",
+    bool_field_opt fields "cadence_deferred"
+  with
+  | Some at, Some kind, Some detail, Some snapshot_present, Some cadence_deferred ->
+      Some
+        { at
+        ; kind = Memory_activity
+        ; text =
+            Printf.sprintf
+              "Librarian failed \xc2\xb7 %s\n%s\nsnapshot present: %s \xc2\xb7 cadence deferred: %s"
+              kind
+              detail
+              (if snapshot_present then "yes" else "no")
+              (if cadence_deferred then "yes" else "no")
+        }
+  | Some _, Some _, Some _, Some _, None
+  | Some _, Some _, Some _, None, _
+  | Some _, Some _, None, _, _
+  | Some _, None, _, _, _
+  | None, _, _, _, _ -> None
+
+let memory_row_of_json = function
+  | `Assoc fields ->
+      (match bool_field_opt fields "ok" with
+       | Some false ->
+           Option.map
+             (fun error ->
+                { at = 0.0
+                ; kind = Memory_activity
+                ; text = "Memory journal unreadable: " ^ error
+                })
+             (string_field fields "error")
+       | Some true ->
+           (match string_field fields "outcome" with
+            | Some "committed" -> memory_committed_row fields
+            | Some "failed" -> memory_failed_row fields
+            | Some _ | None -> None)
+       | None -> None)
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let memory_rows_of_json = function
+  | `Assoc fields ->
+      (match List.assoc_opt "entries" fields with
+       | Some (`List entries) ->
+           let rows = List.map memory_row_of_json entries in
+           Ok
+             { rows = List.filter_map Fun.id rows
+             ; dropped = List.length (List.filter Option.is_none rows)
+             }
+       | Some _ | None -> Error "memory journal response has no entries array")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+      Error "memory journal response is not an object"
 
 let non_blank_lines text =
   String.split_on_char '\n' text

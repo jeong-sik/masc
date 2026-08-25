@@ -184,6 +184,21 @@ let test_deadline_kills_reparented_term_ignoring_child () =
       check int "timeout exit code" 124 code;
       let child_pid = read_file child_pid_file |> String.trim |> int_of_string in
       let heartbeat_bytes () = (Unix.stat child_heartbeat_file).Unix.st_size in
+      (* The script must kill the reparented TERM-ignoring child. run_ci can
+         return before the KILL escalation lands, so poll until the child is
+         actually gone (bounded) before measuring. This makes the pass case
+         deterministic; a real failure to kill still trips the check below. *)
+      let deadline = Unix.gettimeofday () +. 5.0 in
+      let rec wait_child_dead () =
+        if Unix.gettimeofday () >= deadline then ()
+        else
+          try
+            Unix.kill child_pid 0;
+            Unix.sleep 1;
+            wait_child_dead ()
+          with Unix.Unix_error _ -> ()
+      in
+      wait_child_dead ();
       let bytes_after_timeout = heartbeat_bytes () in
       Unix.sleep 2;
       let bytes_after_observation = heartbeat_bytes () in

@@ -8,6 +8,8 @@ let down ~count ~height scroll =
 
 let up ~count ~height scroll = max 0 (normalize ~count ~height scroll - 1)
 
+(* Not in the interface: [cursor_down] and [cursor_up] are the only callers,
+   and an exported clamp with no caller is a surface the ratchet counts. *)
 let cursor_normalized ~count cursor = max 0 (min cursor (count - 1))
 
 let cursor_down ~count cursor =

@@ -315,17 +315,21 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     | Some query -> "/" ^ query ^ "  " ^ hints
     | None -> hints
   in
-  let build =
+  let identity =
     match state.server_identity with
     | None -> []
     | Some identity ->
+        (* The health probe owns the exact path. Escape terminal controls, but
+           do not trim or rewrite characters that may belong to the path. *)
         [ Masc_tui_footer.Server_build
             { version = identity.Tui_decode.sid_version
             ; commit = identity.Tui_decode.sid_binary_commit
             }
+        ; Masc_tui_footer.Server_base_path
+            (Terminal_text.single_line identity.Tui_decode.sid_base_path)
         ]
   in
-  Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
+  Masc_tui_footer.line ~status:(status @ identity) ~dim:Ansi.dim ~reset:Ansi.reset
     ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
@@ -3345,13 +3349,13 @@ let render_keeper_message (state : state) =
           ~reasoning:state.msg_reasoning_visibility
           ~tools:state.msg_tool_visibility
       in
-      Printf.sprintf "%s  %s  %s%s(port %d)%s"
+      Printf.sprintf "%s  %s%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
-        Ansi.dim
-        (if String.equal modes "" then "" else modes ^ "  ")
-        state.port Ansi.reset
+        (if String.equal modes ""
+         then ""
+         else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -3813,14 +3817,13 @@ let render_keeper_message (state : state) =
       | Masc_tui_keeper_selection.No_alternative -> ""
       | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
     in
-    let footer =
+    let footer_hints =
       Printf.sprintf
-        "%s  %s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear%s"
-        Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
+        "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear"
+        enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf
-      (Message_layout.fit_width footer (max 1 (chat_cols - 1)));
-    Buffer.add_char chat_buf '\n';
+      (footer_line state ~max_cells:chat_cols ~hints:footer_hints);
 
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols

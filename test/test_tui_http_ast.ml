@@ -98,6 +98,10 @@ let test_keeper_chat_uses_current_async_contract () =
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render_keeper_message"
        ~callee:"chat_rows_for"
      >= 1);
+  check int "the chat pane draws exactly one shared status footer" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message" ~callee:"footer_line");
   check bool "draft cleanup checks Keeper and message identity" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"consume_dispatched_message_draft" ~callee:"String.equal"
@@ -744,6 +748,25 @@ let test_the_screen_does_not_read_the_servers_bind_address () =
        ~name:"server_peer_host")
 ;;
 
+let test_server_identity_is_revalidated_on_every_refresh () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "each surface refresh asks the compact identity probe once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"load_http_surfaces" ~callee:"load_server_identity");
+  check int "identity-known cache gating is absent" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"load_http_surfaces" ~callees:[]
+       ~identifiers:[ "identity_known" ]);
+  check int "HTTP apply uses the tested A-to-B transition" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_http_surfaces"
+       ~callee:"Masc_tui_types.server_identity_of_refresh");
+  check int "a failed refresh clears current identity" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_async_message" ~callees:[]
+       ~fields:[ "server_identity" ])
+;;
+
 let test_planning_refresh_reconciles_navigation_identity () =
   let main_path = "bin/masc_tui.ml" in
   check int "planning apply owns one identity reconciliation" 1
@@ -1384,6 +1407,11 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_keeper_logs"
     [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  check_fields "footer_line" [ "sid_base_path" ];
+  check int "footer path has no workspace fallback" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"footer_line" ~callees:[]
+       ~fields:[ "workspace" ]);
   let ansi_path = "bin/masc_tui_ansi.ml" in
   [ "single_line"
   ; "optional_single_line"
@@ -1534,6 +1562,10 @@ let () =
           "the screen does not read the server's bind address"
           `Quick
           test_the_screen_does_not_read_the_servers_bind_address;
+        test_case
+          "server identity is revalidated on every refresh"
+          `Quick
+          test_server_identity_is_revalidated_on_every_refresh;
         test_case
           "overview events use bounded scroll projection"
           `Quick

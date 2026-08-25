@@ -56,39 +56,12 @@ module Server_runtime_bootstrap = Server_runtime_bootstrap
 module Server_routes_http_runtime = Server_routes_http_runtime
 module Server_startup_takeover = Server_startup_takeover
 
-let mcp_protocol_versions = Server_mcp_transport_http.mcp_protocol_versions
-
-let mcp_protocol_version_default =
-  Server_mcp_transport_http.mcp_protocol_version_default
-
 let default_base_path = Server_mcp_transport_http.default_base_path
 
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
-
-let validate_mcp_session_delete_profile =
-  Server_mcp_transport_http.validate_mcp_session_delete_profile
-
-let protocol_version_from_body =
-  Server_mcp_transport_http.protocol_version_from_body
-
-let get_session_id_query = Server_mcp_transport_http.get_session_id_query
-
-let get_cookie_value = Server_mcp_transport_http.get_cookie_value
-
 let get_session_id_any = Server_mcp_transport_http.get_session_id_any
-
-let get_protocol_version = Server_mcp_transport_http.get_protocol_version
 
 let get_protocol_version_for_session =
   Server_mcp_transport_http.get_protocol_version_for_session

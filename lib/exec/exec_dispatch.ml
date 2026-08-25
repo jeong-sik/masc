@@ -755,6 +755,7 @@ and dispatch_sequence ?base_host_env ?timeout_sec ?on_output_chunk ~head ~tail (
     | Shell_ir.And_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> false
     | Shell_ir.Or_if, Unix.WEXITED 0 -> false
     | Shell_ir.Or_if, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> true
+    | Shell_ir.Seq, _ -> true
   in
   let rec step acc = function
     | [] -> acc

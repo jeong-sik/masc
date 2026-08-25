@@ -87,18 +87,42 @@ let test_single_command_is_simple_not_pipeline () =
   (* "single command must be Simple, not Pipeline" *)
   | _ -> assert false
 
-let test_logic_or_rejected () =
-  (* '||' is subset-excluded — post-hoc classifier on the Parse_error
-     path now mints Parsed.Too_complex `Logic_op, which the corpus
-     tap uses to bucket the rejection by construct type. *)
+let test_logic_or_parsed () =
   match Bash.parse_string "ls || cat" with
-  | Parsed.Too_complex `Logic_op -> ()
-  (* "|| must classify as Logic_op" *)
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.Or_if, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "ls");
+    assert (Exec_program.to_string s2.bin = "cat")
   | _ -> assert false
 
-let test_logic_and_rejected () =
+let test_logic_and_parsed () =
   match Bash.parse_string "ls && cat" with
-  | Parsed.Too_complex `Logic_op -> ()
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.And_if, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "ls");
+    assert (Exec_program.to_string s2.bin = "cat")
+  | _ -> assert false
+
+let test_semicolon_sequence_parsed () =
+  match Bash.parse_string "echo first; echo second" with
+  | Parsed.Parsed (Shell_ir.Sequence { head = Shell_ir.Simple s1; tail = [ (Shell_ir.Seq, Shell_ir.Simple s2) ] }) ->
+    assert (Exec_program.to_string s1.bin = "echo");
+    assert (Exec_program.to_string s2.bin = "echo");
+    assert (s1.args = [ Shell_ir.Lit ("first", Shell_ir.default_meta) ]);
+    assert (s2.args = [ Shell_ir.Lit ("second", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_semicolon_trailing_parsed () =
+  match Bash.parse_string "echo hello;" with
+  | Parsed.Parsed (Shell_ir.Simple s) ->
+    assert (Exec_program.to_string s.bin = "echo");
+    assert (s.args = [ Shell_ir.Lit ("hello", Shell_ir.default_meta) ])
+  | _ -> assert false
+
+let test_semicolon_three_stages_dispatch () =
+  match Bash.parse_string "echo '=== store open PRs ==='; echo '=== store 825 branch? ==='" with
+  | Parsed.Parsed ir ->
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "=== store open PRs ===\n=== store 825 branch? ===")
   | _ -> assert false
 
 let test_general_redirect_parsed () =
@@ -462,8 +486,11 @@ let () =
   test_two_stage_pipeline ();
   test_three_stage_pipeline_with_args ();
   test_single_command_is_simple_not_pipeline ();
-  test_logic_or_rejected ();
-  test_logic_and_rejected ();
+  test_logic_or_parsed ();
+  test_logic_and_parsed ();
+  test_semicolon_sequence_parsed ();
+  test_semicolon_trailing_parsed ();
+  test_semicolon_three_stages_dispatch ();
   test_general_redirect_parsed ();
   test_redirect_append_parsed ();
   test_input_redirect_parsed ();

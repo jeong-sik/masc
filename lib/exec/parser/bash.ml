@@ -146,19 +146,11 @@ let classify_too_complex (source : string) : Parsed.reason_too_complex option =
   if has "$((" then Some `Arith_expansion
   else if has "<<<" then Some `Here_string
   else if has "<<" then Some `Heredoc
-  (* [&&] and [||] are in the subset now, so reaching here with one means
+  (* [&&], [||] and [;] are in the subset now, so reaching here with one means
      the input failed for another reason -- an operand the grammar could not
-     read. Classifying it as `Logic_op would name the wrong construct. *)
+     read. *)
   else if has "$(" || has "`" then Some `Cmd_subst
   else if has "<(" || has ">(" then Some `Proc_subst
-  (* Before the redirect check, not after. A separated list usually carries a
-     redirect somewhere in it, and reporting the redirect names a construct
-     this subset already supports. Measured against the 548 command lines the
-     runtime produced over 2026-08-21..23, every one of the 31 refusals
-     reported as `Redirect was in fact a [;] beside a supported [2>/dev/null].
-     The tap that decides which construct the subset takes next was reading
-     the wrong one. *)
-  else if has ";" then Some `Command_separator
   else if has ">>" || has ">" || has "<" then Some `Redirect
   else if has "(" || has ")" then Some `Subshell
   else if has "&" then Some `Background

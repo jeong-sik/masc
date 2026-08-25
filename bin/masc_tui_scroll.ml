@@ -7,3 +7,15 @@ let down ~count ~height scroll =
   min (maximum ~count ~height) (normalize ~count ~height scroll + 1)
 
 let up ~count ~height scroll = max 0 (normalize ~count ~height scroll - 1)
+
+let cursor_normalized ~count cursor = max 0 (min cursor (count - 1))
+
+let cursor_down ~count cursor =
+  min (max 0 (count - 1)) (cursor_normalized ~count cursor + 1)
+
+let cursor_up ~count cursor = max 0 (cursor_normalized ~count cursor - 1)
+
+let ensure_visible ~cursor ~height scroll =
+  if cursor < scroll then cursor
+  else if cursor > scroll + height - 1 then cursor - height + 1
+  else max 0 scroll

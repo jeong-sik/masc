@@ -133,7 +133,9 @@ val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
     {!Server_mcp_transport_http_headers.request_uses_stateless_protocol}. *)
 
 val validate_2026_request_headers :
-  Httpun.Request.t -> string -> (unit, string) result
+  Httpun.Request.t ->
+  string ->
+  (unit, Server_mcp_transport_http_headers.header_rejection) result
 (** Re-export of
     {!Server_mcp_transport_http_headers.validate_2026_request_headers}. *)
 

@@ -24,7 +24,7 @@ type post_body_rejection =
   | Session_required of string
   | Unknown_session of string
   | Invalid_accept of string
-  | Header_mismatch of string
+  | Header_mismatch of Server_mcp_transport_http_headers.header_rejection
 
 let invalid_accept_message =
   "Invalid Accept header: must include application/json and text/event-stream."
@@ -57,7 +57,7 @@ let decide_post_body ~request ~context ~session_is_known body_str =
             Server_mcp_transport_http_protocol.validate_2026_request_headers
               request body_str
           with
-          | Error msg -> Error (Header_mismatch msg)
+          | Error rejection -> Error (Header_mismatch rejection)
           | Ok () -> (
               match
                 Server_mcp_transport_http_headers.classify_mcp_accept request

@@ -25,7 +25,7 @@ type post_body_rejection =
   | Session_required of string
   | Unknown_session of string
   | Invalid_accept of string
-  | Header_mismatch of string
+  | Header_mismatch of Server_mcp_transport_http_headers.header_rejection
 
 val invalid_accept_message : string
 

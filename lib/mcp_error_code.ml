@@ -10,6 +10,7 @@ type t =
   | Tool_dispatch_failure
   | Backpressure_shed
   | Session_evicted
+  | Header_mismatch
   | Unsupported_protocol_version
   | Quiet of { reason : string ; recovered : bool }
 
@@ -25,8 +26,14 @@ let to_wire_code = function
   | Tool_dispatch_failure -> -32004
   | Backpressure_shed -> -32005
   | Session_evicted -> -32006
-  (* Fixed by MCP revision 2026-07-28, not chosen by this server: clients pin
-     on -32022 to tell a modern server from a legacy one. *)
+  (* Both fixed by MCP revision 2026-07-28, not chosen by this server. That
+     revision partitions the JSON-RPC server-error range -- -32000..-32019 stays
+     implementation-defined, -32020..-32099 belongs to the specification -- and
+     renumbers HeaderMismatch from the draft's -32001 to -32020. -32001 is
+     [Auth_error] here, so the draft number made "your headers disagree" and
+     "you are not authorized" the same value on the wire. Clients pin on -32022
+     to tell a modern server from a legacy one. *)
+  | Header_mismatch -> -32020
   | Unsupported_protocol_version -> -32022
   | Quiet _ -> -32099
 
@@ -42,6 +49,7 @@ let of_wire_code = function
   | -32004 -> Some Tool_dispatch_failure
   | -32005 -> Some Backpressure_shed
   | -32006 -> Some Session_evicted
+  | -32020 -> Some Header_mismatch
   | -32022 -> Some Unsupported_protocol_version
   | _ -> None
 
@@ -58,6 +66,7 @@ let to_wire_message_default = function
   | Backpressure_shed -> "Backpressure shed; resume via Last-Event-ID"
   | Session_evicted -> "Session evicted by server policy"
   (* Verbatim from the MCP 2026-07-28 example response. *)
+  | Header_mismatch -> "Header mismatch"
   | Unsupported_protocol_version -> "Unsupported protocol version"
   | Quiet { reason ; _ } -> reason
 
@@ -80,6 +89,11 @@ let allows_null_request_id : t -> bool = function
   (* The version is read from the [MCP-Protocol-Version] header, so the
      rejection happens before the JSON-RPC body — and the request id — has
      been parsed. That is exactly the §5 case a null id is for. *)
+  (* The mirrored-header check runs on a body that parsed -- it compares the
+     header against params._meta -- so the id is readable and JSON-RPC 2.0 §5
+     requires carrying it. A request whose body did not parse is reported as
+     [Invalid_request] instead, which is the arm above that does allow null. *)
+  | Header_mismatch -> false
   | Unsupported_protocol_version -> true
   | Quiet _ -> false
 ;;
@@ -98,6 +112,7 @@ let to_http_status : t -> Httpun.Status.t = function
   | Session_evicted -> `Gone
   (* 4xx is what MCP 2026-07-28 Backward Compatibility has clients inspect;
      the body, not the status, is what marks the server as modern. *)
+  | Header_mismatch -> `Bad_request
   | Unsupported_protocol_version -> `Bad_request
   | Quiet _ -> `OK
 
@@ -114,15 +129,37 @@ let all =
     Tool_dispatch_failure;
     Backpressure_shed;
     Session_evicted;
+    Header_mismatch;
     Unsupported_protocol_version;
     Quiet { reason = "<exemplar>"; recovered = false };
   ]
 
+(* Encoded through Yojson rather than [Printf] + [String.escaped]. The latter
+   writes a non-ASCII byte as OCaml's decimal escape -- "한" becomes
+   \237\149\156 -- and \2 is not an escape JSON knows, so any message
+   carrying a non-ASCII byte produced a body no client could parse. Header and
+   tool names reach these messages straight from the request, so that byte is
+   the caller's to choose. *)
 let jsonrpc_error_body (t : t) ~(message : string) : string =
-  Printf.sprintf
-    {|{"jsonrpc":"2.0","error":{"code":%d,"message":"%s"},"id":null}|}
-    (to_wire_code t)
-    (String.escaped message)
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ( "error"
+        , `Assoc
+            [ ("code", `Int (to_wire_code t)); ("message", `String message) ] )
+      ; ("id", `Null)
+      ])
+
+let jsonrpc_error_body_with_id (t : t) ~(id : Yojson.Safe.t)
+    ~(message : string) : string =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ ("jsonrpc", `String "2.0")
+      ; ( "error"
+        , `Assoc
+            [ ("code", `Int (to_wire_code t)); ("message", `String message) ] )
+      ; ("id", id)
+      ])
 
 let unsupported_protocol_version_body ~(requested : string)
     ~(supported : string list) : string =
@@ -157,6 +194,7 @@ let pp fmt = function
   | Tool_dispatch_failure -> Format.pp_print_string fmt "Tool_dispatch_failure"
   | Backpressure_shed -> Format.pp_print_string fmt "Backpressure_shed"
   | Session_evicted -> Format.pp_print_string fmt "Session_evicted"
+  | Header_mismatch -> Format.pp_print_string fmt "Header_mismatch"
   | Unsupported_protocol_version ->
       Format.pp_print_string fmt "Unsupported_protocol_version"
   | Quiet { reason ; recovered } ->

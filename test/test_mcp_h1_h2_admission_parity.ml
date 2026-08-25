@@ -5,6 +5,7 @@ module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
 module Mcp_store = Masc.Session.McpSessionStore
+module Transport_headers = Server_mcp_transport_http_headers
 module Auth = Auth
 
 let request_trust_policy =
@@ -217,11 +218,14 @@ let test_request_context_decides_post_body () =
        ~context:(context ~session_was_provided:false ()) ~session_is_known:false
        (stateless_body ())
    with
-  | Error (Request_context.Header_mismatch msg) ->
+  | Error
+      (Request_context.Header_mismatch
+         (Transport_headers.Mirrored_header_mismatch msg)) ->
       check bool "header mismatch mentions Mcp-Method" true
         (contains ~needle:"Mcp-Method" msg)
   | Ok _ -> fail "mismatched stateless headers should reject"
-  | Error _ -> fail "mismatched stateless headers should use Header_mismatch")
+  | Error _ ->
+      fail "a readable body disagreeing with a header is a mirrored mismatch")
 
 let test_shared_post_admission_matrix () =
   assert_result_ok "initialize may mint a fresh session"

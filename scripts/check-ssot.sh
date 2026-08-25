@@ -151,9 +151,26 @@ check_rule "R9-tui-chat-theme-owner" 0 \
 # SSOT-R10 — Theme is the only production owner of projected background SGR
 # bytes. Existing diff backgrounds and the new RGB/indexed serializer remain
 # literal in masc_tui_theme.ml; callers pass typed projected colours instead.
+r10_pattern='48[;:](2|5)'
+r10_self_test_failed=0
+for fixture in '48;2' '48;5' '48:2' '48:5'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r10_pattern"; then
+    echo "ERROR[R10-pattern-self-test]: did not match $fixture" >&2
+    r10_self_test_failed=1
+  fi
+done
+if printf '%s\n' '48;1' '48:1' | rg -q "$r10_pattern"; then
+  echo "ERROR[R10-pattern-self-test]: matched a non-background colour mode" >&2
+  r10_self_test_failed=1
+fi
+if [ "$r10_self_test_failed" -eq 0 ]; then
+  echo "OK[R10-pattern-self-test]: semicolon and colon forms covered."
+else
+  fail=1
+fi
 check_rule "R10-tui-projected-background" 0 \
   "Masc_tui_theme.Sgr.background" \
-  '48;(2|5)' \
+  "$r10_pattern" \
   'bin/masc_tui_theme\.mli?:' \
   bin lib
 

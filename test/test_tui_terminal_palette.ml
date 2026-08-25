@@ -33,7 +33,22 @@ let test_classifier_precedence () =
     ; ( "dumb TERM"
       , input ~term:(Some "DuMb") ~colorterm:(Some "truecolor") ()
       , Palette.Unknown )
-    ; "native RGB", input ~terminfo_rgb:(Some true) (), Palette.True_color
+    ; ( "native RGB with 24-bit colour count"
+      , input ~terminfo_rgb:(Some true) ~terminfo_colors:(Some 16_777_216) ()
+      , Palette.True_color )
+    ; ( "RGB#1 normalized to presence cannot prove truecolor"
+      , input ~terminfo_rgb:(Some true) ()
+      , Palette.Unknown )
+    ; ( "boolean RGB with 256 colours remains ANSI-256"
+      , input ~terminfo_rgb:(Some true) ~terminfo_colors:(Some 256) ()
+      , Palette.Ansi256 )
+    ; ( "RGB below the 16m boundary remains ANSI-256"
+      , input ~terminfo_rgb:(Some true)
+          ~terminfo_colors:(Some 16_777_215) ()
+      , Palette.Ansi256 )
+    ; ( "16m colours without RGB presence remain ANSI-256"
+      , input ~terminfo_colors:(Some 16_777_216) ()
+      , Palette.Ansi256 )
     ; ( "COLORTERM exact, case-insensitive"
       , input ~colorterm:(Some "TrUeCoLoR") ()
       , Palette.True_color )
@@ -64,27 +79,32 @@ let test_stdout_level_is_one_process_lazy () =
   let target = Palette.make_rgb ~red:12 ~green:34 ~blue:56 in
   check bool "best_color reads the same owner" true
     (Palette.best_color target
-     = Palette.best_color_for_level ~level:first target)
+     = Testing.best_color_for_level ~level:first target)
 ;;
 
-let check_rgb message expected actual =
-  check (triple int int int) message expected
-    (Palette.red actual, Palette.green actual, Palette.blue actual)
+let projected_view = function
+  | None -> `None
+  | Some projected ->
+    Palette.fold_projected_color
+      ~rgb:(fun color ->
+        `Rgb (Palette.red color, Palette.green color, Palette.blue color))
+      ~indexed:(fun index -> `Indexed index)
+      projected
 ;;
 
 let test_truecolor_projection_preserves_rgb () =
   let target = Palette.make_rgb ~red:12 ~green:34 ~blue:56 in
-  match Palette.best_color_for_level ~level:Palette.True_color target with
-  | Some (Palette.Rgb projected) -> check_rgb "RGB unchanged" (12, 34, 56) projected
-  | Some (Palette.Indexed index) -> failf "truecolor became index %d" index
-  | None -> fail "truecolor projection disappeared"
+  check bool "RGB unchanged" true
+    (projected_view
+       (Testing.best_color_for_level ~level:Palette.True_color target)
+     = `Rgb (12, 34, 56))
 ;;
 
 let indexed target =
-  match Palette.best_color_for_level ~level:Palette.Ansi256 target with
-  | Some (Palette.Indexed index) -> index
-  | Some (Palette.Rgb _) -> fail "ANSI-256 projection remained RGB"
-  | None -> fail "ANSI-256 projection disappeared"
+  match projected_view (Testing.best_color_for_level ~level:Palette.Ansi256 target) with
+  | `Indexed index -> index
+  | `Rgb _ -> fail "ANSI-256 projection remained RGB"
+  | `None -> fail "ANSI-256 projection disappeared"
 ;;
 
 let test_ansi256_projection_uses_only_fixed_entries () =
@@ -104,11 +124,8 @@ let test_unsupported_levels_do_not_invent_a_background () =
   let target = Palette.make_rgb ~red:12 ~green:34 ~blue:56 in
   List.iter
     (fun level ->
-      check (option int) "no projection" None
-        (match Palette.best_color_for_level ~level target with
-         | None -> None
-         | Some (Palette.Indexed index) -> Some index
-         | Some (Palette.Rgb _) -> Some (-1)))
+      check bool "no projection" true
+        (projected_view (Testing.best_color_for_level ~level target) = `None))
     [ Palette.Ansi16; Palette.Unknown ]
 ;;
 

@@ -21,9 +21,9 @@ type stdout_color_level =
   | Ansi16
   | Unknown
 
-type projected_color =
-  | Rgb of rgb
-  | Indexed of int
+type projected_color
+(** A colour already projected for the process capability. Construction stays
+    inside this module so production callers cannot bypass [best_color]. *)
 
 val stdout_color_level : unit -> stdout_color_level
 (** The process-local stdout capability, backed by an internal [Lazy.t] and
@@ -31,17 +31,16 @@ val stdout_color_level : unit -> stdout_color_level
     terminfo data remains [Unknown]. OSC foreground/background responses and
     terminal-name suffixes are not evidence for this value. *)
 
-val best_color_for_level
-  :  level:stdout_color_level
-  -> rgb
-  -> projected_color option
-(** Project a semantic RGB colour for a known output level. [True_color]
-    keeps the RGB value. [Ansi256] chooses the nearest fixed xterm colour
-    (indices 16..255), with the lowest index winning a distance tie.
-    [Ansi16] and [Unknown] return [None]. *)
-
 val best_color : rgb -> projected_color option
 (** Project for the process-local [stdout_color_level ()]. *)
+
+val fold_projected_color
+  :  rgb:(rgb -> 'a)
+  -> indexed:(int -> 'a)
+  -> projected_color
+  -> 'a
+(** Eliminate an abstract projection. The [indexed] branch receives only a
+    fixed xterm index in 16..255. Theme uses this to serialize SGR bytes. *)
 
 module For_testing : sig
   type classifier_input =
@@ -51,12 +50,23 @@ module For_testing : sig
     ; terminfo_rgb : bool option
     ; terminfo_colors : int option
     }
+  (** [terminfo_rgb] records capability presence only. It deliberately cannot
+      establish truecolor without a matching [terminfo_colors] count. *)
 
   val classify : classifier_input -> stdout_color_level
   (** Pure classifier used by the process-local detector. Precedence is:
-      usable TTY/[TERM], native RGB or exact case-insensitive
-      [COLORTERM=truecolor], at least 256 colours, at least 16 colours, then
-      [Unknown]. *)
+      usable TTY/[TERM], exact case-insensitive [COLORTERM=truecolor] or native
+      RGB together with at least 16,777,216 colours, at least 256 colours, at
+      least 16 colours, then [Unknown]. RGB capability presence alone is not
+      evidence of bit depth. *)
+
+  val best_color_for_level
+    :  level:stdout_color_level
+    -> rgb
+    -> projected_color option
+  (** Pure projection fixture. [True_color] keeps RGB, [Ansi256] chooses the
+      nearest fixed xterm colour in 16..255, and [Ansi16]/[Unknown] return
+      [None]. Production code uses [best_color]. *)
 end
 
 type t

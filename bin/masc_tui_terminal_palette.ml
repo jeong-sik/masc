@@ -36,32 +36,26 @@ let term_is_usable = function
   | None -> false
 ;;
 
-module For_testing = struct
-  type classifier_input =
-    { is_tty : bool
-    ; term : string option
-    ; colorterm : string option
-    ; terminfo_rgb : bool option
-    ; terminfo_colors : int option
-    }
-
-  let classify input =
-    let colorterm_is_truecolor =
-      match input.colorterm with
-      | Some value ->
-        String.equal (String.lowercase_ascii value) "truecolor"
-      | None -> false
-    in
-    if not input.is_tty || not (term_is_usable input.term) then Unknown
-    else if input.terminfo_rgb = Some true || colorterm_is_truecolor then
-      True_color
-    else
-      match input.terminfo_colors with
-      | Some colors when colors >= 256 -> Ansi256
-      | Some colors when colors >= 16 -> Ansi16
-      | Some _ | None -> Unknown
-  ;;
-end
+let classify_stdout_color_level ~is_tty ~term ~colorterm ~terminfo_rgb
+    ~terminfo_colors =
+  let colorterm_is_truecolor =
+    match colorterm with
+    | Some value -> String.equal (String.lowercase_ascii value) "truecolor"
+    | None -> false
+  in
+  let terminfo_is_truecolor =
+    match terminfo_rgb, terminfo_colors with
+    | Some true, Some colors -> colors >= 16_777_216
+    | (Some false | None), _ | Some true, None -> false
+  in
+  if not is_tty || not (term_is_usable term) then Unknown
+  else if colorterm_is_truecolor || terminfo_is_truecolor then True_color
+  else
+    match terminfo_colors with
+    | Some colors when colors >= 256 -> Ansi256
+    | Some colors when colors >= 16 -> Ansi16
+    | Some _ | None -> Unknown
+;;
 
 external native_terminfo_capabilities_raw : string -> int * int
   = "masc_tui_terminal_palette_terminfo_capabilities"
@@ -90,13 +84,8 @@ let detect_stdout_color_level () =
       native_terminfo_capabilities term
     | true, (Some _ | None) | false, _ -> None, None
   in
-  For_testing.classify
-    { is_tty
-    ; term
-    ; colorterm = Sys.getenv_opt "COLORTERM"
-    ; terminfo_rgb
-    ; terminfo_colors
-    }
+  classify_stdout_color_level ~is_tty ~term
+    ~colorterm:(Sys.getenv_opt "COLORTERM") ~terminfo_rgb ~terminfo_colors
 ;;
 
 (* Stdlib Lazy is intentional: this process fact can be forced during module
@@ -145,14 +134,37 @@ let nearest_xterm_fixed_index target =
   !best_index
 ;;
 
-let best_color_for_level ~level color =
+let project_color_for_level ~level color =
   match level with
   | True_color -> Some (Rgb color)
   | Ansi256 -> Some (Indexed (nearest_xterm_fixed_index color))
   | Ansi16 | Unknown -> None
 ;;
 
-let best_color color = best_color_for_level ~level:(stdout_color_level ()) color
+let best_color color = project_color_for_level ~level:(stdout_color_level ()) color
+
+let fold_projected_color ~rgb ~indexed = function
+  | Rgb color -> rgb color
+  | Indexed index -> indexed index
+;;
+
+module For_testing = struct
+  type classifier_input =
+    { is_tty : bool
+    ; term : string option
+    ; colorterm : string option
+    ; terminfo_rgb : bool option
+    ; terminfo_colors : int option
+    }
+
+  let classify input =
+    classify_stdout_color_level ~is_tty:input.is_tty ~term:input.term
+      ~colorterm:input.colorterm ~terminfo_rgb:input.terminfo_rgb
+      ~terminfo_colors:input.terminfo_colors
+  ;;
+
+  let best_color_for_level = project_color_for_level
+end
 
 type t =
   { foreground : rgb

@@ -268,8 +268,9 @@ let awaiting_approval_notice (state : state) =
             match state.view with
             | Keepers Keeper_message -> ""
             | Overview | Acting | Keepers _ | Lanes | Board | Approvals | Planning
-            | Schedules | Verification | Harness | Fusion | Repositories | Changes
-            | Connectors | Runtime | Config | Resources | Tools | System_logs ->
+            | Schedules | Verification | Harness | Fusion | Repositories | Code
+            | Changes | Connectors | Runtime | Config | Resources | Tools
+            | System_logs ->
                 "  (2 then m to answer)"
           in
           Some
@@ -5752,6 +5753,169 @@ let render_runtime_pick (state : state) =
 (* The Resources surface: the MCP resource inventory on the left, the
    selected read on the right. Wide terminals show both; narrow ones show
    the list, and Enter swaps to the content until Esc. *)
+
+(* The Code surface: one directory level on the left, the opened file on the
+   right. Entries come from the lazy /workspace/children route; the file is
+   lexed once at load (masc_tui_code_lexer) and drawn as styled spans.
+   fit_width measures cells past the SGR bytes and closes a cut style, so a
+   long row truncates without bleeding colour into the margin. *)
+let render_code (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let split = cols >= keeper_split_threshold_cols in
+  let list_rows_budget = max 1 (rows - 5) in
+  let entries = state.code_entries in
+  let total = List.length entries in
+  let cursor = max 0 (min state.code_cursor (total - 1)) in
+  let span (text, kind) =
+    if String.length text = 0 then ""
+    else
+      let style =
+        if String.equal kind Masc_tui_code_lexer.kind_keyword then
+          Theme.Syntax.keyword
+        else if String.equal kind Masc_tui_code_lexer.kind_string then
+          Theme.Syntax.string
+        else if String.equal kind Masc_tui_code_lexer.kind_comment then
+          Ansi.gray
+        else if String.equal kind Masc_tui_code_lexer.kind_number then
+          Ansi.magenta
+        else if String.equal kind Masc_tui_code_lexer.kind_type then
+          Ansi.bold ^ Ansi.blue
+        else ""
+      in
+      if String.equal style "" then text else style ^ text ^ Ansi.reset
+  in
+  let list_pane pane_buf pane_cols =
+    framed_top pane_buf pane_cols;
+    let list_focused = not state.code_focus_file in
+    let where = if String.equal state.code_dir "" then "/" else state.code_dir in
+    framed_line pane_buf pane_cols
+      ((if list_focused then Ansi.bold else Ansi.dim)
+       ^ " " ^ Terminal_text.single_line where
+       ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
+       ^ (if list_focused then "  [j/k]" else "")
+       ^ Ansi.reset);
+    framed_divider pane_buf pane_cols;
+    let status_rows =
+      match state.code_entries_error with
+      | Some detail ->
+          framed_line pane_buf pane_cols
+            (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
+          1
+      | None ->
+          if total = 0 then begin
+            framed_line pane_buf pane_cols
+              (Ansi.dim ^ " (loading\xe2\x80\xa6)" ^ Ansi.reset);
+            1
+          end
+          else 0
+    in
+    let list_rows_budget = max 0 (list_rows_budget - status_rows) in
+    let first =
+      if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
+    in
+    for i = 0 to list_rows_budget - 1 do
+      match List.nth_opt entries (first + i) with
+      | Some node ->
+          let marker =
+            if node.Masc.Tui_decode.wt_has_children then "\xe2\x96\xb8 "
+            else "  "
+          in
+          let name =
+            Terminal_text.single_line node.Masc.Tui_decode.wt_label
+          in
+          let selected = first + i = cursor in
+          let line =
+            if selected then
+              Theme.selection ^ " " ^ marker ^ name
+              ^ String.make
+                  (max 0
+                     (pane_cols - 7
+                      - Message_layout.display_width (marker ^ name)))
+                  ' '
+              ^ Ansi.reset
+            else " " ^ marker ^ name
+          in
+          framed_line pane_buf pane_cols line
+      | None -> framed_empty pane_buf pane_cols
+    done;
+    framed_bottom pane_buf pane_cols
+  in
+  let content_pane pane_buf pane_cols =
+    let title =
+      match state.code_file with
+      | Some (path, _) -> Terminal_text.single_line path
+      | None -> "(Enter opens the selected file)"
+    in
+    box_top pane_buf pane_cols;
+    box_line pane_buf pane_cols
+      ((if state.code_focus_file then Ansi.bold else Ansi.dim)
+       ^ " " ^ title
+       ^ (if state.code_focus_file then "  [j/k]" else "")
+       ^ Ansi.reset);
+    box_divider pane_buf pane_cols;
+    let content_height = max 1 (rows - 4) in
+    (match state.code_file_error, state.code_file with
+     | Some detail, _ ->
+         box_line pane_buf pane_cols
+           (Theme.bad ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
+         for _ = 2 to content_height do
+           box_empty pane_buf pane_cols
+         done
+     | None, None ->
+         for _ = 1 to content_height do
+           box_empty pane_buf pane_cols
+         done
+     | None, Some (_, file_rows) ->
+         let total_lines = List.length file_rows in
+         let max_scroll = max 0 (total_lines - content_height) in
+         let scroll = max 0 (min state.code_file_scroll max_scroll) in
+         for i = 0 to content_height - 1 do
+           match List.nth_opt file_rows (scroll + i) with
+           | Some segments ->
+               let body =
+                 String.concat "" (List.map span segments)
+               in
+               box_line pane_buf pane_cols
+                 (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
+                    Ansi.reset body)
+           | None -> box_empty pane_buf pane_cols
+         done);
+    box_bottom pane_buf pane_cols
+  in
+  (if split then begin
+     let left_cols = keeper_roster_pane_cols in
+     let right_cols = cols - left_cols in
+     let left_buf = Buffer.create 1024 in
+     let right_buf = Buffer.create 4096 in
+     list_pane left_buf left_cols;
+     content_pane right_buf right_cols;
+     let blank_left = String.make left_cols ' ' in
+     let rec zip left right =
+       match left, right with
+       | [], [] -> []
+       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+       | l :: lt, [] -> l :: zip lt []
+     in
+     List.iter
+       (fun line ->
+         Buffer.add_string buf line;
+         Buffer.add_char buf '\n')
+       (zip (frame_lines left_buf) (frame_lines right_buf))
+   end
+   else if state.code_focus_file then content_pane buf cols
+   else list_pane buf cols);
+  Buffer.add_string buf
+    (footer_line state
+       ~hints:
+         (Printf.sprintf
+            "j/k:%s  Enter:open  Esc:%s  r:refresh  Tab:next  q:quit"
+            (if state.code_focus_file then "scroll" else "move")
+            (if state.code_focus_file then "list" else "up")));
+  finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
+
 let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -6013,6 +6177,7 @@ let render_surface (state : state) =
   | Runtime -> render_runtime state
   | Config -> render_config state
   | Resources -> render_resources state
+  | Code -> render_code state
   | Tools -> render_tools state
   | Acting -> render_acting state
   | System_logs -> render_system_logs state

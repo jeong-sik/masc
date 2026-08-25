@@ -2367,6 +2367,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
         state.changes_keeper <- Some keeper.k_name;
         state.changes <- None;
         state.changes_error <- None;
+        state.changes_cursor <- 0;
         state.changes_scroll <- 0;
         state.changes_diff_row <- None;
         state.changes_diff_scroll <- 0;
@@ -2643,6 +2644,7 @@ let goto_surface state ~mailbox (destination : surface) =
             state.changes_keeper <- Some name;
             state.changes <- None;
             state.changes_error <- None;
+            state.changes_cursor <- 0;
             state.changes_scroll <- 0;
             state.changes_diff_row <- None;
             state.changes_diff_scroll <- 0
@@ -5719,6 +5721,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Ok snapshot ->
             state.changes <- Some snapshot;
             state.changes_error <- None;
+            state.changes_cursor <- 0;
             state.changes_scroll <- 0;
             (* The open row indexes the snapshot it was opened against. A new
                snapshot can hold a different change at the same index, so the
@@ -7841,9 +7844,12 @@ let main () =
                 | Some _ ->
                     state.changes_diff_scroll <- state.changes_diff_scroll + 1
                 | None ->
-                    state.changes_scroll <-
-                      move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                        ~current:state.changes_scroll)
+                    let cursor, scroll =
+                      move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
+                        ~scroll:state.changes_scroll
+                    in
+                    state.changes_cursor <- cursor;
+                    state.changes_scroll <- scroll)
             | Connectors ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(1)
@@ -8049,10 +8055,13 @@ let main () =
                     state.changes_diff_scroll <-
                       max 0 (state.changes_diff_scroll - 1)
                 | None ->
-                    if state.changes_scroll > 0 then
-                      state.changes_scroll <-
-                        move_surface_scroll state ~rows:(surface_rows ())
-                          ~delta:(-1) ~current:state.changes_scroll)
+                    let cursor, scroll =
+                      move_row_cursor state ~delta:(-1)
+                        ~cursor:state.changes_cursor
+                        ~scroll:state.changes_scroll
+                    in
+                    state.changes_cursor <- cursor;
+                    state.changes_scroll <- scroll)
             | Connectors ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
@@ -8318,12 +8327,12 @@ let main () =
                 | Some snapshot -> (
                     match
                       List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                        state.changes_scroll
+                        state.changes_cursor
                     with
                     | None ->
                         add_event state "error" "no change under the cursor"
                     | Some _ ->
-                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_row <- Some state.changes_cursor;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -8442,7 +8451,7 @@ let main () =
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (
@@ -8452,7 +8461,7 @@ let main () =
                           "this write is outside the playground; the tree \
                            reading needs a path under it"
                     | Some path ->
-                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_row <- Some state.changes_cursor;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -8470,7 +8479,7 @@ let main () =
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (
@@ -8507,13 +8516,13 @@ let main () =
                           ~path)))
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
-              the one the list marks, which is the top of the visible page. *)
+              the one the list marks, which the arrow keys move. *)
            (match state.changes with
             | None -> add_event state "error" "no changes loaded yet"
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (

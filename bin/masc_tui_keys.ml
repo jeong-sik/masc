@@ -154,7 +154,9 @@ let for_surface = function
       ]
       @ listing_meta
   | Changes ->
-      [ b Navigate "j/k" "scroll"
+      (* "move", not "scroll": the keys move the marked row and the window
+         follows it, which is also what the surface's own footer says. *)
+      [ b Navigate "j/k" "move"
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
       ; b Act "Right / Enter" "written diff"
           ~help:"what the call wrote, as a diff"

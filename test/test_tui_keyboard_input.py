@@ -5260,7 +5260,46 @@ def file_changes_alpha_response() -> tuple[int, dict[str, object]]:
                         "after": "let a = 2",
                     },
                     "succeeded": True,
-                }
+                },
+                # A second row, so the arrow keys have somewhere to go. With
+                # one row the marked row and the window's top row are the same
+                # index whether or not the code keeps them apart.
+                {
+                    "at": 1787600100.0,
+                    "keeper": "alpha",
+                    "turn": 9,
+                    "task_id": "task-9",
+                    "location": {
+                        "kind": "repo",
+                        "repo_id": "masc",
+                        "path": "lib/second.ml",
+                    },
+                    "change": {
+                        "kind": "edit",
+                        "before": "let b = 1",
+                        "after": "let b = 2\nlet c = 3",
+                    },
+                    "succeeded": True,
+                },
+                {
+                    "at": 1787600200.0,
+                    "keeper": "alpha",
+                    "turn": 11,
+                    "task_id": "task-11",
+                    "location": {
+                        "kind": "repo",
+                        "repo_id": "masc",
+                        "path": "lib/long.ml",
+                    },
+                    "change": {
+                        "kind": "edit",
+                        "before": "let x = 0",
+                        # Taller than the diff view, so the view has somewhere
+                        # to scroll and says how far it scrolled.
+                        "after": "\n".join(f"let x{n} = {n}" for n in range(40)),
+                    },
+                    "succeeded": True,
+                },
             ],
             "over_budget": 0,
             "malformed": 0,
@@ -5281,13 +5320,14 @@ def file_changes_beta_response() -> tuple[int, dict[str, object]]:
         "before": "let beta = false",
         "after": "let beta = true",
     }
+    payload["changes"] = [change]
     return status, payload
 
 
 def changes_keeper_and_arrow_detail_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
-    _slave_fd: int,
+    slave_fd: int,
     output: bytearray,
     _base_path: str,
 ) -> None:
@@ -5304,6 +5344,70 @@ def changes_keeper_and_arrow_detail_interaction(
             raise AssertionError(
                 f"the preview missed {needle!r}: {preview_plain[-600:]!r}"
             )
+    # Down moves the marked row, not just the window. The mark used to be the
+    # window's top row, so on a list that fits the screen it could not move at
+    # all and Enter opened the first change whatever the operator pressed.
+    second = send_and_wait(
+        process, master_fd, output, b"\x1b[B", b"preview masc:lib/second.ml"
+    )
+    second_plain = CSI_RE.sub(b"", second).decode("utf-8")
+    for needle in ("-1 +2", "let b = 1", "let c = 3"):
+        if needle not in second_plain:
+            raise AssertionError(
+                f"down did not move the mark to the second change ({needle!r} "
+                f"missing): {second_plain[-600:]!r}"
+            )
+    second_diff = send_and_wait(
+        process, master_fd, output, b"\x1b[C", b"turn 9  task task-9  applied"
+    )
+    second_diff_plain = CSI_RE.sub(b"", second_diff).decode("utf-8")
+    for needle in ("MASC Change", "masc:lib/second.ml", "let c = 3"):
+        if needle not in second_diff_plain:
+            raise AssertionError(
+                f"right opened a diff that is not the marked row ({needle!r} "
+                f"missing): {second_diff_plain!r}"
+            )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    # An open diff scrolls to its end and stops there. The keypress steps
+    # without a bound -- the rows are the drawing's -- so the frame reports
+    # what it could use and the loop stores that. Without the report the
+    # stored value kept climbing, and coming back up took one press per step
+    # taken past the end.
+    send_and_wait(
+        process, master_fd, output, b"\x1b[B", b"preview masc:lib/long.ml"
+    )
+    tall = send_and_wait(
+        process, master_fd, output, b"\x1b[C", b"turn 11  task task-11  applied"
+    )
+    if b"scroll 0]" not in CSI_RE.sub(b"", tall):
+        raise AssertionError(
+            f"the tall diff did not open at the top: {CSI_RE.sub(b'', tall)!r}"
+        )
+    mark = len(output)
+    os.write(master_fd, b"j" * 60)
+    wait_for_terminal_input_consumed(slave_fd)
+    drain_until_quiet(process, master_fd, output)
+    settled = CSI_RE.sub(b"", bytes(output[mark:])).decode("utf-8")
+    at_end = re.findall(r"scroll (\d+)\]", settled)
+    if not at_end:
+        raise AssertionError(
+            f"the tall diff drew no scroll indicator: {settled[-800:]!r}"
+        )
+    bottom = int(at_end[-1])
+    if bottom == 0:
+        raise AssertionError(
+            f"the tall diff did not scroll at all: {settled[-800:]!r}"
+        )
+    send_and_wait(
+        process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
+    )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
+    )
+    send_and_wait(
+        process, master_fd, output, b"\x1b[A", b"preview masc:lib/example.ml"
+    )
     beta = send_and_wait(process, master_fd, output, b"]", b"masc:lib/beta.ml")
     if b"MASC Changes beta" not in CSI_RE.sub(b"", beta):
         raise AssertionError(f"Changes did not switch to beta: {beta!r}")
@@ -5384,7 +5488,10 @@ def enter_outside_changes_interaction(
             "returning to Changes did not draw the list columns; Enter on "
             f"Lanes armed a view it does not own: {back_plain!r}"
         )
-    if "-1 +1" in back_plain:
+    # What says a diff is open is the diff view's own frame, not a pair of
+    # counts: the marked row previews its diff under the list now, so "-1 +1"
+    # is what an unopened list looks like.
+    if "esc closes" in back_plain:
         raise AssertionError(
             "returning to Changes drew a diff nobody opened; Enter on Lanes "
             f"reached the Changes handler: {back_plain!r}"

@@ -1046,6 +1046,11 @@ type state = {
   mutable changes_keeper: string option;
   mutable changes: Tui_decode.file_change_snapshot option;
   mutable changes_error: string option;
+  (* Which row the list marks, and where the window on that list sits. Two
+     fields rather than one: the marked row was the window's top row, so the
+     rows the window already showed below it could not be marked, and Enter,
+     d, v and o all read whichever change happened to be drawn first. *)
+  mutable changes_cursor: int;
   mutable changes_scroll: int;
   (* The row whose diff is open, as an index into the loaded list, and how far
      that diff is scrolled. An index rather than a copy of the change: a
@@ -1465,6 +1470,7 @@ let create_state
   changes_keeper = None;
   changes = None;
   changes_error = None;
+  changes_cursor = 0;
   changes_scroll = 0;
   changes_diff_row = None;
   changes_diff_scroll = 0;
@@ -1638,6 +1644,12 @@ type clamped_scroll =
   | Acting of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
+  (* An open diff's rows are built by the drawing, out of the recorded before
+     and after text, so the keypress cannot count them. It steps unbounded and
+     the frame reports back what it could actually use: without that report
+     the stored value kept climbing past the end of the diff, and coming back
+     up took one keypress per step taken past it. *)
+  | Changes_diff_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
@@ -1650,6 +1662,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting value -> state.acting_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Changes_diff_scroll value -> state.changes_diff_scroll <- value
 
 (* Changes draws a preview under its list, so the rows the list can use are
    fewer than the chrome alone says. The number of rows the list keeps lives

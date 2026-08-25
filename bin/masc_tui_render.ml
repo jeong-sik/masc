@@ -4865,26 +4865,37 @@ let render_changes_list (state : state) =
    | Some note ->
        box_line_styled buf cols ~style:Ansi.dim note;
        box_divider buf cols);
-  let chrome_rows =
-    7
-    + (if Option.is_some state.changes_error then 2 else 0)
-    + (if Option.is_some budget_note then 2 else 0)
+  (* The chrome and the preview's share both come from [scrolled_surface],
+     which the keypress reads too. Working them out again here is what drifted
+     the last time: this counted the over-budget note's two rows and the bound
+     did not, and then the preview took half the body and the bound still did
+     not know. *)
+  let chrome_rows, preview_keep =
+    match scrolled_surface state Changes with
+    | Some s -> (s.sc_chrome, s.sc_preview_keep)
+    | None -> (listing_chrome ~error:state.changes_error, None)
   in
   let total_content = max 1 (rows - chrome_rows) in
   (* The cursor row's recorded diff previews under the list, from the same
      local snapshot Enter renders -- no request rides a keypress. The list
-     keeps at least five rows; the preview takes what remains. *)
-  let cursor_change =
-    if shown = 0 then None else List.nth_opt changes state.changes_scroll
-  in
+     keeps at least [changes_preview_keep_rows] rows; the preview takes what
+     remains.
+
+     The split comes from Masc_tui_scroll because the keypress has to obey
+     the height this draws. It also cannot depend on which row the cursor is
+     on: reading the unclamped scroll to decide whether there is a preview
+     made the height depend on the value that height was bounding, and the
+     rows past the shortened list became unreachable. *)
   let preview_height =
-    match cursor_change with
+    match preview_keep with
     | None -> 0
-    | Some _ -> max 0 (min (total_content - 5) (total_content / 2))
+    | Some _ when shown = 0 -> 0
+    | Some keep -> Masc_tui_scroll.preview_height ~total:total_content ~keep
   in
   let content_height = max 1 (total_content - preview_height) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
+  let cursor_change = List.nth_opt changes scroll in
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with

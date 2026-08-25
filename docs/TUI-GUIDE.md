@@ -720,7 +720,7 @@ Global, outside message input:
 | `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
 | `2` | Jump to Keepers from anywhere |
 | `r` | Force refresh |
-| `q` | Quit |
+| `q` twice | Quit; any other input after the first `q` cancels |
 
 Per surface:
 

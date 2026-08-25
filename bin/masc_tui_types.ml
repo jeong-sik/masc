@@ -662,6 +662,9 @@ type state = {
      once it is already receiving text cannot be found by looking. Focus is
      what routes keys into it, and the operator takes and releases that. *)
   mutable composer_focused: bool;
+  (* A top-level [q] arms exit instead of ending the TUI immediately. The next
+     unrelated input clears it; a second [q] exits. *)
+  mutable quit_armed: bool;
   (* The keeper list holds one row per running keeper, so a keeper that failed
      to start is absent from it rather than shown as failed. This carries the
      fleet's own reading of what is missing. *)
@@ -1051,6 +1054,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   keeper_action_pending = None;
   keeper_action_serial = 0;
   composer_focused = false;
+  quit_armed = false;
   fleet_safety = None;
   fleet_safety_error = None;
   connection_status = Disconnected;

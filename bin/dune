@@ -352,7 +352,7 @@
  (name masc_tui_keeper_activity)
  (wrapped false)
  (modules masc_tui_keeper_activity)
- (libraries masc unix))
+ (libraries masc masc.time_codec unix))
 
 (library
  (name masc_tui_metrics_tail)
@@ -528,6 +528,7 @@
   masc
   masc.auth
   masc.masc_random_id
+   masc.time_codec
   terminal_size
   masc_tui_credential
   masc_tui_types
@@ -666,6 +667,7 @@
  (libraries
   masc
   masc.keeper_canary
+  masc.time_codec
   masc.server
   masc.runtime
   masc.agent_core

@@ -44,15 +44,20 @@ let create ~capacity ~equal =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
   { capacity; equal; recent = []; growing_recent = [] }
 
-let same_key cache left right =
+(* [key] and [visual_key] share every field name but [text], and [rendered]
+   and [growing] both carry a [key]. OCaml resolves a bare field to the last
+   record that declares it, so the streaming pair defined below silently
+   retypes every function up here. The annotations say which family each one
+   belongs to rather than leaving it to definition order. *)
+let same_key cache (left : 'identity key) (right : 'identity key) =
   cache.equal left.identity right.identity
   && String.equal left.text right.text
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
 
-let take_matching cache key entries =
-  let rec loop before = function
+let take_matching cache key (entries : 'identity rendered list) =
+  let rec loop before : 'identity rendered list -> _ = function
     | [] -> None
     | entry :: rest when same_key cache key entry.key ->
         Some (entry, List.rev_append before rest)
@@ -76,12 +81,13 @@ let drop count entries =
   in
   loop count entries
 
-let remember cache rendered =
+let remember cache (rendered : 'identity rendered) =
   (* One width/source/revision tuple per completed entry. A resize or visual
      revision replaces that entry's old rows instead of accumulating variants. *)
   let other_identities =
     List.filter
-      (fun entry -> not (cache.equal rendered.key.identity entry.key.identity))
+      (fun (entry : 'identity rendered) ->
+        not (cache.equal rendered.key.identity entry.key.identity))
       cache.recent
   in
   cache.recent <- take cache.capacity (rendered :: other_identities)

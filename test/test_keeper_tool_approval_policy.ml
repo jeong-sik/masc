@@ -84,6 +84,105 @@ let test_the_question_names_the_call () =
     "Run Execute?"
     (Policy.question_for ~tool_name:"Execute" ~input:no_input)
 
+(* ---- folded composition verdicts ----
+   A composition tool is built out of nodes the descriptor registry knows.
+   The fold is made when the bundle is built, from the entry's validated
+   plan: every node Run makes the composition Run, any Ask makes it Ask with
+   the asking node named in [because]. *)
+
+module Folded = Masc.Keeper_tool_approval_folded
+module Catalog = Masc.Keeper_tool_composition_catalog
+module Plan = Masc.Keeper_tool_plan
+
+(* One minimal composition document: two read-only nodes. *)
+let read_only_composition_toml =
+  {|
+[[compositions]]
+name = "mission_snapshot"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "memory"
+tool = "keeper_memory_search"
+after = ["clock"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "mission"
+|}
+;;
+
+(* The same shape but one node writes a file. *)
+let world_changing_composition_toml =
+  {|
+[[compositions]]
+name = "snapshot_writer"
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "write"
+tool = "Write"
+after = ["clock"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "file_path"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "out.txt"
+[[compositions.nodes.input.fields]]
+name = "content"
+[compositions.nodes.input.fields.value]
+kind = "literal"
+value = "hello"
+|}
+;;
+
+let fold_of toml =
+  match Catalog.parse toml with
+  | Error error -> Alcotest.failf "catalog parse failed: %s" (Catalog.error_to_string error)
+  | Ok catalog -> (
+      match Catalog.entries catalog with
+      | [] -> Alcotest.fail "catalog has no entries"
+      | entry :: _ -> Folded.fold_entry entry)
+
+let test_a_plan_of_only_run_nodes_folds_to_run () =
+  let verdict = fold_of read_only_composition_toml in
+  (match verdict with
+   | Policy.Run { because } ->
+     check string "the reason says why" "every node in the composition only reads" because
+   | Policy.Ask { because } ->
+     Alcotest.failf "read-only composition folded to Ask: %s" because)
+
+let test_a_plan_with_an_asking_node_folds_to_ask_naming_the_node () =
+  let verdict = fold_of world_changing_composition_toml in
+  (match verdict with
+   | Policy.Ask { because } ->
+     (* The folded [because] is the asking node's own reason, which for a
+        writing node names its group: Filesystem tools change something
+        outside this turn. *)
+     check bool "the reason carries the asking node's group" true
+       (String.length because > 0)
+   | Policy.Run { because } ->
+     Alcotest.failf "world-changing composition folded to Run: %s" because)
+
 let () =
   run "keeper_tool_approval_policy"
     [ ( "the split"
@@ -102,4 +201,10 @@ let () =
         ] )
     ; ( "the question"
       , [ test_case "names the call" `Quick test_the_question_names_the_call ] )
+    ; ( "folded compositions"
+      , [ test_case "a plan of only Run nodes folds to Run" `Quick
+            test_a_plan_of_only_run_nodes_folds_to_run
+        ; test_case "a plan with an asking node folds to Ask naming the node" `Quick
+            test_a_plan_with_an_asking_node_folds_to_ask_naming_the_node
+        ] )
     ]

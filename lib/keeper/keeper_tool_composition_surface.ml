@@ -889,6 +889,12 @@ let make_tools
      serves both. Name collisions across the two sources are refused where
      both catalogs are loaded, before this point. *)
   let declared_entries = skill_composition_entries in
+  (* Fold each validated entry's per-node verdicts now, while the plans are
+     in hand, so the approval gate reads a real answer instead of falling
+     into its "no descriptor" arm for composition tools. *)
+  List.iter
+    (fun entry -> Keeper_tool_approval_folded.register_entry ~entry)
+    declared_entries;
   let composition_tools =
     declared_entries
     |> List.map (fun (entry : Catalog.entry) ->

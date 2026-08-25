@@ -17,7 +17,14 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
         match Mode.resolve (Mode.shared ()) ~keeper_name with
         | Mode.Yolo -> Agent_core.Hooks.Continue
         | Mode.Auto -> (
-            match Policy.verdict_for ~tool_name ~input with
+            let verdict =
+              match
+                Keeper_tool_approval_folded.verdict_for_folded ~tool_name ~input
+              with
+              | Some folded -> folded
+              | None -> Policy.verdict_for ~tool_name ~input
+            in
+            match verdict with
             | Policy.Run _ -> Agent_core.Hooks.Continue
             | Policy.Ask _ ->
                 Agent_core.Hooks.ElicitToolApproval

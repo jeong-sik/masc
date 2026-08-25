@@ -29,30 +29,31 @@ let descriptor_for tool_name =
   | descriptor :: _ -> Some descriptor
   | [] -> Descriptor.find_public tool_name
 
+let verdict_for_descriptor ~tool_name (descriptor : Keeper_tool_descriptor.t) ~input =
+  match Descriptor.readonly_for_input descriptor ~input with
+  | Some true -> Run { because = "this call only reads" }
+  | Some false | None -> (
+      let group = descriptor.Keeper_tool_descriptor.keeper_tool_group in
+      if group_changes_the_world group then
+        Ask
+          { because =
+              Printf.sprintf "%s tools change something outside this turn"
+                (Descriptor.keeper_tool_group_to_string group)
+          }
+      else
+        Run
+          { because =
+              Printf.sprintf "%s tools stay inside masc"
+                (Descriptor.keeper_tool_group_to_string group)
+          })
+
 let verdict_for ~tool_name ~input =
   match descriptor_for tool_name with
   | None ->
       (* Not a safe tool -- one this build cannot classify. Running it unasked
          would make "no descriptor" the quietest way past the gate. *)
       Ask { because = "no descriptor declares what this tool does" }
-  | Some descriptor -> (
-      match Descriptor.readonly_for_input descriptor ~input with
-      | Some true ->
-          Run { because = "this call only reads" }
-      | Some false | None ->
-          let group = descriptor.keeper_tool_group in
-          if group_changes_the_world group then
-            Ask
-              { because =
-                  Printf.sprintf "%s tools change something outside this turn"
-                    (Descriptor.keeper_tool_group_to_string group)
-              }
-          else
-            Run
-              { because =
-                  Printf.sprintf "%s tools stay inside masc"
-                    (Descriptor.keeper_tool_group_to_string group)
-              })
+  | Some descriptor -> verdict_for_descriptor ~tool_name descriptor ~input
 
 let question_for ~tool_name ~input =
   let subject =

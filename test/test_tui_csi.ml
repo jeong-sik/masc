@@ -44,12 +44,24 @@ let test_modified_arrows () =
   check_name "ctrl-shift-left" "ctrl-shift-left" "1;6" 'D'
 ;;
 
-(* The Kitty protocol's own final. The first parameter is a code point, so a
-   letter comes back as itself rather than as its number. *)
+(* The Kitty protocol's own final. The first parameter is a code point. A
+   plain or newly distinguishable chord keeps a name, while Ctrl+letter must
+   remain the C0 byte that the existing bindings receive in legacy mode. *)
 let test_csi_u_letters () =
-  check_name "ctrl-p" "ctrl-p" "112;5" 'u';
+  check_name "ctrl-p" "\016" "112;5" 'u';
   check_name "ctrl-shift-f" "ctrl-shift-f" "102;6" 'u';
   check_name "alt-a" "alt-a" "97;3" 'u'
+;;
+
+let test_csi_u_control_letters_match_legacy_bytes () =
+  for offset = 0 to 25 do
+    let letter = Char.chr (Char.code 'a' + offset) in
+    let parameters = Printf.sprintf "%d;5" (Char.code letter) in
+    check_name
+      (Printf.sprintf "ctrl-%c" letter)
+      (String.make 1 (Char.chr (offset + 1)))
+      parameters 'u'
+  done
 ;;
 
 (* A terminal may report an upper-case letter with Shift held. Both halves say
@@ -117,6 +129,32 @@ let test_enable_asks_for_disambiguation_only () =
   check string "disable pops it" "\027[<u" Csi.disable_kitty_keyboard
 ;;
 
+(* SS3: a terminal in application cursor mode sends [ESC O A] for Up rather
+   than [ESC \[ A]. read_input hands those finals here with no parameters, so
+   the same table has to name them -- otherwise the arrows reach the surfaces
+   as "unknown-esc" and move nothing while j/k keep working. *)
+let test_ss3_finals_are_named_without_parameters () =
+  List.iter
+    (fun (final, expected) ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c" final)
+        (Some expected)
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ ('A', "up"); ('B', "down"); ('C', "right"); ('D', "left")
+    ; ('H', "home"); ('F', "end") ]
+
+let test_an_unnamed_ss3_final_stays_unnamed () =
+  (* [Z] is taken -- it is Shift+Tab -- so the check uses a final the table
+     really does not name. Reaching the surfaces as "unknown-esc" is the
+     right answer for those. *)
+  List.iter
+    (fun final ->
+      Alcotest.(check (option string))
+        (Printf.sprintf "ESC O %c is not named" final)
+        None
+        (Masc_tui_csi.name ~parameters:"" ~final))
+    [ 'P'; 'Q'; 'R'; 'S' ]
+
 let () =
   run "tui_csi"
     [ ( "legacy"
@@ -132,11 +170,17 @@ let () =
         ] )
     ; ( "csi-u"
       , [ test_case "letters" `Quick test_csi_u_letters
+        ; test_case "Ctrl letters match legacy bytes" `Quick
+            test_csi_u_control_letters_match_legacy_bytes
         ; test_case "upper case is lowered" `Quick test_csi_u_lowers_the_letter
         ; test_case "named keys" `Quick test_csi_u_named_keys
         ] )
     ; ( "boundaries"
-      , [ test_case "unknown sequences" `Quick test_unknown_sequences_are_none
+      , [ test_case "SS3 finals are named without parameters" `Quick
+            test_ss3_finals_are_named_without_parameters
+        ; test_case "an unnamed SS3 final stays unnamed" `Quick
+            test_an_unnamed_ss3_final_stays_unnamed
+        ; test_case "unknown sequences" `Quick test_unknown_sequences_are_none
         ; test_case "enable is minimal" `Quick test_enable_asks_for_disambiguation_only
         ] )
     ]

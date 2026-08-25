@@ -1250,6 +1250,7 @@ def run_terminal_scenario(
     prepare_workspace: WorkspaceSetup | None = None,
     preload_input: bytes | None = None,
     extra_args: tuple[str, ...] = (),
+    extra_env: dict[str, str] | None = None,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1275,6 +1276,11 @@ def run_terminal_scenario(
                 # here. Both directions leave, so neither shell decides.
                 environment.pop("NO_COLOR", None)
                 environment.pop("MASC_TUI_FORCE_COLOR", None)
+                # A scenario's own variables (an $EDITOR stub, say) apply
+                # before the fixed set below, so the harness keeps the last
+                # word on the terminal it describes.
+                if extra_env is not None:
+                    environment.update(extra_env)
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
@@ -2856,7 +2862,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
-        send_and_wait(process, master_fd, output, b"\x17", b"Board (3)  [j/k]")
+        # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
+        # disambiguation. It must reach the same pane binding as legacy 0x17.
+        send_and_wait(process, master_fd, output, b"\x1b[119;5u", b"Board (3)  [j/k]")
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
         send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
@@ -4247,7 +4255,14 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
+        # iTerm reports Ctrl-G as CSI-u after keyboard disambiguation is on.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[103;5u",
+            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
+        )
         wait_for_output(
             process,
             master_fd,
@@ -4491,6 +4506,147 @@ def verification_unread_interaction(gate: GatedHttpResponse) -> Interaction:
             raise AssertionError(
                 f"Verification header did not report the read: {loaded!r}"
             )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+VERIFICATION_VERDICT_PATH = "/api/v1/verification/verdict"
+
+
+def verification_request_row(task_id: str) -> dict[str, object]:
+    return {
+        "request_id": f"vr-{task_id}",
+        "task_id": task_id,
+        "task_title": f"finish {task_id}",
+        "request_kind": "completion",
+        "request_summary": f"prove {task_id} is done",
+        "submitted_by": "keeper-alpha",
+        "created_at": "2026-08-25T14:00:00+09:00",
+        "required_artifacts": ["diff"],
+        "submitted_evidence": ["diff"],
+        "next_action": "review the diff",
+    }
+
+
+def verification_verdict_fixtures() -> HttpFixtures:
+    rows = [
+        verification_request_row("task-901"),
+        verification_request_row("task-902"),
+    ]
+    return {
+        "/api/v1/verification/requests?limit=200": (
+            200,
+            {"requests": rows, "total": 2},
+        ),
+        VERIFICATION_VERDICT_PATH: (
+            200,
+            {"ok": True, "message": "verdict recorded for task-901", "noop": False},
+        ),
+    }
+
+
+@contextmanager
+def reject_editor_script() -> Iterator[str]:
+    """An $EDITOR that writes the reject reason into the form and exits 0.
+
+    The TUI hands the editor the temp file as its one argument; a real editor
+    is a human typing, this one is the same save without the human.
+    """
+    fd, path = tempfile.mkstemp(prefix="masc-tui-reject-editor-", suffix=".sh")
+    try:
+        os.write(fd, b'#!/bin/sh\nprintf %s \'{"reason": "needs a repro"}\' > "$1"\n')
+        os.close(fd)
+        os.chmod(path, 0o755)
+        yield path
+    finally:
+        os.unlink(path)
+
+
+def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
+    """`a` arms and only the second `a` sends the approve; `x` collects a
+    reason through $EDITOR and sends the reject. Both assertions read the
+    recorded POST bodies -- the wire, not the paint -- and the frame between
+    the two presses proves the first one sent nothing.
+    """
+
+    def verdict_bodies() -> list[bytes]:
+        return [
+            body
+            for request_path, body in requests
+            if request_path == VERIFICATION_VERDICT_PATH
+        ]
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Verification")
+        wait_for_output(
+            process, master_fd, output, b"task-901", start=0, timeout=3.0
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"a",
+            b"armed: approve task-901 -- same key again to send",
+        )
+        if verdict_bodies():
+            raise AssertionError("the first press already sent the verdict")
+        os.write(master_fd, b"a")
+        approve_body = wait_for_http_request(
+            process, master_fd, output, requests, path=VERIFICATION_VERDICT_PATH
+        )
+        approve_payload = json.loads(approve_body)
+        if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
+            raise AssertionError(f"approve body: {approve_payload!r}")
+        # Reject on the same row: the $EDITOR stub saves the reason form, so
+        # the second verdict body carries it.
+        read_available(master_fd, output)
+        reject_start = len(output)
+        os.write(master_fd, b"x")
+        deadline = time.monotonic() + 5.0
+        while len(verdict_bodies()) < 2:
+            read_available(master_fd, output)
+            if process.poll() is not None:
+                raise AssertionError("TUI exited before the reject verdict")
+            if time.monotonic() > deadline:
+                raise AssertionError(
+                    f"reject verdict never posted: {bytes(output[reject_start:])!r}"
+                )
+            select.select([master_fd], [], [], 0.05)
+        reject_payload = json.loads(verdict_bodies()[1])
+        if reject_payload != {
+            "task_id": "task-901",
+            "verdict": "reject",
+            "reason": "needs a repro",
+        }:
+            raise AssertionError(f"reject body: {reject_payload!r}")
+        # The verdict events live on the Overview's Recent Events pane, so
+        # the visible trace is asserted there, not on the Verification frame.
+        tab_until(process, master_fd, output, b"MASC Overview")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"rejecting task-901",
+            start=reject_start,
+            timeout=3.0,
+        )
+        # The events pane trims long rows, so the completion needle stops
+        # before the width does.
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"Verification: verdict recorded",
+            start=reject_start,
+            timeout=3.0,
+        )
         os.write(master_fd, b"q")
 
     return interact
@@ -4855,6 +5011,20 @@ def code_lane_fixtures() -> HttpFixtures:
     fixtures[WORKSPACE_FILE_AML_PATH] = file_response
     # uri's Query_value encoding may or may not spell the slash; serve both.
     fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
+    history_response = (
+        200,
+        {
+            "ok": True,
+            "commits": [
+                {"hash": "abc1234", "date": "2026-08-25",
+                 "author": "keeper-alpha", "subject": "feat: add x"},
+                {"hash": "def5678", "date": "2026-08-24",
+                 "author": "vincent", "subject": "chore: seed the file"},
+            ],
+        },
+    )
+    fixtures["/api/v1/git/log?path=lib/a.ml&limit=50"] = history_response
+    fixtures["/api/v1/git/log?path=lib%2Fa.ml&limit=50"] = history_response
     return fixtures
 
 
@@ -4881,6 +5051,22 @@ def code_lane_interaction(
         raise AssertionError(f"no line-number gutter: {opened!r}")
     if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
         raise AssertionError(f"the comment did not colour: {opened!r}")
+    # H swaps the content for the commits that touched the file; Esc swaps
+    # back (the lexed keyword span is the proof the content returned).
+    # The needle is a commit hash so the wait crosses the "(loading
+    # history)" frame and lands on the fetched listing.
+    history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
+    history_plain = CSI_RE.sub(b"", history).decode("utf-8")
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
+        if needle not in history_plain:
+            raise AssertionError(
+                f"history missed {needle!r}: {history_plain!r}"
+            )
+    if "Esc:code" not in history_plain:
+        raise AssertionError(
+            f"history footer does not offer the way back: {history_plain!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
     os.write(master_fd, b"q")
 
 
@@ -6049,6 +6235,16 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/verification/requests?limit=200": verification_gate,
         },
     )
+    verdict_requests: HttpRequests = []
+    with reject_editor_script() as reject_editor:
+        run_terminal_scenario(
+            executable,
+            description="Verification verdict keys",
+            interact=verification_verdict_interaction(verdict_requests),
+            http_fixtures=verification_verdict_fixtures(),
+            http_requests=verdict_requests,
+            extra_env={"EDITOR": reject_editor},
+        )
     observer_requests: HttpRequests = []
     run_terminal_scenario(
         executable,

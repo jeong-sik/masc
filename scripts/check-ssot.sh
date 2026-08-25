@@ -259,15 +259,20 @@ check_rule "R12-tui-theme-for-testing" 0 \
   bin lib
 
 # SSOT-R13 — shared footer facts are rendered only by Masc_tui_footer. A
-# surface supplies its local key hints and typed status items; spelling Port
-# or Refresh inside another production string recreates the per-screen drift
-# #30194 removed. The second arm catches the simplest split-literal bypass.
-r13_pattern='"[^"\n]*(Port:|Refresh:)|"(Port|Refresh)"[[:space:]]*\^[[:space:]]*":"'
+# surface supplies its local key hints and typed status items; spelling Port,
+# Refresh, or Base inside another production string recreates the per-screen
+# drift #30194 removed. Word boundaries keep lower-case [transport:] from
+# reading as [port:], and the second arm catches the simplest split-literal
+# bypass.
+r13_pattern='"[^"\n]*(\b([Pp]ort|[Rr]efresh|[Bb]ase)[[:space:]]*:|\([Pp]ort[[:space:]]+%d\))|"([Pp]ort|[Rr]efresh|[Bb]ase)"[[:space:]]*\^[[:space:]]*":"'
 r13_self_test_failed=0
 for fixture in \
   '"Port: %d"' \
+  '"port: %d"' \
   '"Refresh: %.0fs"' \
+  '"Base: /tmp/masc"' \
   '"keys | Port: 8935"' \
+  '"(port %d)"' \
   '"Port" ^ ":"'; do
   if ! printf '%s\n' "$fixture" | rg -q "$r13_pattern"; then
     echo "ERROR[R13-pattern-self-test]: did not match $fixture" >&2
@@ -277,13 +282,15 @@ done
 if printf '%s\n' \
   'Masc_tui_footer.Port port' \
   'Masc_tui_footer.Refresh_interval seconds' \
+  'Masc_tui_footer.Server_base_path path' \
+  '"Keeper chat transport: " ^ detail' \
   'footer_line state ~status' \
   | rg -q "$r13_pattern"; then
   echo "ERROR[R13-pattern-self-test]: matched the typed footer API" >&2
   r13_self_test_failed=1
 fi
 if [ "$r13_self_test_failed" -eq 0 ]; then
-  echo "OK[R13-pattern-self-test]: direct and split footer fact literals covered."
+  echo "OK[R13-pattern-self-test]: direct, lower-case, and split footer fact literals covered."
 else
   fail=1
 fi

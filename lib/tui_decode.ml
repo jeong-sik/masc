@@ -1000,6 +1000,35 @@ let tool_envelope_outcome (json : Yojson.Safe.t) : (string, string) result =
       | _ -> Error "unexpected tool response envelope")
   | _ -> Error "unexpected tool response envelope"
 
+(* [POST /api/v1/verification/verdict] answers [{ok = true; message; noop}]
+   on the success status; a refusal rides a non-2xx status and never reaches
+   this decoder through [post_json]. [noop = true] says the verdict already
+   stood and this call changed nothing -- the caller words its event with
+   that rather than reading "recorded" off a write that did not happen. *)
+let verification_verdict_outcome (json : Yojson.Safe.t) :
+    (string * bool, string) result =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool true) ->
+          let message =
+            match List.assoc_opt "message" fields with
+            | Some (`String m) when String.trim m <> "" -> m
+            | Some _ | None -> "verdict recorded"
+          in
+          let noop =
+            match List.assoc_opt "noop" fields with
+            | Some (`Bool b) -> b
+            | Some _ | None -> false
+          in
+          Ok (message, noop)
+      | Some (`Bool false) -> (
+          match List.assoc_opt "error" fields with
+          | Some (`String e) -> Error e
+          | Some _ | None -> Error "verdict rejected")
+      | Some _ | None -> Error "unexpected verdict response envelope")
+  | _ -> Error "unexpected verdict response envelope"
+
 (** Decode one SGR-encoded mouse report ([CSI ?1006;1000h] mode) into a key.
 
     A wheel report becomes [wheel-up] / [wheel-down] rather than the arrow keys
@@ -3259,3 +3288,26 @@ let decode_git_diff json =
   let* rows_json = required_list_field json "unified" in
   let* gd_rows = decode_list "unified" decode_git_diff_row rows_json in
   Ok { gd_has_changes; gd_rows }
+
+(* ── git log: who touched this file, most recent first ─────────────── *)
+
+type git_log_row = {
+  gl_hash : string;
+  gl_date : string;  (** --date=short, as the route formats it *)
+  gl_author : string;
+  gl_subject : string;
+}
+
+let decode_git_log_row json =
+  let* gl_hash = required_string_field json "hash" in
+  let* gl_date = required_string_field json "date" in
+  let* gl_author = required_string_field json "author" in
+  let* gl_subject = required_string_field json "subject" in
+  Ok { gl_hash; gl_date; gl_author; gl_subject }
+
+let decode_git_log json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "git log answered ok=false"
+  else
+    let* rows_json = required_list_field json "commits" in
+    decode_list "commits" decode_git_log_row rows_json

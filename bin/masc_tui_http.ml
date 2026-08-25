@@ -324,6 +324,25 @@ let fetch_workspace_file ~(host : string) ~(port : int) ~(path : string) :
           Error ("workspace file was not JSON: " ^ detail)
       | json -> Masc.Tui_decode.decode_workspace_file json)
 
+(** The file's commit history ([/api/v1/git/log]), most recent first. *)
+let fetch_git_log ~(host : string) ~(port : int) ~(path : string)
+    ~(limit : int) : (Masc.Tui_decode.git_log_row list, string) result =
+  let route =
+    Printf.sprintf "/api/v1/git/log?path=%s&limit=%d"
+      (percent_encode_query_value path)
+      limit
+  in
+  match http_get ~host ~port ~path:route with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "git log returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | exception Yojson.Json_error detail ->
+          Error ("git log was not JSON: " ^ detail)
+      | json -> Masc.Tui_decode.decode_git_log json)
+
 let fetch_keeper_file_changes ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(window_hours : float) :
     (Masc.Tui_decode.file_change_snapshot, string) result =
@@ -811,6 +830,27 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   in
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
+
+(** POST /api/v1/verification/verdict — the operator's verdict on a task
+    awaiting verification. The route demands a reason with a reject and takes
+    none with an approve, so the variant carries it only where it rides. The
+    route wants a token-bound admin credential — the one this process mints
+    at startup. *)
+let post_verification_verdict ~(host : string) ~(port : int)
+    ~(task_id : string) ~(verdict : [ `Approve | `Reject of string ]) :
+    (Yojson.Safe.t, string) result =
+  let fields =
+    match verdict with
+    | `Approve ->
+        [ ("task_id", `String task_id); ("verdict", `String "approve") ]
+    | `Reject reason ->
+        [ ("task_id", `String task_id)
+        ; ("verdict", `String "reject")
+        ; ("reason", `String reason)
+        ]
+  in
+  post_json ~host ~port ~path:"/api/v1/verification/verdict"
+    ~body:(Yojson.Safe.to_string (`Assoc fields))
 
 (** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
     exactly the fields the operator left in $EDITOR; a field absent from the

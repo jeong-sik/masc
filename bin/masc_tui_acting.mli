@@ -21,6 +21,14 @@ type filter =
 val next_filter : filter -> filter
 val filter_label : filter -> string
 
+type entry = {
+  ae_at : float;  (** when the TUI received it *)
+  ae_event : Observer.event;
+}
+(** One feed event as the screen holds it. The screen is a feed: entries are
+    held and drawn in the order they arrived, so arrival is the clock the rows
+    wear. *)
+
 val visible : filter -> Observer.event -> bool
 (** Whether an event draws under a filter. Under [Actions] the hidden kinds
     are named here, not guessed from volume: telemetry, heartbeats,
@@ -72,13 +80,19 @@ val keeper_of_event :
     carries. [traces] is (keeper name, trace id) for every keeper the TUI
     knows. An event whose correlation matches none keeps its agent name. *)
 
-val row_of_event : duration_ms:float option -> Observer.event -> row
+val row_of_entry : duration_ms:float option -> entry -> row
+(** The row an entry draws, wearing the entry's arrival clock. Render calls
+    this rather than [row_of_event] so there is no clock argument at the call
+    site to hand in the wrong value. *)
 
-val with_received_clock : received:float -> row -> row
-(** Give a row that carries no clock of its own the time the TUI received it.
-    [Snapshot] and [Other] carry none, and the list is ordered by arrival, so
-    without this the Time column is blank on the rows an operator would read
-    to check that order. A row that carries a clock is returned unchanged. *)
+val row_of_event :
+  at:float -> duration_ms:float option -> Observer.event -> row
+(** [at] is the row's clock, given by the caller. The screen is a feed: rows
+    are held and drawn in the order they arrived, so arrival is the clock that
+    matches the order the operator scrolls through. Reading each event's own
+    timestamp instead put two clocks on one screen, and the two event kinds
+    that carry none showed [--:--:--] -- the column that would let an operator
+    check the order was blank on 925 of 927 rows. *)
 (** One row per event. [duration_ms] is drawn on a completed call when the
     caller could pair it with its start; see {!duration_of_completion}. *)
 

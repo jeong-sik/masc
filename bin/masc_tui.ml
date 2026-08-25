@@ -4419,7 +4419,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                      Observer_live { live with events = live.events + 1 }
                | Observer_off | Observer_opening | Observer_closed _ -> ());
               state.acting <-
-                { ae_at = received; ae_event = event } :: state.acting;
+                { Masc_tui_acting.ae_at = received; ae_event = event }
+                :: state.acting;
               (* A row arriving at the top pushes every row down one. An
                  operator scrolled into the past keeps the rows they were
                  reading and a count of what arrived above them. *)
@@ -4440,7 +4441,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           Masc_tui_acting.retain
             ~actions:Masc_tui_types.acting_retained_entries
             ~quiet:Masc_tui_types.acting_retained_quiet
-            ~event_of:(fun entry -> entry.Masc_tui_types.ae_event)
+            ~event_of:(fun entry -> entry.Masc_tui_acting.ae_event)
             state.acting
         in
         state.acting <- kept;

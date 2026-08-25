@@ -5735,21 +5735,21 @@ let render_acting (state : state) =
     let rec walk acc = function
       | [] -> List.rev acc
       | entry :: older ->
-          if Acting.visible state.acting_filter entry.ae_event then
+          if Acting.visible state.acting_filter entry.Acting.ae_event then
             walk ((entry, older) :: acc) older
           else walk acc older
     in
     walk [] state.acting
   in
   let row_of (entry, older) =
-    let event = entry.ae_event in
+    let event = entry.Acting.ae_event in
     let duration_ms =
       match event with
       | Masc_tui_observer.Agent_core
           ({ Masc_tui_observer.kind = Masc_tui_observer.Tool_completed; _ } as
            completed) ->
           Acting.duration_of_completion
-            ~before:(List.map (fun e -> e.ae_event) older)
+            ~before:(List.map (fun e -> e.Acting.ae_event) older)
             completed
       | Masc_tui_observer.Agent_core _ | Masc_tui_observer.Keeper_heartbeat _
       | Masc_tui_observer.Keeper_tool_call _
@@ -5762,10 +5762,7 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    let row =
-      Acting.row_of_event ~duration_ms event
-      |> Acting.with_received_clock ~received:entry.Masc_tui_types.ae_at
-    in
+    let row = Acting.row_of_entry ~duration_ms entry in
     { row with Acting.keeper = Acting.keeper_of_event ~traces event }
   in
   let shown = List.length visible in
@@ -5848,11 +5845,11 @@ let render_acting (state : state) =
             | Acting.Attention -> Theme.warn
             | Acting.Quiet -> Ansi.dim
           in
+          (* Every row carries the moment the TUI received it, so there is no
+             longer a clockless row to draw a blank for. *)
           let clock =
-            if row.Acting.at <= 0. then "--:--:--"
-            else
-              Terminal_text.clock_timestamp
-                (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
+            Terminal_text.clock_timestamp
+              (Masc_domain.iso8601_of_unix_seconds row.Acting.at)
           in
           let line =
             Printf.sprintf "  %-8s %-16s %s %-16s %s" clock

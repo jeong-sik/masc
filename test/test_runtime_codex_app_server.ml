@@ -2596,7 +2596,42 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
-       let context_envelope = Yojson.Safe.from_string start_instructions in
+       (* [developer_instructions] is several sections joined by a blank
+          line: the system prompt, the native-posture note RFC-0390 sends on
+          every Codex turn (#30408), and each developer message. Only one of
+          them is the context envelope, so pick it out. Parsing the whole
+          string worked only while this fixture happened to leave one section
+          standing, and the posture note arriving in front of it took the test
+          red on main. *)
+       let context_envelope =
+         let paragraphs instructions =
+           let rec collect acc current = function
+             | [] -> List.rev (String.concat "\n" (List.rev current) :: acc)
+             | "" :: rest ->
+               collect (String.concat "\n" (List.rev current) :: acc) [] rest
+             | line :: rest -> collect acc (line :: current) rest
+           in
+           collect [] [] (String.split_on_char '\n' instructions)
+         in
+         let parsed =
+           paragraphs start_instructions
+           |> List.filter_map (fun section ->
+                match Yojson.Safe.from_string section with
+                | json -> Some json
+                | exception Yojson.Json_error _ -> None)
+           |> List.filter (fun json ->
+                Yojson.Safe.Util.member "schema" json
+                = `String Keeper_official_client_context_codec.schema)
+         in
+         match parsed with
+         | [ envelope ] -> envelope
+         | [] ->
+           fail
+             ("no context envelope in the developer instructions: "
+              ^ start_instructions)
+         | _ :: _ :: _ ->
+           fail "more than one context envelope in the developer instructions"
+       in
        let open Yojson.Safe.Util in
        check string
          "dynamic context envelope schema"

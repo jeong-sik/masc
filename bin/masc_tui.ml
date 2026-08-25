@@ -239,12 +239,15 @@ let take_late_palette_publisher reader =
 ;;
 
 let publish_late_terminal_palette reader decoder =
-  match (Masc_tui_terminal_probe.snapshot decoder).palette with
+  match reader.late_palette_publisher with
   | None -> ()
-  | Some palette ->
-    (match take_late_palette_publisher reader with
+  | Some _ ->
+    (match Masc_tui_terminal_probe.palette decoder with
      | None -> ()
-     | Some publish -> publish palette)
+     | Some palette ->
+       (match take_late_palette_publisher reader with
+        | None -> ()
+        | Some publish -> publish palette))
 ;;
 
 let install_late_palette_publisher reader ~request_full_repaint =

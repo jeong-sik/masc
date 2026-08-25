@@ -185,10 +185,14 @@ let test_user_message_background_has_one_render_snapshot () =
   check int "late palette publication clears its callback before use" 1
     (count_field_clears_to_none ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
-  check int "late palette helper snapshots the continuing decoder" 1
+  check int "late palette helper gates on its one-shot publisher" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"publish_late_terminal_palette"
+       ~callees:[] ~fields:[ "late_palette_publisher" ]);
+  check int "late palette helper reads the O(1) decoder palette" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"publish_late_terminal_palette"
-       ~callee:"Masc_tui_terminal_probe.snapshot");
+       ~callee:"Masc_tui_terminal_probe.palette");
   check int "late palette helper consumes the one-shot publisher" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"publish_late_terminal_palette"

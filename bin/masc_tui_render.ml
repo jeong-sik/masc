@@ -3837,7 +3837,18 @@ let render_keeper_message (state : state) =
       | Masc_tui_keeper_selection.No_alternative -> ""
       | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
     in
+    (* A composer holding a slash word gets a footer about that word instead
+       of the key list. The keys have not changed and one backspace brings
+       them back; what the operator is looking at is the command they are
+       part way through typing, and until now the only way to find out
+       whether it existed was to send it. *)
     let footer_hints =
+      match
+        Masc_tui_command.hint_line
+          (Masc_tui_command.hint (Buffer.contents state.msg_input))
+      with
+      | Some line -> line
+      | None ->
       if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with

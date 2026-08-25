@@ -41,6 +41,36 @@ type t =
   | View_image_missing_path  (** [/image] with no path on the line. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
+type command_help = {
+  word : string;  (** The slash word itself, without the slash. *)
+  args : string;  (** How the rest of the line reads, or [""] for none. *)
+  summary : string;  (** One line on what it does. *)
+}
+
+val catalog : command_help list
+(** Every command this build knows. {!help_lines} and {!hint} are both drawn
+    from it, so a command cannot be described one way in the help and another
+    in the composer. *)
+
+val usage : command_help -> string
+(** [/word args], or [/word] where there are none. *)
+
+type hint =
+  | No_command  (** The composer holds a message, not a command. *)
+  | Candidates of command_help list
+      (** What the half-typed word could still become. *)
+  | Chosen of command_help  (** The word names this command exactly. *)
+  | Unknown_command of string  (** The word begins nothing the parser knows. *)
+
+val hint : string -> hint
+(** What to show while the operator is typing. A half-typed word lists its
+    candidates rather than describing one, because {!parse} does no prefix
+    matching and the line is not sendable yet. *)
+
+val hint_line : hint -> string option
+(** {!hint} as one row for the composer's footer, or [None] where there is
+    nothing to say. *)
+
 val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a
     new command cannot ship without its line. *)

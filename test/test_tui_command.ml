@@ -205,6 +205,114 @@ let test_the_request_names_the_tool_and_its_arguments () =
        | _ -> fail "params missing")
   | _ -> fail "request is not an object"
 
+let describe_hint = function
+  | Command.No_command -> "none"
+  | Command.Chosen entry -> "chosen:" ^ entry.Command.word
+  | Command.Unknown_command word -> "unknown:" ^ word
+  | Command.Candidates entries ->
+      "candidates:"
+      ^ String.concat "," (List.map (fun e -> e.Command.word) entries)
+
+let hint text = describe_hint (Command.hint text)
+
+let test_plain_text_has_no_hint () =
+  check string "a message" "none" (hint "please look at the log");
+  check string "empty" "none" (hint "");
+  check string "a slash mid-sentence" "none" (hint "look at a/b")
+
+let test_a_lone_slash_lists_everything () =
+  check int "one candidate per command" (List.length Command.catalog)
+    (match Command.hint "/" with
+     | Command.Candidates entries -> List.length entries
+     | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
+
+let test_a_prefix_narrows_the_list () =
+  check string "t narrows to three" "candidates:task,thinking,tools" (hint "/t");
+  check string "th narrows to one" "candidates:thinking" (hint "/th")
+
+(* [parse] does no prefix matching, so a half-typed word is not a command yet.
+   A hint that described it would say the line was ready when sending it would
+   be refused. *)
+let test_a_half_typed_word_is_not_chosen () =
+  check string "not chosen" "candidates:task" (hint "/ta");
+  check bool "and the parser agrees" true
+    (match Command.parse "/ta" with
+     | Command.Unknown "ta" -> true
+     | _ -> false)
+
+let test_a_complete_word_is_described () =
+  check string "bare" "chosen:task" (hint "/task");
+  check string "with an argument" "chosen:task" (hint "/task write the runbook");
+  check string "with a body below" "chosen:task" (hint "/task title\nbody");
+  check string "an argument it knows" "chosen:thinking" (hint "/thinking folded")
+
+let test_a_word_that_begins_nothing_is_named () =
+  check string "named while it can be fixed" "unknown:zork" (hint "/zork");
+  check string "and with an argument" "unknown:zork" (hint "/zork a b")
+
+let test_the_hint_line_says_what_the_hint_holds () =
+  check (option string) "no command" None (Command.hint_line Command.No_command);
+  check bool "a chosen command carries its summary" true
+    (match Command.hint_line (Command.hint "/memory") with
+     | Some line ->
+         String.length line > String.length "/memory"
+         && String.starts_with ~prefix:"/memory" line
+     | None -> false);
+  check bool "candidates carry every usage" true
+    (match Command.hint_line (Command.hint "/t") with
+     | Some line ->
+         List.for_all
+           (fun word ->
+              let needle = "/" ^ word in
+              let rec appears at =
+                at + String.length needle <= String.length line
+                && (String.equal
+                      (String.sub line at (String.length needle))
+                      needle
+                    || appears (at + 1))
+              in
+              appears 0)
+           [ "task"; "thinking"; "tools" ]
+     | None -> false);
+  check bool "an unknown word names itself" true
+    (match Command.hint_line (Command.hint "/zork") with
+     | Some line -> String.starts_with ~prefix:"/zork is not a command" line
+     | None -> false);
+  check (option string) "one candidate still shows its argument"
+    (Some "/thinking [hidden|folded|full]")
+    (Command.hint_line (Command.hint "/th"));
+  (* The bare slash is the one an operator types knowing nothing, so it is
+     the row that must not run off the pane. *)
+  check bool "the bare slash fits a narrow pane" true
+    (match Command.hint_line (Command.hint "/") with
+     | Some line -> String.length line <= 80
+     | None -> false)
+
+(* The catalog is what the help and the composer both read. A command listed
+   there that the parser does not know would be documented and then refused. *)
+let test_every_catalogued_command_parses () =
+  List.iter
+    (fun (entry : Command.command_help) ->
+      check bool
+        (Printf.sprintf "/%s parses" entry.Command.word)
+        true
+        (match Command.parse ("/" ^ entry.Command.word) with
+         | Command.Unknown _ -> false
+         | _ -> true))
+    Command.catalog
+
+let test_help_lines_come_from_the_catalog () =
+  check int "one line per command" (List.length Command.catalog)
+    (List.length Command.help_lines);
+  List.iter2
+    (fun (entry : Command.command_help) line ->
+      check bool
+        (Printf.sprintf "/%s keeps its summary" entry.Command.word)
+        true
+        (String.starts_with ~prefix:(Command.usage entry) line
+         && String.length line > String.length (Command.usage entry)))
+    Command.catalog Command.help_lines
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -221,6 +329,23 @@ let () =
             test_an_unknown_command_is_named_not_sent
         ; test_case "the keeper message carries the task id first" `Quick
             test_the_keeper_message_carries_the_task_id_first
+        ; test_case "plain text has no hint" `Quick test_plain_text_has_no_hint
+        ; test_case "a lone slash lists everything" `Quick
+            test_a_lone_slash_lists_everything
+        ; test_case "a prefix narrows the list" `Quick
+            test_a_prefix_narrows_the_list
+        ; test_case "a half-typed word is not chosen" `Quick
+            test_a_half_typed_word_is_not_chosen
+        ; test_case "a complete word is described" `Quick
+            test_a_complete_word_is_described
+        ; test_case "a word that begins nothing is named" `Quick
+            test_a_word_that_begins_nothing_is_named
+        ; test_case "the hint line says what the hint holds" `Quick
+            test_the_hint_line_says_what_the_hint_holds
+        ; test_case "every catalogued command parses" `Quick
+            test_every_catalogued_command_parses
+        ; test_case "help lines come from the catalog" `Quick
+            test_help_lines_come_from_the_catalog
         ] )
     ; ( "tools/call"
       , [ test_case "a tool answer is read off the SSE body" `Quick

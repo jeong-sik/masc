@@ -19,6 +19,13 @@ val kind_comment : string
 val kind_number : string
 val kind_type : string
 
+val kind_diff_added : string
+(** A ["```diff"] line that adds. Whole-line rather than token-shaped: the
+    first cell decides the line, and no run ends in the middle of one. *)
+
+val kind_diff_removed : string
+(** The same fence's removing line. *)
+
 val ocaml_lexer : string -> segment list
 val bash_lexer : string -> segment list
 val json_lexer : string -> segment list

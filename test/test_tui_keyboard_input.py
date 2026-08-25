@@ -3986,13 +3986,25 @@ def memory_journal_timeline_interaction() -> Interaction:
         )
         visible = bytes(output[start:])
         for needle in (
-            b"ADDED (now in current memory) [fact] the Runtime probe shares one provider endpoint",
-            b"REMOVED (no longer in current memory) [constraint] probe every model separately",
+            b"[fact] the Runtime probe shares one provider endpoint",
+            b"[constraint] probe every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
             if needle not in visible:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
+
+        # The changed facts ride a ```diff fence, which is what colours the two
+        # directions and keeps a leading + out of markdown's list grammar. The
+        # renderer used to escape that + instead, and nothing consumed the
+        # escape, so every changed fact reached the pane behind a literal
+        # backslash. Asserted on the drawn bytes because that is where it
+        # showed: the decoder was honest the whole time.
+        for escaped in (b"\\+ ", b"\\- "):
+            if escaped in visible:
+                raise AssertionError(
+                    f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
+                )
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")

@@ -47,6 +47,9 @@ type palette = {
   code_string : span;
   code_comment : span;
   code_number : span;
+  code_diff_added : span;
+      (** A ["```diff"] fence's added line. Whole-line, not token-shaped. *)
+  code_diff_removed : span;  (** The same fence's removed line. *)
   code_type : span;  (** Also JSON object keys: a field name reads as one. *)
 }
 

@@ -5762,7 +5762,10 @@ let render_acting (state : state) =
       | Masc_tui_observer.Other _ ->
           None
     in
-    let row = Acting.row_of_event ~duration_ms event in
+    let row =
+      Acting.row_of_event ~duration_ms event
+      |> Acting.with_received_clock ~received:entry.Masc_tui_types.ae_at
+    in
     { row with Acting.keeper = Acting.keeper_of_event ~traces event }
   in
   let shown = List.length visible in

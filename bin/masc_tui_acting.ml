@@ -239,6 +239,19 @@ let row_of_event ~duration_ms (event : Observer.event) =
   | Observer.Other name ->
       { at = 0.; keeper = "server"; glyph = Attention; label = name; detail = "" }
 
+(* Rows are held and drawn in the order they arrived, and that arrival time is
+   what the screen scrolls through -- but the Time column shows the clock the
+   event carried, and [Snapshot] and [Other] carry none. So the column was
+   blank on exactly the rows an operator would use to check the order, and the
+   order itself was never shown at all.
+
+   Arrival is already recorded next to the event. A row with no clock of its
+   own says when the TUI received it, which is both true and the key the list
+   is sorted by. A row that does carry one keeps it: an operator wants to know
+   when the turn settled, not when this process heard about it. *)
+let with_received_clock ~received row =
+  if row.at > 0. then row else { row with at = received }
+
 let duration_of_completion ~before (completed : Observer.agent_core) =
   match completed.Observer.tool_use_id with
   | None -> None

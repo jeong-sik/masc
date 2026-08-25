@@ -22,6 +22,7 @@ type runtime_observation = {
   streaming_ttfrc_ms : float option;
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
+  usage_scope : Runtime_usage_scope.t;
 }
 
 and runtime_attempt = {
@@ -123,6 +124,7 @@ let runtime_observation_of_candidates ~runtime_id
     ?(streaming_ttfrc_ms = None)
     ?(streaming_inter_chunk_count = 0)
     ?(streaming_inter_chunk_avg_ms = None)
+    ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     () : runtime_observation =
   (* Thread the caller-supplied raw model attribution into both fields.
      Without this, success rows lose model attribution at construction
@@ -143,6 +145,7 @@ let runtime_observation_of_candidates ~runtime_id
     streaming_ttfrc_ms;
     streaming_inter_chunk_count;
     streaming_inter_chunk_avg_ms;
+    usage_scope;
   }
 
 (* ================================================================ *)
@@ -326,6 +329,7 @@ let runtime_observation_with_metrics ~runtime_id
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
     ?(attempt_details_source = "agent_core_metrics_callbacks")
     ?(agent_core_internal_runtime_allowed = false)
+    ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     () =
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
@@ -338,6 +342,7 @@ let runtime_observation_with_metrics ~runtime_id
     ~streaming_ttfrc_ms:ttfrc
     ~streaming_inter_chunk_count:chunk_count
     ~streaming_inter_chunk_avg_ms:chunk_avg
+    ~usage_scope
     ()
 
 (* ================================================================ *)
@@ -361,6 +366,7 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
       ("streaming_ttfrc_ms", Json_util.float_opt_to_json obs.streaming_ttfrc_ms);
       ("streaming_inter_chunk_count", `Int obs.streaming_inter_chunk_count);
       ("streaming_inter_chunk_avg_ms", Json_util.float_opt_to_json obs.streaming_inter_chunk_avg_ms);
+      ("usage_scope", `String (Runtime_usage_scope.to_string obs.usage_scope));
     ]
 
 let get_runtime_audit_store store_opt =

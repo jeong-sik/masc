@@ -919,6 +919,10 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                ~capture
                ~attempt_details_source:"claude_code"
                ~agent_core_internal_runtime_allowed:false
+               ~usage_scope:
+                 (if Option.is_some turn.usage
+                  then Runtime_usage_scope.Per_request
+                  else Runtime_usage_scope.Usage_scope_unavailable)
                ()
            in
            Ok

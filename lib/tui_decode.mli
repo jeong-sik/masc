@@ -770,6 +770,18 @@ type context_unavailable_reason =
   | Context_turn_record_read_failed
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
+  | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_usage_scope_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_tokens_exceed_window of
+      { raw_input_tokens : int
+      ; context_window : int
+      }
 
 type context_observation =
   | Context_observed of {

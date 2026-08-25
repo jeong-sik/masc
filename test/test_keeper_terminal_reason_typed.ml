@@ -938,6 +938,7 @@ let () =
     ; final_agent_core_turn_ordinal = 0
     ; usage = Masc.Inference_utils.zero_usage
     ; usage_reported = true
+    ; usage_scope = Runtime_usage_scope.Per_request
     ; tool_calls = []
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; operator_disposition = None

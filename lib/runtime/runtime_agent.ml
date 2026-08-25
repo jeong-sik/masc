@@ -262,6 +262,7 @@ let runtime_id_of_config (config : config) =
   | None -> config.name
 
 let runtime_observation_for_terminal_config ~total_duration_ms ?error
+    ?(usage_scope = Runtime_usage_scope.Usage_scope_unavailable)
     (config : config) =
   let latency_ms = Some (int_of_float total_duration_ms) in
   let capture, _metrics =
@@ -277,10 +278,11 @@ let runtime_observation_for_terminal_config ~total_duration_ms ?error
       (match error with
        | None -> "runtime_agent_terminal"
        | Some _ -> "runtime_agent_terminal_error")
+    ~usage_scope
     ()
 
-let runtime_observation_for_completed_config ~total_duration_ms config =
-  runtime_observation_for_terminal_config ~total_duration_ms config
+let runtime_observation_for_completed_config ~total_duration_ms ~usage_scope config =
+  runtime_observation_for_terminal_config ~total_duration_ms ~usage_scope config
 
 (* Agent Core contract §4.6: [read_sse] arms the stream-idle deadline only when BOTH a
    clock and the idle timeout are present. masc's clock derivation resolves to
@@ -1223,6 +1225,10 @@ let run_blocks
       let runtime_observation =
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms config
+          ~usage_scope:
+            (if Option.is_some response.usage
+             then Runtime_usage_scope.Per_request
+             else Runtime_usage_scope.Usage_scope_unavailable)
       in
       Ok
         {
@@ -1251,6 +1257,10 @@ let run_blocks
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms
           config
+          ~usage_scope:
+            (if Option.is_some response.usage
+             then Runtime_usage_scope.Per_request
+             else Runtime_usage_scope.Usage_scope_unavailable)
       in
       Ok
         { response
@@ -1283,6 +1293,7 @@ let run_blocks
         runtime_observation_for_completed_config
           ~total_duration_ms:run_total_duration_ms
           config
+          ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
       in
       Ok
         { response = partial_response

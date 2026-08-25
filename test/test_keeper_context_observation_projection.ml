@@ -25,6 +25,7 @@ let sample_record
       ?(absolute_turn = 4071)
       ?(input_tokens = Some 18_000)
       ?(context_window = Some 131_072)
+      ?(usage_scope = Runtime_usage_scope.Per_request)
       ()
   : Turn_record.t
   =
@@ -66,6 +67,7 @@ let sample_record
       ; output_tokens = Some 412
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 15_000
+      ; scope = usage_scope
       }
   ; ts = 1_781_200_000.5
   }
@@ -232,17 +234,68 @@ let test_missing_window_keeps_tokens_without_ratio () =
     check bool "max is null without a window" true (field fields "context_max" = `Null))
 ;;
 
-(* The projection writes these fields and Tui_decode reads them, but each side
-   had only its own tests: the producer checked what it emitted and the decoder
-   checked hand-written JSON. A field the producer stopped emitting therefore
-   left both suites green while the Live Context surface fell back to zeros
-   (#29320). Every shape the producer can emit is decoded here. *)
 let decodes fields =
   Masc.Tui_decode.decode_context_observation
     ~expected_trace_id:sample_trace
     (`Assoc fields)
 ;;
 
+let test_cumulative_usage_is_diagnostic_not_occupancy () =
+  with_temp_workspace (fun config ->
+    append_record
+      config
+      (sample_record
+         ~input_tokens:(Some 1_063_857)
+         ~context_window:(Some 128_000)
+         ~usage_scope:Runtime_usage_scope.Conversation_cumulative
+         ());
+    let fields =
+      Projection.context_fields
+        ~config
+        ~keeper_name:"beta"
+        ~current_trace_id:sample_trace
+    in
+    check_not_observed fields ~reason:"conversation_cumulative_usage";
+    match decodes fields with
+    | Ok
+        (Masc.Tui_decode.Context_unavailable
+          (Context_conversation_cumulative_usage
+            { raw_input_tokens = Some 1_063_857
+            ; context_window = Some 128_000
+            })) -> ()
+    | Ok _ -> fail "cumulative usage lost its typed raw diagnostics"
+    | Error detail -> fail detail)
+;;
+
+let test_per_request_overflow_is_unavailable_not_clamped () =
+  with_temp_workspace (fun config ->
+    append_record
+      config
+      (sample_record
+         ~input_tokens:(Some 128_001)
+         ~context_window:(Some 128_000)
+         ());
+    let fields =
+      Projection.context_fields
+        ~config
+        ~keeper_name:"beta"
+        ~current_trace_id:sample_trace
+    in
+    check_not_observed fields ~reason:"context_tokens_exceed_window";
+    match decodes fields with
+    | Ok
+        (Masc.Tui_decode.Context_unavailable
+          (Context_tokens_exceed_window
+            { raw_input_tokens = 128_001; context_window = 128_000 })) -> ()
+    | Ok _ -> fail "per-request overflow was clamped or lost"
+    | Error detail -> fail detail)
+;;
+
+(* The projection writes these fields and Tui_decode reads them, but each side
+   had only its own tests: the producer checked what it emitted and the decoder
+   checked hand-written JSON. A field the producer stopped emitting therefore
+   left both suites green while the Live Context surface fell back to zeros
+   (#29320). Every shape the producer can emit is decoded here. *)
 let test_every_projected_shape_decodes () =
   with_temp_workspace (fun config ->
     (* absence: no store at all *)
@@ -287,6 +340,10 @@ let () =
             test_previous_trace_row_is_typed_absent
         ; test_case "missing window keeps tokens without ratio" `Quick
             test_missing_window_keeps_tokens_without_ratio
+        ; test_case "cumulative usage is diagnostic, not occupancy" `Quick
+            test_cumulative_usage_is_diagnostic_not_occupancy
+        ; test_case "per-request overflow is unavailable, not clamped" `Quick
+            test_per_request_overflow_is_unavailable_not_clamped
         ; test_case "every projected shape decodes" `Quick
             test_every_projected_shape_decodes
         ] )

@@ -989,6 +989,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            ~capture
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
+           ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
            ()
        in
        Ok

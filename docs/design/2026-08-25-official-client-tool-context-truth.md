@@ -285,4 +285,3 @@ turns. Historical rows remain evidence of the prior bug and are not rewritten.
 4. newly generated official-client raw trace + TurnRecord
 5. effective tool surface API/TUI capture for at least Claude, Codex, Antigravity Keeper
 6. all completion triggers above recorded as pass/fail, with no `unknown`
-

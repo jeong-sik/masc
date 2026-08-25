@@ -21,13 +21,25 @@ let reason_undecodable = "turn_record_undecodable"
 let reason_read_failed = "turn_record_read_failed"
 let reason_without_usage = "turn_record_without_usage"
 let reason_trace_mismatch = "turn_record_trace_mismatch"
+let reason_cumulative_usage = "conversation_cumulative_usage"
+let reason_usage_scope_unavailable = "usage_scope_unavailable"
+let reason_tokens_exceed_window = "context_tokens_exceed_window"
 
-let not_observed_json ~reason =
-  `Assoc [ "kind", `String "not_observed"; "reason", `String reason ]
+let opt_assoc name to_json = function
+  | Some value -> [ name, to_json value ]
+  | None -> []
+;;
+
+let not_observed_json ?usage_scope ?raw_input_tokens ?context_window ~reason () =
+  `Assoc
+    ([ "kind", `String "not_observed"; "reason", `String reason ]
+     @ opt_assoc "usage_scope" (fun value -> `String value) usage_scope
+     @ opt_assoc "raw_input_tokens" (fun value -> `Int value) raw_input_tokens
+     @ opt_assoc "context_window" (fun value -> `Int value) context_window)
 ;;
 
 let missing_measurement_json () =
-  not_observed_json ~reason:reason_measurement_missing
+  not_observed_json ~reason:reason_measurement_missing ()
 ;;
 
 let context_fields_unavailable unavailable =
@@ -126,6 +138,7 @@ let observed_context_fields (record : Turn_record.t) =
       ; "absolute_turn", `Int record.absolute_turn
       ; "request_body_bytes", request_body_bytes
       ; "metrics_unavailable", `Null
+      ; "usage_scope", `String (Runtime_usage_scope.to_string record.usage.scope)
       ]
   in
   [ "context_ratio", ratio
@@ -140,22 +153,47 @@ let observed_context_fields (record : Turn_record.t) =
 let context_fields ~config ~keeper_name ~current_trace_id =
   match latest_turn_observation ~config ~keeper_name with
   | No_turn_record ->
-    context_fields_unavailable (not_observed_json ~reason:reason_measurement_missing)
+    context_fields_unavailable (not_observed_json ~reason:reason_measurement_missing ())
   | Undecodable_turn_record ->
-    context_fields_unavailable (not_observed_json ~reason:reason_undecodable)
+    context_fields_unavailable (not_observed_json ~reason:reason_undecodable ())
   | Turn_record_read_failed ->
-    context_fields_unavailable (not_observed_json ~reason:reason_read_failed)
+    context_fields_unavailable (not_observed_json ~reason:reason_read_failed ())
   | Observed record ->
     (* A reseeded identity starts a new trace while the per-name store keeps
        the previous trace's rows: projecting those would show the prior
        generation's occupancy on a keeper whose context is empty. *)
     if not (String.equal record.trace_id current_trace_id)
-    then context_fields_unavailable (not_observed_json ~reason:reason_trace_mismatch)
+    then context_fields_unavailable (not_observed_json ~reason:reason_trace_mismatch ())
     else (
-      match record.usage.input_tokens with
-      | None ->
-        context_fields_unavailable (not_observed_json ~reason:reason_without_usage)
-      | Some _ -> observed_context_fields record)
+      match record.usage.scope, record.usage.input_tokens, record.context_window with
+      | Runtime_usage_scope.Per_request, None, _ ->
+        context_fields_unavailable (not_observed_json ~reason:reason_without_usage ())
+      | Runtime_usage_scope.Per_request, Some tokens, Some window
+        when window > 0 && tokens > window ->
+        context_fields_unavailable
+          (not_observed_json
+             ~reason:reason_tokens_exceed_window
+             ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
+             ~raw_input_tokens:tokens
+             ~context_window:window
+             ())
+      | Runtime_usage_scope.Per_request, Some _, _ -> observed_context_fields record
+      | Runtime_usage_scope.Conversation_cumulative, tokens, window ->
+        context_fields_unavailable
+          (not_observed_json
+             ~reason:reason_cumulative_usage
+             ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
+             ?raw_input_tokens:tokens
+             ?context_window:window
+             ())
+      | Runtime_usage_scope.Usage_scope_unavailable, tokens, window ->
+        context_fields_unavailable
+          (not_observed_json
+             ~reason:reason_usage_scope_unavailable
+             ~usage_scope:(Runtime_usage_scope.to_string record.usage.scope)
+             ?raw_input_tokens:tokens
+             ?context_window:window
+             ()))
 ;;
 
 let last_turn_usage_json_of_meta

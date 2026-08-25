@@ -57,6 +57,7 @@ type runtime_observation = {
   streaming_ttfrc_ms : float option;
   streaming_inter_chunk_count : int;
   streaming_inter_chunk_avg_ms : float option;
+  usage_scope : Runtime_usage_scope.t;
 }
 (** Per-turn runtime execution snapshot.  [attempts] is
     in chronological order (the internal capture stores
@@ -122,6 +123,7 @@ val runtime_observation_with_metrics :
   capture:runtime_metrics_capture ->
   ?attempt_details_source:string ->
   ?agent_core_internal_runtime_allowed:bool ->
+  ?usage_scope:Runtime_usage_scope.t ->
   unit ->
   runtime_observation
 (** Materialises a {!runtime_observation} from a finished
@@ -161,4 +163,3 @@ val runtime_metrics_json : unit -> Yojson.Safe.t
     operator dashboard.  Pinned because
     [Runtime_agent] re-exposes it via the
     [include Runtime_observation] module. *)
-

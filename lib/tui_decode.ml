@@ -292,6 +292,18 @@ type context_unavailable_reason =
   | Context_turn_record_read_failed
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
+  | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_usage_scope_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_tokens_exceed_window of
+      { raw_input_tokens : int
+      ; context_window : int
+      }
 
 type context_observation =
   | Context_observed of {
@@ -809,12 +821,42 @@ let parse_log_entry line =
   let* json = json in
   decode_log_entry json
 
-let context_unavailable_reason_of_string = function
+let optional_int_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "field '%s' must be an integer or null (received %s)"
+         key
+         (Json_util.kind_name other))
+;;
+
+let context_unavailable_reason_of_json json raw =
+  let* raw_input_tokens = optional_int_field json "raw_input_tokens" in
+  let* context_window = optional_int_field json "context_window" in
+  let usage_scope =
+    match Json_util.assoc_member_opt "usage_scope" json with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  match raw with
   | "context_measurement_missing" -> Ok Context_measurement_missing
   | "turn_record_undecodable" -> Ok Context_turn_record_undecodable
   | "turn_record_read_failed" -> Ok Context_turn_record_read_failed
   | "turn_record_without_usage" -> Ok Context_turn_record_without_usage
   | "turn_record_trace_mismatch" -> Ok Context_turn_record_trace_mismatch
+  | "conversation_cumulative_usage"
+    when usage_scope = Some "conversation_cumulative" ->
+    Ok (Context_conversation_cumulative_usage { raw_input_tokens; context_window })
+  | "usage_scope_unavailable" when usage_scope = Some "unavailable" ->
+    Ok (Context_usage_scope_unavailable { raw_input_tokens; context_window })
+  | "context_tokens_exceed_window" ->
+    (match usage_scope, raw_input_tokens, context_window with
+     | Some "per_request", Some raw_input_tokens, Some context_window ->
+       Ok (Context_tokens_exceed_window { raw_input_tokens; context_window })
+     | _ -> Error "context token overflow diagnostics are incomplete")
   | raw -> Error (Printf.sprintf "unknown context unavailable reason %S" raw)
 
 let context_unavailable_reason_to_string = function
@@ -823,6 +865,21 @@ let context_unavailable_reason_to_string = function
   | Context_turn_record_read_failed -> "turn record read failed"
   | Context_turn_record_without_usage -> "turn record has no provider usage"
   | Context_turn_record_trace_mismatch -> "turn record belongs to a prior trace"
+  | Context_conversation_cumulative_usage { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "cumulative usage %s tokens (window %s); occupancy not observed"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_usage_scope_unavailable { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "usage scope unavailable (input %s, window %s)"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_tokens_exceed_window { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "per-request usage exceeds window: %d / %d tokens"
+      raw_input_tokens
+      context_window
 
 let require_object_member json key =
   let* value = required_member json key in
@@ -839,7 +896,7 @@ let decode_context_unavailable_payload json =
     Error (Printf.sprintf "unknown context unavailable kind %S" kind)
   else
     let* reason = require_string_field json "reason" in
-    context_unavailable_reason_of_string reason
+    context_unavailable_reason_of_json json reason
 
 let validate_context_ratio ~tokens ~maximum ~ratio =
   match maximum, ratio with

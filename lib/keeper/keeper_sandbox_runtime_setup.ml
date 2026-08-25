@@ -151,6 +151,10 @@ let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
 let sandbox_turn_id_label_key = "masc.mcp.turn_id"
 
+(* Values of the [masc.mcp.kind] label. A turn container lives for one turn and
+   is torn down with it; a oneshot container lives for one command. *)
+let turn_container_kind = "turn"
+
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let normalize_base_path_for_hash base_path =

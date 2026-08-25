@@ -572,6 +572,12 @@ let run_turn
   in
   Spawn_turn_registry.with_turn_registry spawn_registry
   @@ fun () ->
+  (* The language servers a code query starts belong to this turn, for the
+     reason lsp_turn_pool.mli measures: starting one costs 11-60 ms, keeping
+     one costs 12-155 MB, and every keeper has its own sandbox root. Binding
+     here also shuts them down when the turn ends. *)
+  Lsp_turn_pool.with_turn_pool
+  @@ fun () ->
   let runtime_id_string = runtime_id in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)

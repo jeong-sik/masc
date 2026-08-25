@@ -39,6 +39,10 @@ val command_of_language : language -> string * string list
     {!Lsp_project_root} walks a file's ancestors looking for these. *)
 val project_markers_of_language : language -> string list
 
+(** The language of a file, by extension. [None] for a file no server here
+    covers. *)
+val language_of_path : string -> language option
+
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 val command_for_lang : string -> (string * string list) option
 

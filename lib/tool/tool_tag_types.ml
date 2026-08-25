@@ -17,6 +17,7 @@ type module_tag =
   | Mod_agent_timeline
   | Mod_schedule
   | Mod_spawn
+  | Mod_code_query
   | Mod_misc
   | Mod_library
   | Mod_external

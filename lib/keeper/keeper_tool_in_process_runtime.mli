@@ -233,6 +233,17 @@ val handle_masc_agent_timeline_with_outcome
   : config:Workspace.config -> meta:keeper_meta -> name:string -> args:Yojson.Safe.t
   -> Keeper_tool_execution.t
 
+val handle_keeper_code_query_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+(** [keeper_code_query], reached through the turn's language-server pool.
+
+    Answers with a refusal outside a turn, where there is no pool: a server
+    started here would outlive every caller that could ask it anything. *)
+
 val handle_keeper_spawn_with_outcome
   :  name:string
   -> args:Yojson.Safe.t

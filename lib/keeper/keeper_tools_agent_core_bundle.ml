@@ -286,7 +286,11 @@ let make_tool_bundle_for_descriptors
                | Keeper_tool_descriptor.Tool_execute
                | Keeper_tool_descriptor.Tool_keeper_spawn_dispatch ->
                  Some mark_terminal_effect_failed
-               | ( Keeper_tool_descriptor.Tool_search_files
+               (* A code query starts a language server, but the pool owns it
+                  and the turn ends it either way, so a failed call leaves the
+                  caller holding nothing. It answers with the readers. *)
+               | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+                 | Keeper_tool_descriptor.Tool_search_files
                  | Keeper_tool_descriptor.Tool_read_file
                  | Keeper_tool_descriptor.Tool_edit_file
                  | Keeper_tool_descriptor.Tool_write_file

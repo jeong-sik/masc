@@ -144,6 +144,7 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_spawn_dispatch
+  | Tool_keeper_code_query_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -285,6 +286,7 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_spawn_dispatch -> "tool_keeper_spawn_dispatch"
+  | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -295,7 +297,10 @@ let runtime_handler_to_string = function
 
 let keeper_tool_group_of_runtime_handler = function
   | Tool_execute -> Execute_group
-  | Tool_search_files -> Search_files_group
+  (* A code query answers the question Grep answers -- where is this name --
+     from the compiler's view of the code rather than the text's, so it
+     belongs to the same group and not to the filesystem tools. *)
+  | Tool_search_files | Tool_keeper_code_query_dispatch -> Search_files_group
   | Tool_read_file | Tool_edit_file | Tool_write_file -> Filesystem_group
   | Tool_board_dispatch -> Board_group
   | Tool_voice_dispatch -> Voice_group
@@ -491,6 +496,7 @@ let descriptor
     match runtime_handler with
     | Tool_surface_post -> Terminal
     | ( Tool_execute
+      | Tool_keeper_code_query_dispatch
       | Tool_search_files
       | Tool_read_file
       | Tool_edit_file
@@ -1718,6 +1724,25 @@ let keeper_spawn_descriptor (definition : Tool_schemas_spawn.definition) =
     ()
 ;;
 
+let keeper_code_query_descriptor () =
+  let schema : Masc_domain.tool_schema = Tool_schemas_code_query.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:"masc.code_query"
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_keeper_code_query_dispatch
+    (* Reads code and writes nothing. It does start a language server, but the
+       turn's pool owns that and ends it; the caller is left holding an answer
+       or a refusal. The wait is the pool's own bound, not one a caller states,
+       so the reason keeper_spawn_wait is not read-only does not apply. *)
+    ~readonly:true
+    ()
+;;
+
 let masc_keeper_descriptor
     ?(polling_read = false)
     ~keeper_model_projection
@@ -2234,6 +2259,8 @@ let internal_descriptors : t list =
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_spawn_descriptor Tool_schemas_spawn.definitions
+  (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
+  @ [ keeper_code_query_descriptor () ]
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"

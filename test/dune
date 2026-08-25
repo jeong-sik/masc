@@ -184,6 +184,7 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_keeper_tool_code_query
   test_lsp_questions
   test_lsp_workspace_pool
   test_ide_annotations
@@ -523,6 +524,7 @@
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
   test_lsp_process_manager
+  test_keeper_tool_code_query
   test_lsp_questions
   test_lsp_workspace_pool
   test_ide_annotations

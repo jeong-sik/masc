@@ -75,7 +75,11 @@ let test_a_steadily_progressing_turn_stays_near_zero () =
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 
 let sample ~last_progress_at ~active_tool_count =
-  Some { Try_provider.last_progress_at; active_tool_count }
+  Some { Try_provider.last_progress_at; active_tool_count; awaiting_approval_count = 0 }
+;;
+
+let sample_with_approval ~last_progress_at ~active_tool_count ~awaiting_approval_count =
+  Some { Try_provider.last_progress_at; active_tool_count; awaiting_approval_count }
 ;;
 
 let threshold_sec = 900.0
@@ -150,6 +154,47 @@ let test_a_missing_sample_falls_back_to_elapsed () =
        ~threshold_sec
        ~attempt_started_at
        ~sample:None)
+;;
+
+(* task-344: an approval wait is a human-decision wait, not provider
+   no-progress. [provider_call_deadline_sec] in [30,180) with an operator who
+   takes longer than that to answer used to report
+   "provider call made no progress for Ns" against a healthy turn: the gate
+   blocks before [execute_admitted] issues ToolCalled, so the wait neither
+   bumps [active_tool_count] nor refreshes [last_progress_at]. The wait is
+   bounded by the gate's own [timeout_sec], so exempting it costs the
+   watchdog nothing. *)
+let test_an_approval_wait_is_not_a_stall () =
+  let now = attempt_started_at +. 500.0 in
+  check bool "a call parked on a human answer suppresses the stall verdict"
+    false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec:60.0
+       ~attempt_started_at
+       ~sample:
+         (sample_with_approval
+            ~last_progress_at:(now -. 200.0)
+            ~active_tool_count:0
+            ~awaiting_approval_count:1))
+;;
+
+(* task-344: the exemption must not leak past the wait. Once the gate settles
+   (answer, timeout, displacement -- the waiter leaves the registry on every
+   path), the count returns to zero and a genuinely silent provider is again
+   the watchdog's to report. *)
+let test_the_exemption_ends_when_the_wait_ends () =
+  let now = attempt_started_at +. 500.0 in
+  check bool "wait over, silence beyond the threshold is a stall again" true
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec:60.0
+       ~attempt_started_at
+       ~sample:
+         (sample_with_approval
+            ~last_progress_at:(now -. 200.0)
+            ~active_tool_count:0
+            ~awaiting_approval_count:0))
 ;;
 
 (* {1 the synthetic Wall_clock timeout joins existing paths} *)
@@ -229,6 +274,10 @@ let () =
             test_the_threshold_boundary_is_exclusive
         ; test_case "a missing sample falls back to elapsed" `Quick
             test_a_missing_sample_falls_back_to_elapsed
+        ; test_case "an approval wait is not a stall" `Quick
+            test_an_approval_wait_is_not_a_stall
+        ; test_case "the exemption ends when the wait ends" `Quick
+            test_the_exemption_ends_when_the_wait_ends
         ] )
     ; ( "wall_clock_timeout_integration"
       , [ test_case "carries the Wall_clock phase" `Quick

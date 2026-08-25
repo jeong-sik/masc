@@ -124,3 +124,17 @@ let settle t ~keeper_name ~tool_call_id decision =
 let pending t =
   Stdlib.Mutex.protect t.mutex (fun () ->
       List.map (fun waiter -> waiter.entry) t.waiters)
+
+(* task-344: how many calls the named keeper has parked in [await] right now.
+   The stall watchdog reads this to exempt a human-decision wait from its
+   "provider made no progress" report. Derived from the same live waiter list
+   [pending] walks, under the same mutex, so it can never disagree with the
+   waits themselves: entry adds a waiter, and [Fun.protect] removal takes it
+   out on every exit path (answer, timeout, displacement, cancellation). *)
+let pending_count t ~keeper_name =
+  Stdlib.Mutex.protect t.mutex (fun () ->
+      List.length
+        (List.filter (fun waiter ->
+             String.equal waiter.entry.keeper_name keeper_name)
+           t.waiters))
+;;

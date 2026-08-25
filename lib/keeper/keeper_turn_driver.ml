@@ -1221,10 +1221,24 @@ let run_named
                     try
                       match Keeper_registry.get ~base_path keeper_name with
                       | Some { current_turn_observation = Some obs; _ } ->
+                        (* task-344: a tool call parked in the approval gate
+                           is work, not a stall. [awaiting_approval_count] is
+                           read from the shared approval registry's live
+                           waiter list rather than written through as its own
+                           observation field: that list is already the source
+                           of truth, maintained under its own mutex with
+                           [Fun.protect] removal on every exit path (answer,
+                           timeout, displacement, cancel), so a crashed gate
+                           fiber can never leave a stale waiter behind to
+                           blind the watchdog permanently. *)
                         Some
                           { Keeper_turn_driver_try_provider.last_progress_at =
                               obs.last_progress_at
                           ; active_tool_count = obs.active_tool_count
+                          ; awaiting_approval_count =
+                              Keeper_tool_approval_registry.pending_count
+                                (Keeper_tool_approval_registry.shared ())
+                                ~keeper_name
                           }
                       | Some _ | None -> None
                     with

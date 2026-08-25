@@ -93,3 +93,11 @@ type pending =
 
 val pending : t -> pending list
 (** Every wait currently open, oldest first. *)
+
+val pending_count : t -> keeper_name:string -> int
+(** How many waits the named keeper has open right now (task-344).
+
+    The stall watchdog reads this to treat a human-decision wait as work
+    rather than "provider made no progress". Derived from the same live
+    waiter list {!pending} walks, so it can never disagree with the waits
+    themselves. *)

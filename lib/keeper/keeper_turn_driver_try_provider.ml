@@ -12,7 +12,7 @@ open Result.Syntax
 
 (** A reading of the keeper's live in-turn progress signal (#28417).
 
-    Mirrors the two fields of [Keeper_registry_types.turn_observation] the
+    Mirrors the fields of [Keeper_registry_types.turn_observation] the
     stall decision needs. Kept as its own record so this module does not
     depend on [Keeper_registry]: the caller supplies the reading, this module
     decides. *)
@@ -27,6 +27,11 @@ type provider_progress_sample =
             means "working", not "stalled" -- the exclusion
             [Keeper_registry_types]' [active_tool_count] doc comment has
             described since RFC-0197 without any code ever reading it. *)
+  ; awaiting_approval_count : int
+        (** Tool calls blocked in [Keeper_tool_approval_gate.tool_approval]
+            waiting for a human answer (task-344). Same "work, not a stall"
+            reading as [active_tool_count]; the wait is bounded by the
+            gate's own [timeout_sec], so exempting it loses no safety. *)
   }
 
 (** Explicit context record for the extracted [try_provider] function.
@@ -297,11 +302,18 @@ let progress_poll_interval_sec = 15.0
 
 let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
   match sample with
-  | Some { last_progress_at; active_tool_count } ->
+  | Some { last_progress_at; active_tool_count; awaiting_approval_count } ->
     (* A tool call that runs for minutes refreshes no progress signal while
        it runs, so tools in flight are work, not a stall. The 2026-08-12
        live attempt spent 120s inside one [Execute] and was healthy. *)
-    active_tool_count = 0 && now -. last_progress_at > threshold_sec
+    (* task-344: a tool call blocked in the approval gate is likewise work,
+       not a stall -- the turn is waiting on a human decision, and that wait
+       is already bounded by the gate's own [timeout_sec]. Without this
+       exemption the watchdog misreports "provider made no progress for Ns"
+       whenever [provider_call_deadline_sec] lands in [30,180) and the
+       operator takes longer than that to answer. *)
+    let waiting_on_work_in_flight = active_tool_count > 0 || awaiting_approval_count > 0 in
+    (not waiting_on_work_in_flight) && now -. last_progress_at > threshold_sec
   | None ->
     (* Probe absent, or the keeper has no live turn observation to read.
        Falling back to elapsed time reproduces the pre-#28417 ceiling: losing

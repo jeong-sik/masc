@@ -2,7 +2,7 @@
 
 (** A reading of the keeper's live in-turn progress signal (#28417).
 
-    Mirrors the two [Keeper_registry_types.turn_observation] fields the stall
+    Mirrors the [Keeper_registry_types.turn_observation] fields the stall
     decision needs, so this module decides without depending on
     [Keeper_registry]. *)
 type provider_progress_sample =
@@ -11,6 +11,10 @@ type provider_progress_sample =
   ; active_tool_count : int
         (** Tools issued but not yet completed; non-zero means work in
             flight, not a stall. *)
+  ; awaiting_approval_count : int
+        (** Tool calls parked in the approval gate waiting on a human
+            answer (task-344); non-zero likewise means work in flight, not
+            a stall, and the wait is bounded by the gate's own timeout. *)
   }
 
 type try_provider_ctx =

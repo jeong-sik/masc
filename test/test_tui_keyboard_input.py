@@ -2862,7 +2862,9 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
-        send_and_wait(process, master_fd, output, b"\x17", b"Board (3)  [j/k]")
+        # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
+        # disambiguation. It must reach the same pane binding as legacy 0x17.
+        send_and_wait(process, master_fd, output, b"\x1b[119;5u", b"Board (3)  [j/k]")
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
         send_and_wait(process, master_fd, output, b"l", b"j/k:scroll")
@@ -4253,7 +4255,14 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        send_and_wait(process, master_fd, output, b"\x07", b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat")
+        # iTerm reports Ctrl-G as CSI-u after keyboard disambiguation is on.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[103;5u",
+            b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
+        )
         wait_for_output(
             process,
             master_fd,

@@ -23,12 +23,13 @@
    the name built out of it. *)
 
 val name : parameters:string -> final:char -> string option
-(** The name for one CSI sequence, or [None] when this vocabulary has none.
+(** The key for one CSI sequence, or [None] when this vocabulary has none.
 
-    Names are lower-case and modifiers prefix them in a fixed order —
-    ["ctrl-shift-up"], never ["shift-ctrl-up"] — so a binding is one string
-    and two spellings cannot drift apart. An unmodified key keeps its bare
-    name, so every existing binding reads the same as before. *)
+    Named keys are lower-case and modifiers prefix them in a fixed order —
+    ["ctrl-shift-up"], never ["shift-ctrl-up"]. CSI-u Ctrl+letter sequences
+    instead return the same one-byte C0 string as legacy terminals. Thus a
+    binding receives one value regardless of which encoding the terminal
+    uses. *)
 
 val enable_kitty_keyboard : string
 (** The escape that asks the terminal to report modifiers on every key.

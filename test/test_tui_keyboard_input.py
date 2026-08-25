@@ -5984,12 +5984,12 @@ def attention_drawn_once_interaction() -> Interaction:
 
 
 def composer_newline_interaction(requests: HttpRequests) -> Interaction:
-    """Ctrl-J opens a line; Return sends.
+    """Ctrl-J and Shift+Enter open lines; Return sends.
 
-    The two are one byte apart only because the TUI turns off the terminal's
-    CR-to-LF translation. With it on, Return arrives as LF -- the byte Ctrl-J
-    sends -- and the composer cannot tell them apart. This drives a real
-    terminal, so it fails if that setting is ever restored.
+    Ctrl-J and Return are one byte apart only because the TUI turns off the
+    terminal's CR-to-LF translation. With it on, Return arrives as LF -- the
+    byte Ctrl-J sends -- and the composer cannot tell them apart. Enhanced
+    keys keep Shift+Enter separate as the raw CSI sequence driven below.
     """
 
     def interact(
@@ -6020,7 +6020,25 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
         if "firstsecond" in rendered:
             raise AssertionError(f"composer joined the two lines: {rendered!r}")
 
-        # Return sends what Ctrl-J composed, newline and all.
+        # Kitty keyboard disambiguation reports Shift+Enter as CSI 13;2u.
+        # It opens another line and, like Ctrl-J, must not send on its own.
+        third_frame = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[13;2uthird",
+            composer_showing(b"third", prefix=b"    "),
+        )
+        third_rendered = CSI_RE.sub(b"", third_frame).decode("utf-8")
+        if "first" not in third_rendered or "second" not in third_rendered:
+            raise AssertionError(
+                f"Shift+Enter lost an earlier composer line: {third_rendered!r}"
+            )
+        posted = [path for path, _body in requests if path.endswith("/chat/stream")]
+        if posted:
+            raise AssertionError(f"Shift+Enter sent the composer: {posted!r}")
+
+        # Return sends what Ctrl-J and Shift+Enter composed, newlines and all.
         os.write(master_fd, b"\r")
         body = wait_for_http_request(
             process,
@@ -6030,7 +6048,7 @@ def composer_newline_interaction(requests: HttpRequests) -> Interaction:
             path="/api/v1/keepers/chat/stream",
         )
         message = json.loads(body)["message"]
-        if message != "first\nsecond":
+        if message != "first\nsecond\nthird":
             raise AssertionError(f"the newline did not survive the send: {message!r}")
         # The fixture answers 503, so the turn settles rather than streaming.
         # Esc then leaves the pane instead of interrupting, and q quits from

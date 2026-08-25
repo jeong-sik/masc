@@ -23,7 +23,11 @@
 #   exception_message_classifiers
 #     Exception-message substring classification shapes.
 #   stub_markers
-#     Runtime stubs such as Not_implemented and failwith "not implemented".
+#     Runtime stubs -- Not_implemented, failwith "not implemented"/"TODO"/
+#     "stub" -- and `assert false`. The last one is counted because it is the
+#     same promise ("this cannot happen") made where the compiler cannot check
+#     it: a wildcard arm asserting unreachability takes a new variant silently
+#     and turns it into an Assert_failure at runtime.
 #   wildcard_silent_defaults
 #     Line-leading catch-all arms that collapse to permissive defaults.
 #

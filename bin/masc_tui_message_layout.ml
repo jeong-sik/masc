@@ -448,21 +448,35 @@ let chat_role_label_column = 16
 
 let chat_role_label_share = 4
 
-let chat_role_label_width ~pane_cells labels =
-  let widest =
-    List.fold_left (fun acc label -> max acc (display_width label)) 0 labels
-  in
-  let ceiling = max chat_role_label_column (pane_cells / chat_role_label_share) in
-  max chat_role_label_column (min widest ceiling)
+(* A budget, not a measurement of what happens to be loaded.
+   Measuring the widest label on the pane tied body width to the message
+   list: [rows_of_entry] takes the body's width from what the badge leaves,
+   so a differently-named speaker posting re-wrapped every body already on
+   screen, changed how many rows the history occupies, and moved
+   [msg_scroll] -- which counts rows back from the newest -- to a different
+   part of the conversation. Labels on one live pane ran from 13 cells
+   ("admin · agent") to 57
+   ("keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent · agent"), so the
+   badge took a quarter of the pane and gave it back one message later.
+   Fixed, the body keeps its width and only a resize re-wraps. *)
+let chat_role_label_budget = 24
+
+let chat_role_label_width ~pane_cells =
+  max chat_role_label_column
+    (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
 let align_role_label ?(column = chat_role_label_column) label =
   let column = max 1 column in
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
   if cells > column then
-    let prefix, _, _ = cell_prefix_of_pieces label pieces (column - 1) in
-    prefix ^ "…"
-  else label ^ String.make (column - cells) ' '
+    (* Right-aligned, so the cut is at the head. These labels are
+       [agent · surface] and share long prefixes -- every canary starts
+       "keeper-canary-10t-cdx-sol-" -- so the tail is what tells them apart. *)
+    let kept = cell_suffix_of_pieces label pieces (column - 1) in
+    let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
+    "…" ^ String.make pad ' ' ^ kept
+  else String.make (column - cells) ' ' ^ label
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows

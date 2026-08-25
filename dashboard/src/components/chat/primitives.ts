@@ -2176,6 +2176,16 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
   }
 }
 
+// How much body a block list renders, near enough to decide whether the reader
+// needs a fold. Serialized size rather than a per-variant character count:
+// there are seventeen block shapes and a new one must not silently stop
+// counting. The number is an approximation of volume, not of characters, so it
+// is compared against its own threshold.
+const blockBodyWeight = (blocks: ChatBlock[]): number =>
+  blocks
+    .filter(block => block.t !== 'thinking')
+    .reduce((total, block) => total + JSON.stringify(block).length, 0)
+
 function ChatBlocks({ blocks, fallbackText }: { blocks: ChatBlock[]; fallbackText?: string }) {
   return html`
     <div class="flex flex-col gap-3" data-chat-blocks>
@@ -2759,8 +2769,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const effectiveBlocks = isFailureMessage ? [] : renderedServerBlocks
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const hasNonThinkingBlocks = effectiveBlocks.some(block => block.t !== 'thinking')
-  const collapseThreshold = 1200
-  const isCollapsible = !hasNonThinkingBlocks && messageLength > collapseThreshold
+  const collapseThreshold = hasNonThinkingBlocks ? 2400 : 1200
+  // A long body is a long body whether the server sent it as blocks or as
+  // plain text. The clamp used to hang off the plain-text div alone, so a
+  // message carrying any non-thinking block — which is most keeper output —
+  // rendered through ChatBlocks with no way to fold it. Measure whichever
+  // body this message actually renders.
+  const collapsibleLength = hasNonThinkingBlocks
+    ? blockBodyWeight(effectiveBlocks)
+    : messageLength
+  const isCollapsible = collapsibleLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -2972,7 +2990,9 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 />`
               : hasEffectiveBlocks
               ? html`
-                  <${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />
+                  <div class=${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}>
+                    <${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />
+                  </div>
                   ${hasRealText && !hasNonThinkingBlocks
                     ? html`
                         <div

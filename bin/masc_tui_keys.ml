@@ -120,6 +120,9 @@ let for_surface = function
   | Verification -> b Navigate "j/k" "scroll" :: listing_meta
   | Harness -> b Navigate "j/k" "scroll" :: listing_meta
   | Fusion ->
+      (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
+         footer is [footer_hints_fusion_detail], which also appends the live
+         scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"; b Act "Enter" "detail" ] @ listing_meta
   | Repositories -> b Navigate "j/k" "scroll" :: listing_meta
   | Changes ->
@@ -158,11 +161,31 @@ let for_surface = function
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
-let footer_hints surface =
-  for_surface surface
+(* Sort by group, then flatten to the footer's "key:label  key:label" form.
+   Both the static per-surface footer and the Fusion detail footer (which
+   appends a live scroll position) render through this one projection. *)
+let hints_of_bindings bindings =
+  bindings
   |> List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group))
   |> List.map (fun { key; label; _ } -> key ^ ":" ^ label)
   |> String.concat "  "
+
+let footer_hints surface = hints_of_bindings (for_surface surface)
+
+(* The Fusion detail view: the keys table owns the key list; the renderer
+   owns the live scroll numbers it appends after them. ([view] stays
+   [Fusion]; [fusion_mode] decides list vs detail — masc_tui_types.ml.)
+   [scroll] is the clamped position the renderer computed, so the footer
+   agrees with what is on screen. *)
+let footer_hints_fusion_detail ~scroll ~max_scroll =
+  Printf.sprintf "%s  (%d/%d)"
+    (hints_of_bindings
+       ([ b Navigate "j/k" "scroll"
+        ; b Navigate "PgUp/PgDn" "page"
+        ; b Act "Esc" "back"
+        ]
+        @ listing_meta))
+    scroll max_scroll
 
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)

@@ -4330,9 +4330,7 @@ let render_fusion_detail (state : state) run_id =
   Buffer.add_string buf
     (footer_line state
        ~hints:
-         (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Esc:back  r:refresh  Tab:next"
-            scroll max_scroll));
+         (Masc_tui_keys.footer_hints_fusion_detail ~scroll ~max_scroll));
   finish_surface state ~clamped:(Fusion_detail_scroll scroll)
     ~surface_key:"fusion-detail" ~rows:terminal_rows ~cols buf
 

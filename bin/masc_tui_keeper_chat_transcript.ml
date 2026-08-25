@@ -308,6 +308,38 @@ let compact_marker (activities : tool_activity list) =
   then marker_of_outcome Outcome_unrecorded
   else marker_of_outcome Returned
 
+(* The descriptor registry already owns the model-facing name. Reusing it
+   here keeps the summary on the same vocabulary the Keeper saw (Read, Edit,
+   Execute, ...), instead of deriving categories from spelling conventions.
+   A trace from an older or external provider may name no registered tool; in
+   that case the exact safe name is more useful than an invented "Other". *)
+let canonical_tool_name (activity : tool_activity) =
+  match Masc.Keeper_tool_descriptor.find_public activity.tool_name with
+  | Some descriptor -> descriptor.public_name
+  | None -> (
+      match
+        Masc.Keeper_tool_descriptor.public_name_for_internal activity.tool_name
+      with
+      | Some public_name -> public_name
+      | None -> safe_line activity.tool_name)
+
+let compact_tool_parts (activities : tool_activity list) =
+  let add counts activity =
+    let name = canonical_tool_name activity in
+    let rec increment reversed = function
+      | [] -> List.rev ((name, 1) :: reversed)
+      | (existing, count) :: rest when String.equal existing name ->
+          List.rev_append reversed ((existing, count + 1) :: rest)
+      | entry :: rest -> increment (entry :: reversed) rest
+    in
+    increment [] counts
+  in
+  List.fold_left add [] activities
+  |> List.map (fun (name, count) -> Printf.sprintf "%s %d" name count)
+
+let compact_tool_mix activities =
+  String.concat " · " (compact_tool_parts activities)
+
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]
    folds only the presentation rows; it reports exactly how many detail rows
@@ -322,11 +354,12 @@ let project_tool_block mode (block : tool_block) =
     | Full, _ -> full_activity_rows, 0
     | Compact, activities ->
         let outcomes = String.concat ", " (compact_outcome_parts activities) in
+        let mix = compact_tool_mix activities in
         let hidden_activity_rows = List.length full_activity_rows in
         ( [ safe_line
-              (Printf.sprintf "%s Ran %s · %s · %s folded"
+              (Printf.sprintf "%s Tools %d · %s · %s · %s folded"
                  (compact_marker activities)
-                 (plural activity_count "tool") outcomes
+                 activity_count mix outcomes
                  (plural hidden_activity_rows "detail"))
           ]
         , hidden_activity_rows )
@@ -411,10 +444,13 @@ let phase_text t =
          here would read as a slow tool rather than a question on screen. *)
       "held at a tool call, waiting for your answer"
   | Working ->
-      let calls = List.length t.reversed_tool_calls in
+      let activities = tool_calls t in
+      let calls = List.length activities in
       let work =
         if calls = 0 then "working"
-        else Printf.sprintf "working, %d tool call(s)" calls
+        else
+          Printf.sprintf "working · %s · %s"
+            (plural calls "tool") (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed

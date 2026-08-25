@@ -100,6 +100,10 @@ val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 
 type row =
   { at : float  (** The server's [ts], the sort key. *)
+  ; turn_id : string option
+      (** Exact producer identity for grouping rows from one turn: the typed
+          delivery key for direct turns, otherwise the persisted [turn_ref].
+          [None] for old rows and Memory journal entries. *)
   ; kind : kind
   ; text : string
       (** What to draw. Empty for [Tool_calls] and [Reasoning], whose typed

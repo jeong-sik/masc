@@ -370,13 +370,15 @@ let test_progress_row_counts_the_tool_calls () =
           matching the whole string here would tie tool-call counting to
           the age format. *)
        check bool "a turn with no calls does not mention them" false
-         (contains ~needle:"tool call" text)
+         (contains ~needle:"tool" text)
    | rows -> failf "expected a progress row, got %d rows" (List.length rows));
   feed t read_file_call;
   match rows t with
   | (Transcript.Progress, text) :: _ ->
       check bool "once it calls tools the row counts them" true
-        (contains ~needle:"1 tool call" text)
+        (contains ~needle:"1 tool" text);
+      check bool "and says which tool kind is active" true
+        (contains ~needle:"read_file 1" text)
   | rows -> failf "expected a progress row, got %d rows" (List.length rows)
 
 let test_interrupt_row_does_not_claim_the_turn_stopped () =
@@ -475,11 +477,30 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check bool "the compact row does not hide the failure" true
     (contains ~needle:"1 failed" summary);
   check bool "the compact row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Ran 3 tools" summary);
+    (String.starts_with ~prefix:"✗ Tools 3" summary);
   check bool "the compact row carries the exact folded count" true
     (contains ~needle:"3 details folded" summary);
   check string "compact does not count the visible omission as hidden"
     (List.nth full.rows 3) (List.nth compact.rows 1)
+
+let test_compact_summary_counts_registered_public_names () =
+  let activity name =
+    Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+      ~outcome:Transcript.Returned ~duration:None
+  in
+  let projection =
+    Transcript.tool_block
+      [ activity "Read"; activity "Read"; activity "Edit"; activity "Execute" ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.rows with
+  | [ summary ] ->
+      List.iter
+        (fun expected ->
+          check bool ("summary contains " ^ expected) true
+            (contains ~needle:expected summary))
+        [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
+  | rows -> failf "expected one compact row, got %d" (List.length rows)
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
@@ -605,6 +626,8 @@ let () =
             test_fragment_for_an_unopened_call_is_dropped
         ; test_case "compact and full keep the same typed facts" `Quick
             test_compact_and_full_keep_the_same_typed_facts
+        ; test_case "compact summary counts registered public names" `Quick
+            test_compact_summary_counts_registered_public_names
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick

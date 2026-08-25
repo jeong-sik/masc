@@ -221,7 +221,8 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let margin =
         if String.equal row.gutter "" then ""
         else
-          Printf.sprintf "%s%s%s" Ansi.dim row.gutter
+          Printf.sprintf "%s%s%s%s" Ansi.dim (Chat_theme.origin row.style)
+            row.gutter
             (if context.ambient_background then context.inline_restore
              else Ansi.reset)
       in
@@ -3392,16 +3393,49 @@ let render_keeper_message (state : state) =
     in
     (* Derived once for the width and again per row, so the badge the pane
        measures is the badge it draws. *)
-    let role_label_of (message : Masc_tui_types.msg_entry) =
+    let base_role_label_of (message : Masc_tui_types.msg_entry) =
       match message.me_role with
       | Message_user speaker -> speaker
       | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-      | Message_autonomous -> "\xc2\xb7 auto"
+      | Message_autonomous -> "auto"
       | Message_status -> "status"
       | Message_error -> "error"
       | Message_tool -> "tools"
       | Message_thinking -> "thinking"
       | Message_memory -> "memory"
+    in
+    (* A persisted delivery key or turn_ref is the grouping authority. Rows
+       without one keep their old labels; grouping them by adjacency or clock
+       would silently put unrelated activity inside the same turn. *)
+    let visible_messages =
+      List.mapi (fun entry_index message -> (entry_index, message)) messages
+      |> List.filter (fun (_, message) ->
+           message.me_role <> Message_thinking
+           || state.msg_reasoning_visibility <> Reasoning_hidden)
+    in
+    let grouped_messages =
+      let rec loop previous_turn reversed = function
+        | [] -> List.rev reversed
+        | (entry_index, message) :: rest ->
+            let turn_id = message.me_request_id in
+            let grouped = not (String.equal turn_id "") in
+            let starts_turn =
+              grouped
+              && not (Option.exists (String.equal turn_id) previous_turn)
+            in
+            let base = base_role_label_of message in
+            let role_label =
+              if not grouped then base
+              else if starts_turn then "turn · " ^ base
+              else "↳ " ^ base
+            in
+            let next_previous =
+              if grouped then Some turn_id else previous_turn
+            in
+            loop next_previous
+              ((entry_index, message, role_label) :: reversed) rest
+      in
+      loop None [] visible_messages
     in
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -3410,13 +3444,8 @@ let render_keeper_message (state : state) =
       (* The position distinguishes rows whose durable timestamp and request
          fields tie. A history reorder can only cause a miss: the exact body is
          another cache-key field, so an index never authorizes stale rows. *)
-      List.mapi
-        (fun entry_index message ->
-          if
-            message.me_role = Message_thinking
-            && state.msg_reasoning_visibility = Reasoning_hidden
-          then None
-          else
+      List.map
+        (fun (entry_index, message, grouped_role_label) ->
           let style =
             match message.me_role with
             | Message_user _ -> Message_layout.User
@@ -3426,11 +3455,12 @@ let render_keeper_message (state : state) =
             | Message_tool -> Message_layout.Tool
             | Message_thinking -> Message_layout.Thinking
           in
-          let role_label = role_label_of message in
+          let role_label = grouped_role_label in
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
           let role_label =
-            Message_layout.align_role_label ~column:role_label_column role_label
+            Message_layout.align_role_label ~column:role_label_column ~style
+              role_label
           in
           let body =
             match message.me_role with
@@ -3465,8 +3495,7 @@ let render_keeper_message (state : state) =
             | Message_status | Message_error ->
                 message.me_text
           in
-          Some
-            ({ style;
+          ({ style;
                timestamp = message.me_timestamp;
                role_label;
                request_label =
@@ -3481,8 +3510,7 @@ let render_keeper_message (state : state) =
                    };
              }
               : Message_layout.entry))
-        messages
-      |> List.filter_map Fun.id
+        grouped_messages
     in
     (* Rows for the turn still streaming, drawn under the committed history so
        the streaming reply sits at the bottom edge, where the eye rests while
@@ -3498,9 +3526,15 @@ let render_keeper_message (state : state) =
           let request_label = Keeper_chat.compact_request_id request_id in
           let entry ?(markdown_source = Message_layout.Markdown_streaming) style
               role_label body =
+            (* One alignment, on the label the row actually carries. Aligning
+               the continuation mark and then aligning the result again pays
+               the badge's width twice, so the second call trims what the
+               first had already fitted. *)
             ({ style;
                timestamp = "live";
-               role_label;
+               role_label =
+                 Message_layout.align_role_label ~column:role_label_column
+                   ~style ("↳ " ^ role_label);
                request_label;
                body;
                markdown_source;
@@ -3708,7 +3742,8 @@ let render_keeper_message (state : state) =
              (match kind with
               | Keeper_chat_transcript.Progress ->
                   box_line_styled chat_buf chat_cols ~style:Ansi.cyan
-                    ("  " ^ spinner ^ " " ^ text)
+                    ("  " ^ spinner ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
+                     ^ Ansi.reset ^ Ansi.cyan ^ " · " ^ text)
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
@@ -4865,26 +4900,37 @@ let render_changes_list (state : state) =
    | Some note ->
        box_line_styled buf cols ~style:Ansi.dim note;
        box_divider buf cols);
-  let chrome_rows =
-    7
-    + (if Option.is_some state.changes_error then 2 else 0)
-    + (if Option.is_some budget_note then 2 else 0)
+  (* The chrome and the preview's share both come from [scrolled_surface],
+     which the keypress reads too. Working them out again here is what drifted
+     the last time: this counted the over-budget note's two rows and the bound
+     did not, and then the preview took half the body and the bound still did
+     not know. *)
+  let chrome_rows, preview_keep =
+    match scrolled_surface state Changes with
+    | Some s -> (s.sc_chrome, s.sc_preview_keep)
+    | None -> (listing_chrome ~error:state.changes_error, None)
   in
   let total_content = max 1 (rows - chrome_rows) in
   (* The cursor row's recorded diff previews under the list, from the same
      local snapshot Enter renders -- no request rides a keypress. The list
-     keeps at least five rows; the preview takes what remains. *)
-  let cursor_change =
-    if shown = 0 then None else List.nth_opt changes state.changes_scroll
-  in
+     keeps at least [changes_preview_keep_rows] rows; the preview takes what
+     remains.
+
+     The split comes from Masc_tui_scroll because the keypress has to obey
+     the height this draws. It also cannot depend on which row the cursor is
+     on: reading the unclamped scroll to decide whether there is a preview
+     made the height depend on the value that height was bounding, and the
+     rows past the shortened list became unreachable. *)
   let preview_height =
-    match cursor_change with
+    match preview_keep with
     | None -> 0
-    | Some _ -> max 0 (min (total_content - 5) (total_content / 2))
+    | Some _ when shown = 0 -> 0
+    | Some keep -> Masc_tui_scroll.preview_height ~total:total_content ~keep
   in
   let content_height = max 1 (total_content - preview_height) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
+  let cursor_change = List.nth_opt changes scroll in
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with

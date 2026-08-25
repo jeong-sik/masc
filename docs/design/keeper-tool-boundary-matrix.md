@@ -185,6 +185,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_composition_catalog.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_composition_plan_index.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_composition_plan_index.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_definition_source.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_definition_source.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_agent_core_bundle.ml` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_bundle.mli` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_handler_exec.ml` - agent-core-tool-bridge

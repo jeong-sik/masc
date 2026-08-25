@@ -50,11 +50,17 @@ let test_one_skill_is_named_with_its_path () =
   check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
   (* The keeper is told where to read it, not handed the body: a skill can run
      to tens of kilobytes and would otherwise land on every turn. *)
+  (* The block used to hand over a filesystem path. .masc/skills sits beside
+     the keeper sandbox root rather than inside it, so the [Read] it asked for
+     could not resolve, and over seven days three of 14,582 [Read] calls even
+     tried. The body comes through [keeper_skill] now. *)
   check
     bool
-    "the path is given"
-    true
-    (contains ~needle:".masc/skills/<name>/SKILL.md" rendered);
+    "no filesystem path is handed to the model"
+    false
+    (contains ~needle:".masc/skills" rendered);
+  check bool "the tool that serves the body is named" true
+    (contains ~needle:"keeper_skill" rendered);
   let rendered_skill_line =
     lines rendered
     |> List.find_opt (contains ~needle:"Skills named by this task")
@@ -63,8 +69,8 @@ let test_one_skill_is_named_with_its_path () =
   check
     string
     "the complete instruction is unchanged"
-    "- Skills named by this task: humanize-korean. Each one is at \
-     .masc/skills/<name>/SKILL.md — read it before you use it."
+    "- Skills named by this task: humanize-korean. Call `keeper_skill` with a \
+     name to read one whole, before you act on it."
     rendered_skill_line
 ;;
 

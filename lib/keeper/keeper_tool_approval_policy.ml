@@ -163,6 +163,10 @@ and undescribed_kind tool_name =
   then Control (Run { because = "reads a composition request this keeper made" })
   else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
   then Control (Run { because = "cancels a request inside masc" })
+  else if String.equal tool_name Keeper_tool_composition_catalog.skill_tool_name
+  then
+    Control
+      (Run { because = "reads one instruction skill this keeper already carries" })
   else if String.equal
             tool_name
             Keeper_tool_composition_catalog.plan_execute_tool_name

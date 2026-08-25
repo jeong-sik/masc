@@ -666,6 +666,12 @@ let surface_needs : surface -> surface_needs = function
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
+  sc_preview_keep : int option;
+      (** rows the list keeps when the surface draws a preview under it, or
+          [None] when the list has the whole body. A surface that adds a
+          preview says so here: the keypress works its bound out from this,
+          and a field the record demands cannot be forgotten the way a
+          wildcard branch can. *)
 }
 
 (* These seven draw the same frame: a title, a column row, three dividers, the
@@ -1608,8 +1614,25 @@ let apply_clamped_scroll (state : state) = function
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
 
+(* Changes draws a preview under its list, so the rows the list can use are
+   fewer than the chrome alone says. The number of rows the list keeps lives
+   here because both the drawing and the keypress need it; Masc_tui_scroll
+   works the split out from it. *)
+let changes_preview_keep_rows = 5
+
+(* The over-budget note and its divider, which the Changes drawing puts above
+   the list. Chrome the drawing adds conditionally has to be counted here too
+   -- a bound worked out from fewer chrome rows than the frame uses lets the
+   cursor name a row the frame will not draw. *)
+let changes_budget_note_rows (state : state) =
+  match state.changes with
+  | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
+  | Some _ | None -> 0
+
 let scrolled_surface (state : state) : surface -> scrolled option =
-  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  let listing ~error count =
+    Some { sc_count = count; sc_chrome = listing_chrome ~error; sc_preview_keep = None }
+  in
   function
   | System_logs ->
       Some
@@ -1618,6 +1641,7 @@ let scrolled_surface (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.sys_entries)
         ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
+        ; sc_preview_keep = None
         }
   | Verification ->
       listing ~error:state.verification_error
@@ -1640,10 +1664,16 @@ let scrolled_surface (state : state) : surface -> scrolled option =
          | None -> 0
          | Some s -> List.length s.Tui_decode.rs_repositories)
   | Changes ->
-      listing ~error:state.changes_error
-        (match state.changes with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.fcs_changes)
+      Some
+        { sc_count =
+            (match state.changes with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.fcs_changes)
+        ; sc_chrome =
+            listing_chrome ~error:state.changes_error
+            + changes_budget_note_rows state
+        ; sc_preview_keep = Some changes_preview_keep_rows
+        }
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -1656,6 +1686,7 @@ let scrolled_surface (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.rss_candidates)
         ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        ; sc_preview_keep = None
         }
   | Tools ->
       listing ~error:state.tools_error

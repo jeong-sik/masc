@@ -1152,6 +1152,8 @@ type async_msg =
       string * (Masc.Tui_decode.git_log_row list, string) result
   | Code_diff_loaded of
       string * (Masc.Tui_decode.git_diff, string) result
+  | Code_notes_loaded of
+      string * (Masc.Tui_decode.ide_annotation list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1711,6 +1713,58 @@ let launch_code_diff_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_diff_loaded (path, Error "Eio switch is unavailable"))
+
+(* The codebase slug for the surface's scope, when it has one. Only a
+   repository row carries the server-minted slug (RFC-0378: the client
+   never re-derives it); the other scopes honestly have none. *)
+let code_scope_codebase state =
+  match state.code_scope with
+  | Code_scope_repo repo_id -> (
+      match state.repositories with
+      | None -> Error "the repositories listing is not loaded yet"
+      | Some snapshot -> (
+          match
+            List.find_opt
+              (fun (r : Masc.Tui_decode.repository) ->
+                String.equal r.Masc.Tui_decode.rp_id repo_id)
+              snapshot.Masc.Tui_decode.rs_repositories
+          with
+          | None ->
+              Error ("repository " ^ repo_id ^ " is not in the listing")
+          | Some r -> (
+              match r.Masc.Tui_decode.rp_codebase with
+              | Some slug -> Ok slug
+              | None ->
+                  Error
+                    "this repository's remote has no canonical slug, so \
+                     it has no notes")))
+  | Code_scope_keeper _ ->
+      Error "notes are scoped by repository; open the file from Repos"
+  | Code_scope_project ->
+      Error "the project tree is not a registered repository; no notes here"
+
+let launch_code_notes_load state ~mailbox ~codebase ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_ide_annotations ~host ~port ~codebase
+          ~file_path:path
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_notes_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_notes_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -4689,8 +4743,25 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_diff <- None;
           state.code_diff_error <- None;
           state.code_diff_open <- false;
-          state.code_diff_scroll <- 0
+          state.code_diff_scroll <- 0;
+          state.code_notes <- None;
+          state.code_notes_error <- None;
+          state.code_notes_open <- false;
+          state.code_notes_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_notes_loaded (path, result) ->
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok notes ->
+            state.code_notes <- Some (path, notes);
+            state.code_notes_error <- None;
+            state.code_notes_scroll <- 0
+        | Error detail -> state.code_notes_error <- Some detail)
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
@@ -6349,6 +6420,32 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "m" when state.view = Code && state.code_focus_file
+                       && Option.is_some state.code_file ->
+           (* The notes anchored to the open file. Repository scope only:
+              the annotation routes are scoped by the server-minted codebase
+              slug, and only a Repositories row carries one -- the other
+              scopes say so instead of guessing a slug. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_notes_open then state.code_notes_open <- false
+                else
+                  match code_scope_codebase state with
+                  | Error why -> add_event state "system" ("notes: " ^ why)
+                  | Ok codebase ->
+                      state.code_notes_open <- true;
+                      state.code_diff_open <- false;
+                      state.code_history_open <- false;
+                      (match state.code_notes with
+                       | Some (loaded_path, _)
+                         when String.equal loaded_path path ->
+                           ()
+                       | Some _ | None ->
+                           state.code_notes <- None;
+                           state.code_notes_error <- None;
+                           launch_code_notes_load state
+                             ~mailbox:async_messages ~codebase ~path))
        | Some "d" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file ->
            (* The working tree against HEAD, over the open file. One overlay
@@ -6362,6 +6459,7 @@ let main () =
                 else begin
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
+                  state.code_notes_open <- false;
                   (match state.code_diff with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6384,6 +6482,7 @@ let main () =
                 else begin
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
+                  state.code_notes_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -6564,7 +6663,8 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_diff_open then state.code_diff_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
+                else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
@@ -6684,7 +6784,8 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_diff_open then state.code_diff_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
+                else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
                 else if state.code_focus_file then state.code_focus_file <- false
@@ -6756,7 +6857,15 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_diff_open then (
+                  if state.code_notes_open then (
+                    match state.code_notes with
+                    | Some (_, notes) ->
+                        state.code_notes_scroll <-
+                          min
+                            (max 0 (List.length notes - 1))
+                            (state.code_notes_scroll + 1)
+                    | None -> ())
+                  else if state.code_diff_open then (
                     match state.code_diff with
                     | Some (_, diff) ->
                         state.code_diff_scroll <-
@@ -6975,7 +7084,10 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  if state.code_diff_open then
+                  if state.code_notes_open then
+                    state.code_notes_scroll <-
+                      max 0 (state.code_notes_scroll - 1)
+                  else if state.code_diff_open then
                     state.code_diff_scroll <-
                       max 0 (state.code_diff_scroll - 1)
                   else if state.code_history_open then

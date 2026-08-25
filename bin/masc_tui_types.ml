@@ -941,6 +941,14 @@ type state = {
   mutable code_diff_error: string option;
   mutable code_diff_open: bool;
   mutable code_diff_scroll: int;
+  (* The file pane's notes view: m on an open file (repository scope only --
+     the annotation routes are scoped by the server-minted codebase slug,
+     which only a Repositories row carries) swaps the content for the notes
+     anchored to the file. *)
+  mutable code_notes: (string * Tui_decode.ide_annotation list) option;
+  mutable code_notes_error: string option;
+  mutable code_notes_open: bool;
+  mutable code_notes_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -1332,6 +1340,10 @@ let create_state
   code_diff_error = None;
   code_diff_open = false;
   code_diff_scroll = 0;
+  code_notes = None;
+  code_notes_error = None;
+  code_notes_open = false;
+  code_notes_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;

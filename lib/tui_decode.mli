@@ -343,6 +343,9 @@ val runtime_provider_status_to_string : runtime_provider_status -> string
 type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
+  rp_codebase : string option;
+      (** the server-minted slug the IDE annotation routes scope by;
+          [None] when the remote cannot canonicalize *)
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -1015,3 +1018,18 @@ type git_log_row = {
 
 val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
 (** The route's [{ok; commits}] envelope, most recent first. *)
+
+(** One [/api/v1/ide/annotations] note: where it anchors, who left it, the
+    server's kind word, and what it says. *)
+type ide_annotation = {
+  ia_line_start : int;
+  ia_line_end : int;
+  ia_keeper : string;
+  ia_kind : string;
+  ia_content : string;
+  ia_task : string option;
+}
+
+val decode_ide_annotations :
+  Yojson.Safe.t -> (ide_annotation list, string) result
+(** The route's [{ok; data}] envelope. *)

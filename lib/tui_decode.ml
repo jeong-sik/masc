@@ -1501,6 +1501,10 @@ type runtime_surface_snapshot = {
 type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
+  (* The server-minted codebase slug the IDE annotation routes scope by
+     (RFC-0378: clients carry this value, they do not re-derive it from the
+     url). [None] when the remote cannot canonicalize. *)
+  rp_codebase : string option;
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -2196,6 +2200,7 @@ let decode_runtime_surface_snapshot ~probe_json ~resolved_json =
 let decode_repository json =
   let* rp_id = required_string_field json "id" in
   let* rp_name = required_string_field json "name" in
+  let* rp_codebase = optional_string_field json "codebase" in
   let* rp_local_path = required_string_field json "local_path" in
   let* rp_default_branch = required_string_field json "default_branch" in
   let* rp_status = required_string_field json "status" in
@@ -2207,8 +2212,8 @@ let decode_repository json =
     | bad -> field_type_error "auto_sync" "a bool or null" bad
   in
   Ok
-    { rp_id; rp_name; rp_local_path; rp_default_branch; rp_status
-    ; rp_keepers; rp_auto_sync
+    { rp_id; rp_name; rp_codebase; rp_local_path; rp_default_branch
+    ; rp_status; rp_keepers; rp_auto_sync
     }
 
 let decode_repository_snapshot json =
@@ -3363,3 +3368,33 @@ let decode_git_log json =
   else
     let* rows_json = required_list_field json "commits" in
     decode_list "commits" decode_git_log_row rows_json
+
+(* ── IDE annotations: notes anchored to lines of a codebase ────────── *)
+
+type ide_annotation = {
+  ia_line_start : int;
+  ia_line_end : int;
+  ia_keeper : string;
+  (* The server's kind vocabulary (comment / decision / question /
+     bookmark), carried as its own word: the TUI only prints it, so an
+     added kind shows itself instead of killing the listing. *)
+  ia_kind : string;
+  ia_content : string;
+  ia_task : string option;
+}
+
+let decode_ide_annotation json =
+  let* ia_line_start = required_int_field json "line_start" in
+  let* ia_line_end = required_int_field json "line_end" in
+  let* ia_keeper = required_string_field json "keeper_id" in
+  let* ia_kind = required_string_field json "kind" in
+  let* ia_content = required_string_field json "content" in
+  let* ia_task = optional_string_field json "task_id" in
+  Ok { ia_line_start; ia_line_end; ia_keeper; ia_kind; ia_content; ia_task }
+
+let decode_ide_annotations json =
+  let* ok = required_bool_field json "ok" in
+  if not ok then Error "annotations answered ok=false"
+  else
+    let* rows_json = required_list_field json "data" in
+    decode_list "data" decode_ide_annotation rows_json

@@ -4407,13 +4407,18 @@ def message_origin_badge_interaction(
     )
     update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
     frame = bytes(output[pane_start:update_end])
-    for needle, description in (
-        (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
-        (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
-        (b"\x1b[36m\xe2\x94\x82\x1b[0m \x1b[0moperator-body-neutral", "gutter-marked operator body"),
-        (b"\x1b[34m\xe2\x94\x82\x1b[0m \x1b[0mkeeper-body-neutral", "gutter-marked Keeper body"),
+    plain_frame = CSI_RE.sub(b"", frame)
+    for pattern, description in (
+        (
+            b"\xe2\x96\xb6\\s+(?:turn \xc2\xb7 )?vincent {2}operator-body-neutral",
+            "operator mark, origin, and separated body",
+        ),
+        (
+            b"\xe2\x97\x8f\\s+(?:turn \xc2\xb7 )?alpha {2}keeper-body-neutral",
+            "Keeper mark, origin, and separated body",
+        ),
     ):
-        if needle not in frame:
+        if re.search(pattern, plain_frame) is None:
             raise AssertionError(f"chat frame omitted {description}: {frame!r}")
     for forbidden, description in (
         (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
@@ -4844,25 +4849,32 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the note anchor mark is missing from the gutter: {back!r}"
             )
-        # H over the repo-scoped file, then Enter on the top commit: its
-        # subject's (#N) plus the registered remote become the PR link.
-        send_and_wait(process, master_fd, output, b"H", b"seed the file")
+        # H over the repo-scoped file: the commits and the recorded keeper
+        # edits arrive woven into one timeline, newest first.
+        history = send_and_wait(process, master_fd, output, b"H", b"Edit (turn 7)")
+        history_plain = CSI_RE.sub(b"", history).decode("utf-8")
+        for needle in ("history: note.ml", "seed the file", "L2", "alpha"):
+            if needle not in history_plain:
+                raise AssertionError(
+                    f"the history missed {needle!r}: {history_plain!r}"
+                )
+        # Enter on the top row (the newer commit): its subject's (#N) plus
+        # the registered remote become the PR link.
         send_and_wait(
             process, master_fd, output, b"\r",
             b"github.com/jeong-sik/masc/pull/1256",
         )
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
-        # c: which keeper wrote which lines, through what, and when.
-        activity = send_and_wait(
-            process, master_fd, output, b"c", b"Edit (turn 7)"
+        # j scrolls the edit row to the top; Enter on it closes the history
+        # and jumps the cursor (the reverse gutter) to the lines it wrote.
+        jumped = send_and_wait(
+            process, master_fd, output, b"j\r", b"\x1b[7m   2\x1b[0m"
         )
-        activity_plain = CSI_RE.sub(b"", activity).decode("utf-8")
-        for needle in ("activity: note.ml", "L1", "alpha"):
-            if needle not in activity_plain:
-                raise AssertionError(
-                    f"the activity view missed {needle!r}: {activity_plain!r}"
-                )
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # The loaded history now decorates the gutter too: the edit's line
+        # carries the recorded-edit mark.
+        if "\u00b7".encode() not in jumped:
+            raise AssertionError(
+                f"the recorded-edit mark is missing from the gutter: {jumped!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -5408,7 +5420,8 @@ def code_lane_fixtures() -> HttpFixtures:
              "hueIndex": None},
         ],
     )
-    file_response = (200, {"ok": True, "content": "let x = 1\n(* hi *)\n"})
+    file_response = (
+        200, {"ok": True, "content": "let x = 1\n(* hi *)\nlet y = x\n"})
     fixtures[WORKSPACE_FILE_AML_PATH] = file_response
     # uri's Query_value encoding may or may not spell the slash; serve both.
     fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
@@ -5417,9 +5430,9 @@ def code_lane_fixtures() -> HttpFixtures:
         {
             "ok": True,
             "commits": [
-                {"hash": "abc1234", "date": "2026-08-25",
+                {"hash": "abc1234", "timestamp_ms": 1787000000000,
                  "author": "keeper-alpha", "subject": "feat: add x"},
-                {"hash": "def5678", "date": "2026-08-24",
+                {"hash": "def5678", "timestamp_ms": 1786900000000,
                  "author": "vincent", "subject": "chore: seed the file"},
             ],
         },
@@ -5454,6 +5467,13 @@ def code_lane_fixtures() -> HttpFixtures:
              "character": 1},
         ]}},
     )
+    y_definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 1,
+             "character": 5},
+        ]}},
+    )
     for enc in ("lib/a.ml", "lib%2Fa.ml"):
         fixtures[
             f"/api/v1/lsp/question?question=hover&path={enc}&line=1&symbol=x"
@@ -5461,6 +5481,9 @@ def code_lane_fixtures() -> HttpFixtures:
         fixtures[
             f"/api/v1/lsp/question?question=definition&path={enc}&line=1&symbol=x"
         ] = definition_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=3&symbol=y"
+        ] = y_definition_response
     return fixtures
 
 
@@ -5536,7 +5559,8 @@ def code_lane_interaction(
     # history)" frame and lands on the fetched listing.
     history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
     history_plain = CSI_RE.sub(b"", history).decode("utf-8")
-    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent",
+                   "keeper edits not shown"):
         if needle not in history_plain:
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
@@ -5549,17 +5573,13 @@ def code_lane_interaction(
     # The search above left the cursor on line 2; the lsp fixtures answer
     # about line 1, so put the cursor back where the question is.
     send_and_wait(process, master_fd, output, b"k", b"\x1b[7m   1\x1b[0m")
-    # K pre-fills the palette with the hover command; the argument is the
-    # symbol, and the answer lands beside the title.
-    prefilled = send_and_wait(process, master_fd, output, b"K", b"hover ")
-    if b"MASC Palette" not in CSI_RE.sub(b"", prefilled) and \
-            b"hover " not in CSI_RE.sub(b"", prefilled):
-        raise AssertionError(f"K did not open the palette: {prefilled!r}")
-    send_and_wait(process, master_fd, output, b"x\r", b"x: int")
-    # D asks for the definition; the answer is inside the same file, so the
-    # cursor (the reverse gutter) moves to its line.
-    send_and_wait(process, master_fd, output, b"D", b"def ")
-    landed = send_and_wait(process, master_fd, output, b"x\r", b"x: lib/a.ml:2")
+    # The cursor line holds one name (let is a keyword, 1 a number), so K
+    # asks about it at once -- no palette between the keypress and the
+    # answer beside the title.
+    send_and_wait(process, master_fd, output, b"K", b"x: int")
+    # D likewise jumps straight to the definition; the answer is inside the
+    # same file, so the cursor (the reverse gutter) moves to its line.
+    landed = send_and_wait(process, master_fd, output, b"D", b"x: lib/a.ml:2")
     if re.search(rb"\x1b\[7m\s+2\x1b\[0m", landed) is None:
         raise AssertionError(
             f"the definition jump did not move the cursor gutter: {landed!r}"
@@ -5573,6 +5593,26 @@ def code_lane_interaction(
     if re.search(rb"\x1b\[7m\s+2\x1b\[0m", returned) is not None:
         raise AssertionError(
             f"B left the cursor on the jumped-to line: {returned!r}"
+        )
+    # A line with several names (let y = x) opens the palette with each as
+    # an entry instead of guessing one.
+    send_and_wait(
+        process, master_fd, output, b"jj",
+        re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
+    )
+    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
+    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+        raise AssertionError(
+            f"the candidate list missed the second name: {choices!r}"
+        )
+    # Enter alone runs the highlighted candidate (def y): the answer names
+    # the location and the cursor jumps to it.
+    picked = send_and_wait(
+        process, master_fd, output, b"\r", b"y: lib/a.ml:1"
+    )
+    if re.search(rb"\x1b\[7m\s+1\x1b\[0m", picked) is None:
+        raise AssertionError(
+            f"the candidate jump did not move the cursor gutter: {picked!r}"
         )
     os.write(master_fd, b"q")
 
@@ -6840,8 +6880,8 @@ def run_keyboard_regression(executable: str) -> None:
     ] = (
         200,
         {"ok": True, "commits": [
-            {"hash": "abc1234", "date": "2026-08-25", "author": "keeper",
-             "subject": "docs: seed the file (#1256)"},
+            {"hash": "abc1234", "timestamp_ms": 1787650000000,
+             "author": "keeper", "subject": "docs: seed the file (#1256)"},
         ]},
     )
     repositories_fixtures[
@@ -6849,7 +6889,7 @@ def run_keyboard_regression(executable: str) -> None:
     ] = (
         200,
         {"ok": True, "data": [
-            {"file_path": "note.ml", "line_start": 1, "line_end": 1,
+            {"file_path": "note.ml", "line_start": 2, "line_end": 2,
              "keeper_id": "alpha",
              "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
              "timestamp_ms": 1787600000000},

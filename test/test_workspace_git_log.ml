@@ -11,15 +11,17 @@ let row line =
 
 let test_a_row_splits_on_the_first_three_tabs () =
   check_json "plain row"
-    {|{"hash":"abc1234","date":"2026-08-25","author":"alpha","subject":"fix: a thing"}|}
-    (row "abc1234\t2026-08-25\talpha\tfix: a thing");
+    {|{"hash":"abc1234","timestamp_ms":1787000000000,"author":"alpha","subject":"fix: a thing"}|}
+    (row "abc1234\t1787000000\talpha\tfix: a thing");
   check_json "a subject keeps its own tabs"
-    {|{"hash":"abc1234","date":"2026-08-25","author":"alpha","subject":"a\tb"}|}
-    (row "abc1234\t2026-08-25\talpha\ta\tb")
+    {|{"hash":"abc1234","timestamp_ms":1787000000000,"author":"alpha","subject":"a\tb"}|}
+    (row "abc1234\t1787000000\talpha\ta\tb")
 
 let test_a_malformed_row_is_dropped () =
-  check_json "three fields is not a row" "none" (row "abc\t2026-08-25\talpha");
-  check_json "empty line is not a row" "none" (row "")
+  check_json "three fields is not a row" "none" (row "abc\t1787000000\talpha");
+  check_json "empty line is not a row" "none" (row "");
+  check_json "a non-epoch second field is not a row" "none"
+    (row "abc1234\t2026-08-25\talpha\tfix: a thing")
 
 let () =
   Alcotest.run "workspace-git-log"

@@ -1684,6 +1684,10 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
+        ; tool_groups_opt = None
+        ; tool_groups_present = false
+        ; native_tool_posture_opt = None
+        ; native_tool_posture_present = false
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions
@@ -1809,6 +1813,10 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; proactive_enabled_opt = None
         ; sandbox_profile_opt = None
         ; network_mode_opt = None
+        ; tool_groups_opt = None
+        ; tool_groups_present = false
+        ; native_tool_posture_opt = None
+        ; native_tool_posture_present = false
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions

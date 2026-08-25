@@ -1943,6 +1943,43 @@ let test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity () =
         reason
   | _ -> fail "expected non-tool start with tool identity to fail closed"
 
+let test_keeper_stream_bridge_preserves_native_tool_origin () =
+  let open Agent_core.Types in
+  let events =
+    translate_agent_core_stream_events
+      [ ContentBlockStart
+          { index = 7
+          ; content_type = Runtime_native_tools.stream_content_type
+          ; tool_id = Some "native-1"
+          ; tool_name = Some "commandExecution"
+          }
+      ; ContentBlockStop { index = 7 }
+      ]
+  in
+  let has_dynamic_tool_event =
+    List.exists
+      (function
+        | Keeper_chat_events.Tool_call_start _
+        | Keeper_chat_events.Tool_call_end _ -> true
+        | _ -> false)
+      events
+  in
+  check bool "native observation is not a MASC tool call" false has_dynamic_tool_event;
+  match events with
+  | [ Keeper_chat_events.Agent_core_content_block_start
+        { index = 7
+        ; content_type
+        ; tool_call_id = Some "native-1"
+        ; tool_call_name = Some "commandExecution"
+        }
+    ; Agent_core_content_block_stop { index = 7 }
+    ] ->
+    check string
+      "typed native content origin"
+      Runtime_native_tools.stream_content_type
+      content_type
+  | _ -> fail "native tool origin was rejected or promoted to a MASC tool"
+
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_core.Types in
   let events =
@@ -2935,6 +2972,8 @@ let () =
             test_keeper_stream_bridge_rejects_tool_start_missing_identity;
           test_case "stream bridge rejects non-tool start with tool identity" `Quick
             test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity;
+          test_case "stream bridge preserves native tool origin" `Quick
+            test_keeper_stream_bridge_preserves_native_tool_origin;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
           test_case "stream protocol error summary includes diagnostics" `Quick

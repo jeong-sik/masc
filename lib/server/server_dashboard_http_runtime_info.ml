@@ -2474,20 +2474,18 @@ let light_runtime_resolution_json (config : Workspace.config) =
 (* 30-second TTL chosen to match the dashboard frontend's natural refresh
    cadence (~3s polling × 10 = a fresh value at least every minute under
    sustained load).  Tool inventory + usage stats rarely change inside a
-   30s window — the per-actor cache key isolates permission changes from
-   leaking across actors.  Schedule FSM projection is attached outside this
+   30s window. The effective Keeper selector is part of the cache key because
+   those surfaces can differ. Schedule FSM projection is attached outside this
    cache because due/pending state is operationally time-sensitive. *)
 let dashboard_tools_cache_ttl_sec = 30.0
 
-let dashboard_tools_cache_key ~base_path ~actor =
-  Printf.sprintf "tools:%s:%s" base_path actor
+let dashboard_tools_cache_key ~base_path ~keeper =
+  Printf.sprintf
+    "tools:%s:%s"
+    base_path
+    (Option.value ~default:"registered-catalog-only" keeper)
 
-let dashboard_actor_name = function
-  | Some actor when String.trim actor <> "" -> actor
-  | Some _ | None -> "dashboard"
-;;
-
-let dashboard_tools_warming_json ~actor =
+let dashboard_tools_warming_json ~keeper =
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "status", `String "warming"
@@ -2513,17 +2511,24 @@ let dashboard_tools_warming_json ~actor =
           ; "latest_age_s", `Null
           ; "entry_count", `Int 0
           ; "stale_reason", `String "warming"
-          ; "actor", `String actor
+          ; "actor", `String "dashboard"
           ] )
+    ; ( "effective_keeper_surface"
+      , match keeper with
+        | None -> `Null
+        | Some keeper_name ->
+          `Assoc
+            [ "status", `String "warming"
+            ; "keeper_name", `String keeper_name
+            ] )
     ]
 ;;
 
 
-let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojson.Safe.t =
-  let actor_name = dashboard_actor_name actor in
+let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojson.Safe.t =
   let ctx : Tool_misc.context =
     { config
-    ; agent_name = actor_name
+    ; agent_name = "dashboard"
     ; help_schemas = Config.raw_all_tool_schemas
     }
   in
@@ -2533,11 +2538,11 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
     | Some t -> Server_timing.measure t phase f
   in
   let cache_key =
-    dashboard_tools_cache_key ~base_path:config.base_path ~actor:actor_name
+    dashboard_tools_cache_key ~base_path:config.base_path ~keeper
   in
   Dashboard_cache.seed_stale_if_missing cache_key
     ~stale_for:dashboard_tools_cache_ttl_sec
-    (dashboard_tools_warming_json ~actor:actor_name);
+    (dashboard_tools_warming_json ~keeper);
   let compute () =
     let config_resolution =
       run Projection_config_resolution (fun () ->
@@ -2558,11 +2563,20 @@ let dashboard_tools_http_json ?actor ?timing (config : Workspace.config) : Yojso
         |> Tool_usage_log.attach_source_metadata
              ~masc_root:(Workspace.masc_root_dir config))
     in
+    let effective_keeper_surface =
+      match keeper with
+      | None -> `Null
+      | Some keeper_name ->
+        run Tools_compute (fun () ->
+          Keeper_effective_tool_surface.resolve ~config ~keeper_name
+          |> Keeper_effective_tool_surface.to_yojson)
+    in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
       ; "config_resolution", config_resolution
       ; "runtime_resolution", runtime_resolution
       ; "tool_inventory", inventory
+      ; "effective_keeper_surface", effective_keeper_surface
       ; "tool_usage", usage
       ]
   in

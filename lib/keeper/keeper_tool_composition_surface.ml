@@ -159,6 +159,70 @@ let request_id_of_validated_input = function
   | _ -> None
 ;;
 
+let entry_description (entry : Catalog.entry) =
+  Option.value
+    ~default:
+      (match entry.execution with
+       | Catalog.Inline ->
+         "Execute the validated Keeper composition " ^ entry.name ^ "."
+       | Catalog.Async ->
+         "Start the validated read-only Keeper composition "
+         ^ entry.name
+         ^ " and return its durable request id.")
+    entry.description
+;;
+
+let status_description =
+  "Read the exact durable status and structured result of one async Keeper composition request."
+;;
+
+let cancel_description =
+  "Request cancellation of one async Keeper composition by its exact durable request id."
+;;
+
+let schema_tool ~name ~description ~input_schema =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~name
+    ~description
+    ~input_schema
+    (fun _ _ -> invalid_arg "schema-only Keeper tool cannot execute")
+;;
+
+let schema_tools ?(skill_composition_entries = []) () =
+  let composition_tools =
+    List.map
+      (fun (entry : Catalog.entry) ->
+         schema_tool
+           ~name:(Catalog.tool_name entry)
+           ~description:(entry_description entry)
+           ~input_schema:(Catalog.input_schema_of_params entry.params))
+      skill_composition_entries
+  in
+  let plan_execute_tool =
+    schema_tool
+      ~name:plan_execute_tool_name
+      ~description:plan_execute_description
+      ~input_schema:plan_execute_input_schema
+  in
+  if
+    List.exists
+      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+      skill_composition_entries
+  then
+    composition_tools
+    @ [ plan_execute_tool
+      ; schema_tool
+          ~name:Catalog.status_tool_name
+          ~description:status_description
+          ~input_schema:request_id_input_schema
+      ; schema_tool
+          ~name:Catalog.cancel_tool_name
+          ~description:cancel_description
+          ~input_schema:request_id_input_schema
+      ]
+  else composition_tools @ [ plan_execute_tool ]
+;;
+
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
   `Assoc
     [ "planned_index", `Int schedule.planned_index
@@ -876,16 +940,12 @@ let make_request_control_tool
    names and descriptions ride the tool description, the body arrives only
    when asked for -- but the harness serves it from the catalog it already
    parsed, so no path is resolved and the call is on the record. *)
-let skill_name_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ("name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]) ] )
-    ; "required", `List [ `String "name" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
+(* Declared in [config/tools/keeper_skill.toml] with every other tool rather
+   than built here. Which skills are readable is workspace state and is
+   appended below; the argument's shape and the sentence saying when to reach
+   for the tool are not, and the model-prose ratchet is what says so. *)
+let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
+let skill_name_input_schema = skill_tool_schema.input_schema
 
 let skill_name_of_validated_input input =
   match input with
@@ -906,10 +966,7 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
 "
   in
   let description =
-    "Read one instruction skill whole, by name. Read a skill before you act on      a task that names it.
-
-Available:
-" ^ listed
+    skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
   in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
@@ -1018,17 +1075,7 @@ let make_tools
       ~base_path:config.base_path
       ?on_externalization_error:tool_externalization_error
       ~name:tool_name
-      ~description:
-        (Option.value
-           ~default:
-             (match entry.execution with
-              | Catalog.Inline ->
-                "Execute the validated Keeper composition " ^ entry.name ^ "."
-              | Catalog.Async ->
-                "Start the validated read-only Keeper composition "
-                ^ entry.name
-                ^ " and return its durable request id.")
-           entry.description)
+      ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
         let start_time = Time_compat.now () in
@@ -1419,8 +1466,7 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.status_tool_name
-        ~description:
-          "Read the exact durable status and structured result of one async Keeper composition request."
+        ~description:status_description
         ~descriptor:
           (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
         ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
@@ -1429,8 +1475,7 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.cancel_tool_name
-        ~description:
-          "Request cancellation of one async Keeper composition by its exact durable request id."
+        ~description:cancel_description
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
     in

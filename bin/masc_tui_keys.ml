@@ -214,14 +214,13 @@ let for_surface = function
       ; b Search "n / N" "next / previous match"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
-                 (the palette collects the name)"
+                 (one name asks at once; several open the palette as \
+                 choices)"
       ; b Act "D" "definition"
-          ~help:"jump to where a name on the cursor line is defined"
+          ~help:"jump to where a name on the cursor line is defined (one \
+                 name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
-      ; b Act "c" "activity"
-          ~help:"which keeper wrote which lines, through what, and when \
-                 (repository scope)"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"
@@ -229,14 +228,20 @@ let for_surface = function
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"the open file's working tree against HEAD (d or Esc closes)"
-      ; b Act "Enter (history)" "PR"
-          ~help:"the top commit's pull request, from its (#N) and the \
-                 repository's remote"
+      ; b Act "Enter (history)" "open"
+          ~help:"a commit answers with its pull request, from its (#N) and \
+                 the repository's remote; a keeper edit jumps the cursor \
+                 to the lines it wrote (B walks back)"
       ; b Act "H" "history"
-          ~help:"the commits that touched the open file (H or Esc closes)"
+          ~help:"the work over the open file: its commits and the recorded \
+                 keeper edits, newest first (H or Esc closes)"
       ]
       @ listing_meta
-  | Tools -> b Navigate "j/k" "scroll" :: listing_meta
+  | Tools ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ]
+      @ listing_meta
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)

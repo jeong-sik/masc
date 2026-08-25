@@ -3142,12 +3142,15 @@ let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
   prepare_config_sync_keeper ~sw config name;
-  let path = write_config_sync_toml config name in
+  let toml_path = write_config_sync_toml config name in
   ignore
     (post_config ~sw ~clock:(Eio.Stdenv.clock env)
        ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
        ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|});
-  let parsed = Keeper_toml_loader.parse_toml (In_channel.with_open_bin path In_channel.input_all) in
+  let parsed =
+    Keeper_toml_loader.parse_toml
+      (In_channel.with_open_bin toml_path In_channel.input_all)
+  in
   (match parsed with
    | Error error -> fail error
    | Ok doc ->
@@ -3247,6 +3250,97 @@ let test_config_post_prevalidates_mixed_request () =
   in
   check (option bool) "activation was not committed" (Some false)
     (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
+
+let test_config_post_round_trips_typed_tools_patch () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-tools" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_tool_approval_mode.set
+        (Masc.Keeper_tool_approval_mode.shared ())
+        ~keeper_name:name
+        Masc.Keeper_tool_approval_mode.Auto;
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+       let raw, json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"groups":["fs","core"],"native":"full"}}|}
+       in
+       check bool "HTTP 200" true (String.starts_with ~prefix:"HTTP/1.1 200" raw);
+       let open Yojson.Safe.Util in
+       check (list string) "readback groups" [ "fs"; "core" ]
+         (json |> member "tools" |> member "groups" |> to_list |> List.map to_string);
+       check string "readback native" "full"
+         (json |> member "tools" |> member "native" |> to_string);
+       check string "Auto rejects full preview" "rejected"
+         (json
+          |> member "tools"
+          |> member "full_native_admission"
+          |> member "status"
+          |> to_string);
+       let doc =
+         match
+           Keeper_toml_loader.parse_toml
+             (In_channel.with_open_bin toml_path In_channel.input_all)
+         with
+         | Ok doc -> doc
+         | Error error -> fail error
+       in
+       check (list string) "TOML groups" [ "fs"; "core" ]
+         (Keeper_toml_loader.toml_string_list doc "keeper.tools.groups");
+       check (option string) "TOML native" (Some "full")
+         (Keeper_toml_loader.toml_string_opt doc "keeper.tools.native");
+       Masc.Keeper_tool_approval_mode.set
+         (Masc.Keeper_tool_approval_mode.shared ())
+         ~keeper_name:name
+         Masc.Keeper_tool_approval_mode.Yolo;
+       let yolo_raw, yolo_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"native":"full"}}|}
+       in
+       check bool "Yolo preview HTTP 200" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" yolo_raw);
+       check string "Yolo allows full preview" "allowed"
+         Yojson.Safe.Util.(
+           yolo_json
+           |> member "tools"
+           |> member "full_native_admission"
+           |> member "status"
+           |> to_string);
+       Masc.Keeper_tool_approval_mode.set
+         (Masc.Keeper_tool_approval_mode.shared ())
+         ~keeper_name:name
+         Masc.Keeper_tool_approval_mode.Auto;
+       let invalid_raw, _ =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"tools":{"native":"yolo"}}|}
+       in
+       check bool "invalid native is HTTP 400" true
+         (String.starts_with ~prefix:"HTTP/1.1 400" invalid_raw))
+;;
 
 (* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
    keeper through the bounded fiber pool. Before the fiber-batch change the
@@ -3551,5 +3645,7 @@ let () =
             test_config_post_reports_runtime_sync_failure;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
+          test_case "typed tools patch round-trips and previews admission" `Quick
+            test_config_post_round_trips_typed_tools_patch;
         ] );
     ]

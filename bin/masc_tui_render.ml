@@ -200,9 +200,11 @@ let tool_projection_mode (state : state) =
 let render_chat_row ~theme buf cols (row : Message_layout.row) =
   match row.kind with
   | Message_layout.Body ->
-      (* The two indent cells the layout reserves become a gutter in the
-         block's own colour, so where one block ends and the next begins
-         reads at a glance instead of from the headings alone. *)
+      (* The two cells reserved by the layout separate the activity column from
+         its body. The semantic lead lives with the origin label, so wrapped
+         prose starts at one stable column without drawing a rail on every row.
+         That rail gave a continuation equal visual weight to a new event and
+         made a busy turn look like a table. *)
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
       let dress rest =
@@ -233,13 +235,10 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         let rest = String.sub text 2 (String.length text - 2) in
         if context.ambient_background then
           box_line_styled buf cols ~style:context.opening
-            (Printf.sprintf "%s%s\xe2\x94\x82%s %s" margin
-               (Chat_theme.origin row.style) context.inline_restore
-               (dress rest))
+            (Printf.sprintf "%s  %s" margin (dress rest))
         else
           box_line buf cols
-            (Printf.sprintf "%s%s\xe2\x94\x82%s %s%s%s" margin
-               (Chat_theme.origin row.style) Ansi.reset
+            (Printf.sprintf "%s  %s%s%s" margin
                (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
         box_line_styled buf cols ~style:context.opening (dress text)
@@ -1735,9 +1734,6 @@ let render_planning_list (state : state) =
            if idx < count then begin
              let g = List.nth goals idx in
              let is_selected = idx = state.planning_cursor in
-             let depth = planning_goal_depth p.pl_goals g in
-             let indent = String.make (depth * 2) ' ' in
-             let branch = if depth > 0 then "└─ " else "  " in
              let status_color = planning_phase_color g.pg_phase in
              let status_label = planning_phase_label g.pg_phase in
             let due =
@@ -1746,16 +1742,15 @@ let render_planning_list (state : state) =
               | None -> ""
             in
              let line =
-               Printf.sprintf "%s%s%s[%s]%s %s P%d  %s%s"
-                 indent branch status_color
+               Printf.sprintf "  %s[%s]%s %s P%d  %s%s"
+                 status_color
                  (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 30 - (depth * 2)
-                   - Message_layout.display_width due))
+                    (cols - 30 - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =
@@ -5489,56 +5484,31 @@ let render_runtime (state : state) =
             scroll_hint));
   finish_surface state ~surface_key:"runtime" ~rows:terminal_rows ~cols buf
 
-(* The tools a keeper can reach.
-
-   Surfaces is the column that carries the reading: a tool registered and
-   projected nowhere is reachable by nothing, which the name and description
-   do not say. *)
+(* Two deliberately separate readings: the selected Keeper's exact turn
+   surface, then the process-wide registered catalog. A registered tool is not
+   evidence that a Keeper can call it. *)
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
-  let tools =
+  let registered_tools =
     match state.tools_inventory with
     | None -> []
     | Some s -> s.Masc.Tui_decode.ts_tools
   in
-  let tool_rows = Tool_tree.rows tools in
-  let shown = List.length tools in
+  let registered_rows = Tool_tree.rows registered_tools in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
       now.Unix.tm_sec
   in
-  let unprojected =
-    List.length
-      (List.filter
-         (fun (t : Masc.Tui_decode.tool_entry) ->
-           t.Masc.Tui_decode.tl_surfaces = [])
-         tools)
-  in
   let header =
-    match state.tools_inventory with
-    | None ->
-        Printf.sprintf "%s  (not loaded)  %s  %s"
-          (screen_title " MASC Tools") timestamp
-          (connection_badge state.connection_status)
-    | Some _ when unprojected > 0 ->
-        Printf.sprintf "%s (%d, %d on no surface)  %s  %s"
-          (screen_title " MASC Tools") shown
-          unprojected timestamp (connection_badge state.connection_status)
-    | Some _ ->
-        Printf.sprintf "%s (%d)  %s  %s"
-          (screen_title " MASC Tools") shown timestamp
-          (connection_badge state.connection_status)
+    Printf.sprintf "%s  effective Keeper + registered catalog  %s  %s"
+      (screen_title " MASC Tools") timestamp
+      (connection_badge state.connection_status)
   in
   box_top buf cols;
   box_line buf cols header;
-  box_divider buf cols;
-  let col_hdr =
-    Printf.sprintf "  %-32s %-8s %s" "Tool" "Direct" "Surfaces"
-  in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
   box_divider buf cols;
   (match state.tools_error with
    | None -> ()
@@ -5546,75 +5516,140 @@ let render_tools (state : state) =
        box_line_styled buf cols ~style:Theme.bad
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = if Option.is_some state.tools_error then 9 else 7 in
+  let effective_lines =
+    match state.tools_inventory with
+    | None -> [ Theme.warn, " Effective Keeper Surface — not loaded" ]
+    | Some { Masc.Tui_decode.ts_effective = None; _ } ->
+        [ Theme.warn, " Effective Keeper Surface — no Keeper selected" ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_warming { ets_keeper_name });
+          _ } ->
+        [ Theme.warn,
+          Printf.sprintf " Effective Keeper Surface — %s — warming"
+            (Terminal_text.single_line ets_keeper_name) ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_unavailable
+                 { ets_keeper_name; ets_reason; ets_detail });
+          _ } ->
+        [ Theme.bad,
+          Printf.sprintf " Effective Keeper Surface — %s — unavailable (%s)"
+            (Terminal_text.single_line ets_keeper_name)
+            (Terminal_text.single_line ets_reason);
+          Theme.bad, "   " ^ Terminal_text.single_line ets_detail ]
+    | Some
+        { Masc.Tui_decode.ts_effective =
+            Some
+              (Masc.Tui_decode.Effective_surface_available
+                 { ets_keeper_name;
+                   ets_runtime_id;
+                   ets_official_client_kind;
+                   ets_native_posture;
+                   ets_tool_groups;
+                   ets_instruction_skills;
+                   ets_composition_skills;
+                   ets_tools;
+                   ets_tool_surface_sha256;
+                 });
+          _ } ->
+        let native = Option.value ~default:"n/a" ets_native_posture in
+        let groups =
+          match ets_tool_groups with [] -> "all" | xs -> String.concat "," xs
+        in
+        let instruction =
+          match ets_instruction_skills with
+          | [] -> "none"
+          | xs -> String.concat "," xs
+        in
+        let composition =
+          match ets_composition_skills with
+          | [] -> "none"
+          | xs -> String.concat "," xs
+        in
+        let digest =
+          match ets_tool_surface_sha256 with
+          | None -> "n/a (Agent Core owns the turn)"
+          | Some value -> value
+        in
+        let tool_lines =
+          List.map
+            (fun (tool : Masc.Tui_decode.effective_tool) ->
+               let source =
+                 match tool.et_skill_source, tool.et_group with
+                 | Some source, _ -> tool.et_origin ^ ":" ^ source
+                 | None, Some group -> tool.et_origin ^ ":" ^ group
+                 | None, None -> tool.et_origin
+               in
+               Ansi.dim,
+               Printf.sprintf "   %-34s %s"
+                 (Terminal_text.single_line tool.et_name)
+                 (Terminal_text.single_line source))
+            ets_tools
+        in
+        [ Ansi.bold,
+          Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
+            (Terminal_text.single_line ets_keeper_name)
+            (List.length ets_tools);
+          Ansi.dim,
+          Printf.sprintf "   runtime=%s  client=%s  native=%s  groups=%s"
+            (Terminal_text.single_line ets_runtime_id)
+            (Terminal_text.single_line ets_official_client_kind)
+            native (Terminal_text.single_line groups);
+          Ansi.dim,
+          Printf.sprintf "   instruction skills=%s  composition skills=%s"
+            (Terminal_text.single_line instruction)
+            (Terminal_text.single_line composition);
+          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest;
+          Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
+        @ tool_lines
+  in
+  let catalog_lines =
+    let heading =
+      [ Ansi.bold,
+        Printf.sprintf " Registered Catalog — %d tools"
+          (List.length registered_tools);
+        Ansi.dim, Printf.sprintf "   %-32s %-8s %s" "Tool" "Direct" "Surfaces" ]
+    in
+    heading
+    @ List.map
+        (function
+          | Tool_tree.Domain { name; count } ->
+              ( Ansi.bold,
+                Printf.sprintf " %s (%d) ─────────────────────"
+                  (Terminal_text.single_line name) count )
+          | Tool_tree.Family { name; count } ->
+              Ansi.bold,
+              Printf.sprintf "    %s (%d)" (Terminal_text.single_line name) count
+          | Tool_tree.Tool tool ->
+              let surfaces =
+                match tool.Masc.Tui_decode.tl_surfaces with
+                | [] -> "none"
+                | names -> String.concat ", " names
+              in
+              ( (if tool.tl_surfaces = [] then Theme.warn else Ansi.dim),
+                Printf.sprintf "      %-30s %-8s %s"
+                  (Terminal_text.single_line tool.tl_name)
+                  (if tool.tl_direct_call then "yes" else "no")
+                  (Terminal_text.single_line surfaces) ))
+        registered_rows
+  in
+  let display_lines = effective_lines @ [ Ansi.dim, "" ] @ catalog_lines in
+  let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
   let content_height = max 1 (rows - chrome_rows) in
-  let drawable = List.length tool_rows in
+  let drawable = List.length display_lines in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min state.tools_scroll max_scroll) in
-  if shown = 0 then begin
-    let warming =
-      match state.tools_inventory with
-      | Some { Masc.Tui_decode.ts_freshness = Masc.Tui_decode.Warming; _ } -> true
-      | Some _ | None -> false
-    in
-    let empty =
-      (* A server still building its inventory answers with an empty list, and
-         reading that as "none" told an operator their workspace had no tools
-         when it has a hundred. The payload says which of the two it is. *)
-      if warming then "  (the server is still building its tool inventory)"
-      else
-        match
-          empty_page_of ~snapshot:state.tools_inventory ~error:state.tools_error
-        with
-        | Page_failed -> "  (load failed; nothing here is a reading)"
-        | Page_unread -> "  (not loaded yet)"
-        | Page_empty -> "  (no tools registered)"
-    in
-    box_line_styled buf cols ~style:Ansi.dim empty;
-    for _ = 1 to content_height - 1 do
-      box_empty buf cols
-    done
-  end
-  else
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll in
-      match List.nth_opt tool_rows idx with
-      | None -> box_empty buf cols
-      | Some (Tool_tree.Domain { name; count }) ->
-          (* A rule line after the name: the domain is the question the
-             section answers, and a heavier separation than the family's
-             plain bold keeps the three depths readable apart. The rule is a
-             fixed length rather than filling the row -- box_line_styled
-             pads, and a domain heading that shouts across the full width
-             would outrank the surface header above it. *)
-          let rule = "─────────────────────" in
-          box_line_styled buf cols ~style:Ansi.bold
-            (Printf.sprintf " %s (%d) %s" (Terminal_text.single_line name) count rule)
-      | Some (Tool_tree.Family { name; count }) ->
-          box_line_styled buf cols ~style:Ansi.bold
-            (Printf.sprintf "    %s  (%d)" (Terminal_text.single_line name) count)
-      | Some (Tool_tree.Tool t) ->
-          let open Masc.Tui_decode in
-          let surfaces =
-            match t.tl_surfaces with
-            | [] -> "none"
-            | names -> String.concat ", " names
-          in
-          (* Indented under the family heading above it, one deeper than the
-             family sits under its domain, so the name column reads as a
-             three-level tree rather than as a hundred equals. *)
-          let line =
-            Printf.sprintf "      %-30s %-8s %s"
-              (Terminal_text.single_line t.tl_name)
-              (if t.tl_direct_call then "yes" else "no")
-              (Terminal_text.single_line surfaces)
-          in
-          let style = if t.tl_surfaces = [] then Theme.warn else Ansi.dim in
-          box_line_styled buf cols ~style line
-    done;
+  for i = 0 to content_height - 1 do
+    match List.nth_opt display_lines (i + scroll) with
+    | None -> box_empty buf cols
+    | Some (style, line) -> box_line_styled buf cols ~style line
+  done;
   if drawable > content_height then
     box_line_styled buf cols ~style:Ansi.dim
-      (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
+      (Printf.sprintf "[%d rows, scroll %d]" drawable scroll);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -6170,7 +6205,6 @@ let render_code (state : state) =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
-    let activity_showing = state.code_activity_open in
     let title =
       match state.code_file with
       | Some (path, _) ->
@@ -6181,15 +6215,13 @@ let render_code (state : state) =
             if
               state.code_file_hscroll > 0 && not history_showing
               && not diff_showing && not notes_showing
-              && not activity_showing
             then
               Printf.sprintf "%s  (col %d)" path
                 (state.code_file_hscroll + 1)
             else path
           in
           let base =
-            if activity_showing then "activity: " ^ path
-            else if notes_showing then "notes: " ^ path
+            if notes_showing then "notes: " ^ path
             else if diff_showing then "diff vs HEAD: " ^ path
             else if history_showing then "history: " ^ path
             else path
@@ -6211,63 +6243,7 @@ let render_code (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height () in
-    (if activity_showing then
-       match state.code_activity_error, state.code_activity with
-       | Some detail, _ ->
-           box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, None ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (loading activity)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, Some (_, []) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no keeper edit is recorded over this file)"
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, Some (_, regions) ->
-           let total = List.length regions in
-           let max_scroll = max 0 (total - content_height) in
-           let scroll =
-             max 0 (min state.code_activity_scroll max_scroll)
-           in
-           for i = 0 to content_height - 1 do
-             match List.nth_opt regions (scroll + i) with
-             | Some region ->
-                 let open Masc.Tui_decode in
-                 let anchor =
-                   if region.ir_line_start = region.ir_line_end then
-                     Printf.sprintf "L%d" region.ir_line_start
-                   else
-                     Printf.sprintf "L%d-%d" region.ir_line_start
-                       region.ir_line_end
-                 in
-                 let at =
-                   let t =
-                     Unix.localtime (region.ir_at_ms /. 1000.)
-                   in
-                   Printf.sprintf "%02d-%02d %02d:%02d"
-                     (t.Unix.tm_mon + 1) t.Unix.tm_mday t.Unix.tm_hour
-                     t.Unix.tm_min
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
-                      at Ansi.reset Ansi.dim anchor Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line region.ir_keeper)
-                      Ansi.reset
-                      (Terminal_text.single_line region.ir_source))
-             | None -> box_empty pane_buf pane_cols
-           done
-     else if notes_showing then
+    (if notes_showing then
        match state.code_notes_error, state.code_notes with
        | Some detail, _ ->
            box_line pane_buf pane_cols
@@ -6428,27 +6404,69 @@ let render_code (state : state) =
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, []) ->
+       | None, Some (_, { chl_entries = []; chl_edits_note }) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
-           for _ = 2 to content_height do
+             (Ansi.dim ^ "  (no commit or recorded keeper edit touches \
+                          this file)" ^ Ansi.reset);
+           (match chl_edits_note with
+            | Some note ->
+                box_line pane_buf pane_cols
+                  (Ansi.dim ^ "  " ^ Terminal_text.single_line note
+                  ^ Ansi.reset)
+            | None -> ());
+           let used = 1 + if chl_edits_note = None then 0 else 1 in
+           for _ = used + 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, commits) ->
-           let total = List.length commits in
-           let max_scroll = max 0 (total - content_height) in
+       | None, Some (_, { chl_entries; chl_edits_note }) ->
+           (* When the keeper edits could not ride along, the first row
+              says so; the timeline scrolls beneath it. *)
+           let note_rows =
+             match chl_edits_note with
+             | None -> 0
+             | Some note ->
+                 box_line pane_buf pane_cols
+                   (Ansi.dim ^ "  " ^ Terminal_text.single_line note
+                   ^ Ansi.reset);
+                 1
+           in
+           let list_height = max 1 (content_height - note_rows) in
+           let total = List.length chl_entries in
+           let max_scroll = max 0 (total - list_height) in
            let scroll = max 0 (min state.code_history_scroll max_scroll) in
-           for i = 0 to content_height - 1 do
-             match List.nth_opt commits (scroll + i) with
-             | Some row ->
+           let at_of ms =
+             let t = Unix.localtime (ms /. 1000.) in
+             Printf.sprintf "%02d-%02d %02d:%02d" (t.Unix.tm_mon + 1)
+               t.Unix.tm_mday t.Unix.tm_hour t.Unix.tm_min
+           in
+           for i = 0 to list_height - 1 do
+             match List.nth_opt chl_entries (scroll + i) with
+             | Some (Hist_commit row) ->
                  let open Masc.Tui_decode in
                  box_line pane_buf pane_cols
                    (Printf.sprintf "  %s%s%s  %s%s%s  %s  %s" Ansi.dim
-                      row.gl_date Ansi.reset
+                      (at_of row.gl_at_ms) Ansi.reset
                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
                       row.gl_hash Ansi.reset
                       (Terminal_text.single_line row.gl_author)
                       (Terminal_text.single_line row.gl_subject))
+             | Some (Hist_edit region) ->
+                 let open Masc.Tui_decode in
+                 let anchor =
+                   if region.ir_line_start = region.ir_line_end then
+                     Printf.sprintf "L%d" region.ir_line_start
+                   else
+                     Printf.sprintf "L%d-%d" region.ir_line_start
+                       region.ir_line_end
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
+                      (at_of region.ir_at_ms) Ansi.reset Ansi.dim anchor
+                      Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      (Terminal_text.single_line region.ir_keeper)
+                      Ansi.reset
+                      (Terminal_text.single_line region.ir_source))
              | None -> box_empty pane_buf pane_cols
            done
      else
@@ -6474,29 +6492,35 @@ let render_code (state : state) =
                   (max 0 (state.code_file_max_width - 1)))
            in
            (* Which lines carry a note or a recorded keeper edit -- only
-              what is already loaded (m or c has been opened for this
+              what is already loaded (m or H has been opened for this
               file); the pane does not fetch to decorate. A line with both
               shows the note's mark. *)
-           let loaded_for l =
-             match l with
-             | Some (loaded_path, rows) when
-                 (match state.code_file with
-                  | Some (open_path, _) ->
-                      String.equal loaded_path open_path
-                  | None -> false) -> rows
-             | _ -> []
+           let matches_open_file loaded_path =
+             match state.code_file with
+             | Some (open_path, _) -> String.equal loaded_path open_path
+             | None -> false
            in
            let note_spans =
-             List.map
-               (fun (n : Masc.Tui_decode.ide_annotation) ->
-                 (n.ia_line_start, n.ia_line_end))
-               (loaded_for state.code_notes)
+             match state.code_notes with
+             | Some (loaded_path, notes) when matches_open_file loaded_path
+               ->
+                 List.map
+                   (fun (n : Masc.Tui_decode.ide_annotation) ->
+                     (n.ia_line_start, n.ia_line_end))
+                   notes
+             | _ -> []
            in
            let edit_spans =
-             List.map
-               (fun (r : Masc.Tui_decode.ide_region) ->
-                 (r.ir_line_start, r.ir_line_end))
-               (loaded_for state.code_activity)
+             match state.code_history with
+             | Some (loaded_path, listing)
+               when matches_open_file loaded_path ->
+                 List.filter_map
+                   (function
+                     | Hist_edit (r : Masc.Tui_decode.ide_region) ->
+                         Some (r.ir_line_start, r.ir_line_end)
+                     | Hist_commit _ -> None)
+                   listing.chl_entries
+             | _ -> []
            in
            let covers line spans =
              List.exists (fun (a, b) -> line >= a && line <= b) spans
@@ -6565,17 +6589,16 @@ let render_code (state : state) =
             (if
                state.code_focus_file && not state.code_history_open
                && not state.code_diff_open && not state.code_notes_open
-               && not state.code_activity_open
              then "h/l:pan  "
              else "")
             (if state.code_notes_open then
                "w:add  d:diff  H:history  m:notes  "
              else if state.code_focus_file then
-               "c:activity  d:diff  H:history  m:notes  "
+               "d:diff  H:history  m:notes  "
              else "")
             (if
                state.code_history_open || state.code_diff_open
-               || state.code_notes_open || state.code_activity_open
+               || state.code_notes_open
              then "code"
              else if state.code_focus_file then "list"
              else "up")));
@@ -7377,6 +7400,40 @@ let render_terminal_too_small ~rows ~cols =
   finish_frame ~surface_key:"terminal-too-small"
     ~cursor:Frame_presenter.Hidden ~rows ~cols buf
 
+let render_workspace_identity_blocker state ~terminal_rows ~rows ~cols =
+  let buf = Buffer.create 512 in
+  box_top buf cols;
+  box_line_styled buf cols ~style:Theme.bad
+    " WORKSPACE IDENTITY BLOCKER";
+  box_divider buf cols;
+  (match state.workspace_identity with
+   | Masc_tui_types.Workspace_identity_mismatch
+       { local_base_path; server_base_path } ->
+     box_line_styled buf cols ~style:Theme.bad
+       "  The TUI and server resolve different workspaces.";
+     box_line buf cols
+       ("  local  " ^ Terminal_text.single_line local_base_path);
+     box_line buf cols
+       ("  server " ^ Terminal_text.single_line server_base_path);
+     box_line_styled buf cols ~style:Ansi.dim
+       "  Local Keeper/context/metrics reads are disabled. Restart with the matching --base-path."
+   | Masc_tui_types.Workspace_identity_unread ->
+     box_line_styled buf cols ~style:Theme.warn
+       "  Waiting for /health?full=1 to prove the server's effective base path.";
+     box_line buf cols
+       ("  local  " ^ Terminal_text.single_line state.local_base_path);
+     box_line_styled buf cols ~style:Ansi.dim
+       "  Local Keeper/context/metrics reads remain disabled until identity is proven."
+   | Masc_tui_types.Workspace_identity_match -> ());
+  for _ = 1 to max 0 (rows - 9) do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"r:retry identity  q:quit");
+  finish_surface state ~surface_key:"workspace-identity-blocker"
+    ~rows:terminal_rows ~cols buf
+
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
@@ -7387,7 +7444,13 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
-  else if state.palette_open then render_palette state
-  else if state.context_inspector_open then render_context_inspector state
-  else if state.help_open then render_help state
-  else render_surface state
+  else
+    match state.workspace_identity with
+    | Masc_tui_types.Workspace_identity_unread
+    | Masc_tui_types.Workspace_identity_mismatch _ ->
+      render_workspace_identity_blocker state ~terminal_rows ~rows ~cols
+    | Masc_tui_types.Workspace_identity_match ->
+      if state.palette_open then render_palette state
+      else if state.context_inspector_open then render_context_inspector state
+      else if state.help_open then render_help state
+      else render_surface state

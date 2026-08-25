@@ -17,6 +17,14 @@ let empty_assistant =
   {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-empty-1","message":{"role":"assistant","model":"claude-fixture","content":[]}}|}
 ;;
 
+let native_tool_assistant =
+  {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-native-1","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"native-call-1","name":"Read","input":{"file_path":"/tmp/fixture"}}]}}|}
+;;
+
+let native_tool_result =
+  {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
+;;
+
 let result =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_OK","api_error_status":null}|}
 ;;
@@ -935,6 +943,32 @@ let test_stream_events_preserve_text_and_tool_identity () =
         | _ -> fail "Claude stream events did not preserve wire order and identity")
 ;;
 
+let test_stream_events_preserve_native_tool_origin () =
+  let events = ref [] in
+  with_fixture
+    [ Emit native_tool_assistant; Emit native_tool_result; Emit assistant; Emit result ]
+    (fun path ->
+      match
+        run_fixture
+          ~timeout_s:window_outlasting_process_start_s
+          ~on_stream_event:(fun event -> events := event :: !events)
+          path
+      with
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok turn ->
+        check int "no MASC dynamic calls" 0 turn.dynamic_tool_calls;
+        match List.rev !events with
+        | [ Turn_started { turn_id = "assistant-native-1"; model = "claude-fixture" }
+          ; Native_tool_started
+              { call_id = Some "native-call-1"; tool_name = Some "Read" }
+          ; Native_tool_finished
+              { call_id = Some "native-call-1"; tool_name = Some "Read" }
+          ; Text_delta "MASC_CLAUDE_OK"
+          ; Turn_finished { text = "MASC_CLAUDE_OK" }
+          ] -> ()
+        | _ -> fail "Claude native tool activity was not kept distinct from MASC tools")
+;;
+
 (* This test used to assert the opposite: that an MCP notification draws no
    control_response, on the reasoning that a JSON-RPC notification carries no id
    and so needs no reply. That conflates two layers. The reply rule that binds
@@ -1573,6 +1607,10 @@ let () =
             "stream preserves text and tool identity"
             `Quick
             test_stream_events_preserve_text_and_tool_identity
+        ; test_case
+            "stream preserves native tool origin"
+            `Quick
+            test_stream_events_preserve_native_tool_origin
         ; test_case
             "pre-admission tool call is rejected"
             `Quick

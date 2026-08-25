@@ -32,6 +32,7 @@ type editor_semantics =
 type editor_credential_policy =
   | Credentials_optional
   | Credentials_forbidden
+  | Credentials_file_required
 
 type editor_protocol =
   { protocol : string
@@ -39,6 +40,8 @@ type editor_protocol =
   ; semantics : editor_semantics
   ; credential_policy : editor_credential_policy
   ; requires_non_interactive : bool
+  ; provider_fields : string list
+  ; required_provider_fields : string list
   }
 
 val editor_protocols : editor_protocol list
@@ -65,4 +68,3 @@ val api_format_of_protocol : string -> (Runtime_schema.api_format, string) resul
     (renamed in v0.19.43) are rejected with an "unknown protocol" error — they
     are NOT silently canonicalized — so a checked-in config still using them
     fails to load. Locked by [test_legacy_protocol_alias_rejected]. *)
-

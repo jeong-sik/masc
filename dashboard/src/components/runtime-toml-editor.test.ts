@@ -37,6 +37,8 @@ const providerProtocols = [
     semantics: 'http_provider',
     credential_policy: 'optional',
     requires_non_interactive: false,
+    provider_fields: [],
+    required_provider_fields: [],
   },
   {
     protocol: 'openai-compatible-http',
@@ -44,6 +46,8 @@ const providerProtocols = [
     semantics: 'http_provider',
     credential_policy: 'optional',
     requires_non_interactive: false,
+    provider_fields: [],
+    required_provider_fields: [],
   },
   {
     protocol: 'ollama-http',
@@ -51,6 +55,8 @@ const providerProtocols = [
     semantics: 'http_provider',
     credential_policy: 'optional',
     requires_non_interactive: false,
+    provider_fields: [],
+    required_provider_fields: [],
   },
   {
     protocol: 'codex-app-server',
@@ -58,6 +64,8 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
+    provider_fields: [],
+    required_provider_fields: [],
   },
   {
     protocol: 'claude-code',
@@ -65,6 +73,17 @@ const providerProtocols = [
     semantics: 'official_client',
     credential_policy: 'forbidden',
     requires_non_interactive: true,
+    provider_fields: [],
+    required_provider_fields: [],
+  },
+  {
+    protocol: 'antigravity-cli',
+    transport: 'command',
+    semantics: 'official_client',
+    credential_policy: 'file_required',
+    requires_non_interactive: true,
+    provider_fields: ['agent', 'effort', 'timeout-s'],
+    required_provider_fields: ['timeout-s'],
   },
 ] as const
 
@@ -958,6 +977,7 @@ describe('RuntimeTomlEditor', () => {
       'ollama-http',
       'codex-app-server',
       'claude-code',
+      'antigravity-cli',
     ])
     expect(protocolOptions).not.toContain('messages-cli')
     expect(protocolOptions).not.toContain('openai-compatible-cli')
@@ -1013,6 +1033,56 @@ describe('RuntimeTomlEditor', () => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('[codex_subscription.qwen]')
       expect(container.querySelector('[data-testid="runtime-add-binding-error"]')).toBeNull()
+    })
+  })
+
+  it('materializes every required Antigravity provider field', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'antigravity_subscription' },
+    })
+    fireEvent.change(container.querySelector('[aria-label="새 provider protocol"]') as HTMLSelectElement, {
+      target: { value: 'antigravity-cli' },
+    })
+
+    const credentialType = container.querySelector('[aria-label="새 provider credential 종류"]') as HTMLSelectElement
+    expect(credentialType.value).toBe('file')
+    expect(credentialType.disabled).toBe(true)
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: '/opt/homebrew/bin/antigravity' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider credential 값"]') as HTMLInputElement, {
+      target: { value: '/Users/dancer/.config/antigravity/oauth.json' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 Antigravity agent"]') as HTMLInputElement, {
+      target: { value: 'gemini-3.1-pro' },
+    })
+    fireEvent.change(container.querySelector('[aria-label="새 Antigravity effort"]') as HTMLSelectElement, {
+      target: { value: 'high' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 Antigravity timeout-s"]') as HTMLInputElement, {
+      target: { value: '900' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.antigravity_subscription]')
+      expect(source).toContain('protocol = "antigravity-cli"')
+      expect(source).toContain('command = "/opt/homebrew/bin/antigravity"')
+      expect(source).toContain('agent = "gemini-3.1-pro"')
+      expect(source).toContain('effort = "high"')
+      expect(source).toContain('timeout-s = 900')
+      expect(source).toContain('[providers.antigravity_subscription.credentials]')
+      expect(source).toContain('type = "file"')
+      expect(source).toContain('path = "/Users/dancer/.config/antigravity/oauth.json"')
     })
   })
 

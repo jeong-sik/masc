@@ -494,6 +494,8 @@ type raw_trace_stage =
   | Assistant_block
   | Tool_start
   | Tool_finish
+  | Native_tool_start
+  | Native_tool_finish
   | Run_finish
 
 let raw_trace_stage_label = function
@@ -501,6 +503,8 @@ let raw_trace_stage_label = function
   | Assistant_block -> "assistant_block"
   | Tool_start -> "tool_start"
   | Tool_finish -> "tool_finish"
+  | Native_tool_start -> "native_tool_start"
+  | Native_tool_finish -> "native_tool_finish"
   | Run_finish -> "run_finish"
 ;;
 
@@ -581,6 +585,27 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
     (match !all_blocks_recorded, finished with
      | true, Some trace_ref -> { result with trace_ref = Some trace_ref }
      | false, _ | _, None -> result)
+;;
+
+let record_raw_native_tool ~keeper_name ~raw_trace_run ~phase observation =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    let stage, record =
+      match phase with
+      | `Started ->
+        Native_tool_start,
+        Agent_core.Raw_trace.record_native_tool_started
+      | `Finished ->
+        Native_tool_finish,
+        Agent_core.Raw_trace.record_native_tool_finished
+    in
+    ignore
+      (observe_raw_trace ~keeper_name ~stage (fun () ->
+         record
+           active
+           ~call_id:observation.Runtime_native_tools.call_id
+           ~tool_name:observation.tool_name))
 ;;
 
 let record_raw_tool_started ~keeper_name ~raw_trace_run ~invocation ~tool_name ~input =

@@ -40,6 +40,42 @@ let server_identity_of_refresh
   | Error _ -> None
 ;;
 
+type workspace_identity =
+  | Workspace_identity_unread
+  | Workspace_identity_match
+  | Workspace_identity_mismatch of
+      { local_base_path : string
+      ; server_base_path : string
+      }
+
+let canonical_path path =
+  if String.equal path ""
+  then ""
+  else
+    try Unix.realpath path with
+    | Unix.Unix_error _ -> path
+;;
+
+let workspace_identity_of_refresh ~local_base_path reading =
+  match reading with
+  | Error _ -> Workspace_identity_unread
+  | Ok identity ->
+    let local_base_path = canonical_path local_base_path in
+    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    if String.equal local_base_path "" || String.equal server_base_path ""
+    then Workspace_identity_unread
+    else if String.equal local_base_path server_base_path
+    then Workspace_identity_match
+    else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
+let workspace_identity_allows_surface_key identity key =
+  match identity with
+  | Workspace_identity_match -> true
+  | Workspace_identity_unread | Workspace_identity_mismatch _ ->
+    String.equal key "r" || String.equal key "R"
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -474,21 +510,8 @@ type planning_snapshot = Tui_decode.planning_snapshot
   pl_generated_at: string;
 }
 
-(* Goals no longer nest, so every goal sits at depth 0. *)
-let planning_goal_depth (_goals : planning_goal list) (_goal : planning_goal) = 0
-
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
   goals
-  |> List.mapi (fun index goal -> (index, goal))
-  |> List.stable_sort (fun (left_index, left_goal) (right_index, right_goal) ->
-         match
-           Int.compare
-             (planning_goal_depth goals left_goal)
-             (planning_goal_depth goals right_goal)
-         with
-         | 0 -> Int.compare left_index right_index
-         | depth_cmp -> depth_cmp)
-  |> List.map snd
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -703,6 +726,22 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+(* One row of the file pane's history view: the work over the open file is
+   the commits that touched it and the recorded keeper edits, woven into one
+   timeline by their shared timestamp. *)
+type code_history_entry =
+  | Hist_commit of Tui_decode.git_log_row
+  | Hist_edit of Tui_decode.ide_region
+
+type code_history_listing = {
+  chl_entries: code_history_entry list;
+  (* Why the keeper edits are missing when they are: the scope carries no
+     codebase slug, or their fetch failed. The commits still show; the view
+     says what it could not weave in rather than showing a shorter history
+     as if it were the whole one. *)
+  chl_edits_note: string option;
+}
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -737,6 +776,8 @@ type state = {
      a different process on the same endpoint replaces this projection, while
      a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
+  local_base_path: string;
+  mutable workspace_identity: workspace_identity;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -968,9 +1009,10 @@ type state = {
   mutable code_file_max_width: int;
   mutable code_focus_file: bool;
   (* The file pane's history view: H on an open file swaps the content for
-     the commits that touched it, keyed by the path they were fetched for so
+     the work over it -- the commits that touched it woven with the recorded
+     keeper edits, newest first -- keyed by the path they were fetched for so
      opening another file drops a stale listing rather than captioning it. *)
-  mutable code_history: (string * Tui_decode.git_log_row list) option;
+  mutable code_history: (string * code_history_listing) option;
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
@@ -989,13 +1031,6 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
-  (* The file pane's activity view: c on an open file (repository scope,
-     like the notes) swaps the content for which keeper wrote which lines,
-     through what, and when. *)
-  mutable code_activity: (string * Tui_decode.ide_region list) option;
-  mutable code_activity_error: string option;
-  mutable code_activity_open: bool;
-  mutable code_activity_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -1245,6 +1280,7 @@ let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
     ~workspace
+    ?(local_base_path = "")
     ~port
     ~refresh_interval
     ()
@@ -1266,6 +1302,11 @@ let create_state
   context_inspector_exact = None;
   roster_pane_hidden = false;
   server_identity = None;
+  local_base_path;
+  workspace_identity =
+    (if String.equal local_base_path ""
+     then Workspace_identity_match
+     else Workspace_identity_unread);
   help_scroll = 0;
   image_open = None;
   palette_open = false;
@@ -1419,10 +1460,6 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
-  code_activity = None;
-  code_activity_error = None;
-  code_activity_open = false;
-  code_activity_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
@@ -1777,7 +1814,6 @@ let surface_row_texts (state : state) : surface -> string list option = function
       if
         state.code_focus_file && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then
         Option.map
           (fun (_, rows) ->
@@ -1859,6 +1895,10 @@ type palette_action =
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
+  (* (question, symbol): a language-server question about a name on the
+     Code pane's cursor line — the K/D candidates ride the palette as
+     entries so one keypress can also be a choice among several names. *)
+  | Palette_lsp of string * string
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1872,6 +1912,55 @@ let palette_contains ~needle haystack =
     done;
     !found
   end
+
+(* The identifier names on the file pane's cursor line, in reading order,
+   first occurrence only. The open file already carries its lexed segments,
+   so the scan skips what the lexer called a keyword, a string, a comment,
+   or a number -- those offer no name a language server answers about --
+   rather than keeping a second keyword list that could drift. *)
+let code_cursor_line_symbols (state : state) =
+  match state.code_file with
+  | None -> []
+  | Some (_, rows) -> (
+      match List.nth_opt rows state.code_file_cursor with
+      | None -> []
+      | Some segments ->
+          let name_kind kind =
+            not
+              (List.exists (String.equal kind)
+                 [ Masc_tui_code_lexer.kind_keyword;
+                   Masc_tui_code_lexer.kind_string;
+                   Masc_tui_code_lexer.kind_comment;
+                   Masc_tui_code_lexer.kind_number ])
+          in
+          let starts c =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+          in
+          let continues c =
+            starts c || (c >= '0' && c <= '9') || c = '\''
+          in
+          let names = ref [] in
+          List.iter
+            (fun (text, kind) ->
+              if name_kind kind then begin
+                let n = String.length text in
+                let i = ref 0 in
+                while !i < n do
+                  if starts text.[!i] then begin
+                    let j = ref (!i + 1) in
+                    while !j < n && continues text.[!j] do
+                      incr j
+                    done;
+                    let name = String.sub text !i (!j - !i) in
+                    if not (List.exists (String.equal name) !names) then
+                      names := name :: !names;
+                    i := !j
+                  end
+                  else incr i
+                done
+              end)
+            segments;
+          List.rev !names)
 
 let palette_entries (state : state) =
   List.map
@@ -1888,6 +1977,16 @@ let palette_entries (state : state) =
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
+  @ (* With a file focused on the Code surface, the cursor line's names are
+       askable: K/D pre-fill the matching prefix, so exactly these entries
+       remain in view. *)
+  (if state.view = Code && state.code_focus_file then
+     List.concat_map
+       (fun name ->
+         [ ("def " ^ name, Palette_lsp ("definition", name));
+           ("hover " ^ name, Palette_lsp ("hover", name)) ])
+       (code_cursor_line_symbols state)
+   else [])
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)

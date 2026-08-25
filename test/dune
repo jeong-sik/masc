@@ -1,5 +1,15 @@
 ; Test Environment Configuration
 
+(test
+ (name test_keeper_effective_tool_surface)
+ (modules test_keeper_effective_tool_surface)
+ (libraries masc masc_test_deps alcotest))
+
+(test
+ (name test_task_skill_reference)
+ (modules test_task_skill_reference)
+ (libraries masc.task_handlers masc alcotest unix fs_compat masc_string_util))
+
 (env
  (_
   (env-vars
@@ -848,6 +858,14 @@
 (test
  (name test_tool_call_id_is_not_invented)
  (modules test_tool_call_id_is_not_invented)
+ (libraries alcotest ast_grep))
+
+(test
+ (name test_keeper_turn_finish_cancel_protect)
+ (modules test_keeper_turn_finish_cancel_protect)
+ (deps
+  %{workspace_root}/lib/keeper/keeper_unified_turn.ml
+  %{workspace_root}/lib/keeper/keeper_turn.ml)
  (libraries alcotest ast_grep))
 
 (test
@@ -2772,7 +2790,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries alcotest masc masc_tui_types))
+ (libraries alcotest masc masc_tui_types unix))
 
 (test
  (name test_tool_transport_prefix)
@@ -2782,7 +2800,7 @@
 (test
  (name test_tui_palette_matching)
  (modules test_tui_palette_matching)
- (libraries alcotest masc.masc_types masc_tui_types))
+ (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types))
 
 (test
  (name test_tui_acting)

@@ -207,3 +207,31 @@ let notify t ~language ~workspace_root ~method_ ~params =
     Lsp_message_router.send_notification t.router proc ~method_ ~params;
     Ok ()
 ;;
+
+(* Shuts every held server down. Closing the pipes is what ends the stderr
+   drain and the response reader; the switch cannot do it, because it releases
+   after it has waited for exactly those fibers. *)
+let close t =
+  let held =
+    Eio.Mutex.use_rw ~protect:true t.table_mutex (fun () ->
+      let held = Hashtbl.fold (fun _key proc acc -> proc :: acc) t.servers [] in
+      Hashtbl.reset t.servers;
+      Hashtbl.reset t.spawn_locks;
+      held)
+  in
+  List.iter
+    (fun proc ->
+      try Lsp_process_manager.shutdown proc with
+      | exn ->
+        Log.Server.debug
+          "LSP pool close for %s raised: %s"
+          proc.Lsp_process_manager.lang_id
+          (Printexc.to_string exn))
+    held
+;;
+
+let with_pool ~clock ~proc_mgr f =
+  Eio.Switch.run (fun sw ->
+    let t = create ~sw ~clock ~proc_mgr in
+    Fun.protect ~finally:(fun () -> close t) (fun () -> f t))
+;;

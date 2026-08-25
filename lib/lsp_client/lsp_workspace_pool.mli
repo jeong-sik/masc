@@ -40,14 +40,21 @@ type error =
 
 val pp_error : Format.formatter -> error -> unit
 
-(** [create ~sw ~clock ~proc_mgr] holds language servers for the lifetime of
-    [sw]. Every spawned process is bound to [sw] as well, so turning it off
-    terminates them. *)
-val create
-  :  sw:Eio.Switch.t
-  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+(** [with_pool ~clock ~proc_mgr f] runs [f] with a pool and shuts every
+    language server down before returning.
+
+    A pool is only handed out this way because the teardown cannot be left to
+    the switch. [Lsp_process_manager.spawn] forks a stderr drain and a response
+    reader onto the switch, and both block on a read that ends only when the
+    pipes close — while the pipes close in [Eio.Switch.on_release], which runs
+    after the switch has waited for those fibers. A pool torn down by its
+    switch alone hangs there; measured, with two [ocamllsp] processes still
+    resident five minutes on. *)
+val with_pool
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
   -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
-  -> t
+  -> (t -> 'a)
+  -> 'a
 
 (** The language server for [(lang_id, workspace_root)], started and
     initialized on first use. Two calls with the same pair get the same

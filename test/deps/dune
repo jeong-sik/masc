@@ -30,6 +30,7 @@
   (re_export digestif)
   (re_export eio)
   (re_export eio_main)
+  (re_export eio.unix)
   (re_export fmt)
   (re_export fs_compat)
   (re_export grpc-direct)

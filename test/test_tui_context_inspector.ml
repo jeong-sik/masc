@@ -10,8 +10,8 @@ let turn_ref trace turn =
 
 let record ?input_components ~trace ~turn () : Turn_record.t =
   { execution_ids = []
-  ; keeper = "rondo"
-  ; agent_name = "keeper-rondo"
+  ; keeper = "omega"
+  ; agent_name = "keeper-omega"
   ; turn_kind = Direct
   ; trace_id = trace
   ; absolute_turn = turn
@@ -113,11 +113,11 @@ let prompt_response keeper =
 let test_prompt_capture_binds_keeper () =
   check bool "wrong Keeper is rejected" true
     (Result.is_error
-       (Inspector.decode_prompt_capture ~expected_keeper:"rondo"
+       (Inspector.decode_prompt_capture ~expected_keeper:"omega"
           (prompt_response "other")));
   match
-    Inspector.decode_prompt_capture ~expected_keeper:"rondo"
-      (prompt_response "rondo")
+    Inspector.decode_prompt_capture ~expected_keeper:"omega"
+      (prompt_response "omega")
   with
   | Error detail -> fail detail
   | Ok capture ->

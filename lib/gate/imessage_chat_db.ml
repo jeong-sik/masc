@@ -145,6 +145,10 @@ let with_db ~db_path f =
          false and the handle leaks rather than the error being hidden. *)
       if not (Sqlite3.db_close db) then
         Log.Gate.warn "imessage: chat.db handle still had live statements";
+      (* See Keeper_chat_operation_store.close_db — sqlite3-ocaml releases the
+         OCaml runtime during the close and nulls the handle only after it
+         reacquires it, so the wrapper has to stay reachable past the call or
+         another domain's GC finalizer can close the same pointer. *)
       ignore (Sys.opaque_identity db);
       result)
 ;;
@@ -162,8 +166,9 @@ let with_statement db sql f =
       | rc -> Sqlite3.Rc.is_success rc
       | exception Sqlite3.Error _ -> false
     in
-    (* sqlite3-ocaml clears the statement pointer only after it reacquires the
-       OCaml runtime, so the wrapper has to stay reachable past finalize. *)
+    (* See Keeper_chat_operation_store.finalize — sqlite3-ocaml clears the
+       statement pointer only after it reacquires the OCaml runtime, so the
+       wrapper has to stay reachable past finalize for the same reason. *)
     ignore (Sys.opaque_identity stmt);
     (match result with
      | Error _ as error -> error

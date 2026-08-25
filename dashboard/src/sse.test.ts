@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  _resetJournalForTests,
   journal,
   normalizeSSEDispatchType,
   recordServerPushEvent,
@@ -67,7 +68,7 @@ describe('normalizeSSEDispatchType', () => {
 
 describe('server-push Agent Core typed-payload handlers', () => {
   beforeEach(() => {
-    journal.value = []
+    _resetJournalForTests()
   })
 
   function emitEvent(payload: Record<string, unknown>): void {
@@ -107,8 +108,15 @@ describe('server-push Agent Core typed-payload handlers', () => {
       task_id: 't1',
       turn: null,
       tool_name: null,
-      payload: { agent_name: 'alpha', task_id: 't1', elapsed_s: 12.5 },
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        elapsed_s: 12.5,
+        success: true,
+        result: 'ok',
+      },
     })
+    expect(journal.value).toHaveLength(1)
     expect(lastJournalEntry()?.text).toBe('Agent run completed · t1 · 12.5s')
   })
 
@@ -176,6 +184,7 @@ describe('server-push Agent Core typed-payload handlers', () => {
         error_detail: { variant: 'rate_limited', message: 'slow down' },
       },
     })
+    expect(journal.value).toHaveLength(1)
     expect(lastJournalEntry()?.text).toBe('Agent run failed · t1 · 3.0s · boom')
   })
 

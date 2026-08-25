@@ -103,6 +103,11 @@ export const journal = signal<JournalEntry[]>([])
 
 const journalRing = new RingBuffer<JournalEntry>(MAX_JOURNAL_ENTRIES)
 
+export function _resetJournalForTests(): void {
+  journalRing.clear()
+  journal.value = []
+}
+
 function addJournalEntry(
   agent: string,
   text: string,

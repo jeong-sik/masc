@@ -4528,38 +4528,56 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
     )
 
 
-def repositories_enter_interaction(
-    process: subprocess.Popen[bytes],
-    master_fd: int,
-    _slave_fd: int,
-    output: bytearray,
-    _base_path: str,
-) -> None:
+def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
     """Enter on a Repositories row opens that repository's own tree on the
     Code surface, through the ?repo_id= axis; the header names whose tree
-    it is."""
-    tab_until(process, master_fd, output, b"MASC Repositories")
-    wait_for_output(process, master_fd, output, b"ready", start=0, timeout=3.0)
-    code = send_and_wait(process, master_fd, output, b"\r", b"src")
-    code_plain = CSI_RE.sub(b"", code).decode("utf-8")
-    if "masc ▸ /" not in code_plain:
-        raise AssertionError(
-            f"the Code header does not name the repository: {code_plain!r}"
+    it is. Then m reads the notes anchored to a file, and w adds one
+    through the $EDITOR form -- the assertion is the recorded POST body."""
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        tab_until(process, master_fd, output, b"MASC Repositories")
+        wait_for_output(
+            process, master_fd, output, b"ready", start=0, timeout=3.0
         )
-    # Open a file in the repository scope, then m: the notes anchored to it
-    # arrive through the codebase slug the repositories row carries.
-    send_and_wait(process, master_fd, output, b"j\r", b"let")
-    notes = send_and_wait(
-        process, master_fd, output, b"m", b"keep n at three"
-    )
-    notes_plain = CSI_RE.sub(b"", notes).decode("utf-8")
-    for needle in ("notes: note.ml", "L1", "alpha", "decision", "task-77"):
-        if needle not in notes_plain:
+        code = send_and_wait(process, master_fd, output, b"\r", b"src")
+        code_plain = CSI_RE.sub(b"", code).decode("utf-8")
+        if "masc ▸ /" not in code_plain:
             raise AssertionError(
-                f"the notes view missed {needle!r}: {notes_plain!r}"
+                f"the Code header does not name the repository: {code_plain!r}"
             )
-    send_and_wait(process, master_fd, output, b"\x1b", b"let")
-    os.write(master_fd, b"q")
+        # Open a file in the repository scope, then m: the notes anchored to
+        # it arrive through the codebase slug the repositories row carries.
+        send_and_wait(process, master_fd, output, b"j\r", b"let")
+        notes = send_and_wait(
+            process, master_fd, output, b"m", b"keep n at three"
+        )
+        notes_plain = CSI_RE.sub(b"", notes).decode("utf-8")
+        for needle in ("notes: note.ml", "L1", "alpha", "Decision", "task-77"):
+            if needle not in notes_plain:
+                raise AssertionError(
+                    f"the notes view missed {needle!r}: {notes_plain!r}"
+                )
+        # w: the $EDITOR stub saves the form, and the wire carries it.
+        os.write(master_fd, b"w")
+        body = wait_for_http_request(
+            process, master_fd, output, requests,
+            path="/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc",
+        )
+        payload = json.loads(body)
+        if payload != {"file_path": "note.ml", "line_start": 1,
+                       "line_end": 1, "kind": "Question",
+                       "content": "why three?"}:
+            raise AssertionError(f"note POST body: {payload!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        os.write(master_fd, b"q")
+
+    return interact
 
 
 VERIFICATION_VERDICT_PATH = "/api/v1/verification/verdict"
@@ -4607,6 +4625,23 @@ def reject_editor_script() -> Iterator[str]:
     fd, path = tempfile.mkstemp(prefix="masc-tui-reject-editor-", suffix=".sh")
     try:
         os.write(fd, b'#!/bin/sh\nprintf %s \'{"reason": "needs a repro"}\' > "$1"\n')
+        os.close(fd)
+        os.chmod(path, 0o755)
+        yield path
+    finally:
+        os.unlink(path)
+
+
+@contextmanager
+def note_editor_script() -> Iterator[str]:
+    """An $EDITOR that fills the note form and exits 0 -- the saved form."""
+    fd, path = tempfile.mkstemp(prefix="masc-tui-note-editor-", suffix=".sh")
+    try:
+        os.write(
+            fd,
+            b'#!/bin/sh\nprintf %s \'{"line_start": 1, "line_end": 1, '
+            b'"kind": "Question", "content": "why three?"}\' > "$1"\n',
+        )
         os.close(fd)
         os.chmod(path, 0o755)
         yield path
@@ -6406,7 +6441,7 @@ def run_keyboard_regression(executable: str) -> None:
             "ok": True,
             "data": [
                 {"id": "an-1", "file_path": "note.ml", "line_start": 1,
-                 "line_end": 1, "keeper_id": "alpha", "kind": "decision",
+                 "line_end": 1, "keeper_id": "alpha", "kind": "Decision",
                  "content": "keep n at three until the probe lands",
                  "goal_id": None, "task_id": "task-77", "references": [],
                  "created_at_ms": 1, "updated_at_ms": 1},
@@ -6416,12 +6451,26 @@ def run_keyboard_regression(executable: str) -> None:
     repositories_fixtures[
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = notes_response
-    run_terminal_scenario(
-        executable,
-        description="Repositories Enter opens the Code tree",
-        interact=repositories_enter_interaction,
-        http_fixtures=repositories_fixtures,
+    repositories_fixtures[
+        "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
+    ] = (
+        201,
+        {"ok": True, "data": {"id": "an-2", "file_path": "note.ml",
+         "line_start": 1, "line_end": 1, "keeper_id": "masc-tui",
+         "kind": "Question", "content": "why three?", "goal_id": None,
+         "task_id": None, "references": [], "created_at_ms": 2,
+         "updated_at_ms": 2}},
     )
+    note_requests: HttpRequests = []
+    with note_editor_script() as note_editor:
+        run_terminal_scenario(
+            executable,
+            description="Repositories Enter opens the Code tree",
+            interact=repositories_enter_interaction(note_requests),
+            http_fixtures=repositories_fixtures,
+            http_requests=note_requests,
+            extra_env={"EDITOR": note_editor},
+        )
     verdict_requests: HttpRequests = []
     with reject_editor_script() as reject_editor:
         run_terminal_scenario(

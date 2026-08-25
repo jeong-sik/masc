@@ -210,6 +210,9 @@ let for_surface = function
           ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
+      ; b Act "w" "add note"
+          ~help:"in the notes view: add one through the $EDITOR form \
+                 (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"the open file's working tree against HEAD (d or Esc closes)"
       ; b Act "H" "history"

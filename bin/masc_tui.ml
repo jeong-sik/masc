@@ -1161,6 +1161,8 @@ type async_msg =
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
+  (* The path the note anchored to; success re-reads the listing. *)
+  | Code_note_written of string * (unit, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1794,6 +1796,27 @@ let launch_code_notes_load state ~mailbox ~codebase ~path =
   | None ->
       enqueue_async mailbox
         (Code_notes_loaded (path, Error "Eio switch is unavailable"))
+
+(* Same fiber-and-mailbox shape as the other writes. *)
+let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
+    ~kind ~content =
+  add_event state "system" ("adding a note to " ^ path);
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_ide_annotation ~host ~port ~codebase
+          ~file_path:path ~line_start ~line_end ~kind ~content
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_note_written (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run
+  | None -> run ()
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -4791,6 +4814,24 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.code_notes_error <- None;
             state.code_notes_scroll <- 0
         | Error detail -> state.code_notes_error <- Some detail)
+  | Code_note_written (path, result) -> (
+      match result with
+      | Ok () ->
+          add_event state "system" ("note added to " ^ path);
+          (* Re-read rather than splice: the server owns ids and order. *)
+          let still_current =
+            match state.code_file with
+            | Some (open_path, _) -> String.equal open_path path
+            | None -> false
+          in
+          if still_current then (
+            match code_scope_codebase state with
+            | Ok codebase ->
+                state.code_notes <- None;
+                state.code_notes_error <- None;
+                launch_code_notes_load state ~mailbox ~codebase ~path
+            | Error _ -> ())
+      | Error detail -> state.code_notes_error <- Some detail)
   | Code_diff_loaded (path, result) ->
       (* Keyed to the file still open, as the history is. *)
       let still_current =
@@ -5818,6 +5859,72 @@ let main () =
           ~body_json:(Yojson.Safe.to_string json))
       ()
   in
+  (* A new note over the open file: $EDITOR is the form, and the editor is
+     the confirmation step -- a non-zero exit or an empty content leaves the
+     file unannotated. Reachable only from the notes view, which already
+     proved the scope has a codebase slug. *)
+  let handle_code_note_write () =
+    match state.code_file with
+    | None -> ()
+    | Some (path, _) -> (
+        match code_scope_codebase state with
+        | Error why -> add_event state "system" ("notes: " ^ why)
+        | Ok codebase -> (
+            match Masc_tui_editor.editor_command () with
+            | None ->
+                add_event state "error"
+                  "no $EDITOR set; export EDITOR to add a note here"
+            | Some _ -> (
+                let stem =
+                  "{\n  \"line_start\": 1,\n  \"line_end\": 1,\n  \"kind\": \"Comment\",\n  \"content\": \"\"\n}\n"
+                in
+                match
+                  Masc_tui_editor.roundtrip ~restore:restore_terminal
+                    ~reenter:reenter_terminal stem
+                with
+                | None -> add_event state "system" "note cancelled"
+                | Some body -> (
+                    match Yojson.Safe.from_string body with
+                    | exception Yojson.Json_error e ->
+                        add_event state "error"
+                          ("note: body is not JSON: " ^ e)
+                    | json ->
+                        let field key =
+                          match json with
+                          | `Assoc fields -> List.assoc_opt key fields
+                          | _ -> None
+                        in
+                        let int_field key =
+                          match field key with
+                          | Some (`Int n) -> Some n
+                          | Some _ | None -> None
+                        in
+                        let content =
+                          match field "content" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> ""
+                        in
+                        let kind =
+                          match field "kind" with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "Comment"
+                        in
+                        if String.equal content "" then
+                          add_event state "system"
+                            "note cancelled (empty content)"
+                        else (
+                          match
+                            (int_field "line_start", int_field "line_end")
+                          with
+                          | Some line_start, Some line_end ->
+                              start_code_note_write state
+                                ~mailbox:async_messages ~codebase ~path
+                                ~line_start ~line_end ~kind ~content
+                          | _ ->
+                              add_event state "error"
+                                "note: line_start and line_end must be \
+                                 integers")))))
+  in
   (* Verification reject: the reason is required, and $EDITOR is the form we
      already have. The editor is the confirmation step -- a non-zero exit or
      an empty reason leaves the task unjudged, so no arming gate sits in
@@ -6457,6 +6564,10 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "w" when state.view = Code && state.code_notes_open ->
+           (* Adding a note lives inside the notes view: the view proves the
+              scope, and the fresh listing lands where the writer looks. *)
+           handle_code_note_write ()
        | Some "m" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:

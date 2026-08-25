@@ -93,10 +93,18 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; code_type = (Ansi.bold ^ Ansi.blue, closing)
   }
 
-let chat_markdown ~context ~width body =
+let markdown_with_closing ~closing ~width body =
   Markdown.render
-    ~palette:(chat_markdown_palette ~closing:context.Chat_theme.markdown_close)
-    ~width body
+    ~palette:(chat_markdown_palette ~closing) ~width body
+
+let chat_markdown ~context ~width body =
+  markdown_with_closing ~closing:context.Chat_theme.markdown_close ~width body
+
+(* Documents outside a conversation have no ambient role background to
+   restore. Keep their former reset boundary explicit instead of inventing a
+   synthetic chat role or taking a terminal-palette snapshot. *)
+let document_markdown ~width body =
+  markdown_with_closing ~closing:Ansi.reset ~width body
 
 (* The semantic Markdown palette itself is compiled into this binary. The
    generation travels separately because only a user row's ambient terminal
@@ -1371,7 +1379,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
      for a while; this surface reads the same kind of document. *)
   let body_lines =
     Message_layout.wrap_body
-      ~markdown:chat_markdown
+      ~markdown:document_markdown
       ~max_cells:text_width
       ~sanitize:Terminal_text.single_line
       post.bp_body
@@ -1398,7 +1406,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
                  Ansi.dim created_at Ansi.reset
              in
              let body =
-               Message_layout.wrap_body ~markdown:chat_markdown
+               Message_layout.wrap_body ~markdown:document_markdown
                  ~max_cells:(max 1 (cols - 10))
                  ~sanitize:Terminal_text.single_line c.bc_content
              in
@@ -2064,7 +2072,7 @@ let schedule_detail_lines ~width (row : schedule_row) =
   ; field "Digest" row.sch_payload_digest
   ; Ansi.bold, "  Summary"
   ]
-  @ (Message_layout.wrap_body ~markdown:chat_markdown
+  @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
   @ [ Ansi.dim, ""
@@ -6056,7 +6064,7 @@ let render_resources (state : state) =
          done
      | None, Some (_, lines) ->
          let rendered =
-           Message_layout.wrap_body ~markdown:chat_markdown
+           Message_layout.wrap_body ~markdown:document_markdown
              ~max_cells:(max 1 (pane_cols - 8))
              ~sanitize:Terminal_text.single_line (String.concat "\n" lines)
          in

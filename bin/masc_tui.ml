@@ -4383,14 +4383,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               state.acting_undecodable <- state.acting_undecodable + 1;
               state.acting_undecodable_last <- Some reason)
         decoded;
-      let kept = List.length state.acting in
-      if kept > Masc_tui_types.acting_retained_entries then begin
-        state.acting <-
-          List.filteri
-            (fun index _ -> index < Masc_tui_types.acting_retained_entries)
-            state.acting;
-        state.acting_dropped <-
-          state.acting_dropped + (kept - Masc_tui_types.acting_retained_entries)
+      if
+        List.length state.acting
+        > Masc_tui_types.acting_retained_entries
+          + Masc_tui_types.acting_retained_quiet
+      then begin
+        let kept, dropped =
+          Masc_tui_acting.retain
+            ~actions:Masc_tui_types.acting_retained_entries
+            ~quiet:Masc_tui_types.acting_retained_quiet
+            ~event_of:(fun entry -> entry.Masc_tui_types.ae_event)
+            state.acting
+        in
+        state.acting <- kept;
+        state.acting_dropped <- state.acting_dropped + dropped
       end
   | Task_dispatched { keeper; task_id; title; body } ->
       add_event state "task" (Printf.sprintf "%s created for %s" task_id keeper);

@@ -166,6 +166,20 @@ module For_testing : sig
 
   val parse_git_numstat_line : string -> (string * string) option
 
+  val repository_owning : base:string -> path:string -> string option
+  (** The repository that owns [path], searched upward from the file and
+      stopped at [base].
+
+      git does not stop. Asked about a file under a playground that keeps its
+      clones in [repos/<id>/], it finds no repository at the playground root,
+      walks past it, and answers from whichever repository encloses MASC's own
+      checkout -- where the path does not exist, so it prints nothing and a
+      modified file reads as unchanged (#30322).
+
+      [base] is the far edge because it is where the caller's authority ends:
+      the query named a keeper or a repository, and an answer from outside
+      that is not an answer to the question asked. *)
+
   type safe_workspace_file
 
   (** Resolve to both the lexical path used for Git pathspecs and the

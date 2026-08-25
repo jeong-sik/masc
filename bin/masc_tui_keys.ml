@@ -153,6 +153,14 @@ let for_surface = function
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ]
+  | Code ->
+      (* A row surface: masc_tui_types gives it a searchable row list
+         (code_entries), so the cursor and "/" are real here, and Enter drills
+         one directory level (the /workspace/children route is lazy). Claimed
+         from those two facts rather than from the render, so the footer does
+         not advertise a key nothing handles. *)
+      [ b Navigate "j/k" "move"; b Act "Enter" "open" ~help:"drill in, or open the file" ]
+      @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed

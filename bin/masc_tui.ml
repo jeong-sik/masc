@@ -2854,10 +2854,10 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   ; me_tool_block = tool_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
-  ; (* The transcript carries no request id: these rows predate this session, or
-       came from another client. The pane shows the compacted id beside a row,
-       so an empty one is what says "not from a request this session made". *)
-    me_request_id = ""
+  ; (* Direct rows retain their typed delivery key; autonomous rows retain the
+       persisted turn_ref. Old rows and Memory journal entries carry neither,
+       so the empty value continues to mean "no grouping authority". *)
+    me_request_id = Option.value ~default:"" row.Keeper_chat_history.turn_id
   ; me_at = row.Keeper_chat_history.at
   }
 

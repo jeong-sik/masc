@@ -3393,16 +3393,49 @@ let render_keeper_message (state : state) =
     in
     (* Derived once for the width and again per row, so the badge the pane
        measures is the badge it draws. *)
-    let role_label_of (message : Masc_tui_types.msg_entry) =
+    let base_role_label_of (message : Masc_tui_types.msg_entry) =
       match message.me_role with
       | Message_user speaker -> speaker
       | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
-      | Message_autonomous -> "\xc2\xb7 auto"
+      | Message_autonomous -> "auto"
       | Message_status -> "status"
       | Message_error -> "error"
       | Message_tool -> "tools"
       | Message_thinking -> "thinking"
       | Message_memory -> "memory"
+    in
+    (* A persisted delivery key or turn_ref is the grouping authority. Rows
+       without one keep their old labels; grouping them by adjacency or clock
+       would silently put unrelated activity inside the same turn. *)
+    let visible_messages =
+      List.mapi (fun entry_index message -> (entry_index, message)) messages
+      |> List.filter (fun (_, message) ->
+           message.me_role <> Message_thinking
+           || state.msg_reasoning_visibility <> Reasoning_hidden)
+    in
+    let grouped_messages =
+      let rec loop previous_turn reversed = function
+        | [] -> List.rev reversed
+        | (entry_index, message) :: rest ->
+            let turn_id = message.me_request_id in
+            let grouped = not (String.equal turn_id "") in
+            let starts_turn =
+              grouped
+              && not (Option.exists (String.equal turn_id) previous_turn)
+            in
+            let base = base_role_label_of message in
+            let role_label =
+              if not grouped then base
+              else if starts_turn then "turn · " ^ base
+              else "↳ " ^ base
+            in
+            let next_previous =
+              if grouped then Some turn_id else previous_turn
+            in
+            loop next_previous
+              ((entry_index, message, role_label) :: reversed) rest
+      in
+      loop None [] visible_messages
     in
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
@@ -3411,13 +3444,8 @@ let render_keeper_message (state : state) =
       (* The position distinguishes rows whose durable timestamp and request
          fields tie. A history reorder can only cause a miss: the exact body is
          another cache-key field, so an index never authorizes stale rows. *)
-      List.mapi
-        (fun entry_index message ->
-          if
-            message.me_role = Message_thinking
-            && state.msg_reasoning_visibility = Reasoning_hidden
-          then None
-          else
+      List.map
+        (fun (entry_index, message, grouped_role_label) ->
           let style =
             match message.me_role with
             | Message_user _ -> Message_layout.User
@@ -3427,7 +3455,7 @@ let render_keeper_message (state : state) =
             | Message_tool -> Message_layout.Tool
             | Message_thinking -> Message_layout.Thinking
           in
-          let role_label = role_label_of message in
+          let role_label = grouped_role_label in
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
           let role_label =
@@ -3467,8 +3495,7 @@ let render_keeper_message (state : state) =
             | Message_status | Message_error ->
                 message.me_text
           in
-          Some
-            ({ style;
+          ({ style;
                timestamp = message.me_timestamp;
                role_label;
                request_label =
@@ -3483,8 +3510,7 @@ let render_keeper_message (state : state) =
                    };
              }
               : Message_layout.entry))
-        messages
-      |> List.filter_map Fun.id
+        grouped_messages
     in
     (* Rows for the turn still streaming, drawn under the committed history so
        the streaming reply sits at the bottom edge, where the eye rests while
@@ -3500,6 +3526,10 @@ let render_keeper_message (state : state) =
           let request_label = Keeper_chat.compact_request_id request_id in
           let entry ?(markdown_source = Message_layout.Markdown_streaming) style
               role_label body =
+            let role_label =
+              Message_layout.align_role_label ~column:role_label_column
+                ("↳ " ^ role_label)
+            in
             ({ style;
                timestamp = "live";
                role_label =
@@ -3712,7 +3742,8 @@ let render_keeper_message (state : state) =
              (match kind with
               | Keeper_chat_transcript.Progress ->
                   box_line_styled chat_buf chat_cols ~style:Ansi.cyan
-                    ("  " ^ spinner ^ " " ^ text)
+                    ("  " ^ spinner ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
+                     ^ Ansi.reset ^ Ansi.cyan ^ " · " ^ text)
               | Keeper_chat_transcript.Attention ->
                   box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)

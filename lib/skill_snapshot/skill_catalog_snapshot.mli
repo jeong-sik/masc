@@ -149,6 +149,7 @@ val config_source_revision_to_string : config_source_revision -> string
 val config_revision_to_string : config_revision -> string
 val catalog_revision_to_string : catalog_revision -> string
 val snapshot_revision_to_string : snapshot_revision -> string
+val equal_snapshot_revision : snapshot_revision -> snapshot_revision -> bool
 val identity_to_yojson : identity -> Yojson.Safe.t
 val to_public_yojson : t -> Yojson.Safe.t
 (** Public projection omits Skill bodies, source text, resolved host paths, and

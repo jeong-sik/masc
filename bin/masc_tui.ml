@@ -889,10 +889,10 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       submit_message text
     end;
     true
-  | "\n" ->
-    (* Ctrl-J, or Return on a terminal that still translates it. A composer
-       that cannot hold two lines makes an operator send two messages for one
-       thought. *)
+  | "\n" | "shift-enter" ->
+    (* Ctrl-J, Shift+Enter with enhanced keys, or Return on a terminal that
+       still translates it. A composer that cannot hold two lines makes an
+       operator send two messages for one thought. *)
     forget_recall state;
     Buffer.add_char state.msg_input '\n';
     true

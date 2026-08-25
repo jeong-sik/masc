@@ -74,6 +74,7 @@ let test_csi_u_lowers_the_letter () =
 let test_csi_u_named_keys () =
   check_name "tab" "tab" "9;1" 'u';
   check_name "enter" "enter" "13;1" 'u';
+  check_name "shift-enter" "shift-enter" "13;2" 'u';
   check_name "backspace" "backspace" "127;1" 'u';
   check_name "ctrl-enter" "ctrl-enter" "13;5" 'u'
 ;;

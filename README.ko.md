@@ -37,10 +37,10 @@ MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 
 | **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
 | **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | 소스를 받아서 빌드합니다 (`masc-tui`) |
 
-![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-21/01-overview.png)
+![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-25/01-overview.png)
 
 로컬에서 실행 중인 MASC를 캡처한 화면입니다. 운영 정보는 알아볼 수 없도록
-바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)에서
+바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-25/README.md)에서
 24개 화면과 캡처 조건을 확인할 수 있습니다.
 
 ## 처음 실행하기
@@ -163,6 +163,12 @@ dune build --root . bin/masc_tui.exe
 넘기는 경로 바로 아래에 `.masc`가 있어야 합니다. `--base-path`를 안 주면
 `MASC_BASE_PATH`를, 그것도 없으면 현재 디렉터리를 씁니다. `dune install`이나 opam
 설치를 하면 `masc-tui` 이름으로 `PATH`에 올라갑니다.
+
+![MASC 터미널 UI](docs/screenshots/tui/2026-08-25/surfaces/01-overview.png)
+
+이 화면의 Keeper 이름과 경로는 같은 글자 수의 가짜 값으로 바꿨습니다. 나머지 네
+장과 캡처 조건은
+[화면 목록](docs/screenshots/tui/2026-08-25/surfaces/README.md)에 있습니다.
 
 `Tab`을 누르면 화면 20개를 돌아가며 보여 주고, 지금 보는 화면은 맨 윗줄 띠에
 표시됩니다.
@@ -334,7 +340,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 화면입니다.
 
 주 메뉴, Monitor, Work, Lab 화면을 캡처한
-[24개 화면 목록](docs/screenshots/dashboard/2026-08-21/README.md)도 있습니다.
+[24개 화면 목록](docs/screenshots/dashboard/2026-08-25/README.md)도 있습니다.
 
 ## 저장소 구조
 

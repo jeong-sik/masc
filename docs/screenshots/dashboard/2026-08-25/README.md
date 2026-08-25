@@ -1,20 +1,19 @@
-# Dashboard screenshots — 2026-08-21
+# Dashboard screenshots — 2026-08-25
 
 These screenshots were captured from the live loopback dashboard at
 `http://127.0.0.1:8935/dashboard/`.
 
-- Captured: `2026-08-21T10:14:30Z`
-- Runtime: MASC `0.23.0`, commit `ddb2c03e7f42589ddca5b5136df451922bf8a297`
-- Documentation source: `origin/main` at `4abc3da1f3449ce05e910deadba188ab5ab638af`
+- Captured: `2026-08-25T10:30:50Z`
+- Runtime: MASC `0.24.0`, commit `be865dae4a198f915c4e9febc0a5fe32b104d9ba`
+- Documentation source: `21c9242eebfd659c9257b200c82027e789624acd`
 - Viewport: `1440 × 1000`, device scale factor `1`
-- Runtime state: `overall_status=degraded`, `operator_action_required=true`
-- Scope: 13 primary rail screens, 7 visible Monitor/Work sections, and 4 Lab sections
+- Keeper names redacted: 14
+- Reproduce: `python3 scripts/capture-dashboard-screenshots.py --out docs/screenshots/dashboard/2026-08-25`
 
-The capture walked the primary navigation buttons and visible section links,
-then verified the resulting hash route and rendered main content before saving
-each image. Live messages, local paths, channel IDs, repository identifiers,
-and Keeper names were replaced with documentation-safe placeholders in the
-browser immediately before capture. No write action was performed.
+The capture walked each hash route, verified the route it landed on, then
+replaced Keeper names, absolute home paths, and long numeric channel ids with
+documentation-safe placeholders before saving. Every frame carries a badge
+saying so. No write action was performed.
 
 ## Primary navigation
 

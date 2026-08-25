@@ -37,10 +37,10 @@ are doing; they read and write the same `.masc/` state.
 | **Dashboard** | Reading the whole workspace in a browser and taking operator actions | Served at `/dashboard/` by the same process |
 | **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | Built from a source checkout (`masc-tui`) |
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-21/01-overview.png)
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-25/01-overview.png)
 
 This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-25/README.md)
 contains 24 screens and the exact capture metadata.
 
 ## Start here
@@ -165,6 +165,12 @@ dune build --root . bin/masc_tui.exe
 `.masc` must sit directly below the path you pass. `--base-path` falls back to
 `MASC_BASE_PATH` and then the current directory. `dune install` or an opam
 install puts the same program on `PATH` as `masc-tui`.
+
+![MASC terminal UI](docs/screenshots/tui/2026-08-25/surfaces/01-overview.png)
+
+Keeper names and the base path in this frame were replaced with stand-ins of the
+same width; the [surface inventory](docs/screenshots/tui/2026-08-25/surfaces/README.md)
+holds four more and the capture metadata.
 
 `Tab` rotates through 20 surfaces, and the active one is highlighted in a strip
 on the top row:
@@ -336,7 +342,7 @@ Route examples required by the current dashboard contract:
 `dashboard#connectors?section=connector-status`, and
 `dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-See the [24-screen inventory](docs/screenshots/dashboard/2026-08-21/README.md)
+See the [24-screen inventory](docs/screenshots/dashboard/2026-08-25/README.md)
 for the captured primary, Monitor, Work, and Lab views.
 
 ## Repository layout

@@ -38,6 +38,15 @@ val run :
   attempt_outcome
 
 module For_testing : sig
+  (** What the developer instructions say about the built-in write path.
+
+      Codex cannot be told to drop its built-in tools, so under
+      [Native_read] the model carries a refused [apply_patch] beside a working
+      [Write]. This names which one the session refused. Empty for every other
+      posture, where nothing about the built-in surface is unusual. Pure;
+      pinned by [test_keeper_codex_write_path_note]. *)
+  val native_posture_note : Runtime_native_tools.posture -> string list
+
   (** Typed carriage of Codex app-server client errors into agent-core
       errors; rotation class per constructor is pinned by
       [test_keeper_codex_error_carriage]. RFC-0370 §3.1. *)

@@ -8,8 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0239", "0241", "0244"]
-implementation_prs: ["#21299 CLOSED — recency-gate consolidation, withdrawn as wrong-layer scoring (see §-1)"]
-revision: "2026-06-16 — decision-layer correction; see §-1 (READ FIRST)"
+
 ---
 
 # RFC-0247 — Memory OS as a brain

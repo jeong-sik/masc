@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0088", "0091", "0105", "0154"]
-implementation_prs: [16948, 16958]
 ---
 
 ## Implementation summary (2026-05-21)

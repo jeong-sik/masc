@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0245"]
-implementation_prs: ["21704", "21722"]
 ---
 
 ## 1. Motivation

@@ -8,7 +8,6 @@ author: jeong-sik (with Claude Opus 4.8)
 supersedes: []
 superseded_by: null
 related: ["0056", "0086", "0042", "0205"]
-implementation_prs: []
 ---
 
 # RFC-0215 — Keeper sub-library extraction campaign

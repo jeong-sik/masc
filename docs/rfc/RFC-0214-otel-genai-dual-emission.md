@@ -1,3 +1,8 @@
+---
+rfc: "0214"
+status: Draft
+---
+
 # RFC-0214: OTel GenAI Semantic Convention Migration
 
 | | |

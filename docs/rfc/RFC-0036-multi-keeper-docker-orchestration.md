@@ -1,3 +1,8 @@
+---
+rfc: "0036"
+status: Draft
+---
+
 # RFC-0036: Multi-Keeper Docker Orchestration & Lifecycle Cleanup
 
 - **Status**: Draft

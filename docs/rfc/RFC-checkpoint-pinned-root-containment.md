@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: []
 related: ["0089", "0225", "0342"]
-implementation_prs: []
 ---
 
 # RFC-checkpoint-pinned-root-containment — Immutable boot-pinned root capability

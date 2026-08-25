@@ -8,7 +8,6 @@ author: jeong-sik
 supersedes: []
 superseded_by: "KEEPER-STATE-OWNERSHIP"
 related: ["0067", "0315"]
-implementation_prs: []
 ---
 
 # RFC-0294: Remove workspace Goal horizon

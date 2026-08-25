@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0204", "0138", "0029"]
-implementation_prs: [28386]
 ---
 
 # RFC-0372 — Request-scoped resource budget

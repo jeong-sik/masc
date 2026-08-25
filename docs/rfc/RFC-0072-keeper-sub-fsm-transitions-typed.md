@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0002", "0039", "0042", "0046"]
-implementation_prs: [14880,14903,14908,14912,14918,14927,14938]
 ---
 
 # RFC-0072 — Type-encoded keeper sub-FSM transitions (runtime + turn_phase)

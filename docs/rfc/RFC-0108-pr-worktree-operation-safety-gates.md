@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0078"]
-implementation_prs: []
 ---
 
 # RFC-0108: PR / Worktree Operation Safety Gates

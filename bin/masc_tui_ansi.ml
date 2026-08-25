@@ -30,7 +30,6 @@ module Ansi = struct
   let default_fg = Masc_tui_theme.Sgr.default_fg
   let gray = Masc_tui_theme.Sgr.gray
 
-
   let move_to = Masc_tui_theme.Term.move_to
   let reverse = Masc_tui_theme.Sgr.reverse
 

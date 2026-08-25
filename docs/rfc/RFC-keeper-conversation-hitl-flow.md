@@ -1,3 +1,8 @@
+---
+rfc: "keeper-conversation-hitl-flow"
+status: Implemented
+---
+
 # RFC: Keeper conversation and non-blocking HITL
 
 - Status: Accepted

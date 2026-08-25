@@ -1,3 +1,8 @@
+---
+rfc: "0379"
+status: Draft
+---
+
 # RFC-0379 — Keeper Monitor: 조건 전이가 Keeper 를 깨운다 (Event-Driven Wake)
 
 - Status: draft

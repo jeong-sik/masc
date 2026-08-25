@@ -1,3 +1,8 @@
+---
+rfc: "0302"
+status: Draft
+---
+
 # RFC-0302: Keeper 메모리 파일 I/O off-main-domain 오프로드 (HOL fix)
 
 - Status: Draft

@@ -1,3 +1,8 @@
+---
+rfc: "0252"
+status: Draft
+---
+
 # RFC-0252 — Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장)
 
 - Status: Draft

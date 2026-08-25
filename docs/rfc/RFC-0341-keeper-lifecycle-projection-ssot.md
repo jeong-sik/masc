@@ -1,3 +1,8 @@
+---
+rfc: "0341"
+status: Draft
+---
+
 # RFC-0341 — Keeper lifecycle projection SSOT
 
 - Status: Accepted

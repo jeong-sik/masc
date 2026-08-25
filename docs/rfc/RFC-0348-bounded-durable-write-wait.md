@@ -1,3 +1,8 @@
+---
+rfc: "0348"
+status: Draft
+---
+
 # RFC-0348 — Bounded lane acquisition for durable keeper_msg writes (#25398)
 
 - Status: Draft

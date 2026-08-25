@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0223"]
-implementation_prs: []
 ---
 
 # RFC-0235: Voice output transport — browser-addressed audio delivery, device-routed playback

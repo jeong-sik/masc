@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0244", "0247"]
-implementation_prs: []
 ---
 
 # RFC-0251 — Memory OS: record well, do not value

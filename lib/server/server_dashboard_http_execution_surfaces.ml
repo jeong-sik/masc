@@ -123,13 +123,14 @@ let execution_actor_for_request ~base_path request =
   Server_auth.sanitized_dashboard_actor_for_request ~base_path request
 ;;
 
-(* Wire operator broadcast refs now that Sse is in scope. *)
-let () =
-  set_operator_snapshot_broadcaster
-    (fun
-       (publication :
-         Server_dashboard_http_core_operator.operator_snapshot_publication)
-     ->
+(* These two used to be installed into process-global Atomics from module
+   initializers, because Server_dashboard_http_core_operator is compiled before
+   Sse is in scope here and so cannot name these bodies. They are ordinary
+   functions now; the refresh loops take them as arguments (#25927). *)
+let broadcast_operator_snapshot
+      (publication :
+        Server_dashboard_http_core_operator.operator_snapshot_publication)
+  =
     let current =
       Server_dashboard_http_core_operator.operator_snapshot_publication ()
     in
@@ -145,7 +146,7 @@ let () =
       broadcast_cached_surface
         ~event_type:"operator_snapshot"
         (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-           publication))
+           publication)
 ;;
 
 let () =
@@ -160,10 +161,7 @@ let () =
        | Some publication -> broadcast_operator_snapshot publication)
 ;;
 
-let () =
-  set_operator_digest_broadcaster
-    (broadcast_cached_surface ~event_type:"operator_digest")
-;;
+let broadcast_operator_digest = broadcast_cached_surface ~event_type:"operator_digest"
 
 let execution_cache : cached_surface =
   Server_dashboard_http_cache.create_cached_surface

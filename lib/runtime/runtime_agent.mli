@@ -267,8 +267,6 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val with_agent_core_tool_of_masc_hook_unset : (unit -> 'a) -> 'a
-
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
@@ -407,12 +405,29 @@ val run_blocks :
   (run_result, Agent_core.Error.t) result
 (** Runs an Agent Core agent against structured user-authored content blocks. *)
 
+type agent_core_tool_projector =
+  name:string ->
+  description:string ->
+  input_schema:Yojson.Safe.t ->
+  (Yojson.Safe.t -> Tool_result.result) ->
+  Agent_core.Tool.t
+(** Turns one MASC tool schema into the inline [Agent_core.Tool.t] a provider
+    call carries. [Tool_bridge] owns the projection and this library must not
+    depend on it, so the direction is inverted by passing the function in.
+
+    It used to be inverted by a process-global [Atomic.t] that [Tool_bridge]
+    filled from a module initializer, which made "was the bridge linked and did
+    its initializer run" a runtime question — answered by an [Internal] error
+    at the point of use, and undone in tests by a [For_testing] helper that
+    emptied the global. As an argument the question is the compiler's. *)
+
 val run_with_masc_tools :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
+  agent_core_tool_of_masc:agent_core_tool_projector ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
@@ -421,12 +436,3 @@ val run_with_masc_tools :
 (** Variant of {!run} that projects the supplied MASC schemas into exact inline
     [Agent_core.Tool.t] values through [dispatch]. *)
 
-val set_agent_core_tool_of_masc_hook :
-  (name:string ->
-   description:string ->
-   input_schema:Yojson.Safe.t ->
-   (Yojson.Safe.t -> Tool_result.result) ->
-   Agent_core.Tool.t) ->
-  unit
-(** [set_agent_core_tool_of_masc_hook f] registers a function to project MASC tool schemas
-    into Agent_core.Tool.t. Used to decouple the [Tool_bridge] module. *)

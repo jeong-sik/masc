@@ -1,3 +1,8 @@
+---
+rfc: "0062"
+status: Implemented
+---
+
 # RFC-0062 — Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initial Draft)
 
 **Status**: Implemented (Phase 0–4c-1 merged via #14437/#14464/#14482/#14486/#14528; this RFC is a documentation backfill per §10. Body wording retained for historical context.)

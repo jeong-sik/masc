@@ -8,7 +8,6 @@ author: vincent (drafted by Claude Opus 4.8)
 supersedes: []
 superseded_by: null
 related: ["0239", "0257", "0259", "0285"]
-implementation_prs: []
 ---
 
 # RFC: Keeper durable memory consolidation — deprecate memory_bank into Memory OS

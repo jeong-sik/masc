@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0056", "0085", "0005", "0003"]
-implementation_prs: []
 ---
 
 # RFC-0178 — Types Sub-library Extraction with `_intf.ml` mli-only Surface

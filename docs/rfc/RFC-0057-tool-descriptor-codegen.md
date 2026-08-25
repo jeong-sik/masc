@@ -1,3 +1,8 @@
+---
+rfc: "0057"
+status: Draft
+---
+
 # RFC-0057: Tool Descriptor Codegen — `[@@deriving tool]` via Build-Time Generation
 
 > **Status**: Draft

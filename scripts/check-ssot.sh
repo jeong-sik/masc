@@ -148,6 +148,71 @@ check_rule "R9-tui-chat-theme-owner" 0 \
   '' \
   bin/masc_tui_render.ml
 
+# SSOT-R10 — Theme is the only production owner of projected background SGR
+# bytes. Existing diff backgrounds and the new RGB/indexed serializer remain
+# literal in masc_tui_theme.ml; callers pass typed projected colours instead.
+# The prefix is the owned surface: 48:25 is deliberately a match, as is split
+# construction such as "48;" ^ "2". A completed mode is not required before
+# the raw extended-background construction has already bypassed Theme.
+r10_pattern='(^|[^0-9])48[;:]'
+r10_self_test_failed=0
+for fixture in '48;2' '48;5' '48:2' '48:5' '"48;" ^ "2"' '48:25'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r10_pattern"; then
+    echo "ERROR[R10-pattern-self-test]: did not match $fixture" >&2
+    r10_self_test_failed=1
+  fi
+done
+if printf '%s\n' '148;2' '47;2' '47:5' '49;2' '49:5' \
+  | rg -q "$r10_pattern"; then
+  echo "ERROR[R10-pattern-self-test]: matched a non-48 prefix" >&2
+  r10_self_test_failed=1
+fi
+if [ "$r10_self_test_failed" -eq 0 ]; then
+  echo "OK[R10-pattern-self-test]: owned prefixes and numeric boundary covered."
+else
+  fail=1
+fi
+check_rule "R10-tui-projected-background" 0 \
+  "Masc_tui_theme.Sgr.background" \
+  "$r10_pattern" \
+  'bin/masc_tui_theme\.mli?:' \
+  bin lib
+
+# SSOT-R11 — Palette.For_testing can choose a level directly and therefore
+# bypass the process-local stdout capability owner. Production code may use
+# only Masc_tui_terminal_palette.best_color. The full module name catches
+# direct calls and alias declarations; the narrow function name also catches
+# calls through an alias such as X.best_color_for_level.
+r11_pattern='Masc_tui_terminal_palette[[:space:]]*\.[[:space:]]*For_testing|best_color_for_level'
+r11_self_test_failed=0
+for fixture in \
+  'Masc_tui_terminal_palette.For_testing.best_color_for_level' \
+  'module X = Masc_tui_terminal_palette.For_testing' \
+  'X.best_color_for_level'; do
+  if ! printf '%s\n' "$fixture" | rg -q "$r11_pattern"; then
+    echo "ERROR[R11-pattern-self-test]: did not match $fixture" >&2
+    r11_self_test_failed=1
+  fi
+done
+if printf '%s\n' \
+  'Masc_tui_terminal_palette.best_color' \
+  'module X = Masc_tui_terminal_palette' \
+  'X.best_color' \
+  | rg -q "$r11_pattern"; then
+  echo "ERROR[R11-pattern-self-test]: matched the production API" >&2
+  r11_self_test_failed=1
+fi
+if [ "$r11_self_test_failed" -eq 0 ]; then
+  echo "OK[R11-pattern-self-test]: direct and alias bypasses covered."
+else
+  fail=1
+fi
+check_rule "R11-tui-palette-for-testing" 0 \
+  "Masc_tui_terminal_palette.best_color" \
+  "$r11_pattern" \
+  'bin/masc_tui_terminal_palette\.mli?:' \
+  bin lib
+
 # SSOT-R3 (tool-name literal) is intentionally deferred to #8448's landing:
 # the raw `"masc_..."` match is too noisy without the Tool_name.Keeper variant
 # refactor in place. Add to this script once #8448 introduces a narrow dispatch
@@ -156,6 +221,6 @@ check_rule "R9-tui-chat-theme-owner" 0 \
 echo ""
 echo "SSOT snapshot (baselines tracked inline; lower them as SSOT PRs land):"
 echo "  Script: scripts/check-ssot.sh"
-echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462"
+echo "  Related issues: #8355 #8387 #8403 #8414 #8448 #8455 #8462 #30411"
 
 exit "$fail"

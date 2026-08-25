@@ -8,7 +8,6 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0189", "21228", "5610"]
-implementation_prs: ["28752", "28753", "28754", "28755", "28756", "28757", "28758"]
 ---
 
 # RFC-0381: 웹 검색은 폴백이 있는 척한다

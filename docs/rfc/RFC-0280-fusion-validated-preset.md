@@ -1,3 +1,8 @@
+---
+rfc: "0280"
+status: Draft
+---
+
 # RFC-0280 — Fusion: validated preset type (Parse, don't validate)
 
 - Status: Draft

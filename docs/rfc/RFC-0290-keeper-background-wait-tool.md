@@ -1,3 +1,8 @@
+---
+rfc: "0290"
+status: Draft
+---
+
 # RFC-0290: Generic keeper background-work tool (spawn → wake-on-completion)
 
 - Status: Draft

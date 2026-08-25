@@ -8,7 +8,6 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0377"]
-implementation_prs: []
 ---
 
 # RFC: 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 (event-queue-admit-all-ready)

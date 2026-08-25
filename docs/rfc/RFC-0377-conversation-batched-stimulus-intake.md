@@ -1,3 +1,8 @@
+---
+rfc: "0377"
+status: Draft
+---
+
 # RFC-0377 — 같은 대화의 밀린 메시지는 한 턴이 함께 본다 (Conversation-Batched Stimulus Intake)
 
 - Status: Draft

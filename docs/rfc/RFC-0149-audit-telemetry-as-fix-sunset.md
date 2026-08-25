@@ -3,7 +3,6 @@ title: Audit-Driven Telemetry-as-Fix Sunset
 rfc: 0149
 status: Implemented
 created: 2026-05-20
-implementation_prs: []
 ---
 
 # RFC-0149 — Audit-Driven Telemetry-as-Fix Sunset (memory_recall · compact_negative_savings · runtime_resolve_live_warn)

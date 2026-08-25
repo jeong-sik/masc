@@ -1,3 +1,8 @@
+---
+rfc: "0352"
+status: Implemented
+---
+
 # RFC-0352 — Legacy Goal: RFC-0000 §3.2 ↔ §3.15 자기모순 해소 (결정 요청)
 
 - Status: **Accepted — Path B (오너 결정 2026-07-21)**

@@ -8,7 +8,6 @@ author: agent-llm-a-cron-loop (vincent)
 supersedes: []
 superseded_by: null
 related: ["0085", "0088", "0089", "0126", "0131"]
-implementation_prs: [16531, 16536, 16537]
 ---
 
 ## Implementation summary (2026-05-21)

@@ -1,3 +1,8 @@
+---
+rfc: "dashboard-dev-token-configured-role"
+status: Draft
+---
+
 # RFC: Loopback dashboard dev-token issues Admin
 
 Status: Draft

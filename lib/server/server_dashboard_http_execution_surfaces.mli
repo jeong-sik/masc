@@ -251,3 +251,19 @@ val patch_keeper_row :
   keepalive_running:bool ->
   Yojson.Safe.t ->
   Yojson.Safe.t
+
+val broadcast_operator_snapshot :
+  Server_dashboard_http_core_operator.operator_snapshot_publication -> unit
+(** Publish an operator snapshot on SSE, if the publication still matches the
+    current one. Passed to the snapshot refresh loop at boot. *)
+
+val broadcast_operator_digest : Yojson.Safe.t -> unit
+(** Publish an operator digest on SSE. Passed to the digest refresh loop at
+    boot.
+
+    Both used to reach their loops through process-global [Atomic.t] cells that
+    module initializers here filled, because
+    [Server_dashboard_http_core_operator] is compiled before [Sse] is in scope
+    here and cannot name these bodies. The cells defaulted to functions that
+    did nothing, so a missing registration was a broadcast that silently went
+    nowhere (#25927). *)

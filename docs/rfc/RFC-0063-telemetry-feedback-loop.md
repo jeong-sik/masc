@@ -1,3 +1,8 @@
+---
+rfc: "0063"
+status: Active
+---
+
 # RFC-0063 — Telemetry Feedback Loop & Cooperative Scheduling Safety
 
 - **Status**: Active (Postmortem chain merged: #14491 introduce → #14499 fix → #14503 release bump → #14508/#14511 follow-ups all on main. Cooperative scheduling guarantees from §"safety" remain advisory for future fiber additions.)

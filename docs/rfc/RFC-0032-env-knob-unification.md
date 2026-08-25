@@ -1,3 +1,8 @@
+---
+rfc: "0032"
+status: Draft
+---
+
 # RFC-0032 — Environment Knob Unification
 
 - **Status**: Draft

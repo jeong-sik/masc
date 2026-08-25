@@ -45,6 +45,7 @@ depends: [
   "conf-gmp" {= "5"}
   "conf-gmp-powm-sec" {= "4"}
   "conf-libssl" {= "4"}
+  "conf-ncurses" {= "1"}
   "conf-pkg-config" {= "4"}
   "conf-protoc" {= "4.4.0"}
   "conf-sqlite3" {= "1"}

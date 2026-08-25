@@ -3,7 +3,6 @@ title: Keeper Detail FSM Hub as SSOT
 rfc: 0046
 status: Active
 created: 2026-05-08
-implementation_prs: []
 ---
 
 # RFC-0046 — Keeper Detail FSM Hub as SSOT

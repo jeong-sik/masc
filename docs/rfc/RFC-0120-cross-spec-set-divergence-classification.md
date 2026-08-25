@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0072", "0113", "0114", "0115", "0116", "0117", "0118", "0119"]
-implementation_prs: []
 ---
 
 # RFC-0120: Cross-spec set-name divergence — 3-class classification framework (STALE / DELIBERATE / NAME COLLISION)

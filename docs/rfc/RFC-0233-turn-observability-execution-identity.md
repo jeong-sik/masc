@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0225", "0230", "0231", "0252"]
-implementation_prs: ["20968", "20975", "20985", "20995", "21000"]
 ---
 
 # RFC-0233: TurnRecord + canonical execution identity

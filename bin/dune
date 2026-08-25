@@ -290,14 +290,26 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_keys)
+ (wrapped false)
+ (modules masc_tui_keys)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_theme)
  (wrapped false)
- (modules masc_tui_theme))
+ (modules masc_tui_theme)
+ (libraries masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_palette)
  (wrapped false)
- (modules masc_tui_terminal_palette))
+ (modules masc_tui_terminal_palette)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names masc_tui_terminal_palette_stubs))
+ (c_library_flags (-lncurses)))
 
 (library
  (name masc_tui_paste)
@@ -539,6 +551,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_keys
   masc_tui_theme
   masc_tui_terminal_palette
   masc_tui_terminal_probe

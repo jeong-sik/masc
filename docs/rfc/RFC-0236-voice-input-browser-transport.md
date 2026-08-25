@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0235", "0223"]
-implementation_prs: []
 ---
 
 # RFC-0236: Voice input transport — browser-captured speech-to-text for the dashboard composer

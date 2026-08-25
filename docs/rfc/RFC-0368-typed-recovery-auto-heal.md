@@ -1,3 +1,8 @@
+---
+rfc: "0368"
+status: Draft
+---
+
 # RFC-0368 — 판단 없는 recovery는 keeper의 다음 claim이 스스로 해제한다
 
 **Status**: Draft — §설계 1의 `Transport_interrupted` 재분류는 **철회됨** (아래 정정)

@@ -8,7 +8,6 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0389"]
-implementation_prs: ["30119"]
 ---
 
 # RFC-0390: Official client 네이티브 도구를 keeper 별로 켜고 끈다

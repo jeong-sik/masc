@@ -1,3 +1,8 @@
+---
+rfc: "0206"
+status: Draft
+---
+
 # RFC-0206: Runtime 개념 — runtime→Runtime 재탄생
 
 - Status: Draft

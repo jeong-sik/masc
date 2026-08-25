@@ -8,8 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0283", "0298", "0300"]
-implementation_prs:
-  - "fix/fusion-settings-layout" # Phase 0 — layout regression fix (set-line CSS + set-card-b-wide)
 ---
 
 # RFC-0306 — Typed, comment-preserving fusion settings editor

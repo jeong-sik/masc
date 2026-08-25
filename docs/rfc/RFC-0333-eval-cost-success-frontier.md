@@ -1,3 +1,8 @@
+---
+rfc: "0333"
+status: Draft
+---
+
 # RFC-0333 — Deterministic cost↔success frontier join for the eval harness
 
 - Status: Draft

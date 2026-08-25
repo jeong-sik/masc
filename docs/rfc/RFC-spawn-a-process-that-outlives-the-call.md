@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["execute-subset-dispositions"]
-implementation_prs: []
 ---
 
 # Spawn: a process that outlives the call

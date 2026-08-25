@@ -1,3 +1,8 @@
+let context_window_of_turn ~turn_budget = function
+  | `Produced_result -> Some turn_budget
+  | `Errored -> None
+;;
+
 let write
       ~config
       ~keeper_name

@@ -1,3 +1,8 @@
+---
+rfc: "per-keeper-github-cli-identity"
+status: Draft
+---
+
 # RFC: Keeper-specific GitHub CLI identity
 
 Status: Draft

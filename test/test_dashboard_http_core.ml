@@ -913,6 +913,7 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
       (request "/api/v1/operator")
   in
   let after =
@@ -967,35 +968,44 @@ let test_operator_snapshot_publication_rejects_stale_races () =
   let old_generation_compute =
     Server_dashboard_http_core_operator.begin_operator_snapshot_compute ()
   in
-  let broadcasts = ref [] in
-  let original_broadcast =
-    Server_dashboard_http_core_operator.For_testing
-    .replace_operator_snapshot_broadcaster
-      (fun _publication -> ())
+  (* This used to swap the process-global broadcaster and count what arrived on
+     it. The broadcaster is an argument now (#25927), so the assertion runs
+     against the function the observer actually calls: one invalidation yields
+     one publication, and a second read of the same generation yields none. *)
+  Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  let generation = Dashboard_projection_cache.snapshot_invalidation_generation () in
+  let invalidation =
+    Server_dashboard_http_core_operator
+    .publish_operator_snapshot_invalidation_if_current
+      ~generation
   in
-  Fun.protect
-    ~finally:(fun () ->
-      Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
-        original_broadcast)
-    (fun () ->
-      Server_dashboard_http_core_operator.set_operator_snapshot_broadcaster
-        (fun publication -> broadcasts := publication :: !broadcasts);
-      Dashboard_projection_cache.invalidate_snapshot_json ~config;
-      check int "one invalidation publishes exactly once" 1
-        (List.length !broadcasts);
-      let invalidation = List.hd !broadcasts in
-      let current =
-        Server_dashboard_http_core_operator.operator_snapshot_publication ()
-      in
-      check int "broadcast is the canonical generation" current.generation
-        invalidation.generation;
-      check int "broadcast is the canonical terminal sequence"
-        current.terminal_sequence invalidation.terminal_sequence;
-      check bool "old-generation completion is rejected" true
-        (Option.is_none
-           (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
-              ~compute:old_generation_compute
-              (`Assoc [ "winner", `String "old-generation" ]))))
+  (match invalidation with
+   | None -> fail "one invalidation must publish once"
+   | Some invalidation ->
+     let current =
+       Server_dashboard_http_core_operator.operator_snapshot_publication ()
+     in
+     check int "publication is the canonical generation" current.generation
+       invalidation.generation;
+     check int "publication is the canonical terminal sequence"
+       current.terminal_sequence invalidation.terminal_sequence);
+  (* Not "twice returns None": the contract says install *or return*, so a
+     second read of the current generation hands back the same tombstone. What
+     it refuses is a generation that is no longer current.
+
+     Two guards enforce that — the outer current_generation compare and the
+     inner publication.generation compare — so removing either one alone still
+     passes here. Removing both fails this case. *)
+  check bool "a stale generation does not publish" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator
+        .publish_operator_snapshot_invalidation_if_current
+          ~generation:(generation - 1)));
+  check bool "old-generation completion is rejected" true
+    (Option.is_none
+       (Server_dashboard_http_core_operator.publish_operator_snapshot_if_current
+          ~compute:old_generation_compute
+          (`Assoc [ "winner", `String "old-generation" ])))
 
 let test_operator_snapshot_error_clears_previous_success () =
   let success =
@@ -1060,6 +1070,7 @@ let test_operator_snapshot_http_rejects_stale_success_after_store_error () =
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
       (request "/api/v1/operator")
   in
   let open Yojson.Safe.Util in
@@ -1216,6 +1227,7 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ~state
       ~sw
       ~clock:(Eio.Stdenv.clock env)
+      ~broadcast_snapshot:(fun _publication -> ())
       (request "/api/v1/operator")
   in
   check string

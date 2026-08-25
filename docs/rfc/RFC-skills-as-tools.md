@@ -8,7 +8,6 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0389", "prompts-and-tool-definitions-outside-ocaml", "skills-declared-not-discovered"]
-implementation_prs: []
 ---
 
 # RFC: Skills as Tools (skills-as-tools)

@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0084", "0089"]
-implementation_prs: [15720, 16235, 16238, 16296]
 ---
 
 # RFC-0091 — Execute tool: cmd string → typed Argv schema

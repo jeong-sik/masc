@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0108", "0079"]
-implementation_prs: []
 ---
 
 # RFC: Offload the structured-log durable append off the emitting fiber

@@ -1913,6 +1913,8 @@
 
 (include stanzas/test_fs_compat_home_guard.inc)
 
+(include stanzas/test_fs_compat_save_file_mode.inc)
+
 (include stanzas/test_fs_compat_mkdir_memo.inc)
 
 (include stanzas/test_fs_compat_fd_cache.inc)
@@ -3051,9 +3053,11 @@
 (include stanzas/test_prompt_templates_render.inc)
 (include stanzas/test_tui_send_disposition.inc)
 (include stanzas/test_tui_scroll.inc)
+(include stanzas/test_tui_keys.inc)
 (include stanzas/test_workspace_git_log.inc)
 (include stanzas/test_tui_code_lexer.inc)
 (include stanzas/test_tui_theme.inc)
+(include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
 

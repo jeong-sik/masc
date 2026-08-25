@@ -1,3 +1,8 @@
+---
+rfc: "0024"
+status: Draft
+---
+
 # RFC-0024: Ollama Runtime Integration + KV Cache Optimization
 
 - **Status**: Draft

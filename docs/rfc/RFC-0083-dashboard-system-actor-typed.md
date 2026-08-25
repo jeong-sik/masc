@@ -1,9 +1,9 @@
 ---
-id: RFC-0083
+rfc: "0083"
 title: Dashboard system-actor convention typed unification
 status: Implemented
 created: 2026-05-15
-authors: ["@yousleepwhen"]
+author: yousleepwhen
 related: ["RFC-0077"]
 ---
 

@@ -46,6 +46,40 @@ let test_conditional_tokens_agree_with_the_flag () =
     (if Masc_tui_theme.colors_enabled then "x" else "")
     (Masc_tui_theme.style "x")
 
+let test_projected_background_bytes () =
+  let expected bytes = if Masc_tui_theme.colors_enabled then bytes else "" in
+  let rgb = Masc_tui_terminal_palette.make_rgb ~red:12 ~green:34 ~blue:56 in
+  let truecolor =
+    Masc_tui_terminal_palette.For_testing.best_color_for_level
+      ~level:Masc_tui_terminal_palette.True_color rgb
+  in
+  let indexed =
+    Masc_tui_terminal_palette.For_testing.best_color_for_level
+      ~level:Masc_tui_terminal_palette.Ansi256
+      (Masc_tui_terminal_palette.make_rgb ~red:95 ~green:0 ~blue:0)
+  in
+  check str "truecolor background"
+    (expected "\027[48;2;12;34;56m")
+    (Masc_tui_theme.Sgr.background truecolor);
+  check str "indexed background"
+    (expected "\027[48;5;52m")
+    (Masc_tui_theme.Sgr.background indexed);
+  check str "unsupported level keeps the default background" ""
+    (Masc_tui_theme.Sgr.background None)
+
+let test_colour_environment_policy () =
+  let enabled = Masc_tui_theme.For_testing.colors_enabled in
+  check bool "NO_COLOR disables styling" false
+    (enabled ~force_color:None ~no_color:(Some "1"));
+  check bool "any non-empty NO_COLOR disables styling" false
+    (enabled ~force_color:(Some "0") ~no_color:(Some "0"));
+  check bool "empty NO_COLOR does not disable styling" true
+    (enabled ~force_color:None ~no_color:(Some ""));
+  check bool "MASC_TUI_FORCE_COLOR=1 overrides NO_COLOR" true
+    (enabled ~force_color:(Some "1") ~no_color:(Some "1"));
+  check bool "other force values do not override NO_COLOR" false
+    (enabled ~force_color:(Some "true") ~no_color:(Some "1"))
+
 let test_status_names_the_exact_hues () =
   let open Masc_tui_theme in
   check str "ok is green" Sgr.green (status Ok);
@@ -99,17 +133,23 @@ let test_strip_sgr_removes_only_styles () =
 
 (* Diff backgrounds are content, so they carry a reading's name and not a
    colour's. The renderer used to reach into [Sgr] for them, which is what the
-   module's own boundary says a renderer does not do -- and the values are the
-   part a reader checks, so they are spelled here rather than described. *)
+   module's own boundary says a renderer does not do.
+
+   The escapes themselves are already pinned in [conditional_tokens], with the
+   NO_COLOR fold applied. Repeating them here would state the value twice and
+   get the fold wrong the second time -- as the first draft of this test did,
+   asserting the raw escape under a flag that empties it. What is left to
+   check is that the reading names that entry and does not grow a second
+   spelling of the same colour.
+
+   Under NO_COLOR this says nothing: every token folds to the empty string, so
+   any wrong entry passes. That is the flag doing its job rather than a hole
+   in the check -- with no colour there is no mapping left to get wrong -- and
+   it is written down because a green run there is weaker than it looks. *)
 let test_diff_backgrounds_are_named_as_content () =
-  check str "added is the dark green cube entry" "\027[48;5;22m"
+  check str "added names the Sgr entry" Masc_tui_theme.Sgr.bg_added
     Masc_tui_theme.Syntax.diff_added_bg;
-  check str "removed is the dark red one" "\027[48;5;52m"
-    Masc_tui_theme.Syntax.diff_removed_bg;
-  (* Same string as the primitive, reached by the name that says why. *)
-  check str "added is the Sgr entry" Masc_tui_theme.Sgr.bg_added
-    Masc_tui_theme.Syntax.diff_added_bg;
-  check str "removed is the Sgr entry" Masc_tui_theme.Sgr.bg_removed
+  check str "removed names the Sgr entry" Masc_tui_theme.Sgr.bg_removed
     Masc_tui_theme.Syntax.diff_removed_bg
 
 let () =
@@ -121,6 +161,10 @@ let () =
     ; ( "conditional"
       , [ Alcotest.test_case "every colour agrees with the flag" `Quick
             test_conditional_tokens_agree_with_the_flag
+        ; Alcotest.test_case "projected backgrounds own their bytes" `Quick
+            test_projected_background_bytes
+        ; Alcotest.test_case "colour environment policy is deterministic" `Quick
+            test_colour_environment_policy
         ; Alcotest.test_case "the flag reflects the environment" `Quick
             test_the_shim_is_the_same_strings
         ] )

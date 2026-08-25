@@ -1,3 +1,8 @@
+---
+rfc: "0342"
+status: Draft
+---
+
 # RFC-0342: Capability catalog overlay, deployment capability declarations, and boot posture
 
 - Status: Draft

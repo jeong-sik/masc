@@ -1,3 +1,8 @@
+---
+rfc: "0356"
+status: Draft
+---
+
 # RFC-0356: Approval owns the effect (replay the approved payload, do not require byte-identical resubmission)
 
 **Status**: Draft

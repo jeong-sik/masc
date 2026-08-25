@@ -1,3 +1,8 @@
+---
+rfc: "0298"
+status: Draft
+---
+
 # RFC-0298: fusion judge pool — judge 모델을 preset에서 분리
 
 | | |

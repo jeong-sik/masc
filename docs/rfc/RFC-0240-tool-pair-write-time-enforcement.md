@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0044", "0110", "0233"]
-implementation_prs: [24482, 24856, 25046, 25977, 29582]
 ---
 
 # RFC-0240: Tool-pair invariant enforced at write-time

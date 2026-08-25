@@ -3,7 +3,6 @@ title: Capacity Probe Adapter
 rfc: 0064
 status: Active
 created: 2026-05-10
-implementation_prs: []
 ---
 
 # RFC-0064: Capacity Probe Adapter

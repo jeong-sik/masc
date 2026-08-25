@@ -8,7 +8,6 @@ author: jeong-sik
 supersedes: []
 superseded_by: null
 related: ["0033", "0058"]
-implementation_prs: [15722,15725]
 ---
 
 # RFC-0095 — Provider-D-compat provider streaming wire-up

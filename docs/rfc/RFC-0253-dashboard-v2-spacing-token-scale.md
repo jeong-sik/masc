@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0174", "0204"]
-implementation_prs: []
 ---
 
 # RFC-0253 — Dashboard keeper-v2 spacing/radius token scale

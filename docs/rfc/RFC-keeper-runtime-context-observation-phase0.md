@@ -8,7 +8,6 @@ author: codex
 supersedes: []
 superseded_by: []
 related: ["0140", "0150", "0349"]
-implementation_prs: ["26389"]
 ---
 
 # Keeper runtime context observation Phase 0

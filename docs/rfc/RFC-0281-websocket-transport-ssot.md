@@ -8,7 +8,6 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0100", "0204", "0106", "0138"]
-implementation_prs: []
 ---
 
 # RFC-0281: WebSocket transport SSOT

@@ -28,6 +28,10 @@ let register_snapshot_generation_observer observer =
   Atomic.set snapshot_generation_observer (Some observer)
 ;;
 
+let snapshot_invalidation_generation () =
+  Atomic.get snapshot_invalidation_generation_ref
+;;
+
 let with_snapshot_publication_generation f =
   Stdlib.Mutex.protect snapshot_publication_mu (fun () ->
     f (Atomic.get snapshot_invalidation_generation_ref))

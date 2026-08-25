@@ -1841,6 +1841,27 @@ let launch_code_activity_load state ~mailbox ~codebase ~path =
       enqueue_async mailbox
         (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
+(* Remember where a jump is about to leave from, so B can walk back.
+   Bounded: the oldest entry falls off past twenty. *)
+let code_jump_back_limit = 20
+
+let push_code_jump state =
+  let file = Option.map fst state.code_file in
+  let entry =
+    ( state.code_scope,
+      state.code_dir,
+      file,
+      state.code_file_cursor,
+      state.code_file_scroll )
+  in
+  state.code_jump_back <-
+    entry
+    :: (if List.length state.code_jump_back >= code_jump_back_limit then
+          List.filteri
+            (fun i _ -> i < code_jump_back_limit - 1)
+            state.code_jump_back
+        else state.code_jump_back)
+
 (* Ask the language server about [symbol] on the pane's cursor line. The
    question rides the surface's workspace axes, so a keeper checkout and a
    repository ask about their own bytes. *)
@@ -4982,7 +5003,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            let open Masc.Tui_decode in
            if location.ll_inside then begin
              (* Jump there: same file just moves the cursor, another file
-                opens with the line as its target. *)
+                opens with the line as its target. Either way the place the
+                jump left from goes on the back stack first. *)
+             push_code_jump state;
              state.code_lsp_note <-
                Some
                  (Printf.sprintf "%s: %s:%d" symbol location.ll_path
@@ -6872,6 +6895,40 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "B" when state.view = Code ->
+           (* Walk back through the definition jumps, newest first. The
+              stack holds where each jump left from; an empty stack says so
+              instead of moving. *)
+           (match state.code_jump_back with
+            | [] -> add_event state "system" "no jump to walk back from"
+            | (scope, dir, file, cursor, scroll) :: rest ->
+                state.code_jump_back <- rest;
+                let scope_changed = state.code_scope <> scope in
+                state.code_scope <- scope;
+                let dir_changed = not (String.equal state.code_dir dir) in
+                state.code_dir <- dir;
+                if scope_changed || dir_changed then begin
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end;
+                (match file with
+                 | None ->
+                     state.code_file <- None;
+                     state.code_file_error <- None;
+                     state.code_focus_file <- false
+                 | Some path -> (
+                     match state.code_file with
+                     | Some (open_path, _)
+                       when String.equal open_path path ->
+                         state.code_file_cursor <- cursor;
+                         state.code_file_scroll <- scroll;
+                         state.code_focus_file <- true
+                     | Some _ | None ->
+                         state.code_target_line <- Some (cursor + 1);
+                         launch_code_file_load state
+                           ~mailbox:async_messages ~path)))
        | Some "K" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file
                        && not state.code_history_open

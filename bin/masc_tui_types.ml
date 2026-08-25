@@ -943,6 +943,11 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  (* Where a definition jump left from, newest first: scope, directory,
+     open file (if any), its cursor and scroll. B walks back through it.
+     Bounded so a long session cannot grow it without limit. *)
+  mutable code_jump_back:
+    (code_workspace_scope * string * string option * int * int) list;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
@@ -1369,6 +1374,7 @@ let create_state
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
+  code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
   code_focus_file = false;

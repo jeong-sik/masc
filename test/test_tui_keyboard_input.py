@@ -5491,6 +5491,16 @@ def code_lane_interaction(
         raise AssertionError(
             f"the definition jump did not move the cursor gutter: {landed!r}"
         )
+    # B walks back to where the jump left from: the cursor gutter returns
+    # to line 1.
+    returned = send_and_wait(
+        process, master_fd, output, b"B",
+        re.compile(rb"\x1b\[7m\s+1\x1b\[0m"),
+    )
+    if re.search(rb"\x1b\[7m\s+2\x1b\[0m", returned) is not None:
+        raise AssertionError(
+            f"B left the cursor on the jumped-to line: {returned!r}"
+        )
     os.write(master_fd, b"q")
 
 

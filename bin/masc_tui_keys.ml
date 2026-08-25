@@ -213,6 +213,8 @@ let for_surface = function
                  (the palette collects the name)"
       ; b Act "D" "definition"
           ~help:"jump to where a name on the cursor line is defined"
+      ; b Act "B" "back"
+          ~help:"walk back through the definition jumps, newest first"
       ; b Act "c" "activity"
           ~help:"which keeper wrote which lines, through what, and when \
                  (repository scope)"

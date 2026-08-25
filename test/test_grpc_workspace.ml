@@ -355,13 +355,15 @@ let test_grpc_stream_max_buffer_env_override () =
 ;;
 
 let test_grpc_default_on_enablement () =
-  (* With no MASC_GRPC_ENABLED env var, gRPC stays enabled. *)
+  (* With no MASC_GRPC_ENABLED env var, gRPC stays off: nothing has ever
+     subscribed to it, so it does not open a port to prove that again. Both
+     explicit settings still decide. *)
   let was_set = Sys.getenv_opt "MASC_GRPC_ENABLED" in
   (match was_set with
    | Some _ -> Unix.putenv "MASC_GRPC_ENABLED" ""
    | None -> ());
   let result = Masc_grpc_server.is_enabled () in
-  Alcotest.(check bool) "enabled by default" true result;
+  Alcotest.(check bool) "off by default" false result;
   (* Verify explicit enable still works. *)
   Unix.putenv "MASC_GRPC_ENABLED" "1";
   let enabled = Masc_grpc_server.is_enabled () in

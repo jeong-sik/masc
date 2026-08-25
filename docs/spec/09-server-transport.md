@@ -92,7 +92,7 @@ graph TB
 | HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
 | HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
 | WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_mcp_transport_ws` | HTTP 리스너의 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
-| gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
+| gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본 비활성, `MASC_GRPC_ENABLED=1`로 활성화 | Available |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
 
 **Experimental** 상태의 의미: 해당 transport는 코드가 존재하고 로컬 테스트에서 동작하지만, 프로덕션 interop 검증이 미완료. API/프로토콜은 향후 breaking change가 발생할 수 있음. 기본값으로 활성화되어 있으나, 주의해서 사용.
@@ -543,7 +543,9 @@ WebSocket 세션은 `ws-{timestamp_ms}-{counter}` 형식 ID를 사용한다. SHA
 
 ### 10.1 활성화
 
-기본값은 활성이다. `MASC_GRPC_ENABLED=0` 또는 `false`일 때만 비활성화된다. 포트는 `MASC_GRPC_PORT` (기본값: 8936).
+기본값은 **비활성**이다 (2026-08-25부터). `MASC_GRPC_ENABLED=1`일 때만 뜬다. 포트는 `MASC_GRPC_PORT` (기본값: 8936).
+
+껐다기보다 **아무도 켠 적이 없었다**: 서버 자신의 transport-health 집계가 이 표면이 듣고 있던 내내 `subscribers: 0`, `events_delivered: 0`을 보고했다. 그동안 websocket이 `primary_path`를 맡고 SSE가 브로드캐스트를 날랐다. 코드는 그대로이므로 되돌리는 건 환경변수 하나다.
 
 ### 10.2 Service 정의
 
@@ -718,7 +720,7 @@ sequenceDiagram
 |---------|--------|------|
 | `MASC_USE_H2` | `auto` | HTTP listener mode (`auto`, `1`=`h2_only`, `0`=`h1_only`) |
 | `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
-| `MASC_GRPC_ENABLED` | 1 | gRPC 활성화 (`0`으로 비활성화) |
+| `MASC_GRPC_ENABLED` | 0 | gRPC 활성화 (`1`로 활성화) |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
 | `MASC_AGENT_TRANSPORT` | `local` | 값만 정한다. 경로는 안 바뀐다 (§3.1) |
 

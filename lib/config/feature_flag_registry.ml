@@ -34,9 +34,14 @@ type flag = {
     with the same default value. *)
 let all_flags : flag list = [
   (* ── Transport ────────────────────────────────────────────── *)
+  (* Off by default since 2026-08-25. The server's own transport-health
+     projection reported subscribers 0 and events_delivered 0 for the whole
+     time it has been listening, while websocket carries primary_path and SSE
+     carries the broadcasts. Set MASC_GRPC_ENABLED=1 to bring it back; nothing
+     else moved, so that is the whole of the undo. *)
   { env_name = "MASC_GRPC_ENABLED";
-    description = "gRPC transport server";
-    default = true; category = "transport";
+    description = "gRPC transport server (off by default; nothing has subscribed)";
+    default = false; category = "transport";
     lifecycle = Active };
 
   { env_name = "MASC_WS_ENABLED";

@@ -349,8 +349,20 @@ type acting_entry = {
 
 (* How many feed events the TUI keeps. On the live runtime the feed ran at
    about four events a second, so this is a few minutes of scrollback; what
-   falls off the end is counted in [acting_dropped], not lost in silence. *)
+   falls off the end is counted in [acting_dropped], not lost in silence.
+
+   That rate held while every event was something a keeper did. A chat stream
+   sends one frame per token, so the two budgets below are separate: this one
+   is spent only on events the Acting screen's [Actions] filter shows, and the
+   stream frames, heartbeats and snapshots share the smaller one. Trimming by
+   arrival alone let a single long reply spend all 1000 and leave the screen
+   holding about a second. *)
 let acting_retained_entries = 1000
+
+(* Recent context for the [Everything] filter -- enough that the operator can
+   see what is streaming without it costing the log its history. Roughly five
+   screens at the row heights this TUI draws. *)
+let acting_retained_quiet = 200
 
 type overview_snapshot = {
   ov_workspace_health: workspace_health;

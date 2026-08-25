@@ -26,6 +26,32 @@ let visible filter (event : Observer.event) =
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
           true)
 
+(* Trimming the ring by arrival alone let one class of event evict every
+   other. [acting_retained_entries] was sized against a feed of about four
+   events a second, and a chat stream sends one frame per token: a single
+   thousand-token reply fills the whole ring, and the calls and settlements
+   an operator opened this screen for are gone before they can read them.
+
+   So the budget is per class, using the same predicate the screen filters
+   with -- what [Actions] shows gets [actions] slots, everything else gets
+   [quiet]. Both classes keep their newest and the rest is counted, not
+   silently forgotten. Entries arrive newest-first and stay in that order. *)
+let retain ~actions ~quiet ~event_of entries =
+  let rec walk kept n_actions n_quiet dropped = function
+    | [] -> (List.rev kept, dropped)
+    | entry :: older ->
+        let is_action = visible Actions (event_of entry) in
+        let used = if is_action then n_actions else n_quiet in
+        let budget = if is_action then actions else quiet in
+        if used >= budget then walk kept n_actions n_quiet (dropped + 1) older
+        else
+          walk (entry :: kept)
+            (if is_action then n_actions + 1 else n_actions)
+            (if is_action then n_quiet else n_quiet + 1)
+            dropped older
+  in
+  walk [] 0 0 0 entries
+
 type glyph =
   | Call_started
   | Call_returned

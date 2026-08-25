@@ -27,6 +27,22 @@ val visible : filter -> Observer.event -> bool
     composite and snapshot pushes. An event type this build was not taught
     always draws, so a new kind is noticed rather than filtered away. *)
 
+val retain :
+  actions:int ->
+  quiet:int ->
+  event_of:('a -> Observer.event) ->
+  'a list ->
+  'a list * int
+(** Trim a newest-first ring to a budget per class, answering what was kept
+    and how many were dropped. Events [visible Actions] spend [actions];
+    everything else spends [quiet].
+
+    Trimming by arrival alone let one class evict the other: a chat stream
+    sends one frame per token, so a single long reply spent the whole ring
+    and the screen held about a second of the calls and settlements it was
+    opened for. Order is preserved and nothing is dropped without being
+    counted. *)
+
 (** The glyph a row starts with. One vocabulary for the whole surface and
     the Keepers roster, so a column scans the same way on both. *)
 type glyph =

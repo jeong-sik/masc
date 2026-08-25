@@ -102,6 +102,54 @@ let test_a_stream_frame_draws_its_keeper_and_its_clock () =
   check string "detail names the frame" "CUSTOM KEEPER_TOOL_RESULT_READY"
     row.Acting.detail
 
+(* The screen that prompted this: 927 rows held, two of them actions, and the
+   whole page inside one second. A reply sends one frame per token, so 1,200
+   frames arriving after two real events used to push both out of a ring
+   trimmed by arrival. Budgeting per class keeps them. *)
+let test_a_long_reply_does_not_evict_the_log_it_streams_into () =
+  let stream index =
+    Observer.Keeper_chat_stream_frame
+      { keeper = "rondo"
+      ; frame = Some "TEXT_MESSAGE_CONTENT"
+      ; at = 200. +. float_of_int index
+      }
+  in
+  (* Newest first, the order the ring holds. *)
+  let ring = List.init 1_200 stream @ [ settled "largo"; agent_core ~tool:"read_file" "analyst" ] in
+  let kept, dropped =
+    Acting.retain ~actions:1_000 ~quiet:200 ~event_of:Fun.id ring
+  in
+  check int "both actions survive a reply twelve hundred frames long" 2
+    (List.filter (Acting.visible Acting.Actions) kept |> List.length);
+  check int "the quiet budget is spent, not the whole ring" 200
+    (List.filter (fun e -> not (Acting.visible Acting.Actions e)) kept |> List.length);
+  check int "everything dropped is counted" 1_000 dropped;
+  check int "nothing is invented" (List.length kept + dropped) (List.length ring)
+
+(* Trimming by arrival is what the budgets replace. Pinned so that a single
+   shared budget cannot come back without this failing. *)
+let test_the_old_arrival_trim_would_have_lost_them () =
+  let stream index =
+    Observer.Keeper_chat_stream_frame
+      { keeper = "rondo"; frame = Some "TEXT_MESSAGE_CONTENT"; at = float_of_int index }
+  in
+  let ring = List.init 1_200 stream @ [ settled "largo" ] in
+  let by_arrival = List.filteri (fun index _ -> index < 1_000) ring in
+  check int "arrival order keeps no action at all" 0
+    (List.filter (Acting.visible Acting.Actions) by_arrival |> List.length);
+  let kept, _ = Acting.retain ~actions:1_000 ~quiet:200 ~event_of:Fun.id ring in
+  check int "the class budget keeps it" 1
+    (List.filter (Acting.visible Acting.Actions) kept |> List.length)
+
+(* Order is what the screen scrolls through, so trimming must not reorder. *)
+let test_trimming_keeps_the_order_it_was_given () =
+  let ring = [ settled "a"; heartbeat "b"; settled "c"; heartbeat "d"; settled "e" ] in
+  let kept, dropped = Acting.retain ~actions:2 ~quiet:1 ~event_of:Fun.id ring in
+  check (list string) "newest of each class, in arrival order"
+    [ "a"; "b"; "c" ]
+    (List.map (fun e -> (Acting.row_of_event ~duration_ms:None e).Acting.keeper) kept);
+  check int "the rest is counted" 2 dropped
+
 let test_a_call_and_its_return_read_as_one_pair () =
   let started =
     agent_core ~tool:"read_file" ~task:"task-494" ~turn:2086 ~tool_use_id:"tu-1"
@@ -215,6 +263,12 @@ let () =
             test_one_reply_does_not_bury_the_actions_it_sits_between
         ; test_case "a stream frame draws its keeper and its clock" `Quick
             test_a_stream_frame_draws_its_keeper_and_its_clock
+        ; test_case "a long reply does not evict the log it streams into" `Quick
+            test_a_long_reply_does_not_evict_the_log_it_streams_into
+        ; test_case "the old arrival trim would have lost them" `Quick
+            test_the_old_arrival_trim_would_have_lost_them
+        ; test_case "trimming keeps the order it was given" `Quick
+            test_trimming_keeps_the_order_it_was_given
         ; test_case "a call and its return read as one pair" `Quick
             test_a_call_and_its_return_read_as_one_pair
         ; test_case "a return with no start held has no duration" `Quick

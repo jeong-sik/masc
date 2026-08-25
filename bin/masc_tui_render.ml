@@ -2619,7 +2619,7 @@ let render_lanes (state : state) =
       (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"lanes" ~rows:terminal_rows ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
@@ -3596,7 +3596,7 @@ let render_system_logs (state : state) =
       (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 
@@ -3712,7 +3712,7 @@ let render_verification (state : state) =
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 (* What the harness decided, most recent first.
@@ -3825,7 +3825,7 @@ let render_harness (state : state) =
       (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 let fusion_run_status_color = function
@@ -4178,7 +4178,7 @@ let render_repositories (state : state) =
       (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"repositories" ~rows:terminal_rows ~cols buf
 
 (* The files a keeper wrote, read back out of the tool-call log.
@@ -5055,7 +5055,7 @@ let render_tools (state : state) =
       (Printf.sprintf "[%d tools, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:(Masc_tui_keys.footer_hints state.view));
   finish_surface state ~surface_key:"tools" ~rows:terminal_rows ~cols buf
 
 (** Dispatch a normal-height render based on the current surface. *)
@@ -5748,80 +5748,11 @@ let render_surface (state : state) =
   | Schedules -> render_schedules state
 
 (* The [?] help screen: every binding, grouped by the surface that answers
-   it. Hand-maintained beside the arms that bind them -- a key added without
-   its row here is the discoverability bug this screen exists to close. *)
+   it. The rows come from Masc_tui_keys -- the same table the footers read --
+   so the two displays cannot drift apart. A key added to the dispatch gets
+   its row there, once. *)
 let help_sections : (string * (string * string) list) list =
-  [ ( "Global"
-    , [ "Tab / Shift-Tab", "next / previous surface"
-      ; "r", "refresh the current surface"
-      ; "i", "focus the composer (message the shown keeper)"
-      ; "?", "this help"
-      ; "Ctrl-B", "show or hide the keeper roster beside a surface"
-      ; "Ctrl-T", "release the mouse so you can drag-select and copy"
-      ; "q", "quit"
-      ] )
-  ; ( "Overview"
-    , [ "j / k", "scroll events"
-      ; "t", "hand j/k to the task list"
-      ; "Enter", "open the selected task"
-      ; "Esc", "close detail / back to events"
-      ] )
-  ; ( "Keepers"
-    , [ "j / k", "move the roster cursor"
-      ; "/", "search names; Enter keeps the query"
-      ; "n / N", "next / previous search match"
-      ; "Enter", "keeper detail"
-      ; "c", "chat with the keeper"
-      ; "l", "logs"
-      ; "t", "tool calls"
-      ; "u", "pick a runtime lane"
-      ; "[ / ]", "detail tabs: Info / Instructions / GitHub"
-      ; "L", "on the GitHub tab: start the gh device-flow login"
-      ; "g", "toggle yolo tool approval"
-      ; "p / w", "pause / wake"
-      ; "s", "shutdown"
-      ; "e", "settings"
-      ; "a", "new keeper"
-      ] )
-  ; ( "Chat"
-    , [ "Enter", "send, or queue while a turn runs"
-      ; "Ctrl-J", "newline in the draft"
-      ; "Ctrl-G", "next keeper with a chat open"
-      ; "Ctrl-U", "clear the draft"
-      ; "Ctrl-K / Ctrl-P", "cancel / edit the last queued line"
-      ; "PgUp / PgDn", "scroll history"
-      ; "y / n", "answer a tool approval"
-      ; "Esc", "back; during a turn, interrupt it"
-      ] )
-  ; ( "Board"
-    , [ "j / k", "move"
-      ; "Enter", "read the post"
-      ; "w", "write a post"
-      ; "v / V", "vote up / down"
-      ; "c", "reply (while reading)"
-      ] )
-  ; ( "Approvals"
-    , [ "j / k", "move"; "y", "confirm"; "n", "deny" ] )
-  ; ( "Planning"
-    , [ "c", "complete goal"; "x", "drop"; "o", "reopen" ] )
-  ; ( "Config"
-    , [ "e", "edit runtime.toml; the server previews before it writes"
-      ; "r", "reload"
-      ] )
-  ; ( "Resources"
-    , [ "j / k", "move"
-      ; "Enter", "read the selected resource"
-      ; "J / K", "scroll the text"
-      ; "Esc", "back to the list"
-      ] )
-  ; ( "Connectors"
-    , [ "b / u", "bind / unbind a channel (editor form)" ] )
-  ; ( "Logs (Acting / System)"
-    , [ "j / k", "scroll"
-      ; "g / G", "newest / oldest"
-      ; "f", "cycle the filter"
-      ] )
-  ]
+  Masc_tui_keys.help_sections ()
 
 let help_lines () =
   help_sections

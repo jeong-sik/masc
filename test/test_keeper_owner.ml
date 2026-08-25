@@ -2164,13 +2164,20 @@ let test_agent_delegate_submits_owner_operation_without_waiting () =
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
   Fun.protect
-    ~finally:(fun () -> remove_tree base_path)
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      remove_tree base_path)
     (fun () ->
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-tool-test"));
        let meta = make_meta "agent-operation-target" in
        Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+       ignore
+         (Keeper_registry.For_testing.register
+            ~base_path
+            meta.name
+            meta);
        Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
        |> Result.get_ok
        |> ignore;

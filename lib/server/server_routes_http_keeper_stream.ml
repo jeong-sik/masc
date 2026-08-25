@@ -1632,24 +1632,25 @@ let process_single_turn ~user_row_origin ~submission
           else Error "Keeper chat payload identity does not match its direct message"
         in
         (* Whether a keeper can take a turn lives in the registry, not on
-           disk. [ensure_keeper_exists] downstream reads meta, which a
-           stopped keeper still has, so the user row committed first and the
-           turn then failed on the registry miss — and the raw
-           [keeper_turn_resources_unavailable] payload was what the person
-           saw in their own chat, stored durably beside their message
-           (#25529). Asking the registry here settles it before anything is
-           written. *)
-        let keeper_is_running =
+           disk. [ensure_keeper_exists] downstream reads meta, which an
+           unregistered keeper still has, so the user row committed first and
+           the turn then failed on the registry miss — and the raw
+           [keeper_turn_resources_unavailable] payload was what the person saw
+           in their own chat, stored durably beside their message (#25529).
+           A missing process-local entry covers both the brief pre-autoboot
+           window and a stopped keeper, so the response names only that
+           observed fact and offers both retry and start. *)
+        let keeper_is_registered =
           if Keeper_registry.is_registered ~base_path payload.name
           then Ok ()
           else
             Error
               (Printf.sprintf
-                 "keeper %s is not running; start it before sending a message"
+                 "keeper %s is not registered in this server process; retry shortly or start it before sending a message"
                  payload.name)
         in
         let operation_prepare =
-          Result.bind keeper_is_running (fun () ->
+          Result.bind keeper_is_registered (fun () ->
             Result.bind payload_identity (fun () ->
               append_queued_user_row_once ()))
         in

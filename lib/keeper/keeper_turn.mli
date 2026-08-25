@@ -21,12 +21,16 @@ val handle_keeper_up : _ Keeper_types_profile.context -> Yojson.Safe.t -> tool_r
 
     @since 2.110.0 *)
 val preflight_keeper_msg_resolved :
+  base_path:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_invocation_contract.direct_message ->
   (Keeper_invocation_contract.direct_message, string) result
 (** Run synchronous validation for [handle_keeper_msg] before an async wrapper
-    accepts the turn for later execution. Takes the effective meta the
-    resolution step already read, so no second store read happens here. *)
+    accepts the turn for later execution. Requires a current registry entry and
+    takes the effective meta the resolution step already read, so no second
+    store read happens here. A missing entry may mean autoboot has not registered
+    the Keeper yet or that it is stopped; callers receive a retry-or-start
+    message rather than a permanent-state claim. *)
 
 val preflight_keeper_delegate :
   _ Keeper_types_profile.context ->

@@ -84,6 +84,135 @@ let test_the_question_names_the_call () =
     "Run Execute?"
     (Policy.question_for ~tool_name:"Execute" ~input:no_input)
 
+
+(* ── compositions ────────────────────────────────────────────────────────
+   A composition tool is materialised outside the descriptor registry, so a
+   descriptor lookup finds nothing. Before the plan index the policy read that
+   as "cannot classify" and asked about every composition, including one whose
+   whole plan is reads -- while the same tools called directly ran unasked. *)
+
+module Index = Masc.Keeper_tool_composition_plan_index
+
+let mentions haystack needle =
+  let hl = String.length haystack and nl = String.length needle in
+  let rec at i = i + nl <= hl && (String.sub haystack i nl = needle || at (i + 1)) in
+  at 0
+;;
+
+let with_index rows f =
+  let index = Index.shared () in
+  Index.forget_all index;
+  List.iter
+    (fun (composition, node_tools) -> Index.record index ~composition ~node_tools)
+    rows;
+  Fun.protect ~finally:(fun () -> Index.forget_all index) f
+;;
+
+let test_a_plan_of_reads_runs_unasked () =
+  with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun () ->
+    check bool "a composition that only reads is not asked about" false
+      (asks ~tool_name:"keeper_compose_reading" ~input:no_input);
+    check bool "the reason counts the nodes it cleared" true
+      (String.length (because ~tool_name:"keeper_compose_reading" ~input:no_input) > 0))
+;;
+
+let test_one_writing_node_asks_and_names_itself () =
+  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun () ->
+    check bool "one node that changes something asks for the whole plan" true
+      (asks ~tool_name:"keeper_compose_mixed" ~input:no_input);
+    let reason = because ~tool_name:"keeper_compose_mixed" ~input:no_input in
+    (* Without the node name the operator sees a composition name and has to
+       go read the plan to learn why they are being asked. *)
+    check bool "the reason names the node responsible" true
+      (mentions reason "Write"))
+;;
+
+let test_an_unrecorded_name_is_still_unclassifiable () =
+  with_index [] (fun () ->
+    check bool "a name that is not a composition keeps the old answer" true
+      (asks ~tool_name:"keeper_compose_never_declared" ~input:no_input);
+    check string "and keeps the old reason"
+      "no descriptor declares what this tool does"
+      (because ~tool_name:"keeper_compose_never_declared" ~input:no_input))
+;;
+
+(* keeper_plan_execute carries no catalog entry -- its nodes arrive in the
+   input, so the same fold reads them from there and judges the plan actually
+   being run. *)
+let plan_input tools =
+  `Assoc
+    [ ( "nodes"
+      , `List
+          (List.mapi
+             (fun i tool ->
+                `Assoc
+                  [ "id", `String (Printf.sprintf "n%d" i)
+                  ; "tool", `String tool
+                  ])
+             tools) )
+    ]
+;;
+
+let test_ad_hoc_plan_of_reads_runs_unasked () =
+  with_index [] (fun () ->
+    check bool "an ad-hoc plan of reads is not asked about" false
+      (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Grep" ])))
+;;
+
+let test_ad_hoc_plan_with_a_write_asks () =
+  with_index [] (fun () ->
+    check bool "an ad-hoc plan that writes is asked about" true
+      (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Execute" ])));
+;;
+
+let test_a_malformed_plan_is_asked_about () =
+  with_index [] (fun () ->
+    (* Not "a plan whose nodes are all reads". The tool will reject it too. *)
+    check bool "a plan_execute call with no nodes field is asked about" true
+      (asks ~tool_name:"keeper_plan_execute" ~input:no_input))
+;;
+
+(* The invariant every task in this goal is checked against: nothing that runs
+   unasked today may start asking. Read directly and Read inside a plan must
+   give the same answer. *)
+let test_no_direct_call_became_asked () =
+  with_index [] (fun () ->
+    let asked_now =
+      Descriptor.public_names ()
+      |> List.filter (fun tool_name -> asks ~tool_name ~input:no_input)
+    in
+    check (slist string String.compare) "the asked set is unchanged"
+      [ "Edit"; "Execute"; "Write" ] asked_now)
+;;
+
+
+(* The two control tools that ride beside an async composition. They are
+   Agent-Core tools like a composition, so no descriptor owns them, but they
+   carry no plan either -- the fold has nothing to read and would ask. *)
+module Catalog = Masc.Keeper_tool_composition_catalog
+
+let test_reading_a_request_status_runs_unasked () =
+  with_index [] (fun () ->
+    check bool "reading the status of a request this keeper made is not asked about"
+      false (asks ~tool_name:Catalog.status_tool_name ~input:no_input))
+;;
+
+let test_cancelling_a_request_runs_unasked () =
+  with_index [] (fun () ->
+    check bool "cancelling a request inside masc is not asked about" false
+      (asks ~tool_name:Catalog.cancel_tool_name ~input:no_input))
+;;
+
+(* The names come from the catalog the surface builds these tools from, so a
+   rename cannot leave the policy answering about a name nobody calls. *)
+let test_the_control_names_are_the_catalogue_s () =
+  check bool "status and cancel are distinct names" true
+    (not (String.equal Catalog.status_tool_name Catalog.cancel_tool_name));
+  check bool "neither is a composition tool name" true
+    (not (mentions Catalog.status_tool_name "keeper_compose_")
+     && not (mentions Catalog.cancel_tool_name "keeper_compose_"))
+;;
+
 let () =
   run "keeper_tool_approval_policy"
     [ ( "the split"
@@ -99,6 +228,30 @@ let () =
             test_an_unclassifiable_tool_is_asked_about
         ; test_case "every group is classified" `Quick
             test_every_group_is_classified
+        ] )
+    ; ( "compositions"
+      , [ test_case "a plan of reads runs unasked" `Quick
+            test_a_plan_of_reads_runs_unasked
+        ; test_case "one writing node asks and names itself" `Quick
+            test_one_writing_node_asks_and_names_itself
+        ; test_case "an unrecorded name is still unclassifiable" `Quick
+            test_an_unrecorded_name_is_still_unclassifiable
+        ; test_case "an ad-hoc plan of reads runs unasked" `Quick
+            test_ad_hoc_plan_of_reads_runs_unasked
+        ; test_case "an ad-hoc plan with a write asks" `Quick
+            test_ad_hoc_plan_with_a_write_asks
+        ; test_case "a malformed plan is asked about" `Quick
+            test_a_malformed_plan_is_asked_about
+        ; test_case "no direct call became asked" `Quick
+            test_no_direct_call_became_asked
+        ] )
+    ; ( "composition control tools"
+      , [ test_case "reading a request status runs unasked" `Quick
+            test_reading_a_request_status_runs_unasked
+        ; test_case "cancelling a request runs unasked" `Quick
+            test_cancelling_a_request_runs_unasked
+        ; test_case "the control names are the catalogue's" `Quick
+            test_the_control_names_are_the_catalogue_s
         ] )
     ; ( "the question"
       , [ test_case "names the call" `Quick test_the_question_names_the_call ] )

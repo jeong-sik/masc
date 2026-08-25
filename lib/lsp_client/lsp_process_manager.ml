@@ -25,31 +25,88 @@ let pp_spawn_error fmt = function
   | Process_error msg -> Fmt.pf fmt "LSP process error: %s" msg
 ;;
 
-(** Language → command mapping. Returns [(executable, argv)] or [None]. *)
-let command_for_lang lang_id =
-  match lang_id with
-  | "ocaml" -> Some ("ocamllsp", [ "ocamllsp" ])
-  | "typescript" | "javascript" ->
-    Some ("typescript-language-server", [ "typescript-language-server"; "--stdio" ])
-  | "python" -> Some ("pylsp", [ "pylsp" ])
-  | "rust" -> Some ("rust-analyzer", [ "rust-analyzer" ])
-  | "go" -> Some ("gopls", [ "gopls" ])
+(* One row per language the client knows. A variant rather than three
+   independent string matches: adding a language now fails to compile until its
+   command, its extensions and its project markers are all given, where before
+   a new arm in one match left the others silently answering "unknown". *)
+type language =
+  | Ocaml
+  | Typescript
+  | Javascript
+  | Python
+  | Rust
+  | Go
+
+let lang_id_of_language = function
+  | Ocaml -> "ocaml"
+  | Typescript -> "typescript"
+  | Javascript -> "javascript"
+  | Python -> "python"
+  | Rust -> "rust"
+  | Go -> "go"
+;;
+
+let language_of_lang_id = function
+  | "ocaml" -> Some Ocaml
+  | "typescript" -> Some Typescript
+  | "javascript" -> Some Javascript
+  | "python" -> Some Python
+  | "rust" -> Some Rust
+  | "go" -> Some Go
   | _ -> None
 ;;
 
-(** Detect language from file extension. [Filename.extension] and
-    [String.lowercase_ascii] are total (no extension yields [""]), so no
-    guard is needed around them. *)
-let lang_of_path file_path =
-  let ext = Filename.extension file_path |> String.lowercase_ascii in
+let command_of_language = function
+  | Ocaml -> "ocamllsp", [ "ocamllsp" ]
+  | Typescript | Javascript ->
+    "typescript-language-server", [ "typescript-language-server"; "--stdio" ]
+  | Python -> "pylsp", [ "pylsp" ]
+  | Rust -> "rust-analyzer", [ "rust-analyzer" ]
+  | Go -> "gopls", [ "gopls" ]
+;;
+
+(* The file whose directory a language server for this language should be
+   rooted at, nearest first. [dune-workspace] sits above [dune-project] in a
+   multi-project tree, so it is listed second and only wins where no
+   [dune-project] is nearer. *)
+let project_markers_of_language = function
+  | Ocaml -> [ "dune-project"; "dune-workspace" ]
+  | Typescript -> [ "tsconfig.json"; "package.json" ]
+  | Javascript -> [ "jsconfig.json"; "package.json" ]
+  | Python -> [ "pyproject.toml"; "setup.py"; "setup.cfg" ]
+  | Rust -> [ "Cargo.toml" ]
+  | Go -> [ "go.mod" ]
+;;
+
+let language_of_extension ext =
   match ext with
-  | ".ml" | ".mli" -> "ocaml"
-  | ".ts" | ".tsx" -> "typescript"
-  | ".js" | ".jsx" -> "javascript"
-  | ".py" -> "python"
-  | ".rs" -> "rust"
-  | ".go" -> "go"
-  | _ -> "unknown"
+  | ".ml" | ".mli" -> Some Ocaml
+  | ".ts" | ".tsx" -> Some Typescript
+  | ".js" | ".jsx" -> Some Javascript
+  | ".py" -> Some Python
+  | ".rs" -> Some Rust
+  | ".go" -> Some Go
+  | _ -> None
+;;
+
+(** Language → command mapping. Returns [(executable, argv)] or [None]. *)
+let command_for_lang lang_id =
+  Option.map command_of_language (language_of_lang_id lang_id)
+;;
+
+(** Detect the language of a file from its extension. [Filename.extension] and
+    [String.lowercase_ascii] are total (no extension yields [""]), so no guard
+    is needed around them. *)
+let language_of_path file_path =
+  Filename.extension file_path |> String.lowercase_ascii |> language_of_extension
+;;
+
+(** Detect language from file extension, as the wire id the IDE proxy speaks.
+    ["unknown"] where {!language_of_path} answers [None]. *)
+let lang_of_path file_path =
+  match language_of_path file_path with
+  | Some language -> lang_id_of_language language
+  | None -> "unknown"
 ;;
 
 (** Check that an executable exists on [PATH]. *)

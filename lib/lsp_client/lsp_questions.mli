@@ -1,0 +1,70 @@
+(** The three questions a caller can ask a language server about a position.
+
+    Not a protocol client. Completion, formatting and code actions belong to an
+    editor; rename writes files. What is left is: where is this used, where
+    does it come from, what is it (RFC a-language-server-the-keeper-can-ask
+    §3.1). *)
+
+type question =
+  | References
+  | Definition
+  | Hover
+
+val question_of_string : string -> question option
+val string_of_question : question -> string
+
+(** The LSP method each question is asked with. *)
+val method_of_question : question -> string
+
+type location =
+  { path : string
+  ; line : int
+  ; character : int
+  }
+
+type answer =
+  | Locations of location list
+      (** [[]] means the language server looked and found nothing. That is a
+          different fact from "no server for this language" and from "the
+          server is not installed", which is why neither of those is spelled
+          this way. *)
+  | Hover_text of string option
+      (** [None] where the server has nothing to say at that position. *)
+
+type error =
+  | Server of Lsp_workspace_pool.error
+  | Unreadable_file of
+      { path : string
+      ; reason : string
+      }
+  | Unparsed_answer of
+      { method_ : string
+      ; reason : string
+      }
+      (** The server answered in a shape this module does not read. Reported
+          rather than dropped: a silently skipped element would answer
+          [Locations []] for a file that has references. *)
+
+val pp_error : Format.formatter -> error -> unit
+
+(** Read a server's answer to [question]. Separate from {!ask} because this is
+    where servers differ: [textDocument/definition] may answer one [Location],
+    a list of them, a list of [LocationLink], or [null], and hover contents may
+    be markup, a bare string, or a list. *)
+val answer_of_json : question -> Yojson.Safe.t -> (answer, string) result
+
+(** [ask pool ~language ~workspace_root ~path ~line ~character ~question]
+    opens the document, asks, and closes it again.
+
+    Opening every time rather than tracking which documents a server holds:
+    the file on disk is the truth here — nothing edits a buffer in memory —
+    and a document left open would go stale the moment a tool wrote to it. *)
+val ask
+  :  Lsp_workspace_pool.t
+  -> language:Lsp_process_manager.language
+  -> workspace_root:string
+  -> path:string
+  -> line:int
+  -> character:int
+  -> question:question
+  -> (answer, error) result

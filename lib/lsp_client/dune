@@ -13,6 +13,7 @@
  (flags
   (:standard -w +33))
  (libraries
+  masc.fs_compat
   masc.masc_core
   masc.masc_log
   cstruct
@@ -20,4 +21,5 @@
   eio.unix
   fmt
   unix
+  uri
   yojson))

@@ -97,13 +97,16 @@ GitHub CLI identity observation. On the GitHub tab, `L` starts the gh
 device-flow login and streams its (redacted) output into the pane; when
 the stream ends the pane re-reads the identity observation.
 
-Reading a board post on a wide terminal keeps the post list beside it,
-with the open post marked.
+Reading a board post on a wide terminal keeps the post list beside it.
+`Ctrl-W` switches focus between the list and the post. `j`/`k` then move the
+focused pane. The open post remains marked when the detail has focus.
 
 The Config surface shows `runtime.toml` as the server reads it; `e` opens
 it in `$EDITOR` and the server's preview validation gates the write. The
 Resources surface lists every MCP resource; `Enter` reads one beside the
-list. On Connectors, `b`/`u` open an editor form that binds or unbinds a
+list. `Ctrl-W` switches between the list and text, and `j`/`k` move whichever
+pane has focus. Resource text uses the same Markdown renderer as chat and
+Board. On Connectors, `b`/`u` open an editor form that binds or unbinds a
 channel.
 
 At 110 columns and wider, the keeper detail view keeps a roster pane on its
@@ -220,17 +223,19 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-    STATUS       KEEPER             A P TURNS PHASE / MODEL       TASK
- >  ● active     adm-race-cf-001    A P   498 running claude-opus task-471
+    HEALTH       KEEPER             A P TURNS LIFECYCLE / MODEL   TASK
+ >  ● healthy    adm-race-cf-001    A P   498 running claude-opus task-471
     ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
   j/k move  p pause  w wake  s shutdown  c chat  enter detail
 ```
 
 The metadata list needs no server, so names, turn counts, and tasks stay
-readable while the runtime is down. `STATUS`, `PHASE / MODEL`, and lifecycle
+readable while the runtime is down. `HEALTH`, `LIFECYCLE / MODEL`, and lifecycle
 actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
 `- unread` rather than guessed from metadata. The status glyph is the primary
-colour cue. Phase and model stay neutral so an ordinary row does not turn into
+colour cue. `healthy` answers whether the heartbeat/readiness checks are good;
+`running` answers whether the Keeper process exists. They are separate axes,
+so `healthy` and `running` on the same row is expected. Phase and model stay neutral so an ordinary row does not turn into
 a strip of competing colours.
 
 ### Lanes
@@ -240,13 +245,14 @@ it with `Tab` immediately after Keepers.
 
 ```
  MASC Lanes (10 keepers)  17:02:53  [connected]
-  KEEPER             PHASE       TURN        IDLE   LAST OUTCOME         DIAGNOSIS
+  KEEPER             LIFECYCLE   TURN STEP   IDLE   LAST OUTCOME         DIAGNOSIS
   taskmaster         ● running   executing   7m     done · deepseek-v4   running_fiber_alive
   kidsnote           × failing   executing   59m    done                 failing_unhealthy
 ```
 
-The rows come from `GET /api/v1/keepers/composite`. `PHASE` is the Keeper
-lifecycle, `TURN` is the current turn step, and `IDLE` is the producer's idle
+The rows come from `GET /api/v1/keepers/composite`. `LIFECYCLE` is the Keeper
+process state, `TURN STEP` is the current autonomous or requested turn step,
+and `IDLE` is the producer's idle
 duration in seconds rendered as seconds, minutes, hours, or days. `LAST
 OUTCOME` keeps the latest runtime state and model when one exists.
 `DIAGNOSIS` is the condition the producer says determined the lifecycle
@@ -377,6 +383,11 @@ saw finish, `?` for one whose outcome the trace did not record - and then
 whatever the turn said. A call that finished carries its duration, in
 milliseconds as the server records it; a call still open when the trace
 closed has none.
+
+When an autonomous turn says something, its badge is `· auto` instead of the
+Keeper name used for a direct chat reply. A blank autonomous turn with no trace
+still draws one `·` row, so the turn is visible without pretending it answered
+the preceding operator message.
 
 ```
  [21:41:34] thinking
@@ -546,6 +557,10 @@ the same press again sends. In a post, `c` replies: the same compose pane
 opens with the post as its target, the whole draft is the comment, and
 sending returns to the post with the reply visible.
 
+Board comments keep their author and timestamp on a separate line. Markdown
+headings, lists, tables, code blocks, and wrapped paragraphs are rendered below
+that line instead of being flattened into one truncated row.
+
 ### Planning
 
 Goals with backlog rollups.
@@ -580,7 +595,7 @@ to wake up".
    Next due: 2026-08-24T09:57:00
  >   [scheduled] 2026-08-24T09:57:00  alpha        daily 09:57
      [running  ] 2026-08-24T09:12:00  sangsu       one-shot
-  j/k:move  x:cancel  r:refresh  Tab:next  | Port: 8935
+  j/k:move  Enter:details  x:cancel  r:refresh  Tab:next  | Port: 8935
 ```
 
 The header count and the page are different things: the server sorts the whole
@@ -597,6 +612,10 @@ that already ran comes back as the server's rejection on the surface, not a
 local guess from the status column. The payload target column names who the
 wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
+
+`Enter` opens the selected schedule. The detail names its stable ID, status,
+due time, recurrence, source, target, and full payload summary. `Esc` returns
+to the list; `j`/`k` scroll a long payload.
 
 ### Fusion
 
@@ -709,6 +728,8 @@ Per surface:
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | `Enter` | Keepers | Open keeper detail |
 | `Enter` | Board | Open post body |
+| `Ctrl-W` | Board read, Resources | Switch the focused pane |
+| `Enter` | Schedules | Open schedule details |
 | `Enter` | Planning | Open goal detail |
 | `Enter` | Fusion | Open exact run evidence detail |
 | `l` | Keeper detail | Open logs |
@@ -722,6 +743,8 @@ Per surface:
 | `Ctrl-G` | Message | Switch to the next Keeper while no turn is in flight |
 | `Ctrl-U` | Message | Clear the input line |
 | `Backspace` | Message | Delete the last UTF-8 scalar without splitting its byte encoding |
+| `PgUp` / `PgDn` | Message | Scroll chat history by a page |
+| `Up` / `Down` | Message after scrolling back | Adjust chat history by one line |
 
 ## Navigation
 

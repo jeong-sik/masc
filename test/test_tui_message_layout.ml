@@ -128,15 +128,14 @@ let test_scroll_hint_says_how_far_back () =
   check string "an unscrolled pane names the key that scrolls" "PgUp:scroll back" (hint 0);
   check string "a clamped position is not scrolled" "PgUp:scroll back" (hint (-1));
   check string "a scrolled pane says how far back"
-    "PgUp/PgDn:scroll  Ctrl-E:newest  (3 back)" (hint 3);
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (3 back)" (hint 3);
   check string "at the start, that is said instead of the distance"
-    "PgUp/PgDn:scroll  Ctrl-E:newest  (start of conversation)"
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
     (hint ~older_exist:false 3);
-  (* The footer was narrowed on purpose in #29946. Carrying the count must not
-     spend that back, so the widest hint stays the width it already was. *)
-  check bool "the widest hint is no wider than before the count moved here" true
+  check bool "the count does not widen the start-of-history hint" true
     (Layout.display_width (hint ~older_exist:false 9999)
-     <= String.length "PgUp/PgDn:scroll  Ctrl-E:newest  (start of conversation)")
+     <= Layout.display_width
+          "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)")
 ;;
 
 let test_utf8_scalar_input_contract () =

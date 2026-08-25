@@ -97,6 +97,12 @@ module Syntax : sig
   val string_ : string
 end
 
+val strip_sgr : string -> string
+(** The string with its SGR sequences removed. A row drawn as one
+    reverse-video band cannot carry inner styles — the first inner reset
+    would cut the band short — so the selected row folds its colours and
+    the reverse is the emphasis. *)
+
 (** The shared glyph vocabulary. Plain text — callers colour it. *)
 module Glyph : sig
   val task_done : string       (* ● *)

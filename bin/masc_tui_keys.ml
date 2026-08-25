@@ -81,7 +81,9 @@ let for_surface = function
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
       ; b Act "Ctrl-K / Ctrl-P" "queued line"
           ~help:"cancel / edit the last queued line"
-      ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history"
+      ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
+      ; b Navigate "Up / Down" "adjust"
+          ~help:"when scrolled back, adjust by one line"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
@@ -94,6 +96,7 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ]
       @ listing_meta
   | Approvals ->
@@ -108,8 +111,10 @@ let for_surface = function
       ]
       @ listing_meta
   | Schedules ->
-      [ b Navigate "j/k" "move"
-      ; b Act "x" "cancel" ~help:"cancel (press twice to confirm)"
+      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
+      ; b Act "Enter" "details" ~help:"open schedule details"
+      ; b Act "Esc" "back" ~help:"back to the schedule list"
+      ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ]
       @ listing_meta
   | Verification -> b Navigate "j/k" "scroll" :: listing_meta
@@ -137,7 +142,8 @@ let for_surface = function
       ; b Meta "Tab" "next"
       ]
   | Resources ->
-      [ b Navigate "j/k" "move"
+      [ b Navigate "j/k" "move" ~help:"move the list; with the text focused, scroll it"
+      ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
       ; b Navigate "J / K" "scroll text"
       ; b Act "Enter" "read" ~help:"read the selected resource"
       ; b Act "Esc" "list" ~help:"back to the list"

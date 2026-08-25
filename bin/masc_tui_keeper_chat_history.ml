@@ -194,14 +194,8 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
          int_field change "retained"
        with
        | Some added, Some removed, Some retained ->
-           let added_lines =
-             List.map (memory_fact_line "+ ADDED (now in current memory)") added
-           in
-           let removed_lines =
-             List.map
-               (memory_fact_line "- REMOVED (no longer in current memory)")
-               removed
-           in
+           let added_lines = List.map (memory_fact_line "+") added in
+           let removed_lines = List.map (memory_fact_line "-") removed in
            let dropped_lines =
              match list_field fields "dropped" with
              | None -> Some []
@@ -216,9 +210,17 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
            else
              Option.map
                (fun dropped_lines ->
+                  (* One header line, then the change as a diff fence. The
+                     per-fact wording used to repeat "now in current memory" on
+                     every line; the header says once what the state is now,
+                     and inside the fence a [+] or [-] says which way each fact
+                     went. The fence also takes these lines out of markdown's
+                     list grammar -- the reason the renderer used to escape a
+                     leading [+], an escape nothing ever consumed, so readers
+                     saw a literal backslash. *)
                   let summary =
                     Printf.sprintf
-                      "%s committed current memory revision %d\nDELTA: %d added (now present) \xc2\xb7 %d removed (now absent) \xc2\xb7 %d retained from previous"
+                      "%s committed current memory revision %d \xc2\xb7 now %d added, %d removed, %d retained"
                       (memory_source_label fields)
                       revision
                       (List.length added)
@@ -229,11 +231,16 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                   ; turn_id = None
                   ; kind = Memory_activity
                   ; text =
-                      String.concat "\n"
-                        (summary
-                         :: (List.filter_map Fun.id added_lines
-                             @ List.filter_map Fun.id removed_lines
-                             @ dropped_lines))
+                      (let change_lines =
+                         List.filter_map Fun.id added_lines
+                         @ List.filter_map Fun.id removed_lines
+                         @ dropped_lines
+                       in
+                       String.concat "\n"
+                         (match change_lines with
+                          | [] -> [ summary ]
+                          | lines ->
+                            (summary :: "```diff" :: lines) @ [ "```" ]))
                   })
                dropped_lines
        | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)

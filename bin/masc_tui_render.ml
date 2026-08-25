@@ -93,6 +93,13 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; code_comment = (Ansi.gray, closing)
   ; code_number = (Ansi.magenta, closing)
   ; code_type = (Ansi.bold ^ Ansi.blue, closing)
+  (* A diff's two answers, in the foreground rather than the background the
+     Changes surface uses. A background paints the row to its full width, and
+     inside a chat fence that would draw a green band across the pane for
+     every added line. The hue is the same question either way: is this
+     arriving or leaving. *)
+  ; code_diff_added = (Ansi.green, closing)
+  ; code_diff_removed = (Ansi.red, closing)
   }
 
 let markdown_with_closing ~closing ~width body =
@@ -3462,20 +3469,11 @@ let render_keeper_message (state : state) =
             | Message_thinking
               when state.msg_reasoning_visibility = Reasoning_folded ->
                 folded_thinking_summary message.me_text
-            | Message_memory ->
-                (* A Memory journal's leading [+]/[-] is data, not a Markdown
-                   list marker. Escaping it only for presentation keeps the
-                   decoder honest and preserves the added/removed distinction
-                   in the rendered timeline. *)
-                message.me_text
-                |> String.split_on_char '\n'
-                |> List.map (fun line ->
-                  if String.length line > 1
-                     && (line.[0] = '+' || line.[0] = '-')
-                     && line.[1] = ' '
-                  then "\\" ^ line
-                  else line)
-                |> String.concat "\n"
+            (* The Memory journal's change arrives inside a ["```diff"]
+               fence, so a leading [+] is fence content rather than a list
+               marker and needs no escaping. The escape that used to be here
+               was never consumed by the renderer, so what reached the pane
+               was a literal backslash in front of every changed fact. *)
             | Message_tool ->
                 (match message.me_tool_block with
                  | None -> message.me_text
@@ -3487,7 +3485,7 @@ let render_keeper_message (state : state) =
                      String.concat "\n" projection.rows)
             | Message_thinking | Message_user _ | Message_keeper
             | Message_autonomous
-            | Message_status | Message_error ->
+            | Message_status | Message_error | Message_memory ->
                 message.me_text
           in
           ({ style;

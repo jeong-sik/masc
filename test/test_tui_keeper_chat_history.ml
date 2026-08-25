@@ -672,11 +672,14 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         (fun needle ->
            check bool needle true (contains row.text needle))
         [ "Librarian committed current memory revision 7"
-        ; "DELTA: 1 added (now present)"
-        ; "1 removed (now absent)"
-        ; "3 retained from previous"
-        ; "+ ADDED (now in current memory) [fact] the probe uses HTTP/2"
-        ; "- REMOVED (no longer in current memory) [constraint] use the old endpoint"
+        ; "now 1 added, 1 removed, 3 retained"
+          (* The change is a diff fence. That is what colours the two
+             directions, and what keeps a leading [+] out of markdown's list
+             grammar -- the renderer used to escape it and nothing consumed
+             the escape, so a backslash reached the pane. *)
+        ; "```diff"
+        ; "+ [fact] the probe uses HTTP/2"
+        ; "- [constraint] use the old endpoint"
         ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
         ]
   | Ok decoded ->

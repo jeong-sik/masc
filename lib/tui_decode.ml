@@ -2787,26 +2787,30 @@ type server_identity = {
    missing tells the operator less than a footer with a gap in it. *)
 let decode_server_identity json =
   let* build = optional_object_field json "build" in
-  let build = Option.value build ~default:(`Assoc []) in
   let* paths = optional_object_field json "paths" in
-  let paths = Option.value paths ~default:(`Assoc []) in
-  let string_or field source =
-    match member field source with
-    | `String value -> value
-    | _ -> ""
+  (* A section the probe did not carry leaves its fields unread. Standing an
+     empty object in for it would read the same here and mean something else:
+     absent is what the footer draws as unread. *)
+  let string_in section field =
+    match Option.map (member field) section with
+    | Some (`String value) -> value
+    | Some _ | None -> ""
   in
   let sid_binary_commit_age_s =
-    match member "binary_commit_age_seconds" build with
-    | `Float value -> Some value
-    | `Int value -> Some (float_of_int value)
-    | _ -> None
+    match Option.map (member "binary_commit_age_seconds") build with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | Some _ | None -> None
   in
   Ok
-    { sid_version = string_or "version" json
-    ; sid_binary_commit = string_or "binary_commit" build
+    { sid_version =
+        (match member "version" json with
+         | `String value -> value
+         | _ -> "")
+    ; sid_binary_commit = string_in build "binary_commit"
     ; sid_binary_commit_age_s
-    ; sid_base_path = string_or "effective_base_path" paths
-    ; sid_masc_root = string_or "effective_masc_root" paths
+    ; sid_base_path = string_in paths "effective_base_path"
+    ; sid_masc_root = string_in paths "effective_masc_root"
     }
 ;;
 

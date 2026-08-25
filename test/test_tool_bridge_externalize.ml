@@ -493,6 +493,33 @@ let test_blob_store_failure_is_typed () =
           | Some Agent_core.Types.Unknown -> ()
           | _ -> Alcotest.fail "expected unknown post-effect failure class")))
 
+(* A caller's own metadata has to survive the manifest step, or a projection
+   attached before it is silently dropped on its way out. [Execute] attaches
+   the rewrite for an escaped shell there (`escaped_shell`), so this is the
+   join it passes through. *)
+let test_existing_metadata_survives_the_manifest () =
+  let answered =
+    Tool_result.with_metadata
+      (`Assoc [ "escaped_shell", `String "kept" ])
+      (tool_ok "small")
+  in
+  match B.attach_artifact_manifest ~base_path:"/nonexistent-base" answered with
+  | Error { message; _ } -> Alcotest.fail message
+  | Ok result ->
+    (match Tool_result.metadata result with
+     | Some (`Assoc fields) ->
+       (match List.assoc_opt "escaped_shell" fields with
+        | Some (`String "kept") -> ()
+        | Some other ->
+          Alcotest.failf
+            "escaped_shell changed on the way through: %s"
+            (Yojson.Safe.to_string other)
+        | None -> Alcotest.fail "escaped_shell was dropped by the manifest step")
+     | Some other ->
+       Alcotest.failf "metadata stopped being an object: %s" (Yojson.Safe.to_string other)
+     | None -> Alcotest.fail "metadata was dropped entirely")
+;;
+
 let () =
   Alcotest.run "tool_bridge_externalize"
     [
@@ -538,5 +565,7 @@ let () =
             test_bounded_read_page_is_not_nested;
           Alcotest.test_case "store failure is typed" `Quick
             test_blob_store_failure_is_typed;
+          Alcotest.test_case "existing metadata survives the manifest" `Quick
+            test_existing_metadata_survives_the_manifest;
         ] );
     ]

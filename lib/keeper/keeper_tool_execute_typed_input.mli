@@ -193,8 +193,13 @@ val to_shell_ir_unvalidated :
 val hidden_script_findings
   :  sandbox:Masc_exec.Sandbox_target.t
   -> execute_input
-  -> (string * string) list
+  -> (string * Keeper_tooling.Shell_costume.finding) list
 (** The scripts hidden inside argv, and what the gate would have called each.
+
+    The finding rather than its tag: a caller that wants to hand the writer a
+    rewrite needs the typed reason, and the tag is one rendering of it. Losing
+    the reason here would mean the only thing left to say is the name of the
+    problem.
 
     [argv:["sh";"-c";S]] arrives as one opaque program with two literal
     arguments, so S is counted as nothing at all while the guarantees that

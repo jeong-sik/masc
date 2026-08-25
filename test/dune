@@ -2169,6 +2169,7 @@
 (include stanzas/test_runtime_agent_close_cancel_source.inc)
 
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_keeper_skill_tool_definition.inc)
 (include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_claude_code.inc)

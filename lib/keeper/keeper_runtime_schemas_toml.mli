@@ -10,3 +10,8 @@ val fusion : Masc_domain.tool_schema
 val fusion_status : Masc_domain.tool_schema
 val artifact_read : Masc_domain.tool_schema
 val analyze_image : Masc_domain.tool_schema
+
+val skill : Masc_domain.tool_schema
+(** keeper_skill's declaration. Its [description] is the static half only:
+    [Keeper_tool_composition_surface] appends the skills this keeper carries,
+    which are workspace state and have no place in a shipped file. *)

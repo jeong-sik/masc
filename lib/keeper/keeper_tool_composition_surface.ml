@@ -876,15 +876,12 @@ let make_request_control_tool
    names and descriptions ride the tool description, the body arrives only
    when asked for -- but the harness serves it from the catalog it already
    parsed, so no path is resolved and the call is on the record. *)
+(* Read from the same file the description comes from, so config/tools/keeper_skill.toml
+   declares the whole tool rather than half of it. A reader who opens the file
+   because the tool-call record named it sees the parameter the tool actually
+   validates against. *)
 let skill_name_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ("name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]) ] )
-    ; "required", `List [ `String "name" ]
-    ; "additionalProperties", `Bool false
-    ]
+  Keeper_runtime_schemas_toml.skill.Masc_domain.input_schema
 ;;
 
 let skill_name_of_validated_input input =
@@ -905,11 +902,16 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
     |> String.concat "
 "
   in
+  (* The description's static half ships in config/tools/keeper_skill.toml; the
+     list below is workspace state and has no place in a file. *)
   let description =
-    "Read one instruction skill whole, by name. Read a skill before you act on      a task that names it.
-
-Available:
-" ^ listed
+    String.concat
+      "\n"
+      [ Keeper_runtime_schemas_toml.skill.Masc_domain.description
+      ; ""
+      ; "Available:"
+      ; listed
+      ]
   in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)

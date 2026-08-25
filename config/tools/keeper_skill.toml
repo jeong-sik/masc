@@ -1,0 +1,11 @@
+name = "keeper_skill"
+description = """
+Read one instruction skill whole, by name. Read a skill before you act on a \
+task that names it."""
+additional_properties = false
+
+[[params]]
+name = "name"
+type = "string"
+required = true
+min_length = 1

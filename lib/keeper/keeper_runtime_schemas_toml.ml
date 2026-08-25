@@ -34,3 +34,10 @@ let fusion = schema_of_name "masc_fusion"
 let fusion_status = schema_of_name "masc_fusion_status"
 let artifact_read = schema_of_name "keeper_artifact_read"
 let analyze_image = schema_of_name "analyze_image"
+
+(* keeper_skill is built in [Keeper_tool_composition_surface] rather than
+   published through [Keeper_tool_runtime_schemas], because the list of skills
+   this keeper carries is workspace state and cannot live in a file. The static
+   half -- what the tool is for, and the one parameter it takes -- can, and the
+   surface appends the list to the description it reads here. *)
+let skill = schema_of_name "keeper_skill"

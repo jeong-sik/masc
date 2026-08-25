@@ -363,7 +363,7 @@ masc/
 |---|---|
 | [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP 클라이언트 설정 |
 | [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | 터미널 UI 화면, 키, 문제 해결 |
-| [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 실행과 감독 |
+| [`docs/KEEPER-USER-MANUAL.ko.md`](docs/KEEPER-USER-MANUAL.ko.md) | Keeper 를 만들고 켜고 지켜보는 법 |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Keeper 파일과 런타임 배정 규칙 |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 로컬 bearer와 대시보드 쓰기 권한 |

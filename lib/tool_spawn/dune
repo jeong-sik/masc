@@ -1,0 +1,30 @@
+(include_subdirs no)
+
+; The spawn tool surface. It was a lib/*.ml member, which put it in the single
+; `masc` library alongside 169 others; the structure ratchet counts that
+; membership as the monolith debt itself and says extraction is what moves it.
+;
+; Nothing here needed `masc`. Its collaborators already live in their own
+; libraries -- Spawn_handle and Spawn_registry in lib/process, the result and
+; argument types in lib/tool_types, the schemas in lib/tool_schemas -- so the
+; dependencies all point the same way they did before, one library down instead
+; of sideways within one.
+;
+; (wrapped false) keeps the bare `Tool_spawn.` spelling its callers and
+; test/test_tool_spawn.ml already use.
+(library
+ (name masc_tool_spawn)
+ (public_name masc.tool_spawn)
+ (wrapped false)
+ (modules tool_spawn)
+ (libraries
+  masc_core
+  masc_string_util
+  masc_process
+  masc.tool_types
+  masc_types
+  masc.tool_schemas
+  eio
+  yojson
+  time_compat
+  unix))

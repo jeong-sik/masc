@@ -698,7 +698,8 @@
   test_task_tool_toml_parity
   test_operator_surface_toml_parity)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref))
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.tool_spawn))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 (test

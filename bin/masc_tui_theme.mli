@@ -115,6 +115,34 @@ val tone : tone -> string
     names, so one remap moves every reading at once. *)
 type status = Ok | Warn | Bad | Info | Muted
 
+(** The ANSI colours masc names. Only the ones something draws a meaning
+    through: a colour absent here is one nothing reads a meaning out of. *)
+type ansi_color =
+  | Red
+  | Green
+  | Yellow
+  | Blue
+  | Cyan
+  | Bright_black
+
+val ansi_readable
+  :  Masc_tui_terminal_palette.t option
+  -> ansi_color
+  -> string
+(** The colour, made readable against the page it lands on.
+
+    masc draws these out of the reader's own palette, so what they come out as
+    is their theme's call -- and across twelve base16 schemes that call fails
+    often enough to matter: yellow at 1.44:1 on default-light, bright black at
+    1.69:1 on Nord. That is not a dimmer warning, it is a warning nobody sees.
+
+    Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
+    code goes out and the theme keeps its choice. Where it does not, the same
+    colour is lifted in lightness alone until it does, so a red is still a
+    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    the reply -- the plain code goes out, which is what every row drew before
+    this existed. *)
+
 val status : status -> string
 (** The plain SGR code. What the reader's own theme puts in that palette
     entry; use {!status_readable} where the palette is known. *)
@@ -174,21 +202,24 @@ module For_testing : sig
       [None] where the text is already under the floor and has no room to
       give. *)
 
-  val status_readable
+  val ansi_color_index : ansi_color -> int
+  (** Which of the sixteen palette entries a colour is -- the same decision
+      the SGR code makes, as an index, so a test can look up what the reader's
+      theme actually put there. *)
+
+  val ansi_color_code : ansi_color -> string
+  (** The plain SGR code, conditional on colours as everything else is. *)
+
+  val ansi_readable
     :  colors_enabled:bool
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)
     -> Masc_tui_terminal_palette.t option
-    -> status
+    -> ansi_color
     -> string
-  (** Pure capability/environment fixture for {!val:status_readable}, so a
-      test can drive it without the process capability deciding the answer. *)
-
-  val status_ansi_index : status -> int
-  (** Which of the sixteen palette entries a status names -- the same decision
-      the SGR code makes, as an index, so a test can look up what the reader's
-      theme actually put there. *)
+  (** Pure capability/environment fixture for {!val:ansi_readable}, so a test
+      can drive it without the process capability deciding the answer. *)
 
   val recede
     :  colors_enabled:bool

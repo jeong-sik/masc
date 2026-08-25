@@ -212,15 +212,43 @@ let status = function
    WCAG 2 AA for body text. *)
 let status_contrast_floor = 4.5
 
-(* Which of the sixteen palette entries each status names. The SGR codes above
-   select these, so this is the same decision written as an index; the pair is
-   what lets a reading of state be checked against the theme it lands on. *)
-let status_ansi_index = function
-  | Ok -> 2
-  | Warn -> 3
-  | Bad -> 1
-  | Info -> 6
-  | Muted -> 8
+(* The ANSI colours masc names, and the palette entry each one is. Only the
+   ones something actually draws through: a colour with no name here is a
+   colour nothing reads a meaning out of. *)
+type ansi_color =
+  | Red
+  | Green
+  | Yellow
+  | Blue
+  | Cyan
+  | Bright_black
+
+let ansi_color_index = function
+  | Red -> 1
+  | Green -> 2
+  | Yellow -> 3
+  | Blue -> 4
+  | Cyan -> 6
+  | Bright_black -> 8
+
+let ansi_color_code = function
+  | Red -> Sgr.red
+  | Green -> Sgr.green
+  | Yellow -> Sgr.yellow
+  | Blue -> Sgr.blue
+  | Cyan -> Sgr.cyan
+  | Bright_black -> Sgr.gray
+
+(* Which colour each status names. The SGR code and the palette index come
+   from the same choice, so a reading of state can be checked against the
+   theme it lands on. *)
+let status_ansi_color = function
+  | Ok -> Green
+  | Warn -> Yellow
+  | Bad -> Red
+  | Info -> Cyan
+  | Muted -> Bright_black
+
 
 (* A semantic colour, made readable where the terminal's own palette is not.
 
@@ -235,14 +263,14 @@ let status_ansi_index = function
    does not, the same colour is lifted in lightness alone until it does, so a
    red stays a red. Where the terminal said nothing, the plain code goes out,
    which is what this drew before. *)
-let status_readable_for ~colors_enabled ~project palette state =
-  let code = status state in
+let ansi_readable_for ~colors_enabled ~project palette color =
+  let code = ansi_color_code color in
   if not colors_enabled then code
   else
     match palette with
     | None -> code
     | Some palette -> (
-      match Terminal_palette.ansi palette (status_ansi_index state) with
+      match Terminal_palette.ansi palette (ansi_color_index color) with
       | None -> code
       | Some entry ->
         let background = Terminal_palette.background palette in
@@ -258,15 +286,25 @@ let status_readable_for ~colors_enabled ~project palette state =
              projected_foreground ~colors_enabled projected))
 ;;
 
+let status_readable_for ~colors_enabled ~project palette state =
+  ansi_readable_for ~colors_enabled ~project palette (status_ansi_color state)
+;;
+
 module For_testing = struct
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
   let user_message_background = user_message_background_for
   let recede_rgb = recede_rgb
   let recede = recede_for
-  let status_readable = status_readable_for
-  let status_ansi_index = status_ansi_index
+  let ansi_color_index = ansi_color_index
+  let ansi_color_code = ansi_color_code
+  let ansi_readable = ansi_readable_for
 end
+
+let ansi_readable palette color =
+  ansi_readable_for ~colors_enabled ~project:Terminal_palette.best_color
+    palette color
+;;
 
 let status_readable palette state =
   status_readable_for ~colors_enabled ~project:Terminal_palette.best_color

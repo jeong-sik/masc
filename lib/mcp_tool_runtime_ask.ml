@@ -151,3 +151,108 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
                   Some
                     (Tool_result.ok ~tool_name ~start_time
                        (Yojson.Safe.to_string (ask_json a))))))
+
+(* masc_ask_status: what the Keeper asked and what came back.
+
+   An answer does not interrupt the asking Keeper, so a question it never
+   reads is worse than one it never asked -- the operator spent attention on a
+   decision that went nowhere. This is the read side that closes that loop. *)
+
+let response_json = function
+  | Keeper_ask.Chose { choice_ids } ->
+      `Assoc
+        [
+          ("kind", `String "chose");
+          ("choice_ids", `List (List.map (fun id -> `String id) choice_ids));
+        ]
+  | Keeper_ask.Wrote text -> `Assoc [ ("kind", `String "wrote"); ("text", `String text) ]
+  | Keeper_ask.Skipped -> `Assoc [ ("kind", `String "skipped") ]
+
+let answer_json (answer : Keeper_ask.answer) =
+  `Assoc
+    [
+      ("question_id", `String answer.question_id);
+      ("response", response_json answer.response);
+    ]
+
+let responder_json (responder : Keeper_ask.responder) =
+  `Assoc
+    [
+      ("surface", Surface_ref.to_json responder.surface);
+      ( "actor_id",
+        match responder.actor_id with None -> `Null | Some id -> `String id );
+      ( "display_name",
+        match responder.display_name with None -> `Null | Some name -> `String name );
+    ]
+
+let resolution_json = function
+  | Keeper_ask.Open -> `Assoc [ ("state", `String "open") ]
+  | Keeper_ask.Answered_by { answers; responder; answered_at } ->
+      `Assoc
+        [
+          ("state", `String "answered");
+          ("answered_at", `Float answered_at);
+          ("responder", responder_json responder);
+          ("answers", `List (List.map answer_json answers));
+        ]
+  | Keeper_ask.Withdrawn_because { reason; withdrawn_at } ->
+      `Assoc
+        [
+          ("state", `String "withdrawn");
+          ("reason", `String reason);
+          ("withdrawn_at", `Float withdrawn_at);
+        ]
+
+let question_summary_json (q : Keeper_ask.question) =
+  `Assoc
+    [
+      ("question_id", `String q.question_id);
+      ("header", `String q.header);
+      ("prompt", `String q.prompt);
+      ( "choices",
+        `List
+          (List.map
+             (fun (c : Keeper_ask.choice) ->
+               `Assoc [ ("choice_id", `String c.choice_id); ("label", `String c.label) ])
+             q.choices) );
+    ]
+
+let row_json (ask_id, ((a : Keeper_ask.ask), resolution)) =
+  `Assoc
+    [
+      ("ask_id", `String ask_id);
+      ("asked_at", `Float a.asked_at);
+      ("context", match a.context with None -> `Null | Some c -> `String c);
+      ("questions", `List (List.map question_summary_json a.questions));
+      ("resolution", resolution_json resolution);
+    ]
+
+let is_open = function
+  | Keeper_ask.Open -> true
+  | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
+
+let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+  let base_path = ctx.config.base_path in
+  let keeper_name = ctx.agent_name in
+  let include_resolved = bool_field "include_resolved" ctx.arguments in
+  let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
+  let rows = Keeper_ask_store.rows ~base_path ~keeper_name in
+  let selected =
+    List.filter
+      (fun (ask_id, (_, resolution)) ->
+        let id_matches =
+          match wanted_ask_id with None -> true | Some wanted -> String.equal wanted ask_id
+        in
+        id_matches && (include_resolved || is_open resolution))
+      rows
+  in
+  Some
+    (Tool_result.ok ~tool_name ~start_time
+       (Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("keeper_name", `String keeper_name);
+              ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
+              ("returned", `Int (List.length selected));
+              ("asks", `List (List.map row_json selected));
+            ])))

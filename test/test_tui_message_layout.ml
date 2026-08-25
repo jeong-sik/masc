@@ -298,7 +298,7 @@ let test_input_cursor_uses_visible_terminal_cells () =
      to become, and the text re-wrapped when the turn settled. *)
   let gutter_width timestamp =
     Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:80 ~height:200
-      [ entry ~timestamp Layout.Keeper (badge "sangsu") "req" "body" ]
+      [ entry ~timestamp Layout.Keeper (badge "omega") "req" "body" ]
     |> List.filter_map (fun (row : Layout.row) ->
          let cells = Layout.display_width row.gutter in
          if cells = 0 then None else Some cells)

@@ -378,6 +378,22 @@ let execute_tool_eio
                             (a spawned process needs the turn's switch, which this endpoint \
                             does not have)"
                            name))
+                 (* Keeper-only, for the same reason as spawn above: the
+                    language server belongs to the turn's pool, and this
+                    endpoint has no turn to end it. Measured: an idle server
+                    held 12-17 MB and a working one 155 MB, so one started
+                    here would sit for the life of the server. *)
+                 | Mod_code_query ->
+                   Some
+                     (Tool_result.error
+                        ~failure_class:Tool_result.Workflow_rejection
+                        ~tool_name:name
+                        ~start_time
+                        (Printf.sprintf
+                           "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                            (a language server belongs to the turn's pool, which this \
+                            endpoint does not have)"
+                           name))
                  | Mod_schedule ->
                    Tool_schedule.dispatch
                      { Tool_schedule.config

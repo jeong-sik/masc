@@ -360,6 +360,13 @@ let explicit_metadata : (string * metadata) list =
     (* Keeper-only: a spawned process belongs to the turn's switch, and the
        MCP boundary has no turn to end it, so these are callable from a keeper
        and absent from the public schema surface. *)
+    (* Keeper-only: the language server belongs to the turn's pool, and the
+       MCP boundary has no turn to end it. *)
+    ( "keeper_code_query",
+      hidden_runtime_tool
+        "Keeper code-query runtime tool; it asks the turn's language server, so it is \
+         callable from a keeper and hidden from the public MCP schema surface."
+        read_state_tool );
     ( "keeper_spawn",
       hidden_runtime_tool
         "Keeper spawn runtime tool; the process it starts belongs to the turn, so it is \

@@ -1,3 +1,8 @@
+---
+rfc: "0361"
+status: Draft
+---
+
 # RFC-0361: 완료 권한의 관측과 조회
 
 Status: Draft

@@ -1,3 +1,8 @@
+---
+rfc: "0366"
+status: Draft
+---
+
 # RFC-0366 — 운영자가 다음 턴의 컨텍스트에 한 문장을 넣는다
 
 **Status**: Draft

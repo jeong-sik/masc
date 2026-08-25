@@ -1,3 +1,8 @@
+---
+rfc: "0200"
+status: Draft
+---
+
 # RFC-0200 — Time constants 를 leaf library 로 분리
 
 | Field | Value |

@@ -1,3 +1,8 @@
+---
+rfc: "0349"
+status: Superseded
+---
+
 # RFC-0349 — Restore a reachable compaction admission path
 
 - Status: Superseded by #26545 + #26547 + #26557. Revivable — see § 0.1.

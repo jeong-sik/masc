@@ -1,3 +1,8 @@
+---
+rfc: "0350"
+status: Draft
+---
+
 # RFC-0350 — Unbounded request-fiber admission (durable queue + lifecycle-sibling worker + typed saturation)
 
 - Status: Draft

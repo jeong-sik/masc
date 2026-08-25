@@ -1,3 +1,8 @@
+---
+rfc: "0277"
+status: Draft
+---
+
 # RFC-0277 — Fusion: 이종 패널 그룹(heterogeneous panel groups) + 발동 예산 제거
 
 - Status: Draft

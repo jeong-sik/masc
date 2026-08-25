@@ -1,3 +1,8 @@
+---
+rfc: "0335"
+status: Draft
+---
+
 # RFC-0335 — TOML as the Single Settings Source
 
 - **Status:** Draft

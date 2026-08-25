@@ -1,3 +1,8 @@
+---
+rfc: "0216"
+status: Draft
+---
+
 # RFC-0216: Per-Keeper Decline Memory (orphan-task churn root fix)
 
 - **Status**: Draft

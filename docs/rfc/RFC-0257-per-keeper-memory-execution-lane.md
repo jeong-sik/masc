@@ -1,3 +1,8 @@
+---
+rfc: "0257"
+status: Draft
+---
+
 # RFC-0257 — Per-Keeper memory execution lane
 
 - Status: Draft

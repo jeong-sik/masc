@@ -1,3 +1,8 @@
+---
+rfc: "0338"
+status: Draft
+---
+
 # RFC-0338: Lane-per-keeper durable persistence isolation
 
 - Status: Draft

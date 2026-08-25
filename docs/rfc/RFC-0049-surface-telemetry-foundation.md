@@ -1,3 +1,8 @@
+---
+rfc: "0049"
+status: Draft
+---
+
 # RFC-0049 — Dashboard Surface Telemetry Foundation
 
 Status: Draft

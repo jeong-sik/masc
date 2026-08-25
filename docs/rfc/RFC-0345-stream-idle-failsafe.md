@@ -1,3 +1,8 @@
+---
+rfc: "0345"
+status: Draft
+---
+
 # RFC-0345 — Streaming idle-timeout fail-safe floor (#25128)
 
 - Status: Draft

@@ -1,3 +1,8 @@
+---
+rfc: "0012"
+status: Draft
+---
+
 # RFC 0012 — Mid-Turn Progress Probe
 
 - Status: Draft

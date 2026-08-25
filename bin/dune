@@ -479,8 +479,6 @@
   masc_tui_keeper_control
   masc_tui_keeper_selection
   masc_tui_message_layout
-  masc_tui_span
-  masc_tui_diff
   masc_tui_metrics_tail
   masc_tui_observer
   masc_tui_operator_projection
@@ -502,6 +500,8 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_span
+  masc_tui_diff
   masc
   masc.auth
   masc.masc_random_id

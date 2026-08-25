@@ -4174,7 +4174,119 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
 
-let render_changes (state : state) =
+module Span = Masc_tui_span
+module Diff = Masc_tui_diff
+
+(* A row of the diff, drawn as layers rather than as one styled string.
+
+   Three styles overlap on every line: the row's background, the gutter's
+   weight, and the text's own colour. Concatenating them would let the
+   gutter's reset close the background, and the line would lose its colour
+   from the marker onward -- the fault [Masc_tui_span] exists for. *)
+let diff_row_span ~width (row : Diff.row) =
+  let background, marker, text =
+    match row with
+    | Diff.Removed line -> (Span.bg Ansi.bg_removed, "-", line)
+    | Diff.Added line -> (Span.bg Ansi.bg_added, "+", line)
+    | Diff.Context line -> (Span.plain, " ", line)
+  in
+  (* Context is dim so the changed lines are what an eye lands on. The marker
+     is bold against the same background, which is what tells the two apart
+     where the terminal has no colour. *)
+  let text_style =
+    match row with
+    | Diff.Context _ -> Span.combine background (Span.weight Ansi.dim)
+    | Diff.Removed _ | Diff.Added _ -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.bold)) (marker ^ " ")
+      ; Span.text text_style (Terminal_text.single_line text)
+      ]
+  in
+  (* Padded to the full width with the row's own background: colour that stops
+     at the last character makes lines of different lengths look like
+     different kinds of line. Truncated first, because padding does not
+     shorten. *)
+  Span.pad_to width background (Span.truncate width composed)
+
+let box_line_span buf cols span =
+  let inner = cols - 4 in
+  Buffer.add_string buf
+    (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
+
+(* The two halves of one change. A write has no removed half: its before is
+   empty, so every line arrives as an addition, which is what a new file is. *)
+let change_diff_halves (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_kind with
+  | Masc.Tui_decode.Fc_edited { before; after; _ } -> (before, after)
+  | Masc.Tui_decode.Fc_written { content } -> ("", content)
+
+let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let before, after = change_diff_halves change in
+  let diff_rows = Diff.rows ~before ~after in
+  let removed, added = Diff.counts diff_rows in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  -%d +%d  %s"
+      (screen_title " MASC Change")
+      (Terminal_text.single_line (change_row_address change))
+      removed added
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  (* Facts about the change the rows themselves cannot carry. *)
+  let notes =
+    let turn =
+      Printf.sprintf "  turn %s  task %s  %s"
+        (Option.fold ~none:"-" ~some:string_of_int change.Masc.Tui_decode.fc_turn)
+        (Terminal_text.single_line
+           (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
+        (if change.Masc.Tui_decode.fc_succeeded then "applied"
+         else "the call failed; this is what it tried to write")
+    in
+    match change.Masc.Tui_decode.fc_kind with
+    | Masc.Tui_decode.Fc_edited { replace_all = true; _ } ->
+        (* Every occurrence changed, and the log records the text once. Showing
+           one pair without saying so would undercount the change. *)
+        [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
+    | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
+    | Masc.Tui_decode.Fc_written _ -> [ turn ]
+  in
+  List.iter (fun note -> box_line_styled buf cols ~style:Ansi.dim note) notes;
+  box_divider buf cols;
+  let chrome_rows = 7 + List.length notes - 1 in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    box_line_styled buf cols ~style:Ansi.dim
+      "  (the call recorded no text; there is nothing to compare)";
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row -> box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
+    done;
+  if total > content_height then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll)
+  else box_line_styled buf cols ~style:Ansi.dim "  esc closes";
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
+  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
@@ -4289,6 +4401,20 @@ let render_changes (state : state) =
   Buffer.add_string buf
     (footer_line state ~hints:"j/k:scroll  o:open in editor  r:refresh  Tab:next  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+(* The surface has two readings: the list, and one change opened. The open row
+   is held as an index, so a refresh that shortens the list closes the diff
+   rather than drawing a change the answer no longer holds. *)
+let render_changes (state : state) =
+  let opened =
+    match (state.changes_diff_row, state.changes) with
+    | Some row, Some snapshot ->
+        List.nth_opt snapshot.Masc.Tui_decode.fcs_changes row
+    | Some _, None | None, (Some _ | None) -> None
+  in
+  match opened with
+  | Some change -> render_changes_diff state change
+  | None -> render_changes_list state
 
 (* Where the gate can deliver.
 

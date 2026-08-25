@@ -1831,7 +1831,9 @@ let goto_surface state ~mailbox (destination : surface) =
             state.changes_keeper <- Some name;
             state.changes <- None;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0
         | Some _ | None -> ());
        match state.changes_keeper with
        | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
@@ -4345,7 +4347,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Ok snapshot ->
             state.changes <- Some snapshot;
             state.changes_error <- None;
-            state.changes_scroll <- 0
+            state.changes_scroll <- 0;
+            (* The open row indexes the snapshot it was opened against. A new
+               snapshot can hold a different change at the same index, so the
+               diff closes rather than silently changing what it shows. *)
+            state.changes_diff_row <- None;
+            state.changes_diff_scroll <- 0
         | Error detail -> state.changes_error <- Some detail)
   | Lanes_loaded result -> (
       match result with
@@ -5419,7 +5426,13 @@ let main () =
             | Acting | Keepers Keeper_list | Lanes | Approvals | Schedules
             | Resources ->
                 state.resource_focus <- false
-            | Verification | Harness | Repositories | Changes | Connectors | Runtime
+            | Changes ->
+                (* Esc closes the open diff and leaves the list where it was,
+                   so the row an operator was reading is still under the
+                   cursor when they come back. *)
+                state.changes_diff_row <- None;
+                state.changes_diff_scroll <- 0
+            | Verification | Harness | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -5519,10 +5532,17 @@ let main () =
                 state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.repositories_scroll
-            | Changes ->
-                state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.changes_scroll
+            | Changes -> (
+                (* An open diff owns the scroll keys: the list is behind it and
+                   moving both would put the cursor somewhere the operator
+                   cannot see. *)
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <- state.changes_diff_scroll + 1
+                | None ->
+                    state.changes_scroll <-
+                      move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                        ~current:state.changes_scroll)
             | Connectors ->
                 state.connectors_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5653,11 +5673,16 @@ let main () =
                   state.repositories_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.repositories_scroll
-            | Changes ->
-                if state.changes_scroll > 0 then
-                  state.changes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.changes_scroll
+            | Changes -> (
+                match state.changes_diff_row with
+                | Some _ ->
+                    state.changes_diff_scroll <-
+                      max 0 (state.changes_diff_scroll - 1)
+                | None ->
+                    if state.changes_scroll > 0 then
+                      state.changes_scroll <-
+                        move_surface_scroll state ~rows:(surface_rows ())
+                          ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
                 if state.connectors_scroll > 0 then
                   state.connectors_scroll <-
@@ -5801,7 +5826,24 @@ let main () =
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Lanes | Approvals | Schedules | Verification | Harness
-            | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+            | Changes -> (
+                (* The row under the cursor, read as the lines it removed and
+                   added. Held as an index rather than a copy: a refresh
+                   replaces the list, and a copy would keep drawing a change
+                   the answer no longer holds. *)
+                match state.changes with
+                | None -> add_event state "error" "no changes loaded yet"
+                | Some snapshot -> (
+                    match
+                      List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
+                        state.changes_scroll
+                    with
+                    | None ->
+                        add_event state "error" "no change under the cursor"
+                    | Some _ ->
+                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_scroll <- 0))
+            | Repositories | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
            state.acting_filter <- Masc_tui_acting.next_filter state.acting_filter
        | Some "g" when state.view = Acting ->

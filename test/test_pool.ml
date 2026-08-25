@@ -151,13 +151,22 @@ let test_ensure_host_header_adds_port_when_missing () =
     Alcotest.(check int) "existing headers preserved" 2 (List.length headers)
   | None -> Alcotest.fail "expected Some headers"
 
-let test_ensure_host_header_omits_port_when_uri_has_none () =
+(* This used to expect a portless "example.com" header here. Adding it is what
+   the whole helper exists to avoid needing: Piaf writes that header itself and
+   writes it correctly when there is no port to add.
+
+   Sending it anyway broke HTTP/2. RFC 9113 §8.3.1 carries the authority in the
+   [:authority] pseudo-header and a request that also sends [Host] is
+   malformed, so the peer resets the stream. Observed 2026-08-25 against
+   https://ollama.com/v1/models: the same GET returns 200 without the header
+   and [Protocol Error (PROTOCOL_ERROR (0x1))] with it (#30474). *)
+let test_ensure_host_header_absent_when_uri_has_no_port () =
   let uri = Uri.of_string "http://example.com/path" in
   match ensure_host_header ~uri (Some []) with
   | Some headers ->
-    Alcotest.(check (option string)) "host header has no port"
-      (Some "example.com") (List.assoc_opt "host" headers)
-  | None -> Alcotest.fail "expected Some headers"
+    Alcotest.(check (option string)) "no port to add, so no header to send"
+      None (List.assoc_opt "host" headers)
+  | None -> ()
 
 let test_ensure_host_header_leaves_caller_override_alone () =
   let uri = Uri.of_string "http://127.0.0.1:18935/x" in
@@ -421,13 +430,13 @@ let () =
         ] );
       ( "ensure_host_header (Host-header port fix, task-11)",
         [
-          Alcotest.test_case "adds port when missing" `Quick
+          Alcotest.test_case "a named port is written into the header" `Quick
             test_ensure_host_header_adds_port_when_missing;
-          Alcotest.test_case "omits port when uri has none" `Quick
-            test_ensure_host_header_omits_port_when_uri_has_none;
+          Alcotest.test_case "no header when the uri has no port" `Quick
+            test_ensure_host_header_absent_when_uri_has_no_port;
           Alcotest.test_case "leaves caller override alone" `Quick
             test_ensure_host_header_leaves_caller_override_alone;
-          Alcotest.test_case "adds header to None headers when uri has a host" `Quick
+          Alcotest.test_case "adds header to None headers when the uri names a port" `Quick
             test_ensure_host_header_on_none_headers_with_host;
           Alcotest.test_case "None headers stays None when uri has no host" `Quick
             test_ensure_host_header_on_none_headers_without_uri_host_stays_none;

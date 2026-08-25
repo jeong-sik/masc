@@ -356,7 +356,20 @@ let has_host_header headers =
    [add_unless_exists] keeps ours instead of its own truncated one. A
    caller that already set a "host" header (any case) is left alone —
    this only fills a gap Piaf leaves, it does not override a deliberate
-   caller choice. *)
+   caller choice.
+
+   Only when the URI names a port. That is the whole failure above: a
+   portless Host is wrong exactly when the port is not the scheme's default,
+   and the header Piaf writes is already right otherwise.
+
+   Sending it unconditionally broke HTTP/2. RFC 9113 §8.3.1 carries the
+   authority in the [:authority] pseudo-header and a request that also
+   sends [Host] is malformed, so the peer resets the stream. Observed
+   2026-08-25 against https://ollama.com/v1/models: the same GET returns
+   200 without the header and [Protocol Error (PROTOCOL_ERROR (0x1))] with
+   it. Every runtime on that provider read as unreachable in the dashboard
+   runtime lens while curl reached it, and api.kimi.com — which does not
+   enforce it — stayed green, so the failure looked provider-specific. *)
 (* [None] here is [?headers] genuinely omitted by the caller ("no
    headers"), not unparsed/malformed external data — [[]] is the only
    value that means "no headers" for a [(string * string) list], so no
@@ -366,15 +379,10 @@ let ensure_host_header ~uri headers =
   if has_host_header headers
   then Some headers
   else (
-    match Uri.host uri with
-    | None -> if headers = [] then None else Some headers
-    | Some host ->
-      let value =
-        match Uri.port uri with
-        | Some port -> Printf.sprintf "%s:%d" host port
-        | None -> host
-      in
-      Some (("host", value) :: headers))
+    match Uri.host uri, Uri.port uri with
+    | Some host, Some port ->
+      Some (("host", Printf.sprintf "%s:%d" host port) :: headers)
+    | (Some _ | None), _ -> if headers = [] then None else Some headers)
 
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)

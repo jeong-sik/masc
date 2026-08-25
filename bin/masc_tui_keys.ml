@@ -157,6 +157,7 @@ let for_surface = function
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
+      ; b Navigate "PgUp / PgDn" "page"
       ; b Act "Right / Enter" "detail"
       ; b Act "Left / Esc" "back"
       ]

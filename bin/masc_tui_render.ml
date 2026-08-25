@@ -4480,7 +4480,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         "j/k:move  PgUp/PgDn:page  right/Enter:detail  r:refresh  Tab:next  q:quit");
+         (Masc_tui_keys.footer_hints Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 let fusion_wrapped_block ~width ~indent text =

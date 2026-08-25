@@ -252,13 +252,13 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       else
         box_line_styled buf cols ~style:context.opening (dress text)
   | Message_layout.Metadata (Message_layout.Continued_at { timestamp }) ->
-      box_line_styled buf cols ~style:Ansi.dim
+      box_line_styled buf cols ~style:(Theme.recede ())
         (Printf.sprintf "[%s]" timestamp)
   | Message_layout.Metadata
       (Message_layout.Origin { timestamp; role_label; request_label }) ->
       (match row.style with
        | Message_layout.Tool | Message_layout.Thinking ->
-           box_line_styled buf cols ~style:Ansi.dim
+           box_line_styled buf cols ~style:(Theme.recede ())
              (Printf.sprintf "[%s]  %s  %s" timestamp
                 (String.trim role_label) request_label)
        | Message_layout.User | Message_layout.Keeper | Message_layout.Status
@@ -2628,9 +2628,9 @@ let render_keeper_list (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     "  Health = heartbeat/readiness   Lifecycle = keeper process   A = autoboot   P = autonomous turns";
-  box_line_styled buf cols ~style:Ansi.dim (keeper_column_header columns);
+  box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset);
 
@@ -2875,7 +2875,7 @@ let render_lanes (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim (keeper_lane_header columns);
+  box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);
   box_divider buf cols;
   (match state.lanes_error with
    | None -> ()
@@ -2899,7 +2899,7 @@ let render_lanes (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no keeper lane snapshots)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -2915,7 +2915,7 @@ let render_lanes (state : state) =
           else box_line buf cols row
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d keepers, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -3299,7 +3299,7 @@ let render_keeper_logs (state : state) =
       Printf.sprintf "  %-8s %-4s %-8s %5s %13s %9s %9s  %-10s" "Time"
         "Kind" "Channel" "Msgs" "In/Out" "Lat" "Cost" "Work"
     in
-    box_line_styled buf cols ~style:Ansi.dim col_hdr;
+    box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
     box_divider buf cols;
 
     (match state.log_error with
@@ -3328,7 +3328,7 @@ let render_keeper_logs (state : state) =
     in
 
     if total_entries = 0 then begin
-      box_line_styled buf cols ~style:Ansi.dim
+      box_line_styled buf cols ~style:(Theme.recede ())
         ("  " ^ Metrics_tail.empty_message state.log_error);
       for _ = 1 to content_height - 1 do
         box_empty buf cols
@@ -3370,7 +3370,7 @@ let render_keeper_logs (state : state) =
         Printf.sprintf "[%d/%d entries, scroll %d]" total_entries total_entries
           scroll
       in
-      box_line_styled buf cols ~style:Ansi.dim indicator
+      box_line_styled buf cols ~style:(Theme.recede ()) indicator
     end;
 
     box_bottom buf cols;
@@ -3695,7 +3695,7 @@ let render_keeper_message (state : state) =
 
     if visible_rows = [] then begin
       if history_height > 0 then
-        box_line_styled chat_buf chat_cols ~style:Ansi.dim
+        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
           "  (no messages yet -- type below and press Enter)";
       for _ = 1 to history_height - 1 do
         box_empty chat_buf chat_cols
@@ -3743,7 +3743,7 @@ let render_keeper_message (state : state) =
            mine;
          List.iter
            (fun entry ->
-             box_line_styled chat_buf chat_cols ~style:Ansi.dim
+             box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
                (Printf.sprintf "  (also sending to %s: %s%s)"
                   (Keeper_chat.terminal_safe_text
                      entry.sent_request.keeper_name)
@@ -3778,7 +3778,7 @@ let render_keeper_message (state : state) =
        fetch. Counting it without drawing it floated the footer a row up,
        and a failed page load was silent -- the one thing it must not be. *)
     (if state.msg_older_loading then
-       box_line_styled chat_buf chat_cols ~style:Ansi.dim
+       box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
          "  (loading older messages\xe2\x80\xa6)"
      else
        match state.msg_older_error with
@@ -3835,7 +3835,7 @@ let render_keeper_message (state : state) =
           if String.equal queued_keeper keeper_name then ""
           else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
         in
-        box_line_styled chat_buf chat_cols ~style:Ansi.dim
+        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
           (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
              (Keeper_chat.terminal_safe_text body)))
       (Masc_tui_keeper_chat_queue.waiting state.msg_queued);
@@ -4073,7 +4073,7 @@ let render_system_logs (state : state) =
     Printf.sprintf "  %-8s %-7s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
       "Message"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.system_logs_error with
    | None -> ()
@@ -4097,7 +4097,7 @@ let render_system_logs (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no entries)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -4126,7 +4126,7 @@ let render_system_logs (state : state) =
           else box_line buf cols line
     done;
   if total_entries > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d entries, scroll %d]" total_entries scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -4174,7 +4174,7 @@ let render_verification (state : state) =
     Printf.sprintf "  %-14s %-16s %-9s %s" "Task" "Submitted by" "Evidence"
       "What it asks for"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.verification_error with
    | None -> ()
@@ -4196,7 +4196,7 @@ let render_verification (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (nothing waiting on a verdict)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -4243,7 +4243,7 @@ let render_verification (state : state) =
           else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
@@ -4322,7 +4322,7 @@ let render_harness (state : state) =
     Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task" "Gate" "Verdict"
       "Evaluator"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.harness_error with
    | None -> ()
@@ -4341,7 +4341,7 @@ let render_harness (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no verdicts recorded)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -4377,7 +4377,7 @@ let render_harness (state : state) =
           else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -4422,7 +4422,7 @@ let render_fusion_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %-8s %-9s %-16s %-10s %-10s %s" "TIME" "STATUS"
        "KEEPER" "PRESET" "TOPOLOGY" "RUN");
   box_divider buf cols;
@@ -4448,7 +4448,7 @@ let render_fusion_list (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no retained Fusion runs)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -4704,7 +4704,7 @@ let render_repositories (state : state) =
     Printf.sprintf "  %-18s %-12s %-9s %-6s %s" "Name" "Branch" "Status" "Sync"
       "Keepers"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.repositories_error with
    | None -> ()
@@ -4726,7 +4726,7 @@ let render_repositories (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no repositories registered)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -4758,7 +4758,7 @@ let render_repositories (state : state) =
           else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d repositories, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -4875,14 +4875,14 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
   in
-  List.iter (fun note -> box_line_styled buf cols ~style:Ansi.dim note) notes;
+  List.iter (fun note -> box_line_styled buf cols ~style:(Theme.recede ()) note) notes;
   box_divider buf cols;
   let chrome_rows = 7 + List.length notes - 1 in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
   if total = 0 then begin
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       "  (the call recorded no text; there is nothing to compare)";
     for _ = 1 to content_height - 1 do
       box_empty buf cols
@@ -4895,9 +4895,9 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       | Some row -> box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
     done;
   if total > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll)
-  else box_line_styled buf cols ~style:Ansi.dim "  esc closes";
+  else box_line_styled buf cols ~style:(Theme.recede ()) "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
@@ -4944,7 +4944,7 @@ let render_changes_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr = Printf.sprintf "  %-6s %-10s %-44s %s" "Turn" "Task" "File" "What" in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.changes_error with
    | None -> ()
@@ -4966,7 +4966,7 @@ let render_changes_list (state : state) =
   (match budget_note with
    | None -> ()
    | Some note ->
-       box_line_styled buf cols ~style:Ansi.dim note;
+       box_line_styled buf cols ~style:(Theme.recede ()) note;
        box_divider buf cols);
   (* The chrome and the preview's share both come from [scrolled_surface],
      which the keypress reads too. Working them out again here is what drifted
@@ -5011,7 +5011,7 @@ let render_changes_list (state : state) =
       | Page_unread -> "  (pick a keeper on the Keepers surface, then press r)"
       | Page_empty -> "  (this keeper wrote no files in the window)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -5047,7 +5047,7 @@ let render_changes_list (state : state) =
        let diff_rows = Diff.rows ~before ~after in
        let removed, added = Diff.counts diff_rows in
        box_divider buf cols;
-       box_line_styled buf cols ~style:Ansi.dim
+       box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf "  preview %s  -%d +%d  (Enter opens, scrolls)"
             (Terminal_text.single_line (change_row_address change))
             removed added);
@@ -5060,7 +5060,7 @@ let render_changes_list (state : state) =
        done
    | Some _ -> ());
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -5121,7 +5121,7 @@ let render_changes_tree_diff (state : state)
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     "  old   new     what the working tree holds, against its last commit";
   box_divider buf cols;
   (match state.changes_tree_diff_error with
@@ -5148,7 +5148,7 @@ let render_changes_tree_diff (state : state)
             "  (the tree reports a change and sent no lines)"
           else "  (this file matches its last commit)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -5160,7 +5160,7 @@ let render_changes_tree_diff (state : state)
       | Some row ->
           box_line_span buf cols (tree_diff_row_span ~width:(cols - 4) row)
     done;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
        Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll
      else "  esc closes");
@@ -5230,7 +5230,7 @@ let render_connectors (state : state) =
     Printf.sprintf "  %-16s %-11s %-11s %-10s %s" "Connector" "Configured"
       "Reachable" "Status" "Channel"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.connectors_error with
    | None -> ()
@@ -5251,7 +5251,7 @@ let render_connectors (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no connectors registered)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -5282,7 +5282,7 @@ let render_connectors (state : state) =
           else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d connectors, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -5461,7 +5461,7 @@ let render_runtime (state : state) =
   in
   box_line_styled buf cols ~style:authority_style authority_line;
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     ("  "
      ^ runtime_column runtime_lane_width "LANE" ^ " "
      ^ runtime_column runtime_candidate_width "CANDIDATE" ^ " "
@@ -5489,7 +5489,7 @@ let render_runtime (state : state) =
       | Page_unread -> "  (not loaded yet)"
       | Page_empty -> "  (no runtime lanes configured)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -5748,7 +5748,7 @@ let render_tools (state : state) =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   if drawable > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d rows, scroll %d]" drawable scroll);
   box_bottom buf cols;
   Buffer.add_string buf
@@ -5805,7 +5805,7 @@ let render_keeper_calls (state : state) =
     Printf.sprintf "  %-8s %s %-24s %-8s %-6s %s" "Time" " " "Tool" "Dur"
       "Turn" "Subject"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.keeper_calls_error with
    | None -> ()
@@ -5861,7 +5861,7 @@ let render_keeper_calls (state : state) =
       | None, None -> "  (not loaded yet)"
       | Some _, None -> "  (no calls recorded)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -5934,7 +5934,7 @@ let render_keeper_calls (state : state) =
     drawn := !idx - scroll
   end;
   if scroll > 0 || !drawn < shown then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d calls, showing %d from %d]" shown !drawn scroll)
   else box_empty buf cols;
   box_bottom buf cols;
@@ -6036,14 +6036,14 @@ let render_acting (state : state) =
     if state.acting_unseen = 0 then ""
     else Printf.sprintf "  %d new above (g)" state.acting_unseen
   in
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf "  %s%s%s%s" feed dropped undecodable unseen);
   box_divider buf cols;
   let col_hdr =
     Printf.sprintf "  %-8s %-16s %s %-16s %s" "Time" "Keeper" " " "Event"
       "Detail"
   in
-  box_line_styled buf cols ~style:Ansi.dim col_hdr;
+  box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (* The page indicator has a row of its own whether or not it is drawn, so a
      list that overflows does not push the help line off the bottom. *)
@@ -6062,7 +6062,7 @@ let render_acting (state : state) =
           if held = 0 then "  (the feed closed before any event arrived)"
           else "  (nothing under this filter; f shows everything)"
     in
-    box_line_styled buf cols ~style:Ansi.dim empty;
+    box_line_styled buf cols ~style:(Theme.recede ()) empty;
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -6099,7 +6099,7 @@ let render_acting (state : state) =
           box_line_styled buf cols ~style line
     done;
   if shown > content_height then
-    box_line_styled buf cols ~style:Ansi.dim
+    box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d rows, scroll %d]" shown scroll)
   else box_empty buf cols;
   box_bottom buf cols;
@@ -6916,8 +6916,8 @@ let render_prompts (state : state) =
   box_divider buf cols;
   (match selected with
    | None ->
-       box_line_styled buf cols ~style:Ansi.dim "  no prompt selected";
-       box_line_styled buf cols ~style:Ansi.dim "  input contract unavailable";
+       box_line_styled buf cols ~style:(Theme.recede ()) "  no prompt selected";
+       box_line_styled buf cols ~style:(Theme.recede ()) "  input contract unavailable";
        box_divider buf cols;
        for _ = 1 to detail_height do
          box_empty buf cols
@@ -6943,7 +6943,7 @@ let render_prompts (state : state) =
            | [] -> "Template input: none"
            | variables -> "Template input: " ^ String.concat " | " variables
        in
-       box_line_styled buf cols ~style:Ansi.dim ("  " ^ input_contract);
+       box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ input_contract);
        box_divider buf cols;
        let body_width = max 1 (cols - 6) in
        let effective_lines =

@@ -1957,7 +1957,7 @@
 .tool-approval-card-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--status-warn); box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-warn) 60%, transparent); animation: lg-pulse 2.4s ease-in-out infinite; }
 .tool-approval-card-head .mono { color: var(--text-bright); font-weight: 600; }
 .tool-approval-card-q { color: var(--text-mid); }
-.tool-approval-card-args { margin: 0; max-height: 120px; overflow: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); background: var(--bg-main); border: 1px solid var(--border-main); border-radius: var(--radius-xs); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
+.tool-approval-card-args { margin: 0; max-height: 120px; overflow: auto; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); background: var(--bg-main); border: 1px solid var(--border-main); border-radius: var(--radius-xs); padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
 .tool-approval-card-actions { display: flex; align-items: center; gap: 8px; }
 .tool-approval-card-wait { font-size: 11.5px; color: var(--status-warn); }
 @media (max-width: 900px) { .tool-approval-stack { margin: 0 14px 8px; } }

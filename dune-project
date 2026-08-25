@@ -63,6 +63,7 @@
     (>= 3.0)
     (< 4.0)))
   (otoml (>= 1.0))
+  (yaml (= 3.2.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))
   (cmdliner (>= 1.1))

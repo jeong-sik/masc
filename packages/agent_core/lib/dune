@@ -51,6 +51,7 @@
   cstruct
   optint
   yojson
+  yaml
   ppx_deriving_yojson.runtime
   uri
   unix

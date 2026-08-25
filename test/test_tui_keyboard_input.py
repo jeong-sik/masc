@@ -1498,7 +1498,7 @@ def navigate_with_arrows_and_quit(
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
         master_fd,
@@ -4593,12 +4593,21 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        # iTerm reports Ctrl-G as CSI-u after keyboard disambiguation is on.
+        # The visible roster is an input pane: Left focuses it, Down moves its
+        # cursor, and Enter opens that Keeper without changing the draft.
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"Enter:open")
         send_and_wait(
             process,
             master_fd,
             output,
-            b"\x1b[103;5u",
+            b"\x1b[B",
+            b"\x1b[7m \xc2\xb7 beta",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
         )
         wait_for_output(

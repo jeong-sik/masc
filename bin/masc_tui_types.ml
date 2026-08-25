@@ -338,9 +338,11 @@ type board_mode =
           two-step arm, not a key: [esc] offers send-or-discard, so a stray
           Enter during writing cannot publish. *)
 
-type board_focus =
-  | Board_posts_pane
-  | Board_detail_pane
+(** Shared horizontal pane vocabulary.  Every split surface stores one of
+    these instead of inventing a bool or a surface-specific variant. *)
+type pane_focus =
+  | Left_pane
+  | Right_pane
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -749,7 +751,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
-  mutable task_focus: bool;
+  mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -775,6 +777,8 @@ type state = {
   (* Derived display phase for the selected long name in the narrow roster.
      The main loop advances it only while that roster is visible. *)
   mutable roster_marquee_frame: int;
+  mutable keeper_detail_focus: pane_focus;
+  mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
      a different process on the same endpoint replaces this projection, while
      a failed probe returns the display to unread rather than showing stale. *)
@@ -814,7 +818,7 @@ type state = {
   mutable resource_content: (string * string list) option;
   mutable resource_content_error: string option;
   mutable resource_scroll: int;
-  mutable resource_focus: bool;
+  mutable resource_focus: pane_focus;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -916,7 +920,7 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
-  mutable board_focus: board_focus;
+  mutable board_focus: pane_focus;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -1010,7 +1014,7 @@ type state = {
      keypress is what this field exists to avoid. *)
   mutable code_file_hscroll: int;
   mutable code_file_max_width: int;
-  mutable code_focus_file: bool;
+  mutable code_focus_file: pane_focus;
   (* The file pane's history view: H on an open file swaps the content for
      the work over it -- the commits that touched it woven with the recorded
      keeper edits, newest first -- keyed by the path they were fetched for so
@@ -1297,7 +1301,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
-  task_focus = false;
+  task_focus = Left_pane;
   help_open = false;
   context_inspector_open = false;
   context_inspector_keeper = None;
@@ -1310,6 +1314,8 @@ let create_state
   context_inspector_exact = None;
   roster_pane_hidden = false;
   roster_marquee_frame = 0;
+  keeper_detail_focus = Right_pane;
+  keeper_message_focus = Right_pane;
   server_identity = None;
   local_base_path;
   workspace_identity =
@@ -1329,7 +1335,7 @@ let create_state
   resource_content = None;
   resource_content_error = None;
   resource_scroll = 0;
-  resource_focus = false;
+  resource_focus = Left_pane;
   config_prompts = false;
   prompts_snapshot = None;
   prompts_error = None;
@@ -1399,7 +1405,7 @@ let create_state
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;
-  board_focus = Board_detail_pane;
+  board_focus = Right_pane;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
@@ -1456,7 +1462,7 @@ let create_state
   code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
-  code_focus_file = false;
+  code_focus_file = Left_pane;
   code_history = None;
   code_history_error = None;
   code_history_open = false;
@@ -1829,7 +1835,7 @@ let surface_row_texts (state : state) : surface -> string list option = function
          file's own lines; otherwise it searches the tree, as it always
          has. The overlays keep their own j/k and are not searched. *)
       if
-        state.code_focus_file && not state.code_history_open
+        state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
       then
         Option.map
@@ -1997,7 +2003,7 @@ let palette_entries (state : state) =
   @ (* With a file focused on the Code surface, the cursor line's names are
        askable: K/D pre-fill the matching prefix, so exactly these entries
        remain in view. *)
-  (if state.view = Code && state.code_focus_file then
+  (if state.view = Code && state.code_focus_file = Right_pane then
      List.concat_map
        (fun name ->
          [ ("def " ^ name, Palette_lsp ("definition", name));

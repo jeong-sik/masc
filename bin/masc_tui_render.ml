@@ -815,7 +815,7 @@ let render_overview (state : state) =
       let idx = i + task_scroll_offset in
       if idx < List.length state.tasks then begin
         let t = List.nth state.tasks idx in
-        let is_selected = state.task_focus && idx = state.task_cursor in
+        let is_selected = state.task_focus = Right_pane && idx = state.task_cursor in
         let content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ task_line t
@@ -838,7 +838,9 @@ let render_overview (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:state.task_focus));
+       ~hints:
+         (Masc_tui_keys.footer_hints_overview
+            ~task_focus:(state.task_focus = Right_pane)));
 
   finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
       ~cols buf
@@ -1532,7 +1534,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
    marked, exactly the roster-beside-detail shape. *)
 let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   framed_top buf cols;
-  let focused = state.board_focus = Board_posts_pane in
+  let focused = state.board_focus = Left_pane in
   framed_line buf cols
     ((if focused then Ansi.bold else Ansi.dim)
      ^ Printf.sprintf " Board (%d)%s" (List.length state.board_posts)
@@ -1589,7 +1591,7 @@ let render_board_read (state : state) (list_post : board_post) =
       ~hints:
         (Printf.sprintf
            "j/k:%s  PgUp/PgDn:page%s  left/Esc:back  c:reply  r:refresh  Tab:next"
-           (if state.board_focus = Board_posts_pane then "posts" else "scroll")
+           (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
   if cols < keeper_split_threshold_cols then begin
@@ -3121,14 +3123,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
 (* A narrow roster beside the detail: position context, not a second input
    surface -- the keys keep their detail meaning. The window follows the
    cursor the way the detail follows the selection. *)
-let keeper_roster_pane (state : state) ~rows ~cols buf =
+let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   framed_top buf cols;
   let title = " KEEPERS" in
-  let hint = "^B HIDE" in
+  let hint = if focused then "ENTER OPEN" else "^B HIDE" in
   let title_gap = max 1 (cols - 4 - String.length title - String.length hint) in
+  let title_row = title ^ String.make title_gap ' ' ^ hint in
   framed_line buf cols
-    (Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
-   ^ hint ^ Ansi.reset);
+    (if focused then Theme.selection ^ title_row ^ Ansi.reset
+     else
+       Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
+       ^ hint ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -3185,6 +3190,10 @@ let render_keeper_detail (state : state) =
     let footer =
       keeper_action_hints state (Some (keeper_reading state k))
     in
+    let footer =
+      if keeper_roster_pane_shown state ~cols then "  h/l pane" ^ footer
+      else footer
+    in
     if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");
@@ -3199,7 +3208,9 @@ let render_keeper_detail (state : state) =
       let right_cols = cols - left_cols in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      keeper_roster_pane state ~rows ~cols:left_cols left_buf;
+      keeper_roster_pane
+        ~focused:(state.keeper_detail_focus = Left_pane)
+        state ~rows ~cols:left_cols left_buf;
       let scroll =
         keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
       in
@@ -3916,7 +3927,9 @@ let render_keeper_message (state : state) =
       match slash_hint with
       | Some line -> line
       | None ->
-      if chat_cols < 120 then
+      if state.keeper_message_focus = Left_pane then
+        "j/k or Up/Down:move  Enter:open  Right/l/Esc:chat"
+      else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
           | Queues_behind _ ->
@@ -3947,7 +3960,9 @@ let render_keeper_message (state : state) =
     in
     if split then begin
       let left_buf = Buffer.create 1024 in
-      keeper_roster_pane state ~rows ~cols:keeper_roster_pane_cols left_buf;
+      keeper_roster_pane
+        ~focused:(state.keeper_message_focus = Left_pane)
+        state ~rows ~cols:keeper_roster_pane_cols left_buf;
       let blank_left = String.make keeper_roster_pane_cols ' ' in
       let rec zip left right =
         match left, right with
@@ -3965,8 +3980,11 @@ let render_keeper_message (state : state) =
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
       ~cursor:
-        (Frame_presenter.Visible_at
-           { row = input_row; column = cursor_column })
+        (if state.keeper_message_focus = Left_pane then
+           Frame_presenter.Hidden
+         else
+           Frame_presenter.Visible_at
+             { row = input_row; column = cursor_column })
       ~rows ~cols buf
     end
 
@@ -6188,7 +6206,7 @@ let render_code (state : state) =
   in
   let list_pane pane_buf pane_cols =
     framed_top pane_buf pane_cols;
-    let list_focused = not state.code_focus_file in
+    let list_focused = state.code_focus_file = Left_pane in
     let where = if String.equal state.code_dir "" then "/" else state.code_dir in
     (* Whose tree this is: a keeper workspace or a repository reads
        differently from the project's, and the same relative path exists in
@@ -6287,9 +6305,9 @@ let render_code (state : state) =
     in
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
-      ((if state.code_focus_file then Ansi.bold else Ansi.dim)
+      ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
        ^ " " ^ title
-       ^ (if state.code_focus_file then "  [j/k]" else "")
+       ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height () in
@@ -6628,29 +6646,29 @@ let render_code (state : state) =
          Buffer.add_char buf '\n')
        (zip (frame_lines left_buf) (frame_lines right_buf))
    end
-   else if state.code_focus_file then content_pane buf cols
+   else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:%s  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
-            (if state.code_focus_file then "scroll" else "move")
+            "j/k:%s  h/l:pane  %sEnter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
+            (if state.code_focus_file = Right_pane then "scroll" else "move")
             (if
-               state.code_focus_file && not state.code_history_open
+               state.code_focus_file = Right_pane && not state.code_history_open
                && not state.code_diff_open && not state.code_notes_open
-             then "h/l:pan  "
+             then "Shift-â/â:pan  "
              else "")
             (if state.code_notes_open then
                "w:add  d:diff  H:history  m:notes  "
-             else if state.code_focus_file then
+             else if state.code_focus_file = Right_pane then
                "d:diff  H:history  m:notes  "
              else "")
             (if
                state.code_history_open || state.code_diff_open
                || state.code_notes_open
              then "code"
-             else if state.code_focus_file then "list"
+             else if state.code_focus_file = Right_pane then "list"
              else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
@@ -6667,7 +6685,7 @@ let render_resources (state : state) =
   let cursor = max 0 (min state.resources_cursor (total - 1)) in
   let list_pane pane_buf pane_cols =
     framed_top pane_buf pane_cols;
-    let list_focused = not state.resource_focus in
+    let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
@@ -6722,9 +6740,9 @@ let render_resources (state : state) =
     in
     box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
-      ((if state.resource_focus then Ansi.bold else Ansi.dim)
+      ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
        ^ " " ^ title
-       ^ (if state.resource_focus then "  [j/k]" else "")
+       ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = max 1 (rows - 5) in
@@ -6776,14 +6794,14 @@ let render_resources (state : state) =
          Buffer.add_char buf '\n')
        (zip (frame_lines left_buf) (frame_lines right_buf))
    end
-   else if state.resource_focus then content_pane buf cols
+   else if state.resource_focus = Right_pane then content_pane buf cols
    else list_pane buf cols);
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:%s  Enter:read  Ctrl-W:switch pane  Esc:list  r:reload  Tab:next"
-            (if state.resource_focus then "scroll text" else "move")));
+            "j/k:%s  h/l:pane  Enter:read  Ctrl-W:pane  Esc:list  r:reload  Tab:next"
+            (if state.resource_focus = Right_pane then "scroll text" else "move")));
   finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
 (* How long ago the running binary's commit landed. Coarse on purpose: the

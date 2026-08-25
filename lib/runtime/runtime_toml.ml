@@ -245,7 +245,12 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
 ;;
 
 let active_top_level_namespaces =
-  [ "providers"; "models"; "runtime"; "web_search"; "skills" ]
+  [ "providers"
+  ; "models"
+  ; "runtime"
+  ; "web_search"
+  ; Skill_source_config.top_level_namespace
+  ]
 ;;
 let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces

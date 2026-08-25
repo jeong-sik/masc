@@ -4,6 +4,7 @@ open Masc
 let runtime_with_skills =
   {|[skills]
 activation-lifetime = "session"
+precedence = "earlier-source-wins"
 
 [[skills.sources]]
 id = "project"

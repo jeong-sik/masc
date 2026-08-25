@@ -125,13 +125,6 @@ module Local_runtime = struct
   (** Default worker model override for the local runtime. *)
   let worker_model_opt () =
     Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
-
-  (** MASC MCP endpoint URL (formerly in Chain module).
-      Defaults to {base_url}/mcp. *)
-  let mcp_url () =
-    match Sys.getenv_opt mcp_url_env_key |> trim_opt with
-    | Some url -> url
-    | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
 
 module Ollama = struct

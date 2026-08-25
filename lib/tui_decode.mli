@@ -346,6 +346,7 @@ type repository = {
   rp_codebase : string option;
       (** the server-minted slug the IDE annotation routes scope by;
           [None] when the remote cannot canonicalize *)
+  rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;

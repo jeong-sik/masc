@@ -1745,6 +1745,52 @@ let launch_code_diff_load state ~mailbox ~path =
       enqueue_async mailbox
         (Code_diff_loaded (path, Error "Eio switch is unavailable"))
 
+(* The squash-merge convention leaves the PR number as the subject's last
+   "(#N)"; a subject without one truthfully has no PR to point at. *)
+let pr_number_of_subject subject =
+  let n = String.length subject in
+  let rec scan i best =
+    if i >= n then best
+    else if
+      subject.[i] = '(' && i + 2 < n && subject.[i + 1] = '#'
+    then begin
+      let rec digits j acc =
+        if j < n && subject.[j] >= '0' && subject.[j] <= '9' then
+          digits (j + 1) ((acc * 10) + (Char.code subject.[j] - 48))
+        else (j, acc)
+      in
+      let stop, value = digits (i + 2) 0 in
+      if value > 0 && stop < n && subject.[stop] = ')' then
+        scan (stop + 1) (Some value)
+      else scan (i + 1) best
+    end
+    else scan (i + 1) best
+  in
+  scan 0 None
+
+(* A GitHub pull-request URL from the registered remote. Only GitHub: other
+   forges spell the path differently, and guessing would link to a 404. *)
+let github_pr_url ~remote ~number =
+  let remote = String.trim remote in
+  let https =
+    if String.starts_with ~prefix:"git@github.com:" remote then
+      Some
+        ("https://github.com/"
+        ^ String.sub remote 15 (String.length remote - 15))
+    else if String.starts_with ~prefix:"https://github.com/" remote then
+      Some remote
+    else None
+  in
+  Option.map
+    (fun base ->
+      let base =
+        if String.ends_with ~suffix:".git" base then
+          String.sub base 0 (String.length base - 4)
+        else base
+      in
+      Printf.sprintf "%s/pull/%d" base number)
+    https
+
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
@@ -7812,7 +7858,61 @@ let main () =
               makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
-                if state.code_focus_file then ()
+                if state.code_history_open then (
+                  (* The top visible commit is the selected one, the way the
+                     Changes list treats its scroll. Its subject's "(#N)" is
+                     the PR; the note says the link, or why there is none. *)
+                  match state.code_history with
+                  | None -> ()
+                  | Some (_, commits) -> (
+                      match
+                        List.nth_opt commits state.code_history_scroll
+                      with
+                      | None -> ()
+                      | Some row ->
+                          let open Masc.Tui_decode in
+                          state.code_lsp_note <-
+                            Some
+                              (match pr_number_of_subject row.gl_subject with
+                               | None ->
+                                   Printf.sprintf
+                                     "%s: no PR number in this subject"
+                                     row.gl_hash
+                               | Some number -> (
+                                   let remote =
+                                     match state.code_scope with
+                                     | Code_scope_repo repo_id -> (
+                                         match state.repositories with
+                                         | None -> None
+                                         | Some snapshot ->
+                                             Option.map
+                                               (fun r -> r.rp_url)
+                                               (List.find_opt
+                                                  (fun r ->
+                                                    String.equal r.rp_id
+                                                      repo_id)
+                                                  snapshot.rs_repositories))
+                                     | Code_scope_keeper _
+                                     | Code_scope_project -> None
+                                   in
+                                   match remote with
+                                   | None ->
+                                       Printf.sprintf
+                                         "#%d -- this scope has no \
+                                          registered remote to link into"
+                                         number
+                                   | Some remote -> (
+                                       match
+                                         github_pr_url ~remote ~number
+                                       with
+                                       | Some url -> url
+                                       | None ->
+                                           Printf.sprintf
+                                             "#%d -- the remote is not \
+                                              GitHub, so the link shape is \
+                                              unknown"
+                                             number)))))
+                else if state.code_focus_file then ()
                 else
                   match List.nth_opt state.code_entries state.code_cursor with
                   | Some node ->

@@ -1090,7 +1090,7 @@ let approval_tool ~active ?tool_approval ~executions () =
         Some
           (fun _ ->
             Agent_core.Hooks.ElicitToolApproval
-              { question = "run the effect?" })
+              { question = "run the effect?"; because = "policy: effectful tool" })
     }
   in
   one_dynamic_tool ~hooks ?tool_approval ~active (fun _input ->

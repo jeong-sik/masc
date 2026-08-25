@@ -91,6 +91,7 @@ type keeper_chat_event =
       ; tool_call_name : string
       ; args : string
       ; question : string
+      ; because : string
       }
   | Tool_approval_settled of
       { tool_call_id : string

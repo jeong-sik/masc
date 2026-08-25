@@ -116,8 +116,10 @@ type elicitation_callback = elicitation_request -> elicitation_response
 (** Prompt supplied by a [PreToolUse] hook when caller approval is required.
     It deliberately has no generic JSON schema: authorization is a closed
     protocol, not an arbitrary elicitation answer. AGENT_CORE does not install a timer
-    or persist a pending approval request at this synchronous boundary. *)
-type tool_approval_prompt = { question : string }
+    or persist a pending approval request at this synchronous boundary.
+    [because] is the policy's one-line reason for asking rather than running;
+    the operator deciding sees only this string, never the policy table. *)
+type tool_approval_prompt = { question : string; because : string }
 
 (** Exact immutable tool occurrence presented to the caller-owned approval
     boundary. [input] is the invocation input selected by the provider. *)

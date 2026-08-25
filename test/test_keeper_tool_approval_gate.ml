@@ -62,8 +62,9 @@ let rec drain events acc =
 let event_labels events =
   drain events []
   |> List.filter_map (function
-       | Events.Tool_approval_requested { tool_call_id; question; _ } ->
-           Some (Printf.sprintf "requested(%s,%s)" tool_call_id question)
+       | Events.Tool_approval_requested { tool_call_id; question; because; _ } ->
+           Some
+             (Printf.sprintf "requested(%s,%s,%s)" tool_call_id question because)
        | Events.Tool_approval_settled { tool_call_id; outcome } ->
            Some (Printf.sprintf "settled(%s,%s)" tool_call_id outcome)
        | _ -> None)
@@ -80,12 +81,24 @@ let test_a_read_runs_without_asking () =
 
 let test_an_edit_asks () =
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
+      let edit_event () =
+        pre_tool_use_event ~tool_name:"Edit"
+          ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])
+      in
       check string "the question names the file the call would change"
         "ask:Run Edit on lib/a.ml?"
-        (decision_to_string
-           (gate.Gate.pre_tool_use
-              (pre_tool_use_event ~tool_name:"Edit"
-                 ~input:(`Assoc [ "file_path", `String "lib/a.ml" ])))))
+        (decision_to_string (gate.Gate.pre_tool_use (edit_event ())));
+      (* The because the policy computed is the thing an operator reads when
+         deciding; asking without it forces a blind yes. *)
+      let why =
+        match gate.Gate.pre_tool_use (edit_event ()) with
+        | Agent_core.Hooks.ElicitToolApproval { question; because } ->
+            Printf.sprintf "ask:%s because=%s" question because
+        | other -> "not-an-ask: " ^ decision_to_string other
+      in
+      check string "the ask carries why this call was held"
+        "ask:Run Edit on lib/a.ml? because=fs tools change something outside this turn"
+        why)
 
 let test_other_stages_pass_through () =
   with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
@@ -99,7 +112,8 @@ let test_other_stages_pass_through () =
 (* ── the callback half ────────────────────────────────────────────── *)
 
 let request ~tool_name ~input =
-  { Agent_core.Hooks.prompt = { question = "Run it?" }
+  { Agent_core.Hooks.prompt =
+      { question = "Run it?"; because = "policy: needs an operator's eye" }
   ; invocation = invocation ~tool_use_id:"call-1"
   ; tool_name
   ; input
@@ -129,8 +143,9 @@ let test_an_approval_lets_the_call_through () =
         |> fst
       in
       check approval "the call is admitted" Agent_core.Hooks.Approved answer;
-      check (list string) "the stream carried the question and its answer"
-        [ "requested(call-1,Run it?)"; "settled(call-1,approve)" ]
+      check (list string) "the stream carried the question, its reason and its answer"
+        [ "requested(call-1,Run it?,policy: needs an operator's eye)"
+        ; "settled(call-1,approve)" ]
         (event_labels events))
 
 let test_a_denial_stops_the_call () =
@@ -145,7 +160,8 @@ let test_a_denial_stops_the_call () =
       in
       check approval "the call is refused" Agent_core.Hooks.Denied answer;
       check (list string) "and the refusal is on the stream"
-        [ "requested(call-1,Run it?)"; "settled(call-1,deny)" ]
+        [ "requested(call-1,Run it?,policy: needs an operator's eye)"
+        ; "settled(call-1,deny)" ]
         (event_labels events))
 
 let test_nobody_answering_does_not_admit_the_call () =
@@ -157,7 +173,8 @@ let test_nobody_answering_does_not_admit_the_call () =
       in
       check approval "silence is not consent" Agent_core.Hooks.Timed_out answer;
       check (list string) "the pane is told the prompt is over"
-        [ "requested(call-1,Run it?)"; "settled(call-1,timed_out)" ]
+        [ "requested(call-1,Run it?,policy: needs an operator's eye)"
+        ; "settled(call-1,timed_out)" ]
         (event_labels events))
 
 let test_the_settled_event_is_sent_on_every_path () =

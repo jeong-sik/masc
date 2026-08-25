@@ -685,6 +685,28 @@ interface KeeperConversationUsage {
   costUsd?: number | null
 }
 
+// A tool call the keeper is holding for an operator decision. The stream
+// event KEEPER_TOOL_APPROVAL_REQUESTED mints it; KEEPER_TOOL_APPROVAL_SETTLED
+// (or a timeout-driven settle on the server) retires it. Without this row the
+// dashboard drew nothing while the call waited and the answer, when it came,
+// was only the 180-second timeout read as a denial nobody chose.
+export interface KeeperToolApprovalPending {
+  toolCallId: string
+  toolName: string
+  args: string
+  question: string
+  askedAtMs: number | null
+  // Server-stated seconds until the wait retires itself. Null when unknown;
+  // the view derives the remaining time from its own clock.
+  timeoutSec: number | null
+  // Client-side answer state: 'answering' while the POST is in flight so the
+  // buttons cannot be double-clicked into two answers for one call.
+  answering: boolean
+  answeredDecision: 'approve' | 'deny' | null
+  answeredOutcome: string | null
+  settled: boolean
+}
+
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks a resume-next-cycle
 // boundary, `external_effect_pending` marks a durable control wait, and

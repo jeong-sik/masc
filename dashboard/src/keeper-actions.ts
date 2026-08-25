@@ -10,12 +10,14 @@ import {
   moveKeeperChatPendingReceiptToEnd,
   resolveKeeperChatRecovery,
   fetchQueuedKeeperMessageResult,
+  fetchKeeperToolApprovals,
   interruptKeeperTurn as apiInterruptKeeperTurn,
   isTerminalQueuedKeeperMessage,
   queuedKeeperMessageError,
   queuedKeeperMessageToReply,
   streamKeeperMessage,
 } from './api/keeper'
+import { answerKeeperToolApproval } from './api/keeper'
 import type { KeeperChatPendingAttachment } from './api/keeper'
 import { fetchKeeperToolCalls } from './api/dashboard'
 import {
@@ -50,6 +52,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
+  keeperToolApprovals,
   activeStreamEntryId,
   activeStreamRequestId,
   appendThreadEntry,
@@ -73,6 +76,9 @@ import {
   setRecordValue,
   setStatusDetail,
   updateThreadEntry,
+  settleKeeperToolApproval,
+  updateKeeperToolApproval,
+  upsertKeeperToolApproval,
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
@@ -227,6 +233,73 @@ export async function interruptKeeperTurn(keeperName: string): Promise<boolean> 
     console.warn('[keeper] interrupt turn failed', { keeperName: name, message })
     setRecordValue(keeperActionErrors, name, message)
     throw err
+  }
+}
+
+// --- Held tool approvals (task-343) ---
+
+// Re-hydrates waits whose REQUESTED event this view never saw: the listing is
+// public-read, so a dashboard opened after the gate fired still draws the
+// card instead of discovering the wait only as a 180s timeout.
+export async function hydrateKeeperToolApprovals(): Promise<void> {
+  let rows
+  try {
+    rows = await fetchKeeperToolApprovals()
+  } catch {
+    // Listing is best-effort hydration; the REQUESTED stream event remains
+    // the primary source. A failed poll must not surface as an error row.
+    return
+  }
+  for (const row of rows) {
+    // A row the stream already drew carries fresher askedAt semantics; only
+    // fill gaps, never overwrite an in-flight answer with a re-hydration.
+    if (keeperToolApprovals.value[row.keeper]?.[row.tool_call_id]) continue
+    upsertKeeperToolApproval(row.keeper, {
+      toolCallId: row.tool_call_id,
+      toolName: row.tool,
+      args: row.args,
+      question: row.question,
+      askedAtMs: row.asked_at !== null ? row.asked_at * 1000 : null,
+      timeoutSec: row.timeout_sec,
+      answering: false,
+      answeredDecision: null,
+      answeredOutcome: null,
+      settled: false,
+    })
+  }
+}
+
+export async function answerHeldKeeperToolApproval(
+  keeperName: string,
+  toolCallId: string,
+  decision: 'approve' | 'deny',
+): Promise<boolean> {
+  const existing = keeperToolApprovals.value[keeperName]?.[toolCallId]
+  if (!existing || existing.settled) return false
+  if (existing.answering) return false
+  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+    ...approval,
+    answering: true,
+    answeredDecision: decision,
+  }))
+  try {
+    const result = await answerKeeperToolApproval(keeperName, toolCallId, decision)
+    // settled=false (late answer) still retires the card: the call is gone,
+    // and the row would otherwise promise an interaction that no longer
+    // exists. The SETTLED stream event, when it comes, is a no-op drop.
+    settleKeeperToolApproval(keeperName, toolCallId, result.decision)
+    setRecordValue(keeperActionErrors, keeperName, null)
+    return result.settled
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn('[keeper] tool approval answer failed', { keeperName, toolCallId, message })
+    updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+      ...approval,
+      answering: false,
+      answeredDecision: null,
+    }))
+    setRecordValue(keeperActionErrors, keeperName, message)
+    return false
   }
 }
 

@@ -30,6 +30,8 @@ import {
   keeperSending,
   keeperStreamStartedAt,
   setRecordValue,
+  upsertKeeperToolApproval,
+  dropKeeperToolApproval,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import {
@@ -508,7 +510,40 @@ export function applyKeeperStreamEvent(
       }
       return null
     }
-    case 'CUSTOM':
+    case 'CUSTOM': {
+      const customValue = isRecord(event.value) ? event.value : null
+      if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
+        const toolCallId = nonBlankToolCallId(asString(customValue?.tool_call_id))
+        if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
+        const toolName = asString(customValue?.tool_call_name) ?? ''
+        const question = asString(customValue?.question) ?? ''
+        if (!toolName) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_name'
+        if (!question) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing question'
+        upsertKeeperToolApproval(keeperName, {
+          toolCallId,
+          toolName,
+          args: asString(customValue?.args) ?? '',
+          question,
+          askedAtMs: Date.now(),
+          timeoutSec: null,
+          answering: false,
+          answeredDecision: null,
+          answeredOutcome: null,
+          settled: false,
+        })
+        return null
+      }
+      if (event.name === 'KEEPER_TOOL_APPROVAL_SETTLED') {
+        const toolCallId = nonBlankToolCallId(asString(customValue?.tool_call_id))
+        if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_SETTLED missing tool_call_id'
+        const outcome = asString(customValue?.outcome) ?? ''
+        if (!outcome) return 'KEEPER_TOOL_APPROVAL_SETTLED missing outcome'
+        // A settle for a call this view never drew (e.g. answered from another
+        // window, or a re-hydrated wait whose REQUESTED predates this view)
+        // still retires nothing here; dropping is the no-op it should be.
+        dropKeeperToolApproval(keeperName, toolCallId)
+        return null
+      }
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
@@ -887,6 +922,7 @@ export function applyKeeperStreamEvent(
         }
       }
       return null
+    }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)

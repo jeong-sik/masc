@@ -429,6 +429,73 @@ export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): K
   }
 }
 
+// A tool call the keeper is holding, as listed by the server registry. This is
+// the re-hydration path for waits whose owning stream watcher is gone and the
+// fallback when the REQUESTED event predates this view.
+export interface KeeperToolApprovalRow {
+  keeper: string
+  tool_call_id: string
+  tool: string
+  args: string
+  question: string
+  asked_at: number | null
+  timeout_sec: number | null
+}
+
+export async function fetchKeeperToolApprovals(
+  opts: { signal?: AbortSignal } = {},
+): Promise<KeeperToolApprovalRow[]> {
+  const path = '/api/v1/keepers/tool-approvals'
+  const resp = await fetchControlPlane(path, { method: 'GET', signal: opts.signal })
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('GET', path, resp)
+  }
+  const data = (await resp.json()) as Record<string, unknown>
+  const rows = Array.isArray(data.pending) ? data.pending : []
+  return rows.map((row): KeeperToolApprovalRow => {
+    const record = isRecord(row) ? row : {}
+    return {
+      keeper: asString(record.keeper) ?? '',
+      tool_call_id: asString(record.tool_call_id) ?? '',
+      tool: asString(record.tool) ?? '',
+      args: asString(record.args) ?? '',
+      question: asString(record.question) ?? '',
+      asked_at: typeof record.asked_at === 'number' ? record.asked_at : null,
+      timeout_sec: typeof record.timeout_sec === 'number' ? record.timeout_sec : null,
+    }
+  }).filter(row => row.keeper && row.tool_call_id)
+}
+
+// Answers a held tool call. `settled: false` on a 200 means the wait was
+// already gone (timed out, or answered elsewhere) — the POST still succeeds,
+// so the caller reads the flag rather than treating absence of a throw as
+// "approved".
+export async function answerKeeperToolApproval(
+  keeperName: string,
+  toolCallId: string,
+  decision: 'approve' | 'deny',
+  opts: { signal?: AbortSignal } = {},
+): Promise<{ settled: boolean; decision: string }> {
+  const path = '/api/v1/keepers/tool-approval'
+  const resp = await fetchControlPlane(
+    path,
+    {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: keeperName.trim(), tool_call_id: toolCallId, decision }),
+      signal: opts.signal,
+    },
+  )
+  if (!resp.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, resp)
+  }
+  const data = (await resp.json()) as Record<string, unknown>
+  return {
+    settled: data.settled === true,
+    decision: asString(data.decision) ?? decision,
+  }
+}
+
 // --- SSE streaming ---
 
 function parseSseFrames(chunk: string): { frames: string[]; rest: string } {

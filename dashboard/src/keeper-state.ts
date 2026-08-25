@@ -29,6 +29,7 @@ import type {
   ChatShellLine,
   ChatTableCellValue,
   ChatTraceStep,
+  KeeperToolApprovalPending,
 } from './types'
 
 // --- Signals ---
@@ -45,6 +46,13 @@ export const keeperStreamStartedAt = signal<Record<string, number | null>>({})
 // Wall-clock ms of the most recent SSE event observed for an in-flight
 // stream. Drives the stall indicator (streaming but no events for N s).
 export const keeperStreamLastEventAt = signal<Record<string, number | null>>({})
+
+// Tool calls each keeper is holding for an operator decision, keyed by keeper
+// then tool_call_id. Minted by KEEPER_TOOL_APPROVAL_REQUESTED, retired by
+// KEEPER_TOOL_APPROVAL_SETTLED or a server-side timeout settle; the pending
+// GET listing re-hydrates waits whose owning stream watcher is gone
+// (masc#30034). This is UI state only — the server registry is the SSOT.
+export const keeperToolApprovals = signal<Record<string, Record<string, KeeperToolApprovalPending>>>({})
 
 // Thread entries kept per keeper. History beyond this window stays
 // available server-side (keeper_chat/<name>.jsonl, GET /chat/history).
@@ -1037,6 +1045,55 @@ export function appendThreadEntry(name: string, entry: KeeperConversationEntry):
     [name]: capThreadEntries([...existing, entry]),
   }
 }
+
+// --- Tool approval rows ---
+
+export function upsertKeeperToolApproval(
+  keeperName: string,
+  approval: KeeperToolApprovalPending,
+): void {
+  const byKeeper = keeperToolApprovals.value[keeperName] ?? {}
+  keeperToolApprovals.value = {
+    ...keeperToolApprovals.value,
+    [keeperName]: { ...byKeeper, [approval.toolCallId]: approval },
+  }
+}
+
+export function updateKeeperToolApproval(
+  keeperName: string,
+  toolCallId: string,
+  updater: (approval: KeeperToolApprovalPending) => KeeperToolApprovalPending,
+): void {
+  const byKeeper = keeperToolApprovals.value[keeperName]
+  const existing = byKeeper?.[toolCallId]
+  if (!existing) return
+  keeperToolApprovals.value = {
+    ...keeperToolApprovals.value,
+    [keeperName]: { ...byKeeper, [toolCallId]: updater(existing) },
+  }
+}
+
+export function settleKeeperToolApproval(
+  keeperName: string,
+  toolCallId: string,
+  outcome: string,
+): void {
+  updateKeeperToolApproval(keeperName, toolCallId, approval => ({
+    ...approval,
+    settled: true,
+    answering: false,
+    answeredOutcome: outcome,
+  }))
+}
+
+export function dropKeeperToolApproval(keeperName: string, toolCallId: string): void {
+  const byKeeper = keeperToolApprovals.value[keeperName]
+  if (!byKeeper || !(toolCallId in byKeeper)) return
+  const next = { ...byKeeper }
+  delete next[toolCallId]
+  keeperToolApprovals.value = { ...keeperToolApprovals.value, [keeperName]: next }
+}
+
 
 export function removeThreadEntries(name: string, entryIds: readonly string[]): void {
   if (entryIds.length === 0) return

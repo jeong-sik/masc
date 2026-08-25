@@ -4408,6 +4408,79 @@ def keeper_lanes_interaction(
     return interact
 
 
+FILE_CHANGES_ALPHA_PATH = "/api/v1/keepers/alpha/file-changes?window_hours=24"
+
+
+def file_changes_alpha_response() -> tuple[int, dict[str, object]]:
+    return (
+        200,
+        {
+            "keeper": "alpha",
+            "window_hours": 24.0,
+            "calls_in_window": 3,
+            "changes": [
+                {
+                    "at": 1787600000.0,
+                    "keeper": "alpha",
+                    "turn": 7,
+                    "task_id": "task-1",
+                    "location": {
+                        "kind": "repo",
+                        "repo_id": "masc",
+                        "path": "lib/example.ml",
+                    },
+                    "change": {
+                        "kind": "edit",
+                        "before": "let a = 1",
+                        "after": "let a = 2",
+                    },
+                    "succeeded": True,
+                }
+            ],
+            "over_budget": 0,
+            "malformed": 0,
+        },
+    )
+
+
+def enter_outside_changes_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    """Enter pressed off the Changes surface must not arm its diff view.
+
+    The widened Enter arm sent Acting/Lanes/Approvals/Schedules/Verify/Harness
+    into the Changes handler; with changes loaded, coming back to Changes then
+    drew a diff nobody opened.
+    """
+    populated = tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    populated_plain = CSI_RE.sub(b"", populated).decode("utf-8")
+    if "MASC Changes" not in populated_plain:
+        raise AssertionError(
+            f"Changes did not draw the fixture row as a list: {populated_plain!r}"
+        )
+    lanes = tab_until(process, master_fd, output, b"MASC Lanes")
+    if b"MASC Lanes" not in lanes:
+        raise AssertionError(f"did not reach Lanes: {lanes!r}")
+    os.write(master_fd, b"\r")
+    back = tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    back_plain = CSI_RE.sub(b"", back).decode("utf-8")
+    if "Turn" not in back_plain:
+        raise AssertionError(
+            "returning to Changes did not draw the list columns; Enter on "
+            f"Lanes armed a view it does not own: {back_plain!r}"
+        )
+    if "-1 +1" in back_plain:
+        raise AssertionError(
+            "returning to Changes drew a diff nobody opened; Enter on Lanes "
+            f"reached the Changes handler: {back_plain!r}"
+        )
+    os.write(master_fd, b"q")
+
+
 RUNTIME_PROBE_PATH = "/api/v1/dashboard/runtime-probe"
 RUNTIME_PROBE_FORCE_PATH = f"{RUNTIME_PROBE_PATH}?force=1"
 RUNTIME_RESOLVED_PATH = "/api/v1/runtime/resolved"
@@ -5349,6 +5422,14 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper lanes unread, failed, empty, and populated",
         interact=keeper_lanes_interaction(lanes_fixtures, lanes_gate),
         http_fixtures=lanes_fixtures,
+    )
+    enter_split_fixtures = keeper_runtime_http_fixtures()
+    enter_split_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+    run_terminal_scenario(
+        executable,
+        description="Enter off the Changes surface does not arm its diff",
+        interact=enter_outside_changes_interaction,
+        http_fixtures=enter_split_fixtures,
     )
     run_terminal_scenario(
         executable,

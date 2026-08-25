@@ -158,6 +158,16 @@ let for_surface = function
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)
       b Navigate "j/k" "scroll" :: listing_meta
+  | Code ->
+      (* One surface, two things under the cursor: a directory listing, and a
+         file once one is open. Enter descends or opens; Esc closes the file
+         first and only then climbs a directory, so the same key walks back
+         out the way it came in. *)
+      [ b Navigate "j/k" "move" ~help:"move the listing; with a file open, scroll it"
+      ; b Act "Enter" "open" ~help:"enter the directory, or open the file"
+      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
+      ]
+      @ listing_meta
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 

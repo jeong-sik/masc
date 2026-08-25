@@ -63,12 +63,25 @@ let measured ~surface =
 ;;
 
 (* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools] declaration
-   (surface = All) must keep the exact same tool surface it had before this
-   feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
-   2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
-   surface by 567 bytes (count unchanged at 82). *)
-let all_surface_golden_count = 86
-let all_surface_golden_bytes = 72_787
+   (surface = All) must keep the tool surface it had before that feature, so a
+   later refactor cannot quietly take a tool away from the Keepers that never
+   opted in. Pinned on 2026-08-23 from the pre-feature surface.
+
+   Re-pin only with the PR that moves the surface, and say what the move bought.
+   The two earlier re-pins also restated the new numbers in this comment, and
+   both restatements drifted from the values three lines below (it read 68,881
+   bytes at 82 tools against 72,787 at 86), so this one names no number that
+   lives in the code.
+
+   2026-08-25: re-pinned for [keeper_code_query], the language-server tool added
+   in #30539. That PR wired the tool through the descriptor and the catalog but
+   never ran this file, so main went red on the count and stayed red for every
+   other PR until an unrelated review noticed it. What the growth bought is a
+   question a Keeper could not ask before: where a name is defined and what its
+   type is, answered from the compiler's view of the code rather than from a
+   text match. *)
+let all_surface_golden_count = 87
+let all_surface_golden_bytes = 74_267
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

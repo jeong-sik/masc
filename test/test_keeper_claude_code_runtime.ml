@@ -227,11 +227,22 @@ let message role text : Agent_core.Types.message =
   { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
+(* [Runtime_claude_code.user_message] always sends a content-block array —
+   "never the bare-string form", as its own comment puts it — so the text a
+   turn carries is the text block inside that array, not the member itself.
+   Reading the member as a string was right until #30567 gave the array an
+   image block to hold in front of the text. Images are dropped here on
+   purpose: every caller of this helper asks what prompt text went out. *)
 let content_of_wire_message raw =
   Yojson.Safe.from_string raw
   |> Yojson.Safe.Util.member "message"
   |> Yojson.Safe.Util.member "content"
-  |> Yojson.Safe.Util.to_string
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (fun block ->
+       match Yojson.Safe.Util.member "type" block with
+       | `String "text" -> Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" block))
+       | _ -> None)
+  |> String.concat ""
 ;;
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus

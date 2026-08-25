@@ -215,15 +215,19 @@ check_rule "R11-tui-palette-for-testing" 0 \
 
 # SSOT-R12 — Theme.For_testing accepts injected environment/capability facts,
 # so it is a test fixture rather than a second production styling authority.
-# The full module name catches both direct calls and alias declarations. Once
-# declarations are forbidden at baseline zero, a production alias use has no
-# legal declaration through which to enter.
-r12_pattern='Masc_tui_theme[[:space:]]*\.[[:space:]]*For_testing'
+# The full module name catches direct use. The member pattern catches use via
+# a Masc_tui_theme alias, and the declaration pattern prevents hiding the
+# fixture module behind another alias before the member is selected.
+r12_owner_pattern='Masc_tui_theme[[:space:]]*\.[[:space:]]*For_testing'
+r12_member_pattern='For_testing[[:space:]]*\.[[:space:]]*(user_message_background|user_message_background_rgb)'
+r12_alias_pattern="module[[:space:]]+[A-Z][A-Za-z0-9_']*[[:space:]]*=[[:space:]]*([A-Z][A-Za-z0-9_']*[[:space:]]*\.[[:space:]]*)+For_testing"
+r12_pattern="${r12_owner_pattern}|${r12_member_pattern}|${r12_alias_pattern}"
 r12_self_test_failed=0
 for fixture in \
   'Masc_tui_theme.For_testing.user_message_background' \
+  'Theme.For_testing.user_message_background' \
   'module X = Masc_tui_theme.For_testing' \
-  'module X = Masc_tui_theme . For_testing'; do
+  'module X = Theme.For_testing'; do
   if ! printf '%s\n' "$fixture" | rg -q "$r12_pattern"; then
     echo "ERROR[R12-pattern-self-test]: did not match $fixture" >&2
     r12_self_test_failed=1
@@ -238,7 +242,7 @@ if printf '%s\n' \
   r12_self_test_failed=1
 fi
 if [ "$r12_self_test_failed" -eq 0 ]; then
-  echo "OK[R12-pattern-self-test]: direct and alias-declaration boundaries covered."
+  echo "OK[R12-pattern-self-test]: direct, member, and alias-declaration boundaries covered."
 else
   fail=1
 fi

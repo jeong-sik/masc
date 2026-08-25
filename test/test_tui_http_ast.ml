@@ -156,8 +156,58 @@ let test_keeper_chat_uses_current_async_contract () =
 ;;
 
 let test_user_message_background_has_one_render_snapshot () =
+  let main_path = "bin/masc_tui.ml" in
   let render_path = "bin/masc_tui_render.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
+  let count_field_clears_to_none ~binding_name ~field_name =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self expression ->
+            (match expression.Parsetree.pexp_desc with
+             | Parsetree.Pexp_setfield (_, { txt; _ }, value)
+               when String.equal (Ast_grep.longident_leaf txt) field_name ->
+               (match value.Parsetree.pexp_desc with
+                | Parsetree.Pexp_construct ({ txt; _ }, None)
+                  when String.equal (Ast_grep.longident_leaf txt) "None" ->
+                  incr count
+                | _ -> ())
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    List.iter (iter.expr iter)
+      (Ast_grep.expressions_of_value_binding ~module_path:main_path
+         ~binding_name);
+    !count
+  in
+  check int "late palette publication clears its callback before use" 1
+    (count_field_clears_to_none ~binding_name:"take_late_palette_publisher"
+       ~field_name:"late_palette_publisher");
+  check int "late palette helper snapshots the continuing decoder" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"publish_late_terminal_palette"
+       ~callee:"Masc_tui_terminal_probe.snapshot");
+  check int "late palette helper consumes the one-shot publisher" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"publish_late_terminal_palette"
+       ~callee:"take_late_palette_publisher");
+  check int "input checks publication after next and before probe removal" 3
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"take_input_byte"
+       ~callee:"publish_late_terminal_palette");
+  check int "late publication updates the palette authority" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"install_late_palette_publisher"
+       ~callee:"Masc_tui_terminal_palette.set_current");
+  check int "late publication requests one full repaint" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"install_late_palette_publisher"
+       ~callee:"request_full_repaint");
+  check int "startup has one conditional late publisher installation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"install_late_palette_publisher");
   check int "Chat theme reads one atomic palette snapshot" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
        ~binding_name:"snapshot" ~callee:"Masc_tui_terminal_palette.snapshot");
@@ -176,6 +226,14 @@ let test_user_message_background_has_one_render_snapshot () =
   check int "one palette snapshot spans layout and draw" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"render_keeper_message" ~callee:"Chat_theme.snapshot");
+  check int "layout receives the captured Chat theme" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~callee:"cached_chat_markdown" ~arguments:[ "theme", "chat_theme" ]);
+  check int "visible drawing receives the captured Chat theme" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~callee:"render_chat_row" ~arguments:[ "theme", "chat_theme" ]);
   check int "layout derives one body context per entry" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:render_path
        ~binding_name:"cached_chat_markdown"

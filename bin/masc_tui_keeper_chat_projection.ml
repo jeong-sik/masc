@@ -2,10 +2,22 @@
 
 module Keeper_turn_outcome = Masc.Keeper_turn_outcome
 
+(* One image the operator staged with :attach, carried to the keeper chat
+   endpoint. [data] is raw base64 with no data-URL prefix, the shape the
+   endpoint's attachments array takes. *)
+type attachment = {
+  attachment_id : string;
+  name : string;
+  mime_type : string;
+  size : int;
+  data : string;
+}
+
 type request = {
   request_id : string;
   keeper_name : string;
   message : string;
+  attachments : attachment list;
 }
 
 type acceptance_state =
@@ -99,19 +111,55 @@ type error_certainty =
 
 let ( let* ) = Result.bind
 
-let create_request ~keeper_name ~message =
+let create_request ?(attachments = []) ~keeper_name ~message () =
   {
     request_id = "tui-" ^ Random_id.uuid_v7 ();
     keeper_name;
     message;
+    attachments;
   }
 
-let request_to_yojson request =
+(* The endpoint reads the payload from [attachments] and the ordering from
+   [user_blocks]; an attachment no block references never reaches the keeper.
+   Images lead, then the message text, matching the dashboard composer so both
+   surfaces put the same conversation on the wire. *)
+let attachment_to_yojson attachment =
   `Assoc
+    [ "id", `String attachment.attachment_id
+    ; "type", `String "image"
+    ; "name", `String attachment.name
+    ; "mime_type", `String attachment.mime_type
+    ; "size", `Int attachment.size
+    ; "data", `String attachment.data
+    ]
+
+let attachment_block_to_yojson attachment =
+  `Assoc
+    [ "type", `String "image"
+    ; "attachment_id", `String attachment.attachment_id
+    ; "name", `String attachment.name
+    ; "mime_type", `String attachment.mime_type
+    ; "size", `Int attachment.size
+    ]
+
+let request_to_yojson request =
+  let base =
     [ "request_id", `String request.request_id
     ; "name", `String request.keeper_name
     ; "message", `String request.message
     ]
+  in
+  match request.attachments with
+  | [] -> `Assoc base
+  | attachments ->
+    `Assoc
+      (base
+       @ [ "attachments", `List (List.map attachment_to_yojson attachments)
+         ; ( "user_blocks"
+           , `List
+               (List.map attachment_block_to_yojson attachments
+                @ [ `Assoc [ "type", `String "text"; "text", `String request.message ] ]) )
+         ])
 
 let request_body request = Yojson.Safe.to_string (request_to_yojson request)
 

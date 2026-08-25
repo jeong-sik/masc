@@ -15,6 +15,8 @@ type t =
   | Inspect_context
   | View_image of string
   | View_image_missing_path
+  | Attach_image of string
+  | Attach_image_missing_path
   | Unknown of string
 
 (* One list, drawn by /help and kept beside the parser so a new command
@@ -59,6 +61,10 @@ let catalog =
     ; summary = "inspect the last observed provider input"
     }
   ; { word = "image"; args = "<path>"; summary = "draw an image file on the terminal" }
+  ; { word = "attach"
+    ; args = "<path>"
+    ; summary = "stage an image to send with the next keeper message"
+    }
   ; { word = "help"; args = ""; summary = "this list" }
   ]
 
@@ -124,6 +130,8 @@ let parse text =
     | "context", _ -> Inspect_context
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path
+    | "attach", "" -> Attach_image_missing_path
+    | "attach", path -> Attach_image path
     | word, _ -> Unknown word
 
 type hint =
@@ -198,11 +206,18 @@ let hint_spans = function
   | Candidates { typed; entries } ->
       (* Names only. Every usage spelled out runs past a 120-column pane on
          the bare slash, and the commands that fell off the end were the ones
-         an operator who typed [/] had not thought of yet. *)
+         an operator who typed [/] had not thought of yet.
+
+         One space between them, not two: at ten commands the two-space form
+         reached 88 columns and no longer fit the 80-column row the bare slash
+         has to survive on. Every name starts with [/], so the boundary reads
+         without the second space, and dropping it buys back nine columns —
+         enough that the eleventh command costs a real decision rather than
+         silently pushing a name off the end. *)
       List.concat
         (List.mapi
            (fun index entry ->
-              (if index = 0 then [] else [ Detail "  " ])
+              (if index = 0 then [] else [ Detail " " ])
               @ word_spans ~typed entry)
            entries)
   | Unknown_command word ->

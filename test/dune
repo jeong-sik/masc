@@ -2794,6 +2794,8 @@
  (modules test_tui_keeper_chat_projection)
  (libraries
   alcotest
+  base64
+  masc_tui_attachment
   masc
   masc.keeper_chat_operations
   masc.string_util

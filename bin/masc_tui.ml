@@ -2952,6 +2952,15 @@ let drop_inflight state request =
    cannot produce a second turn. The client used to hold its own five-phase
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
+(* Staged images belong to the message being composed, so the send that consumes
+   the draft consumes them too. Returning and clearing in one step keeps a failed
+   send from silently re-attaching the same image to the next one. *)
+let take_pending_attachments state =
+  let staged = state.msg_attachments in
+  state.msg_attachments <- [];
+  staged
+;;
+
 let launch_keeper_request state ~mailbox request =
   let live =
     Keeper_chat_transcript.create
@@ -3031,7 +3040,11 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
       match send_disposition state ~keeper_name:target with
       | Sends ->
           let request =
-            Keeper_chat.create_request ~keeper_name:target ~message:text
+            Keeper_chat.create_request
+              ~attachments:(take_pending_attachments state)
+              ~keeper_name:target
+              ~message:text
+              ()
           in
           launch_keeper_request state ~mailbox request
       | Queues_behind request -> (
@@ -3293,6 +3306,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.View_image path ->
       Buffer.clear state.msg_input;
       open_image state ~notice (String.trim path)
+  | Masc_tui_command.Attach_image_missing_path ->
+      notice ~role:Message_error "/attach needs a path on the same line"
+  | Masc_tui_command.Attach_image path -> (
+      Buffer.clear state.msg_input;
+      match Masc_tui_attachment.of_file ~path:(String.trim path) with
+      | Error error ->
+          notice ~role:Message_error
+            (Masc_tui_attachment.error_to_string error)
+      | Ok attachment ->
+          state.msg_attachments <- state.msg_attachments @ [ attachment ];
+          notice ~role:Message_status
+            (Printf.sprintf
+               "attached %s (%s, %d bytes) — %d staged for the next message"
+               attachment.Masc_tui_keeper_chat_projection.name
+               attachment.Masc_tui_keeper_chat_projection.mime_type
+               attachment.Masc_tui_keeper_chat_projection.size
+               (List.length state.msg_attachments)))
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~role:Message_status
@@ -4642,6 +4672,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
+       | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)

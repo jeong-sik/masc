@@ -1,7 +1,18 @@
+(** One image staged with [:attach] and sent with the next message. [data] is
+    raw base64 with no data-URL prefix and no newlines. *)
+type attachment = {
+  attachment_id : string;
+  name : string;
+  mime_type : string;
+  size : int;
+  data : string;
+}
+
 type request = {
   request_id : string;
   keeper_name : string;
   message : string;
+  attachments : attachment list;
 }
 
 type acceptance_state =
@@ -104,7 +115,12 @@ type sse_line =
 
 val classify_sse_line : string -> sse_line
 
-val create_request : keeper_name:string -> message:string -> request
+val create_request :
+  ?attachments:attachment list ->
+  keeper_name:string ->
+  message:string ->
+  unit ->
+  request
 val request_to_yojson : request -> Yojson.Safe.t
 val request_body : request -> string
 val same_request_identity : request -> request -> bool

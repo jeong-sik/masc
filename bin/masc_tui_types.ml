@@ -1087,6 +1087,14 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
+  (* The newest row [msg_scroll] counts back from, as [me_at], while the
+     operator is reading back. Counting from whatever is newest right now made
+     the count mean something different every time a reply landed: the new rows
+     go on that end, so the same count lands further down and the window slides
+     toward text nobody asked to see. Pinned when they scroll off the bottom
+     and released when they return to it, which is also how they get back to
+     following the turn. *)
+  mutable msg_scroll_pin: float option;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -1448,6 +1456,7 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_scroll = 0;
+  msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
@@ -1506,6 +1515,28 @@ let chat_rows_for (state : state) keeper_name =
     (fun left right -> Float.compare left.me_at right.me_at)
     (loaded @ session)
 
+(* The one place [msg_scroll] moves, so the pin it counts back from cannot be
+   forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
+   pin; returning to it releases the pin, which is also the gesture for going
+   back to following the turn. *)
+let set_msg_scroll (state : state) rows =
+  let rows = max 0 rows in
+  if rows = 0 then begin
+    state.msg_scroll <- 0;
+    state.msg_scroll_pin <- None
+  end
+  else begin
+    if state.msg_scroll = 0 then
+      state.msg_scroll_pin <-
+        (match state.msg_target_keeper_name with
+         | None -> None
+         | Some keeper_name ->
+           (match List.rev (chat_rows_for state keeper_name) with
+            | newest :: _ -> Some newest.me_at
+            | [] -> None));
+    state.msg_scroll <- rows
+  end
+
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
    row, so a composer that grew would otherwise push the cursor off the line it
@@ -1543,7 +1574,7 @@ let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
-  | Message_scroll value -> state.msg_scroll <- value
+  | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value

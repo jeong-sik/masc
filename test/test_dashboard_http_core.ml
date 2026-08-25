@@ -3362,6 +3362,59 @@ let test_tool_call_fleet_cache_tracks_durable_revision () =
          (Option.is_none (Dashboard_cache.peek key)))
 ;;
 
+
+(* [paused] is read the same way [health_state] is: absence is an answer, a
+   present value of the wrong type is not. Before this, [assoc_bool_opt] gave
+   both cases the same [None] and a keeper an operator had paused could be
+   drawn as live if the producer ever wrote the field as anything but a bool. *)
+let paused_fixture paused_field =
+  let now = Masc_domain.now_iso () in
+  `Assoc
+    ([ "name", `String "paused-vocabulary-fixture"
+     ; "agent_name", `String "keeper-paused-vocabulary-fixture-agent"
+     ; "keeper_id", `String "k-paused-vocabulary-fixture"
+     ; "status", `String "active"
+     ; "diagnostic", `Assoc [ "health_state", `String "healthy" ]
+     ; "keepalive_running", `Bool false
+     ; "turn_count", `Int 1
+     ; "updated_at", `String now
+     ; "tool_audit_at", `String now
+     ]
+     @ paused_field)
+;;
+
+let operator_paused_note = "운영자 일시정지"
+
+let continuity_note keeper =
+  let row = Dashboard_execution_builders.continuity_row_of_keeper ~now_ts:0.0 keeper in
+  Yojson.Safe.to_string row.Dashboard_execution_helpers.json
+;;
+
+let test_paused_true_reads_as_paused () =
+  let note = continuity_note (paused_fixture [ "paused", `Bool true ]) in
+  Alcotest.(check bool)
+    "a keeper the producer marked paused is drawn paused"
+    true
+    (String_util.contains_substring note operator_paused_note)
+;;
+
+let test_absent_paused_reads_as_not_paused () =
+  let note = continuity_note (paused_fixture []) in
+  Alcotest.(check bool)
+    "no paused field is no pause recorded, not a pause"
+    false
+    (String_util.contains_substring note operator_paused_note)
+;;
+
+let test_non_boolean_paused_is_refused () =
+  Alcotest.check_raises
+    "a paused field that is not a boolean is producer drift, not false"
+    (Invalid_argument
+       "dashboard continuity: keeper paused is not a boolean: \"true\"")
+    (fun () -> ignore (continuity_note (paused_fixture [ "paused", `String "true" ])))
+;;
+
+
 let () =
   run "dashboard_http_core"
     [
@@ -3525,6 +3578,14 @@ let () =
             test_lifecycle_cache_patch_rejects_missing_or_unknown_status;
           test_case "running keeper reconciliation rebuilds continuity brief" `Quick
             test_running_keeper_reconciliation_rebuilds_continuity_brief;
+        ] );
+      ( "paused vocabulary (#30084 follow-up)",
+        [ test_case "paused true reads as paused" `Quick
+            test_paused_true_reads_as_paused;
+          test_case "absent paused is no pause recorded" `Quick
+            test_absent_paused_reads_as_not_paused;
+          test_case "non-boolean paused is refused" `Quick
+            test_non_boolean_paused_is_refused;
         ] );
       ( "context-window shrink guard (#25062/#25268)",
         [ test_case "success clears the previous error" `Quick

@@ -260,7 +260,9 @@ let sanitize_namespace_segment name =
         in
         Buffer.add_char buf (if is_safe then c else '-'))
       name;
-    let folded = String.trim (Buffer.contents buf) in
+    (* No trim: every byte written above is one of [a-zA-Z0-9_-], so the
+       fold cannot leave whitespace at either end to remove. *)
+    let folded = Buffer.contents buf in
     let head =
       if String.length folded > namespace_segment_max_length
       then String.sub folded 0 namespace_segment_max_length

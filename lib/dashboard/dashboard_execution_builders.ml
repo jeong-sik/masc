@@ -250,7 +250,15 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
      Health is parsed whether or not the keeper is paused, so a health this
      build cannot read is rejected either way. Validating it only on the
      unpaused path would grant producer drift a free pass on every paused
-     keeper - the permissive fallback moved one field over. *)
+     keeper - the permissive fallback moved one field over.
+
+     [paused] is read the same way, and for the same reason. Absence is a real
+     answer here: server_dashboard_http_execution_surfaces.ml:809 upserts the
+     field for every keeper carrying an override, so a row without it is a row
+     with no pause recorded. A value that is present and is not a boolean is
+     not that -- it is the producer saying something this build cannot read,
+     and [assoc_bool_opt] would have folded it into the same [None] as absence
+     and drawn a paused keeper as live. *)
   let health =
     let raw = string_field "health_state" (member_assoc "diagnostic" keeper) in
     match Keeper_status_runtime.keeper_health_of_string_opt raw with
@@ -259,8 +267,18 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
       invalid_arg
         (Printf.sprintf "dashboard continuity: unknown keeper health %S" raw)
   in
+  let paused =
+    match Json_util.assoc_member_opt "paused" keeper with
+    | None -> false
+    | Some (`Bool value) -> value
+    | Some other ->
+      invalid_arg
+        (Printf.sprintf
+           "dashboard continuity: keeper paused is not a boolean: %s"
+           (Yojson.Safe.to_string other))
+  in
   let liveness =
-    if Option.value ~default:false (Json_util.assoc_bool_opt "paused" keeper)
+    if paused
     then Cl_paused
     else
       match health with

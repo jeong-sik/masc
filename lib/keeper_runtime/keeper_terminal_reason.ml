@@ -115,7 +115,23 @@ let of_masc_internal_kind wire = function
    [wire] is carried in every payload-bearing variant so [to_wire] reproduces
    it byte-for-byte; classification reads a canonical byte sequence only.
    Spellings neither stage claims stay typed [Unknown] and take the generic
-   disposition route. *)
+   disposition route.
+
+   The second stage is the half of this axis that is still string-shaped, and
+   it is not string-shaped because the type is missing. [Keeper_agent_error]
+   matches [Agent_core.Retry] and [Agent_core.Error] exhaustively and prints
+   each arm into one of about thirty [api_error_*] / [provider_error_*]
+   spellings (keeper_agent_error.ml:140-156 and :210-285); the two prefix
+   tests below then bucket those prints back into two variants. The producer's
+   variant reaches here as text and is re-derived from its first eleven bytes.
+
+   Nothing is misread today -- the collapse those two buckets perform is the
+   one the note above [operator_disposition] states on purpose, and context
+   overflow is answered on its own axis in [Keeper_runtime_failure_route].
+   What is worth saying is that the first stage is not the whole job. #29889
+   typed the keeper's own thirteen internal kinds; the provider family beside
+   them was left where it was, and a reader who sees only the enumeration
+   lookup above would take this file for closed. *)
 let of_wire wire =
   match Keeper_internal_error.wire_kind_of_string wire with
   | Some kind -> of_masc_internal_kind wire kind

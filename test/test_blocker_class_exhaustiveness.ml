@@ -252,7 +252,12 @@ let provider_runtime_surface_exn
     fail "runtime_blocker_surface_of_failure_reason returned None for Provider_runtime_error"
 ;;
 
-let test_typed_provider_reason_falls_through () =
+(* This used to assert the fall-through: a Provider_runtime_error carrying a
+   typed exhaustion reason still came out labelled "provider_runtime_error",
+   even with a code that spelled the exhaustion out. That is what made the
+   status bridge's runtime_exhausted arm unreachable (#30447) — the registry
+   wraps exhaustion in this constructor and the reason was being dropped. *)
+let test_typed_provider_reason_reaches_runtime_exhausted () =
   let surface =
     provider_runtime_surface_exn
       ~reason:(Some Connection_refused)
@@ -260,8 +265,8 @@ let test_typed_provider_reason_falls_through () =
       ()
   in
   check string
-    "non-NTC provider error -> provider_runtime_error catch-all"
-    "provider_runtime_error"
+    "a typed exhaustion reason is not flattened into the provider catch-all"
+    "runtime_exhausted"
     surface.KSB.blocker_class
 ;;
 
@@ -350,8 +355,8 @@ let () =
             test_api_timeout_prose_does_not_map_to_agent_timeout
         ] )
     ; ( "provider_runtime_record"
-      , [ test_case "typed reason falls through" `Quick
-            test_typed_provider_reason_falls_through
+      , [ test_case "typed reason reaches runtime_exhausted" `Quick
+            test_typed_provider_reason_reaches_runtime_exhausted
         ; test_case "reason=None provider error falls through" `Quick
             test_reason_none_provider_error_falls_through
         ; test_case "provider timeout catch-all stays provider runtime" `Quick

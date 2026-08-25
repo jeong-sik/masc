@@ -435,9 +435,16 @@ let ensure_login_keychain home_dir =
            a 0700 home, and any passphrase usable unattended would have to be
            stored next to it. *)
         let* () = run_security [ "create-keychain"; "-p"; ""; path ] in
-        (try Unix.chmod path 0o600 with
-         | Unix.Unix_error (error, fn, arg) -> ignore (unix_error_detail error fn arg));
-        Ok ()
+        (* [security] writes it 0644. Narrowing is reported rather than
+           swallowed: the 0700 home above still keeps other users out, so a
+           failure here is not fatal, but it does mean the file is readable to
+           anything that reaches the directory. *)
+        try
+          Unix.chmod path 0o600;
+          Ok ()
+        with
+        | Unix.Unix_error (error, fn, arg) ->
+          Error ("created, but could not narrow to 0600: " ^ unix_error_detail error fn arg)
       in
       match provisioned with
       | Ok () -> Provisioned

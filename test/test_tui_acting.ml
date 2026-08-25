@@ -150,6 +150,27 @@ let test_trimming_keeps_the_order_it_was_given () =
     (List.map (fun e -> (Acting.row_of_event ~duration_ms:None e).Acting.keeper) kept);
   check int "the rest is counted" 2 dropped
 
+(* The screen orders by arrival and labels by the event's own clock, and two
+   of the event kinds carry no clock. So the column an operator reads to check
+   the order was blank on those rows -- 925 of the 927 on the screen that
+   prompted this. Arrival is recorded beside the event; a row with no clock
+   says that instead of nothing. *)
+let test_a_row_with_no_clock_of_its_own_shows_when_it_arrived () =
+  let received = 1787507570.5 in
+  let at_of event =
+    (Acting.row_of_event ~duration_ms:None event
+    |> Acting.with_received_clock ~received)
+      .Acting.at
+  in
+  check bool "an unknown type shows arrival rather than --:--:--" true
+    (Float.equal (at_of (Observer.Other "internal_agent_runs_changed")) received);
+  check bool "a snapshot shows arrival too" true
+    (Float.equal (at_of (Observer.Snapshot "execution_snapshot")) received);
+  (* An event that names its own moment keeps it: the operator wants to know
+     when the turn settled, not when this process heard about it. *)
+  check bool "a settlement keeps the clock it carried" true
+    (Float.equal (at_of (settled "largo")) 100.)
+
 let test_a_call_and_its_return_read_as_one_pair () =
   let started =
     agent_core ~tool:"read_file" ~task:"task-494" ~turn:2086 ~tool_use_id:"tu-1"
@@ -269,6 +290,8 @@ let () =
             test_the_old_arrival_trim_would_have_lost_them
         ; test_case "trimming keeps the order it was given" `Quick
             test_trimming_keeps_the_order_it_was_given
+        ; test_case "a row with no clock of its own shows when it arrived" `Quick
+            test_a_row_with_no_clock_of_its_own_shows_when_it_arrived
         ; test_case "a call and its return read as one pair" `Quick
             test_a_call_and_its_return_read_as_one_pair
         ; test_case "a return with no start held has no duration" `Quick

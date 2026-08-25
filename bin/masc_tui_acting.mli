@@ -73,6 +73,12 @@ val keeper_of_event :
     knows. An event whose correlation matches none keeps its agent name. *)
 
 val row_of_event : duration_ms:float option -> Observer.event -> row
+
+val with_received_clock : received:float -> row -> row
+(** Give a row that carries no clock of its own the time the TUI received it.
+    [Snapshot] and [Other] carry none, and the list is ordered by arrival, so
+    without this the Time column is blank on the rows an operator would read
+    to check that order. A row that carries a clock is returned unchanged. *)
 (** One row per event. [duration_ms] is drawn on a completed call when the
     caller could pair it with its start; see {!duration_of_completion}. *)
 

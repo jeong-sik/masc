@@ -789,6 +789,28 @@ let test_turn_ref_rejects_malformed () =
   check bool "non-int suffix -> None" true (Ids.Turn_ref.of_string "trace#abc" = None);
   check bool "empty trace -> None" true (Ids.Turn_ref.of_string "#4" = None)
 
+(* The 61 rows in #30190 that named a deepseek profile next to GLM's 200,000
+   were all error-path rows, and the number they carried was the turn budget,
+   not that profile's window. Both halves of the contract are pinned here: the
+   number recorded is the budget the prompt was shaped to, and the error path
+   records no number at all. *)
+let test_context_window_records_the_turn_budget () =
+  Alcotest.(check (option int))
+    "a completed turn records the budget it was shaped to"
+    (Some 200_000)
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Produced_result)
+
+let test_context_window_absent_on_the_error_path () =
+  Alcotest.(check (option int))
+    "an errored turn records no ceiling"
+    None
+    (Masc.Keeper_turn_record_writer.context_window_of_turn
+       ~turn_budget:200_000
+       `Errored)
+
+
 let () =
   run "turn_record"
     [ ( "prompt_block_id"
@@ -840,6 +862,12 @@ let () =
             test_diff_identical_records_is_empty
         ; test_case "entries_with_diffs pairs same-trace only" `Quick
             test_entries_with_diffs_same_trace_only
+        ] )
+    ; ( "context_window"
+      , [ test_case "records the turn budget" `Quick
+            test_context_window_records_the_turn_budget
+        ; test_case "absent on the error path" `Quick
+            test_context_window_absent_on_the_error_path
         ] )
     ; ( "turn_ref"
       , [ test_case "make/to_string/of_string roundtrip" `Quick

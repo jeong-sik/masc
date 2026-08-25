@@ -1056,10 +1056,51 @@ let dashboard_runtime_provider_probe_json
     end
 ;;
 
+let dashboard_runtime_probe_representatives runtimes =
+  let _, representatives_rev =
+    List.fold_left
+      (fun (seen, representatives_rev) (runtime : Runtime.t) ->
+         if Set_util.StringSet.mem runtime.provider.id seen
+         then seen, representatives_rev
+         else
+           ( Set_util.StringSet.add runtime.provider.id seen
+           , runtime :: representatives_rev ))
+      (Set_util.StringSet.empty, [])
+      runtimes
+  in
+  List.rev representatives_rev
+;;
+
+let dashboard_runtime_project_provider_probe (runtime : Runtime.t) probe =
+  let json =
+    match probe.json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (function
+             | "runtime_id", _ -> "runtime_id", `String runtime.id
+             | "model_id", _ -> "model_id", `String runtime.model.id
+             | "model_api_name", _ ->
+               "model_api_name", `String runtime.model.api_name
+             | field -> field)
+           fields)
+    | json -> json
+  in
+  { probe with json; runtime_id = runtime.id }
+;;
+
 let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
-  (* Probe each runtime concurrently when a server switch is reachable (the
+  (* Probe one representative per provider concurrently when a server switch
+     is reachable (the
      production background-refresh fiber / boot warm, or a switch-bearing
-     test). Each probe is an independent runtime/URL/HTTP connection with no
+     test). Models bound to one provider share its transport, credentials,
+     protocol, and metadata endpoint, so repeating the same GET for every
+     model creates duplicate load and duplicate-looking failures without new
+     reachability evidence. The representative result is projected back onto
+     every runtime row below so the public schema and exact runtime-id join stay
+     unchanged.
+
+     Each provider probe is an independent URL/HTTP connection with no
      shared mutable state, so the work is embarrassingly parallel and latency
      collapses from [sum latencies] to [max latencies] -- a dead runtime no
      longer serializes the probes after it.
@@ -1085,14 +1126,28 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
 
      Without a switch (unit tests, no Eio scheduler) it falls back to a
      sequential [List.map] so deterministic ordering and test seams hold. *)
-  let probes =
+  let representatives = dashboard_runtime_probe_representatives runtimes in
+  let provider_probes =
     match Eio_context.get_switch_opt () with
-    | None -> List.map dashboard_runtime_provider_probe_json runtimes
+    | None -> List.map dashboard_runtime_provider_probe_json representatives
     | Some _sw ->
       Eio.Fiber.List.map
         ~max_fibers:dashboard_runtime_probe_max_fibers
         dashboard_runtime_provider_probe_json
-        runtimes
+        representatives
+  in
+  let probes_by_provider =
+    List.map2
+      (fun (runtime : Runtime.t) probe -> runtime.provider.id, probe)
+      representatives
+      provider_probes
+  in
+  let probes =
+    List.map
+      (fun (runtime : Runtime.t) ->
+         let probe = List.assoc runtime.provider.id probes_by_provider in
+         dashboard_runtime_project_provider_probe runtime probe)
+      runtimes
   in
   let count pred = probes |> List.filter pred |> List.length in
   let skipped = count (fun p -> p.skipped) in

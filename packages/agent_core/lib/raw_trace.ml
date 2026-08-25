@@ -6,6 +6,8 @@ type record_type =
   | Assistant_block
   | Tool_execution_started
   | Tool_execution_finished
+  | Native_tool_started
+  | Native_tool_finished
   | Hook_invoked
   | Run_finished
 [@@deriving yojson, show]
@@ -152,6 +154,8 @@ let record_type_to_string = function
   | Assistant_block -> "assistant_block"
   | Tool_execution_started -> "tool_execution_started"
   | Tool_execution_finished -> "tool_execution_finished"
+  | Native_tool_started -> "native_tool_started"
+  | Native_tool_finished -> "native_tool_finished"
   | Hook_invoked -> "hook_invoked"
   | Run_finished -> "run_finished"
 ;;
@@ -161,6 +165,8 @@ let record_type_of_string = function
   | "assistant_block" -> Ok Assistant_block
   | "tool_execution_started" -> Ok Tool_execution_started
   | "tool_execution_finished" -> Ok Tool_execution_finished
+  | "native_tool_started" -> Ok Native_tool_started
+  | "native_tool_finished" -> Ok Native_tool_finished
   | "hook_invoked" -> Ok Hook_invoked
   | "run_finished" -> Ok Run_finished
   | other ->
@@ -321,12 +327,16 @@ let record_of_json_unchecked json =
     | ( ( Run_started
         | Assistant_block
         | Tool_execution_finished
+        | Native_tool_started
+        | Native_tool_finished
         | Hook_invoked
         | Run_finished )
       , None ) -> Ok ()
     | ( ( Run_started
         | Assistant_block
         | Tool_execution_finished
+        | Native_tool_started
+        | Native_tool_finished
         | Hook_invoked
         | Run_finished )
       , Some _ ) ->
@@ -737,6 +747,26 @@ let record_tool_execution_finished
     ~tool_name
     ~tool_result
     ~tool_error
+    ()
+  |> Result.map (fun _ -> ())
+;;
+
+let record_native_tool_started active ~call_id ~tool_name =
+  append_record
+    active
+    ~record_type:Native_tool_started
+    ?tool_use_id:call_id
+    ?tool_name
+    ()
+  |> Result.map (fun _ -> ())
+;;
+
+let record_native_tool_finished active ~call_id ~tool_name =
+  append_record
+    active
+    ~record_type:Native_tool_finished
+    ?tool_use_id:call_id
+    ?tool_name
     ()
   |> Result.map (fun _ -> ())
 ;;

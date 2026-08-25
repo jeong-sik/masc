@@ -43,6 +43,8 @@ let test_record_type_to_string () =
     ; Raw_trace.Assistant_block, "assistant_block"
     ; Raw_trace.Tool_execution_started, "tool_execution_started"
     ; Raw_trace.Tool_execution_finished, "tool_execution_finished"
+    ; Raw_trace.Native_tool_started, "native_tool_started"
+    ; Raw_trace.Native_tool_finished, "native_tool_finished"
     ; Raw_trace.Hook_invoked, "hook_invoked"
     ; Raw_trace.Run_finished, "run_finished"
     ]
@@ -62,6 +64,8 @@ let test_record_type_of_string () =
     ; "assistant_block"
     ; "tool_execution_started"
     ; "tool_execution_finished"
+    ; "native_tool_started"
+    ; "native_tool_finished"
     ; "hook_invoked"
     ; "run_finished"
     ]

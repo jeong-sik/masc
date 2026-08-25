@@ -96,6 +96,11 @@ let summarize_run run_ref =
   in
   let tool_names =
     records
+    |> List.filter (fun (record : Raw_trace.record) ->
+      match record.record_type with
+      | Tool_execution_started | Tool_execution_finished -> true
+      | Run_started | Assistant_block | Native_tool_started | Native_tool_finished
+      | Hook_invoked | Run_finished -> false)
     |> List.filter_map (fun (record : Raw_trace.record) -> record.tool_name)
     |> List.sort_uniq String.compare
   in

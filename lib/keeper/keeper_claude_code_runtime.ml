@@ -126,12 +126,14 @@ let model_input_projection_for_capacity
   | Some project -> project windowed
 ;;
 
-let claude_stream_callback on_event =
-  match on_event with
-  | None -> None
-  | Some emit ->
+let claude_stream_callback ~keeper_name ~raw_trace_run on_event =
+  match on_event, raw_trace_run with
+  | None, None -> None
+  | _ ->
+    let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
+    let native_tool_indexes = Hashtbl.create 8 in
     let streamed_text = Buffer.create 256 in
     Some
       (function
@@ -167,6 +169,38 @@ let claude_stream_callback on_event =
                Hashtbl.remove tool_indexes call_id;
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_claude_code.Native_tool_started observation ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Started
+            observation;
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Option.iter
+            (fun call_id -> Hashtbl.replace native_tool_indexes call_id index)
+            observation.call_id;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = Runtime_native_tools.stream_content_type
+               ; tool_id = observation.call_id
+               ; tool_name = observation.tool_name
+               })
+        | Runtime_claude_code.Native_tool_finished observation ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Finished
+            observation;
+          Option.iter
+            (fun call_id ->
+               Option.iter
+                 (fun index ->
+                    Hashtbl.remove native_tool_indexes call_id;
+                    emit (Agent_core.Types.ContentBlockStop { index }))
+                 (Hashtbl.find_opt native_tool_indexes call_id))
+            observation.call_id
         | Runtime_claude_code.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -729,7 +763,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
              "Claude Code host stop arrived without an acknowledged provider turn")
     in
     let turn_result =
-      let on_stream_event = claude_stream_callback on_event in
+      let on_stream_event =
+        claude_stream_callback ~keeper_name ~raw_trace_run on_event
+      in
       try
         let client_result =
            Runtime_claude_code.run_turn

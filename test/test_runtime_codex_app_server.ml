@@ -214,6 +214,14 @@ let tool_call_request =
   {|{"id":"tool-request-1","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","tool":"masc_probe","namespace":null,"arguments":{"marker":"from-codex"}}}|}
 ;;
 
+let native_command_started =
+  {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
+;;
+
+let native_command_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":"/tmp"}}}|}
+;;
+
 let test_dynamic_tool_callback () =
   let call_id = ref None in
   let arguments = ref `Null in
@@ -273,6 +281,45 @@ let test_dynamic_tool_callback () =
               {|{"marker":"from-codex"}|}
               (Yojson.Safe.to_string arguments)
           | _ -> fail "Codex live stream events were not projected in wire order"))
+;;
+
+let test_native_command_events_stay_distinct_from_dynamic_tools () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; native_command_started
+    ; native_command_completed
+    ; agent_message_delta
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         check int "no MASC dynamic calls" 0 result.dynamic_tool_calls;
+         let open Runtime_codex_app_server in
+         match List.rev !stream_events with
+         | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+           ; Native_tool_started
+               { call_id = Some "native-command-1"
+               ; tool_name = Some "commandExecution"
+               }
+           ; Native_tool_finished
+               { call_id = Some "native-command-1"
+               ; tool_name = Some "commandExecution"
+               }
+           ; Text_delta "MASC_"
+           ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+           ] -> ()
+         | _ -> fail "Codex native command activity was projected as a MASC tool")
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -2152,6 +2199,73 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 finished.final_text))
 ;;
 
+let test_keeper_codex_raw_trace_separates_native_tool_observation () =
+  let base_path = temp_workspace "masc-codex-native-raw-trace-" in
+  let raw_trace_path = Filename.concat base_path "official-codex-native-raw.jsonl" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; native_command_started
+         ; native_command_completed
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~raw_trace_path
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ ->
+              let records =
+                match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
+                | Ok records -> records
+                | Error error -> fail (Agent_core.Error.to_string error)
+              in
+              let records_of_type record_type =
+                List.filter
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.record_type = record_type)
+                  records
+              in
+              check int
+                "one native start"
+                1
+                (List.length (records_of_type Native_tool_started));
+              check int
+                "one native finish"
+                1
+                (List.length (records_of_type Native_tool_finished));
+              check int
+                "no MASC execution start"
+                0
+                (List.length (records_of_type Tool_execution_started));
+              check int
+                "no MASC execution finish"
+                0
+                (List.length (records_of_type Tool_execution_finished));
+              let native_start = List.hd (records_of_type Native_tool_started) in
+              check
+                (option string)
+                "native call id"
+                (Some "native-command-1")
+                native_start.tool_use_id;
+              check
+                (option string)
+                "native tool name"
+                (Some "commandExecution")
+                native_start.tool_name))
+;;
+
 let test_keeper_protocol_failure_enters_recovery () =
   let base_path = temp_workspace "masc-codex-runtime-recovery-" in
   Fun.protect
@@ -3486,6 +3600,10 @@ let () =
             test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case
+            "native command stays distinct from dynamic tools"
+            `Quick
+            test_native_command_events_stay_distinct_from_dynamic_tools
+        ; test_case
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
@@ -3538,6 +3656,10 @@ let () =
             "Keeper Codex RAW contains tool and response"
             `Quick
             test_keeper_codex_raw_trace_contains_actual_tool_and_response
+        ; test_case
+            "Keeper Codex RAW separates native tools"
+            `Quick
+            test_keeper_codex_raw_trace_separates_native_tool_observation
         ; test_case
             "Keeper protocol failure enters recovery"
             `Quick

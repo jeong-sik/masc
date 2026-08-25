@@ -3,6 +3,13 @@ type posture =
   | Native_read
   | Native_full
 
+type observation =
+  { call_id : string option
+  ; tool_name : string option
+  }
+
+let stream_content_type = "native_tool_use"
+
 let to_string = function
   | Native_none -> "none"
   | Native_read -> "read"

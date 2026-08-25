@@ -252,16 +252,11 @@ type stream_projection =
   ; on_tool_finished : call_id:string -> unit
   }
 
-let stream_projection ~turn_count on_event =
-  match on_event with
-  | None ->
-    { on_runtime_event = ignore
-    ; on_tool_started = (fun ~call_id:_ ~tool_name:_ ~arguments:_ -> ())
-    ; on_tool_finished = (fun ~call_id:_ -> ())
-    }
-  | Some emit ->
+let stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event =
+    let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
+    let native_tool_indexes = Hashtbl.create 8 in
     let emit event =
       try emit event with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -283,6 +278,38 @@ let stream_projection ~turn_count on_event =
             emit
               (Agent_core.Types.ContentBlockDelta
                  { index = 0; delta = Agent_core.Types.TextDelta text })
+          | Runtime_antigravity.Native_tool_started observation ->
+            Host.record_raw_native_tool
+              ~keeper_name
+              ~raw_trace_run
+              ~phase:`Started
+              observation;
+            let index = !next_tool_index in
+            incr next_tool_index;
+            Option.iter
+              (fun call_id -> Hashtbl.replace native_tool_indexes call_id index)
+              observation.call_id;
+            emit
+              (Agent_core.Types.ContentBlockStart
+                 { index
+                 ; content_type = Runtime_native_tools.stream_content_type
+                 ; tool_id = observation.call_id
+                 ; tool_name = observation.tool_name
+                 })
+          | Runtime_antigravity.Native_tool_finished observation ->
+            Host.record_raw_native_tool
+              ~keeper_name
+              ~raw_trace_run
+              ~phase:`Finished
+              observation;
+            Option.iter
+              (fun call_id ->
+                 Option.iter
+                   (fun index ->
+                      Hashtbl.remove native_tool_indexes call_id;
+                      emit (Agent_core.Types.ContentBlockStop { index }))
+                   (Hashtbl.find_opt native_tool_indexes call_id))
+              observation.call_id
           | Runtime_antigravity.Turn_finished { text = _ } ->
             emit Agent_core.Types.MessageStop)
     ; on_tool_started =
@@ -625,7 +652,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let process_mgr = Eio.Stdenv.process_mgr env in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
-    let stream = stream_projection ~turn_count on_event in
+      let stream =
+        stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event
+      in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
       | Turn_inflight { session_id; turn_id; _ } ->

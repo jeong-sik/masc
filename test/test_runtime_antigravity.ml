@@ -267,6 +267,33 @@ let test_stream_events_preserve_available_wire_data () =
          | _ -> fail "Antigravity stream did not preserve available wire data")
 ;;
 
+let test_stream_events_preserve_anonymous_native_tool_steps () =
+  let events = ref [] in
+  with_fixture
+    [ init ()
+    ; step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ()
+    ; step ~index:7 ~state:"DONE" ~step_type:"tool" ()
+    ; result ()
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> events := event :: !events)
+           path
+       with
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ ->
+         match List.rev !events with
+         | [ Runtime_antigravity.Turn_started
+               { conversation_id = "conversation-1"; model = "gemini-fixture" }
+           ; Native_tool_started { call_id = Some "7"; tool_name = None }
+           ; Native_tool_finished { call_id = Some "7"; tool_name = None }
+           ; Text_delta "MASC_ANTIGRAVITY_OK\n"
+           ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
+           ] -> ()
+         | _ -> fail "Antigravity tool step was given an invented tool name")
+;;
+
 let test_successful_official_client_turn () =
   with_fixture
     [ init ()
@@ -774,6 +801,10 @@ let () =
             "stream preserves available wire data"
             `Quick
             test_stream_events_preserve_available_wire_data
+        ; test_case
+            "stream preserves anonymous native tool steps"
+            `Quick
+            test_stream_events_preserve_anonymous_native_tool_steps
         ; test_case
             "resume identity and argv"
             `Quick

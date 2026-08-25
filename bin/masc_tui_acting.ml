@@ -15,7 +15,12 @@ let visible filter (event : Observer.event) =
       | Observer.Agent_core { Observer.kind = Observer.Telemetry; _ } -> false
       | Observer.Agent_core _ -> true
       | Observer.Keeper_heartbeat _ | Observer.Keeper_composite_changed _
-      | Observer.Snapshot _ ->
+      | Observer.Snapshot _
+      (* A reply sends one stream frame per token, and a queue-size change is
+         state rather than something a keeper did. Both belong with the
+         heartbeat: shown under [Everything], never counted as an action. *)
+      | Observer.Keeper_chat_stream_frame _
+      | Observer.Keeper_waiting_inventory_changed _ ->
           false
       | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
       | Observer.Keeper_chat_appended _ | Observer.Other _ ->
@@ -122,7 +127,9 @@ let keeper_of_event ~traces (event : Observer.event) =
   | Observer.Keeper_tool_call c -> c.Observer.kt_keeper
   | Observer.Keeper_turn_complete t -> t.Observer.tc_keeper
   | Observer.Keeper_composite_changed { keeper; _ }
-  | Observer.Keeper_chat_appended { keeper; _ } ->
+  | Observer.Keeper_chat_appended { keeper; _ }
+  | Observer.Keeper_chat_stream_frame { keeper; _ }
+  | Observer.Keeper_waiting_inventory_changed { keeper; _ } ->
       keeper
   | Observer.Snapshot _ | Observer.Other _ -> "server"
 
@@ -187,6 +194,20 @@ let row_of_event ~duration_ms (event : Observer.event) =
       ; label = "chat"
       ; detail = Option.value ~default:"" connector
       }
+  | Observer.Keeper_chat_stream_frame { keeper; frame; at } ->
+      { at
+      ; keeper
+      ; glyph = Quiet
+      ; label = "chat stream"
+      ; detail = Option.value ~default:"" frame
+      }
+  | Observer.Keeper_waiting_inventory_changed { keeper; queue_kind; at } ->
+      { at
+      ; keeper
+      ; glyph = Quiet
+      ; label = "waiting queue"
+      ; detail = Option.value ~default:"" queue_kind
+      }
   | Observer.Snapshot name ->
       { at = 0.; keeper = "server"; glyph = Quiet; label = "snapshot"; detail = name }
   | Observer.Other name ->
@@ -212,6 +233,8 @@ let duration_of_completion ~before (completed : Observer.agent_core) =
           | Observer.Agent_core _ | Observer.Keeper_heartbeat _
           | Observer.Keeper_tool_call _ | Observer.Keeper_turn_complete _
           | Observer.Keeper_composite_changed _ | Observer.Keeper_chat_appended _
+          | Observer.Keeper_chat_stream_frame _
+          | Observer.Keeper_waiting_inventory_changed _
           | Observer.Snapshot _ | Observer.Other _ ->
               None)
         before

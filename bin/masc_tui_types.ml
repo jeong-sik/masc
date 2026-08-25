@@ -29,6 +29,17 @@ let connection_status_label = function
   | Disconnected -> "disconnected"
 ;;
 
+(* A successful probe is the current server even when the peer address did not
+   change. A failed probe is unread, not permission to present the previous
+   process as current. Keeping this projection pure lets the same-port restart
+   rule be tested without a live server. *)
+let server_identity_of_refresh
+    (reading : (Tui_decode.server_identity, string) result) =
+  match reading with
+  | Ok current -> Some current
+  | Error _ -> None
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -656,8 +667,9 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
-  (* Read once and kept: the server names itself at startup and only a
-     restart changes the answer. *)
+  (* Current successful /health identity. Every HTTP refresh revalidates it so
+     a different process on the same endpoint replaces this projection, while
+     a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
@@ -769,6 +781,12 @@ type state = {
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
+  (* The list draws each ask on one row; this opens the selected one whole.
+     Keyed on the cursor rather than a token so an ask that resolves while it
+     is open closes with the row instead of stranding a detail for something
+     that is gone. *)
+  mutable approval_detail_open: bool;
+  mutable approval_detail_scroll: int;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
@@ -856,6 +874,13 @@ type state = {
   mutable code_file_error: string option;
   mutable code_file_scroll: int;
   mutable code_focus_file: bool;
+  (* The file pane's history view: H on an open file swaps the content for
+     the commits that touched it, keyed by the path they were fetched for so
+     opening another file drops a stale listing rather than captioning it. *)
+  mutable code_history: (string * Tui_decode.git_log_row list) option;
+  mutable code_history_error: string option;
+  mutable code_history_open: bool;
+  mutable code_history_scroll: int;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -918,6 +943,12 @@ type state = {
   mutable verification_error: string option;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* An approve armed for a second keypress: which task. The cursor can move
+     between the two presses, so the task id is captured at arm time and a
+     press on a different row re-arms for that row. Reject carries no arm --
+     its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: string option;
+  mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
@@ -1156,6 +1187,8 @@ let create_state
   keeper_tool_approvals_error = None;
   keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
+  approval_detail_open = false;
+  approval_detail_scroll = 0;
   approval_cursor = 0;
   pending_approval_action = None;
   board_posts = [];
@@ -1217,6 +1250,10 @@ let create_state
   code_file_error = None;
   code_file_scroll = 0;
   code_focus_file = false;
+  code_history = None;
+  code_history_error = None;
+  code_history_open = false;
+  code_history_scroll = 0;
   changes_keeper = None;
   changes = None;
   changes_error = None;
@@ -1254,6 +1291,8 @@ let create_state
   verification_error = None;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_verdict_armed = None;
+  verification_verdict_error = None;
   system_logs_scroll = 0;
   system_logs_cursor = 0;
   msg_input = Buffer.create 256;

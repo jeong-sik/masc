@@ -95,6 +95,10 @@ type event =
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
+  | Keeper_chat_stream_frame of
+      { keeper : string; frame : string option; at : float }
+  | Keeper_waiting_inventory_changed of
+      { keeper : string; queue_kind : string option; at : float }
   | Snapshot of string
   | Other of string
 
@@ -228,6 +232,36 @@ let decode_keeper_tool_call fields =
        ; kt_at
        })
 
+(* The [ag_ui_event] frame names itself in [type]; only CUSTOM adds a [name],
+   so pairing the two labels the frame without matching on any literal. *)
+let stream_frame_label inner =
+  match string_field inner "type", string_field inner "name" with
+  | Some kind, Some name -> Some (kind ^ " " ^ name)
+  | Some kind, None -> Some kind
+  | None, (Some _ | None) -> None
+
+(* A live chat stream frame. The dashboard reads these to draw the keeper's
+   reply as it arrives, so the server is right to broadcast them; the TUI was
+   simply never taught the type and drew every one as an unnamed row with no
+   time and no keeper -- the fields were in the frame all along. *)
+let decode_keeper_chat_operation_event fields =
+  let event = "keeper_chat_operation_event" in
+  let* keeper = required string_field fields "name" ~event in
+  let* at = required float_field fields "ts_unix" ~event in
+  let frame = Option.bind (assoc_field fields "ag_ui_event") stream_frame_label in
+  Ok (Keeper_chat_stream_frame { keeper; frame; at })
+
+(* Names the keeper in [keeper_name] rather than [name] -- the one broadcast
+   in this family that does. Reading the field it actually sends is why this
+   needs its own decoder instead of [decode_named_keeper_event]. *)
+let decode_keeper_waiting_inventory_changed fields =
+  let event = "keeper_waiting_inventory_changed" in
+  let* keeper = required string_field fields "keeper_name" ~event in
+  let* at = required float_field fields "ts_unix" ~event in
+  Ok
+    (Keeper_waiting_inventory_changed
+       { keeper; queue_kind = string_field fields "queue_kind"; at })
+
 let decode_named_keeper_event ~event fields make =
   let* keeper = required string_field fields "name" ~event in
   let* at = required float_field fields "ts_unix" ~event in
@@ -247,6 +281,10 @@ let event_of_json (json : Yojson.Safe.t) =
       | Some ("keeper_composite_changed" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_composite_changed { keeper; at })
+      | Some "keeper_chat_operation_event" ->
+          decode_keeper_chat_operation_event fields
+      | Some "keeper_waiting_inventory_changed" ->
+          decode_keeper_waiting_inventory_changed fields
       | Some ("keeper_chat_appended" as event) ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_chat_appended

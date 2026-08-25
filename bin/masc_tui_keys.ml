@@ -105,7 +105,13 @@ let for_surface = function
       ]
       @ listing_meta
   | Approvals ->
-      [ b Navigate "j/k" "move"; b Act "y" "confirm"; b Act "n" "deny" ]
+      [ b Navigate "j/k" "move"
+        (* The list draws each ask on one row. Enter is where a multi-line
+           argument is readable before y answers it. *)
+      ; b Act "Enter" "read the whole ask" ~help:"j/k scrolls it; Esc goes back"
+      ; b Act "y" "confirm"
+      ; b Act "n" "deny"
+      ]
       @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
@@ -123,7 +129,12 @@ let for_surface = function
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ]
       @ listing_meta
-  | Verification -> b Navigate "j/k" "scroll" :: listing_meta
+  | Verification ->
+      [ b Navigate "j/k" "scroll"
+      ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
+      ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
+      ]
+      @ listing_meta
   | Harness -> b Navigate "j/k" "scroll" :: listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
@@ -179,7 +190,9 @@ let for_surface = function
            (masc_tui.ml:6001). A key that works and is not listed is the same
            drift as a listed key that does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
-          ~help:"close the file, then climb one directory"
+          ~help:"close the history, then the file, then climb one directory"
+      ; b Act "H" "history"
+          ~help:"the commits that touched the open file (H or Esc closes)"
       ]
       @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta

@@ -102,17 +102,19 @@ let redacted_http_url_opt url =
         (Keeper_chat_blocks.dropped_http_url_reason_to_string reason))
     url
 
-let strip_trailing_slash s =
-  let len = String.length s in
-  if len > 0 && s.[len - 1] = '/' then String.sub s 0 (len - 1) else s
-
+(* Same rule as the Discord adapter, reached the same way: resolve first, then
+   fold. This file used to strip one trailing slash off the argument and leave
+   the env value alone, so the same server produced a different link depending
+   on which branch ran (#30476). *)
 let public_voice_audio_url ?base_url token =
   let base =
     match base_url with
-    | Some b -> strip_trailing_slash b
+    | Some b -> b
     | None -> Env_config_core.masc_http_base_url ()
   in
-  base ^ "/api/v1/voice/audio/" ^ token
+  Masc_network_defaults.normalize_loopback_base_url base
+  ^ "/api/v1/voice/audio/"
+  ^ token
 
 (* ── Rich block builders ─────────────────────────────────────────── *)
 

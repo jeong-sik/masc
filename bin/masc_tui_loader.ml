@@ -881,8 +881,9 @@ let load_planning ~(host : string) ~(port : int) :
   | Error err -> Error ("planning load failed: " ^ err)
   | Ok json -> Tui_decode.decode_planning_snapshot json
 
-(* Which server this is. It changes only when the server restarts, so the
-   caller asks once and keeps the answer rather than paying for it per tick. *)
+(* Which server this is. [/health] is the compact probe, and the caller asks on
+   every refresh because another process may bind the same endpoint without a
+   failed request reaching this TUI. *)
 let load_server_identity ~(host : string) ~(port : int) :
     (Tui_decode.server_identity, string) result =
   match fetch_server_identity ~host ~port with

@@ -19,6 +19,7 @@ module Composer = Masc_tui_composer
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
 
@@ -314,17 +315,21 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     | Some query -> "/" ^ query ^ "  " ^ hints
     | None -> hints
   in
-  let build =
+  let identity =
     match state.server_identity with
     | None -> []
     | Some identity ->
+        (* The health probe owns the exact path. Escape terminal controls, but
+           do not trim or rewrite characters that may belong to the path. *)
         [ Masc_tui_footer.Server_build
             { version = identity.Tui_decode.sid_version
             ; commit = identity.Tui_decode.sid_binary_commit
             }
+        ; Masc_tui_footer.Server_base_path
+            (Terminal_text.single_line identity.Tui_decode.sid_base_path)
         ]
   in
-  Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
+  Masc_tui_footer.line ~status:(status @ identity) ~dim:Ansi.dim ~reset:Ansi.reset
     ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
@@ -977,6 +982,66 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   finish_surface state ~clamped:(Task_detail offset) ~surface_key:"task-detail" ~rows:terminal_rows ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
+(* The ask, whole. The list row is one line through [single_line], which
+   turns a newline into the six characters [\x0A] and then cuts; an [Edit]
+   carrying a page of code read as its first forty characters and there was
+   no second screen. This is that screen. *)
+let render_approval_detail (state : state) (row : approval_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let width = max 8 (cols - 6) in
+  let fields =
+    match row with
+    | Keeper_tool_row held ->
+      [ "keeper", held.Tui_decode.kta_keeper
+      ; "tool", held.Tui_decode.kta_tool
+      ; "call", held.Tui_decode.kta_tool_call_id
+      ; "question", held.Tui_decode.kta_question
+      ; "args", held.Tui_decode.kta_args
+      ]
+    | Operator_row a ->
+      [ "actor", a.Masc_tui_operator_projection.ap_actor
+      ; "action", a.Masc_tui_operator_projection.ap_action_type
+      ; "target", a.Masc_tui_operator_projection.ap_target_type
+      ; "summary", a.Masc_tui_operator_projection.ap_summary
+      ; "payload",
+        Yojson.Safe.pretty_to_string a.Masc_tui_operator_projection.ap_payload
+      ]
+  in
+  let lines = Approval_detail.of_fields ~width fields in
+  box_top buf cols;
+  box_line buf cols (screen_title " Approval" ^ "  " ^ Ansi.dim
+    ^ "Esc: back to the list" ^ Ansi.reset);
+  box_divider buf cols;
+  let content_height = max 1 (rows - 6) in
+  let scroll =
+    Masc_tui_scroll.normalize ~count:(List.length lines) ~height:content_height
+      state.approval_detail_scroll
+  in
+  let drawn =
+    lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  in
+  List.iter
+    (fun (line : Approval_detail.line) ->
+      let text = line.Approval_detail.text in
+      match line.Approval_detail.label with
+      | Some _ ->
+        box_line buf cols
+          (Printf.sprintf "  %s%s%s" Ansi.bold (fit_width text (cols - 6)) Ansi.reset)
+      | None ->
+        box_line buf cols (Printf.sprintf "  %s" (fit_width text (cols - 6))))
+    drawn;
+  for _ = 1 to content_height - List.length drawn do
+    box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:"j/k:scroll  y:confirm  n:deny  Esc:back");
+  finish_surface state ~surface_key:"approval-detail" ~rows:terminal_rows
+    ~cols buf
+
 let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3284,13 +3349,13 @@ let render_keeper_message (state : state) =
           ~reasoning:state.msg_reasoning_visibility
           ~tools:state.msg_tool_visibility
       in
-      Printf.sprintf "%s  %s  %s%s(port %d)%s"
+      Printf.sprintf "%s  %s%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
         (keeper_message_identity state keeper_name)
-        Ansi.dim
-        (if String.equal modes "" then "" else modes ^ "  ")
-        state.port Ansi.reset
+        (if String.equal modes ""
+         then ""
+         else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
     in
     let target_registered =
       keeper_available_for_new_message state keeper_name
@@ -3752,14 +3817,13 @@ let render_keeper_message (state : state) =
       | Masc_tui_keeper_selection.No_alternative -> ""
       | Masc_tui_keeper_selection.Switch_to _ -> "  Ctrl-G:next Keeper"
     in
-    let footer =
+    let footer_hints =
       Printf.sprintf
-        "%s  %s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear%s"
-        Ansi.dim enter_hint scroll_hint switch_hint escape_hint Ansi.reset
+        "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear"
+        enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf
-      (Message_layout.fit_width footer (max 1 (chat_cols - 1)));
-    Buffer.add_char chat_buf '\n';
+      (footer_line state ~max_cells:chat_cols ~hints:footer_hints);
 
     let input_column =
       Message_layout.input_cursor_column ~terminal_cols:chat_cols
@@ -4018,6 +4082,26 @@ let render_verification (state : state) =
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
+  (* The arm and the server's last refusal sit under the list, the same rows
+     the schedule cancel carries them on. *)
+  (match state.verification_verdict_armed with
+   | Some task_id ->
+       (* No width padding on the id: padding to a reserved column (the
+          schedule arm's habit) pushes the "same key again" tail past the box
+          on a narrow terminal, and the tail is the half that instructs. *)
+       box_line buf cols
+         (Theme.warn
+         ^ Printf.sprintf "  armed: approve %s -- same key again to send"
+             (Terminal_text.single_line task_id)
+         ^ Ansi.reset)
+   | None -> ());
+  (match state.verification_verdict_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.bad ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
@@ -5636,7 +5720,10 @@ let render_acting (state : state) =
       | Masc_tui_observer.Keeper_tool_call _
       | Masc_tui_observer.Keeper_turn_complete _
       | Masc_tui_observer.Keeper_composite_changed _
-      | Masc_tui_observer.Keeper_chat_appended _ | Masc_tui_observer.Snapshot _
+      | Masc_tui_observer.Keeper_chat_appended _
+      | Masc_tui_observer.Keeper_chat_stream_frame _
+      | Masc_tui_observer.Keeper_waiting_inventory_changed _
+      | Masc_tui_observer.Snapshot _
       | Masc_tui_observer.Other _ ->
           None
     in
@@ -5925,9 +6012,12 @@ let render_code (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane pane_buf pane_cols =
+    let history_showing = state.code_history_open in
     let title =
       match state.code_file with
-      | Some (path, _) -> Terminal_text.single_line path
+      | Some (path, _) ->
+          let path = Terminal_text.single_line path in
+          if history_showing then "history: " ^ path else path
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;
@@ -5940,32 +6030,72 @@ let render_code (state : state) =
     (* Five chrome rows: top gap, title, divider, bottom gap, and the
        footer this pane must leave room for. *)
     let content_height = max 1 (rows - 5) in
-    (match state.code_file_error, state.code_file with
-     | Some detail, _ ->
-         box_line pane_buf pane_cols
-           (Theme.bad ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
-         for _ = 2 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, None ->
-         for _ = 1 to content_height do
-           box_empty pane_buf pane_cols
-         done
-     | None, Some (_, file_rows) ->
-         let total_lines = List.length file_rows in
-         let max_scroll = max 0 (total_lines - content_height) in
-         let scroll = max 0 (min state.code_file_scroll max_scroll) in
-         for i = 0 to content_height - 1 do
-           match List.nth_opt file_rows (scroll + i) with
-           | Some segments ->
-               let body =
-                 String.concat "" (List.map span segments)
-               in
-               box_line pane_buf pane_cols
-                 (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
-                    Ansi.reset body)
-           | None -> box_empty pane_buf pane_cols
-         done);
+    (if history_showing then
+       match state.code_history_error, state.code_history with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (loading history)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, []) ->
+           box_line pane_buf pane_cols
+             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, commits) ->
+           let total = List.length commits in
+           let max_scroll = max 0 (total - content_height) in
+           let scroll = max 0 (min state.code_history_scroll max_scroll) in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt commits (scroll + i) with
+             | Some row ->
+                 let open Masc.Tui_decode in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%s%s  %s%s%s  %s  %s" Ansi.dim
+                      row.gl_date Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      row.gl_hash Ansi.reset
+                      (Terminal_text.single_line row.gl_author)
+                      (Terminal_text.single_line row.gl_subject))
+             | None -> box_empty pane_buf pane_cols
+           done
+     else
+       match state.code_file_error, state.code_file with
+       | Some detail, _ ->
+           box_line pane_buf pane_cols
+             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, None ->
+           for _ = 1 to content_height do
+             box_empty pane_buf pane_cols
+           done
+       | None, Some (_, file_rows) ->
+           let total_lines = List.length file_rows in
+           let max_scroll = max 0 (total_lines - content_height) in
+           let scroll = max 0 (min state.code_file_scroll max_scroll) in
+           for i = 0 to content_height - 1 do
+             match List.nth_opt file_rows (scroll + i) with
+             | Some segments ->
+                 let body =
+                   String.concat "" (List.map span segments)
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "%s%4d%s %s" Ansi.dim (scroll + i + 1)
+                      Ansi.reset body)
+             | None -> box_empty pane_buf pane_cols
+           done);
     box_bottom pane_buf pane_cols
   in
   (if split then begin
@@ -5995,9 +6125,12 @@ let render_code (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:%s  Enter:open  Esc:%s  r:refresh  Tab:next  q:quit"
+            "j/k:%s  Enter:open  %sEsc:%s  r:refresh  Tab:next  q:quit"
             (if state.code_focus_file then "scroll" else "move")
-            (if state.code_focus_file then "list" else "up")));
+            (if state.code_focus_file then "H:history  " else "")
+            (if state.code_history_open then "code"
+             else if state.code_focus_file then "list"
+             else "up")));
   finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
 
 let render_resources (state : state) =
@@ -6248,7 +6381,17 @@ let render_surface (state : state) =
                render_planning_detail state
                  ~armed:(goal_action_armed_for state goal_id) goal
            | None -> render_planning_list state)
-  | Approvals -> render_approvals state
+  | Approvals ->
+      (* Open on the row the cursor is on. An ask that resolves while it is
+         open takes the row with it, so the detail closes rather than showing
+         something the queue no longer holds. *)
+      (match
+         if state.approval_detail_open then
+           List.nth_opt (approval_items state) state.approval_cursor
+         else None
+       with
+       | Some row -> render_approval_detail state row
+       | None -> render_approvals state)
   | Verification -> render_verification state
   | Harness -> render_harness state
   | Fusion ->

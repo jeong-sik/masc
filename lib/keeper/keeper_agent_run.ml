@@ -328,10 +328,21 @@ let prune_raw_traces_after_turn_record
             first.detail))
 ;;
 
+(* An open tool cycle at dispatch is not corruption. Checkpoint persistence
+   stores one on purpose between [After_assistant_collected] and
+   [After_tool_results_appended] so recovery knows which calls were in flight,
+   and any turn that dies in that window leaves one behind — a provider timeout
+   does it without the process ever dying, which boot recovery's "process
+   death" premise did not cover. Measured 2026-08-22..25: one timeout latched
+   rondo for 33 consecutive turns and sangsu and lane-smith likewise, 555 turns
+   on 2026-08-23 alone, each lane failing every turn until a restart.
+
+   So the routine case is closed here with the same synthesized results boot
+   recovery appends, and the turn proceeds on the closed history. A structural
+   break still latches: a history that does not parse is genuine corruption and
+   no result can repair it. *)
 let provider_transcript_admission messages =
-  match Keeper_compaction_unit.validate_provider_transcript messages with
-  | Ok () -> Ok ()
-  | Error transcript_error ->
+  let reject transcript_error =
     let reason, tool_use_ids =
       match transcript_error with
       | Keeper_compaction_unit.Invalid_transcript_structure _ ->
@@ -344,16 +355,35 @@ let provider_transcript_admission messages =
          (Keeper_internal_error.Incomplete_tool_transcript
             { reason
             ; detail =
-                Keeper_compaction_unit.show_provider_transcript_error
-                  transcript_error
+                Keeper_compaction_unit.show_provider_transcript_error transcript_error
             ; tool_use_ids
             }))
+  in
+  match Keeper_compaction_unit.validate_provider_transcript messages with
+  | Ok () -> Ok messages
+  | Error (Keeper_compaction_unit.Invalid_transcript_structure _ as transcript_error) ->
+    reject transcript_error
+  | Error (Keeper_compaction_unit.Unresolved_tool_results _ as transcript_error) ->
+    (match Keeper_compaction_unit.close_open_tail messages with
+     | Ok { Keeper_compaction_unit.messages; closed_tool_use_ids } ->
+       Log.Keeper.info
+         "closed %d in-flight tool call(s) an interrupted turn left open: %s"
+         (List.length closed_tool_use_ids)
+         (String.concat "," closed_tool_use_ids);
+       Ok messages
+     | Error _ ->
+       (* [close_open_tail] passes a structural break through unchanged, and a
+          history that does not parse is corruption no synthesized result can
+          repair. *)
+       reject transcript_error)
 ;;
 
+(* [dispatch] receives the admitted history, which is the input list unless an
+   interrupted turn's open cycle had to be closed first. *)
 let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   match provider_transcript_admission messages with
   | Error _ as error -> error
-  | Ok () -> dispatch ()
+  | Ok admitted -> dispatch admitted
 ;;
 
 (* [run_ref.agent_name] is the AGENT_CORE runtime identity, not the Keeper identity.
@@ -955,7 +985,7 @@ let run_turn
                    boundaries settle the lane, while usage remains observational. *)
                 dispatch_after_provider_transcript_admission
                   ~messages:initial_messages
-                  ~dispatch:(fun () ->
+                  ~dispatch:(fun initial_messages ->
                     Keeper_turn_driver.run_named
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path

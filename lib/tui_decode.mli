@@ -833,6 +833,13 @@ val decode_json_response_body :
     success. *)
 val tool_envelope_outcome : Yojson.Safe.t -> (string, string) result
 
+(** The [/api/v1/verification/verdict] success envelope
+    [{ok; message; noop}] as [(message, noop)]. [noop = true] means the
+    verdict already stood and this call changed nothing. Refusals arrive as
+    non-2xx statuses and never reach this decoder. *)
+val verification_verdict_outcome :
+  Yojson.Safe.t -> (string * bool, string) result
+
 (** Decode one SGR mouse report into the [up]/[down] key a wheel turns
     into, or [None] for reports nothing consumes (clicks, releases,
     horizontal wheel). [parameters] is the raw CSI parameter span
@@ -975,3 +982,14 @@ val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
 (** Reject an unrecognised row kind rather than reading it as context: git's
     vocabulary is closed, so a fourth word means the server changed, and
     drawing it as unchanged would say the opposite of what happened. *)
+
+(** One [/api/v1/git/log] commit: hash, short date, author, subject. *)
+type git_log_row = {
+  gl_hash : string;
+  gl_date : string;
+  gl_author : string;
+  gl_subject : string;
+}
+
+val decode_git_log : Yojson.Safe.t -> (git_log_row list, string) result
+(** The route's [{ok; commits}] envelope, most recent first. *)

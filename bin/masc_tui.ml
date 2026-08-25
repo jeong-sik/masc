@@ -488,6 +488,19 @@ let read_input ?(timeout = 0.1) reader () : input_event option =
                    match Masc_tui_csi.name ~parameters ~final with
                    | Some named -> key named
                    | None -> key "unknown-esc"))
+          (* [ESC O <final>] is SS3: what a terminal in application cursor
+             mode sends for the arrows and Home/End instead of [ESC \[
+             <final>]. Left unread the [ESC] answered as "esc" and the final
+             byte arrived as the letter [A], so the arrows moved nothing on
+             any surface while j/k kept working. The finals are the same
+             ones CSI uses, so the same table names them. *)
+          | Some 'O' -> (
+              match take_input_byte reader ~timeout:0.05 with
+              | Some final -> (
+                  match Masc_tui_csi.name ~parameters:"" ~final with
+                  | Some named -> key named
+                  | None -> key "unknown-esc")
+              | None -> key "esc")
           (* [ESC _ G] opens an APC the terminal is sending back. Left
              unread its body arrives as keys: "Gi=31" typed into the
              composer, once per image. *)
@@ -1019,7 +1032,9 @@ type http_surface_results = {
   http_planning: (planning_snapshot, string) result option;
   http_system_logs: (system_log_snapshot, string) result option;
   http_fleet_safety: (Tui_decode.fleet_safety, string) result option;
-  http_server_identity: (Tui_decode.server_identity, string) result option;
+  (* Mandatory on every refresh: the same endpoint may name a different
+     server after a restart, without a failed request reaching this process. *)
+  http_server_identity: (Tui_decode.server_identity, string) result;
   (* [None] on surfaces that do not show it: the roster costs a request and
      only the Keepers surface reads it, so leaving it out keeps whatever the
      last Keepers refresh observed rather than dropping it. *)
@@ -1112,6 +1127,8 @@ type async_msg =
   | Goal_transition_done of (string, string) result
   | Schedules_loaded of (schedule_snapshot, string) result
   | Schedule_cancel_done of (string, string) result
+  (* (message, noop): [noop = true] says the verdict already stood. *)
+  | Verification_verdict_done of (string * bool, string) result
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
@@ -1120,6 +1137,8 @@ type async_msg =
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
+  | Code_history_loaded of
+      string * (Masc.Tui_decode.git_log_row list, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
   | Github_login_lines of string * string list
@@ -1609,6 +1628,32 @@ let launch_code_file_load state ~mailbox ~path =
   | None ->
       enqueue_async mailbox
         (Code_file_loaded (path, Error "Eio switch is unavailable"))
+
+(* The 50-commit first page covers the pane; the route caps at 200 anyway. *)
+let code_history_limit = 50
+
+let launch_code_history_load state ~mailbox ~path =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.fetch_git_log ~host ~port ~path
+          ~limit:code_history_limit
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Code_history_loaded (path, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Code_history_loaded (path, Error "Eio switch is unavailable"))
 
 (* The device-flow login, streamed. gh prints the one-time code on its
    own output, which the server forwards redacted; every data line lands
@@ -3276,7 +3321,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation ~identity_known
+let load_http_surfaces ~host ~port ~approval_generation
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
@@ -3305,11 +3350,10 @@ let load_http_surfaces ~host ~port ~approval_generation ~identity_known
   let http_fleet_safety =
     when_needed needs.needs_fleet_safety (fun () -> load_fleet_safety ~host ~port)
   in
-  (* Asked for only while the answer is missing. The server names itself once;
-     a restart drops the connection, and the reconnect asks again. *)
-  let http_server_identity =
-    when_needed (not identity_known) (fun () -> load_server_identity ~host ~port)
-  in
+  (* A process can disappear and another bind the same endpoint between two
+     successful ticks. The compact /health identity is therefore revalidated
+     on every refresh rather than inferred from connection failure. *)
+  let http_server_identity = load_server_identity ~host ~port in
   let http_keeper_roster =
     when_needed needs.needs_keeper_roster (fun () ->
         load_keeper_roster ~host ~port)
@@ -3333,14 +3377,11 @@ let apply_http_surfaces state results =
   Option.iter (apply_planning_load state) results.http_planning;
   Option.iter (apply_system_logs_load state) results.http_system_logs;
   Option.iter (apply_fleet_safety_load state) results.http_fleet_safety;
-  (* A failed read leaves the previous answer standing: the identity is the
-     same server it was, and blanking the footer on one bad tick would say
-     the opposite. *)
-  Option.iter
-    (function
-      | Ok identity -> state.server_identity <- Some identity
-      | Error _ -> ())
-    results.http_server_identity;
+  (* This is a current reading, not a last-known cache. A failed probe makes
+     the projection unread; every following refresh asks again, so a same-port
+     replacement still moves A -> B as soon as /health succeeds. *)
+  state.server_identity <-
+    Masc_tui_types.server_identity_of_refresh results.http_server_identity;
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -3466,8 +3507,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation
-               ~identity_known:(Option.is_some state.server_identity) ~needs))
+             (load_http_surfaces ~host ~port ~approval_generation ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -3484,8 +3524,7 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation
-               ~identity_known:(Option.is_some state.server_identity) ~needs))
+               (load_http_surfaces ~host ~port ~approval_generation ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -3996,6 +4035,58 @@ let handle_schedule_cancel_key state ~mailbox =
           add_event state "system"
             (Printf.sprintf "press x again to cancel %s" row.sch_schedule_id))
 
+(* Send the operator's verdict through the verification route. Same
+   fiber-and-mailbox shape as the other writes; whether the task still awaits
+   verification is the route's store rules to say, so the TUI does not
+   pre-guess from the row it rendered a moment ago. *)
+let start_verification_verdict state ~mailbox ~(task_id : string)
+    ~(verdict : [ `Approve | `Reject of string ]) =
+  state.verification_verdict_error <- None;
+  let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
+  add_event state "system" (Printf.sprintf "%s %s" verb task_id);
+  let host = server_peer_host in
+  let port = state.port in
+  let run_verdict () =
+    let result =
+      match Masc_tui_http.post_verification_verdict ~host ~port ~task_id ~verdict with
+      | Error err -> Error err
+      | Ok json -> Masc.Tui_decode.verification_verdict_outcome json
+    in
+    enqueue_async mailbox (Verification_verdict_done result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_verdict
+  | None -> run_verdict ()
+
+(* The row under the Verification cursor, if the list has one. *)
+let verification_cursor_row state =
+  let requests =
+    match state.verification with
+    | None -> []
+    | Some s -> s.Masc.Tui_decode.vs_requests
+  in
+  List.nth_opt requests state.verification_cursor
+
+(* The approve key on the row under the cursor. Two presses, like the cancel
+   and vote keys: the first names the task, the same press again sends the
+   verdict. The task id is captured at arm time, so moving the cursor between
+   presses re-arms for the new row rather than approving the one the operator
+   left. Reject is not armed -- its $EDITOR reason form is the confirmation. *)
+let handle_verification_approve_key state ~mailbox =
+  match verification_cursor_row state with
+  | None -> ()
+  | Some row -> (
+      let task_id = row.Masc.Tui_decode.vr_task_id in
+      match state.verification_verdict_armed with
+      | Some armed when String.equal armed task_id ->
+          state.verification_verdict_armed <- None;
+          start_verification_verdict state ~mailbox ~task_id ~verdict:`Approve
+      | Some _ | None ->
+          state.verification_verdict_armed <- Some task_id;
+          state.verification_verdict_error <- None;
+          add_event state "system"
+            (Printf.sprintf "press a again to approve %s" task_id))
+
 let handle_board_compose_key state ~mailbox (key : string) : bool =
   if
     state.board_compose_armed
@@ -4341,7 +4432,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         (fun ao_generation ->
            apply_approval_observation state
              { ao_generation; ao_result = Error err })
-        approval_generation;
+      approval_generation;
+      state.server_identity <- None;
       state.connection_status <- Masc_tui_types.Disconnected;
       add_event state "error" err
   | Board_post_refresh_done (request, result) ->
@@ -4477,8 +4569,29 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_file <- Some (path, rows);
           state.code_file_error <- None;
           state.code_file_scroll <- 0;
-          state.code_focus_file <- true
+          state.code_focus_file <- true;
+          (* A new file starts on its content; the old file's history would
+             caption the wrong bytes. *)
+          state.code_history <- None;
+          state.code_history_error <- None;
+          state.code_history_open <- false;
+          state.code_history_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
+  | Code_history_loaded (path, result) ->
+      (* Keyed to the file still open: a listing that raced a file switch
+         describes bytes no longer on screen. *)
+      let still_current =
+        match state.code_file with
+        | Some (open_path, _) -> String.equal open_path path
+        | None -> false
+      in
+      if still_current then (
+        match result with
+        | Ok rows ->
+            state.code_history <- Some (path, rows);
+            state.code_history_error <- None;
+            state.code_history_scroll <- 0
+        | Error detail -> state.code_history_error <- Some detail)
   | Resources_listed result -> (
       match result with
       | Ok rows ->
@@ -4563,6 +4676,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error err ->
           state.schedule_cancel_armed <- None;
           state.schedule_cancel_error <- Some err)
+  | Verification_verdict_done result -> (
+      match result with
+      | Ok (message, noop) ->
+          state.verification_verdict_armed <- None;
+          state.verification_verdict_error <- None;
+          add_event state "system"
+            (if noop then
+               Printf.sprintf "Verification: %s (already recorded)" message
+             else "Verification: " ^ message);
+          (* The row shown still says awaiting until this lands; a judged row
+             that stays listed invites a second verdict. *)
+          launch_verification_load state ~mailbox
+      | Error err ->
+          state.verification_verdict_armed <- None;
+          state.verification_verdict_error <- Some err)
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
@@ -5454,6 +5582,46 @@ let main () =
           ~body_json:(Yojson.Safe.to_string json))
       ()
   in
+  (* Verification reject: the reason is required, and $EDITOR is the form we
+     already have. The editor is the confirmation step -- a non-zero exit or
+     an empty reason leaves the task unjudged, so no arming gate sits in
+     front of it the way one sits in front of the single-key approve. *)
+  let handle_verification_reject () =
+    match verification_cursor_row state with
+    | None -> ()
+    | Some row -> (
+        let task_id = row.Masc.Tui_decode.vr_task_id in
+        match Masc_tui_editor.editor_command () with
+        | None ->
+            add_event state "error"
+              "no $EDITOR set; export EDITOR to reject here"
+        | Some _ -> (
+            let stem = "{\n  \"reason\": \"\"\n}\n" in
+            match
+              Masc_tui_editor.roundtrip ~restore:restore_terminal
+                ~reenter:reenter_terminal stem
+            with
+            | None -> add_event state "system" "reject cancelled"
+            | Some body -> (
+                match Yojson.Safe.from_string body with
+                | exception Yojson.Json_error e ->
+                    add_event state "error" ("reject: body is not JSON: " ^ e)
+                | json ->
+                    let reason =
+                      match json with
+                      | `Assoc fields -> (
+                          match List.assoc_opt "reason" fields with
+                          | Some (`String s) -> String.trim s
+                          | Some _ | None -> "")
+                      | _ -> ""
+                    in
+                    if String.equal reason "" then
+                      add_event state "system" "reject cancelled (empty reason)"
+                    else
+                      start_verification_verdict state
+                        ~mailbox:async_messages ~task_id
+                        ~verdict:(`Reject reason))))
+  in
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> add_event state "error" "config not loaded yet; r to reload"
@@ -5675,6 +5843,8 @@ let main () =
        | Planning, Some _ -> state.goal_action_armed <- None
        | Schedules, Some ("x" | "X") -> ()
        | Schedules, Some _ -> state.schedule_cancel_armed <- None
+       | Verification, Some ("a" | "A") -> ()
+       | Verification, Some _ -> state.verification_verdict_armed <- None
        | _ -> ());
       (* The composer sees the key first, and takes it only when it has one to
          take: unfocused it claims a single key, and only with somewhere to
@@ -5985,6 +6155,27 @@ let main () =
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
            state.resource_focus <- not state.resource_focus
+       | Some "H" when state.view = Code && state.code_focus_file ->
+           (* History over the open file. The capital only: h stays free for
+              the horizontal scroll the file pane is due. Same key closes it;
+              a listing already fetched for this path is shown as it stands. *)
+           (match state.code_file with
+            | None -> ()
+            | Some (path, _) ->
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else begin
+                  state.code_history_open <- true;
+                  (match state.code_history with
+                   | Some (loaded_path, _)
+                     when String.equal loaded_path path ->
+                       ()
+                   | Some _ | None ->
+                       state.code_history <- None;
+                       state.code_history_error <- None;
+                       launch_code_history_load state
+                         ~mailbox:async_messages ~path)
+                end)
        | Some ("h" | "H")
          when state.view = Board
               && terminal_columns >= keeper_split_threshold_cols ->
@@ -6155,7 +6346,9 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_focus_file then state.code_focus_file <- false
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
                   (* Up one directory; "." from Filename.dirname means the
                      root, which this surface spells "". *)
@@ -6239,7 +6432,12 @@ let main () =
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
             | Resources -> state.resource_focus <- false
-            | Acting | Keepers Keeper_list | Lanes | Approvals -> ()
+            | Acting | Keepers Keeper_list | Lanes -> ()
+            | Approvals ->
+                (* Esc leaves the ask and returns to the list with the cursor
+                   where it was, the way the Changes diff does. *)
+                state.approval_detail_open <- false;
+                state.approval_detail_scroll <- 0
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the
@@ -6258,7 +6456,9 @@ let main () =
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_focus_file then state.code_focus_file <- false
+                if state.code_history_open then
+                  state.code_history_open <- false
+                else if state.code_focus_file then state.code_focus_file <- false
                 else if not (String.equal state.code_dir "") then begin
                   let parent = Filename.dirname state.code_dir in
                   state.code_dir <-
@@ -6320,13 +6520,22 @@ let main () =
            (match state.view with
             | Code ->
                 if state.code_focus_file then (
-                  match state.code_file with
-                  | Some (_, rows) ->
-                      state.code_file_scroll <-
-                        min
-                          (max 0 (List.length rows - 1))
-                          (state.code_file_scroll + 1)
-                  | None -> ())
+                  if state.code_history_open then (
+                    match state.code_history with
+                    | Some (_, rows) ->
+                        state.code_history_scroll <-
+                          min
+                            (max 0 (List.length rows - 1))
+                            (state.code_history_scroll + 1)
+                    | None -> ())
+                  else
+                    match state.code_file with
+                    | Some (_, rows) ->
+                        state.code_file_scroll <-
+                          min
+                            (max 0 (List.length rows - 1))
+                            (state.code_file_scroll + 1)
+                    | None -> ())
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_down
@@ -6349,6 +6558,8 @@ let main () =
                     state.log_scroll
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+            | Approvals when state.approval_detail_open ->
+                state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
                 let count = List.length (approval_items state) in
                 if state.approval_cursor < count - 1 then begin
@@ -6510,8 +6721,13 @@ let main () =
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file then
-                  state.code_file_scroll <- max 0 (state.code_file_scroll - 1)
+                if state.code_focus_file then (
+                  if state.code_history_open then
+                    state.code_history_scroll <-
+                      max 0 (state.code_history_scroll - 1)
+                  else
+                    state.code_file_scroll <-
+                      max 0 (state.code_file_scroll - 1))
                 else
                   state.code_cursor <-
                     Masc_tui_scroll.cursor_up
@@ -6536,6 +6752,9 @@ let main () =
             | Keepers Keeper_calls ->
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
+            | Approvals when state.approval_detail_open ->
+                state.approval_detail_scroll <-
+                  max 0 (state.approval_detail_scroll - 1)
             | Approvals ->
                 if state.approval_cursor > 0 then begin
                   state.pending_approval_action <- None;
@@ -6753,6 +6972,13 @@ let main () =
                           launch_github_identity_view state
                             ~mailbox:async_messages k.k_name)
                  | None -> ())
+            | Approvals ->
+                (* The list draws the ask on one row; this is where the whole
+                   thing is readable before [y] answers it. *)
+                if List.length (approval_items state) > 0 then begin
+                  state.approval_detail_open <- true;
+                  state.approval_detail_scroll <- 0
+                end
             | Board ->
                 (match state.board_mode with
                  | Board_list ->
@@ -6825,7 +7051,7 @@ let main () =
                         state.changes_tree_diff_path <- None))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Approvals | Verification | Harness
+            | Acting | Lanes | Verification | Harness
             | Repositories | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
@@ -7015,6 +7241,10 @@ let main () =
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
            handle_schedule_cancel_key state ~mailbox:async_messages
+       | Some "x" | Some "X" when state.view = Verification ->
+           (* Reject wants a reason, and $EDITOR is the form we already
+              have; the editor itself is the confirmation step. *)
+           handle_verification_reject ()
        | Some "l" | Some "L" ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
@@ -7149,9 +7379,13 @@ let main () =
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            | Verification ->
+                (* Two presses, like every irreversible action here: the
+                   first names the task, the second sends the approval. *)
+                handle_verification_approve_key state ~mailbox:async_messages
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Board | Approvals | Planning | Schedules | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 

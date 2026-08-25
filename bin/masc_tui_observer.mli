@@ -111,6 +111,17 @@ type event =
   | Keeper_turn_complete of keeper_turn_complete
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
+  | Keeper_chat_stream_frame of
+      { keeper : string; frame : string option; at : float }
+      (** One frame of a live chat stream ([keeper_chat_operation_event]).
+          [frame] is the AG-UI event's own [type], plus its [name] when it
+          carries one. A reply of any length sends one of these per token, so
+          the Acting filter treats them as noise the way it treats
+          heartbeats. *)
+  | Keeper_waiting_inventory_changed of
+      { keeper : string; queue_kind : string option; at : float }
+      (** The keeper's waiting queue changed. Names the keeper in
+          [keeper_name], not [name]. *)
   | Snapshot of string
       (** A whole-projection push ([execution_snapshot], [operator_snapshot],
           [project_snapshot]); the name is kept, the payload is not. *)

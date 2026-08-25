@@ -6270,11 +6270,66 @@ let render_code (state : state) =
                let scroll =
                  max 0 (min state.code_diff_scroll max_scroll)
                in
+               (* An add or context row is the working tree's own line, so
+                  the lexed row the pane already holds is its exact
+                  colouring -- resolved by the row's new-line number, not by
+                  matching text. A delete row is the old blob's content,
+                  which was never lexed; it keeps the plain red band. Each
+                  lexed segment's reset is followed by re-opening the diff
+                  background, so the band survives the lexer's own resets. *)
+               let lexed_line index =
+                 match state.code_file with
+                 | None -> None
+                 | Some (_, file_rows) -> List.nth_opt file_rows (index - 1)
+               in
                for i = 0 to content_height - 1 do
                  match List.nth_opt rows (scroll + i) with
                  | Some row ->
-                     box_line_span pane_buf pane_cols
-                       (tree_diff_row_span ~width:(pane_cols - 4) row)
+                     let open Masc.Tui_decode in
+                     let gutter =
+                       Printf.sprintf "  %s %s %s "
+                         (Diff.line_number_cell row.gdr_old_line)
+                         (Diff.line_number_cell row.gdr_new_line)
+                         (match row.gdr_kind with
+                          | Gd_removed -> "-"
+                          | Gd_added -> "+"
+                          | Gd_context -> " ")
+                     in
+                     let lexed =
+                       match row.gdr_kind, row.gdr_new_line with
+                       | (Gd_added | Gd_context), Some line ->
+                           lexed_line line
+                       | _ -> None
+                     in
+                     let body =
+                       match lexed with
+                       | Some segments -> (
+                           match row.gdr_kind with
+                           | Gd_added ->
+                               let bg = Theme.Syntax.diff_added_bg in
+                               bg
+                               ^ String.concat ""
+                                   (List.map
+                                      (fun segment ->
+                                        span segment ^ bg)
+                                      segments)
+                               ^ Ansi.reset
+                           | Gd_context | Gd_removed ->
+                               String.concat "" (List.map span segments))
+                       | None -> (
+                           let text =
+                             Terminal_text.single_line row.gdr_text
+                           in
+                           match row.gdr_kind with
+                           | Gd_removed ->
+                               Theme.Syntax.diff_removed_bg ^ text
+                               ^ Ansi.reset
+                           | Gd_added ->
+                               Theme.Syntax.diff_added_bg ^ text ^ Ansi.reset
+                           | Gd_context -> Ansi.dim ^ text ^ Ansi.reset)
+                     in
+                     box_line pane_buf pane_cols
+                       (Ansi.dim ^ gutter ^ Ansi.reset ^ body)
                  | None -> box_empty pane_buf pane_cols
                done)
      else if history_showing then

@@ -5390,8 +5390,11 @@ def code_lane_fixtures() -> HttpFixtures:
             "unified": [
                 {"kind": "delete", "oldLine": 1, "newLine": None,
                  "text": "let a = 1"},
+                # The added row is the working tree's line 1, so its text
+                # agrees with the file fixture -- the renderer now resolves
+                # it back to the lexed row by that number.
                 {"kind": "add", "oldLine": None, "newLine": 1,
-                 "text": "let a = 2"},
+                 "text": "let x = 1"},
             ],
         },
     )
@@ -5452,13 +5455,23 @@ def code_lane_interaction(
     send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
-    diff_frame = send_and_wait(process, master_fd, output, b"d", b"let a = 2")
+    # The added row now arrives lexed, so the wait needle is the keyword
+    # span rather than the plain text the styles split apart.
+    diff_frame = send_and_wait(
+        process, master_fd, output, b"d", b"\x1b[33mlet\x1b[0m"
+    )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1"):
+    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
             )
+    # The added row is the working tree's own line, so it carries the
+    # lexer's colours (the keyword span) inside the diff band.
+    if b"\x1b[33mlet\x1b[0m" not in diff_frame:
+        raise AssertionError(
+            f"the added diff row lost the lexer's colours: {diff_frame!r}"
+        )
     send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).

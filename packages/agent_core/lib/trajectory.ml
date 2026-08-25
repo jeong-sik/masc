@@ -264,6 +264,7 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
                  ; p_pending_tools = StringMap.remove tool_use_id st.p_pending_tools
                  }
                | None -> record_unmatched_finish ()))
+         | Native_tool_started | Native_tool_finished -> st
          | Run_finished ->
            let p_success, p_error_msg =
              match r.error with

@@ -43,6 +43,7 @@ let record ?input_components ~trace ~turn () : Turn_record.t =
       ; output_tokens = Some 200
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = Some 500
+      ; scope = Runtime_usage_scope.Per_request
       }
   ; ts = 1_787_600_000.
   }

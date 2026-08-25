@@ -20,6 +20,15 @@ val plan_execute_input_schema : Yojson.Safe.t
     [Keeper_tool_descriptor.Batch_plan_tool]. *)
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
+val schema_tools :
+  ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
+  unit ->
+  Agent_core.Tool.t list
+(** Handler-free materialization of the exact model-visible composition tool
+    schemas.  Names, descriptions, and input schemas are shared with
+    {!make_tools}; callers use this to project and hash the effective surface
+    without constructing turn sandboxes or executable handlers. *)
+
 val make_tools
   :  ?instruction_skills:(string * string * string) list
        (** Instruction skills this keeper carries, as (name, description,

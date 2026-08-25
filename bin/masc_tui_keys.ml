@@ -237,7 +237,11 @@ let for_surface = function
                  keeper edits, newest first (H or Esc closes)"
       ]
       @ listing_meta
-  | Tools -> b Navigate "j/k" "scroll" :: listing_meta
+  | Tools ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ]
+      @ listing_meta
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)

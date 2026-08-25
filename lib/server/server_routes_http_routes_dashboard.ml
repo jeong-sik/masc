@@ -242,6 +242,7 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     match protocol.credential_policy with
     | Runtime_toml.Credentials_optional -> "optional"
     | Runtime_toml.Credentials_forbidden -> "forbidden"
+    | Runtime_toml.Credentials_file_required -> "file_required"
   in
   `Assoc
     [ "protocol", `String protocol.protocol
@@ -249,6 +250,9 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     ; "semantics", `String semantics
     ; "credential_policy", `String credential_policy
     ; "requires_non_interactive", `Bool protocol.requires_non_interactive
+    ; "provider_fields", Json_util.json_string_list protocol.provider_fields
+    ; ( "required_provider_fields"
+      , Json_util.json_string_list protocol.required_provider_fields )
     ]
 ;;
 
@@ -1725,16 +1729,12 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
            let timing = Server_timing.create () in
            (* RFC-0138 Phase 3 Step 2: wait-free read via
-              [Dashboard_snapshot.current ()] when an actor filter is
-              not requested.  Per-actor variant continues through
-              [dashboard_tools_http_json] until the snapshot type
-              grows an [Actor_filter] arm. *)
+              [Dashboard_snapshot.current ()] for the global catalog. An exact
+              Keeper selector computes the effective surface beside it. *)
            let json =
              Server_dashboard_snapshot_select.select_tools_json
                ~timing
-               ?actor:
-                 (dashboard_actor_for_request
-                    ~base_path:(Mcp_server.workspace_config state).base_path request)
+               ?keeper:(Server_utils.query_param request "keeper")
                (Mcp_server.workspace_config state)
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd

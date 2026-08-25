@@ -267,6 +267,10 @@ let finalize
       ; final_agent_core_turn_ordinal
       ; usage
       ; usage_reported = Option.is_some result.response.usage
+      ; usage_scope =
+          (match result.runtime_observation with
+           | Some observation -> observation.usage_scope
+           | None -> Runtime_usage_scope.Usage_scope_unavailable)
       ; tool_calls = List.rev acc.tool_calls
       ; completion_contract_result
       ; operator_disposition = None

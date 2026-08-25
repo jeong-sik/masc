@@ -50,7 +50,7 @@ let select_shell_json
         ?clock ?request ~timing:timing_obj ~light config)
 ;;
 let select_tools_json
-      ?actor ?timing (config : Workspace.config)
+      ?keeper ?timing (config : Workspace.config)
   : Yojson.Safe.t
   =
   let timing_obj =
@@ -58,7 +58,7 @@ let select_tools_json
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match actor, Dashboard_snapshot.current () with
+  match keeper, Dashboard_snapshot.current () with
   | None, Some snap ->
     Server_timing.measure
       timing_obj
@@ -66,7 +66,7 @@ let select_tools_json
       (fun () -> snap.tools)
   | _ ->
     Server_dashboard_http_runtime_info.dashboard_tools_http_json
-      ?actor ~timing:timing_obj config
+      ?keeper ~timing:timing_obj config
 ;;
 
 let select_telemetry_summary_json

@@ -9,6 +9,7 @@
   masc_error
   ids
   prompt_block_id
+  runtime_usage_scope
   turn_record
   health_status
   types_core

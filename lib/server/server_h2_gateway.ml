@@ -939,15 +939,12 @@ let h2_request_handler _client_addr h2_reqd =
 
       (* The tool inventory had no H2 route at all: an H2 client got 404 where
          an HTTP/1 client got the inventory. Same selector as the HTTP/1 route,
-         so the snapshot fast path and the per-actor fallback both apply. *)
+         so the snapshot fast path and exact Keeper projection both apply. *)
       | `GET, "/api/v1/dashboard/tools" ->
           with_h2_public_read h2_reqd (fun state ->
             let json =
               Server_dashboard_snapshot_select.select_tools_json
-                ?actor:
-                  (dashboard_actor_for_request
-                     ~base_path:(Mcp_server.workspace_config state).base_path
-                     httpun_request)
+                ?keeper:(Server_utils.query_param httpun_request "keeper")
                 (Mcp_server.workspace_config state)
             in
             h2_respond_json_value h2_reqd json ~extra_headers:cors)

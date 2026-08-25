@@ -184,11 +184,38 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
+type effective_tool = {
+  et_name : string;
+  et_origin : string;
+  et_group : string option;
+  et_skill_source : string option;
+}
+
+type effective_tool_surface =
+  | Effective_surface_available of {
+      ets_keeper_name : string;
+      ets_runtime_id : string;
+      ets_official_client_kind : string;
+      ets_native_posture : string option;
+      ets_tool_groups : string list;
+      ets_instruction_skills : string list;
+      ets_composition_skills : string list;
+      ets_tools : effective_tool list;
+      ets_tool_surface_sha256 : string option;
+    }
+  | Effective_surface_unavailable of {
+      ets_keeper_name : string;
+      ets_reason : string;
+      ets_detail : string;
+    }
+  | Effective_surface_warming of { ets_keeper_name : string }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
+  ts_effective : effective_tool_surface option;
 }
 
 (** A connector the gate can deliver through. *)
@@ -770,6 +797,18 @@ type context_unavailable_reason =
   | Context_turn_record_read_failed
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
+  | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_usage_scope_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_tokens_exceed_window of
+      { raw_input_tokens : int
+      ; context_window : int
+      }
 
 type context_observation =
   | Context_observed of {

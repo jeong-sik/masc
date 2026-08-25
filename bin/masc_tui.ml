@@ -1501,9 +1501,12 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 let launch_tools_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
+  let keeper =
+    Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
+  in
   let run () =
     let result =
-      try Masc_tui_loader.load_tools ~host ~port with
+      try Masc_tui_loader.load_tools ~host ~port ?keeper () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -1515,6 +1518,18 @@ let launch_tools_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
+
+let cycle_tools_keeper state ~mailbox ~delta =
+  let count = List.length state.keepers in
+  if count > 0 then begin
+    let next = (state.keeper_cursor + delta + count) mod count in
+    state.keeper_cursor <- next;
+    state.tools_inventory <- None;
+    state.tools_error <- None;
+    state.tools_scroll <- 0;
+    launch_tools_load state ~mailbox
+  end
+;;
 
 let launch_schedules_load state ~mailbox =
   let host = server_peer_host in
@@ -3839,6 +3854,15 @@ let apply_http_surfaces state results =
      replacement still moves A -> B as soon as /health succeeds. *)
   state.server_identity <-
     Masc_tui_types.server_identity_of_refresh results.http_server_identity;
+  state.workspace_identity <-
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:state.local_base_path
+      results.http_server_identity;
+  (match state.workspace_identity with
+   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
+   | Masc_tui_types.Workspace_identity_match ->
+     load_from_masc_dir state state.local_base_path
+   | Masc_tui_types.Workspace_identity_unread -> ());
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -3856,6 +3880,29 @@ let apply_http_surfaces state results =
             (fun observation -> reached observation.ao_result)
             results.http_approvals
           |> Option.to_list))
+
+let load_local_workspace_if_safe state base_path =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match -> load_from_masc_dir state base_path
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
+let load_live_context_if_safe state base_path keeper =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+    load_live_context state base_path keeper
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
+let load_keeper_logs_if_safe state base_path limit keeper =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+    load_selected_keeper_logs state base_path limit keeper
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -4238,7 +4285,7 @@ let apply_keeper_action_result state ~base_path keeper_name action result =
      disk, the fiber is in the roster. Reloading the local half here shows the
      change without waiting a refresh interval; the roster arrives with the
      HTTP refresh the caller starts. *)
-  load_from_masc_dir state base_path
+  load_local_workspace_if_safe state base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let serial = state.keeper_action_serial + 1 in
@@ -4659,6 +4706,9 @@ let handle_keeper_action state ~base_path ~mailbox action =
    chat surface the [c] key opens, so a message typed on the roster and one
    typed in the chat view take the identical dispatch path. *)
 let handle_composer_key state ~base_path ~mailbox key =
+  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  then false
+  else
   let composer = Composer_projection.of_state state in
   match Composer.classify_key composer key with
   | Composer.Pass_to_surface -> false
@@ -4736,6 +4786,9 @@ let spill_nonce () =
   String.sub (Random_id.uuid_v7 ()) 0 8
 
 let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
+  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  then ()
+  else
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
     ignore
@@ -5332,7 +5385,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (fun () ->
             apply_keeper_chat_result state request result)
       in
-      if applied then load_from_masc_dir state base_path;
+      if applied then load_local_workspace_if_safe state base_path;
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
       drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
@@ -5945,7 +5998,8 @@ let main () =
   redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   let state =
-    create_state ~reasoning_visibility ~tool_visibility ~workspace ~port
+    create_state ~reasoning_visibility ~tool_visibility ~workspace
+      ~local_base_path:base_path ~port
       ~refresh_interval:refresh ()
   in
   state.view <- Overview;
@@ -6064,7 +6118,8 @@ let main () =
   flush stdout;
 
   (* Initial load *)
-  load_from_masc_dir state base_path;
+  (* Local workspace state is loaded only after /health proves that this TUI
+     and the server resolve the same canonical base path. *)
   let host = server_peer_host in
   let port = state.port in
   let http_refresh_inflight = ref false in
@@ -6632,6 +6687,12 @@ let main () =
              add_event state "system"
                "q: press again to quit, or any other key to stay"
            end
+       | Some k
+         when not
+                (Masc_tui_types.workspace_identity_allows_surface_key
+                   state.workspace_identity
+                   k) ->
+           ()
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
           screens worth copying from. *)
@@ -6934,6 +6995,10 @@ let main () =
        | Some (("[" | "]") as bracket)
          when state.view = Changes && not compact_viewport ->
            cycle_changes_keeper state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
+       | Some (("[" | "]") as bracket)
+         when state.view = Tools && not compact_viewport ->
+           cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail
@@ -7297,7 +7362,7 @@ let main () =
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
-           load_from_masc_dir state base_path;
+           load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
            start_http_refresh state ~host ~port
@@ -7307,7 +7372,7 @@ let main () =
            (match state.view with
             | Code -> launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
-                load_selected_keeper_logs state base_path 200
+                load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
             | Keepers Keeper_calls ->
                 (match selected_keeper state with
@@ -7610,7 +7675,7 @@ let main () =
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k
+                   | Some k -> load_live_context_if_safe state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
@@ -7832,7 +7897,7 @@ let main () =
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k
+                   | Some k -> load_live_context_if_safe state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
@@ -8135,8 +8200,8 @@ let main () =
                  | Some k ->
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
-                     load_live_context state base_path k;
-                     load_selected_keeper_logs state base_path 200 (Some k);
+                     load_live_context_if_safe state base_path k;
+                     load_keeper_logs_if_safe state base_path 200 (Some k);
                      (* A sticky non-Info tab re-reads for the keeper the
                         cursor now names; without this the pane shows
                         "(loading)" forever after a cursor move, because the
@@ -8518,7 +8583,7 @@ let main () =
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) ->
                 let keeper = selected_keeper state in
-                load_selected_keeper_logs state base_path 200 keeper;
+                load_keeper_logs_if_safe state base_path 200 keeper;
                 (match keeper with
                  | Some _ ->
                      state.log_scroll <-
@@ -8700,7 +8765,7 @@ let main () =
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        load_from_masc_dir state base_path;
+        load_local_workspace_if_safe state base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
@@ -8714,7 +8779,7 @@ let main () =
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
-             load_selected_keeper_logs state base_path 200
+             load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)
          | Keepers Keeper_calls ->
              (match selected_keeper state with

@@ -134,6 +134,8 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -678,18 +680,35 @@ let parse_rate_limit ~expected_session_id fields =
       }
 ;;
 
-let text_blocks ~stage content =
+type assistant_block =
+  | Assistant_text of string
+  | Assistant_native_tool of Runtime_native_tools.observation
+
+let non_blank = function
+  | Some value when String.trim value <> "" -> Some value
+  | Some _ | None -> None
+;;
+
+let assistant_blocks ~stage content =
   match content with
   | `List blocks ->
-    let rec loop texts = function
-      | [] -> Ok (List.rev texts)
+    let rec loop parsed = function
+      | [] -> Ok (List.rev parsed)
       | `Assoc fields :: rest ->
         let* type_ = required_string stage "type" fields in
         (match type_ with
          | "text" ->
            let* text = required_string stage "text" fields in
-           loop (text :: texts) rest
-         | "thinking" | "tool_use" -> loop texts rest
+           loop (Assistant_text text :: parsed) rest
+         | "tool_use" ->
+           let* call_id = optional_string stage "id" fields in
+           let* tool_name = optional_string stage "name" fields in
+           loop
+             (Assistant_native_tool
+                { call_id = non_blank call_id; tool_name = non_blank tool_name }
+              :: parsed)
+             rest
+         | "thinking" -> loop parsed rest
          | other ->
            protocol_error
              stage
@@ -711,8 +730,39 @@ let parse_assistant ~expected_session_id fields =
     let* message_fields = assoc_at stage message in
     let* model = required_string stage "model" message_fields in
     let* content = required_member stage "content" message_fields in
-    let* texts = text_blocks ~stage content in
-    Ok (uuid, model, texts)
+    let* blocks = assistant_blocks ~stage content in
+    Ok (uuid, model, blocks)
+;;
+
+let native_tool_result_ids ~expected_session_id fields =
+  let stage = "user message" in
+  let* session_id = optional_string stage "session_id" fields in
+  let* () =
+    match non_blank session_id with
+    | Some session_id when session_id <> expected_session_id ->
+      protocol_error stage "session_id does not match the active Claude session"
+    | Some _ | None -> Ok ()
+  in
+  match List.assoc_opt "message" fields with
+  | Some (`Assoc message_fields) ->
+    (match List.assoc_opt "content" message_fields with
+     | Some (`List blocks) ->
+       let rec loop ids = function
+         | [] -> Ok (List.rev ids)
+         | `Assoc block_fields :: rest ->
+           (match List.assoc_opt "type" block_fields with
+            | Some (`String "tool_result") ->
+              let* call_id = optional_string stage "tool_use_id" block_fields in
+              loop (Option.to_list (non_blank call_id) @ ids) rest
+            | Some (`String _) | None -> loop ids rest
+            | Some _ -> protocol_error stage "content block type must be a string")
+         | _ :: _ -> protocol_error stage "user content block must be an object"
+       in
+       loop [] blocks
+     | Some `Null | None -> Ok []
+     | Some _ -> protocol_error stage "user content must be an array")
+  | Some `Null | None -> Ok []
+  | Some _ -> protocol_error stage "user message must be an object"
 ;;
 
 let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
@@ -853,7 +903,8 @@ let max_ignored_messages = 256
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
-    ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored =
+    ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
+    ~response_emitted ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -871,31 +922,42 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
-      ~on_stream_event ~stream_started ~response_emitted
+      ~native_tool_calls ~on_stream_event ~stream_started ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
-    let* uuid, model, texts = parse_assistant ~expected_session_id fields in
+    let* uuid, model, blocks = parse_assistant ~expected_session_id fields in
     if not !stream_started
     then (
       stream_started := true;
       emit_stream_event on_stream_event (Turn_started { turn_id = uuid; model }));
-    if List.exists (fun text -> String.length text > 0) texts
-    then response_emitted := true;
+    let texts_rev = ref [] in
     List.iter
-      (fun text -> emit_stream_event on_stream_event (Text_delta text))
-      texts;
+      (function
+        | Assistant_text text ->
+          texts_rev := text :: !texts_rev;
+          emit_stream_event on_stream_event (Text_delta text)
+        | Assistant_native_tool observation ->
+          Option.iter
+            (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
+            observation.call_id;
+          emit_stream_event on_stream_event (Native_tool_started observation))
+      blocks;
+    let texts = List.rev !texts_rev in
+    if List.exists (fun text -> String.length text > 0) texts then response_emitted := true;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
-      ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored
+      ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
+      ~response_emitted ~ignored
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
-      ~on_turn_started ~on_stream_event ~stream_started ~response_emitted ~ignored
+      ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
+      ~response_emitted ~ignored
   | "result" ->
     let parsed_result =
       parse_result
@@ -950,11 +1012,25 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       ; resumed
       ; usage
       }
-  | ("system" | "user") when ignored < max_ignored_messages ->
+  | "user" when ignored < max_ignored_messages ->
+    let* finished_ids = native_tool_result_ids ~expected_session_id fields in
+    List.iter
+      (fun call_id ->
+         match Hashtbl.find_opt native_tool_calls call_id with
+         | None -> ()
+         | Some observation ->
+           Hashtbl.remove native_tool_calls call_id;
+           emit_stream_event on_stream_event (Native_tool_finished observation))
+      finished_ids;
+    await_terminal
+      io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
+      ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls ~on_turn_started
+      ~on_stream_event ~stream_started ~response_emitted ~ignored:(ignored + 1)
+  | "system" when ignored < max_ignored_messages ->
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~on_stream_event ~stream_started ~response_emitted
+      ~native_tool_calls ~on_stream_event ~stream_started ~response_emitted
       ~ignored:(ignored + 1)
   | other ->
     protocol_error
@@ -1147,6 +1223,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~rate_limit:None
     ~assistant_model:None
     ~assistant_texts:[]
+    ~native_tool_calls:(Hashtbl.create 8)
     ~on_turn_started
     ~on_stream_event
     ~stream_started:(ref false)

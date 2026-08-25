@@ -39,6 +39,7 @@ type run_result =
   ; final_agent_core_turn_ordinal : int
   ; usage : Agent_core.Types.api_usage
   ; usage_reported : bool
+  ; usage_scope : Runtime_usage_scope.t
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; operator_disposition : operator_disposition option

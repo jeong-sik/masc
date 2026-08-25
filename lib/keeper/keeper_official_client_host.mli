@@ -69,6 +69,8 @@ type raw_trace_stage =
   | Assistant_block
   | Tool_start
   | Tool_finish
+  | Native_tool_start
+  | Native_tool_finish
   | Run_finish
 
 val observe_raw_trace
@@ -104,6 +106,15 @@ val finish_raw_success
 (** Complete one official-client RAW run. Observation failure cannot replace
     the authoritative runtime result; a trace reference is returned only when
     every assistant block and the terminal record were persisted. *)
+
+val record_raw_native_tool
+  :  keeper_name:string
+  -> raw_trace_run:Agent_core.Raw_trace.active_run option
+  -> phase:[ `Started | `Finished ]
+  -> Runtime_native_tools.observation
+  -> unit
+(** Best-effort durable observation of an official client's built-in tool.
+    It is deliberately separate from MASC tool execution and approval rows. *)
 
 val resolve_reasoning_effort :
   enable_thinking:bool option ->

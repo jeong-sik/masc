@@ -233,6 +233,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
     max_context_override =
       (if p.max_context_override_present then p.max_context_override_opt
        else old.max_context_override);
+    tool_groups =
+      (if p.tool_groups_present then p.tool_groups_opt else old.tool_groups);
     updated_at = now_iso ();
   } in
   match
@@ -322,6 +324,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                         updated.telemetry_feedback_window_hours
                     ; always_allow = updated.always_allow
                     ; agent_core_env = updated.agent_core_env
+                    ; tool_groups = updated.tool_groups
                     ; updated_at = updated.updated_at
                     })
              with

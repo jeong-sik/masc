@@ -59,6 +59,9 @@ export interface NewRuntimeProviderInput {
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
   isNonInteractive: boolean
+  agent: string
+  effort: string
+  timeoutS: number | null
 }
 
 export interface NewRuntimeModelInput {
@@ -103,6 +106,11 @@ interface RuntimeEnvironmentEditorProps {
     credentialType: RuntimeTomlCredentialType,
     value: string,
   ) => void
+  onProviderOptionChange: (
+    providerId: string,
+    field: 'agent' | 'effort' | 'timeout-s',
+    value: string | number | null,
+  ) => void
 }
 
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
@@ -130,6 +138,9 @@ interface NewProviderDraft {
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
   isNonInteractive: boolean
+  agent: string
+  effort: string
+  timeoutS: string
 }
 
 function newProviderDraft(protocol: RuntimeTomlEditorProtocol): NewProviderDraft {
@@ -139,9 +150,14 @@ function newProviderDraft(protocol: RuntimeTomlEditorProtocol): NewProviderDraft
     protocol: protocol.protocol,
     transportKind: protocol.transport,
     transportValue: '',
-    credentialType: protocol.credential_policy === 'forbidden' ? 'none' : 'env',
+    credentialType: protocol.credential_policy === 'forbidden'
+      ? 'none'
+      : protocol.credential_policy === 'file_required' ? 'file' : 'env',
     credentialValue: '',
     isNonInteractive: protocol.requires_non_interactive,
+    agent: '',
+    effort: '',
+    timeoutS: '',
   }
 }
 
@@ -290,6 +306,7 @@ export function RuntimeEnvironmentEditor({
   onProviderTransportChange,
   onProviderEnabledChange,
   onProviderCredentialChange,
+  onProviderOptionChange,
 }: RuntimeEnvironmentEditorProps) {
   const defaultProviderProtocol = providerProtocols[0]
   if (!defaultProviderProtocol) {
@@ -395,6 +412,7 @@ export function RuntimeEnvironmentEditor({
       newProvider.transportKind !== protocol.transport
       || newProvider.isNonInteractive !== protocol.requires_non_interactive
       || (protocol.credential_policy === 'forbidden' && newProvider.credentialType !== 'none')
+      || (protocol.credential_policy === 'file_required' && newProvider.credentialType !== 'file')
     ) {
       setProviderFormError('provider 설정이 백엔드 runtime protocol 계약과 일치하지 않습니다')
       return
@@ -404,12 +422,38 @@ export function RuntimeEnvironmentEditor({
       setProviderFormError('credential 값을 입력하거나 credential 타입을 "없음"으로 두세요')
       return
     }
+    if (
+      protocol.credential_policy === 'file_required'
+      && !trimmedCredentialValue.startsWith('/')
+    ) {
+      setProviderFormError('file credential은 절대 경로여야 합니다')
+      return
+    }
+    const agent = newProvider.agent.trim()
+    const effort = newProvider.effort.trim()
+    const timeoutRaw = newProvider.timeoutS.trim()
+    if (protocol.required_provider_fields.includes('timeout-s') && timeoutRaw === '') {
+      setProviderFormError('timeout-s를 입력하세요')
+      return
+    }
+    const timeoutS = timeoutRaw === '' ? null : Number(timeoutRaw)
+    if (timeoutS !== null && (!Number.isFinite(timeoutS) || timeoutS <= 0)) {
+      setProviderFormError('timeout-s는 양의 숫자여야 합니다')
+      return
+    }
+    if (effort !== '' && !['low', 'medium', 'high'].includes(effort)) {
+      setProviderFormError('effort는 low, medium, high 중 하나여야 합니다')
+      return
+    }
     onAddProvider({
       ...newProvider,
       id,
       displayName: newProvider.displayName.trim(),
       transportValue,
       credentialValue: trimmedCredentialValue,
+      agent,
+      effort,
+      timeoutS,
     })
     setNewProvider(defaultProviderDraft)
     setProviderFormError(null)
@@ -636,9 +680,10 @@ export function RuntimeEnvironmentEditor({
           ` : null}
           ${environment.providers.map(provider => {
             const providerTransportField = transportField(provider)
-            const officialClient = providerProtocols.find(
+            const editorProtocol = providerProtocols.find(
               protocol => protocol.protocol === provider.protocol,
-            )?.semantics === 'official_client'
+            )
+            const officialClient = editorProtocol?.semantics === 'official_client'
             return html`
             <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
@@ -714,12 +759,72 @@ export function RuntimeEnvironmentEditor({
                   </span>
                   `}
               </div>
+              ${editorProtocol?.provider_fields.includes('agent') ? html`
+                <div class="rt-field">
+                  <span class="sub-k">agent</span>
+                  <input
+                    class="rt-input mono"
+                    value=${provider.agent}
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} Antigravity agent`}
+                    onInput=${(event: Event) => onProviderOptionChange(
+                      provider.id,
+                      'agent',
+                      (event.currentTarget as HTMLInputElement).value,
+                    )}
+                  />
+                </div>
+              ` : null}
+              ${editorProtocol?.provider_fields.includes('effort') ? html`
+                <div class="rt-field">
+                  <span class="sub-k">effort</span>
+                  <select
+                    class="rt-select rt-select-narrow"
+                    value=${provider.effort}
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} Antigravity effort`}
+                    onChange=${(event: Event) => onProviderOptionChange(
+                      provider.id,
+                      'effort',
+                      (event.currentTarget as HTMLSelectElement).value,
+                    )}
+                  >
+                    <option value="">unset</option>
+                    <option value="low">low</option>
+                    <option value="medium">medium</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+              ` : null}
+              ${editorProtocol?.provider_fields.includes('timeout-s') ? html`
+                <div class="rt-field">
+                  <span class="sub-k">timeout-s</span>
+                  <input
+                    class="rt-input mono"
+                    type="number"
+                    min="0.001"
+                    step="0.001"
+                    value=${provider.timeoutS ?? ''}
+                    disabled=${isDisabled}
+                    aria-label=${`${provider.id} Antigravity timeout-s`}
+                    onInput=${(event: Event) => {
+                      const raw = (event.currentTarget as HTMLInputElement).value
+                      onProviderOptionChange(
+                        provider.id,
+                        'timeout-s',
+                        raw === '' ? null : Number(raw),
+                      )
+                    }}
+                  />
+                </div>
+              ` : null}
               ${officialClient ? html`
                 <div class="rt-field" data-testid=${`runtime-provider-${provider.id}-subscription-boundary`}>
                   <span class="sub-k">execution</span>
                   <span class="mono">official client · ${provider.isNonInteractive ? 'non-interactive' : '설정 오류: interactive'}</span>
                 </div>
-                ${provider.credentialType !== 'none' ? html`
+                ${editorProtocol?.credential_policy === 'forbidden'
+                    && provider.credentialType !== 'none' ? html`
                   <div class="rt-warn" role="alert">공식 구독 클라이언트에는 API credential을 선언할 수 없습니다.</div>
                 ` : null}
               ` : null}
@@ -800,9 +905,11 @@ export function RuntimeEnvironmentEditor({
                   />
                 </div>
                 <div class="rt-note">
-                  ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.semantics === 'official_client'
-                    ? '구독 로그인 사용 · API key 미저장 · non-interactive 강제'
-                    : '일반 provider는 endpoint transport를 사용합니다.'}
+                  ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.credential_policy === 'file_required'
+                    ? 'operator-owned OAuth file · non-interactive 강제'
+                    : providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.semantics === 'official_client'
+                      ? '구독 로그인 사용 · API key 미저장 · non-interactive 강제'
+                      : '일반 provider는 endpoint transport를 사용합니다.'}
                 </div>
                 <div class="rt-field">
                   <span class="sub-k">credential</span>
@@ -811,7 +918,7 @@ export function RuntimeEnvironmentEditor({
                     value=${newProvider.credentialType}
                     disabled=${isDisabled || providerProtocols.find(
                       protocol => protocol.protocol === newProvider.protocol,
-                    )?.credential_policy === 'forbidden'}
+                    )?.credential_policy !== 'optional'}
                     aria-label="새 provider credential 종류"
                     onChange=${(event: Event) => setNewProvider({ ...newProvider, credentialType: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlCredentialType })}
                   >
@@ -832,6 +939,50 @@ export function RuntimeEnvironmentEditor({
                     />
                   ` : null}
                 </div>
+                ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.provider_fields.includes('agent') ? html`
+                  <div class="rt-field">
+                    <span class="sub-k">agent</span>
+                    <input
+                      class="rt-input mono"
+                      value=${newProvider.agent}
+                      disabled=${isDisabled}
+                      aria-label="새 Antigravity agent"
+                      onInput=${(event: Event) => setNewProvider({ ...newProvider, agent: (event.currentTarget as HTMLInputElement).value })}
+                    />
+                  </div>
+                ` : null}
+                ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.provider_fields.includes('effort') ? html`
+                  <div class="rt-field">
+                    <span class="sub-k">effort</span>
+                    <select
+                      class="rt-select rt-select-narrow"
+                      value=${newProvider.effort}
+                      disabled=${isDisabled}
+                      aria-label="새 Antigravity effort"
+                      onChange=${(event: Event) => setNewProvider({ ...newProvider, effort: (event.currentTarget as HTMLSelectElement).value })}
+                    >
+                      <option value="">unset</option>
+                      <option value="low">low</option>
+                      <option value="medium">medium</option>
+                      <option value="high">high</option>
+                    </select>
+                  </div>
+                ` : null}
+                ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.provider_fields.includes('timeout-s') ? html`
+                  <div class="rt-field">
+                    <span class="sub-k">timeout-s</span>
+                    <input
+                      class="rt-input mono"
+                      type="number"
+                      min="0.001"
+                      step="0.001"
+                      value=${newProvider.timeoutS}
+                      disabled=${isDisabled}
+                      aria-label="새 Antigravity timeout-s"
+                      onInput=${(event: Event) => setNewProvider({ ...newProvider, timeoutS: (event.currentTarget as HTMLInputElement).value })}
+                    />
+                  </div>
+                ` : null}
                 ${providerFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-provider-error">${providerFormError}</div>` : null}
                 <div class="rt-add-actions">
                   <button

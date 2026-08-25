@@ -143,6 +143,7 @@ let write_turn_record config ~absolute_turn ~turn_kind ~raw_trace_run_ref =
       ; output_tokens = None
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Usage_scope_unavailable
       }
     ~execution_ids:[]
     ~blocks:[]

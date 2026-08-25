@@ -112,6 +112,8 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -546,6 +548,30 @@ let agent_message_of_item ~stage item =
   | None -> protocol_error stage "item is missing type"
 ;;
 
+let native_tool_observation_of_item ~stage item =
+  let* fields = assoc_at stage item in
+  match List.assoc_opt "type" fields with
+  | Some (`String (("commandExecution" | "fileChange") as tool_name)) ->
+    let* call_id = required_string stage "id" fields in
+    Ok
+      (Some
+         { Runtime_native_tools.call_id = Some call_id
+         ; tool_name = Some tool_name
+         })
+  | Some (`String _) -> Ok None
+  | Some _ -> protocol_error stage "item type must be a string"
+  | None -> protocol_error stage "item is missing type"
+;;
+
+let active_turn_item ~stage ~thread_id ~turn_id params =
+  let* fields = assoc_at stage params in
+  let* item_thread_id = required_string stage "threadId" fields in
+  let* item_turn_id = required_string stage "turnId" fields in
+  if item_thread_id <> thread_id || item_turn_id <> turn_id
+  then protocol_error stage "item identity does not match the active turn"
+  else required_member stage "item" fields
+;;
+
 let messages_of_items ~stage = function
   | `List items ->
     let rec loop final fallback = function
@@ -732,15 +758,25 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~seen_final
       ~seen_fallback
       ~on_stream_event
+  | Notification { method_ = "item/started"; params } ->
+    let stage = "item/started" in
+    let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* observation = native_tool_observation_of_item ~stage item in
+    Option.iter
+      (fun observation ->
+         emit_stream_event on_stream_event (Native_tool_started observation))
+      observation;
+    await_turn_terminal
+      io ~tools ~tool_call_count ~thread_id ~turn_id ~seen_final ~seen_fallback
+      ~on_stream_event
   | Notification { method_ = "item/completed"; params } ->
     let stage = "item/completed" in
-    let* fields = assoc_at stage params in
-    let* item_thread_id = required_string stage "threadId" fields in
-    let* item_turn_id = required_string stage "turnId" fields in
-    if item_thread_id <> thread_id || item_turn_id <> turn_id
-    then protocol_error stage "item identity does not match the active turn"
-    else
-      let* item = required_member stage "item" fields in
+    let* item = active_turn_item ~stage ~thread_id ~turn_id params in
+    let* observation = native_tool_observation_of_item ~stage item in
+    Option.iter
+      (fun observation ->
+         emit_stream_event on_stream_event (Native_tool_finished observation))
+      observation;
       let* message = agent_message_of_item ~stage item in
       let seen_final, seen_fallback =
         match message with
@@ -748,15 +784,15 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
         | Some (_, text) -> seen_final, Some text
         | None -> seen_final, seen_fallback
       in
-      await_turn_terminal
-        io
-        ~tools
-        ~tool_call_count
-        ~thread_id
-        ~turn_id
-        ~seen_final
-        ~seen_fallback
-        ~on_stream_event
+    await_turn_terminal
+      io
+      ~tools
+      ~tool_call_count
+      ~thread_id
+      ~turn_id
+      ~seen_final
+      ~seen_fallback
+      ~on_stream_event
   | Notification { method_ = "error"; params } ->
     (* willRetry:true is a progress signal — the app-server itself is retrying
        upstream, so the turn is alive. Counting these and failing the turn at a

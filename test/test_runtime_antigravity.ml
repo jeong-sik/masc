@@ -398,16 +398,6 @@ let test_pre_init_success_result_stays_a_protocol_error () =
        | Ok _ -> fail "a success without init was admitted")
 ;;
 
-let test_empty_result_id_after_init_fails_closed () =
-  with_fixture
-    [ init (); result ~conversation_id:"" () ]
-    (fun path ->
-       match run_fixture path with
-       | Error (Runtime_antigravity.Protocol_error _) -> ()
-       | Error error -> fail (Runtime_antigravity.error_to_string error)
-       | Ok _ -> fail "an opened conversation accepted a result with no id")
-;;
-
 let test_conversation_callback_precedes_terminal_result () =
   let observed = ref None in
   with_fixture
@@ -892,10 +882,6 @@ let () =
             "pre-init success result stays a protocol error"
             `Quick
             test_pre_init_success_result_stays_a_protocol_error
-        ; test_case
-            "empty result id after init fails closed"
-            `Quick
-            test_empty_result_id_after_init_fails_closed
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]
     ]

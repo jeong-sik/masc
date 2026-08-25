@@ -1642,7 +1642,10 @@ let test_a_program_named_like_cd_still_runs () =
 let host = Masc_exec.Sandbox_target.host ()
 
 let findings_of json =
-  Execute_input.hidden_script_findings ~sandbox:host (parse_json_exn json)
+  List.map
+    (fun (shell, finding) ->
+       shell, Keeper_tooling.Shell_costume.finding_tag finding)
+    (Execute_input.hidden_script_findings ~sandbox:host (parse_json_exn json))
 ;;
 
 let test_hidden_script_findings_sees_the_costume () =
@@ -1781,6 +1784,44 @@ let test_an_ordinary_program_is_untouched () =
     "rg"
     "rg"
     (lowered_bin (`Assoc [ "argv", `List [ `String "rg"; `String "pattern" ] ]))
+;;
+
+(* The tap hands back the typed finding, because a caller that wants to tell
+   the writer what to do needs the reason and not its name. Two thirds of live
+   escapes are [;], none of them refused, so the name alone would be the end of
+   the conversation. *)
+let test_a_finding_carries_its_rewrite () =
+  let module Costume = Keeper_tooling.Shell_costume in
+  let module Rewrite = Keeper_tooling.Subset_rewrite in
+  match
+    Execute_input.hidden_script_findings
+      ~sandbox:host
+      (parse_json_exn
+         (`Assoc
+             [ "argv", `List [ `String "sh"; `String "-c"; `String "false; echo hi" ] ]))
+  with
+  | [ (_, Costume.Outside_the_subset reason) ] ->
+    let advice = Rewrite.to_string (Rewrite.of_reason reason) in
+    Alcotest.(check bool)
+      ("the advice names the connector -- got: " ^ advice)
+      true
+      (Astring.String.is_infix ~affix:"&&" advice)
+  | other ->
+    Alcotest.failf
+      "expected one outside-the-subset finding, got %d"
+      (List.length other)
+;;
+
+let test_a_representable_costume_has_nothing_to_say () =
+  let module Costume = Keeper_tooling.Shell_costume in
+  match
+    Execute_input.hidden_script_findings
+      ~sandbox:host
+      (parse_json_exn
+         (`Assoc [ "argv", `List [ `String "sh"; `String "-c"; `String "echo hi" ] ]))
+  with
+  | [ (_, Costume.Representable) ] -> ()
+  | _ -> Alcotest.fail "a representable costume has no rewrite to offer"
 ;;
 
 let suite =
@@ -2095,6 +2136,14 @@ let suite =
           "an ordinary program is untouched"
           `Quick
           test_an_ordinary_program_is_untouched
+      ; Alcotest.test_case
+          "a finding carries its rewrite"
+          `Quick
+          test_a_finding_carries_its_rewrite
+      ; Alcotest.test_case
+          "a representable costume has nothing to say"
+          `Quick
+          test_a_representable_costume_has_nothing_to_say
       ])
 ;;
 

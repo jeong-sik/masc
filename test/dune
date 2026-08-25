@@ -861,6 +861,14 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_keeper_turn_finish_cancel_protect)
+ (modules test_keeper_turn_finish_cancel_protect)
+ (deps
+  %{workspace_root}/lib/keeper/keeper_unified_turn.ml
+  %{workspace_root}/lib/keeper/keeper_turn.ml)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (deps

@@ -703,6 +703,22 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+(* One row of the file pane's history view: the work over the open file is
+   the commits that touched it and the recorded keeper edits, woven into one
+   timeline by their shared timestamp. *)
+type code_history_entry =
+  | Hist_commit of Tui_decode.git_log_row
+  | Hist_edit of Tui_decode.ide_region
+
+type code_history_listing = {
+  chl_entries: code_history_entry list;
+  (* Why the keeper edits are missing when they are: the scope carries no
+     codebase slug, or their fetch failed. The commits still show; the view
+     says what it could not weave in rather than showing a shorter history
+     as if it were the whole one. *)
+  chl_edits_note: string option;
+}
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -968,9 +984,10 @@ type state = {
   mutable code_file_max_width: int;
   mutable code_focus_file: bool;
   (* The file pane's history view: H on an open file swaps the content for
-     the commits that touched it, keyed by the path they were fetched for so
+     the work over it -- the commits that touched it woven with the recorded
+     keeper edits, newest first -- keyed by the path they were fetched for so
      opening another file drops a stale listing rather than captioning it. *)
-  mutable code_history: (string * Tui_decode.git_log_row list) option;
+  mutable code_history: (string * code_history_listing) option;
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
@@ -989,13 +1006,6 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
-  (* The file pane's activity view: c on an open file (repository scope,
-     like the notes) swaps the content for which keeper wrote which lines,
-     through what, and when. *)
-  mutable code_activity: (string * Tui_decode.ide_region list) option;
-  mutable code_activity_error: string option;
-  mutable code_activity_open: bool;
-  mutable code_activity_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -1419,10 +1429,6 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
-  code_activity = None;
-  code_activity_error = None;
-  code_activity_open = false;
-  code_activity_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
@@ -1777,7 +1783,6 @@ let surface_row_texts (state : state) : surface -> string list option = function
       if
         state.code_focus_file && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then
         Option.map
           (fun (_, rows) ->

@@ -4844,25 +4844,32 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the note anchor mark is missing from the gutter: {back!r}"
             )
-        # H over the repo-scoped file, then Enter on the top commit: its
-        # subject's (#N) plus the registered remote become the PR link.
-        send_and_wait(process, master_fd, output, b"H", b"seed the file")
+        # H over the repo-scoped file: the commits and the recorded keeper
+        # edits arrive woven into one timeline, newest first.
+        history = send_and_wait(process, master_fd, output, b"H", b"Edit (turn 7)")
+        history_plain = CSI_RE.sub(b"", history).decode("utf-8")
+        for needle in ("history: note.ml", "seed the file", "L2", "alpha"):
+            if needle not in history_plain:
+                raise AssertionError(
+                    f"the history missed {needle!r}: {history_plain!r}"
+                )
+        # Enter on the top row (the newer commit): its subject's (#N) plus
+        # the registered remote become the PR link.
         send_and_wait(
             process, master_fd, output, b"\r",
             b"github.com/jeong-sik/masc/pull/1256",
         )
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
-        # c: which keeper wrote which lines, through what, and when.
-        activity = send_and_wait(
-            process, master_fd, output, b"c", b"Edit (turn 7)"
+        # j scrolls the edit row to the top; Enter on it closes the history
+        # and jumps the cursor (the reverse gutter) to the lines it wrote.
+        jumped = send_and_wait(
+            process, master_fd, output, b"j\r", b"\x1b[7m   2\x1b[0m"
         )
-        activity_plain = CSI_RE.sub(b"", activity).decode("utf-8")
-        for needle in ("activity: note.ml", "L1", "alpha"):
-            if needle not in activity_plain:
-                raise AssertionError(
-                    f"the activity view missed {needle!r}: {activity_plain!r}"
-                )
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # The loaded history now decorates the gutter too: the edit's line
+        # carries the recorded-edit mark.
+        if "\u00b7".encode() not in jumped:
+            raise AssertionError(
+                f"the recorded-edit mark is missing from the gutter: {jumped!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -5417,9 +5424,9 @@ def code_lane_fixtures() -> HttpFixtures:
         {
             "ok": True,
             "commits": [
-                {"hash": "abc1234", "date": "2026-08-25",
+                {"hash": "abc1234", "timestamp_ms": 1787000000000,
                  "author": "keeper-alpha", "subject": "feat: add x"},
-                {"hash": "def5678", "date": "2026-08-24",
+                {"hash": "def5678", "timestamp_ms": 1786900000000,
                  "author": "vincent", "subject": "chore: seed the file"},
             ],
         },
@@ -5536,7 +5543,8 @@ def code_lane_interaction(
     # history)" frame and lands on the fetched listing.
     history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
     history_plain = CSI_RE.sub(b"", history).decode("utf-8")
-    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent",
+                   "keeper edits not shown"):
         if needle not in history_plain:
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
@@ -6840,8 +6848,8 @@ def run_keyboard_regression(executable: str) -> None:
     ] = (
         200,
         {"ok": True, "commits": [
-            {"hash": "abc1234", "date": "2026-08-25", "author": "keeper",
-             "subject": "docs: seed the file (#1256)"},
+            {"hash": "abc1234", "timestamp_ms": 1787650000000,
+             "author": "keeper", "subject": "docs: seed the file (#1256)"},
         ]},
     )
     repositories_fixtures[
@@ -6849,7 +6857,7 @@ def run_keyboard_regression(executable: str) -> None:
     ] = (
         200,
         {"ok": True, "data": [
-            {"file_path": "note.ml", "line_start": 1, "line_end": 1,
+            {"file_path": "note.ml", "line_start": 2, "line_end": 2,
              "keeper_id": "alpha",
              "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
              "timestamp_ms": 1787600000000},

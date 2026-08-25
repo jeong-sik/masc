@@ -6170,7 +6170,6 @@ let render_code (state : state) =
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
-    let activity_showing = state.code_activity_open in
     let title =
       match state.code_file with
       | Some (path, _) ->
@@ -6181,15 +6180,13 @@ let render_code (state : state) =
             if
               state.code_file_hscroll > 0 && not history_showing
               && not diff_showing && not notes_showing
-              && not activity_showing
             then
               Printf.sprintf "%s  (col %d)" path
                 (state.code_file_hscroll + 1)
             else path
           in
           let base =
-            if activity_showing then "activity: " ^ path
-            else if notes_showing then "notes: " ^ path
+            if notes_showing then "notes: " ^ path
             else if diff_showing then "diff vs HEAD: " ^ path
             else if history_showing then "history: " ^ path
             else path
@@ -6211,63 +6208,7 @@ let render_code (state : state) =
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = code_pane_content_height () in
-    (if activity_showing then
-       match state.code_activity_error, state.code_activity with
-       | Some detail, _ ->
-           box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, None ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (loading activity)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, Some (_, []) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no keeper edit is recorded over this file)"
-             ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
-       | None, Some (_, regions) ->
-           let total = List.length regions in
-           let max_scroll = max 0 (total - content_height) in
-           let scroll =
-             max 0 (min state.code_activity_scroll max_scroll)
-           in
-           for i = 0 to content_height - 1 do
-             match List.nth_opt regions (scroll + i) with
-             | Some region ->
-                 let open Masc.Tui_decode in
-                 let anchor =
-                   if region.ir_line_start = region.ir_line_end then
-                     Printf.sprintf "L%d" region.ir_line_start
-                   else
-                     Printf.sprintf "L%d-%d" region.ir_line_start
-                       region.ir_line_end
-                 in
-                 let at =
-                   let t =
-                     Unix.localtime (region.ir_at_ms /. 1000.)
-                   in
-                   Printf.sprintf "%02d-%02d %02d:%02d"
-                     (t.Unix.tm_mon + 1) t.Unix.tm_mday t.Unix.tm_hour
-                     t.Unix.tm_min
-                 in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
-                      at Ansi.reset Ansi.dim anchor Ansi.reset
-                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      (Terminal_text.single_line region.ir_keeper)
-                      Ansi.reset
-                      (Terminal_text.single_line region.ir_source))
-             | None -> box_empty pane_buf pane_cols
-           done
-     else if notes_showing then
+    (if notes_showing then
        match state.code_notes_error, state.code_notes with
        | Some detail, _ ->
            box_line pane_buf pane_cols
@@ -6428,27 +6369,69 @@ let render_code (state : state) =
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, []) ->
+       | None, Some (_, { chl_entries = []; chl_edits_note }) ->
            box_line pane_buf pane_cols
-             (Ansi.dim ^ "  (no commit touches this file)" ^ Ansi.reset);
-           for _ = 2 to content_height do
+             (Ansi.dim ^ "  (no commit or recorded keeper edit touches \
+                          this file)" ^ Ansi.reset);
+           (match chl_edits_note with
+            | Some note ->
+                box_line pane_buf pane_cols
+                  (Ansi.dim ^ "  " ^ Terminal_text.single_line note
+                  ^ Ansi.reset)
+            | None -> ());
+           let used = 1 + if chl_edits_note = None then 0 else 1 in
+           for _ = used + 1 to content_height do
              box_empty pane_buf pane_cols
            done
-       | None, Some (_, commits) ->
-           let total = List.length commits in
-           let max_scroll = max 0 (total - content_height) in
+       | None, Some (_, { chl_entries; chl_edits_note }) ->
+           (* When the keeper edits could not ride along, the first row
+              says so; the timeline scrolls beneath it. *)
+           let note_rows =
+             match chl_edits_note with
+             | None -> 0
+             | Some note ->
+                 box_line pane_buf pane_cols
+                   (Ansi.dim ^ "  " ^ Terminal_text.single_line note
+                   ^ Ansi.reset);
+                 1
+           in
+           let list_height = max 1 (content_height - note_rows) in
+           let total = List.length chl_entries in
+           let max_scroll = max 0 (total - list_height) in
            let scroll = max 0 (min state.code_history_scroll max_scroll) in
-           for i = 0 to content_height - 1 do
-             match List.nth_opt commits (scroll + i) with
-             | Some row ->
+           let at_of ms =
+             let t = Unix.localtime (ms /. 1000.) in
+             Printf.sprintf "%02d-%02d %02d:%02d" (t.Unix.tm_mon + 1)
+               t.Unix.tm_mday t.Unix.tm_hour t.Unix.tm_min
+           in
+           for i = 0 to list_height - 1 do
+             match List.nth_opt chl_entries (scroll + i) with
+             | Some (Hist_commit row) ->
                  let open Masc.Tui_decode in
                  box_line pane_buf pane_cols
                    (Printf.sprintf "  %s%s%s  %s%s%s  %s  %s" Ansi.dim
-                      row.gl_date Ansi.reset
+                      (at_of row.gl_at_ms) Ansi.reset
                       (Masc_tui_theme.tone Masc_tui_theme.Accent)
                       row.gl_hash Ansi.reset
                       (Terminal_text.single_line row.gl_author)
                       (Terminal_text.single_line row.gl_subject))
+             | Some (Hist_edit region) ->
+                 let open Masc.Tui_decode in
+                 let anchor =
+                   if region.ir_line_start = region.ir_line_end then
+                     Printf.sprintf "L%d" region.ir_line_start
+                   else
+                     Printf.sprintf "L%d-%d" region.ir_line_start
+                       region.ir_line_end
+                 in
+                 box_line pane_buf pane_cols
+                   (Printf.sprintf "  %s%s%s  %s%-9s%s %s%s%s  %s" Ansi.dim
+                      (at_of region.ir_at_ms) Ansi.reset Ansi.dim anchor
+                      Ansi.reset
+                      (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                      (Terminal_text.single_line region.ir_keeper)
+                      Ansi.reset
+                      (Terminal_text.single_line region.ir_source))
              | None -> box_empty pane_buf pane_cols
            done
      else
@@ -6474,29 +6457,35 @@ let render_code (state : state) =
                   (max 0 (state.code_file_max_width - 1)))
            in
            (* Which lines carry a note or a recorded keeper edit -- only
-              what is already loaded (m or c has been opened for this
+              what is already loaded (m or H has been opened for this
               file); the pane does not fetch to decorate. A line with both
               shows the note's mark. *)
-           let loaded_for l =
-             match l with
-             | Some (loaded_path, rows) when
-                 (match state.code_file with
-                  | Some (open_path, _) ->
-                      String.equal loaded_path open_path
-                  | None -> false) -> rows
-             | _ -> []
+           let matches_open_file loaded_path =
+             match state.code_file with
+             | Some (open_path, _) -> String.equal loaded_path open_path
+             | None -> false
            in
            let note_spans =
-             List.map
-               (fun (n : Masc.Tui_decode.ide_annotation) ->
-                 (n.ia_line_start, n.ia_line_end))
-               (loaded_for state.code_notes)
+             match state.code_notes with
+             | Some (loaded_path, notes) when matches_open_file loaded_path
+               ->
+                 List.map
+                   (fun (n : Masc.Tui_decode.ide_annotation) ->
+                     (n.ia_line_start, n.ia_line_end))
+                   notes
+             | _ -> []
            in
            let edit_spans =
-             List.map
-               (fun (r : Masc.Tui_decode.ide_region) ->
-                 (r.ir_line_start, r.ir_line_end))
-               (loaded_for state.code_activity)
+             match state.code_history with
+             | Some (loaded_path, listing)
+               when matches_open_file loaded_path ->
+                 List.filter_map
+                   (function
+                     | Hist_edit (r : Masc.Tui_decode.ide_region) ->
+                         Some (r.ir_line_start, r.ir_line_end)
+                     | Hist_commit _ -> None)
+                   listing.chl_entries
+             | _ -> []
            in
            let covers line spans =
              List.exists (fun (a, b) -> line >= a && line <= b) spans
@@ -6565,17 +6554,16 @@ let render_code (state : state) =
             (if
                state.code_focus_file && not state.code_history_open
                && not state.code_diff_open && not state.code_notes_open
-               && not state.code_activity_open
              then "h/l:pan  "
              else "")
             (if state.code_notes_open then
                "w:add  d:diff  H:history  m:notes  "
              else if state.code_focus_file then
-               "c:activity  d:diff  H:history  m:notes  "
+               "d:diff  H:history  m:notes  "
              else "")
             (if
                state.code_history_open || state.code_diff_open
-               || state.code_notes_open || state.code_activity_open
+               || state.code_notes_open
              then "code"
              else if state.code_focus_file then "list"
              else "up")));

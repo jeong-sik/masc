@@ -7,7 +7,7 @@
     cycle invokes [Operator_control.snapshot_json] under a fresh
     [Operator_control.context], decorates the result with
     [with_projection_diagnostics] / [with_operator_snapshot_metadata],
-    and republishes via [broadcast_operator_snapshot].
+    and republishes through the [broadcast_snapshot] it was given.
 
     Pure helper move (no callback injection). All cross-module
     references reach existing siblings or top-level libraries — no
@@ -27,7 +27,7 @@ module Core_cache = Server_dashboard_http_core_cache
 module Core_operator = Server_dashboard_http_core_operator
 module Core_operator_query = Server_dashboard_http_core_operator_query
 
-let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
+let start_operator_snapshot_refresh_loop ~state ~sw ~clock ~broadcast_snapshot =
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
@@ -97,7 +97,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
        with
        | None -> ()
        | Some publication ->
-         Core_operator.broadcast_operator_snapshot publication);
+         broadcast_snapshot publication);
       raise exn
   in
   Proactive_refresh.start
@@ -118,5 +118,5 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       with
       | None -> ()
       | Some publication ->
-        Core_operator.broadcast_operator_snapshot publication)
+        broadcast_snapshot publication)
 ;;

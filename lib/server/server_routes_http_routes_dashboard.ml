@@ -1578,7 +1578,14 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/operator" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           operator_snapshot_http_json ~state ~sw ~clock req
+           operator_snapshot_http_json
+             ~state
+             ~sw
+             ~clock
+             ~broadcast_snapshot:
+               Server_dashboard_http_execution_surfaces
+               .broadcast_operator_snapshot
+             req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

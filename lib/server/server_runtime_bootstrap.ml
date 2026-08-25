@@ -1661,8 +1661,18 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_dashboard_http.start_transport_health_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_execution_trust_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
-      Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
+      Server_dashboard_http.start_operator_snapshot_refresh_loop
+        ~state
+        ~sw
+        ~clock
+        ~broadcast_snapshot:
+          Server_dashboard_http_execution_surfaces.broadcast_operator_snapshot;
+      Server_dashboard_http.start_operator_digest_refresh_loop
+        ~state
+        ~sw
+        ~clock
+        ~broadcast_digest:
+          Server_dashboard_http_execution_surfaces.broadcast_operator_digest;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)

@@ -16,6 +16,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
+module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
@@ -262,35 +263,6 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
                 Ansi.reset Ansi.dim Ansi.reset badge Ansi.dim request_label
                 Ansi.reset))
 
-(* The composer row every surface carries on its last terminal line.
-
-   The recipient is whichever keeper the roster cursor points at. That cursor
-   keeps its place while the operator works on another surface, so the row goes
-   on naming the last keeper they pointed at rather than emptying out. Because
-   the cursor can also move on its own -- a refresh drops a row and the one
-   below slides up -- the name is drawn every frame instead of being captured
-   when the draft was started. *)
-let composer_of_state (state : state) : Composer.t =
-  let target =
-    match selected_keeper state with
-    | None -> Composer.No_target
-    | Some keeper ->
-        if keeper_available_for_new_message state keeper.k_name then
-          Composer.Ready keeper.k_name
-        else
-          Composer.Unreachable
-            { keeper = keeper.k_name
-            ; reason =
-                (match state.keepers_error with
-                 | Some _ -> "keeper list unread"
-                 | None -> "no longer in the roster")
-            }
-  in
-  { Composer.target
-  ; focus = (if state.composer_focused then Composer.Focused else Composer.Unfocused)
-  ; draft = Buffer.contents state.msg_input
-  }
-
 let composer_prompt_text composer =
   Printf.sprintf " %s %s " "\xe2\x80\xba" (Composer.prompt composer)
 
@@ -351,7 +323,7 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
     ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
-  let composer = composer_of_state state in
+  let composer = Composer_projection.of_state state in
   let prompt = composer_prompt_text composer in
   let tone =
     match (composer.Composer.focus, composer.Composer.target) with
@@ -382,7 +354,7 @@ let composer_line state ~cols =
   | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
-  let composer = composer_of_state state in
+  let composer = Composer_projection.of_state state in
   match composer.Composer.focus with
   | Composer.Unfocused -> Frame_presenter.Hidden
   | Composer.Focused ->

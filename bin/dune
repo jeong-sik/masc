@@ -559,6 +559,12 @@
   yojson))
 
 (library
+ (name masc_tui_composer_projection)
+ (wrapped false)
+ (modules masc_tui_composer_projection)
+ (libraries masc_tui_composer masc_tui_types))
+
+(library
  (name masc_tui_terminal_title)
  (wrapped false)
  (modules masc_tui_terminal_title)
@@ -615,6 +621,7 @@
   masc_tui_mcp
   masc_tui_keeper_chat_transcript
   masc_tui_composer
+  masc_tui_composer_projection
   masc_tui_keeper_control
   masc_tui_markdown
   masc_tui_graphics

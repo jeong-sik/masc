@@ -3243,3 +3243,5 @@
  (libraries alcotest masc))
 
 (include stanzas/test_keeper_ask.inc)
+
+(include stanzas/test_keeper_ask_store.inc)

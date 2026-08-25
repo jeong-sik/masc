@@ -68,6 +68,10 @@ type kind =
                 was not taught — unlabelled beats guessed. *)
       }
   | Said_by_keeper
+  | Autonomous_reply
+      (** What an autonomous turn said after its trace. A blank reply remains
+          a row, but callers can mark it instead of drawing an empty keeper
+          message. *)
   | Delivery_failed of { origin_request_id : string option }
       (** An assistant row the server marked [transport_failure]: the reply
           did not reach its destination. Not keeper speech.

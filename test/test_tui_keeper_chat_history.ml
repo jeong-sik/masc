@@ -39,6 +39,7 @@ let operation_key id =
 let origin_request_id = function
   | History.Delivery_failed { origin_request_id } -> origin_request_id
   | History.Addressed_to_keeper _ | History.Said_by_keeper
+  | History.Autonomous_reply
   | History.Tool_calls _ | History.Reasoning _ -> None
 
 let full_tool_rows = History.tool_rows
@@ -47,6 +48,7 @@ let kind_to_string : History.kind -> string = function
   | History.Addressed_to_keeper { speaker; surface } ->
       Printf.sprintf "addressed(%s)" (History.addressed_label speaker surface)
   | History.Said_by_keeper -> "keeper"
+  | History.Autonomous_reply -> "autonomous"
   | History.Delivery_failed _ -> "delivery_failed"
   | History.Tool_calls block ->
       Printf.sprintf "tools[%s]" (String.concat " | " (full_tool_rows block))
@@ -152,7 +154,8 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     match (List.hd (decode (`List [ json ])).History.rows).History.kind with
     | History.Addressed_to_keeper { speaker; surface } ->
         History.addressed_label speaker surface
-    | History.Said_by_keeper | History.Delivery_failed _ | History.Tool_calls _
+    | History.Said_by_keeper | History.Autonomous_reply
+    | History.Delivery_failed _ | History.Tool_calls _
     | History.Reasoning _ ->
         failf "expected an addressed row"
   in
@@ -220,6 +223,7 @@ let test_consecutive_tool_rows_become_one_block () =
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply
        | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the middle row to be a tool block");
       check (float 0.0) "the block is keyed to its first call" 2.0
@@ -334,6 +338,7 @@ let test_an_autonomous_turn_draws_what_it_did () =
            check bool "a step with no status says it was not recorded" true
              (starts_with "? read_file" (row 3))
        | History.Addressed_to_keeper _ | History.Said_by_keeper
+       | History.Autonomous_reply
        | History.Delivery_failed _ | History.Reasoning _ ->
            fail "expected the second row to be a tool block");
       check (float 0.0) "both rows are keyed to the turn" 5.0 tools.History.at
@@ -351,7 +356,7 @@ let test_a_turn_that_also_spoke_keeps_the_order_it_ran_in () =
          ])
   in
   check (list string) "reasoning, then calls, then what it said"
-    [ "thinking[the test names the old label]"; "tools"; "keeper" ]
+    [ "thinking[the test names the old label]"; "tools"; "autonomous" ]
     (decoded.History.rows
      |> List.map (fun r ->
             match r.History.kind with
@@ -412,6 +417,11 @@ let test_a_blank_turn_with_no_trace_keeps_its_line () =
      turn happened. Unchanged from before trace blocks were read. *)
   let decoded = decode (`List [ row ~ts:7.0 ~role:"assistant" "" ]) in
   check (list string) "one keeper row, blank" [ "keeper" ]
+    (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
+
+let test_a_blank_autonomous_turn_has_an_explicit_origin () =
+  let decoded = decode (`List [ autonomous_turn ~ts:8.0 [] ]) in
+  check (list string) "one autonomous row" [ "autonomous" ]
     (List.map (fun r -> kind_to_string r.History.kind) decoded.History.rows)
 
 let test_server_order_is_kept () =
@@ -555,6 +565,8 @@ let () =
         ; test_case "the server's order is kept" `Quick test_server_order_is_kept
         ; test_case "an autonomous turn draws what it did" `Quick
             test_an_autonomous_turn_draws_what_it_did
+        ; test_case "blank autonomous turn keeps its origin" `Quick
+            test_a_blank_autonomous_turn_has_an_explicit_origin
         ; test_case "a turn that also spoke keeps the order it ran in" `Quick
             test_a_turn_that_also_spoke_keeps_the_order_it_ran_in
         ; test_case "steps the server dropped are counted" `Quick

@@ -74,6 +74,34 @@ let test_parse_post_response_slack_error () =
       failf "expected Slack_api channel_not_found, got %s"
         (Format.asprintf "%a" R.pp_error err)
 
+(* Both connectors read the same kind of REST body, and they used to disagree
+   about a repeated object key: this one took the first value through
+   [List.assoc_opt], so {"ok":false,"ok":true} answered "not ok", while
+   discord_rest_client rejected it. test_discord_rest_client.ml sends the same
+   two bodies. *)
+let test_parse_post_response_repeated_key_is_rejected () =
+  match R.parse_post_response ~status:200 ~body:{|{"ok":false,"ok":true}|} with
+  | Error (R.Other detail) ->
+      check bool "names the repeated key" true
+        (String_util.string_contains_substring ~needle:{|repeats object key "ok"|}
+           detail)
+  | Ok ts -> failf "expected a rejection, got ts %S" ts
+  | Error err ->
+      failf "expected Other, got %s" (Format.asprintf "%a" R.pp_error err)
+
+let test_parse_post_response_repeated_key_nested_is_rejected () =
+  match
+    R.parse_post_response ~status:200
+      ~body:{|{"ok":true,"ts":"1.0","meta":{"id":"a","id":"b"}}|}
+  with
+  | Error (R.Other detail) ->
+      check bool "names the nested key" true
+        (String_util.string_contains_substring ~needle:{|repeats object key "id"|}
+           detail)
+  | Ok ts -> failf "expected a rejection, got ts %S" ts
+  | Error err ->
+      failf "expected Other, got %s" (Format.asprintf "%a" R.pp_error err)
+
 let test_parse_post_response_non2xx_is_http_status () =
   let body = {|{"ok":true,"ts":"171.42"}|} in
   match R.parse_post_response ~status:500 ~body with
@@ -245,6 +273,10 @@ let () =
             test_parse_post_response_2xx_ok_returns_ts;
           test_case "2xx ok=false is Slack_api" `Quick
             test_parse_post_response_slack_error;
+          test_case "repeated key is rejected" `Quick
+            test_parse_post_response_repeated_key_is_rejected;
+          test_case "nested repeated key is rejected" `Quick
+            test_parse_post_response_repeated_key_nested_is_rejected;
           test_case "non-2xx is Http_status" `Quick
             test_parse_post_response_non2xx_is_http_status;
           test_case "2xx non-json is Other" `Quick

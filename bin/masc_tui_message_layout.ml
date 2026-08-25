@@ -367,13 +367,14 @@ let chat_input_prompt_cells = display_width chat_input_prompt_prefix
    space after it before any content starts. *)
 let chat_input_box_cells = 2
 
-(* The arrows answer the composer's own history now, so the hint names what
-   still scrolls. Saying "up" here sent an operator to a key that replaces what
-   they typed. *)
+(* At the newest row the arrows answer the composer's history. Once PgUp has
+   moved into the transcript they adjust it one row at a time, so the hint can
+   name them without risking a draft replacement. *)
 let scroll_hint ~scrolled_back ~older_exist =
   if scrolled_back <= 0 then "PgUp:scroll back"
   else if older_exist then
-    Printf.sprintf "PgUp/PgDn:scroll  Ctrl-E:newest  (%d back)" scrolled_back
+    Printf.sprintf "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (%d back)"
+      scrolled_back
   else
     (* At the oldest row with nothing more to fetch that is the more useful
        fact than the distance: an operator pressing up against a pane that will
@@ -381,7 +382,7 @@ let scroll_hint ~scrolled_back ~older_exist =
        stuck key, and at the start the distance says what "start" already
        says. Saying both is also what would have made this hint wider than the
        one it replaced. *)
-    "PgUp/PgDn:scroll  Ctrl-E:newest  (start of conversation)"
+    "\xe2\x86\x91/\xe2\x86\x93:line  PgUp/PgDn:page  Ctrl-E:newest  (start)"
 
 let input_cursor_column ~terminal_cols ~input =
   let last_column = max 1 (terminal_cols - 1) in

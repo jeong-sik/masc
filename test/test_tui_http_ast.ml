@@ -789,6 +789,26 @@ let test_tui_current_projection_wiring () =
        ~binding_name:"load_selected_live_context"
        ~callee:"Context_state.for_selection"
      = 1);
+  check int "keeper detail reads context through the Keeper stamp" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"keeper_detail_pane"
+       ~callee:"Context_state.reading_for_keeper");
+  check int "chat header reads context through the Keeper stamp" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Context_state.reading_for_keeper");
+  check int "chat header uses one measured context item projection" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Observation_layout.context_header_item");
+  check int "chat context item measures the actual header budget" 2
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Message_layout.display_width");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1653,17 +1673,15 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  (* [String.equal] is named here for the same reason [Board_detail.view_for]
-     is above: the guard counts a field reference that is not inside one of
-     these calls, and #30219 compares the pane's keeper against the stamp on a
-     cached answer so one keeper's live context cannot be drawn under
-     another's name. A comparison reaches no terminal, so there is nothing for
-     a sanitiser to do -- and asking for one would be asking the pane to
-     compare sanitised text against raw text, which is a different string. *)
-  check_fields ~non_rendering_calls:[ "String.equal" ] "keeper_detail_pane"
+  (* The stamp lookup compares the raw Keeper identity before anything is
+     rendered. It reaches no terminal, so the raw [k_name] access belongs
+     inside that typed lookup rather than inside a text sanitizer. *)
+  check_fields
+    ~non_rendering_calls:[ "Context_state.reading_for_keeper" ]
+    "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
-    ; "live_context_error"
+    ; "error"
     ; "observed_at"
     ; "turn_ref"
     ; "k_last_turn_ts"

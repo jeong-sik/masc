@@ -156,10 +156,9 @@ let load_selected_keeper_logs (state : state) (base_path : string)
     keeper
   |> apply_keeper_log_snapshot state
 
-(** Apply one exclusive context projection to the mutable screen state. *)
+(** Replace one identity-stamped context snapshot atomically. *)
 let apply_live_context_state (state : state) (context_state : Context_state.t) =
-  state.live_context <- context_state.observation;
-  state.live_context_error <- context_state.error
+  state.live_context <- context_state
 
 (** Load trace-scoped context occupancy from its current TurnRecord SSOT. *)
 let load_selected_live_context (state : state) (base_path : string)

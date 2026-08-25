@@ -562,6 +562,7 @@
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_keeper_selection
+  masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector

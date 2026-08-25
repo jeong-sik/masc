@@ -111,3 +111,10 @@ let context_summary = function
   | Tui_decode.Context_unavailable reason ->
       Context_unavailable
         (Tui_decode.context_unavailable_reason_to_string reason)
+
+let context_header_item ~max_cells observation =
+  match context_summary observation with
+  | Context_measured { ratio; _ } ->
+      let item = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
+      if max_cells >= cells item then Some item else None
+  | Context_partial _ | Context_unavailable _ -> None

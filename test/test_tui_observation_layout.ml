@@ -105,6 +105,23 @@ let test_context_summaries () =
           fail "unavailable context became observed")
     reasons
 
+let test_context_header_item_is_measured_and_atomic () =
+  let measured = observed ~ratio:0.5 ~maximum:200 () in
+  check (option string) "exact fit" (Some "Context 50% used")
+    (Layout.context_header_item ~max_cells:16 measured);
+  check (option string) "wide fit" (Some "Context 50% used")
+    (Layout.context_header_item ~max_cells:40 measured);
+  check (option string) "one cell short omits the whole item" None
+    (Layout.context_header_item ~max_cells:15 measured);
+  check (option string) "partial measurement is omitted" None
+    (Layout.context_header_item ~max_cells:40 (observed ()));
+  check (option string) "non-positive maximum is omitted" None
+    (Layout.context_header_item ~max_cells:40
+       (observed ~ratio:0.5 ~maximum:0 ()));
+  check (option string) "unavailable measurement is omitted" None
+    (Layout.context_header_item ~max_cells:40
+       (Decode.Context_unavailable Decode.Context_measurement_missing))
+
 let () =
   run "tui_observation_layout"
     [ ( "operator rows"
@@ -116,5 +133,7 @@ let () =
             test_log_rows_keep_stable_columns
         ; test_case "context states remain distinct" `Quick
             test_context_summaries
+        ; test_case "context header item is measured and atomic" `Quick
+            test_context_header_item_is_measured_and_atomic
         ] )
     ]

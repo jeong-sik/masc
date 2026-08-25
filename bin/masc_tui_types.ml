@@ -880,8 +880,7 @@ type state = {
   mutable log_entries: log_entry list;
   mutable log_error: Metrics_tail.load_error option;
   mutable log_scroll: int;
-  mutable live_context: Tui_decode.context_observation option;
-  mutable live_context_error: string option;
+  mutable live_context: Masc_tui_context_state.t;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
   mutable transport: Tui_decode.transport_health option;
@@ -1376,8 +1375,7 @@ let create_state
   log_entries = [];
   log_error = None;
   log_scroll = 0;
-  live_context = None;
-  live_context_error = None;
+  live_context = Masc_tui_context_state.empty;
   overview = None;
   overview_error = None;
   transport = None;

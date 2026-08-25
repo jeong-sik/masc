@@ -35,6 +35,14 @@ type config =
 val default_timeout_s : float
 val default_config : cwd:string -> config
 
+(** One image attached to a turn's user message. [base64_data] is the raw
+    base64 payload with no data-URL prefix and no newlines, the shape the
+    stream-json image block takes. *)
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
 type session_mode =
   | Start
   | Resume of { session_id : string }
@@ -163,6 +171,7 @@ val validate_turn :
   ?session_mode:session_mode ->
   config ->
   prompt:string ->
+  images:image_input list ->
   (unit, error) result
 
 val probe_subscription :
@@ -200,6 +209,7 @@ val run_turn :
   ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
+  images:image_input list ->
   (turn_result, error) result
 (** Execute one turn through Claude Code's stream-json control protocol.
 

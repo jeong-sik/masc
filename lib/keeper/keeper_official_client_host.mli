@@ -113,6 +113,23 @@ val resolve_reasoning_effort :
     official-client effort. An absent effort remains absent. A generic
     [enable_thinking] value is rejected rather than translated. *)
 
+(** One base64 image pulled out of a goal, ready for a transport that carries
+    images alongside the prompt text. *)
+type image_block =
+  { media_type : string
+  ; base64_data : string
+  }
+
+val text_and_images_of_blocks :
+  runtime_label:string ->
+  field:string ->
+  Agent_core.Types.content_block list ->
+  (string * image_block list, Agent_core.Error.t) result
+(** Project a goal into the prompt text plus its base64 images. Use this for a
+    transport that carries images; {!text_of_blocks} is for one that does not,
+    and rejects an image rather than dropping it. Non-base64 image sources and
+    every other block kind are rejected here too. *)
+
 val text_of_blocks :
   runtime_label:string ->
   field:string ->

@@ -26,6 +26,39 @@ type host_stop = Runtime_official_client_tool.host_stop =
       ; outcome : terminal_boundary_outcome
       }
 
+type image_block =
+  { media_type : string
+  ; base64_data : string
+  }
+
+(* Split a goal into the text the CLI receives and the images that ride with it.
+   [text_of_blocks] rejects every non-text block; this admits [Image] for the
+   transports that carry one, and keeps rejecting the rest so a block nobody
+   projects cannot slip through as silence. Only [Base64] images are carried:
+   a [Url] or [File_id] source names bytes this process never read, and the CLI
+   has no way to fetch them. *)
+let text_and_images_of_blocks ~runtime_label ~field blocks =
+  let rec loop texts images = function
+    | [] -> Ok (String.concat "\n" (List.rev texts), List.rev images)
+    | Agent_core.Types.Text text :: rest -> loop (text :: texts) images rest
+    | Agent_core.Types.Image { media_type; data; source_type } :: rest ->
+      (match source_type with
+       | Agent_core.Types.Base64 ->
+         loop texts ({ media_type; base64_data = data } :: images) rest
+       | Agent_core.Types.Url | Agent_core.Types.File_id ->
+         Error
+           (config_error
+              ~field
+              (runtime_label ^ " image projection admits base64 sources only")))
+    | _ :: _ ->
+      Error
+        (config_error
+           ~field
+           (runtime_label ^ " projection admits text and image blocks only"))
+  in
+  loop [] [] blocks
+;;
+
 let text_of_blocks ~runtime_label ~field blocks =
   let rec loop texts = function
     | [] -> Ok (String.concat "\n" (List.rev texts))

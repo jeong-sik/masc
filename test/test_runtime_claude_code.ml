@@ -34,6 +34,11 @@ type fixture_step =
   | Emit_and_read of string
   | Emit_and_expect_request_id of string * string
   | Emit_after_closing_input of string
+  | Expect_user_message_contains of string
+    (* Assert against the user message the CLI actually received on stdin. The
+       fixture exits 97 when the needle is absent, so a turn that loses a block
+       between the caller and the wire fails the test instead of passing on a
+       reply the fixture would have emitted anyway. *)
   | Pause of float
 
 let fixture_script
@@ -58,6 +63,11 @@ let fixture_script
     | Emit_after_closing_input line ->
       output_string output "exec 0<&-\n";
       output_string output ("emit " ^ shell_quote line ^ "\n")
+    | Expect_user_message_contains needle ->
+      output_string output
+        (Printf.sprintf
+           "printf '%%s' \"$user_message\" | grep -F %s >/dev/null || exit 97\n"
+           (shell_quote needle))
     | Pause seconds ->
       output_string output (Printf.sprintf "sleep %.3f\n" seconds)
   in
@@ -148,7 +158,7 @@ let window_outlasting_process_start_s = 5.0
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
-    ?on_turn_started_delay_s ?on_stream_event path =
+    ?on_turn_started_delay_s ?on_stream_event ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -182,14 +192,15 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_turn_started
       ?on_stream_event
       config
-      ~prompt:"Return the fixture marker")
+      ~prompt:"Return the fixture marker"
+      ~images)
 ;;
 
 let test_validation_is_process_free () =
   let config =
     { (Runtime_claude_code.default_config ~cwd:"/tmp") with cli_path = "" }
   in
-  match Runtime_claude_code.validate_turn config ~prompt:"fixture" with
+  match Runtime_claude_code.validate_turn config ~prompt:"fixture" ~images:[] with
   | Error (Runtime_claude_code.Invalid_config "cli_path must not be empty") -> ()
   | Error error -> fail (Runtime_claude_code.error_to_string error)
   | Ok () -> fail "invalid Claude Code config passed admission"
@@ -261,6 +272,48 @@ let test_no_deadline_keeps_initialize_bounded () =
        | Ok _ -> fail "an unbounded turn disabled Claude initialization bounds")
 ;;
 
+(* The image has to reach the CLI's stdin, not merely be accepted by the caller.
+   The fixture greps the line it read and exits 97 when the block is absent, so
+   a projection that quietly drops the image fails here instead of returning the
+   reply the fixture would have emitted regardless. *)
+let test_image_reaches_the_cli_user_message () =
+  let image =
+    { Runtime_claude_code.media_type = "image/png"
+    ; base64_data = Base64.encode_string "\x89PNG\r\n\x1a\nfixture"
+    }
+  in
+  with_fixture
+    [ Expect_user_message_contains {|"type":"image"|}
+    ; Expect_user_message_contains {|"media_type":"image/png"|}
+    ; Emit assistant
+    ; Emit_after_closing_input result
+    ]
+    (fun path ->
+      match run_fixture ~images:[ image ] path with
+      | Ok _ -> ()
+      | Error error ->
+        failwith
+          ("image turn failed: " ^ Runtime_claude_code.error_to_string error))
+;;
+
+(* A media type the block cannot carry is rejected before the CLI is spawned,
+   so the caller learns which image is wrong instead of reading a provider 400
+   attributed to the model several seconds later. *)
+let test_unsupported_image_media_type_is_rejected () =
+  let config = Runtime_claude_code.default_config ~cwd:"/tmp" in
+  let image =
+    { Runtime_claude_code.media_type = "image/tiff"; base64_data = "AAAA" }
+  in
+  match Runtime_claude_code.validate_turn config ~prompt:"x" ~images:[ image ] with
+  | Ok () -> failwith "an unsupported media type must not validate"
+  | Error (Runtime_claude_code.Invalid_config detail) ->
+    if not (String_util.contains_substring detail "image/tiff")
+    then failwith ("error should name the rejected media type: " ^ detail)
+  | Error other ->
+    failwith
+      ("expected Invalid_config, got " ^ Runtime_claude_code.error_to_string other)
+;;
+
 let test_no_deadline_starts_after_user_message () =
   with_fixture
     [ Pause 0.2; Emit assistant; Emit result ]
@@ -324,6 +377,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ~on_session_ready:(fun ~session_id:_ -> raise Eio.Time.Timeout)
              config
              ~prompt:"fixture"
+             ~images:[]
            |> ignore)))
 ;;
 
@@ -1283,6 +1337,7 @@ let test_allowed_tools_tokenizer_chars_are_validated () =
       ~dynamic_tools:[ tool ]
       config
       ~prompt:"fixture"
+      ~images:[]
   with
   | Error (Runtime_claude_code.Invalid_config _) -> ()
   | Error error -> fail (Runtime_claude_code.error_to_string error)
@@ -1317,7 +1372,8 @@ let test_live_subscription () =
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           config
-          ~prompt:"Reply with exactly MASC_CLAUDE_LIVE_OK")
+          ~prompt:"Reply with exactly MASC_CLAUDE_LIVE_OK"
+          ~images:[])
     in
     match outcome with
     | Ok turn -> check string "live response" "MASC_CLAUDE_LIVE_OK" turn.text
@@ -1567,6 +1623,12 @@ let () =
             "unknown stream type fails closed"
             `Quick
             test_unknown_stream_type_fails_closed
+        ] )
+    ; ( "images"
+      , [ test_case "image reaches the CLI user message" `Quick
+            test_image_reaches_the_cli_user_message
+        ; test_case "unsupported media type is rejected" `Quick
+            test_unsupported_image_media_type_is_rejected
         ] )
     ; "session", [ test_case "resume identity" `Quick test_resume_preserves_session_identity ]
     ; "live", [ test_case "subscription turn" `Slow test_live_subscription ]

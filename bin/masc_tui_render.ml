@@ -2701,7 +2701,11 @@ let render_lanes (state : state) =
     for index = 0 to content_height - 1 do
       match List.nth_opt lanes (index + scroll) with
       | None -> box_empty buf cols
-      | Some lane -> box_line buf cols (keeper_lane_row columns lane)
+      | Some lane ->
+          let row = keeper_lane_row columns lane in
+          if index + scroll = state.lanes_cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
+          else box_line buf cols row
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -3692,7 +3696,9 @@ let render_system_logs (state : state) =
               Ansi.magenta (Terminal_text.single_line keeper) Ansi.reset
               (Terminal_text.single_line e.sl_message)
           in
-          box_line buf cols line
+          if idx = state.system_logs_cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          else box_line buf cols line
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -3808,7 +3814,8 @@ let render_verification (state : state) =
             | Some _ -> Theme.bad
             | None -> Ansi.reset
           in
-          box_line_styled buf cols ~style line
+          if idx = state.verification_cursor then box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -3921,7 +3928,8 @@ let render_harness (state : state) =
             | Some _ -> Theme.warn
             | None -> Ansi.reset
           in
-          box_line_styled buf cols ~style line
+          if idx = state.harness_cursor then box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -4274,7 +4282,8 @@ let render_repositories (state : state) =
           (* A repository nobody works in is dim rather than absent: it is
              registered, and that it has no keeper is the thing to notice. *)
           let style = match r.rp_keepers with [] -> Ansi.dim | _ -> Ansi.reset in
-          box_line_styled buf cols ~style line
+          if idx = state.repositories_cursor then box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -4748,7 +4757,8 @@ let render_connectors (state : state) =
             else if not c.cn_available then Ansi.dim
             else Ansi.reset
           in
-          box_line_styled buf cols ~style line
+          if idx = state.connectors_cursor then box_line_selected buf cols line
+          else box_line_styled buf cols ~style line
     done;
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -5015,7 +5025,9 @@ let render_runtime (state : state) =
             ^ " " ^ runtime_column runtime_status_width route_probe
             ^ " " ^ detail
           in
-          box_line buf cols line
+          if index + scroll = state.runtime_cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          else box_line buf cols line
     done;
   let scroll_hint =
     if shown > content_height then

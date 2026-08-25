@@ -112,6 +112,21 @@ let surface_rows () =
   let terminal_rows, _columns = get_terminal_size () in
   max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
 
+(* A row cursor over a plain listing: the keypress moves the cursor and the
+   window follows with the smallest move that keeps it visible. Reads the
+   same [scrolled_surface] bound the drawing uses, so the cursor cannot name
+   a row the frame will not draw. *)
+let move_row_cursor (state : state) ~delta ~cursor ~scroll =
+  match scrolled_surface state state.view with
+  | None -> (cursor, scroll + delta)
+  | Some { sc_count; sc_chrome } ->
+      let height = max 1 (surface_rows () - sc_chrome) in
+      let cursor =
+        if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
+        else Masc_tui_scroll.cursor_up ~count:sc_count cursor
+      in
+      (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+
 let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows ())
     ~error:state.log_error
@@ -5765,20 +5780,32 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                state.verification_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.verification_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
+                 in
+                 state.verification_cursor <- cursor;
+                 state.verification_scroll <- scroll)
             | Lanes ->
-                state.lanes_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.lanes_scroll
-            | Harness -> state.harness_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.harness_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
+                 in
+                 state.lanes_cursor <- cursor;
+                 state.lanes_scroll <- scroll)
+            | Harness -> (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                 in
+                 state.harness_cursor <- cursor;
+                 state.harness_scroll <- scroll)
             | Repositories ->
-                state.repositories_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.repositories_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
+                 in
+                 state.repositories_cursor <- cursor;
+                 state.repositories_scroll <- scroll)
             | Changes -> (
                 (* An open diff owns the scroll keys: the list is behind it and
                    moving both would put the cursor somewhere the operator
@@ -5791,15 +5818,21 @@ let main () =
                       move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                         ~current:state.changes_scroll)
             | Connectors ->
-                state.connectors_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.connectors_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
+                 in
+                 state.connectors_cursor <- cursor;
+                 state.connectors_scroll <- scroll)
             | Runtime ->
-                state.runtime_surface_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.runtime_surface_scroll
+                (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
+                 in
+                 state.runtime_cursor <- cursor;
+                 state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(1)
                     ~current:state.tools_scroll
             | Config -> state.config_scroll <-
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
@@ -5816,9 +5849,12 @@ let main () =
                   if state.resources_cursor < total - 1 then
                     state.resources_cursor <- state.resources_cursor + 1
             | Acting -> state.acting_scroll <- state.acting_scroll + 1
-            | System_logs -> state.system_logs_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                    ~current:state.system_logs_scroll
+            | System_logs -> (let cursor, scroll =
+                   move_row_cursor state ~delta:(1)
+                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
+                 in
+                 state.system_logs_cursor <- cursor;
+                 state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 let dispatchable =
                   List.length
@@ -5912,24 +5948,36 @@ let main () =
                 end
             | Verification ->
                 if state.verification_scroll > 0 then
-                  state.verification_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.verification_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
+                 in
+                 state.verification_cursor <- cursor;
+                 state.verification_scroll <- scroll)
             | Lanes ->
                 if state.lanes_scroll > 0 then
-                  state.lanes_scroll <-
-                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                      ~current:state.lanes_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
+                 in
+                 state.lanes_cursor <- cursor;
+                 state.lanes_scroll <- scroll)
             | Harness ->
                 if state.harness_scroll > 0 then
-                  state.harness_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.harness_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                 in
+                 state.harness_cursor <- cursor;
+                 state.harness_scroll <- scroll)
             | Repositories ->
                 if state.repositories_scroll > 0 then
-                  state.repositories_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.repositories_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.repositories_cursor ~scroll:state.repositories_scroll
+                 in
+                 state.repositories_cursor <- cursor;
+                 state.repositories_scroll <- scroll)
             | Changes -> (
                 match state.changes_diff_row with
                 | Some _ ->
@@ -5942,14 +5990,20 @@ let main () =
                           ~delta:(-1) ~current:state.changes_scroll)
             | Connectors ->
                 if state.connectors_scroll > 0 then
-                  state.connectors_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.connectors_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.connectors_cursor ~scroll:state.connectors_scroll
+                 in
+                 state.connectors_cursor <- cursor;
+                 state.connectors_scroll <- scroll)
             | Runtime ->
                 if state.runtime_surface_scroll > 0 then
-                  state.runtime_surface_scroll <-
-                    move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                      ~current:state.runtime_surface_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.runtime_cursor ~scroll:state.runtime_surface_scroll
+                 in
+                 state.runtime_cursor <- cursor;
+                 state.runtime_surface_scroll <- scroll)
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
@@ -5972,9 +6026,12 @@ let main () =
                 end
             | System_logs ->
                 if state.system_logs_scroll > 0 then
-                  state.system_logs_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
-                    ~current:state.system_logs_scroll
+                  (let cursor, scroll =
+                   move_row_cursor state ~delta:(-1)
+                     ~cursor:state.system_logs_cursor ~scroll:state.system_logs_scroll
+                 in
+                 state.system_logs_cursor <- cursor;
+                 state.system_logs_scroll <- scroll)
             | Keepers Keeper_runtime_pick ->
                 if state.runtime_pick_cursor > 0 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor - 1

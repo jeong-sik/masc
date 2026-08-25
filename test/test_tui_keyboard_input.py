@@ -4394,6 +4394,19 @@ def keeper_lanes_interaction(
             b"r",
             b"new_phase",
         )
+        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
+        if banded_alpha.search(populated) is None:
+            raise AssertionError(
+                f"Lanes did not band the cursor row: {populated!r}"
+            )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            re.compile(rb"\x1b\[7m[^\x1b\n]*beta"),
+        )
+        send_and_wait(process, master_fd, output, b"k", banded_alpha)
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",

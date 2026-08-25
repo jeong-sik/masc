@@ -732,6 +732,7 @@ type state = {
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable lanes_error: string option;
   mutable lanes_scroll: int;
+  mutable lanes_cursor: int;
   (* What is waiting on a verdict. Loaded when the surface is opened rather
      than on every refresh: it is a queue an operator visits, not a number the
      other surfaces read. *)
@@ -741,17 +742,20 @@ type state = {
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
+  mutable connectors_cursor: int;
   (* Two server-owned documents joined by exact runtime id: resolved owns
      lanes/provider/model identity, probe owns cached reachability. *)
   mutable runtime_surface: Tui_decode.runtime_surface_snapshot option;
   mutable runtime_surface_error: string option;
   mutable runtime_surface_scroll: int;
+  mutable runtime_cursor: int;
   mutable runtime_surface_generation: int;
   mutable runtime_surface_inflight: int option;
   mutable runtime_surface_force_pending: bool;
   mutable repositories: Tui_decode.repository_snapshot option;
   mutable repositories_error: string option;
   mutable repositories_scroll: int;
+  mutable repositories_cursor: int;
   (* The keeper whose changes the Changes surface is showing, and what it
      answered. The name is held separately from the snapshot because a
      surface that has asked and not yet heard back is a different state from
@@ -777,6 +781,7 @@ type state = {
   mutable harness: Tui_decode.harness_snapshot option;
   mutable harness_error: string option;
   mutable harness_scroll: int;
+  mutable harness_cursor: int;
   mutable fusion_runs: Tui_decode.fusion_snapshot option;
   mutable fusion_error: string option;
   mutable fusion_cursor: int;
@@ -812,9 +817,11 @@ type state = {
   mutable verification: Tui_decode.verification_snapshot option;
   mutable verification_error: string option;
   mutable verification_scroll: int;
+  mutable verification_cursor: int;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
+  mutable system_logs_cursor: int;
   mutable msg_input: Buffer.t;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
@@ -1068,6 +1075,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   lanes = None;
   lanes_error = None;
   lanes_scroll = 0;
+  lanes_cursor = 0;
   system_logs = None;
   system_logs_error = None;
   tools_inventory = None;
@@ -1076,15 +1084,18 @@ let create_state ~workspace ~port ~refresh_interval = {
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;
+  connectors_cursor = 0;
   runtime_surface = None;
   runtime_surface_error = None;
   runtime_surface_scroll = 0;
+  runtime_cursor = 0;
   runtime_surface_generation = 0;
   runtime_surface_inflight = None;
   runtime_surface_force_pending = false;
   repositories = None;
   repositories_error = None;
   repositories_scroll = 0;
+  repositories_cursor = 0;
   changes_keeper = None;
   changes = None;
   changes_error = None;
@@ -1097,6 +1108,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   harness = None;
   harness_error = None;
   harness_scroll = 0;
+  harness_cursor = 0;
   fusion_runs = None;
   fusion_error = None;
   fusion_cursor = 0;
@@ -1120,7 +1132,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   verification = None;
   verification_error = None;
   verification_scroll = 0;
+  verification_cursor = 0;
   system_logs_scroll = 0;
+  system_logs_cursor = 0;
   msg_input = Buffer.create 256;
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;

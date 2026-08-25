@@ -905,7 +905,6 @@ def overview_event_http_fixtures() -> HttpFixtures:
                 "goals": [],
                 "rollup": {
                     "active_count": 0,
-                    "paused_count": 0,
                     "verifying_count": 0,
                     "done_count": 0,
                     "dropped_count": 0,
@@ -988,7 +987,6 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
             "goals": goals,
             "rollup": {
                 "active_count": len(goals),
-                "paused_count": 0,
                 "verifying_count": 0,
                 "done_count": 0,
                 "dropped_count": 0,

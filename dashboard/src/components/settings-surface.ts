@@ -362,7 +362,11 @@ function logRowClock(ts: string): string {
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
   const identity = entry.keeperName
-  const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
+  // The producer's typed category alone, the way log-classification.ts states
+  // it. The /masc_/ test that used to sit here read the message body, so
+  // "[masc_log] WARN: ...", "[masc_agent_core_error] ..." and any line naming a
+  // .masc_atomic_stage_ path were shown as tool rows (#24036 / #25853).
+  const isTool = logDisplayKind(entry) === 'tool'
   return [logRowClock(entry.timestamp), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
 

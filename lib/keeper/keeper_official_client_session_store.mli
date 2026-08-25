@@ -131,12 +131,14 @@ val process_epoch : unit -> string
 
 val path : base_path:string -> keeper_name:string -> (string, string) result
 
-val tool_surface_sha256 : Agent_core.Tool.t list -> string
-(** Stable digest of the exact typed dynamic-tool surface and official-client
-    context-message schema. Tool order, parameter order, and JSON object field
-    order do not affect the digest; tool semantics and history framing do. A
-    framing change therefore starts a fresh provider conversation instead of
-    resuming a session that cannot receive the new history projection. *)
+val tool_surface_sha256 :
+  native_posture:Runtime_native_tools.posture -> Agent_core.Tool.t list -> string
+(** Stable digest of the exact typed dynamic-tool surface, the keeper's
+    native-tool posture, and official-client context-message schema. Tool
+    order, parameter order, and JSON object field order do not affect the
+    digest; tool semantics, posture, and history framing do. A framing or
+    posture change therefore starts a fresh provider conversation instead of
+    resuming a session that cannot receive the new surface. *)
 
 val load : base_path:string -> keeper_name:string -> (t option, string) result
 (** Missing state is [Ok None]. Malformed, retired, or ambiguous state is an

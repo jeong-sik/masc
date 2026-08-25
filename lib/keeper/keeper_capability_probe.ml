@@ -398,6 +398,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                { cli_path = exec.cli_path
                ; cwd = base_path
                ; model = exec.model
+               ; native = Runtime_native_tools.claude_code_default
                ; system_prompt = None
                ; admission_timeout_s = exec.timeout_s
                ; timeout_s =
@@ -432,6 +433,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
                ; model = exec.model
+               ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
                ; timeout_s =

@@ -33,10 +33,7 @@ let empty =
 let seconds_per_hour = 3600.
 
 let cutoff_of ~now ~hours =
-  let tm = Unix.gmtime (now -. (float_of_int hours *. seconds_per_hour)) in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-    tm.Unix.tm_sec
+  Time_codec.rfc3339_of_unix (now -. (float_of_int hours *. seconds_per_hour))
 
 let top_tools counts ~limit =
   Hashtbl.fold (fun name calls acc -> { tu_name = name; tu_calls = calls } :: acc) counts []

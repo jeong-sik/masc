@@ -81,12 +81,10 @@
 
 **현재 올바른 사용** (cross-domain/non-Eio):
 - `otel_metric_store.ml`: HTTP stats endpoint, Eio 밖에서 호출 가능 (OK)
-- `a2a_tools.ml`: UUID RNG, non-yielding (OK)
 - `process_eio.ml`: Unix.getcwd, non-yielding C call (OK)
 
 **의심스러운 사용** (검토 필요):
 - `server_dashboard_http_runtime_info.ml`: 7개 mutex lock/unlock, Eio fiber 안에서
-- `worktree_live_context.ml`: Eio 환경에서 git 작업
 
 **실행**: `Stdlib.Mutex.lock` -> `Eio.Mutex.use_ro`/`Eio.Mutex.protect` 전환. 단, non-yielding critical section이면 현행 유지 (주석으로 근거 명시).
 
@@ -110,7 +108,9 @@
 **실행**: 작은 pilot에서 시작 — 로깅 effect 하나만 도입 후 관찰.
 
 #### E. GADT 확대 적용
-**현재**: masc 2건 (`typed_state.ml`), agent core 5건.
+**현재**: masc 4건 (`turn_fsm`, `artifact`, `autonomous_phase`, `keeper_owner`),
+agent core 2건 (`execution_codec_executor`, `execution_journal`). 2026-08-25 에
+`rg 'type _ [a-z_]* ='` 로 센 값이다.
 
 **적용 후보**:
 1. **툴 스키마**: `string * string` 튜플 대신 타입 수준에서 입력/출력 타입 강제
@@ -343,7 +343,8 @@ data race가 없으면 sequential consistency 보장. data race가 있어도 효
 2. **`Eio.Mutex`는 same-domain용**: cross-domain 공유에는 `Stdlib.Mutex` 필요 (feedback memory 참조).
 3. **Non-atomic ref의 domain 격리**: `ref`가 단일 domain에서만 접근되면 안전. multi-domain 접근 시 `Atomic` 필수.
 4. **`Gc.ramp_up ()` 호출**: 서버 시작 시 `Gc.ramp_up ()`를 호출하여 GC가 모든 domain의 allocation budget을
-   사전 할당. domain 간 GC 병목 감소. **masc `masc.ml`의 서버 초기화에 추가 권장 (1줄).**
+   사전 할당. domain 간 GC 병목 감소. 서버 진입점은 `bin/main_eio.ml` 이다.
+   **아직 어디서도 호출하지 않는다** — 넣을지는 측정 후 정한다.
 
 **근거**: "Retrofitting Parallelism onto OCaml" (Dolan et al., PLDI 2018) —
 OCaml 5.x의 메모리 모델 설계 논문. semantic race의 효과를 공간적으로 1개 값, 시간적으로 1회로 제한.
@@ -354,7 +355,7 @@ OCaml 5.x의 메모리 모델 설계 논문. semantic race의 효과를 공간�
 
 | 기능 | 위치 | 수정량 | 근거 |
 |------|------|--------|------|
-| `Gc.ramp_up ()` | `masc.ml` 서버 초기화 | 1줄 | PLDI 2018: multi-domain GC 사전 할당 |
+| `Gc.ramp_up ()` | `bin/main_eio.ml` 서버 초기화 | 1줄 | PLDI 2018: multi-domain GC 사전 할당 |
 | `[@atomic]` record field | cross-domain 상태 record | 필드당 1 attribute | Local DRF: 명시적 atomic 보장 |
 
 **`[@atomic]` 우선 적용 대상** (cross-domain 공유 record):

@@ -236,3 +236,29 @@ val host_stop_result :
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
     durable continuation owner, so no Agent Core checkpoint is synthesized. *)
+
+val admit_native_posture :
+  posture:Runtime_native_tools.posture ->
+  approval_mode:Keeper_tool_approval_mode.mode ->
+  none_supported:bool ->
+  client_label:string ->
+  (unit, string) result
+(** Pure admission rule for RFC-0390. [Native_none] is refused when the
+    client cannot disable its built-in tools. [Native_full] is refused
+    unless the keeper's approval stance is [Yolo]: built-in calls run inside
+    the vendor process and never reach [ElicitToolApproval], so full native
+    effects are admitted only where every MASC call would also run unasked.
+    The Yolo stance is in-memory by design — after a restart a [full] keeper
+    is refused loudly until an operator re-arms it. *)
+
+val resolve_native_posture :
+  base_path:string ->
+  keeper_name:string ->
+  client_label:string ->
+  default:Runtime_native_tools.posture ->
+  none_supported:bool ->
+  (Runtime_native_tools.posture, Agent_core.Error.t) result
+(** Read the keeper's declared posture from its profile TOML (cached loader),
+    fall back to [default] when the profile declares nothing, then apply
+    {!admit_native_posture} against the keeper's current approval stance.
+    A profile that fails to load is a config error, not a silent default. *)

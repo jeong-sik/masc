@@ -100,6 +100,16 @@ let masc_http_default_port_s =
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
 
+(* The address a client on this machine dials to reach that server.
+
+   The same string as the bind default today, and a different question. A
+   bind address answers "which interfaces do I accept on" and may be a
+   wildcard -- [is_unspecified_host] exists because 0.0.0.0 and :: mean
+   "every interface" rather than a reachable peer, and dialing one is not
+   reaching the server that bound it. Sharing one name for both let a client
+   read the server's bind setting as its destination. *)
+let masc_http_loopback_peer = "127.0.0.1"
+
 (* Lives here rather than at the reader so [Env_config_snapshot] can name it
    instead of restating the number. Restating is how the operator surface came
    to report 128 while the server accepted 512 (#14143 raised the reader and

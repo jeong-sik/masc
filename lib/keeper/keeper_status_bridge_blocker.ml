@@ -109,10 +109,6 @@ let is_provider_runtime_blocker_class blocker_class =
   String.equal blocker_class "provider_runtime_error"
 ;;
 
-let is_stale_turn_timeout_blocker_class blocker_class =
-  String.equal blocker_class (blocker_class_to_string Stale_turn_timeout)
-;;
-
 let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
@@ -187,6 +183,21 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
              investigation is required before restart."
             count
       }
+  (* The registry wraps runtime exhaustion in [Provider_runtime_error] with the
+     typed reason alongside it ([keeper_unified_turn_types.ml:100-112]). Reading
+     the code and dropping the reason is what made the status bridge's
+     [runtime_exhausted] arm unreachable: every exhaustion arrived labelled
+     "provider_runtime_error" (#30447). *)
+  | Keeper_registry.Provider_runtime_error { reason = Some reason; code; detail; _ } ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:
+           (Printf.sprintf
+              "Runtime attempts exhausted (%s): %s; inspect the attempt chain before \
+               retry."
+              code
+              detail)
+         (Runtime_exhausted reason))
   | Keeper_registry.Provider_runtime_error { code; detail; agent_core_timeout; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record

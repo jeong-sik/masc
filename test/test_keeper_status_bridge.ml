@@ -355,11 +355,70 @@ let every_failure_reason : Keeper_registry.failure_reason list =
       ; agent_core_timeout = None
       ; reason = None
       }
+  ; (* The same constructor with the typed reason present. The registry wraps
+       runtime exhaustion this way ([keeper_unified_turn_types.ml:100-112]), and
+       reading only [code] made the status bridge's runtime_exhausted arm
+       unreachable — every exhaustion arrived labelled provider_runtime_error
+       (#30447). *)
+    Keeper_registry.Provider_runtime_error
+      { code = "connection_refused"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = Some "r1"
+      ; agent_core_timeout = None
+      ; reason = Some Keeper_meta_contract.Connection_refused
+      }
   ; Keeper_registry.Turn_overflow_failure
   ; Keeper_registry.Operator_interrupt
   ; Keeper_registry.Exception "boom"
   ]
 ;;
+
+(* The arm this reaches is [keeper_status_bridge.ml]'s runtime_attempts_exhausted
+   label, which nothing could reach before: the producer stamped the string
+   "provider_runtime_error" for exhaustion too. *)
+let test_exhaustion_reaches_the_runtime_exhausted_class () =
+  let reason =
+    Keeper_registry.Provider_runtime_error
+      { code = "dns_failure"
+      ; detail = "no such host"
+      ; provider_id = None
+      ; http_status = None
+      ; runtime_id = Some "r1"
+      ; agent_core_timeout = None
+      ; reason = Some Keeper_meta_contract.Dns_failure
+      }
+  in
+  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  | None -> Alcotest.fail "an exhaustion reason must produce a blocker surface"
+  | Some surface ->
+    Alcotest.(check string)
+      "typed exhaustion is not flattened into provider_runtime_error"
+      "runtime_exhausted"
+      surface.Keeper_status_bridge.blocker_class
+
+(* Without the typed reason the same constructor is a plain provider error, so
+   the two must not collapse into one answer. *)
+let test_provider_error_without_reason_stays_provider_error () =
+  let reason =
+    Keeper_registry.Provider_runtime_error
+      { code = "api_error_500"
+      ; detail = "boom"
+      ; provider_id = None
+      ; http_status = Some 500
+      ; runtime_id = None
+      ; agent_core_timeout = None
+      ; reason = None
+      }
+  in
+  match Keeper_status_bridge.runtime_blocker_surface_of_failure_reason reason with
+  | None -> Alcotest.fail "a provider error must produce a blocker surface"
+  | Some surface ->
+    Alcotest.(check string)
+      "a provider error without an exhaustion reason keeps its own class"
+      "provider_runtime_error"
+      surface.Keeper_status_bridge.blocker_class
 
 let test_undecodable_blocker_classes_are_named_not_counted () =
   let undecodable =
@@ -407,14 +466,17 @@ let test_decodable_blocker_classes_stay_decodable () =
            | None -> None))
       every_failure_reason
   in
-  (* Today every producer class is undecodable, so this list is empty. The
-     assertion is that the complement is computed at all: when a class is
-     taught to the decoder it has to appear here, and a run where the producer
-     stopped emitting anything would show up as both lists empty. *)
-  Alcotest.(check int)
+  (* One producer class decodes: runtime_exhausted, since #30447 stopped
+     flattening a typed exhaustion reason into "provider_runtime_error". The
+     rest are still the two-vocabulary gap this suite pins.
+
+     This number is the point of the test — it was 0 when every producer class
+     was undecodable, and the comment then said a class taught to the decoder
+     "has to appear here". Raising it is that happening, not a regression. *)
+  Alcotest.(check (list string))
     "producer classes that decode today"
-    0
-    (List.length decodable);
+    [ "runtime_exhausted" ]
+    (List.sort_uniq String.compare decodable);
   Alcotest.(check bool)
     "the producer does emit classes"
     true
@@ -486,6 +548,14 @@ let () =
           "decodable classes still decode"
           `Quick
           test_decodable_blocker_classes_stay_decodable
+      ; Alcotest.test_case
+          "typed exhaustion reaches runtime_exhausted"
+          `Quick
+          test_exhaustion_reaches_the_runtime_exhausted_class
+      ; Alcotest.test_case
+          "provider error without a reason stays provider_runtime_error"
+          `Quick
+          test_provider_error_without_reason_stays_provider_error
       ] );
     ]
 ;;

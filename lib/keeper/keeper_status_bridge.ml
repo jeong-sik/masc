@@ -196,8 +196,6 @@ let attention_fields_json_with_approval_queue
         true, Some "runtime_attempts_exhausted", Some "inspect_runtime_attempts"
       | Some blocker when is_provider_runtime_blocker_class blocker.blocker_class ->
         true, Some "provider_runtime_error", Some "inspect_provider_runtime_cause"
-      | Some blocker when is_stale_turn_timeout_blocker_class blocker.blocker_class ->
-        true, Some "stale_turn_timeout", Some "inspect_stale_turn_root_cause"
       | Some blocker when is_fiber_unresolved_blocker_class blocker.blocker_class ->
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"

@@ -25,6 +25,5 @@ val runtime_blocker_surface_of_failure_reason :
 
 val is_runtime_exhausted_blocker_class : string -> bool
 val is_provider_runtime_blocker_class : string -> bool
-val is_stale_turn_timeout_blocker_class : string -> bool
 val is_fiber_unresolved_blocker_class : string -> bool
 

@@ -56,6 +56,18 @@ let with_temp_dir prefix f =
 
 (* ====== Type serialization/deserialization round-trip tests ====== *)
 
+(* The wire is a oneof now (#29396 A6), so these assertions read the arm
+   rather than a string the codec used to build. The label is this suite's
+   own: it exists to keep the expectations readable, not to reintroduce a
+   string form the product parses. *)
+let directive_label directive =
+  match T.HeartbeatAck.directive_to_wire directive with
+  | `Pause _ -> "pause"
+  | `Wakeup _ -> "wakeup"
+  | `Claim_task_id id -> "claim:" ^ id
+  | `not_set -> "<not set>"
+;;
+
 let test_subscribe_filter_request_roundtrip () =
   let req =
     T.SubscribeRequest.
@@ -186,7 +198,7 @@ let test_heartbeat_ack_roundtrip () =
   Alcotest.(check (list string))
     "directives"
     [ "wakeup"; "claim:task-42" ]
-    (List.map T.HeartbeatAck.directive_to_wire decoded.directives)
+    (List.map directive_label decoded.directives)
 ;;
 
 let test_subscribe_request_roundtrip () =
@@ -652,7 +664,7 @@ let test_heartbeat_projects_workspace_view () =
       Alcotest.(check (list string))
         "claimed task emits no assignment directive"
         []
-        (List.map T.HeartbeatAck.directive_to_wire ack.directives);
+        (List.map directive_label ack.directives);
       Alcotest.(check int) "active agents" 1 ack.active_agent_count;
       Alcotest.(check int) "pending tasks" 1 ack.pending_task_count;
       Grpc_eio.Stream.close request_stream
@@ -707,7 +719,7 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
       Alcotest.(check (list string))
         "workspace pause does not become a durable keeper pause"
         []
-        (List.map T.HeartbeatAck.directive_to_wire workspace_paused_ack.directives);
+        (List.map directive_label workspace_paused_ack.directives);
       ignore (Masc.Workspace.resume workspace_config ~by:"operator");
       ignore
         (Keeper_registry.For_testing.register
@@ -718,7 +730,7 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
       Alcotest.(check (list string))
         "durable keeper pause reaches its control stream"
         [ "pause" ]
-        (List.map T.HeartbeatAck.directive_to_wire keeper_paused_ack.directives);
+        (List.map directive_label keeper_paused_ack.directives);
       Grpc_eio.Stream.close request_stream
     | _ -> Alcotest.fail "Heartbeat bidi handler missing"))
 ;;
@@ -762,7 +774,7 @@ let test_heartbeat_does_not_materialize_uninitialized_workspace () =
       Alcotest.(check (list string))
         "uninitialized heartbeat has no directives"
         []
-        (List.map T.HeartbeatAck.directive_to_wire ack.directives);
+        (List.map directive_label ack.directives);
       Alcotest.(check bool)
         "heartbeat leaves state absent"
         false

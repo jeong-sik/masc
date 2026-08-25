@@ -49,10 +49,19 @@ module HeartbeatAck : sig
     ; directives : Keeper_directive.t list
     }
 
-  (** Exact codec for the legacy protobuf [string] field.  This is the only
-      boundary where Keeper directives are represented as strings. *)
-  val directive_of_wire : string -> (Keeper_directive.t, string) result
-  val directive_to_wire : Keeper_directive.t -> string
+  (** Exact codec for the protobuf [Directive] oneof. Each arm is one
+      constructor of {!Keeper_directive}, so the wire cannot name a directive
+      this type does not have. [`not_set] — a Directive message with no field
+      set — is the one shape protobuf still admits and is an error here. *)
+  type directive_wire =
+    [ `Pause of bool
+    | `Wakeup of bool
+    | `Claim_task_id of string
+    | `not_set
+    ]
+
+  val directive_of_wire : directive_wire -> (Keeper_directive.t, string) result
+  val directive_to_wire : Keeper_directive.t -> directive_wire
 
   val of_bytes : string -> t
   val to_bytes : t -> string

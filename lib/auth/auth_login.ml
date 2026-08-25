@@ -109,14 +109,22 @@ let mint ~base_path ~host ~port ~agent_name ~role ~token_env_var
           let raw_token_file =
             persist_raw_token ~base_path ~agent_name bearer_token
           in
+          (* [host] arrives from the --host flag, which is documented as the
+             address to *bind* and offers 0.0.0.0 for it. These two URLs are
+             what the operator opens and pastes, so they need an address that
+             can be dialed (#30506). Only the URLs use it; the credential is
+             decided by base_path, agent_name, and role. *)
+          let advertised_host =
+            Masc_network_defaults.normalize_advertised_host host
+          in
           let dashboard_url =
-            Uri.make ~scheme:"http" ~host ~port ~path:"/dashboard"
+            Uri.make ~scheme:"http" ~host:advertised_host ~port ~path:"/dashboard"
               ~query:[ ("agent", [ agent_name ]); ("token", [ bearer_token ]) ]
               ()
             |> Uri.to_string
           in
           let mcp_url =
-            Uri.make ~scheme:"http" ~host ~port ~path:"/mcp" ()
+            Uri.make ~scheme:"http" ~host:advertised_host ~port ~path:"/mcp" ()
             |> Uri.to_string
           in
           Ok

@@ -20,7 +20,7 @@ import tempfile
 import termios
 import threading
 import time
-from typing import Any
+from typing import Any, cast
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 HttpResponse = tuple[int, object]
@@ -2688,11 +2688,13 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
         )
         assert_planning_goal_selected(refreshed, b"plan-beta-29424")
 
-        detail = send_and_wait(process, master_fd, output, b"\r", b"goal-b-29424")
-        if b"plan-beta-29424" not in detail or b"Esc:back" not in detail:
+        detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"goal-b-29424")
+        if b"plan-beta-29424" not in detail or b"left/Esc:back" not in detail:
             raise AssertionError(
                 f"Planning refresh opened a different goal detail: {detail!r}"
             )
+        listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Planning")
+        assert_planning_goal_selected(listing, b"plan-beta-29424")
         os.write(master_fd, b"q")
 
     return interact
@@ -4639,6 +4641,7 @@ def keeper_lanes_interaction(
 
 
 FILE_CHANGES_ALPHA_PATH = "/api/v1/keepers/alpha/file-changes?window_hours=24"
+FILE_CHANGES_BETA_PATH = "/api/v1/keepers/beta/file-changes?window_hours=24"
 
 
 def file_changes_alpha_response() -> tuple[int, dict[str, object]]:
@@ -4671,6 +4674,67 @@ def file_changes_alpha_response() -> tuple[int, dict[str, object]]:
             "malformed": 0,
         },
     )
+
+
+def file_changes_beta_response() -> tuple[int, dict[str, object]]:
+    status, payload = file_changes_alpha_response()
+    payload["keeper"] = "beta"
+    change = cast(list[dict[str, Any]], payload["changes"])[0]
+    change["keeper"] = "beta"
+    change["turn"] = 8
+    change["task_id"] = "task-2"
+    cast(dict[str, Any], change["location"])["path"] = "lib/beta.ml"
+    change["change"] = {
+        "kind": "edit",
+        "before": "let beta = false",
+        "after": "let beta = true",
+    }
+    return status, payload
+
+
+def changes_keeper_and_arrow_detail_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    beta = send_and_wait(process, master_fd, output, b"]", b"masc:lib/beta.ml")
+    if b"MASC Changes beta" not in CSI_RE.sub(b"", beta):
+        raise AssertionError(f"Changes did not switch to beta: {beta!r}")
+    alpha = send_and_wait(process, master_fd, output, b"[", b"masc:lib/example.ml")
+    if b"MASC Changes alpha" not in CSI_RE.sub(b"", alpha):
+        raise AssertionError(f"Changes did not switch back to alpha: {alpha!r}")
+    detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"-1 +1")
+    if b"MASC Change" not in CSI_RE.sub(b"", detail):
+        raise AssertionError(f"Right did not open the selected diff: {detail!r}")
+    listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    if b"MASC Changes alpha" not in CSI_RE.sub(b"", listing):
+        raise AssertionError(f"Left did not return to the Changes list: {listing!r}")
+    os.write(master_fd, b"q")
+
+
+def keeper_gate_mode_footer_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    tab_until(process, master_fd, output, b"MASC Keepers")
+    footer = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=200,
+        needle=re.compile(rb"g\x1b\[0m auto"),
+        final_cursor=b"\x1b[?25l",
+    )
+    if b"g yolo" in CSI_RE.sub(b"", footer):
+        raise AssertionError(f"YOLO mode still advertised the wrong action: {footer!r}")
+    os.write(master_fd, b"q")
 
 
 def enter_outside_changes_interaction(
@@ -5177,7 +5241,7 @@ def schedule_detail_interaction() -> Interaction:
     ) -> None:
         tab_until(process, master_fd, output, b"MASC Schedules")
         detail = send_and_wait(
-            process, master_fd, output, b"\r", b"instance-proof-701"
+            process, master_fd, output, b"\x1b[C", b"instance-proof-701"
         )
         plain = CSI_RE.sub(b"", detail)
         for needle in (
@@ -5203,7 +5267,7 @@ def schedule_detail_interaction() -> Interaction:
                 raise AssertionError(
                     f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b[5~", b"instance-proof-701")
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
         os.write(master_fd, b"q")
 
     return interact
@@ -5872,6 +5936,26 @@ def run_keyboard_regression(executable: str) -> None:
         description="Enter off the Changes surface does not arm its diff",
         interact=enter_outside_changes_interaction,
         http_fixtures=enter_split_fixtures,
+    )
+    changes_navigation_fixtures = keeper_runtime_http_fixtures()
+    changes_navigation_fixtures[FILE_CHANGES_ALPHA_PATH] = file_changes_alpha_response()
+    changes_navigation_fixtures[FILE_CHANGES_BETA_PATH] = file_changes_beta_response()
+    run_terminal_scenario(
+        executable,
+        description="Changes keeper switch and arrow detail navigation",
+        interact=changes_keeper_and_arrow_detail_interaction,
+        http_fixtures=changes_navigation_fixtures,
+    )
+    gate_mode_fixtures = keeper_runtime_http_fixtures()
+    gate_mode_fixtures["/api/v1/keepers/tool-approval-mode"] = (
+        200,
+        {"overrides": [{"keeper": "alpha", "mode": "yolo"}]},
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper gate footer offers Auto from YOLO",
+        interact=keeper_gate_mode_footer_interaction,
+        http_fixtures=gate_mode_fixtures,
     )
     run_terminal_scenario(
         executable,

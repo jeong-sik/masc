@@ -970,7 +970,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
 
   box_bottom buf cols;
   Buffer.add_string buf
-    (Printf.sprintf "%s  j/k:scroll  esc:back  r:refresh  | Task %s | Refresh: %.0fs%s\n"
+    (Printf.sprintf "%s  j/k:scroll  left/esc:back  r:refresh  | Task %s | Refresh: %.0fs%s\n"
        Ansi.dim (Terminal_text.single_line task.id)
        state.refresh_interval Ansi.reset);
 
@@ -1324,7 +1324,7 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:move  Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
+  Buffer.add_string buf (footer_line state ~hints:"j/k:move  right/Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -1509,7 +1509,7 @@ let render_board_read (state : state) (list_post : board_post) =
     footer_line state
       ~hints:
         (Printf.sprintf
-           "j/k:%s  PgUp/PgDn:page%s  Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  PgUp/PgDn:page%s  left/Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Board_posts_pane then "posts" else "scroll")
            pane_hint)
   in
@@ -1724,7 +1724,7 @@ let render_planning_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:move  Enter:detail  r:refresh  Tab:next");
+  Buffer.add_string buf (footer_line state ~hints:"j/k:move  right/Enter:detail  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"planning-list" ~rows:terminal_rows
       ~cols buf
@@ -1844,7 +1844,7 @@ let render_planning_detail (state : state)
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
+  Buffer.add_string buf (footer_line state ~hints:"j/k:scroll  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
@@ -2014,7 +2014,7 @@ let render_schedule_list (state : state) =
   Buffer.add_string buf
     (footer_line state
        ~hints:
-         "j/k:move  PgUp/PgDn:page  Enter:details  x:cancel  r:refresh  Tab:next");
+         "j/k:move  PgUp/PgDn:page  right/Enter:details  x:cancel  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
@@ -2111,7 +2111,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
     (footer_line state
        ~hints:
          (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Esc:list  x:cancel  r:refresh  Tab:next"
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  x:cancel  r:refresh  Tab:next"
             scroll max_scroll));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
@@ -2322,6 +2322,13 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
     | Some action -> hint action (Keeper_control.action_label action)
     | None -> Printf.sprintf "%sp pause%s" Ansi.dim Ansi.reset
   in
+  let gate_hint =
+    match reading with
+    | Some reading
+      when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
+        Ansi.cyan ^ "g" ^ Ansi.reset ^ " auto"
+    | Some _ | None -> Theme.bad ^ "g" ^ Ansi.reset ^ " yolo"
+  in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
       Printf.sprintf "  %s%s %s\xe2\x80\xa6%s" Ansi.cyan
@@ -2346,15 +2353,15 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
           ; Ansi.cyan ^ "a" ^ Ansi.reset ^ " new"
           ; Ansi.cyan ^ "l" ^ Ansi.reset ^ " logs"
           ; Ansi.cyan ^ "t" ^ Ansi.reset ^ " calls"
-          ; Theme.bad ^ "g" ^ Ansi.reset ^ " yolo"
+          ; gate_hint
           ; Ansi.cyan ^ "u" ^ Ansi.reset ^ " runtime"
             (* Dimmed rather than dropped, the same way an unavailable
                lifecycle key is: chat lives in detail, and a key that vanishes
                between surfaces reads as a key that does not exist. *)
           ; (if offers_chat then Ansi.cyan ^ "c" ^ Ansi.reset ^ " chat"
              else Ansi.dim ^ "c chat" ^ Ansi.reset)
-          ; (if offers_back then Ansi.dim ^ "esc back" ^ Ansi.reset
-             else Ansi.cyan ^ "enter" ^ Ansi.reset ^ " detail")
+          ; (if offers_back then Ansi.dim ^ "left/esc back" ^ Ansi.reset
+             else Ansi.cyan ^ "right/enter" ^ Ansi.reset ^ " detail")
           ; Ansi.dim ^ "r refresh" ^ Ansi.reset
           ; Ansi.dim ^ "q quit" ^ Ansi.reset
           ]
@@ -4210,7 +4217,7 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state
        ~hints:
-         "j/k:move  PgUp/PgDn:page  Enter:detail  r:refresh  Tab:next  q:quit");
+         "j/k:move  PgUp/PgDn:page  right/Enter:detail  r:refresh  Tab:next  q:quit");
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 let fusion_wrapped_block ~width ~indent text =
@@ -4630,7 +4637,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   else box_line_styled buf cols ~style:Ansi.dim "  esc closes";
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
+    (footer_line state ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 let render_changes_list (state : state) =
@@ -4746,7 +4753,7 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Enter:what was written  d:what the tree holds  o:editor  r:refresh  q:quit");
+    (footer_line state ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* One tree-diff row. Same three layers as the tool-call reading, plus the
@@ -4848,7 +4855,7 @@ let render_changes_tree_diff (state : state)
      else "  esc closes");
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
+    (footer_line state ~hints:"j/k:scroll  left/esc:back  o:open in editor  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* The surface has two readings: the list, and one change opened. The open row
@@ -5559,7 +5566,7 @@ let render_keeper_calls (state : state) =
   else box_empty buf cols;
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  Esc:back  Tab:next  q:quit  r:refresh");
+    (footer_line state ~hints:"j/k:scroll  left/Esc:back  Tab:next  q:quit  r:refresh");
   finish_surface state ~clamped:(Keeper_calls scroll) ~surface_key:"keeper-calls" ~rows:terminal_rows ~cols buf
 
 (* The runtime's event feed, newest first, for watching every keeper act at

@@ -35,7 +35,7 @@ let keeper_actions =
   ; b Act "l" "logs"
   ; b Act "t" "calls" ~help:"tool calls"
   ; b Act "u" "runtime" ~help:"pick a runtime lane"
-  ; b Act "g" "yolo" ~help:"toggle yolo tool approval"
+  ; b Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
   ; b Act "p / w" "pause / wake"
   ; b Act "s" "shutdown"
   ; b Act "e" "settings"
@@ -46,8 +46,8 @@ let for_surface = function
   | Overview ->
       [ b Navigate "j/k" "events" ~help:"scroll events"
       ; b Act "t" "tasks" ~help:"hand j/k to the task list"
-      ; b Act "Enter" "open" ~help:"open the selected task"
-      ; b Act "Esc" "back" ~help:"close detail / back to events"
+      ; b Act "Right / Enter" "open" ~help:"open the selected task"
+      ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
       ; b Meta "2" "keepers"
       ]
       @ listing_meta
@@ -60,7 +60,7 @@ let for_surface = function
       ]
   | Keepers Keeper_list ->
       (b Navigate "j/k" "move" ~help:"move the roster cursor")
-      :: (b Act "Enter" "detail" ~help:"keeper detail")
+      :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -69,11 +69,13 @@ let for_surface = function
   | Keepers Keeper_detail ->
       [ b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Instructions / GitHub"
       ; b Act "L" "gh login" ~help:"on the GitHub tab: start the gh device-flow login"
-      ; b Act "Esc" "back"
+      ; b Act "Left / Esc" "back"
       ]
       @ keeper_actions
-  | Keepers Keeper_logs -> [ b Navigate "j/k" "scroll"; b Act "Esc" "back" ]
-  | Keepers Keeper_calls -> [ b Navigate "j/k" "scroll"; b Act "Esc" "back" ]
+  | Keepers Keeper_logs ->
+      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
+  | Keepers Keeper_calls ->
+      [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
   | Keepers Keeper_message ->
       [ b Act "Enter" "send" ~help:"send, or queue while a turn runs"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
@@ -94,7 +96,8 @@ let for_surface = function
   | Lanes -> b Navigate "j/k" "scroll" :: listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
-      ; b Act "Enter" "read" ~help:"read the post"
+      ; b Act "Right / Enter" "read" ~help:"read the post"
+      ; b Act "Left / Esc" "back" ~help:"close the post"
       ; b Act "w" "write" ~help:"write a post"
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
@@ -106,7 +109,8 @@ let for_surface = function
       @ listing_meta
   | Planning ->
       [ b Navigate "j/k" "move"
-      ; b Act "Enter" "detail"
+      ; b Act "Right / Enter" "detail"
+      ; b Act "Left / Esc" "back"
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
@@ -114,8 +118,8 @@ let for_surface = function
       @ listing_meta
   | Schedules ->
       [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
-      ; b Act "Enter" "details" ~help:"open schedule details"
-      ; b Act "Esc" "back" ~help:"back to the schedule list"
+      ; b Act "Right / Enter" "details" ~help:"open schedule details"
+      ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
       ]
       @ listing_meta
@@ -125,11 +129,18 @@ let for_surface = function
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
-      [ b Navigate "j/k" "move"; b Act "Enter" "detail" ] @ listing_meta
+      [ b Navigate "j/k" "move"
+      ; b Act "Right / Enter" "detail"
+      ; b Act "Left / Esc" "back"
+      ]
+      @ listing_meta
   | Repositories -> b Navigate "j/k" "scroll" :: listing_meta
   | Changes ->
       [ b Navigate "j/k" "scroll"
-      ; b Act "Enter" "written diff" ~help:"what the call wrote, as a diff"
+      ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
+      ; b Act "Right / Enter" "written diff"
+          ~help:"what the call wrote, as a diff"
+      ; b Act "Left / Esc" "back" ~help:"close the diff"
       ; b Act "d" "tree diff" ~help:"what the tree holds now"
       ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
       ]
@@ -162,12 +173,13 @@ let for_surface = function
          from those two facts rather than from the render, so the footer does
          not advertise a key nothing handles. *)
       [ b Navigate "j/k" "move"
-      ; b Act "Enter" "open" ~help:"drill in, or open the file"
+      ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open
            (masc_tui.ml:6001). A key that works and is not listed is the same
            drift as a listed key that does nothing, pointing the other way. *)
-      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
+      ; b Act "Left / Esc" "back"
+          ~help:"close the file, then climb one directory"
       ]
       @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta
@@ -196,7 +208,9 @@ let footer_hints surface = hints_of_bindings (for_surface surface)
    task list, Enter/Esc act on the focused task), exactly like the old
    hand-assembled literal did, but without a second key list. *)
 let footer_hints_overview ~task_focus =
-  let dead = if task_focus then [ "t" ] else [ "Enter"; "Esc" ] in
+  let dead =
+    if task_focus then [ "t" ] else [ "Right / Enter"; "Left / Esc" ]
+  in
   for_surface Overview
   |> List.filter (fun b -> not (List.mem b.key dead))
   |> List.map (fun b ->
@@ -215,7 +229,7 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
         ; b Navigate "PgUp/PgDn" "page"
-        ; b Act "Esc" "back"
+        ; b Act "Left / Esc" "back"
         ]
         @ listing_meta))
     scroll max_scroll

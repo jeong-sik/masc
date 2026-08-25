@@ -66,12 +66,12 @@ let test_overview_footer_projects_by_focus () =
      Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
      The projection keeps every pair, relabels j/k by focus, and drops the
      keys that are dead in the other mode: t only leaves the event list,
-     Enter/Esc only act on a focused task. *)
+     Right/Enter and Left/Esc only act on a focused task. *)
   check str "events mode keeps t and drops the task keys"
     "j/k:events  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:false);
-  check str "tasks mode keeps Enter/Esc and drops t"
-    "j/k:tasks  Enter:open  Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
+  check str "tasks mode keeps arrow/Enter/Esc and drops t"
+    "j/k:tasks  Right / Enter:open  Left / Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints_overview ~task_focus:true)
 
 let test_system_logs_lost_the_keys_it_never_had () =
@@ -106,7 +106,7 @@ let test_help_documents_what_was_missing () =
       Alcotest.(check bool)
         (Printf.sprintf "Changes documents %S" key)
         true (List.mem key changes))
-    [ "Enter"; "d"; "o" ];
+    [ "[ / ]"; "Right / Enter"; "Left / Esc"; "d"; "o" ];
   let global = List.map fst (section "Global") in
   Alcotest.(check bool) "the palette has a row" true (List.mem ":" global);
   let logs = List.map fst (section "Logs") in

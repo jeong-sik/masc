@@ -126,6 +126,22 @@ val normalize_advertised_host : string -> string
     127.0.1.1 named one interface and keeps it. A change that widens this
     has to edit the table above, which is the point of writing it down. *)
 
+val voice_audio_path_prefix : string
+(** ["/api/v1/voice/audio/"] — the prefix of the route serving a synthesized
+    voice clip.
+
+    Two callers have to agree on it from different files:
+    {!Server_routes_http_routes_voice} registers the route under this prefix,
+    and {!Server_auth} lists the same prefix as publicly readable. A browser's
+    [<audio>] element cannot send a bearer token, so the unguessable filename
+    token is the capability. Drift in one direction breaks playback under
+    strict auth; drift in the other exposes a path nobody meant to serve. *)
+
+val voice_audio_path : string -> string
+(** [voice_audio_path token] is the server-relative path for one clip:
+    {!voice_audio_path_prefix} followed by [token]. Callers that hand out an
+    absolute URL prepend their own base. *)
+
 val normalize_loopback_base_url : string -> string
 (** Strip trailing slashes from [base_url] and put its host through
     {!normalize_advertised_host}. Returns the input untouched when the host

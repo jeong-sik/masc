@@ -138,8 +138,7 @@ let public_voice_audio_url ?base_url token =
     | None -> Env_config_core.masc_http_base_url ()
   in
   Masc_network_defaults.normalize_loopback_base_url base
-  ^ "/api/v1/voice/audio/"
-  ^ token
+  ^ Masc_network_defaults.voice_audio_path token
 
 let send_link_block ?clock ~token ~channel_id ~url ~title ~description ~image () =
   let embed =

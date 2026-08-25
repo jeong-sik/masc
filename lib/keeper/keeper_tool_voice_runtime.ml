@@ -116,9 +116,7 @@ let handle_speak_with_outcome
                let token =
                  path |> Filename.basename |> Filename.chop_extension
                in
-               let audio_url =
-                 Printf.sprintf "/api/v1/voice/audio/%s" token
-               in
+               let audio_url = Masc_network_defaults.voice_audio_path token in
                let duration_sec =
                  Voice_bridge_core.audio_duration_seconds ~audio_file:path
                in

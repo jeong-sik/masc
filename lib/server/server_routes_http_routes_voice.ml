@@ -172,11 +172,15 @@ let handle_transcribe _state request reqd body =
 
 let add_routes router =
   router
-  |> Http.Router.prefix_get "/api/v1/voice/audio/" (fun request reqd ->
+  |> Http.Router.prefix_get Masc_network_defaults.voice_audio_path_prefix
+       (fun request reqd ->
        with_public_read
          (fun _state _req reqd ->
            let path = Http.Request.path request in
-           match extract_path_param ~prefix:"/api/v1/voice/audio/" path with
+           match
+             extract_path_param
+               ~prefix:Masc_network_defaults.voice_audio_path_prefix path
+           with
            | None ->
                respond_public_read_json_value ~status:`Bad_request request reqd
                  (`Assoc [ ("error", `String "token path parameter required") ])

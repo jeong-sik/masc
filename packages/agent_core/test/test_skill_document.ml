@@ -71,7 +71,7 @@ let test_real_yaml_and_extensions () =
       ~directory_name:"yaml-values"
       "---\nname: yaml-values\ndescription: >-\n  Use this skill when: the input contains YAML.\nmetadata:\n  masc.composition: composition.toml\ndisable-model-invocation: true\n---\n```toml composition\nexample = true\n```\n"
   in
-  check_conformance "conformant" decoded;
+  check_conformance "runtime_compatible" decoded;
   let document = document_exn decoded in
   Alcotest.(check string)
     "folded description"
@@ -82,6 +82,21 @@ let test_real_yaml_and_extensions () =
     [ "masc.composition", "composition.toml" ]
     document.metadata;
   Alcotest.(check int) "one top-level extension" 1 (List.length document.extensions);
+  Alcotest.(check bool)
+    "boolean extension value survives"
+    true
+    (match List.assoc_opt "disable-model-invocation" document.extensions with
+     | Some (Skill_document.Boolean true) -> true
+     | Some _ | None -> false);
+  Alcotest.(check bool)
+    "top-level extension is not called conformant"
+    true
+    (List.exists
+       (function
+         | Skill_document.Unexpected_frontmatter_field
+             "disable-model-invocation" -> true
+         | _ -> false)
+       (Skill_document.diagnostics decoded));
   Alcotest.(check bool)
     "markdown fence remains instructions"
     true
@@ -151,6 +166,135 @@ let test_unicode_length_counts_scalars () =
        (Skill_document.diagnostics too_long))
 ;;
 
+let test_unicode_and_nfkc_names () =
+  let korean =
+    Skill_document.decode
+      ~directory_name:"리뷰"
+      "---\nname: 리뷰\ndescription: 한국어 이름을 사용하는 스킬.\n---\nBody"
+  in
+  check_conformance "conformant" korean;
+  Alcotest.(check string) "Unicode name" "리뷰" (document_exn korean).name;
+  let nfkc =
+    Skill_document.decode
+      ~directory_name:"ｐｄｆ"
+      "---\nname: ｐｄｆ\ndescription: Normalize an internationalized name.\n---\nBody"
+  in
+  check_conformance "conformant" nfkc;
+  Alcotest.(check string) "NFKC effective name" "pdf" (document_exn nfkc).name
+;;
+
+let test_name_mismatch_is_visible_compatibility () =
+  let decoded =
+    Skill_document.decode
+      ~directory_name:"directory-name"
+      "---\nname: declared-name\ndescription: Keep a mismatched skill usable.\n---\nBody"
+  in
+  check_conformance "runtime_compatible" decoded;
+  Alcotest.(check string)
+    "directory remains the effective name"
+    "directory-name"
+    (document_exn decoded).name;
+  Alcotest.(check bool)
+    "mismatch diagnostic"
+    true
+    (List.exists
+       (function
+         | Skill_document.Name_mismatch
+             { declared = "declared-name"; directory = "directory-name" } ->
+           true
+         | _ -> false)
+       (Skill_document.diagnostics decoded))
+;;
+
+let test_invalid_optional_values_are_diagnostic () =
+  let decoded =
+    Skill_document.decode
+      ~directory_name:"optional-values"
+      "---\nname: optional-values\ndescription: Diagnose explicit invalid optional values.\nlicense: null\ncompatibility: \"\"\nmetadata: null\nallowed-tools: null\n---\nBody"
+  in
+  check_conformance "runtime_compatible" decoded;
+  let diagnostics = Skill_document.diagnostics decoded in
+  let has_invalid_type field expected =
+    List.exists
+      (function
+        | Skill_document.Invalid_field_type
+            { field = Skill_document.Standard actual_field
+            ; expected = actual_expected
+            } ->
+          actual_field = field && actual_expected = expected
+        | _ -> false)
+      diagnostics
+  in
+  Alcotest.(check bool)
+    "null license"
+    true
+    (has_invalid_type Skill_document.License Skill_document.String_value);
+  Alcotest.(check bool)
+    "null metadata"
+    true
+    (has_invalid_type Skill_document.Metadata Skill_document.String_mapping);
+  Alcotest.(check bool)
+    "null allowed-tools"
+    true
+    (has_invalid_type Skill_document.Allowed_tools Skill_document.String_value);
+  Alcotest.(check bool)
+    "empty compatibility"
+    true
+    (List.mem Skill_document.Compatibility_empty diagnostics);
+  let null_compatibility =
+    Skill_document.decode
+      ~directory_name:"null-compatibility"
+      "---\nname: null-compatibility\ndescription: Diagnose null compatibility.\ncompatibility: null\n---\nBody"
+  in
+  check_conformance "runtime_compatible" null_compatibility;
+  Alcotest.(check bool)
+    "null compatibility"
+    true
+    (List.exists
+       (function
+         | Skill_document.Invalid_field_type
+             { field = Skill_document.Standard Skill_document.Compatibility
+             ; expected = Skill_document.String_value
+             } ->
+           true
+         | _ -> false)
+       (Skill_document.diagnostics null_compatibility))
+;;
+
+let test_foreign_and_duplicate_metadata_is_preserved_without_ambiguity () =
+  let decoded =
+    Skill_document.decode
+      ~directory_name:"metadata-preservation"
+      "---\nname: metadata-preservation\ndescription: Preserve foreign metadata without choosing a duplicate.\nmetadata:\n  author: somebody\n  hermes:\n    tags: [writing, review]\n  masc.composition: first.toml\n  masc.composition: second.toml\n---\nBody"
+  in
+  check_conformance "runtime_compatible" decoded;
+  let document = document_exn decoded in
+  Alcotest.(check (list (pair string string)))
+    "only unique standard scalar metadata is selectable"
+    [ "author", "somebody" ]
+    document.metadata;
+  Alcotest.(check int)
+    "all metadata values are preserved"
+    4
+    (List.length document.metadata_values);
+  Alcotest.(check bool)
+    "foreign mapping survives"
+    true
+    (match List.assoc_opt "hermes" document.metadata_values with
+     | Some (Skill_document.Mapping _) -> true
+     | Some _ | None -> false);
+  Alcotest.(check bool)
+    "duplicate key diagnosed"
+    true
+    (List.mem
+       (Skill_document.Duplicate_metadata_key "masc.composition")
+       (Skill_document.diagnostics decoded));
+  Alcotest.(check bool)
+    "ambiguous composition has no scalar winner"
+    true
+    (Option.is_none (List.assoc_opt "masc.composition" document.metadata))
+;;
+
 let test_structural_failures_are_unloadable () =
   let cases =
     [ ( "malformed YAML"
@@ -161,12 +305,23 @@ let test_structural_failures_are_unloadable () =
     ; ( "duplicate description"
       , "---\nname: duplicate\ndescription: first\ndescription: second\n---\nBody"
       , (function
-          | Skill_document.Duplicate_field "description" -> true
+         | Skill_document.Duplicate_field
+             (Skill_document.Standard Skill_document.Description) -> true
           | _ -> false) )
     ; ( "unterminated"
       , "---\nname: unterminated\ndescription: missing close\nBody"
       , (function
           | Skill_document.Unterminated_frontmatter -> true
+          | _ -> false) )
+    ; ( "missing frontmatter"
+      , "name: plain\ndescription: not frontmatter\nBody"
+      , (function
+          | Skill_document.Missing_frontmatter -> true
+          | _ -> false) )
+    ; ( "frontmatter root is not a mapping"
+      , "---\n- name\n- description\n---\nBody"
+      , (function
+          | Skill_document.Frontmatter_not_mapping -> true
           | _ -> false) )
     ]
   in
@@ -204,6 +359,19 @@ let () =
             "Unicode scalar length"
             `Quick
             test_unicode_length_counts_scalars
+        ; Alcotest.test_case "Unicode and NFKC names" `Quick test_unicode_and_nfkc_names
+        ; Alcotest.test_case
+            "name mismatch compatibility"
+            `Quick
+            test_name_mismatch_is_visible_compatibility
+        ; Alcotest.test_case
+            "invalid optional values"
+            `Quick
+            test_invalid_optional_values_are_diagnostic
+        ; Alcotest.test_case
+            "foreign and duplicate metadata"
+            `Quick
+            test_foreign_and_duplicate_metadata_is_preserved_without_ambiguity
         ; Alcotest.test_case
             "structural failures"
             `Quick

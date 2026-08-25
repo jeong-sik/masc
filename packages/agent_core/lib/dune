@@ -57,6 +57,8 @@
   unix
   re
   str
+  uucp
+  uunf
   mcp_protocol_bundle)
  (flags
   (:standard -open Agent_core_base -open Agent_core_protocol))

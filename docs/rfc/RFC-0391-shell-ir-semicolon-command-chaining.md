@@ -19,8 +19,16 @@ MASC는 임의의 셸 스크립트를 `/bin/bash`에 무검증으로 넘기지 �
 
 그러나 LLM 에이전트(Keeper)가 다단계 명령어 또는 구분자 출력을 결합한 일상적인 복합 명령을 수행할 때(예: `echo "=== header ==="; gh pr list ...; echo "=== footer ==="`), 기존 파서는 세미콜론(`;`)을 `Too_complex Command_separator`로 분류하여 fail-closed 거부하였다.
 
-- **실측 데이터 근거 (RFC `execute-subset-dispositions` §1 / 2026-08-20..24 표본)**:
-  - Keeper가 발생시킨 셸 이탈(`sh -c` 사용 등) 호출의 **33%**(1,109건 중 365건)가 단순 세미콜론(`;`) 때문이었음.
+- **실측 데이터 근거** (`.masc/logs/system_log_*.jsonl`의 `shell_costume` 기록 1,794건을 명령 원문까지 다시 세었다, 2026-08-25):
+
+  | | 건수 | 비율 |
+  |---|---|---|
+  | 셸을 뒤집어쓴 호출 전체 | 1,794 | |
+  | `command_separator` | 1,145 | 64% |
+  | ├ 이 RFC가 푸는 것 — `;`만 | **1,108** | **62%** |
+  | └ 이 RFC가 못 푸는 것 — `for`/`while`/`if`/`case`를 낀 것 | 37 | 2% |
+
+  - 두 번째 줄과 세 번째 줄을 갈라 적은 이유가 있다. 태그는 **무엇인지가 아니라 처음 걸린 것**을 말한다. `for f in a b; do echo $f; done`은 `;`에서 먼저 걸리므로 `control_flow`가 아니라 `command_separator`로 세어진다 (출처 RFC `execute-subset-dispositions` §6이 이 편향을 미리 적어 두었다). `;`를 통과시키면 이 37건은 풀리는 게 아니라 `parse_error`로 옮겨 간다. `test_shell_costume`이 그 이동을 고정한다.
   - 기존에는 `&&`나 `||`만 조건부 `Sequence`로 허용되고, 무조건 순차 실행인 `;`가 결여되어 모델이 불필요하게 `sh -c` 우회를 시도하거나 호출 실패를 겪음.
 
 ---

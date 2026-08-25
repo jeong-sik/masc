@@ -155,6 +155,12 @@ module Syntax = struct
      every other content colour already does. *)
   let diff_added_bg = Sgr.bg_added
   let diff_removed_bg = Sgr.bg_removed
+
+  (* The same two answers in the foreground, for a diff drawn inside running
+     prose. A background paints the row to its full width, which inside a
+     chat fence draws a band across the pane for every changed line. *)
+  let diff_added = Sgr.green
+  let diff_removed = Sgr.red
 end
 
 let strip_sgr text =

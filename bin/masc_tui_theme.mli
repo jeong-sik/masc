@@ -136,6 +136,14 @@ module Syntax : sig
   val keyword : string
   val string_ : string
 
+  val diff_added : string
+  val diff_removed : string
+  (** Diff colours in the foreground, for a diff drawn inside running prose.
+
+      A background paints the row to its full width; inside a chat fence that
+      draws a band across the pane for every changed line, so prose asks for
+      these and a dedicated diff surface asks for the backgrounds below. *)
+
   val diff_added_bg : string
   val diff_removed_bg : string
   (** Diff-row backgrounds.

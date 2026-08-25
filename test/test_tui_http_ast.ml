@@ -675,11 +675,20 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_with_label
        ~module_path:"bin/masc_tui_loader.ml"
        ~callee:"Metrics_tail.load" ~label:"expected_keeper");
-  check bool "all log interactions use the selected Keeper loader" true
+  (* #30658 put every call site behind a workspace-identity gate, so the
+     invariant moved with it. Counting the raw loader name now passes on the
+     single call inside that wrapper while the gate itself goes unguarded, so
+     the count follows the name the sites actually reach for, and a second
+     check pins the wrapper as the only way through. *)
+  check bool "all log interactions use the identity-gated Keeper loader" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"load_selected_keeper_logs"
+       ~callee:"load_keeper_logs_if_safe"
      >= 3);
+  check int "the gate is the only caller of the raw Keeper log loader" 1
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"load_selected_keeper_logs");
   check int "Board list success uses shared post replacement" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"

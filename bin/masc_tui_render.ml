@@ -98,8 +98,8 @@ let chat_markdown_palette ~closing : Markdown.palette =
      inside a chat fence that would draw a green band across the pane for
      every added line. The hue is the same question either way: is this
      arriving or leaving. *)
-  ; code_diff_added = (Ansi.green, closing)
-  ; code_diff_removed = (Ansi.red, closing)
+  ; code_diff_added = (Theme.Syntax.diff_added, closing)
+  ; code_diff_removed = (Theme.Syntax.diff_removed, closing)
   }
 
 let markdown_with_closing ~closing ~width body =

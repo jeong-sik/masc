@@ -74,8 +74,8 @@ let test_a_steadily_progressing_turn_stays_near_zero () =
 
 module Try_provider = Masc.Keeper_turn_driver_try_provider
 
-let sample ~last_progress_at ~active_tool_count =
-  Some { Try_provider.last_progress_at; active_tool_count }
+let sample ?(awaiting_approval = false) ~last_progress_at ~active_tool_count () =
+  Some { Try_provider.last_progress_at; active_tool_count; awaiting_approval }
 ;;
 
 let threshold_sec = 900.0
@@ -93,7 +93,7 @@ let test_a_progressing_attempt_is_not_stalled () =
        ~now
        ~threshold_sec
        ~attempt_started_at
-       ~sample:(sample ~last_progress_at:(now -. 6.0) ~active_tool_count:0))
+       ~sample:(sample ~last_progress_at:(now -. 6.0) ~active_tool_count:0 ()))
 ;;
 
 let test_a_wedged_attempt_is_stalled () =
@@ -106,7 +106,7 @@ let test_a_wedged_attempt_is_stalled () =
        ~now
        ~threshold_sec
        ~attempt_started_at
-       ~sample:(sample ~last_progress_at:(now -. 3_900.0) ~active_tool_count:0))
+       ~sample:(sample ~last_progress_at:(now -. 3_900.0) ~active_tool_count:0 ()))
 ;;
 
 let test_a_tool_in_flight_is_not_a_stall () =
@@ -120,7 +120,7 @@ let test_a_tool_in_flight_is_not_a_stall () =
        ~now
        ~threshold_sec:60.0
        ~attempt_started_at
-       ~sample:(sample ~last_progress_at:(now -. 200.0) ~active_tool_count:1))
+       ~sample:(sample ~last_progress_at:(now -. 200.0) ~active_tool_count:1 ()))
 ;;
 
 let test_the_threshold_boundary_is_exclusive () =
@@ -131,7 +131,7 @@ let test_the_threshold_boundary_is_exclusive () =
        ~threshold_sec
        ~attempt_started_at
        ~sample:
-         (sample ~last_progress_at:(now -. threshold_sec) ~active_tool_count:0))
+         (sample ~last_progress_at:(now -. threshold_sec) ~active_tool_count:0 ()))
 ;;
 
 let test_a_missing_sample_falls_back_to_elapsed () =
@@ -203,6 +203,47 @@ let test_non_timeout_error_does_not_trip_the_observation_channel () =
           (Llm_provider.Retry.ContextOverflow { message = "exceeded"; limit = None })))
 ;;
 
+
+(* A call held at the approval gate raises neither signal the predicate reads.
+   The gate runs at pre_tool_use and ToolCalled -- what raises
+   active_tool_count -- is published inside execute_admitted, which the gate
+   runs before. So without this exclusion a keeper waiting on a person is
+   indistinguishable from a provider that stopped answering, and with a
+   deadline configured under the 180s approval bound the attempt is cancelled
+   and the loss filed against the provider. The provider had answered. *)
+let test_an_approval_wait_is_not_a_provider_stall () =
+  let now = attempt_started_at +. 200.0 in
+  check bool "waiting on an operator is not the provider going quiet" false
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec:60.0
+       ~attempt_started_at
+       ~sample:
+         (sample
+            ~awaiting_approval:true
+            ~last_progress_at:(now -. 120.0)
+            ~active_tool_count:0
+            ()))
+;;
+
+(* The exclusion is not a way to switch the deadline off. Once the wait
+   settles -- answered, denied, or timed out by the approval registry's own
+   bound -- the same silence is a stall again. *)
+let test_the_same_silence_stalls_once_the_wait_settles () =
+  let now = attempt_started_at +. 200.0 in
+  check bool "the identical reading stalls when no wait is open" true
+    (Try_provider.attempt_stalled
+       ~now
+       ~threshold_sec:60.0
+       ~attempt_started_at
+       ~sample:
+         (sample
+            ~awaiting_approval:false
+            ~last_progress_at:(now -. 120.0)
+            ~active_tool_count:0
+            ()))
+;;
+
 let () =
   run
     "keeper_provider_call_deadline"
@@ -225,6 +266,10 @@ let () =
             test_a_wedged_attempt_is_stalled
         ; test_case "a tool in flight is not a stall" `Quick
             test_a_tool_in_flight_is_not_a_stall
+        ; test_case "an approval wait is not a provider stall" `Quick
+            test_an_approval_wait_is_not_a_provider_stall
+        ; test_case "the same silence stalls once the wait settles" `Quick
+            test_the_same_silence_stalls_once_the_wait_settles
         ; test_case "the threshold boundary is exclusive" `Quick
             test_the_threshold_boundary_is_exclusive
         ; test_case "a missing sample falls back to elapsed" `Quick

@@ -2,15 +2,23 @@
 
 (** A reading of the keeper's live in-turn progress signal (#28417).
 
-    Mirrors the two [Keeper_registry_types.turn_observation] fields the stall
-    decision needs, so this module decides without depending on
-    [Keeper_registry]. *)
+    What the stall decision needs, read by the caller so this module decides
+    without depending on [Keeper_registry] or on the approval registry. *)
 type provider_progress_sample =
   { last_progress_at : float
         (** Unix timestamp of the most recent in-turn progress signal. *)
   ; active_tool_count : int
         (** Tools issued but not yet completed; non-zero means work in
             flight, not a stall. *)
+  ; awaiting_approval : bool
+        (** Whether a call from this keeper is parked at the approval gate.
+
+            Held calls raise neither signal above: the gate runs at
+            [pre_tool_use] and the event that raises [active_tool_count] is
+            published after it. So a keeper waiting on a person reads as a
+            provider that stopped answering, and the attempt is cancelled and
+            filed against the provider. The wait carries its own bound, so
+            excluding it here leaves nothing unbounded. *)
   }
 
 type try_provider_ctx =

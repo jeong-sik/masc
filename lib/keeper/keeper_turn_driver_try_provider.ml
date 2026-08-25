@@ -27,6 +27,19 @@ type provider_progress_sample =
             means "working", not "stalled" -- the exclusion
             [Keeper_registry_types]' [active_tool_count] doc comment has
             described since RFC-0197 without any code ever reading it. *)
+  ; awaiting_approval : bool
+        (** Whether a tool call from this keeper is parked waiting for an
+            operator to answer.
+
+            A held call refreshes no progress signal and is not counted in
+            [active_tool_count]: the approval gate runs at [pre_tool_use],
+            and [ToolCalled] -- what raises that count -- is published inside
+            [execute_admitted], which the gate runs before. So a keeper
+            waiting on a person looked exactly like a provider that had
+            stopped answering, and with a deadline configured under the
+            180s approval bound the watchdog cancelled the attempt and
+            reported "provider call made no progress". The provider had
+            answered; nobody had. *)
   }
 
 (** Explicit context record for the extracted [try_provider] function.
@@ -297,11 +310,21 @@ let progress_poll_interval_sec = 15.0
 
 let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
   match sample with
-  | Some { last_progress_at; active_tool_count } ->
+  | Some { last_progress_at; active_tool_count; awaiting_approval } ->
     (* A tool call that runs for minutes refreshes no progress signal while
        it runs, so tools in flight are work, not a stall. The 2026-08-12
-       live attempt spent 120s inside one [Execute] and was healthy. *)
-    active_tool_count = 0 && now -. last_progress_at > threshold_sec
+       live attempt spent 120s inside one [Execute] and was healthy.
+
+       A call held at the approval gate is the same shape and not the same
+       fact: it is not the provider that has gone quiet, it is a person who
+       has not answered yet. Cancelling the attempt there loses a turn the
+       provider completed and files the loss against the provider. The wait
+       has its own bound -- [Keeper_tool_approval_registry.await] races the
+       answer against [timeout_sec] and settles either way -- so exempting it
+       here does not leave anything unbounded. *)
+    (not awaiting_approval)
+    && active_tool_count = 0
+    && now -. last_progress_at > threshold_sec
   | None ->
     (* Probe absent, or the keeper has no live turn observation to read.
        Falling back to elapsed time reproduces the pre-#28417 ceiling: losing

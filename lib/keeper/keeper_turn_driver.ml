@@ -1225,6 +1225,18 @@ let run_named
                           { Keeper_turn_driver_try_provider.last_progress_at =
                               obs.last_progress_at
                           ; active_tool_count = obs.active_tool_count
+                            (* Read here rather than carried on the turn
+                               observation: the approval registry already owns
+                               this fact, and a second copy on the observation
+                               would be one more thing to keep in step with
+                               it. Both reads happen in the same probe call,
+                               so they describe the same instant. *)
+                          ; awaiting_approval =
+                              List.exists
+                                (fun (p : Keeper_tool_approval_registry.pending) ->
+                                   String.equal p.keeper_name keeper_name)
+                                (Keeper_tool_approval_registry.pending
+                                   (Keeper_tool_approval_registry.shared ()))
                           }
                       | Some _ | None -> None
                     with

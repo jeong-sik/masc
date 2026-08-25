@@ -13,7 +13,7 @@ let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
 let audio_url_of_file audio_file =
   match Filename.chop_suffix_opt ~suffix:".mp3" (Filename.basename audio_file) with
   | Some token when token <> "" ->
-    Some (Printf.sprintf "/api/v1/voice/audio/%s" token)
+    Some (Masc_network_defaults.voice_audio_path token)
   | _ -> None
 ;;
 

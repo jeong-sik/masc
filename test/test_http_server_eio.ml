@@ -269,6 +269,26 @@ let test_voice_routes_present () =
     (has_route `POST "/api/v1/voice/transcribe")
 ;;
 
+(* A browser's <audio> element cannot put a bearer token in its request
+   headers, so the unguessable filename token is the capability. That only
+   works while the route registered above is one [Server_auth] answers without
+   one. The two used to spell the prefix independently in different files.
+
+   Spelled as a literal here on purpose. Together with the route assertion
+   above it makes two independent witnesses that the wire path is the one the
+   browser asks for; reading it from the shared constant would let a rename
+   move both and prove nothing. *)
+let test_the_voice_clip_route_needs_no_bearer_token () =
+  Alcotest.(check bool)
+    "the clip route is on the public-read list"
+    true
+    (Server_auth.is_public_read_path "/api/v1/voice/audio/abc123");
+  Alcotest.(check bool)
+    "a sibling voice route still needs a token"
+    false
+    (Server_auth.is_public_read_path "/api/v1/voice/config")
+;;
+
 let test_frontend_canonical_loopback_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard?agent=codex" in
@@ -446,6 +466,9 @@ let router_tests =
     , `Quick
     , test_frontend_websocket_upgrade_allows_ready_dispatcher )
   ; "voice routes present", `Quick, test_voice_routes_present
+  ; ( "the voice clip route needs no bearer token"
+    , `Quick
+    , test_the_voice_clip_route_needs_no_bearer_token )
   ; ( "frontend canonical localhost redirect"
     , `Quick
     , test_frontend_canonical_loopback_location_localhost )

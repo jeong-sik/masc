@@ -121,7 +121,9 @@ let turn_based_voice_loop_json ~session_active =
       , `Assoc
           [ "tool", `String "keeper_voice_speak"
           ; "delivery", `String "tts_audio_clip"
-          ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
+          ; ( "browser_route"
+            , `String ("GET " ^ Masc_network_defaults.voice_audio_path "<token>")
+            )
           ] )
     ]
 
@@ -143,7 +145,9 @@ let realtime_bridge_voice_loop_json ~session_active ~endpoint =
       , `Assoc
           [ "delivery", `String "assistant_audio_events_or_tts_audio_clip"
           ; "fallback_tool", `String "keeper_voice_speak"
-          ; "browser_route", `String "GET /api/v1/voice/audio/<token>"
+          ; ( "browser_route"
+            , `String ("GET " ^ Masc_network_defaults.voice_audio_path "<token>")
+            )
           ] )
     ]
 

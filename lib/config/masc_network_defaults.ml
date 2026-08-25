@@ -219,6 +219,21 @@ let normalize_advertised_host host =
             masc_http_default_host
         | Ok (Ipaddr.V6 _ | Ipaddr.V4 _) | Error _ -> trimmed)
 
+(* The prefix of the route that serves a synthesized voice clip.
+
+   Named because two of the places that spell it have to agree, and they live
+   in different files: [Server_routes_http_routes_voice] registers the route
+   under this prefix, and [Server_auth] lists the same prefix as publicly
+   readable. A browser's <audio> element cannot put a bearer token in its
+   request headers, so the unguessable filename token is the capability. If
+   the two spellings drift, one direction breaks playback under strict auth
+   and the other opens a path nobody meant to expose. Five more places build
+   a URL from it. *)
+let voice_audio_path_prefix = "/api/v1/voice/audio/"
+
+(* The server-relative path a client fetches for the clip named by [token]. *)
+let voice_audio_path token = voice_audio_path_prefix ^ token
+
 let normalize_loopback_base_url base_url =
   let trimmed = String.trim base_url |> trim_trailing_slashes in
   let uri = Uri.of_string trimmed in

@@ -7,9 +7,17 @@
     a projection (search), or a test can ask "who owns the keyboard right
     now" without re-reading the guards.
 
-    The dispatch itself does not consume this yet — the derivation mirrors
-    it, and the test suite pins the mirror to the documented arm order. When
-    an arm moves, the test is the alarm. *)
+    The dispatch itself does not consume this yet, so this is a mirror and
+    nothing holds it against what it mirrors. [test_tui_mode] checks the
+    ladder here against itself; it does not read masc_tui.ml. Move an arm in
+    the dispatch and this file goes wrong while every test stays green — the
+    arm and the derivation have to move together, by hand, until the first
+    consumer makes the dispatch read this instead of duplicating it.
+
+    {!Ast_grep} can read masc_tui.ml directly, the way
+    [test_tui_http_ast] pins wiring and [test_keeper_keepalive_launch_order_ast]
+    pins an order. That is what would turn this into something the build
+    checks rather than something a reader has to remember. *)
 
 type t =
   | Image_overlay   (** an inline image is shown; any key closes it *)

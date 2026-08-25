@@ -42,6 +42,10 @@ val fold_projected_color
 (** Eliminate an abstract projection. The [indexed] branch receives only a
     fixed xterm index in 16..255. Theme uses this to serialize SGR bytes. *)
 
+(** Test-only capability and projection fixtures. The R11 check in
+    [scripts/check-ssot.sh] is the repository production boundary: code under
+    [bin/] and [lib/] may not name this module outside its owner
+    implementation. Production projection must use [best_color]. *)
 module For_testing : sig
   type classifier_input =
     { is_tty : bool

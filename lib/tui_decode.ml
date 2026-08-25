@@ -2876,6 +2876,8 @@ type prompt_row = {
   pr_has_override : bool;
   pr_file_exists : bool;
   pr_file_path : string;
+  pr_source : string;
+  pr_template_variables : string list;
 }
 
 type prompts_snapshot = { ps_rows : prompt_row list }
@@ -2894,6 +2896,18 @@ let decode_prompt_row json =
     | `Bool value -> value
     | _ -> false
   in
+  let string_list_or_empty field =
+    match member field json with
+    | `Null -> Ok []
+    | `List _ -> require_string_list json field
+    | value ->
+        Error
+          (Printf.sprintf
+             "field '%s' must be a string list (received %s)"
+             field
+             (Yojson.Safe.to_string value))
+  in
+  let* pr_template_variables = string_list_or_empty "template_variables" in
   Ok
     { pr_key
     ; pr_category = string_or "category"
@@ -2902,6 +2916,8 @@ let decode_prompt_row json =
     ; pr_has_override = bool_or "has_override"
     ; pr_file_exists = bool_or "file_exists"
     ; pr_file_path = string_or "file_path"
+    ; pr_source = string_or "source"
+    ; pr_template_variables
     }
 ;;
 
@@ -2916,6 +2932,61 @@ let decode_prompts json =
       (Ok []) rows_json
   in
   Ok { ps_rows = List.rev reversed }
+;;
+
+type librarian_run_page =
+  { lrp_run_id : string option
+  ; lrp_next : (float * string) option
+  }
+
+let decode_librarian_run_page json =
+  let* runs = required_list_field json "runs" in
+  let* has_more = required_bool_field json "has_more" in
+  let rec find_librarian = function
+    | [] -> Ok None
+    | run :: rest ->
+        let* lane = required_string_field run "lane" in
+        if String.equal lane "librarian_exact" then
+          let* run_id = required_string_field run "run_id" in
+          Ok (Some run_id)
+        else find_librarian rest
+  in
+  let* run_id = find_librarian runs in
+  let* lrp_next =
+    if not has_more then Ok None
+    else
+      match List.rev runs with
+      | [] -> Error "exact lane page says has_more but has no cursor row"
+      | last :: _ ->
+          let* started_at = require_float_field last "started_at" in
+          let* last_run_id = required_string_field last "run_id" in
+          Ok (Some (started_at, last_run_id))
+  in
+  Ok { lrp_run_id = run_id; lrp_next }
+;;
+
+let decode_latest_librarian_run_id json =
+  let* page = decode_librarian_run_page json in
+  page.lrp_run_id
+  |> Option.to_result ~none:"no Librarian exact run on this page"
+;;
+
+let decode_librarian_actual_input ~run_id json =
+  let* run = required_object_field json "run" in
+  let* actor = required_string_field run "actor" in
+  let* status = required_string_field run "status" in
+  let* input = required_object_field run "input" in
+  let* payload = required_object_field input "payload" in
+  match member "actual_input" payload with
+  | `Assoc _ as actual_input ->
+      Ok
+        ((Printf.sprintf
+            "LATEST LIBRARIAN RUN  %s \xc2\xb7 %s \xc2\xb7 %s"
+            run_id actor status)
+         :: (Yojson.Safe.pretty_to_string actual_input
+             |> String.split_on_char '\n'))
+  | `Null -> Error "latest Librarian run has no actual_input"
+  | _ -> Error "latest Librarian actual_input is not an object"
 ;;
 
 let decode_fleet_safety json =

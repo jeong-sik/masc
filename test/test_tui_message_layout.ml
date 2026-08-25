@@ -783,6 +783,37 @@ let test_scrolling_back_moves_the_window () =
   check bool "and not the newest ones" false
     (List.exists (fun text -> String.equal text "  line-9") window)
 
+(* [msg_scroll] counts rows back from the newest, and the field says what it
+   is for:
+
+     Held rather than derived: an operator reading back should stay where
+     they are while the keeper keeps talking.
+
+   Counting from the newest end does the opposite. A reply arriving adds rows
+   at that end, so the same count lands that many rows further down and the
+   window slides toward the new text the operator was not reading. *)
+let test_a_new_message_does_not_move_a_scrolled_window () =
+  let window requested entries =
+    Layout.clamped_scrolled_rows ~inner_width:40 ~height:4 ~requested entries
+    |> snd |> text_of
+  in
+  let before = window 4 ten_entries in
+  let arrival =
+    entry ~timestamp:"12:35:00" Layout.Keeper "keeper.one" "tui-..dddddddd"
+      "a reply the operator has not scrolled to"
+  in
+  let after_arrival = ten_entries @ [ arrival ] in
+  (* The defect: the count alone lands that many rows further down, so the
+     window slides toward the reply. *)
+  check bool "the count alone does not hold the position" false
+    (window 4 after_arrival = before);
+  (* The contract the pane relies on: give the count back the rows that
+     arrived and the operator is looking at the same text. *)
+  let grew = Layout.total_rows ~inner_width:40 [ arrival ] in
+  check bool "and the reply is not free" true (grew > 0);
+  check (list string) "the operator keeps reading the same rows" before
+    (window (4 + grew) after_arrival)
+
 let test_max_scroll_stops_at_the_oldest_row () =
   let height = 6 in
   let limit = Layout.max_scroll ~inner_width:40 ~height ten_entries in
@@ -1171,6 +1202,8 @@ let () =
             test_unscrolled_is_the_existing_window
         ; test_case "scrolling back moves the window" `Quick
             test_scrolling_back_moves_the_window
+        ; test_case "a new message does not move a scrolled window" `Quick
+            test_a_new_message_does_not_move_a_scrolled_window
         ; test_case "max scroll stops at the oldest row" `Quick
             test_max_scroll_stops_at_the_oldest_row
         ; test_case "badge is a budget, not a measurement" `Quick

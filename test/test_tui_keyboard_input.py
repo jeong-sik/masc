@@ -3968,14 +3968,14 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed memory revision 9",
+            b"Librarian committed current memory revision 9",
             start=start,
             timeout=5.0,
         )
         visible = bytes(output[start:])
         for needle in (
-            b"+ [fact] the Runtime probe shares one provider endpoint",
-            b"- [constraint] probe every model separately",
+            b"ADDED (now in current memory) [fact] the Runtime probe shares one provider endpoint",
+            b"REMOVED (no longer in current memory) [constraint] probe every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
@@ -3984,7 +3984,7 @@ def memory_journal_timeline_interaction() -> Interaction:
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
-        if b"Librarian committed memory revision 9" in hidden:
+        if b"Librarian committed current memory revision 9" in hidden:
             raise AssertionError(f"Hidden Memory timeline still drew its row: {hidden!r}")
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
@@ -3993,7 +3993,7 @@ def memory_journal_timeline_interaction() -> Interaction:
             master_fd,
             output,
             b"\r",
-            b"Librarian committed memory revision 9",
+            b"Librarian committed current memory revision 9",
         )
         if b"Librarian/Memory timeline shown" not in restored:
             raise AssertionError(f"Memory timeline did not report restoration: {restored!r}")
@@ -5450,6 +5450,20 @@ def code_lane_interaction(
     if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
     send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    # With the file focused, "/" searches its lines: typing jumps the line
+    # cursor (the reverse gutter) to the match, and Enter keeps the query.
+    searched = send_and_wait(process, master_fd, output, b"/hi", b"/hi")
+    if re.search(rb"\x1b\[7m\s+2\x1b\[0m", searched) is None:
+        raise AssertionError(
+            f"the file search did not move the cursor gutter: {searched!r}"
+        )
+    # Enter keeps the query for n/N and closes the prompt; the redrawn
+    # footer (query gone, hints back at the front) is the needle, because
+    # the diff renderer resends only the rows that changed.
+    send_and_wait(
+        process, master_fd, output, b"\r",
+        b"\x1b[2m  j/k:scroll  h/l:pan",
+    )
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
     diff_frame = send_and_wait(process, master_fd, output, b"d", b"let a = 2")
@@ -5476,6 +5490,9 @@ def code_lane_interaction(
             f"history footer does not offer the way back: {history_plain!r}"
         )
     send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    # The search above left the cursor on line 2; the lsp fixtures answer
+    # about line 1, so put the cursor back where the question is.
+    send_and_wait(process, master_fd, output, b"k", b"\x1b[7m   1\x1b[0m")
     # K pre-fills the palette with the hover command; the argument is the
     # symbol, and the answer lands beside the title.
     prefilled = send_and_wait(process, master_fd, output, b"K", b"hover ")
@@ -5490,6 +5507,16 @@ def code_lane_interaction(
     if re.search(rb"\x1b\[7m\s+2\x1b\[0m", landed) is None:
         raise AssertionError(
             f"the definition jump did not move the cursor gutter: {landed!r}"
+        )
+    # B walks back to where the jump left from: the cursor gutter returns
+    # to line 1.
+    returned = send_and_wait(
+        process, master_fd, output, b"B",
+        re.compile(rb"\x1b\[7m\s+1\x1b\[0m"),
+    )
+    if re.search(rb"\x1b\[7m\s+2\x1b\[0m", returned) is not None:
+        raise AssertionError(
+            f"B left the cursor on the jumped-to line: {returned!r}"
         )
     os.write(master_fd, b"q")
 

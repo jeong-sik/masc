@@ -970,6 +970,31 @@ let test_gate_stance_listing_rides_the_flow_generation () =
        ~callee:"Approval.Flow.finish_action")
 ;;
 
+let test_the_scroll_counts_back_from_a_pinned_row () =
+  let main_path = "bin/masc_tui.ml" in
+  let render_path = "bin/masc_tui_render.ml" in
+  (* [msg_scroll] used to count back from whatever row was newest at the
+     moment it was read, so a reply landing moved what the same count meant
+     and the operator reading back was carried toward it. Three things hold
+     the fix: every key that scrolls goes through the one setter that keeps
+     the pin, the pane adds back what arrived since, and nothing writes the
+     field around the setter. *)
+  check int "no key writes the scroll behind the setter's back" 0
+    (Ast_grep.count_field_writes_in_module ~module_path:main_path
+       ~field:"msg_scroll");
+  check int "returning to the bottom releases the pin" 1
+    (Ast_grep.count_field_clears_to_none
+       ~module_path:"bin/masc_tui_types.ml" ~binding_name:"set_msg_scroll"
+       ~field_name:"msg_scroll_pin");
+  check int "the pane reads the pin but never moves it" 0
+    (Ast_grep.count_field_writes_in_module ~module_path:render_path
+       ~field:"msg_scroll_pin");
+  check int "and the count it asks for carries what arrived" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_keeper_message"
+       ~callees:[] ~identifiers:[ "rows_since_pin" ])
+;;
+
 let test_planning_refresh_reconciles_navigation_identity () =
   let main_path = "bin/masc_tui.ml" in
   check int "planning apply owns one identity reconciliation" 1
@@ -1769,6 +1794,10 @@ let () =
           "planning refresh reconciles navigation identity"
           `Quick
           test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "the scroll counts back from a pinned row"
+          `Quick
+          test_the_scroll_counts_back_from_a_pinned_row;
         test_case
           "gate stance listing rides the flow generation"
           `Quick

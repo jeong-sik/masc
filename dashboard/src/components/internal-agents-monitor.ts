@@ -41,6 +41,66 @@ type Row =
 type CommittedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'committed' }>
 type FailedMemoryJournalEntry = Extract<MemoryJournalEntry, { ok: true; outcome: 'failed' }>
 
+type LibrarianInputEvidence = {
+  promptKey: string
+  promptSource: string
+  promptFilePath: string | null
+  effectiveTemplate: string
+  renderedBytes: number
+  renderedSha256: string
+  variables: Record<string, string>
+  messageCount: number | null
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+export function librarianInputEvidence(value: unknown): LibrarianInputEvidence | null {
+  const root = record(value)
+  const actual = record(root?.actual_input)
+  const prompt = record(actual?.prompt)
+  const rawVariables = record(actual?.rendered_prompt_variables)
+  if (!root || !actual || !prompt || !rawVariables) return null
+  const promptKey = typeof prompt.key === 'string' ? prompt.key : null
+  const promptSource = typeof prompt.source === 'string' ? prompt.source : null
+  const effectiveTemplate = typeof prompt.effective_template === 'string' ? prompt.effective_template : null
+  const renderedBytes = typeof prompt.rendered_bytes === 'number' ? prompt.rendered_bytes : null
+  const renderedSha256 = typeof prompt.rendered_sha256 === 'string' ? prompt.rendered_sha256 : null
+  if (
+    promptKey === null
+    || promptSource === null
+    || effectiveTemplate === null
+    || renderedBytes === null
+    || renderedSha256 === null
+  ) return null
+  const variables: Record<string, string> = {}
+  for (const [key, item] of Object.entries(rawVariables)) {
+    if (typeof item !== 'string') return null
+    variables[key] = item
+  }
+  return {
+    promptKey,
+    promptSource,
+    promptFilePath: typeof prompt.file_path === 'string' ? prompt.file_path : null,
+    effectiveTemplate,
+    renderedBytes,
+    renderedSha256,
+    variables,
+    messageCount: typeof root.message_count === 'number' ? root.message_count : null,
+  }
+}
+
+export function renderCapturedLibrarianPrompt(evidence: LibrarianInputEvidence): string {
+  return evidence.effectiveTemplate.replace(/\{\{([^}]+)\}\}/g, (whole, rawName: string) => {
+    const name = rawName.trim()
+    const value = evidence.variables[name]
+    return value === undefined ? whole : value
+  })
+}
+
 function isForbidden(reason: unknown): boolean {
   return reason instanceof ApiRequestError
     ? reason.status === 403
@@ -298,11 +358,13 @@ function LibrarianJournal({
 function ExactRunDetail({ runId }: { runId: string }) {
   const [run, setRun] = useState<ExactLaneRunRecord | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showRenderedPrompt, setShowRenderedPrompt] = useState(false)
 
   useEffect(() => {
     const controller = new AbortController()
     setRun(null)
     setError(null)
+    setShowRenderedPrompt(false)
     fetchExactLaneRun(runId, { signal: controller.signal })
       .then(setRun)
       .catch((cause: unknown) => {
@@ -330,6 +392,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
     const memoryEvidence = run.lane === 'librarian_exact'
       ? librarianMemoryEvidence(run.output)
       : null
+    const inputEvidence = run.lane === 'librarian_exact'
+      ? librarianInputEvidence(run.input.payload)
+      : null
     return html`
       <div class="ia-detail">
         <div class="ia-evi">
@@ -346,6 +411,27 @@ function ExactRunDetail({ runId }: { runId: string }) {
           <${JsonViewerCard} title="실제 입력 · typed" data=${run.input.payload} expandAll=${true} />
           <${JsonViewerCard} title="실제 출력 · typed" data=${output} expandAll=${true} />
         </div>
+        ${inputEvidence === null ? null : html`
+          <div class="ia-evi" data-librarian-input-evidence>
+            <div class="ia-k"><${EvidenceBadge} kind="typed" /> Librarian prompt + input provenance</div>
+            <p class="ia-note">
+              <code>${inputEvidence.promptKey}</code> · source <code>${inputEvidence.promptSource}</code>
+              ${inputEvidence.promptFilePath ? html` · <code>${inputEvidence.promptFilePath}</code>` : null}
+              · ${inputEvidence.renderedBytes.toLocaleString()} bytes · sha256 <code>${inputEvidence.renderedSha256.slice(0, 12)}</code>
+              ${inputEvidence.messageCount === null ? null : ` · ${inputEvidence.messageCount} messages`}
+            </p>
+            <div class="ia-tool-io">
+              <${JsonViewerCard} title="실행 당시 effective template" data=${inputEvidence.effectiveTemplate} />
+              <${JsonViewerCard} title="실제 치환 input sections" data=${inputEvidence.variables} />
+            </div>
+            <${Btn} variant="ghost" onClick=${() => setShowRenderedPrompt(value => !value)}>
+              ${showRenderedPrompt ? '최종 rendered prompt 닫기' : '최종 rendered prompt 보기'}
+            <//>
+            ${showRenderedPrompt
+              ? html`<pre class="mono mt-2 max-h-120 overflow-auto whitespace-pre-wrap rounded border border-[var(--color-border-default)] p-3">${renderCapturedLibrarianPrompt(inputEvidence)}</pre>`
+              : null}
+          </div>
+        `}
         ${run.persistenceError === undefined
           ? null
           : html`<p class="ia-err">완료 의도 <code>${run.intendedStatus}</code> · persistence <code>${run.persistenceState}</code>: ${run.persistenceError}${run.intendedCode ? ` · ${run.intendedCode}: ${run.intendedDetail}` : ''}</p>`}

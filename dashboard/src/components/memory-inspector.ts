@@ -501,8 +501,8 @@ function FactRow({
           ${fact.current
             ? html`<span class="mem-ttl current">유효</span>`
             : html`<span class="mem-ttl expired">만료</span>`}
-          ${delta === 'added' ? html`<span class="mem-delta added">+ 새 기억</span>` : null}
-          ${delta === 'removed' ? html`<span class="mem-delta removed">− 사라진 기억</span>` : null}
+          ${delta === 'added' ? html`<span class="mem-delta added" title="이번 revision부터 current memory에 존재">+ 추가됨 · 현재 기억에 들어옴</span>` : null}
+          ${delta === 'removed' ? html`<span class="mem-delta removed" title="직전 revision에는 있었지만 현재 memory에서는 삭제됨">− 제거됨 · 현재 기억에서 빠짐</span>` : null}
           <span class="mono" title=${formatInstant(fact.first_seen)}>저장 ${factAgeLabel(fact)}</span>
           ${srcOverride ? html`<span class="mem-src mono">${srcOverride}</span>` : null}
         </div>
@@ -641,7 +641,7 @@ function OneKeeperMemoryReal({
         <div class="mem-sec-head">
           <h4>장기 메모리 스토어 · memory-os</h4>
           <span class="mem-n mono">${snapshot.facts.shown}</span>
-          <span class="mem-n mono" title=${`revision ${snapshot.revision}에서 들어온 / 빠진 기억`}>+${snapshot.change.added.length} −${snapshot.change.removed.length}</span>
+          <span class="mem-n mono" title=${`revision ${snapshot.revision}: +는 새 current fact, −는 직전 snapshot에서 삭제된 fact`}>추가 ${snapshot.change.added.length} · 제거 ${snapshot.change.removed.length} · 유지 ${snapshot.change.retained}</span>
         </div>
         ${storeRows.length
           ? html`

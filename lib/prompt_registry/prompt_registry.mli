@@ -130,6 +130,15 @@ val render_prompt_template :
     template references an unresolved variable not in the
     assoc list. *)
 
+val resolve_and_render_prompt_template :
+  string
+  -> (string * string) list
+  -> (prompt_resolution * string, string) result
+(** Resolve the effective template once, then render that exact snapshot.
+    Observation planes use the returned resolution to record which file or
+    override supplied the bytes sent to the model. This avoids reporting a
+    newer override beside a render produced from an older one. *)
+
 (** {1 Override lifecycle} *)
 
 val set_override : string -> string -> (unit, string) result

@@ -878,7 +878,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     if String.trim text <> "" then begin
       (* Back to the newest row: the turn that is about to start is drawn
          there, and staying scrolled back would hide the send. *)
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       forget_recall state;
       submit_message text
     end;
@@ -891,14 +891,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.add_char state.msg_input '\n';
     true
   | "up" when state.msg_scroll > 0 ->
-    state.msg_scroll <- state.msg_scroll + 1;
+    set_msg_scroll state (state.msg_scroll + 1);
     (match state.msg_older_cursor with
      | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
   | "down" when state.msg_scroll > 0 ->
-    state.msg_scroll <- max 0 (state.msg_scroll - 1);
+    set_msg_scroll state (state.msg_scroll - 1);
     true
   | "up" ->
     recall_older state;
@@ -912,26 +912,25 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        hundreds of rows -- took hundreds of notches. Three is what a terminal
        reports per detent, so a notch here covers what a notch covers
        everywhere else. *)
-    state.msg_scroll <- state.msg_scroll + wheel_notch_rows;
+    set_msg_scroll state (state.msg_scroll + wheel_notch_rows);
     (match state.msg_older_cursor with
      | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
   | "wheel-down" ->
-    state.msg_scroll <- max 0 (state.msg_scroll - wheel_notch_rows);
+    set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
     true
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
        single message. A page is the unit the reader actually moves in. *)
-    state.msg_scroll <- state.msg_scroll + keeper_message_page_rows state;
+    set_msg_scroll state (state.msg_scroll + keeper_message_page_rows state);
     true
   | "pagedown" ->
-    state.msg_scroll <-
-      max 0 (state.msg_scroll - keeper_message_page_rows state);
+    set_msg_scroll state (state.msg_scroll - keeper_message_page_rows state);
     true
   | "end" ->
-    state.msg_scroll <- 0;
+    set_msg_scroll state 0;
     true
   | "\127" | "\b" ->
     forget_recall state;
@@ -971,7 +970,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 5 then begin
       (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
          far back is worse than a key that ends the trip. *)
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       true
     end else if c = Some 11 then begin
       (* Ctrl-K: drop the newest waiting line without sending it. The queue
@@ -1147,6 +1146,7 @@ type async_msg =
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
+  | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of ((string * string) list, string) result
   | Code_entries_loaded of
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
@@ -1842,6 +1842,27 @@ let launch_code_activity_load state ~mailbox ~codebase ~path =
       enqueue_async mailbox
         (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
+(* Remember where a jump is about to leave from, so B can walk back.
+   Bounded: the oldest entry falls off past twenty. *)
+let code_jump_back_limit = 20
+
+let push_code_jump state =
+  let file = Option.map fst state.code_file in
+  let entry =
+    ( state.code_scope,
+      state.code_dir,
+      file,
+      state.code_file_cursor,
+      state.code_file_scroll )
+  in
+  state.code_jump_back <-
+    entry
+    :: (if List.length state.code_jump_back >= code_jump_back_limit then
+          List.filteri
+            (fun i _ -> i < code_jump_back_limit - 1)
+            state.code_jump_back
+        else state.code_jump_back)
+
 (* Ask the language server about [symbol] on the pane's cursor line. The
    question rides the surface's workspace axes, so a keeper checkout and a
    repository ask about their own bytes. *)
@@ -1993,6 +2014,30 @@ let launch_prompts_load state ~mailbox =
           `Stop_daemon)
   | None ->
       enqueue_async mailbox (Prompts_loaded (Error "Eio switch is unavailable"))
+
+let launch_librarian_input_load state ~mailbox ~prompt_key =
+  let host = server_peer_host in
+  let port = state.port in
+  state.prompts_librarian_input <- None;
+  state.prompts_librarian_input_error <- None;
+  state.prompts_librarian_input_loading <- true;
+  let run () =
+    let result =
+      try Masc_tui_http.fetch_latest_librarian_input ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Librarian_input_loaded (prompt_key, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Librarian_input_loaded
+           (prompt_key, Error "Eio switch is unavailable"))
 
 let launch_keeper_config_view state ~mailbox keeper_name =
   let host = server_peer_host in
@@ -2401,7 +2446,13 @@ let search_row_cursor state =
   | Connectors -> Some state.connectors_cursor
   | Runtime -> Some state.runtime_cursor
   | System_logs -> Some state.system_logs_cursor
-  | Code -> Some state.code_cursor
+  | Code ->
+      if
+        state.code_focus_file && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+        && not state.code_activity_open
+      then Some state.code_file_cursor
+      else Some state.code_cursor
   | _ -> None
 
 let search_land state index =
@@ -2437,8 +2488,21 @@ let search_land state index =
       state.system_logs_cursor <- index;
       follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
   | Code ->
-      (* The tree pane windows itself around the cursor; no scroll follows. *)
-      state.code_cursor <- index
+      if
+        state.code_focus_file && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+        && not state.code_activity_open
+      then begin
+        state.code_file_cursor <- index;
+        state.code_file_scroll <-
+          Masc_tui_scroll.ensure_visible ~cursor:index
+            ~height:(Masc_tui_render.code_pane_content_height ())
+            state.code_file_scroll
+      end
+      else
+        (* The tree pane windows itself around the cursor; no scroll
+           follows. *)
+        state.code_cursor <- index
   | _ -> ()
 
 let search_jump ?(backwards = false) state ~query ~after =
@@ -2647,7 +2711,7 @@ let switch_to_next_keeper_message state ~mailbox =
   | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
       open_message_for_keeper ~return_to:state.msg_return state keeper_name;
       state.keeper_cursor <- cursor;
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       state.msg_loaded <- [];
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
@@ -4521,11 +4585,11 @@ let handle_composer_key state ~base_path ~mailbox key =
       let text = Buffer.contents state.msg_input in
       (match Masc_tui_command.parse text with
        | Masc_tui_command.Say _ ->
-           state.msg_scroll <- 0;
+           set_msg_scroll state 0;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
-           state.msg_scroll <- 0
+           set_msg_scroll state 0
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
@@ -4680,7 +4744,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.palette_query <- "";
       state.palette_cursor <- 0;
       state.search <- None;
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
         (Masc_tui_command.task_message ~task_id ~title ~body)
@@ -4819,6 +4883,26 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            state.prompts_snapshot <- Some snapshot;
            state.prompts_error <- None
        | Error detail -> state.prompts_error <- Some detail)
+  | Librarian_input_loaded (prompt_key, result) ->
+      let still_selected =
+        match state.prompts_snapshot with
+        | None -> false
+        | Some snapshot ->
+            (match List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor with
+             | Some row -> String.equal row.Tui_decode.pr_key prompt_key
+             | None -> false)
+      in
+      if still_selected then begin
+        state.prompts_librarian_input_loading <- false;
+        state.config_scroll <- 0;
+        match result with
+        | Ok lines ->
+            state.prompts_librarian_input <- Some (prompt_key, lines);
+            state.prompts_librarian_input_error <- None
+        | Error detail ->
+            state.prompts_librarian_input <- None;
+            state.prompts_librarian_input_error <- Some detail
+      end
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok view ->
@@ -4958,7 +5042,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            let open Masc.Tui_decode in
            if location.ll_inside then begin
              (* Jump there: same file just moves the cursor, another file
-                opens with the line as its target. *)
+                opens with the line as its target. Either way the place the
+                jump left from goes on the back stack first. *)
+             push_code_jump state;
              state.code_lsp_note <-
                Some
                  (Printf.sprintf "%s: %s:%d" symbol location.ll_path
@@ -6193,6 +6279,15 @@ let main () =
     | Some snapshot ->
         List.nth_opt snapshot.Tui_decode.ps_rows state.prompts_cursor
   in
+  let handle_librarian_input_read () =
+    match selected_prompt () with
+    | None -> add_event state "error" "prompts not loaded yet; r to reload"
+    | Some row when not (String.equal row.Tui_decode.pr_category "librarian") ->
+        add_event state "error" "actual input is available on the Librarian prompt"
+    | Some row ->
+        launch_librarian_input_load state ~mailbox:async_messages
+          ~prompt_key:row.Tui_decode.pr_key
+  in
   let handle_prompt_edit () =
     match selected_prompt () with
     | None -> add_event state "error" "prompts not loaded yet; r to reload"
@@ -6848,6 +6943,40 @@ let main () =
            (* One cell per press: precise, and holding the key repeats it.
               The lowercase only -- H is the history toggle below. *)
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "B" when state.view = Code ->
+           (* Walk back through the definition jumps, newest first. The
+              stack holds where each jump left from; an empty stack says so
+              instead of moving. *)
+           (match state.code_jump_back with
+            | [] -> add_event state "system" "no jump to walk back from"
+            | (scope, dir, file, cursor, scroll) :: rest ->
+                state.code_jump_back <- rest;
+                let scope_changed = state.code_scope <> scope in
+                state.code_scope <- scope;
+                let dir_changed = not (String.equal state.code_dir dir) in
+                state.code_dir <- dir;
+                if scope_changed || dir_changed then begin
+                  state.code_cursor <- 0;
+                  state.code_entries <- [];
+                  state.code_entries_error <- None;
+                  launch_code_entries_load state ~mailbox:async_messages
+                end;
+                (match file with
+                 | None ->
+                     state.code_file <- None;
+                     state.code_file_error <- None;
+                     state.code_focus_file <- false
+                 | Some path -> (
+                     match state.code_file with
+                     | Some (open_path, _)
+                       when String.equal open_path path ->
+                         state.code_file_cursor <- cursor;
+                         state.code_file_scroll <- scroll;
+                         state.code_focus_file <- true
+                     | Some _ | None ->
+                         state.code_target_line <- Some (cursor + 1);
+                         launch_code_file_load state
+                           ~mailbox:async_messages ~path)))
        | Some "K" when state.view = Code && state.code_focus_file
                        && Option.is_some state.code_file
                        && not state.code_history_open
@@ -7071,6 +7200,9 @@ let main () =
                     max 0
                       (min (count - 1)
                          (state.schedule_cursor + (direction * page)))
+            | Config when state.config_prompts ->
+                state.config_scroll <-
+                  max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
             | Verification | Harness | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
@@ -7420,8 +7552,13 @@ let main () =
                   | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
                   | None -> 0
                 in
-                if state.prompts_cursor < count - 1 then
-                  state.prompts_cursor <- state.prompts_cursor + 1
+                if state.prompts_cursor < count - 1 then begin
+                  state.prompts_cursor <- state.prompts_cursor + 1;
+                  state.config_scroll <- 0;
+                  state.prompts_librarian_input <- None;
+                  state.prompts_librarian_input_error <- None;
+                  state.prompts_librarian_input_loading <- false
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
@@ -7637,7 +7774,14 @@ let main () =
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
             | Config when state.config_prompts ->
-                state.prompts_cursor <- max 0 (state.prompts_cursor - 1)
+                let next = max 0 (state.prompts_cursor - 1) in
+                if next <> state.prompts_cursor then begin
+                  state.prompts_cursor <- next;
+                  state.config_scroll <- 0;
+                  state.prompts_librarian_input <- None;
+                  state.prompts_librarian_input_error <- None;
+                  state.prompts_librarian_input_loading <- false
+                end
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -8266,12 +8410,19 @@ let main () =
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+       | Some "i" | Some "I"
+         when state.view = Config && state.config_prompts ->
+           handle_librarian_input_read ()
        | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
            state.config_prompts <- not state.config_prompts;
            state.prompts_cursor <- 0;
+           state.config_scroll <- 0;
+           state.prompts_librarian_input <- None;
+           state.prompts_librarian_input_error <- None;
+           state.prompts_librarian_input_loading <- false;
            if state.config_prompts && state.prompts_snapshot = None then
              launch_prompts_load state ~mailbox:async_messages
        | Some "p" | Some "P" ->

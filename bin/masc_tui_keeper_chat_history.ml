@@ -175,8 +175,14 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
          int_field change "retained"
        with
        | Some added, Some removed, Some retained ->
-           let added_lines = List.map (memory_fact_line "+") added in
-           let removed_lines = List.map (memory_fact_line "-") removed in
+           let added_lines =
+             List.map (memory_fact_line "+ ADDED (now in current memory)") added
+           in
+           let removed_lines =
+             List.map
+               (memory_fact_line "- REMOVED (no longer in current memory)")
+               removed
+           in
            let dropped_lines =
              match list_field fields "dropped" with
              | None -> Some []
@@ -193,7 +199,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                (fun dropped_lines ->
                   let summary =
                     Printf.sprintf
-                      "%s committed memory revision %d \xc2\xb7 +%d added \xc2\xb7 -%d removed \xc2\xb7 %d retained"
+                      "%s committed current memory revision %d\nDELTA: %d added (now present) \xc2\xb7 %d removed (now absent) \xc2\xb7 %d retained from previous"
                       (memory_source_label fields)
                       revision
                       (List.length added)

@@ -70,6 +70,10 @@ module Theme = struct
     ; bad : string
     ; info : string
     ; muted : string
+    ; user : string
+    ; keeper : string
+    ; tool : string
+    ; quiet : string
     }
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
@@ -83,6 +87,7 @@ module Theme = struct
     | Some _ | None ->
       let palette = Masc_tui_terminal_palette.snapshot_palette probed in
       let of_state = Masc_tui_theme.status_readable palette in
+      let of_colour = Masc_tui_theme.ansi_readable palette in
       let next =
         { generation
         ; ok = of_state Masc_tui_theme.Ok
@@ -90,6 +95,10 @@ module Theme = struct
         ; bad = of_state Masc_tui_theme.Bad
         ; info = of_state Masc_tui_theme.Info
         ; muted = of_state Masc_tui_theme.Muted
+        ; user = of_colour Masc_tui_theme.Bright_cyan
+        ; keeper = of_colour Masc_tui_theme.Bright_blue
+        ; tool = of_colour Masc_tui_theme.Bright_magenta
+        ; quiet = of_colour Masc_tui_theme.Bright_black
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
@@ -101,6 +110,16 @@ module Theme = struct
   let bad () = (resolved ()).bad
   let info () = (resolved ()).info
   let muted () = (resolved ()).muted
+
+  (* Who is speaking is a reading too, so the role colours draw through the
+     same path as the state ones. Measured on the twelve schemes, they need it
+     as much: the Keeper's blue reads at 2.26:1 on default-light and the tool
+     trail's bright black at 1.69:1 on Nord, which is the row an operator
+     scans to see what a keeper just did. *)
+  let user_origin () = (resolved ()).user
+  let keeper_origin () = (resolved ()).keeper
+  let tool_origin () = (resolved ()).tool
+  let quiet_origin () = (resolved ()).quiet
   let selection = Masc_tui_theme.selection
   let border_focus = Masc_tui_theme.border_focus
 
@@ -170,12 +189,12 @@ module Chat_theme = struct
     }
 
   let origin : Masc_tui_message_layout.style -> string = function
-    | Masc_tui_message_layout.User -> Ansi.bright_cyan
-    | Masc_tui_message_layout.Keeper -> Ansi.bright_blue
+    | Masc_tui_message_layout.User -> Theme.user_origin ()
+    | Masc_tui_message_layout.Keeper -> Theme.keeper_origin ()
     | Masc_tui_message_layout.Status -> Theme.warn ()
     | Masc_tui_message_layout.Error -> Theme.bad ()
-    | Masc_tui_message_layout.Tool -> Ansi.bright_magenta
-    | Masc_tui_message_layout.Thinking -> Ansi.gray
+    | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
+    | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset

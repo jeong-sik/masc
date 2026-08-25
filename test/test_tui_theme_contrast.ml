@@ -93,36 +93,29 @@ let ansi scheme index = base scheme ansi_slot.(index)
 let background scheme = base scheme 0x0
 let foreground scheme = base scheme 0x5
 
-(* Every semantic colour masc draws, by the ANSI colour its SGR code selects.
-   Exhaustive over the token types, so a new one cannot be added without
-   deciding here what it is measured as. *)
-let ansi_red = 1
-let ansi_green = 2
-let ansi_yellow = 3
-let ansi_blue = 4
-let ansi_cyan = 6
-let ansi_bright_black = 8
-
-let status_ansi : Masc_tui_theme.status -> int = function
-  | Masc_tui_theme.Ok -> ansi_green
-  | Masc_tui_theme.Warn -> ansi_yellow
-  | Masc_tui_theme.Bad -> ansi_red
-  | Masc_tui_theme.Info -> ansi_cyan
-  | Masc_tui_theme.Muted -> ansi_bright_black
+(* Every colour something draws a meaning through, state and role alike, and
+   the one table both the reading tests and the lifting tests measure. The
+   role ones matter as much as the state ones: the tool trail is the row an
+   operator scans to see what a keeper just did. *)
+let named_colours =
+  [ "status Ok", Masc_tui_theme.Bright_green
+  ; "status Warn", Masc_tui_theme.Bright_yellow
+  ; "status Bad", Masc_tui_theme.Bright_red
+  ; "status Info", Masc_tui_theme.Bright_cyan
+  ; "chat User origin", Masc_tui_theme.Bright_cyan
+  ; "chat Keeper origin", Masc_tui_theme.Bright_blue
+  ; "chat Tool origin", Masc_tui_theme.Bright_magenta
+  ; "chat Thinking origin", Masc_tui_theme.Bright_black
+  ; "Syntax.keyword", Masc_tui_theme.Bright_magenta
+  ; "Syntax.string_", Masc_tui_theme.Bright_green
+  ]
 ;;
 
 let named_tokens =
-  [ "status Ok", status_ansi Masc_tui_theme.Ok
-  ; "status Warn", status_ansi Masc_tui_theme.Warn
-  ; "status Bad", status_ansi Masc_tui_theme.Bad
-  ; "status Info", status_ansi Masc_tui_theme.Info
-  ; "status Muted", status_ansi Masc_tui_theme.Muted
-  ; "Syntax.keyword", ansi_yellow
-  ; "Syntax.string_", ansi_green
-  ; "chat User origin", ansi_cyan
-  ; "chat Keeper origin", ansi_blue
-  ; "chat Tool origin", ansi_bright_black
-  ]
+  List.map
+    (fun (label, colour) ->
+      label, Masc_tui_theme.For_testing.ansi_color_index colour)
+    named_colours
 ;;
 
 (* What a colour has to clear to be read as text. WCAG 2 AA for body text. *)
@@ -299,21 +292,14 @@ let palette_of scheme =
                Some (ansi scheme index)))
 ;;
 
-let readable scheme state =
-  Masc_tui_theme.For_testing.status_readable ~colors_enabled:true
+let readable scheme colour =
+  Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
     ~project:
       (Palette.For_testing.best_color_for_level
          ~level:Palette.True_color)
-    (palette_of scheme) state
+    (palette_of scheme) colour
 ;;
 
-let statuses =
-  [ "Ok", Masc_tui_theme.Ok
-  ; "Warn", Masc_tui_theme.Warn
-  ; "Bad", Masc_tui_theme.Bad
-  ; "Info", Masc_tui_theme.Info
-  ]
-;;
 
 let truecolor_prefix = "\027[38;2;"
 
@@ -322,23 +308,25 @@ let test_a_failing_theme_entry_is_replaced_and_a_passing_one_is_not () =
     (fun scheme ->
       let bg = background scheme in
       List.iter
-        (fun (label, state) ->
-          let entry = ansi scheme (Masc_tui_theme.For_testing.status_ansi_index state) in
+        (fun (label, colour) ->
+          let entry =
+            ansi scheme (Masc_tui_theme.For_testing.ansi_color_index colour)
+          in
           let ratio = Color.contrast_ratio entry bg in
-          let drawn = readable scheme state in
+          let drawn = readable scheme colour in
           if ratio >= text_floor then
             check bool
               (Printf.sprintf "%s: %s reads at %.2f and keeps the theme's own"
                  scheme.name label ratio)
               true
-              (String.equal drawn (Masc_tui_theme.status state))
+              (String.equal drawn (Masc_tui_theme.For_testing.ansi_color_code colour))
           else
             check bool
               (Printf.sprintf "%s: %s only reads at %.2f and is replaced"
                  scheme.name label ratio)
               true
               (String.starts_with ~prefix:truecolor_prefix drawn))
-        statuses)
+        named_colours)
     schemes
 ;;
 
@@ -355,18 +343,18 @@ let test_an_unanswered_palette_changes_nothing () =
           ~ansi:(Array.make Palette.ansi_slot_count None)
       in
       List.iter
-        (fun (label, state) ->
+        (fun (label, colour) ->
           check bool
             (Printf.sprintf "%s: %s keeps its plain code" scheme.name label)
             true
             (String.equal
-               (Masc_tui_theme.For_testing.status_readable ~colors_enabled:true
+               (Masc_tui_theme.For_testing.ansi_readable ~colors_enabled:true
                   ~project:
                     (Palette.For_testing.best_color_for_level
                        ~level:Palette.True_color)
-                  without_ansi state)
-               (Masc_tui_theme.status state)))
-        statuses)
+                  without_ansi colour)
+               (Masc_tui_theme.For_testing.ansi_color_code colour)))
+        named_colours)
     schemes
 ;;
 

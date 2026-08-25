@@ -568,7 +568,7 @@ let connection_badge (state : state) =
   let connection = connection_status_badge state.connection_status in
   match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ Theme.bad ^ "[workspace mismatch]" ^ Ansi.reset
+      connection ^ " " ^ (Theme.bad ()) ^ "[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection
 ;;

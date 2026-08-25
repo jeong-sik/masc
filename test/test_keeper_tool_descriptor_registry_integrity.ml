@@ -198,6 +198,16 @@ let test_model_visible_descriptors_own_capability_identity () =
         descriptor.id)
 ;;
 
+(* [Keeper_schema_toml] decodes each file in a module-level [let] and fails
+   the boot on a bad one, which is the contract its .mli states. That makes
+   the loop below unreachable: a schema that would fail it kills the process
+   before any test function starts, so it can only ever run against schemas
+   that already pass (#29354).
+
+   Keeping the loop and adding a case that drives the same parser the loader
+   uses. [Tool_definition_toml.load] is what [schema_of_name] calls, and it
+   returns a result, so the rejection is observable here rather than only as
+   a boot trace. *)
 let test_model_visible_descriptors_have_canonical_input_schemas () =
   Descriptor.model_visible_descriptors ()
   |> List.iter (fun (descriptor : Descriptor.t) ->
@@ -209,6 +219,46 @@ let test_model_visible_descriptors_have_canonical_input_schemas () =
          descriptor.id
          (String.concat "; " errors));
     ignore descriptor.input_schema_source)
+;;
+
+let test_the_loader_refuses_a_malformed_declaration () =
+  let malformed =
+    {|name = "masc_keeper_up"
+description = "probe"
+
+[[params]]
+name = "keeper_name"
+type = "nonsense"
+|}
+  in
+  match
+    Tool_definition_toml.load ~name:"masc_keeper_up" ~contents:malformed
+  with
+  | Ok _ ->
+    Alcotest.fail
+      "a param type outside the schema vocabulary must not load; the boot \
+       depends on this refusal"
+  | Error _ -> ()
+;;
+
+(* The other half: the refusal has to be about the malformed part, not about
+   the loader rejecting everything. *)
+let test_the_loader_accepts_the_same_declaration_repaired () =
+  let repaired =
+    {|name = "masc_keeper_up"
+description = "probe"
+
+[[params]]
+name = "keeper_name"
+type = "string"
+|}
+  in
+  match
+    Tool_definition_toml.load ~name:"masc_keeper_up" ~contents:repaired
+  with
+  | Ok _ -> ()
+  | Error detail ->
+    Alcotest.failf "the repaired declaration must load: %s" detail
 ;;
 
 let test_all_resolved_descriptor_schemas_are_structurally_valid () =
@@ -1786,6 +1836,14 @@ let () =
             "model-visible descriptors have canonical input schemas"
             `Quick
             test_model_visible_descriptors_have_canonical_input_schemas
+        ; Alcotest.test_case
+            "the loader refuses a malformed declaration"
+            `Quick
+            test_the_loader_refuses_a_malformed_declaration
+        ; Alcotest.test_case
+            "the loader accepts the same declaration repaired"
+            `Quick
+            test_the_loader_accepts_the_same_declaration_repaired
         ; test_case
             "resolved descriptor schemas are structurally valid"
             `Quick

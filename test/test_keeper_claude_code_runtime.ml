@@ -227,11 +227,28 @@ let message role text : Agent_core.Types.message =
   { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
+(* [content] is a content-block array, and has been since a Claude Code keeper
+   started being handed images rather than a reading of them. The text the
+   caller wants is the [text] of the text blocks, in order; image blocks carry
+   base64 and are not part of it. Reading it as a string raised
+   Type_error("Expected string, got array") in four tests at once. *)
 let content_of_wire_message raw =
-  Yojson.Safe.from_string raw
-  |> Yojson.Safe.Util.member "message"
-  |> Yojson.Safe.Util.member "content"
-  |> Yojson.Safe.Util.to_string
+  let blocks =
+    Yojson.Safe.from_string raw
+    |> Yojson.Safe.Util.member "message"
+    |> Yojson.Safe.Util.member "content"
+    |> Yojson.Safe.Util.to_list
+  in
+  let texts =
+    blocks
+    |> List.filter_map (fun block ->
+         match Yojson.Safe.Util.member "type" block with
+         | `String "text" -> Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" block))
+         | _ -> None)
+  in
+  match texts with
+  | [] -> failwith "wire message carries no text block"
+  | texts -> String.concat "" texts
 ;;
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus

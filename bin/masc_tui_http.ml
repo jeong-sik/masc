@@ -812,6 +812,27 @@ let post_schedule_cancel ~(host : string) ~(port : int) ~(schedule_id : string)
   post_json ~host ~port ~path:"/api/v1/tools/masc_schedule_cancel"
     ~body:(Yojson.Safe.to_string payload)
 
+(** POST /api/v1/verification/verdict — the operator's verdict on a task
+    awaiting verification. The route demands a reason with a reject and takes
+    none with an approve, so the variant carries it only where it rides. The
+    route wants a token-bound admin credential — the one this process mints
+    at startup. *)
+let post_verification_verdict ~(host : string) ~(port : int)
+    ~(task_id : string) ~(verdict : [ `Approve | `Reject of string ]) :
+    (Yojson.Safe.t, string) result =
+  let fields =
+    match verdict with
+    | `Approve ->
+        [ ("task_id", `String task_id); ("verdict", `String "approve") ]
+    | `Reject reason ->
+        [ ("task_id", `String task_id)
+        ; ("verdict", `String "reject")
+        ; ("reason", `String reason)
+        ]
+  in
+  post_json ~host ~port ~path:"/api/v1/verification/verdict"
+    ~body:(Yojson.Safe.to_string (`Assoc fields))
+
 (** POST /api/v1/keepers/:name/config — a partial settings patch. The body is
     exactly the fields the operator left in $EDITOR; a field absent from the
     body is absent from the patch, so the editor round-trip cannot blank a

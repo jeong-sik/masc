@@ -4018,6 +4018,26 @@ let render_verification (state : state) =
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
       (Printf.sprintf "[%d requests, scroll %d]" shown scroll);
+  (* The arm and the server's last refusal sit under the list, the same rows
+     the schedule cancel carries them on. *)
+  (match state.verification_verdict_armed with
+   | Some task_id ->
+       (* No width padding on the id: padding to a reserved column (the
+          schedule arm's habit) pushes the "same key again" tail past the box
+          on a narrow terminal, and the tail is the half that instructs. *)
+       box_line buf cols
+         (Theme.warn
+         ^ Printf.sprintf "  armed: approve %s -- same key again to send"
+             (Terminal_text.single_line task_id)
+         ^ Ansi.reset)
+   | None -> ());
+  (match state.verification_verdict_error with
+   | Some err ->
+       box_line buf cols
+         (Theme.bad ^ "  "
+         ^ fit_width (Terminal_text.single_line err) (cols - 8)
+         ^ Ansi.reset)
+   | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));

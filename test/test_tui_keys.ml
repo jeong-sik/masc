@@ -59,7 +59,14 @@ let test_listing_footers_share_one_shape () =
     (fun surface ->
       check str "the plain listings share one footer" canonical
         (Masc_tui_keys.footer_hints surface))
-    [ Lanes; Verification; Harness; Repositories; Tools; System_logs ]
+    [ Lanes; Harness; Repositories; Tools; System_logs ]
+
+let test_verification_footer_carries_the_verdict_keys () =
+  (* Verification left the plain listings when the verdict keys landed: the
+     approve is the two-press arm, the reject is the $EDITOR reason form. *)
+  check str "verification names approve and reject"
+    "j/k:scroll  a:approve  x:reject  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Verification)
 
 let test_overview_footer_projects_by_focus () =
   (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
@@ -126,6 +133,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "plain listings share one footer" `Quick
             test_listing_footers_share_one_shape
+        ; Alcotest.test_case "Verification carries the verdict keys" `Quick
+            test_verification_footer_carries_the_verdict_keys
         ; Alcotest.test_case "Overview footer projects by focus" `Quick
             test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick

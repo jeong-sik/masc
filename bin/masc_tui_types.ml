@@ -918,6 +918,12 @@ type state = {
   mutable verification_error: string option;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* An approve armed for a second keypress: which task. The cursor can move
+     between the two presses, so the task id is captured at arm time and a
+     press on a different row re-arms for that row. Reject carries no arm --
+     its $EDITOR reason form is the confirmation step. *)
+  mutable verification_verdict_armed: string option;
+  mutable verification_verdict_error: string option;
   mutable system_logs: system_log_snapshot option;
   mutable system_logs_error: string option;
   mutable system_logs_scroll: int;
@@ -1254,6 +1260,8 @@ let create_state
   verification_error = None;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_verdict_armed = None;
+  verification_verdict_error = None;
   system_logs_scroll = 0;
   system_logs_cursor = 0;
   msg_input = Buffer.create 256;

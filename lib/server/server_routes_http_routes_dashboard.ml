@@ -2010,9 +2010,12 @@ let add_routes ~sw ~clock router =
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
-     a turn: both decide what a running turn is allowed to do next. *)
+     a turn: both decide what a running turn is allowed to do next. The route
+     carries its own catalog auth key (keeper_tool_approval_route) rather than
+     borrowing a dispatchable tool's name, so the permission it enforces stays
+     reviewable on its own terms. *)
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
@@ -2027,12 +2030,13 @@ let add_routes ~sw ~clock router =
   (* The per-keeper approval stance the gate consults per call. Reading the
      overrides is a public-read projection like the listing above; setting
      one decides what a running turn may do next, so it carries the same
-     authority as answering a held call. *)
+     authority as answering a held call (and its own catalog auth key,
+     keeper_tool_approval_mode_route). *)
   |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approval_mode_get state request reqd) request reqd)
   |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"keeper_tool_approval_mode_route" (fun state _req reqd ->
          handle_keeper_tool_approval_mode_set state request reqd) request reqd)
 
   (* Keeper POST sub-routes. *)

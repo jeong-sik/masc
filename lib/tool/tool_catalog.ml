@@ -239,6 +239,24 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_set_task", broadcast_tool);
     ("masc_broadcast", with_semantic_flags ~mcp_context_required:true broadcast_tool);
     ("channel_gate", broadcast_tool);
+    (* Auth keys owned by the approval-mode HTTP routes themselves, not
+       borrowed from a dispatchable tool. [with_tool_auth] resolves the
+       caller's role through the catalog entry named by ~tool_name, so an
+       HTTP route needs a name here to be authorizable at all; these two
+       exist only for that lookup. They are hidden runtime keys with no
+       schema and no dispatch path, so they never appear on the public MCP
+       surface and cannot be called as tools. *)
+    ( "keeper_tool_approval_route",
+      hidden_runtime_tool
+        "Auth key for the tool-approval HTTP route (answering a held tool \
+         call); no schema, no dispatch path, route-authority only."
+        broadcast_tool );
+    ( "keeper_tool_approval_mode_route",
+      hidden_runtime_tool
+        "Auth key for the tool-approval-mode HTTP route (setting the \
+         per-keeper approval stance); no schema, no dispatch path, \
+         route-authority only."
+        broadcast_tool );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,

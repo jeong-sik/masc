@@ -400,18 +400,34 @@ let input_cursor_column ~terminal_cols ~input =
     (chat_input_box_cells + chat_input_prompt_cells + display_width input + 1)
 
 (* Metadata rows read down the pane as a column: [timestamp] From [origin]
-   request. Origins vary in width, so every label is padded to one fixed badge
-   and a too-long label truncates with an ellipsis rather than pushing the
-   request column out for everyone else. *)
+   request. Origins vary in width, so every label is padded to one badge and
+   the request column stays put down the pane.
+
+   The badge used to be 16 cells whatever the terminal was, so a
+   [codex-mcp-client] read as [codex-mcp-clien…] on a 200-column screen with
+   the room to spell it. The width is the widest label actually on the pane
+   now, never below the old 16 so a narrow terminal draws what it always did,
+   and never past a quarter of the pane so one long name cannot squeeze the
+   messages everyone came to read. *)
 let chat_role_label_column = 16
 
-let align_role_label label =
+let chat_role_label_share = 4
+
+let chat_role_label_width ~pane_cells labels =
+  let widest =
+    List.fold_left (fun acc label -> max acc (display_width label)) 0 labels
+  in
+  let ceiling = max chat_role_label_column (pane_cells / chat_role_label_share) in
+  max chat_role_label_column (min widest ceiling)
+
+let align_role_label ?(column = chat_role_label_column) label =
+  let column = max 1 column in
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
-  if cells > chat_role_label_column then
-    let prefix, _, _ = cell_prefix_of_pieces label pieces (chat_role_label_column - 1) in
+  if cells > column then
+    let prefix, _, _ = cell_prefix_of_pieces label pieces (column - 1) in
     prefix ^ "…"
-  else label ^ String.make (chat_role_label_column - cells) ' '
+  else label ^ String.make (column - cells) ' '
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows

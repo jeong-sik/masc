@@ -125,7 +125,14 @@ val chat_input_prompt_prefix : string
 
 val chat_input_prompt_cells : int
 
-val align_role_label : string -> string
+val chat_role_label_width : pane_cells:int -> string list -> int
+(** The badge width for a pane showing these labels: the widest one, floored
+    at {!chat_role_label_column} so a narrow terminal is unchanged and capped
+    at a quarter of the pane so one long name cannot crowd out the messages. *)
+
+val align_role_label : ?column:int -> string -> string
+(** Pad or truncate to [column], defaulting to {!chat_role_label_column}. Pass
+    the width {!chat_role_label_width} answered for the pane. *)
 (** Pad (or ellipsis-truncate) a metadata role label to one fixed cell column,
     so [timestamp] [From] origin badges align down the pane. *)
 

@@ -3334,6 +3334,23 @@ let render_keeper_message (state : state) =
       |> List.filter (fun message ->
         state.msg_memory_visible || message.me_role <> Message_memory)
     in
+    (* Derived once for the width and again per row, so the badge the pane
+       measures is the badge it draws. *)
+    let role_label_of (message : Masc_tui_types.msg_entry) =
+      match message.me_role with
+      | Message_user speaker -> speaker
+      | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
+      | Message_autonomous -> "\xc2\xb7 auto"
+      | Message_status -> "status"
+      | Message_error -> "error"
+      | Message_tool -> "tools"
+      | Message_thinking -> "thinking"
+      | Message_memory -> "memory"
+    in
+    let role_label_column =
+      Message_layout.chat_role_label_width ~pane_cells:chat_cols
+        (List.map role_label_of messages)
+    in
     let layout_entries =
       (* The position distinguishes rows whose durable timestamp and request
          fields tie. A history reorder can only cause a miss: the exact body is
@@ -3345,22 +3362,21 @@ let render_keeper_message (state : state) =
             && state.msg_reasoning_visibility = Reasoning_hidden
           then None
           else
-          let style, role_label =
+          let style =
             match message.me_role with
-            | Message_user speaker -> Message_layout.User, speaker
-            | Message_keeper ->
-                ( Message_layout.Keeper
-                , Keeper_chat.terminal_safe_text message.me_keeper_name )
-            | Message_autonomous -> Message_layout.Keeper, "\xc2\xb7 auto"
-            | Message_status -> Message_layout.Status, "status"
-            | Message_error -> Message_layout.Error, "error"
-            | Message_tool -> Message_layout.Tool, "tools"
-            | Message_thinking -> Message_layout.Thinking, "thinking"
-            | Message_memory -> Message_layout.Status, "memory"
+            | Message_user _ -> Message_layout.User
+            | Message_keeper | Message_autonomous -> Message_layout.Keeper
+            | Message_status | Message_memory -> Message_layout.Status
+            | Message_error -> Message_layout.Error
+            | Message_tool -> Message_layout.Tool
+            | Message_thinking -> Message_layout.Thinking
           in
+          let role_label = role_label_of message in
           (* One column for every speaker so the [timestamp] speaker request
              rows line up down the pane, whatever name each row carries. *)
-          let role_label = Message_layout.align_role_label role_label in
+          let role_label =
+            Message_layout.align_role_label ~column:role_label_column role_label
+          in
           let body =
             match message.me_role with
             | Message_thinking

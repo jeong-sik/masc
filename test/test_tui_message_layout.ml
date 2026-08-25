@@ -833,6 +833,62 @@ let test_bare_links_are_dressed_and_bounded () =
   check string "http without slashes is not a link" "httpx and http:"
     (dress "httpx and http:")
 
+(* The badge was 16 cells whatever the terminal was, so [codex-mcp-client]
+   read as [codex-mcp-clien…] on a screen with room to spell it. These pin the
+   three things the width has to be at once: wide enough for the names on the
+   pane, never narrower than it used to be, and never so wide that one long
+   name crowds out the messages. *)
+let test_badge_fits_the_longest_name_present () =
+  let width =
+    Layout.chat_role_label_width ~pane_cells:200
+      [ "you"; "codex-mcp-client"; "tools" ]
+  in
+  check int "the longest name fits whole" 16 width;
+  check string "and is not truncated"
+    "codex-mcp-client"
+    (String.trim (Layout.align_role_label ~column:width "codex-mcp-client"))
+
+let test_badge_grows_past_the_old_constant () =
+  let long = "keeper-with-a-very-long-name" in
+  let width = Layout.chat_role_label_width ~pane_cells:200 [ long ] in
+  check bool "a 27-cell name gets more than the old 16" true (width > 16);
+  check string "and reads whole" long
+    (String.trim (Layout.align_role_label ~column:width long))
+
+let test_badge_never_narrows_below_the_old_constant () =
+  List.iter
+    (fun labels ->
+      check int "short labels keep the old badge" 16
+        (Layout.chat_role_label_width ~pane_cells:200 labels))
+    [ [ "you" ]; [ "tools"; "error" ]; [] ]
+
+let test_one_long_name_cannot_crowd_the_messages () =
+  let long = String.make 120 'k' in
+  let pane = 80 in
+  let width = Layout.chat_role_label_width ~pane_cells:pane [ long ] in
+  check bool "the badge stays within a quarter of the pane" true
+    (width <= pane / 4);
+  check bool "so the body keeps most of the width" true
+    (pane - width > pane / 2)
+
+let test_a_narrow_pane_draws_what_it_always_did () =
+  (* Under 64 cells a quarter is below 16, and the floor wins -- the same
+     badge these panes have always had. *)
+  check int "40-cell pane" 16
+    (Layout.chat_role_label_width ~pane_cells:40 [ "codex-mcp-client" ]);
+  check int "16-cell pane" 16
+    (Layout.chat_role_label_width ~pane_cells:16 [ "codex-mcp-client" ])
+
+let test_every_row_gets_the_same_badge () =
+  (* Alignment is the reason the badge exists: one width for the pane, not
+     one per row. *)
+  let width = Layout.chat_role_label_width ~pane_cells:200 [ "you"; "analyst" ] in
+  List.iter
+    (fun label ->
+      check int ("badge width for " ^ label) width
+        (Layout.display_width (Layout.align_role_label ~column:width label)))
+    [ "you"; "analyst"; "tools"; "thinking" ]
+
 let () =
   run "tui_message_layout"
     [
@@ -914,6 +970,18 @@ let () =
             test_scrolling_back_moves_the_window
         ; test_case "max scroll stops at the oldest row" `Quick
             test_max_scroll_stops_at_the_oldest_row
+        ; test_case "badge fits the longest name present" `Quick
+            test_badge_fits_the_longest_name_present
+        ; test_case "badge grows past the old constant" `Quick
+            test_badge_grows_past_the_old_constant
+        ; test_case "badge never narrows below the old constant" `Quick
+            test_badge_never_narrows_below_the_old_constant
+        ; test_case "one long name cannot crowd the messages" `Quick
+            test_one_long_name_cannot_crowd_the_messages
+        ; test_case "a narrow pane draws what it always did" `Quick
+            test_a_narrow_pane_draws_what_it_always_did
+        ; test_case "every row gets the same badge" `Quick
+            test_every_row_gets_the_same_badge
         ; test_case "scrolling past the top shows nothing" `Quick
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ] )

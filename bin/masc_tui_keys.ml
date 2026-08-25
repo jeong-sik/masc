@@ -208,6 +208,10 @@ let for_surface = function
           ~help:"close the history, then the file, then climb one directory"
       ; b Navigate "h/l" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
+      ; b Search "/" "find"
+          ~help:"jump the cursor to a match: the tree, or the open file's \
+                 lines"
+      ; b Search "n / N" "next / previous match"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
                  (the palette collects the name)"

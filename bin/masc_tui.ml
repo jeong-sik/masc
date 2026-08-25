@@ -2447,7 +2447,13 @@ let search_row_cursor state =
   | Connectors -> Some state.connectors_cursor
   | Runtime -> Some state.runtime_cursor
   | System_logs -> Some state.system_logs_cursor
-  | Code -> Some state.code_cursor
+  | Code ->
+      if
+        state.code_focus_file && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+        && not state.code_activity_open
+      then Some state.code_file_cursor
+      else Some state.code_cursor
   | _ -> None
 
 let search_land state index =
@@ -2483,8 +2489,21 @@ let search_land state index =
       state.system_logs_cursor <- index;
       follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
   | Code ->
-      (* The tree pane windows itself around the cursor; no scroll follows. *)
-      state.code_cursor <- index
+      if
+        state.code_focus_file && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+        && not state.code_activity_open
+      then begin
+        state.code_file_cursor <- index;
+        state.code_file_scroll <-
+          Masc_tui_scroll.ensure_visible ~cursor:index
+            ~height:(Masc_tui_render.code_pane_content_height ())
+            state.code_file_scroll
+      end
+      else
+        (* The tree pane windows itself around the cursor; no scroll
+           follows. *)
+        state.code_cursor <- index
   | _ -> ()
 
 let search_jump ?(backwards = false) state ~query ~after =

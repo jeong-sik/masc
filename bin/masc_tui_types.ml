@@ -1695,10 +1695,25 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.sys_entries)
         state.system_logs
   | Code ->
-      Some
-        (List.map
-           (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-           state.code_entries)
+      (* With a file focused (and no overlay over it), "/" searches the
+         file's own lines; otherwise it searches the tree, as it always
+         has. The overlays keep their own j/k and are not searched. *)
+      if
+        state.code_focus_file && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+        && not state.code_activity_open
+      then
+        Option.map
+          (fun (_, rows) ->
+            List.map
+              (fun segments -> String.concat "" (List.map fst segments))
+              rows)
+          state.code_file
+      else
+        Some
+          (List.map
+             (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
+             state.code_entries)
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Changes | Config | Tools ->

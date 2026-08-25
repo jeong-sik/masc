@@ -41,10 +41,16 @@ type row_kind =
   | Metadata of metadata
   | Body
 
+type origin_display =
+  | Origin_row
+  | Origin_inline
+  | Origin_bare
+
 type row = {
   style : style;
   kind : row_kind;
   text : string;
+  gutter : string;
 }
 
 let utf8_scalar_byte_length first =
@@ -551,7 +557,12 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
   | None -> None
   | Some (metadata, text) ->
     let fitted, _, _ = cell_prefix text inner_width in
-    Some { style = entry.style; kind = Metadata metadata; text = fitted }
+    Some
+      { style = entry.style
+      ; kind = Metadata metadata
+      ; text = fitted
+      ; gutter = ""
+      }
 
 (* A body is a document, not a row. [sanitize] is applied to each line rather
    than to the whole, because escaping a newline the way a terminal escape is
@@ -577,8 +588,65 @@ let wrap_body ?markdown ~max_cells ~sanitize text =
          match wrap_words ~max_cells line with [] -> [ "" ] | rows -> rows)
       safe_lines
 
-let rows_of_entry ?markdown ~inner_width ~previous entry =
-  let body_width = max 4 (inner_width - 2) in
+(* What a body keeps whatever else wants the width. Four cells is what
+   [rows_of_entry] has always floored it at. *)
+let min_body_cells = 4
+
+(* [HH:MM:SS] cut to the minute for the inline margin. Seconds earn their
+   width on a row of their own; in a margin they are paid for once per message.
+   Text that is not a clock of that shape is left as it is rather than cut
+   blind. *)
+let short_clock timestamp =
+  if
+    String.length timestamp = 8
+    && Char.equal timestamp.[2] ':'
+    && Char.equal timestamp.[5] ':'
+  then String.sub timestamp 0 5
+  else timestamp
+
+(* [Origin_row] leaves the origin on a row of its own. The other two fold it
+   into the body's left margin, which buys back a row per message -- eight
+   speakers taking turns spent eight of a forty-row pane saying who was
+   talking.
+
+   Every row of the pane keeps the same margin width: the label arrives padded
+   to one column, so a continuation indents to where the first row started and
+   the body still reads as a block. [Origin_bare] drops the clock and keeps
+   the speaker, never the other way round -- losing track of who is talking
+   costs more than losing track of when. *)
+let origin_gutter ~origin ~previous ~inner_width entry =
+  match origin with
+  | Origin_row -> None
+  | Origin_inline | Origin_bare ->
+      let clock =
+        match origin with
+        | Origin_inline -> short_clock entry.timestamp ^ " "
+        | Origin_row | Origin_bare -> ""
+      in
+      (* The margin is taken from the body, so it cannot be wider than what
+         the body can spare. Left unbounded, one long keeper name on a narrow
+         pane drew a margin wider than the frame it sits in and the row
+         spilled past its own border. [min_body_cells] is what
+         {!rows_of_entry} floors the body at; the margin gets whatever is
+         left, and on a pane with nothing left it gets nothing rather than
+         pushing the messages out. *)
+      let ceiling = max 0 (inner_width - 2 - min_body_cells) in
+      let filled = fit_width (clock ^ entry.role_label) (min ceiling
+        (display_width (clock ^ entry.role_label))) in
+      if continues_previous ~previous entry then
+        (* Padded rather than repeated: a second row from the same speaker in
+           the same second has nothing new to say, and [fit_width] measures the
+           cells a label actually occupies where [String.make] would count its
+           bytes. *)
+        Some (fit_width "" (display_width filled))
+      else Some filled
+
+let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
+  let gutter = origin_gutter ~origin ~previous ~inner_width entry in
+  let gutter_width =
+    match gutter with None -> 0 | Some text -> display_width text
+  in
+  let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
      module keeps no terminal vocabulary; without it the body is wrapped as the
      plain text it always was. *)
@@ -599,15 +667,24 @@ let rows_of_entry ?markdown ~inner_width ~previous entry =
     | chunks -> chunks
   in
   let body_rows =
+    let margin = Option.value gutter ~default:"" in
+    let blank = fit_width "" (display_width margin) in
     body_chunks
-    |> List.map (fun chunk ->
-      { style = entry.style; kind = Body; text = "  " ^ chunk })
+    |> List.mapi (fun index chunk ->
+      { style = entry.style
+      ; kind = Body
+      ; text = "  " ^ chunk
+      ; gutter = (if index = 0 then margin else blank)
+      })
   in
-  match metadata_row ~previous ~inner_width entry with
-  | None -> body_rows
-  | Some metadata -> metadata :: body_rows
+  match origin with
+  | Origin_inline | Origin_bare -> body_rows
+  | Origin_row -> (
+      match metadata_row ~previous ~inner_width entry with
+      | None -> body_rows
+      | Some metadata -> metadata :: body_rows)
 
-let visible_rows ?markdown ~inner_width ~height entries =
+let visible_rows ?markdown ?origin ~inner_width ~height entries =
   let inner_width = max 1 inner_width in
   let height = max 0 height in
   let rec collect remaining selected = function
@@ -615,7 +692,7 @@ let visible_rows ?markdown ~inner_width ~height entries =
     | _ when remaining = 0 -> selected
     | entry :: older ->
         let rows =
-          rows_of_entry ?markdown ~inner_width
+          rows_of_entry ?markdown ?origin ~inner_width
             ~previous:(List.nth_opt older 0) entry
         in
         let chosen =
@@ -631,25 +708,25 @@ let visible_rows ?markdown ~inner_width ~height entries =
   in
   collect height [] (List.rev entries)
 
-let total_rows ?markdown ~inner_width entries =
+let total_rows ?markdown ?origin ~inner_width entries =
   let inner_width = max 1 inner_width in
   List.fold_left
     (fun (previous, total) entry ->
        ( Some entry
        , total
-         + List.length (rows_of_entry ?markdown ~inner_width ~previous entry) ))
+         + List.length (rows_of_entry ?markdown ?origin ~inner_width ~previous entry) ))
     (None, 0) entries
   |> snd
 
-let max_scroll ?markdown ~inner_width ~height entries =
-  max 0 (total_rows ?markdown ~inner_width entries - max 1 height)
+let max_scroll ?markdown ?origin ~inner_width ~height entries =
+  max 0 (total_rows ?markdown ?origin ~inner_width entries - max 1 height)
 
 (* Nothing older than the newest [from_bottom + height] rows can reach the
    window, so the walk stops once it holds them. Laying out the whole
    transcript to slice a screenful out of the end made every scrolled frame
    cost what the conversation had accumulated. *)
-let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
-  if from_bottom <= 0 then visible_rows ?markdown ~inner_width ~height entries
+let scrolled_rows ?markdown ?origin ~inner_width ~height ~from_bottom entries =
+  if from_bottom <= 0 then visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
     let height = max 0 height in
@@ -659,7 +736,7 @@ let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
       | _ when gathered_count >= wanted -> gathered, gathered_count
       | entry :: older ->
           let rows =
-            rows_of_entry ?markdown ~inner_width
+            rows_of_entry ?markdown ?origin ~inner_width
               ~previous:(List.nth_opt older 0) entry
           in
           collect (rows @ gathered) (gathered_count + List.length rows) older
@@ -675,7 +752,7 @@ let scrolled_rows ?markdown ~inner_width ~height ~from_bottom entries =
    lies further back cannot change the result. Reaching that through
    {!max_scroll} counted the whole transcript on every frame, including the
    frames where nobody had scrolled at all. *)
-let clamp_scroll ?markdown ~inner_width ~height requested entries =
+let clamp_scroll ?markdown ?origin ~inner_width ~height requested entries =
   if requested <= 0 then requested
   else begin
     let inner_width = max 1 inner_width in
@@ -690,7 +767,7 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
           count
             (total
              + List.length
-                 (rows_of_entry ?markdown ~inner_width
+                 (rows_of_entry ?markdown ?origin ~inner_width
                     ~previous:(List.nth_opt older 0) entry))
             older
     in
@@ -703,9 +780,9 @@ let clamp_scroll ?markdown ~inner_width ~height requested entries =
    own later hits during the second traversal. Keeping the rows from this walk
    avoids a frame-local cache of another size and makes every visited entry
    pay for layout once. *)
-let clamped_scrolled_rows ?markdown ~inner_width ~height ~requested entries =
+let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
   if requested <= 0 then
-    requested, visible_rows ?markdown ~inner_width ~height entries
+    requested, visible_rows ?markdown ?origin ~inner_width ~height entries
   else begin
     let inner_width = max 1 inner_width in
     let window_height = max 0 height in
@@ -716,7 +793,7 @@ let clamped_scrolled_rows ?markdown ~inner_width ~height ~requested entries =
       | _ when gathered_count >= enough -> gathered, gathered_count
       | entry :: older ->
           let rows =
-            rows_of_entry ?markdown ~inner_width
+            rows_of_entry ?markdown ?origin ~inner_width
               ~previous:(List.nth_opt older 0) entry
           in
           collect (rows @ gathered) (gathered_count + List.length rows) older

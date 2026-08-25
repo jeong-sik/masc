@@ -889,6 +889,163 @@ let test_every_row_gets_the_same_badge () =
         (Layout.display_width (Layout.align_role_label ~column:width label)))
     [ "you"; "analyst"; "tools"; "thinking" ]
 
+(* The origin heading costs a row per message. Folding it into the margin is
+   what buys those rows back, so the count is the claim worth pinning. *)
+let origin_entries () =
+  [ entry Layout.User "you" "tui-..aaaaaaaa" "first"
+  ; entry ~timestamp:"12:35:00" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
+      "second"
+  ]
+
+let test_row_mode_draws_what_it_always_did () =
+  let rows =
+    Layout.visible_rows ~inner_width:40 ~height:20 (origin_entries ())
+  in
+  check bool "every gutter empty" true
+    (List.for_all (fun (row : Layout.row) -> String.equal row.gutter "") rows);
+  check bool "headings still have their own rows" true
+    (List.exists
+       (fun (row : Layout.row) ->
+         match row.kind with Layout.Metadata _ -> true | Layout.Body -> false)
+       rows)
+
+let test_folding_returns_one_row_per_message () =
+  let entries = origin_entries () in
+  let full = Layout.total_rows ~inner_width:40 entries in
+  let inline =
+    Layout.total_rows ~origin:Layout.Origin_inline ~inner_width:40 entries
+  in
+  let bare =
+    Layout.total_rows ~origin:Layout.Origin_bare ~inner_width:40 entries
+  in
+  check int "inline drops a row per message" (full - 2) inline;
+  check int "bare drops the same" (full - 2) bare;
+  check bool "no metadata rows survive" true
+    (List.for_all
+       (fun (row : Layout.row) ->
+         match row.kind with Layout.Metadata _ -> false | Layout.Body -> true)
+       (Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40
+          ~height:20 entries))
+
+let first_gutter ~origin entries =
+  match Layout.visible_rows ~origin ~inner_width:40 ~height:20 entries with
+  | row :: _ -> row.Layout.gutter
+  | [] -> failwith "no rows"
+
+let test_inline_margin_carries_clock_and_speaker () =
+  let entries = [ entry Layout.User "you" "tui-..aaaaaaaa" "hello" ] in
+  check string "clock cut to the minute, speaker kept" "12:34 you"
+    (first_gutter ~origin:Layout.Origin_inline entries);
+  check string "bare keeps the speaker only" "you"
+    (first_gutter ~origin:Layout.Origin_bare entries)
+
+(* A timestamp that is not [HH:MM:SS] is left alone rather than cut blind:
+   the shortener is a normaliser, and the case where it does nothing is the
+   one that would otherwise lose bytes silently. *)
+let test_a_timestamp_of_another_shape_survives () =
+  let entries = [ entry ~timestamp:"just now" Layout.User "you" "r" "hello" ] in
+  check string "unshortened" "just now you"
+    (first_gutter ~origin:Layout.Origin_inline entries)
+
+let test_wrapped_rows_indent_under_the_first () =
+  let entries =
+    [ entry Layout.Keeper "keeper.one" "tui-..bbbbbbbb" (String.make 300 'w') ]
+  in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40 ~height:20
+      entries
+  with
+  | [] | [ _ ] -> failwith "expected a wrapped body"
+  | first :: rest ->
+      let width = Layout.display_width first.Layout.gutter in
+      check bool "first row names the origin" true
+        (String.trim first.Layout.gutter <> "");
+      check bool "continuations indent to the same column" true
+        (List.for_all
+           (fun (row : Layout.row) ->
+             String.trim row.Layout.gutter = ""
+             && Layout.display_width row.Layout.gutter = width)
+           rest)
+
+let test_a_second_message_from_one_speaker_stays_blank () =
+  let entries =
+    [ entry Layout.Keeper "keeper.one" "tui-..bbbbbbbb" "first"
+    ; entry Layout.Keeper "keeper.one" "tui-..bbbbbbbb" "second"
+    ]
+  in
+  let rows =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40 ~height:20
+      entries
+  in
+  check int "one row apiece" 2 (List.length rows);
+  match rows with
+  | [ first; second ] ->
+      check bool "the first names the speaker" true
+        (String.trim first.Layout.gutter <> "");
+      check string "the second repeats nothing"
+        (Layout.fit_width "" (Layout.display_width first.Layout.gutter))
+        second.Layout.gutter
+  | _ -> failwith "expected two rows"
+
+(* The margin is paid for out of the body, not out of the frame. A row that
+   drew its own width plus a margin would spill past the border it sits in. *)
+let test_the_margin_comes_out_of_the_body () =
+  let entries =
+    [ entry Layout.User "a-rather-long-speaker" "tui-..aaaaaaaa"
+        (String.make 400 'x')
+    ]
+  in
+  List.iter
+    (fun origin ->
+      List.iter
+        (fun inner ->
+          List.iter
+            (fun (row : Layout.row) ->
+              check bool
+                (Printf.sprintf "row fits %d cells" inner)
+                true
+                (Layout.display_width row.Layout.gutter
+                 + Layout.display_width row.Layout.text
+                <= inner))
+            (Layout.visible_rows ~origin ~inner_width:inner ~height:20 entries))
+        [ 16; 24; 40; 80 ])
+    [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
+
+(* Every scroll function has to measure the mode the pane draws. Given one
+   mode for the clamp and another for the slice, the pane comes out a row
+   short of where it says it is. *)
+let test_scrolling_measures_the_mode_it_draws () =
+  let entries =
+    List.init 12 (fun index ->
+      entry
+        ~timestamp:(Printf.sprintf "12:%02d:00" index)
+        Layout.Keeper
+        (Printf.sprintf "keeper.%d" index)
+        "tui-..bbbbbbbb"
+        (String.make 90 'b'))
+  in
+  List.iter
+    (fun origin ->
+      let height = 6 in
+      let total = Layout.total_rows ~origin ~inner_width:40 entries in
+      let bound = Layout.max_scroll ~origin ~inner_width:40 ~height entries in
+      check int "max scroll agrees with the total" (max 0 (total - height))
+        bound;
+      List.iter
+        (fun requested ->
+          let clamped, rows =
+            Layout.clamped_scrolled_rows ~origin ~inner_width:40 ~height
+              ~requested entries
+          in
+          check int "clamped agrees with clamp_scroll"
+            (Layout.clamp_scroll ~origin ~inner_width:40 ~height requested
+               entries)
+            clamped;
+          check bool "the window never exceeds the height" true
+            (List.length rows <= height))
+        [ 0; 1; 5; bound; bound + 4 ])
+    [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
+
 let () =
   run "tui_message_layout"
     [
@@ -982,6 +1139,22 @@ let () =
             test_a_narrow_pane_draws_what_it_always_did
         ; test_case "every row gets the same badge" `Quick
             test_every_row_gets_the_same_badge
+        ; test_case "origin rows draw what they always did" `Quick
+            test_row_mode_draws_what_it_always_did
+        ; test_case "folding returns one row per message" `Quick
+            test_folding_returns_one_row_per_message
+        ; test_case "inline margin carries clock and speaker" `Quick
+            test_inline_margin_carries_clock_and_speaker
+        ; test_case "a timestamp of another shape survives" `Quick
+            test_a_timestamp_of_another_shape_survives
+        ; test_case "wrapped rows indent under the first" `Quick
+            test_wrapped_rows_indent_under_the_first
+        ; test_case "a second message from one speaker stays blank" `Quick
+            test_a_second_message_from_one_speaker_stays_blank
+        ; test_case "the margin comes out of the body" `Quick
+            test_the_margin_comes_out_of_the_body
+        ; test_case "scrolling measures the mode it draws" `Quick
+            test_scrolling_measures_the_mode_it_draws
         ; test_case "scrolling past the top shows nothing" `Quick
             test_scrolling_past_the_top_yields_no_rows_rather_than_wrapping
         ] )

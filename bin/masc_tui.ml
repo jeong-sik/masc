@@ -959,6 +959,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
       state.msg_tool_visibility <- toggle_tool_visibility state.msg_tool_visibility;
       true
+    end else if c = Some 6 then begin
+      (* Ctrl-F folds the origin headings into the body's margin and then
+         drops the clock from it, handing those rows back to the messages.
+         Ctrl-O would have read better for an origin, but it is VDISCARD on
+         this platform and [Unix.terminal_io] carries no IEXTEN field to turn
+         that off, so the terminal would eat the key before the loop saw it. *)
+      state.msg_origin_display <- next_origin_display state.msg_origin_display;
+      true
     end else if c = Some 21 then begin
       (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
          is the operator saying they do not want what is there, and a spill

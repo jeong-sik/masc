@@ -42,8 +42,24 @@ EOF. So a writer who reaches for `&` today gets no backgrounding, no handle,
 and no refusal either -- the call blocks for exactly as long as it would have
 without the `&`, and nothing says why.
 
+And a timeout does not clean up after it. With `timeout_sec: 1.0`:
+
+```
+sh -c "sleep 47 & echo started"
+  -> ok:false, status exit 124, output "started\n", execution_time_ms 1003
+  -> sleep 47 is still running after the call, and after the process that
+     made it has exited
+```
+
+The call is reported failed and the process it started survives, with no
+handle, nothing watching it, and nothing able to stop it. That is codex#26382
+from §1.4 -- "a cancelled task kept running and saturated a server" --
+reproduced on this path. So `&` is not merely useless today; the cheapest way
+to leave a process running on this host is to write one and let it time out.
+
 (Measured through `test_keeper_tool_execute_exit_result`'s harness, which
-calls `handle_tool_execute_with_outcome` the way a keeper turn does.)
+calls `handle_tool_execute_with_outcome` the way a keeper turn does. The
+orphan was confirmed with `pgrep` after the suite exited.)
 
 **1.1 The result type cannot hold one.**
 

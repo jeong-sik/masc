@@ -104,8 +104,8 @@ let test_the_background_advice_names_a_registered_tool () =
     "the sentence names the spawn tool as it is registered"
     (Printf.sprintf
        "call %s instead: [&] backgrounds nothing here -- the child inherits this call's \
-        output pipe, so the call waits for it anyway. A handle is how a process outlives \
-        the call"
+        output pipe, so the call waits for it anyway, and a timeout leaves it running \
+        with no handle to stop it"
        spawn)
     sentence
 ;;

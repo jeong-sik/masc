@@ -52,8 +52,8 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
       { call = Spawn
       ; because =
           "[&] backgrounds nothing here -- the child inherits this call's \
-           output pipe, so the call waits for it anyway. A handle is how a \
-           process outlives the call"
+           output pipe, so the call waits for it anyway, and a timeout leaves \
+           it running with no handle to stop it"
       }
   | `Control_flow -> a_program_belongs_in_a_file "a loop or a branch is a program, not a command line"
   | `Function_def -> a_program_belongs_in_a_file "a function definition is a program, not a command line"

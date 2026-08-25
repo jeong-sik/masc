@@ -1,6 +1,5 @@
 #![allow(dead_code)] // Infrastructure config — many items used only in wasm32 builds.
 
-use crate::mode::ViewerMode;
 
 // ─── Configuration ──────────────────────────
 
@@ -495,26 +494,6 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
         current_workspace_id(),
         after_seq
     ))
-}
-
-/// No viewer mode has a server-side SSE endpoint.
-///
-/// These returned URLs for four modes. `rg 'trpg|"/sse"' lib/ bin/` finds no
-/// route serving any of them: `api/v1/trpg/stream/sse` is not registered, and
-/// `/sse` reaches the MCP transport, which does not read `?workspace=`. So the
-/// four URLs named surfaces the server does not answer on, and a reader of
-/// this function had no way to tell.
-///
-/// Returning `None` is what the callers already handle — `setup_masc_sse`
-/// logs the mode and returns without opening a connection.
-pub fn sse_endpoint(_mode: &ViewerMode) -> Option<String> {
-    None
-}
-
-/// Resolve SSE endpoint by mode name string (for use from async contexts
-/// that don't have access to Bevy State<ViewerMode>). See [`sse_endpoint`].
-pub fn sse_endpoint_by_name(_mode_name: &str) -> Option<String> {
-    None
 }
 
 #[cfg(test)]

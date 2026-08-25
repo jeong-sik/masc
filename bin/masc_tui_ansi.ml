@@ -29,6 +29,12 @@ module Ansi = struct
 
   let default_fg = Masc_tui_theme.Sgr.default_fg
   let gray = Masc_tui_theme.Sgr.gray
+  let bright_red = Masc_tui_theme.Sgr.bright_red
+  let bright_green = Masc_tui_theme.Sgr.bright_green
+  let bright_yellow = Masc_tui_theme.Sgr.bright_yellow
+  let bright_blue = Masc_tui_theme.Sgr.bright_blue
+  let bright_magenta = Masc_tui_theme.Sgr.bright_magenta
+  let bright_cyan = Masc_tui_theme.Sgr.bright_cyan
 
   let move_to = Masc_tui_theme.Term.move_to
   let reverse = Masc_tui_theme.Sgr.reverse
@@ -91,12 +97,12 @@ module Chat_theme = struct
     }
 
   let origin : Masc_tui_message_layout.style -> string = function
-    | Masc_tui_message_layout.User -> Ansi.cyan
-    | Masc_tui_message_layout.Keeper -> Ansi.blue
+    | Masc_tui_message_layout.User -> Ansi.bright_cyan
+    | Masc_tui_message_layout.Keeper -> Ansi.bright_blue
     | Masc_tui_message_layout.Status -> Theme.warn
     | Masc_tui_message_layout.Error -> Theme.bad
-    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking ->
-        Ansi.gray
+    | Masc_tui_message_layout.Tool -> Ansi.bright_magenta
+    | Masc_tui_message_layout.Thinking -> Ansi.gray
 
   let body : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset

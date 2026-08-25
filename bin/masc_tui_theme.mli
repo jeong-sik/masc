@@ -76,6 +76,15 @@ module Sgr : sig
 
   val gray : string
 
+  val bright_red : string
+  val bright_green : string
+  val bright_yellow : string
+  val bright_blue : string
+  val bright_magenta : string
+  val bright_cyan : string
+  (** Terminal-native bright slots. These remain palette-relative instead of
+      forcing a dark-theme RGB value onto an unknown terminal background. *)
+
   val background : Masc_tui_terminal_palette.projected_color option -> string
   (** Serialize a projected background as SGR [48;2] or [48;5]. [None] and
       disabled colours produce the empty string. This is the only raw

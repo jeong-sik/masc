@@ -95,6 +95,17 @@ module Sgr = struct
   let default_fg = style "\027[39m"
   let gray = style "\027[90m"
 
+  (* Terminal-native bright slots keep the user's own light/dark palette in
+     charge. Modern terminal themes such as Catppuccin deliberately map these
+     slots to the more saturated semantic variants; fixed RGB here would look
+     good only against the background it was designed on. *)
+  let bright_red = style "\027[91m"
+  let bright_green = style "\027[92m"
+  let bright_yellow = style "\027[93m"
+  let bright_blue = style "\027[94m"
+  let bright_magenta = style "\027[95m"
+  let bright_cyan = style "\027[96m"
+
   let background = projected_background ~colors_enabled
 
   let bg_removed = style "\027[48;5;52m"
@@ -131,23 +142,23 @@ type tone = Normal | Dim | Accent
 let tone = function
   | Normal -> ""
   | Dim -> Sgr.dim
-  | Accent -> Sgr.cyan
+  | Accent -> Sgr.bright_cyan
 
 type status = Ok | Warn | Bad | Info | Muted
 
 let status = function
-  | Ok -> Sgr.green
-  | Warn -> Sgr.yellow
-  | Bad -> Sgr.red
-  | Info -> Sgr.cyan
-  | Muted -> Sgr.dim
+  | Ok -> Sgr.bright_green
+  | Warn -> Sgr.bright_yellow
+  | Bad -> Sgr.bright_red
+  | Info -> Sgr.bright_cyan
+  | Muted -> Sgr.gray
 
 let selection = Sgr.reverse
-let border_focus = Sgr.cyan
+let border_focus = Sgr.bright_cyan
 
 module Syntax = struct
-  let keyword = Sgr.yellow
-  let string_ = Sgr.green
+  let keyword = Sgr.bright_magenta
+  let string_ = Sgr.bright_green
 
   (* Diff rows are content, like a keyword or a literal: "this line is green"
      says the file gained it, not that anything is healthy. Named here so the

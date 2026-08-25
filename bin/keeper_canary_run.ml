@@ -222,17 +222,7 @@ let parse_args argv =
          ; allow_reused_keeper = !allow_reused_keeper
          })
 
-let iso8601_now () =
-  let t = Unix.gettimeofday () in
-  let tm = Unix.gmtime t in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
+let iso8601_now () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
 
 (* This must testify to the canary executable that is running, not to an
    arbitrary checkout it happens to be launched from.  The trusted runtime

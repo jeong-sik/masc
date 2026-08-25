@@ -976,6 +976,66 @@ let test_seed_reaches_the_provider_whole () =
    those round-trips to the replay checkpoint in the same shape a
    surviving turn already persists. *)
 
+
+(* RFC-0390 admission: built-in calls never reach the approval gate, so the
+   rule below is the only thing standing between a TOML line and unasked
+   native effects. *)
+let expect_admit label expected result =
+  match (result : (unit, string) result) with
+  | Ok () -> check bool label expected true
+  | Error _ -> check bool label expected false
+;;
+
+let test_native_full_requires_yolo () =
+  expect_admit "full under Auto is refused" false
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_full
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:true
+       ~client_label:"Claude Code");
+  (match
+     Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_full
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:true
+       ~client_label:"Claude Code"
+   with
+   | Ok () -> fail "expected refusal"
+   | Error detail ->
+     check bool "refusal names the yolo requirement" true
+       (String_util.contains_substring detail "yolo"));
+  expect_admit "full under Yolo is admitted" true
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_full
+       ~approval_mode:Keeper_tool_approval_mode.Yolo
+       ~none_supported:true
+       ~client_label:"Claude Code")
+;;
+
+let test_native_none_needs_client_support () =
+  expect_admit "none is refused where built-ins cannot be disabled" false
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_none
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:false
+       ~client_label:"Codex");
+  expect_admit "none is admitted where the client supports it" true
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_none
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:true
+       ~client_label:"Claude Code")
+;;
+
+let test_native_read_is_effect_free_and_admitted () =
+  expect_admit "read is admitted under Auto" true
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_read
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:false
+       ~client_label:"Codex")
+;;
+
 let () = Random.self_init ()
 
 let reject_detail = "Your call to \"effect\": errors (fix these and call again)"
@@ -1232,7 +1292,21 @@ let test_persist_skips_when_no_checkpoint_exists () =
 let () =
   run
     "keeper official-client host"
-    [ ( "reasoning effort"
+    [ ( "native posture admission (RFC-0390)"
+      , [ test_case
+            "full requires yolo"
+            `Quick
+            test_native_full_requires_yolo
+        ; test_case
+            "none needs client support"
+            `Quick
+            test_native_none_needs_client_support
+        ; test_case
+            "read is admitted under Auto"
+            `Quick
+            test_native_read_is_effect_free_and_admitted
+        ] )
+    ; ( "reasoning effort"
       , [ test_case
             "absent controls are omitted"
             `Quick

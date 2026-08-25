@@ -674,6 +674,7 @@ jobs:
           python3 scripts/ci/check-spec-file-refs.py
           bash scripts/ci/check-silent-failure-patterns.sh
           python3 scripts/ci/check_h2_route_auth_parity.py
+          python3 scripts/ci/check_exact_field_decoder_preflight.py
           python3 scripts/ci/check_model_prefix_inheritance.py
           bash scripts/ci/check-enum-string-safety.sh
           python3 scripts/ci/check-env-snapshot-default-drift.py

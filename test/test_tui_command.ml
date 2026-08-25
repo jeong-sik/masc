@@ -12,6 +12,7 @@ let describe = function
   | Command.Switch_keeper_missing_name -> "keeper-missing-name"
   | Command.Interrupt_turn -> "interrupt"
   | Command.Toggle_thinking -> "toggle-thinking"
+  | Command.Toggle_memory -> "toggle-memory"
   (* [describe] is total on purpose: it is what makes a new command show up
      here as a compile error instead of silently going untested. #30234 added
      these two and the match was not swept, which is exactly the miss the
@@ -40,12 +41,13 @@ let test_task_takes_the_line_as_title_and_the_rest_as_body () =
     (describe (Command.parse "/task   "))
 
 let test_pane_commands_parse_by_word () =
-  check (list string) "help, keeper, interrupt, thinking and image"
+  check (list string) "help, keeper, interrupt, thinking, memory and image"
     [ "help"
     ; "keeper:orbiter"
     ; "keeper-missing-name"
     ; "interrupt"
     ; "toggle-thinking"
+    ; "toggle-memory"
     ; "image:shots/frame.png"
     ; "image-missing-path"
     ]
@@ -56,6 +58,7 @@ let test_pane_commands_parse_by_word () =
        ; "/keeper   "
        ; "/interrupt"
        ; "/thinking"
+       ; "/memory"
        ; "/image shots/frame.png"
        ; "/image   "
        ])
@@ -69,7 +72,7 @@ let test_every_command_has_a_help_line () =
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
            Command.help_lines))
-    [ "task"; "keeper"; "interrupt"; "thinking"; "help" ]
+    [ "task"; "keeper"; "interrupt"; "thinking"; "memory"; "help" ]
 
 let test_keeper_names_resolve_by_unique_prefix () =
   let names = [ "orbiter"; "orbit"; "lantern"; "zephyr" ] in

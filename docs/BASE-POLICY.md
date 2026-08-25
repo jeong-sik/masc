@@ -9,28 +9,23 @@
 
 ---
 
-## 1. Inventory (as of contract creation)
+## 1. Inventory
 
-| Layer | `.mli` files with `open Base` | `.ml` files with `open Base` | `.ml` files with Stdlib-shadow block |
-|---|---:|---:|---:|
-| `lib/` (top-level)   | 97 | 100 | 96 |
-| `lib/config/`        |  0 |   0 |  0 |
-| `lib/goal/`          |  0 |   0 |  0 |
-| `lib/workspace/`         |  0 |   0 |  0 |
-| `lib/keeper/`        |  0 |   0 |  0 |
-| `lib/exec/`          |  0 |   0 |  0 |
-| `lib/server/`        |  0 |   0 |  0 |
-| `lib/dashboard_utils/` | 0 |   0 |  0 |
-| `lib/runtime/`       |  0 |   0 |  0 |
-| `lib/shared_audit/`  |  0 |   0 |  0 |
-| `lib/types/`         |  0 |   0 |  0 |
+`open Base` is not in this tree. Counted 2026-08-25 with
+`rg '^\s*open!? Base'` over every `.ml` and `.mli`:
 
-**Key observation**: Sub-packages (`config`, `goal`, `workspace`, `keeper`,
-`exec`, `server`, `runtime`, `shared_audit`, `types`) are already
-Base-free.  The concentration is in the top-level `lib/` tool and
-dashboard modules.
+| Layer | `.mli` with `open Base` | `.ml` with `open Base` |
+|---|---:|---:|
+| `lib/` (top-level) | 0 | 0 |
+| every sub-package  | 0 | 0 |
 
----
+The contract was written when `lib/` top-level held 97 `.mli` and 100 `.ml`
+with `open Base`. The purge in §7 ran to completion; §6 asked whether to
+continue it or stop, and continuing is what happened.
+
+The one `Base.` left in `lib/` is `Agent_core.Base.Tool` in
+`tool_bridge.ml` -- masc's own module of that name, not Jane Street's. The
+`base` in several `dune` files is `masc.agent_core.base`, likewise.
 
 ## 2. Adoption rules
 
@@ -149,77 +144,30 @@ bash scripts/base-policy-audit.sh
 
 ---
 
-## 5. Representative migration — `tool_compact`
-
-`lib/tool_compact` was the first module migrated under this policy
-(see the commit that introduced this document):
-
-**Before (`tool_compact.mli`)**:
-```ocaml
-open Base
-
-type tool_result = bool * string
-val schemas : Types.tool_schema list
-val dispatch : name:string -> args:Yojson.Safe.t -> tool_result option
-```
-
-**After**:
-```ocaml
-(** Tool_compact — placeholder tool module. … *)
-type tool_result = Tool_result.result
-val schemas : Types.tool_schema list
-val dispatch : name:string -> args:Yojson.Safe.t -> tool_result option
-```
-
-**Before (`tool_compact.ml`)**:
-```ocaml
-open Base
-module Format = Stdlib.Format
-module Map    = Stdlib.Map
-…                                (* 15 Stdlib shadow lines *)
-let schemas : Types.tool_schema list = []
-```
-
-**After**:
-```ocaml
-(** Tool_compact — agent core-backed compaction pipeline. … *)
-let schemas : Types.tool_schema list = []
-```
-
-Both files compile without `open Base` because the module contains
-only empty stubs using primitive Stdlib types.  The Dune check target
-(`dune build @check`) validates this.
-
----
-
-## 6. MASC goal and task linkage
+## 5. MASC goal and task linkage
 
 | Field | Value |
 |---|---|
 | Goal ID | `goal-janestreet-base-adoption` |
 | Task ID | `task-130` |
-| Horizon | Mid |
-| Owner lane | Keepers on `task-130` claim work items from this policy |
 
-Active purge tasks `task-117`–`task-125` and agent core Base policy task
-`task-128` should be evaluated against this contract before any further
-`open Base` removal or addition.  The contract is the decision point:
-
-- **Continue purge** → every removed `open Base` must pass Rules 1–4.
-- **Stop purge** → close the purge lane as intended direction with this
-  document as the rationale.
+The decision §6 of the original contract left open -- continue the purge or
+stop it -- was settled by continuing. There are no `open Base` occurrences
+left to evaluate, so the lane has nothing to claim; what remains is the audit
+in §4, which holds the count at zero.
 
 ---
 
-## 7. Migration order (recommended)
+## 6. Migration order — done
 
-Priority is determined by layer stability and reviewer blast-radius:
+The order the contract recommended, and what is left of each step:
 
-1. **`.mli` files in `lib/`** — remove `open Base` (Rule 1).  Each
-   removal is a one-line change that Dune validates immediately.
-2. **`.ml` files with the Stdlib-shadow anti-pattern** — remove
-   `open Base` + the shadow block (Rule 2).  Validate by confirming no
-   Base-exclusive calls remain.
-3. **`.ml` files with genuine Base usage** — migrate call-by-call to
-   qualified `Base.*` access (Rule 3), then remove `open Base`.
-4. **Sub-packages** — already Base-free; maintain by policy (Rule 4).
+1. **`.mli` files in `lib/`** — nothing left (0).
+2. **`.ml` files with the Stdlib-shadow anti-pattern** — nothing left (0),
+   and `scripts/base-policy-audit.sh` holds `ml_base_stdlib_shadow` and
+   `bin_ml_base_stdlib_shadow` at that count.
+3. **`.ml` files with genuine Base usage** — nothing left (0).
+4. **Sub-packages** — Base-free, as they were.
+
+So this document is no longer a plan. It is the rule a reviewer applies to a
+new `open Base`, and §4 is the check that catches one.

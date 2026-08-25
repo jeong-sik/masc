@@ -28,6 +28,7 @@
   slack_rest_client
   slack_user_directory
   slack_observability
+  gate_rest_json
   gate_protocol
   gate_surface
   gate_time_util)

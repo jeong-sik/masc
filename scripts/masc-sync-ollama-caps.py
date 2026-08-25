@@ -414,6 +414,45 @@ def mode_check(config_path: Path, baseline_path: Path, strict: bool) -> int:
     return 0
 
 
+def _emit_model_block(*, model_id: str, api_name: str, capabilities: list[str]) -> None:
+    """Print the advisory TOML for one model. Pure output, so the self-test can
+    capture it without a config file or the network."""
+    flags = MediaFlags.from_ollama_capabilities(capabilities)
+    lines = flags.declared_lines()
+    thinking = "thinking" in capabilities
+    if not lines and not thinking:
+        return
+    print(f"# {model_id} (api: {api_name}) -- /api/show caps={capabilities}")
+    if thinking:
+        # /api/show says the model can think. It cannot say how a request asks
+        # it to, and that is the field admission reads: a model declaring
+        # thinking with a dialect the request path cannot encode has every turn
+        # refused before it reaches the provider. Emitting a guess here would
+        # be worse than the gap — the value is evidenced by trying the
+        # endpoint, not by the capability list. So the line is printed
+        # commented, with what to do (#26787).
+        print(
+            f"# {model_id} reports thinking. thinking-control-format decides "
+            "whether a request can ask for it and is NOT derivable from "
+            "/api/show."
+        )
+        print(
+            "# Send one /v1/chat/completions with no thinking control. If "
+            "reasoning text comes back, the model thinks by default:"
+        )
+        print(f"#   [models.{model_id}]")
+        print('#   thinking-control-format = "none"')
+        print(
+            "# If it needs to be asked, declare the dialect the endpoint "
+            'accepts (for example "reasoning-effort").'
+        )
+    if lines:
+        print(f"[models.{model_id}.capabilities]")
+        for line in lines:
+            print(line)
+    print()
+
+
 def mode_emit(config_path: Path, baseline_path: Path) -> int:
     config = load_config(config_path)
     models = resolve_ollama_models(config)
@@ -423,18 +462,11 @@ def mode_emit(config_path: Path, baseline_path: Path) -> int:
         entry = baseline.get(model.api_name)
         if entry is None:
             continue
-        flags = MediaFlags.from_ollama_capabilities(entry["capabilities"])
-        lines = flags.declared_lines()
-        if not lines:
-            continue
-        print(
-            f"# {model.model_id} (api: {model.api_name}) "
-            f"-- /api/show caps={entry['capabilities']}"
+        _emit_model_block(
+            model_id=model.model_id,
+            api_name=model.api_name,
+            capabilities=entry["capabilities"],
         )
-        print(f"[models.{model.model_id}.capabilities]")
-        for line in lines:
-            print(line)
-        print()
     return 0
 
 
@@ -473,8 +505,33 @@ def mode_self_test() -> int:
         assert verdict.hard is want_hard, f"{verdict} hard != {want_hard}"
         assert verdict.soft is want_soft, f"{verdict} soft != {want_soft}"
 
+    # --emit has to name thinking-control-format for a model that reports
+    # thinking. /api/show cannot evidence that field, and a model declaring
+    # thinking with a dialect the request path cannot encode has every turn
+    # refused before it reaches the provider (#26787). The one scripted path
+    # for adding a model must at least say the field is missing.
+    import io as _io
+    import contextlib as _contextlib
+
+    emit_cases = [
+        (["completion", "tools", "thinking"], True),
+        (["completion", "tools"], False),
+    ]
+    for caps, want_mentions in emit_cases:
+        captured = _io.StringIO()
+        with _contextlib.redirect_stdout(captured):
+            _emit_model_block(
+                model_id="probe-model", api_name="probe:tag", capabilities=caps
+            )
+        mentions = "thinking-control-format" in captured.getvalue()
+        assert mentions is want_mentions, (
+            f"emit({caps}) mentions thinking-control-format={mentions}, "
+            f"want {want_mentions}"
+        )
+
     print(
-        f"self-test OK ({len(cases)} mapping + {len(classify_cases)} classify cases)"
+        f"self-test OK ({len(cases)} mapping + {len(classify_cases)} classify "
+        f"+ {len(emit_cases)} emit cases)"
     )
     return 0
 

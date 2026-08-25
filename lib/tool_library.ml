@@ -213,8 +213,14 @@ let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
        (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
+      (* Local, not UTC, and deliberately left that way: [date_str] lands in the
+         document's filename, so switching it would rename where documents are
+         written. Everything derived from this one [tm] is spelled here rather
+         than at each use — [created] and [updated] used to carry the same
+         sprintf twice on adjacent lines. *)
       let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
+      let day = sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title
         |> String.map (fun c -> if Char.equal c ' ' then '-' else c)
         |> Stdlib.String.to_seq |> Stdlib.Seq.filter (fun c ->
@@ -236,8 +242,8 @@ tags: %s
 
 %s
 |} title source ctx.agent_name
-        (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
-        (sprintf "%04d-%02d-%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday)
+        day
+        day
         tags_str content in
 
       (* Write file *)

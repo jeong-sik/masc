@@ -389,7 +389,7 @@ let descriptor_discovery_json active_name_set descriptor =
 
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let active_name_set =
-    Keeper_tool_policy.keeper_model_tool_schemas ()
+    Keeper_tool_policy.keeper_model_tool_schemas_for meta.tool_groups ()
     |> List.fold_left
          (fun names (schema : Masc_domain.tool_schema) ->
             StringSet.add schema.name names)

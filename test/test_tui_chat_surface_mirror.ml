@@ -60,8 +60,9 @@ let decoded_surface surface =
   | Ok { History.rows = [ row ]; _ } ->
     (match row.History.kind with
      | History.Addressed_to_keeper { surface; _ } -> surface
-     | History.Said_by_keeper | History.Delivery_failed _ | History.Tool_calls _
-     | History.Reasoning _ ->
+     | History.Said_by_keeper | History.Autonomous_reply
+     | History.Delivery_failed _ | History.Tool_calls _
+     | History.Reasoning _ | History.Memory_activity ->
        failf "expected an addressed row")
   | Ok _ -> failf "expected exactly one row"
 ;;

@@ -29,13 +29,15 @@ let with_workspace prefix f =
 
 let owner_epoch = "11111111-1111-4111-8111-111111111111"
 let next_owner_epoch = "22222222-2222-4222-8222-222222222222"
-let empty_surface = tool_surface_sha256 []
+let empty_surface =
+  tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none []
 
 let test_context_message_schema_is_part_of_the_resume_digest () =
   let expected =
     `Assoc
       [ ( "context_message_schema"
         , `String Keeper_official_client_context_codec.schema )
+      ; "native_posture", `String "none"
       ; "tools", `List []
       ]
     |> Yojson.Safe.to_string
@@ -52,7 +54,14 @@ let test_context_message_schema_is_part_of_the_resume_digest () =
   Alcotest.(check bool)
     "a tools-only digest cannot resume the new projection"
     false
-    (String.equal bare_tool_list empty_surface)
+    (String.equal bare_tool_list empty_surface);
+  let full_surface =
+    tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_full []
+  in
+  Alcotest.(check bool)
+    "native posture participates in the durable digest"
+    false
+    (String.equal full_surface empty_surface)
 ;;
 
 let claim_new ~base_path ~keeper_name ~client_kind ~runtime_id ~owner_epoch ~at =
@@ -1085,16 +1094,23 @@ let test_tool_surface_fingerprint_is_canonical () =
   in
   check string
     "tool order"
-    (tool_surface_sha256 [ alpha; beta ])
-    (tool_surface_sha256 [ beta; alpha ]);
+    (tool_surface_sha256
+       ~native_posture:Runtime_native_tools.Native_none
+       [ alpha; beta ])
+    (tool_surface_sha256
+       ~native_posture:Runtime_native_tools.Native_none
+       [ beta; alpha ]);
   check string
     "parameter order"
-    (tool_surface_sha256 [ ordered ])
-    (tool_surface_sha256 [ reordered ]);
+    (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ ordered ])
+    (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ reordered ]);
   check bool
     "description participates"
     true
-    (not (String.equal (tool_surface_sha256 [ alpha ]) (tool_surface_sha256 [ changed ])))
+    (not
+       (String.equal
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ alpha ])
+          (tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [ changed ])))
 ;;
 
 let () =

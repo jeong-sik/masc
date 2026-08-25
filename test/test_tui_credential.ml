@@ -96,6 +96,18 @@ let test_plan_mints_only_into_a_workspace_that_demands_one () =
   check bool "an open path with no workspace needs nothing" true
     (plan ~requires:false ~here:false = Credential.Go_without)
 
+(* The self-mint window is this client's own policy, not the workspace's. The
+   workspace default is a day, meant for an operator sitting in front of a
+   session; a client left running overnight is exactly what that window
+   refuses. The upper bound is the store's: a longer window would make every
+   mint fail instead of lasting longer. *)
+let test_self_mint_window_is_neither_a_day_nor_forever () =
+  check int "thirty days" (24 * 30) Credential.self_mint_expiry_hours;
+  check bool "outlasts an operator session" true
+    (Credential.self_mint_expiry_hours > 24);
+  check bool "within the year the credential store will issue" true
+    (Credential.self_mint_expiry_hours <= 8_760)
+
 (* Silence is right for the two ordinary outcomes; a mint and a failure both
    change what the operator should expect from the next few reads. *)
 let test_only_the_notable_outcomes_speak () =
@@ -108,7 +120,13 @@ let test_only_the_notable_outcomes_speak () =
    | Some notice ->
        check bool "a mint says it made one" true (has "minted one" notice);
        check bool "a mint warns the server may not see it yet" true
-         (has "credential index" notice));
+         (has "credential index" notice);
+       (* Read off the constant rather than spelled out, so the sentence
+          cannot go on claiming thirty days after the window changes. *)
+       check bool "a mint says how long it lasts" true
+         (has
+            (Printf.sprintf "%d days" (Credential.self_mint_expiry_hours / 24))
+            notice));
   match
     Credential.outcome_notice
       (Credential.Unavailable Credential.no_workspace_detail)
@@ -132,6 +150,8 @@ let () =
             test_plan_prefers_the_environment
         ; test_case "minting is only into a workspace that demands one" `Quick
             test_plan_mints_only_into_a_workspace_that_demands_one
+        ; test_case "the self-mint window is the client's own" `Quick
+            test_self_mint_window_is_neither_a_day_nor_forever
         ; test_case "only the notable outcomes speak" `Quick
             test_only_the_notable_outcomes_speak
         ] )

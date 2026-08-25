@@ -85,6 +85,19 @@ let test_live_transcripts_are_kept_per_keeper () =
      | None -> false)
 ;;
 
+(* The renderer knows the wrapped transcript's real maximum only after it has
+   laid the rows out. That clamped value must come back into state; otherwise
+   PgUp can leave [msg_scroll] above the maximum and Up/Down appear frozen
+   until enough keys have burned through the invisible excess. *)
+let test_message_scroll_accepts_the_rendered_clamp () =
+  let state =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+  in
+  state.msg_scroll <- 30;
+  Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
+  check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
+;;
+
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
    the take-newest operation has to return exactly the last-pushed pair and
    leave the drain order of everything older untouched. *)
@@ -303,6 +316,8 @@ let () =
             test_concurrent_turns_keep_request_owned_transcripts
         ; test_case "live transcripts are kept per Keeper" `Quick
             test_live_transcripts_are_kept_per_keeper
+        ; test_case "message scroll accepts the rendered clamp" `Quick
+            test_message_scroll_accepts_the_rendered_clamp
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
         ; test_case "the pane draws the queue it counts" `Quick

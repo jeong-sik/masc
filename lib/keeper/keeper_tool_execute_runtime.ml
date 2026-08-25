@@ -622,10 +622,17 @@ let handle_tool_execute_typed
              argv-shaped costume arrives as one opaque program, so the gate has
              nothing to object to and the call runs.  Refusing them would break
              work that runs today; saying nothing gives the writer no reason to
-             stop.  The rewrite rides back as metadata, which
-             [Tool_result.with_metadata] documents as a projection that leaves
-             the disposition and payload alone -- the call did what it did, and
-             the answer also says what it should have been. *)
+             stop.  So the answer also says what the call should have been.
+
+             It goes in the payload, not in [metadata].  A completed result's
+             model-visible text is the serialized [data]
+             ([Tool_result.message]); [_meta] is a separate field, and every
+             read of it in agent_core discards it -- [agent_tools.ml] answers
+             [Ok { content; _meta = _ }] at the point a tool result becomes
+             conversation.  Metadata reaches dispatch observers and an MCP wire
+             client; it does not reach the keeper this sentence is written for.
+             A field beside the others leaves [ok], the status and the streams
+             alone, so a call that worked still reads as a call that worked. *)
           let costume_advice =
             List.filter_map
               (fun (shell, finding) ->
@@ -647,6 +654,11 @@ let handle_tool_execute_typed
                  | Keeper_tooling.Shell_costume.Refused_by_policy _
                  | Keeper_tooling.Shell_costume.Unparsable _ -> None)
               costume_findings
+          in
+          let escaped_shell_fields =
+            match costume_advice with
+            | [] -> []
+            | advice -> [ "escaped_shell", `List advice ]
           in
           let dispatch () =
             match !For_testing.dispatch_override with
@@ -893,6 +905,7 @@ let handle_tool_execute_typed
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
                     ]
+                    @ escaped_shell_fields
                     @ timeout_fields
                     @ output_fields
                     @ [ "typed", `Bool true
@@ -924,12 +937,7 @@ let handle_tool_execute_typed
                            ~data:payload
                            ()
                        in
-                       match costume_advice with
-                       | [] -> answered
-                       | advice ->
-                         Tool_result.with_metadata
-                           (`Assoc [ "escaped_shell", `List advice ])
-                           answered)
+                       answered)
                   with
                   | Ok result -> Keeper_tool_execution.of_tool_result result
                   | Error _ ->

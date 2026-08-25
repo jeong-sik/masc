@@ -7,6 +7,10 @@
 
 type question =
   | References
+      (** Measured on this tree as answering only the opened file's own
+          occurrences — one item where [rg] finds five. Kept in the type
+          because the parser reads its answers and the tests pin them, and
+          left out of the Keeper surface until #30504 says it answers. *)
   | Definition
   | Hover
 

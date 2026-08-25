@@ -5515,6 +5515,16 @@ def schedule_detail_interaction() -> Interaction:
                     f"Schedule evidence omitted {needle!r}: {evidence_plain!r}"
                 )
         send_and_wait(process, master_fd, output, b"\x1b[D", b"right/Enter:details")
+        # The harness is 100 columns wide. Padding the id to a reserved width
+        # used to push the instruction tail past the box border, so require
+        # the words an operator needs to press the key a second time.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"x",
+            b"armed: cancel schedule-proof-701 -- same key again to send",
+        )
         os.write(master_fd, b"q")
 
     return interact

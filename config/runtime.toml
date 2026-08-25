@@ -124,10 +124,11 @@ path = "/api/tags"
 # api-name = "claude-sonnet-4-5"
 # max-context = 200000
 #
-# Claude Code carries images over the stream-json content-block array, so a
-# model that reads them says so here. Without this key the turn's images are
-# read by the analyze_image sub-call instead, which costs a provider round-trip
-# and leaves later questions about the same image unanswerable.
+# Claude Code carries images over the stream-json content-block array, and Codex
+# over its turn/start input list, so a model that reads them says so here. Both
+# halves are required: without this key the turn's images are read by the
+# analyze_image sub-call instead, which costs a provider round-trip and leaves
+# later questions about the same image unanswerable.
 # [models.claude-code-sonnet.capabilities]
 # supports-image-input = true
 #

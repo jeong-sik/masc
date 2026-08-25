@@ -190,13 +190,15 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.conte
 
 (* A runtime takes an image itself only when its transport can carry one AND its
    model declares image input. Both halves are required and neither implies the
-   other: Claude Code carries images over the stream-json content-block array it
-   already speaks, but a model that does not declare image input is still
-   rejected before dispatch. Codex and Antigravity send prompt text only, so an
-   image cannot reach them whatever the model declares. *)
+   other: Claude Code carries images in its stream-json content-block array and
+   Codex in its turn/start input list, but a model that does not declare image
+   input is still rejected before dispatch. Antigravity sends prompt text only, so an
+   image cannot reach it whatever the model declares. *)
 let transport_carries_images = function
-  | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _ -> true
-  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ -> false
+  | Runtime_execution.Agent_core _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Codex_app_server _ -> true
+  | Runtime_execution.Antigravity_cli _ -> false
 ;;
 
 let runtime_takes_images_itself id =

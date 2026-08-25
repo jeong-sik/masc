@@ -557,11 +557,21 @@ let run_without_lifecycle ~runtime_id ~keeper_name
           (Llm_provider.Reasoning_effort.to_string effective)
       | _ -> () );
     let* developer_messages, history = project_messages prepared.messages in
-    let* prompt =
+    let* prompt, images =
       match goal_blocks with
-      | None -> Ok goal
+      | None -> Ok (goal, [])
       | Some blocks ->
-        Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+        let* text, images =
+          Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+        in
+        Ok
+          ( text
+          , List.map
+              (fun (image : Host.image_block) ->
+                { Runtime_codex_app_server.media_type = image.Host.media_type
+                ; base64_data = image.Host.base64_data
+                })
+              images )
     in
     let developer_instructions =
       (prepared.system_prompt :: native_posture_note native_posture)
@@ -649,6 +659,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
           client_config
           ~prompt
+          ~images
       with
       | Ok () -> Ok ()
       | Error error -> Error (codex_error_to_core_error error)
@@ -856,6 +867,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                ~updated_at:(Time_compat.now ())))
          client_config
          ~prompt
+         ~images
      with
      | Error (Runtime_codex_app_server.Stopped_by_host stop) ->
        recovery_failure := Keeper_official_client_session_store.Host_hook_failed;

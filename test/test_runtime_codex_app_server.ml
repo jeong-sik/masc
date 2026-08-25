@@ -153,7 +153,8 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
-    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event path =
+    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
+    ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -188,7 +189,8 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ?on_turn_started
       ?on_stream_event
       config
-      ~prompt:"Return the fixture marker")
+      ~prompt:"Return the fixture marker"
+      ~images)
 ;;
 
 let test_dispatch_validation_is_process_free () =
@@ -201,6 +203,7 @@ let test_dispatch_validation_is_process_free () =
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
         config
         ~prompt:"fixture"
+        ~images:[]
     with
     | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -356,6 +359,84 @@ let test_history_is_injected_before_turn () =
        match run_fixture ~history path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok result -> check string "text" "MASC_SUBSCRIPTION_OK" result.text)
+;;
+
+(* The image has to land in the turn/start input list as an inline data URL --
+   the app-server README rejects remote HTTP(S) urls, so the encoding is part of
+   the contract, not a detail. Reading the captured request means a projection
+   that drops the image fails here instead of passing on a fixture reply that
+   never depended on it. *)
+let test_image_reaches_the_turn_input () =
+  let capture_path = Filename.temp_file "masc-codex-image-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove capture_path with _ -> ())
+    (fun () ->
+      with_fixture
+        ~capture_path
+        [ init_result
+        ; account_chatgpt
+        ; thread_result
+        ; turn_result
+        ; item_completed
+        ; turn_completed
+        ]
+        (fun path ->
+          let image =
+            { Runtime_codex_app_server.media_type = "image/png"
+            ; base64_data = "aGVsbG8="
+            }
+          in
+          match run_fixture ~images:[ image ] path with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok _ ->
+            let input =
+              Masc_test_deps.read_file capture_path
+              |> String.split_on_char '\n'
+              |> List.filter (fun line -> String.trim line <> "")
+              |> List.map Yojson.Safe.from_string
+              |> List.find (fun json ->
+                   Yojson.Safe.Util.member "method" json = `String "turn/start")
+              |> Yojson.Safe.Util.member "params"
+              |> Yojson.Safe.Util.member "input"
+              |> Yojson.Safe.Util.to_list
+            in
+            (match
+               List.find_opt
+                 (fun item -> Yojson.Safe.Util.member "type" item = `String "image")
+                 input
+             with
+             | None -> fail "turn/start input carried no image item"
+             | Some item ->
+               check
+                 string
+                 "inline data url"
+                 "data:image/png;base64,aGVsbG8="
+                 (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "url" item)))))
+;;
+
+(* A media type the item cannot carry is rejected before the process boundary,
+   so the caller learns which image is wrong instead of reading a turn rejection
+   attributed to the thread. *)
+let test_unsupported_image_media_type_is_rejected () =
+  Eio_main.run (fun env ->
+    let config =
+      { (Runtime_codex_app_server.default_config ()) with cli_path = "/bin/true" }
+    in
+    let image =
+      { Runtime_codex_app_server.media_type = "image/tiff"; base64_data = "AAAA" }
+    in
+    match
+      Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config
+        ~prompt:"x"
+        ~images:[ image ]
+    with
+    | Ok () -> fail "an unsupported media type must not validate"
+    | Error (Runtime_codex_app_server.Invalid_config detail) ->
+      check bool "names the media type" true
+        (String_util.contains_substring detail "image/tiff")
+    | Error other -> fail (Runtime_codex_app_server.error_to_string other))
 ;;
 
 let test_chatgpt_subscription_turn () =
@@ -905,7 +986,8 @@ let test_no_deadline_keeps_admission_bounded () =
             Eio.Time.sleep clock 0.2;
             Ok ())
           config
-          ~prompt:"fixture")
+          ~prompt:"fixture"
+          ~images:[])
     in
     match outcome with
     | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = false }) ->
@@ -935,7 +1017,8 @@ let test_no_deadline_begins_after_turn_dispatch () =
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
              config
-             ~prompt:"fixture")
+             ~prompt:"fixture"
+             ~images:[])
        in
        match outcome with
        | Ok turn -> check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text
@@ -1033,6 +1116,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ~on_thread_ready:(fun ~thread_id:_ -> raise Eio.Time.Timeout)
              config
              ~prompt:"fixture"
+             ~images:[]
            |> ignore)))
 ;;
 
@@ -2532,7 +2616,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
     |> Yojson.Safe.Util.member "params"
     |> Yojson.Safe.Util.member "input"
     |> Yojson.Safe.Util.to_list
-    |> List.hd
+    (* Not [List.hd]: images precede the text in the input list, so a head that
+       happens to be the text today would read an image url on an image turn. *)
+    |> List.find (fun item -> Yojson.Safe.Util.member "type" item = `String "text")
     |> Yojson.Safe.Util.member "text"
     |> Yojson.Safe.Util.to_string
   in
@@ -2963,7 +3049,8 @@ let test_live_chatgpt_subscription () =
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           config
-          ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
+          ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3003,7 +3090,8 @@ let test_live_dynamic_tool_subscription () =
           ~dynamic_tools:[ tool ]
           config
           ~prompt:
-            "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK.")
+            "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3033,7 +3121,8 @@ let test_live_history_injection_subscription () =
             ; { role = Assistant; text = "I will retain that marker." }
             ]
           config
-          ~prompt:"Reply with exactly the continuity marker from the prior history.")
+          ~prompt:"Reply with exactly the continuity marker from the prior history."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3249,7 +3338,13 @@ let test_official_client_host_text_projection_is_hard_cut () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "subscription boundary"
+    [ ( "images"
+      , [ test_case "image reaches the turn input" `Quick
+            test_image_reaches_the_turn_input
+        ; test_case "unsupported media type is rejected" `Quick
+            test_unsupported_image_media_type_is_rejected
+        ] )
+    ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case
             "probe stops before thread"

@@ -876,16 +876,12 @@ let make_request_control_tool
    names and descriptions ride the tool description, the body arrives only
    when asked for -- but the harness serves it from the catalog it already
    parsed, so no path is resolved and the call is on the record. *)
-let skill_name_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ("name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]) ] )
-    ; "required", `List [ `String "name" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
+(* Declared in [config/tools/keeper_skill.toml] with every other tool rather
+   than built here. Which skills are readable is workspace state and is
+   appended below; the argument's shape and the sentence saying when to reach
+   for the tool are not, and the model-prose ratchet is what says so. *)
+let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
+let skill_name_input_schema = skill_tool_schema.input_schema
 
 let skill_name_of_validated_input input =
   match input with
@@ -906,10 +902,7 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
 "
   in
   let description =
-    "Read one instruction skill whole, by name. Read a skill before you act on      a task that names it.
-
-Available:
-" ^ listed
+    skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
   in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)

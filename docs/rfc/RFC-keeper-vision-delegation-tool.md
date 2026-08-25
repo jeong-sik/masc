@@ -73,6 +73,10 @@ RFC-0265 §3.4 requires that "two identical turns reroute identically." "Text-ru
 
 Therefore the reroute-vs-delegate choice must be an **explicit, persisted policy axis** — a keeper-meta field (e.g. `multimodal_policy = delegate | reroute | inherit`) or a config key — resolved deterministically and independent of the live runtime assignment. Default and migration of existing keepers are specified in Phase 3.
 
+**Superseded 2026-08-25 — the axis shipped and lost every image.** `multimodal_policy` existed for two months and no keeper ever left `inherit`: 10 of 10 in the live workspace, and every `[runtime.lanes.*]` there held a single candidate, so `inherit` meant reroute, reroute found no candidate, and RFC-0265 `No_capable_runtime` dropped the image. The recorded drops name `claude_code.claude-sonnet-5` and `antigravity_subscription.gemini-3-6-flash-high` — two models that do read images. A setting that must be right, that nobody sets, and whose default destroys data is not determinism.
+
+The selection is now derived from the assigned lane (`Keeper_vision_ingest.delegates_media`): a lane with a candidate that takes an `Image` keeps its images and RFC-0265 reroutes there; a lane with none delegates instead of dropping. This is still deterministic under RFC-0265 §3.4 — the input is `[[runtime.assignments]]` plus the lane's declared capabilities, both persisted config. What changes when an operator reassigns a keeper is the mechanism, and that is correct: reassignment is also what changes whether the model can see at all.
+
 ### 2.5 Durable artifact store on the input path — REQUIRED new infra `[review]`
 
 The existing `Multimodal.Workspace` / `Workspace_holder` is **not reusable as-is**:

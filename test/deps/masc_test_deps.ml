@@ -78,10 +78,6 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Instructions -> `String ""
         | Schema.Autonomous_instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
-        | Schema.Multimodal_policy ->
-          `String
-            (Masc.Keeper_types_profile.multimodal_policy_to_string
-               Masc.Keeper_types_profile.default_multimodal_policy)
         | Schema.Trace_history -> `List []
         | Schema.Last_handoff_ts -> `Float 0.
         | Schema.Created_at | Schema.Updated_at ->

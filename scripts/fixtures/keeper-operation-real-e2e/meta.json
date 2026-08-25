@@ -4,7 +4,6 @@
   "agent_name": "keeper-operation-real-e2e-agent",
   "instructions": "Exercise durable Keeper chat operation controls against an isolated real backend.",
   "trace_id": "trace-keeper-operation-real-e2e",
-  "multimodal_policy": "inherit",
   "trace_history": [],
   "generation": 1,
   "last_handoff_ts": 0.0,

@@ -368,7 +368,6 @@ let test_keeper_instructions_reach_meta_json () =
     {|[keeper]
 instructions = "keeper instructions"
 sandbox_profile = "local"
-multimodal_policy = "delegate"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -385,17 +384,13 @@ multimodal_policy = "delegate"
         "meta json keeps instructions snapshot"
         (Some "keeper instructions")
         (json_string_field "instructions" json);
-      Alcotest.(check (option string))
-        "meta json keeps multimodal policy"
-        (Some "delegate")
-        (json_string_field "multimodal_policy" json);
       (match Masc.Keeper_meta_json.meta_of_json json with
        | Error err -> Alcotest.failf "meta json roundtrip failed: %s" err
        | Ok roundtrip ->
          Alcotest.(check string)
-           "roundtrip keeps multimodal policy"
-           "delegate"
-           (Profile.multimodal_policy_to_string roundtrip.multimodal_policy));
+           "roundtrip keeps instructions"
+           "keeper instructions"
+           roundtrip.instructions);
       let status_result =
         Status_detail.handle_keeper_status_config ~config ~agent_name:"test-agent"
           (`Assoc [ ("name", `String name); ("fast", `Bool true) ])

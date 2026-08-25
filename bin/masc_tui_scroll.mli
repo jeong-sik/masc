@@ -27,9 +27,6 @@ val up : count:int -> height:int -> int -> int
     first, so a list that shrank answers from its last row, not from a row
     that no longer exists. *)
 
-val cursor_normalized : count:int -> int -> int
-(** The cursor clamped into [0, count-1]; 0 when the list is empty. *)
-
 val cursor_down : count:int -> int -> int
 val cursor_up : count:int -> int -> int
 

@@ -650,15 +650,6 @@ export function keeperConfigControlInventory(
           ],
         },
         {
-          id: 'kcf-prompt-assembly',
-          tab,
-          label: 'Prompt assembly trace',
-          kind: 'live-read',
-          source: `${configApiSource} prompt.system_prompt_blocks`,
-          action: 'read-only assembled layer trace',
-          contracts: configReadContracts(['prompt.system_prompt_blocks']),
-        },
-        {
           id: 'kcf-prompt-preview-tabs',
           tab,
           label: 'Prompt preview mode',
@@ -1187,102 +1178,7 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
   `
 }
 
-// ── prompt assembly trace (조립 추적) ──
-// Keeper-scoped layered lineage built from the keeper's OWN config provenance:
-// system_prompt_blocks (shared base), prompt.instructions (manifest, or a live
-// override when sources.override_fields lists the field).
-// This is deliberately NOT the workspace-global KeeperPromptAssemblyPanel — that
-// component fetches dashboard-wide prompt-registry overrides (fetchDashboardPrompts)
-// and cannot render one keeper's assembled layers. Read-only; every segment is
-// real config text with real provenance, no fabricated base prose.
-type KcfAssemblySource = 'base' | 'manifest' | 'override' | 'goals'
 
-interface KcfAssemblySegment {
-  readonly src: KcfAssemblySource
-  readonly field: string
-  readonly path: string
-  readonly text: string
-  readonly win: boolean
-}
-
-const KCF_ASSEMBLY_SRC_META: Readonly<Record<KcfAssemblySource, { lbl: string; cls: string }>> = {
-  base: { lbl: '공유 베이스', cls: 'src-base' },
-  manifest: { lbl: '매니페스트', cls: 'src-manifest' },
-  override: { lbl: 'live override', cls: 'src-override' },
-  goals: { lbl: '배정 목표', cls: 'src-goals' },
-}
-
-// Server override_fields are dot-namespaced (keeper_status_bridge.ml
-// live_override_details): 'prompt.instructions', etc. A field is
-// marked as winning over the manifest only when its exact key is present.
-export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] {
-  const overrideFields = new Set(c.sources.override_fields)
-  const manifestPath =
-    c.sources.default_manifest_path && c.sources.default_manifest_path.trim() !== ''
-      ? c.sources.default_manifest_path
-      : '매니페스트'
-  const livePath =
-    c.sources.live_meta_path && c.sources.live_meta_path.trim() !== ''
-      ? c.sources.live_meta_path
-      : 'live override'
-  const segments: KcfAssemblySegment[] = []
-  const blocks = c.prompt.system_prompt_blocks
-  const baseBlocks: readonly (readonly [string, { key: string; source: string; text: string }])[] = [
-    ['공유 시스템', blocks.system],
-  ]
-  for (const [label, block] of baseBlocks) {
-    if (block.text.trim() !== '') {
-      segments.push({ src: 'base', field: label, path: block.source, text: block.text, win: false })
-    }
-  }
-  const pushPromptField = (overrideKey: string, label: string, text: string) => {
-    if (text.trim() === '') return
-    const overridden = overrideFields.has(overrideKey)
-    segments.push({
-      src: overridden ? 'override' : 'manifest',
-      field: label,
-      path: overridden ? livePath : manifestPath,
-      text,
-      win: overridden,
-    })
-  }
-  pushPromptField('prompt.instructions', '지시사항 (instructions)', c.prompt.instructions)
-  return segments
-}
-
-function KcfAssemblyTrace({ config }: { config: KeeperConfig }) {
-  const segments = buildKcfAssemblySegments(config)
-  if (segments.length === 0) {
-    return html`<div class="kcf-goals-empty">조립할 프롬프트 레이어가 없습니다.</div>`
-  }
-  const presentSources = [...new Set(segments.map((s) => s.src))]
-  return html`
-    <div class="kasm">
-      <div class="kasm-legend">
-        ${presentSources.map((src) => {
-          const meta = KCF_ASSEMBLY_SRC_META[src]
-          return html`<span key=${src} class=${`kasm-leg ${meta.cls}`}><i></i>${meta.lbl}</span>`
-        })}
-      </div>
-      <div class="kasm-stack">
-        ${segments.map((seg, i) => {
-          const meta = KCF_ASSEMBLY_SRC_META[seg.src]
-          return html`
-            <div key=${i} class=${`kasm-seg ${meta.cls} ${seg.win ? 'win' : ''}`}>
-              <div class="kasm-seg-h">
-                <span class="kasm-seg-src">${meta.lbl}</span>
-                <span class="kasm-seg-field mono">${seg.field}</span>
-                ${seg.win ? html`<span class="kasm-seg-win">매니페스트 덮어씀</span>` : null}
-                <span class="kasm-seg-path mono">${seg.path}</span>
-              </div>
-              <div class="kasm-seg-text">${seg.text}</div>
-            </div>
-          `
-        })}
-      </div>
-    </div>
-  `
-}
 
 // .set-* inline controls — keeper-v2 primitives (SetRow / Toggle / Segmented),
 // styled by the vendored surfaces.css. Used for the editable boolean toggles and
@@ -1924,11 +1820,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const promptTab = html`
     ${toolbar}
     ${promptSection}
-    <${KcfSec}
-      title="조립 추적"
-      desc="베이스 → 매니페스트 → live override 순으로 조립. override_fields가 우선합니다.">
-      <${KcfAssemblyTrace} config=${c} />
-    </${KcfSec}>
   `
 
   // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)

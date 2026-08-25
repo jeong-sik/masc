@@ -83,11 +83,9 @@ let () =
                           (match Execute_input.to_shell_ir_unvalidated parsed with
                            | Ok (Masc_exec.Shell_ir.Simple simple) ->
                              if not
-                                  (List.exists
-                                     (String.equal
-                                        (Masc_exec.Exec_program.to_string
-                                           simple.Masc_exec.Shell_ir.bin))
-                                     [ "sh"; "bash"; "zsh"; "dash"; "ksh" ])
+                                  (Costume.names_a_shell
+                                     (Masc_exec.Exec_program.to_string
+                                        simple.Masc_exec.Shell_ir.bin))
                              then incr lowered
                            | Ok _ -> incr lowered
                            | Error _ -> ())

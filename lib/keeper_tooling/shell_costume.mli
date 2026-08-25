@@ -17,6 +17,14 @@ type t = private {
   script : string;  (** the argument after the [-c] flag *)
 }
 
+val names_a_shell : string -> bool
+(** Whether a program name is one of the shells this module recognises.
+
+    Exposed so a reader asking "did this call end up lowered, or is it still a
+    shell?" answers with the same list {!of_argv} recognises by. Two copies of
+    that list drift, and the number the second one prints would then be about
+    itself. *)
+
 val of_argv : string list -> t option
 (** [Some t] when [argv] is a shell invoked with [-c] and a script argument.
 

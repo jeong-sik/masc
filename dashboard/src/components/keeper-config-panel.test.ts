@@ -916,7 +916,6 @@ vi.mock('../api/dashboard-keeper-github', () => ({
 
 import {
   KeeperConfigPanel,
-  buildKcfAssemblySegments,
   keeperConfigSubscriptionCountsForTests,
   loadKeeperConfig,
   resetKeeperConfig,
@@ -1518,31 +1517,6 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
   })
 
-  it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
-    // Real server override_fields are dot-namespaced; mark instructions.
-    const base = makeKeeperConfig()
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
-      makeKeeperConfig({
-        sources: { ...base.sources, override_fields: ['prompt.instructions'], has_live_override: true },
-      }),
-    )
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '프롬프트')
-    await flush()
-
-    expect(container.textContent).toContain('조립 추적')
-    expect(container.querySelector('.kasm')).not.toBeNull()
-    // 3 base blocks + instructions + goals = 5 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(2)
-    // only prompt.instructions is overridden → exactly one win badge
-    const winBadges = container.querySelectorAll('.kasm-seg-win')
-    expect(winBadges.length).toBe(1)
-    expect(winBadges[0]!.textContent).toContain('매니페스트 덮어씀')
-  })
-
   it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
     const configA = makeKeeperConfig({
       name: 'keeper-a',
@@ -1744,26 +1718,3 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
   })
 })
 
-describe('buildKcfAssemblySegments', () => {
-  it('builds base + manifest/override segments from real config provenance', () => {
-    const base = makeKeeperConfig()
-    const c = makeKeeperConfig({
-      sources: { ...base.sources, override_fields: ['prompt.instructions'] },
-    })
-    const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'override'])
-    const instrSeg = segs.find((s) => s.field.includes('instructions'))
-    expect(instrSeg?.win).toBe(true)
-    expect(instrSeg?.src).toBe('override')
-  })
-
-  it('omits empty prompt fields', () => {
-    const base = makeKeeperConfig()
-    const c = makeKeeperConfig({
-      prompt: { ...base.prompt, instructions: '' },
-    })
-    const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.field)).toEqual(['공유 시스템'])
-    expect(segs.every((s) => s.src === 'base')).toBe(true)
-  })
-})

@@ -26,11 +26,6 @@ type AssemblyLane =
 type WarningSeverity = 'critical' | 'warn' | 'info'
 type AssemblyStageRole = 'source_prep' | 'model_input' | 'evidence'
 
-interface AssemblyComputedRowSpec {
-  id: string
-  promptKey: string
-}
-
 interface AssemblyStageSpec {
   id: string
   order: number
@@ -40,7 +35,6 @@ interface AssemblyStageSpec {
   messageSlot: string
   summary: string
   promptKeys: string[]
-  computedRows?: AssemblyComputedRowSpec[]
 }
 
 export interface KeeperPromptAssemblyRow {
@@ -142,10 +136,6 @@ const STAGES: AssemblyStageSpec[] = [
     messageSlot: 'user',
     summary: 'Current task, workspace state, scheduler signals, and turn intent.',
     promptKeys: [],
-    computedRows: [
-      { id: 'world-observation', promptKey: '(computed:world_observation)' },
-      { id: 'scheduled-automation', promptKey: '(computed:scheduled_automation)' },
-    ],
   },
   {
     id: 'turn-soft-context',
@@ -166,7 +156,6 @@ const STAGES: AssemblyStageSpec[] = [
     messageSlot: 'final',
     summary: 'Memory and tool hints added at the end.',
     promptKeys: [],
-    computedRows: [{ id: 'memory-os-recall', promptKey: '(computed:memory_os_recall)' }],
   },
   {
     id: 'manifest-edge',
@@ -443,37 +432,7 @@ export function buildKeeperPromptAssemblyReport(
   const promptByKey = new Map(prompts.map(prompt => [prompt.key, prompt]))
   const rows: KeeperPromptAssemblyRow[] = []
 
-  function pushComputedRows(stage: AssemblyStageSpec) {
-    const computedRows =
-      stage.computedRows ?? (stage.promptKeys.length === 0
-        ? [{ id: 'computed', promptKey: '(computed)' }]
-        : [])
-
-    for (const row of computedRows) {
-      rows.push({
-        id: `${stage.id}:${row.id}`,
-        order: stage.order,
-        title: stage.title,
-        lane: stage.lane,
-        promptKey: row.promptKey,
-        source: 'computed',
-        hasOverride: false,
-        filePath: null,
-        text: '',
-        bytes: 0,
-        estimatedTokens: 0,
-        fingerprint: '-',
-        missing: false,
-      })
-    }
-  }
-
   for (const stage of STAGES) {
-    if (stage.promptKeys.length === 0) {
-      pushComputedRows(stage)
-      continue
-    }
-
     for (const promptKey of stage.promptKeys) {
       const prompt = promptByKey.get(promptKey)
       const text = promptText(prompt)
@@ -493,8 +452,6 @@ export function buildKeeperPromptAssemblyReport(
         missing: !prompt || prompt.source === 'missing',
       })
     }
-
-    pushComputedRows(stage)
   }
 
   const keeperPrompts = prompts.filter(prompt =>
@@ -999,8 +956,7 @@ function CleanupDetails({ warnings }: { warnings: KeeperPromptAssemblyWarning[] 
   `
 }
 
-function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemblyReport; compact: boolean }) {
-  if (compact) return null
+function SourceEvidenceDetails({ report }: { report: KeeperPromptAssemblyReport }) {
   const pathSteps = buildPathSteps(report)
 
   return html`
@@ -1085,13 +1041,11 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
 
 function PromptAssemblyContent({
   report,
-  compact = false,
   activePreset,
   presets,
   onSelectPreset,
 }: {
   report: KeeperPromptAssemblyReport
-  compact?: boolean
   activePreset: string
   presets: KeeperPromptAssemblyPreset[]
   onSelectPreset: (id: string) => void
@@ -1104,19 +1058,17 @@ function PromptAssemblyContent({
         presets=${presets}
         onSelectPreset=${onSelectPreset}
       />
-      <${SourceEvidenceDetails} report=${report} compact=${compact} />
+      <${SourceEvidenceDetails} report=${report} />
     </div>
   `
 }
 
 export function KeeperPromptAssemblyPanel({
-  compact = false,
   prompts: providedPrompts,
   activePreset,
   presets: providedPresets,
   onPresetChange,
 }: {
-  compact?: boolean
   prompts?: DashboardPromptItem[]
   activePreset?: string
   presets?: KeeperPromptAssemblyPreset[]
@@ -1177,7 +1129,6 @@ export function KeeperPromptAssemblyPanel({
       ${error ? html`<${ErrorState} message=${error} class="mb-3" />` : null}
       <${PromptAssemblyContent}
         report=${report}
-        compact=${compact}
         activePreset=${selectedPreset}
         presets=${presets}
         onSelectPreset=${selectPreset}

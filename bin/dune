@@ -314,10 +314,16 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_color)
+ (wrapped false)
+ (modules masc_tui_color)
+ (libraries masc_tui_terminal_palette))
+
+(library
  (name masc_tui_theme)
  (wrapped false)
  (modules masc_tui_theme)
- (libraries masc_tui_terminal_palette))
+ (libraries masc_tui_color masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_palette)

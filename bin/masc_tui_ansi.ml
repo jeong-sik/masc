@@ -58,11 +58,49 @@ end
     code literal) rather than a reading of state. Renderers do not choose raw
     red, yellow, or green themselves. *)
 module Theme = struct
-  let ok = Masc_tui_theme.status Masc_tui_theme.Ok
-  let warn = Masc_tui_theme.status Masc_tui_theme.Warn
-  let bad = Masc_tui_theme.status Masc_tui_theme.Bad
-  let info = Masc_tui_theme.status Masc_tui_theme.Info
-  let muted = Masc_tui_theme.status Masc_tui_theme.Muted
+  (* Resolved against the terminal's own palette, so a colour the reader's
+     theme leaves unreadable is lifted rather than drawn and lost. The palette
+     arrives after start-up from the OSC answers and can arrive again; the
+     generation says which. Rebuilt only when that changes, because these are
+     read once per drawn row. *)
+  type resolved =
+    { generation : int
+    ; ok : string
+    ; warn : string
+    ; bad : string
+    ; info : string
+    ; muted : string
+    }
+
+  let resolved_cache : resolved option Atomic.t = Atomic.make None
+
+  let rec resolved () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get resolved_cache in
+    match previous with
+    | Some cached when cached.generation = generation -> cached
+    | Some _ | None ->
+      let palette = Masc_tui_terminal_palette.snapshot_palette probed in
+      let of_state = Masc_tui_theme.status_readable palette in
+      let next =
+        { generation
+        ; ok = of_state Masc_tui_theme.Ok
+        ; warn = of_state Masc_tui_theme.Warn
+        ; bad = of_state Masc_tui_theme.Bad
+        ; info = of_state Masc_tui_theme.Info
+        ; muted = of_state Masc_tui_theme.Muted
+        }
+      in
+      if Atomic.compare_and_set resolved_cache previous (Some next) then next
+      else resolved ()
+  ;;
+
+  let ok () = (resolved ()).ok
+  let warn () = (resolved ()).warn
+  let bad () = (resolved ()).bad
+  let info () = (resolved ()).info
+  let muted () = (resolved ()).muted
   let selection = Masc_tui_theme.selection
   let border_focus = Masc_tui_theme.border_focus
 
@@ -134,15 +172,15 @@ module Chat_theme = struct
   let origin : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User -> Ansi.bright_cyan
     | Masc_tui_message_layout.Keeper -> Ansi.bright_blue
-    | Masc_tui_message_layout.Status -> Theme.warn
-    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.bright_magenta
     | Masc_tui_message_layout.Thinking -> Ansi.gray
 
   let body : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
-    | Masc_tui_message_layout.Status -> Theme.warn
-    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
     | Masc_tui_message_layout.Thinking -> Ansi.dim
 

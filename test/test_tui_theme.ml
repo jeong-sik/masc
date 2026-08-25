@@ -84,9 +84,14 @@ let check_rgb label (red, green, blue) color =
     , Masc_tui_terminal_palette.blue color )
 ;;
 
+let no_ansi () =
+  Array.make Masc_tui_terminal_palette.ansi_slot_count None
+;;
+
 let palette background =
   Masc_tui_terminal_palette.of_responses
     ~foreground:(Some (rgb 255 255 255)) ~background:(Some background)
+    ~ansi:(no_ansi ())
 ;;
 
 let user_background ~colors_enabled ~level background =
@@ -101,7 +106,7 @@ let user_background ~colors_enabled ~level background =
    black, so on a light terminal it moves the wrong way. *)
 let two_tone_palette ~foreground ~background =
   Masc_tui_terminal_palette.of_responses ~foreground:(Some foreground)
-    ~background:(Some background)
+    ~background:(Some background) ~ansi:(no_ansi ())
 ;;
 
 let recede ~colors_enabled ~level palette =
@@ -190,7 +195,12 @@ let test_user_message_background_blend () =
     (blend (rgb 0 0 0));
   check_rgb "light blends four percent toward black" (244, 244, 244)
     (blend (rgb 255 255 255));
-  check_rgb "the weighted luminance picks the dark branch" (206, 118, 74)
+  (* A mid orange. Rec.601 luma put it at 0.487 and called the page dark;
+     perceived lightness puts it at 0.614 and calls it light, which is the
+     answer the page itself gives -- black text on it reads at 5.32 and white
+     at 3.94. One measure of lightness now, so this and the direction a colour
+     moves to be read cannot disagree about the same terminal. *)
+  check_rgb "a saturated mid tone reads as the light page it is" (192, 96, 48)
     (blend (rgb 200 100 50))
 ;;
 

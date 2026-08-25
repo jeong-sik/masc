@@ -20,6 +20,7 @@
     "keeper_task_create.toml",
     "keeper_task_done.toml",
     "keeper_tasks_audit.toml",
+    "keeper_tasks_list.toml",
     "keeper_time_now.toml",
     "keeper_tools_list.toml",
     "keeper_voice_agent.toml",

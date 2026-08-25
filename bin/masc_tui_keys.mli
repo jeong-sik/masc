@@ -37,6 +37,10 @@ val footer_hints : Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order. *)
 
+val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
+(** The Fusion detail footer. Separate from {!footer_hints} because it appends
+    the live scroll position, which the static per-surface table cannot know. *)
+
 val help_sections : unit -> (string * (string * string) list) list
 (** The help overlay's sections: Global first, then one section per surface
     that declares bindings, titled with the strip's spelling. *)

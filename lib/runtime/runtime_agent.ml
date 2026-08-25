@@ -13,18 +13,6 @@ type agent_core_tool_projector =
   (Yojson.Safe.t -> Tool_result.result) ->
   Agent_core.Tool.t
 
-let agent_core_tool_of_masc_hook : agent_core_tool_projector option Atomic.t =
-  Atomic.make None
-
-let set_agent_core_tool_of_masc_hook f =
-  Atomic.set agent_core_tool_of_masc_hook (Some f)
-
-let agent_core_tool_hook_unset_error () =
-  Agent_core.Error.Internal
-    "runtime_agent_core_tool_hook_unset: inline MASC tool projection requires \
-     Tool_bridge initialization before Runtime_agent.run_with_masc_tools"
-;;
-
 let network_error_kind_of_unix_error = function
   | Unix.ECONNREFUSED | Unix.ECONNRESET -> Llm_provider.Http_client.Connection_refused
   | Unix.EPIPE -> Llm_provider.Http_client.End_of_file
@@ -825,13 +813,6 @@ let prefer_cooperative_probe_error probe_error advanced_result =
 ;;
 
 module For_testing = struct
-  let with_agent_core_tool_of_masc_hook_unset f =
-    let original = Atomic.exchange agent_core_tool_of_masc_hook None in
-    Fun.protect
-      ~finally:(fun () -> Atomic.set agent_core_tool_of_masc_hook original)
-      f
-  ;;
-
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
   let runtime_observation_for_terminal_config =
@@ -1383,6 +1364,7 @@ let run_with_masc_tools
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
+    ~(agent_core_tool_of_masc : agent_core_tool_projector)
     ?on_event
     ?on_yield
     ?on_resume
@@ -1392,10 +1374,7 @@ let run_with_masc_tools
   | [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
-      (match Atomic.get agent_core_tool_of_masc_hook with
-       | None -> Error (agent_core_tool_hook_unset_error ())
-       | Some agent_core_tool_of_masc ->
-         let agent_core_tools =
+      (let agent_core_tools =
            List.map
              (fun (td : Masc_domain.tool_schema) ->
                agent_core_tool_of_masc

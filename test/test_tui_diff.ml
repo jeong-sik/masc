@@ -73,6 +73,26 @@ let test_repeated_lines_do_not_swallow_the_change () =
     (diff ~before:"same\nsame\nold" ~after:"same\nsame\nnew")
 ;;
 
+(* The column an added line has nothing to put in. A blank would read as an
+   alignment slip and a zero as line zero; both claim something the row does
+   not say. *)
+let test_a_missing_line_number_is_spelled_not_blank () =
+  check string "absence is a dash" "    -" (Diff.line_number_cell None);
+  check int "and it takes a number's width" 5
+    (String.length (Diff.line_number_cell None))
+;;
+
+let test_a_line_number_keeps_the_column_width () =
+  check int "single digit" 5 (String.length (Diff.line_number_cell (Some 7)));
+  check int "five digits" 5 (String.length (Diff.line_number_cell (Some 12345)));
+  check string "right aligned" "    7" (Diff.line_number_cell (Some 7));
+  (* Wider than the column rather than truncated: a line number cut to its
+     last digits is a different line, and a row that slips is visible while a
+     wrong number is not. *)
+  check string "a six-digit file overflows the column" "123456"
+    (Diff.line_number_cell (Some 123456))
+;;
+
 let () =
   run "tui_diff"
     [ ( "shape"
@@ -87,6 +107,12 @@ let () =
       , [ test_case "trailing newline" `Quick test_trailing_newline_is_not_a_line
         ; test_case "empty sides" `Quick test_empty_sides
         ; test_case "counts" `Quick test_counts
+        ] )
+    ; ( "line numbers"
+      , [ test_case "absence is spelled" `Quick
+            test_a_missing_line_number_is_spelled_not_blank
+        ; test_case "the column width holds" `Quick
+            test_a_line_number_keeps_the_column_width
         ] )
     ]
 ;;

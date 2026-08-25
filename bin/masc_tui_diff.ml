@@ -54,3 +54,13 @@ let counts rows =
       | Added _ -> (removed, added + 1)
       | Context _ -> (removed, added))
     (0, 0) rows
+
+(* A line-number cell.
+
+   An added line has no number on the old side and a removed line none on the
+   new one. A blank there would read as an alignment slip and a zero would
+   read as line zero, so absence is spelled: the column says "there is none"
+   in the same width as a number. *)
+let line_number_cell = function
+  | None -> "    -"
+  | Some line -> Printf.sprintf "%5d" line

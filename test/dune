@@ -2776,6 +2776,11 @@
  (libraries alcotest masc_tui_diff))
 
 (test
+ (name test_tui_git_diff_decode)
+ (modules test_tui_git_diff_decode)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_tui_span)
  (modules test_tui_span)
  (libraries alcotest masc_tui_span))

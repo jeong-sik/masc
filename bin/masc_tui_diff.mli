@@ -33,3 +33,10 @@ val rows : before:string -> after:string -> row list
 val counts : row list -> int * int
 (** Removed and added line counts, for a caller that wants to say how large a
     change is before drawing it. *)
+
+val line_number_cell : int option -> string
+(** One line-number column, five cells wide.
+
+    Absence is spelled rather than left blank: an added line has no number on
+    the old side, and a blank there reads as an alignment slip while a zero
+    reads as line zero. Both are claims the row does not make. *)

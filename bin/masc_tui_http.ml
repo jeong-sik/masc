@@ -128,6 +128,12 @@ let url_of ~(host : string) ~(port : int) ~(path : string) =
 
 let percent_encode_path_segment value = Uri.pct_encode value
 
+(* A query value keeps the characters a path segment may not, and loses the
+   two that end a value. A file path carries slashes, so encoding it as a path
+   segment would spell them out and the server would not find the file. *)
+let percent_encode_query_value value =
+  Uri.pct_encode ~component:`Query_value value
+
 let request_clock () = Eio_context.get_clock_opt ()
 
 (** Send an HTTP GET request and return the structured status/body pair. *)
@@ -958,3 +964,39 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
   | Ok (Masc_http_client.Pool.Buffered { status; body; _ }) ->
       Error (Printf.sprintf "github-login returned %d: %s" status body)
   | Ok (Masc_http_client.Pool.Streamed _) -> Ok ()
+
+(** Fetch what the working tree holds for one file ([GET /api/v1/git/diff]).
+
+    The other half of the diff story. A file change says what a keeper tried
+    to write and carries no line numbers, because an [Edit] records two pieces
+    of text and not where in the file they sit. This says what is in the tree
+    now, with the numbers git computed.
+
+    [keeper] names whose playground the path is read under, and the path is
+    relative to that playground -- the same address the Changes surface
+    already shows. Without a keeper the server reads the project checkout. *)
+let fetch_git_diff ~(host : string) ~(port : int) ~(keeper : string option)
+    ~(path : string) ~(base_ref : string) :
+    (Masc.Tui_decode.git_diff, string) result =
+  let query =
+    [ Some (Printf.sprintf "path=%s" (percent_encode_query_value path))
+    ; Some (Printf.sprintf "base_ref=%s" (percent_encode_query_value base_ref))
+    ; Option.map
+        (fun name ->
+          Printf.sprintf "keeper=%s" (percent_encode_query_value name))
+        keeper
+    ]
+    |> List.filter_map Fun.id
+    |> String.concat "&"
+  in
+  let request_path = "/api/v1/git/diff?" ^ query in
+  match http_get ~host ~port ~path:request_path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status)
+    ->
+      Error (Printf.sprintf "git diff returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_git_diff json
+      | exception Yojson.Json_error detail ->
+          Error ("git diff was not JSON: " ^ detail))

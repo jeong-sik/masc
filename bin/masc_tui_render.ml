@@ -4399,7 +4399,109 @@ let render_changes_list (state : state) =
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~hints:"j/k:scroll  o:open in editor  r:refresh  Tab:next  q:quit");
+    (footer_line state ~hints:"j/k:scroll  Enter:what was written  d:what the tree holds  o:editor  r:refresh  q:quit");
+  finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
+
+(* One tree-diff row. Same three layers as the tool-call reading, plus the
+   line numbers git computed -- the part an [Edit] cannot have, because it
+   records two pieces of text and not where in the file they sit. *)
+let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
+  let background, marker =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_removed -> (Span.bg Ansi.bg_removed, "-")
+    | Masc.Tui_decode.Gd_added -> (Span.bg Ansi.bg_added, "+")
+    | Masc.Tui_decode.Gd_context -> (Span.plain, " ")
+  in
+  let gutter =
+    Printf.sprintf "%s %s %s "
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_old_line)
+      (Diff.line_number_cell row.Masc.Tui_decode.gdr_new_line)
+      marker
+  in
+  let text_style =
+    match row.Masc.Tui_decode.gdr_kind with
+    | Masc.Tui_decode.Gd_context -> Span.combine background (Span.weight Ansi.dim)
+    | Masc.Tui_decode.Gd_added | Masc.Tui_decode.Gd_removed -> background
+  in
+  let composed =
+    Span.concat
+      [ Span.text (Span.combine background (Span.weight Ansi.dim)) gutter
+      ; Span.text text_style
+          (Terminal_text.single_line row.Masc.Tui_decode.gdr_text)
+      ]
+  in
+  Span.pad_to width background (Span.truncate width composed)
+
+(* What the tree holds for the file the cursor names. Separate from the
+   tool-call reading by decision, not by accident: one says what the keeper
+   tried to write and the other what survived, and a single view would make
+   whichever it drew look like the whole answer. *)
+let render_changes_tree_diff (state : state)
+    (change : Masc.Tui_decode.file_change) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let diff_rows =
+    match state.changes_tree_diff with
+    | None -> []
+    | Some diff -> diff.Masc.Tui_decode.gd_rows
+  in
+  let total = List.length diff_rows in
+  let header =
+    Printf.sprintf "%s %s  vs HEAD  %s"
+      (screen_title " MASC Tree")
+      (Terminal_text.single_line (change_row_address change))
+      (connection_badge state.connection_status)
+  in
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    "  old   new     what the working tree holds, against its last commit";
+  box_divider buf cols;
+  (match state.changes_tree_diff_error with
+   | None -> ()
+   | Some detail ->
+       box_line_styled buf cols ~style:Theme.bad
+         ("  " ^ Keeper_chat.terminal_safe_text detail);
+       box_divider buf cols);
+  let chrome_rows =
+    7 + if Option.is_some state.changes_tree_diff_error then 2 else 0
+  in
+  let content_height = max 1 (rows - chrome_rows) in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min state.changes_diff_scroll max_scroll) in
+  if total = 0 then begin
+    (* Three different facts, and none of them is the others: not read yet, a
+       failed read, and a file that matches its last commit. *)
+    let empty =
+      match (state.changes_tree_diff, state.changes_tree_diff_error) with
+      | _, Some _ -> "  (the read failed; nothing here is a reading)"
+      | None, None -> "  (reading the tree)"
+      | Some diff, None ->
+          if diff.Masc.Tui_decode.gd_has_changes then
+            "  (the tree reports a change and sent no lines)"
+          else "  (this file matches its last commit)"
+    in
+    box_line_styled buf cols ~style:Ansi.dim empty;
+    for _ = 1 to content_height - 1 do
+      box_empty buf cols
+    done
+  end
+  else
+    for i = 0 to content_height - 1 do
+      match List.nth_opt diff_rows (i + scroll) with
+      | None -> box_empty buf cols
+      | Some row ->
+          box_line_span buf cols (tree_diff_row_span ~width:(cols - 4) row)
+    done;
+  box_line_styled buf cols ~style:Ansi.dim
+    (if total > content_height then
+       Printf.sprintf "[%d lines, scroll %d]  esc closes" total scroll
+     else "  esc closes");
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~hints:"j/k:scroll  esc:back  o:open in editor  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 (* The surface has two readings: the list, and one change opened. The open row
@@ -4413,7 +4515,13 @@ let render_changes (state : state) =
     | Some _, None | None, (Some _ | None) -> None
   in
   match opened with
-  | Some change -> render_changes_diff state change
+  | Some change ->
+      (* A path being read names the tree reading. Both readings of the same
+         row exist at once; which one is drawn is the operator's last key, not
+         whichever answer arrived last. *)
+      if Option.is_some state.changes_tree_diff_path then
+        render_changes_tree_diff state change
+      else render_changes_diff state change
   | None -> render_changes_list state
 
 (* Where the gate can deliver.

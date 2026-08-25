@@ -3108,6 +3108,23 @@ let decode_file_change json =
   let* fc_succeeded = required_bool_field json "succeeded" in
   Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
 
+type git_diff_row_kind =
+  | Gd_context
+  | Gd_added
+  | Gd_removed
+
+type git_diff_row = {
+  gdr_kind : git_diff_row_kind;
+  gdr_old_line : int option;
+  gdr_new_line : int option;
+  gdr_text : string;
+}
+
+type git_diff = {
+  gd_has_changes : bool;
+  gd_rows : git_diff_row list;
+}
+
 let decode_file_change_snapshot json =
   let* fcs_keeper = required_string_field json "keeper" in
   let* fcs_window_hours = require_float_field json "window_hours" in
@@ -3124,3 +3141,28 @@ let decode_file_change_snapshot json =
     ; fcs_over_budget
     ; fcs_malformed
     }
+
+(* ── git diff: what the tree holds ─────────────────────────────────── *)
+
+let decode_git_diff_row json =
+  let* kind = required_string_field json "kind" in
+  let* text = required_string_field json "text" in
+  let* gdr_old_line = optional_int_or_null json "oldLine" in
+  let* gdr_new_line = optional_int_or_null json "newLine" in
+  (* An unknown kind is an error, not a context line. git's vocabulary is
+     closed and a fourth word means the server changed under us; drawing it as
+     unchanged would report the opposite of whatever happened. *)
+  let* gdr_kind =
+    match kind with
+    | "context" -> Ok Gd_context
+    | "add" -> Ok Gd_added
+    | "delete" -> Ok Gd_removed
+    | other -> Error (Printf.sprintf "unknown git diff row kind: %s" other)
+  in
+  Ok { gdr_kind; gdr_old_line; gdr_new_line; gdr_text = text }
+
+let decode_git_diff json =
+  let* gd_has_changes = required_bool_field json "has_changes" in
+  let* rows_json = required_list_field json "unified" in
+  let* gd_rows = decode_list "unified" decode_git_diff_row rows_json in
+  Ok { gd_has_changes; gd_rows }

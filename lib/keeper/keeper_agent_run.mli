@@ -131,7 +131,8 @@ module For_testing : sig
 
   val dispatch_after_provider_transcript_admission
     :  messages:Agent_core.Types.message list
-    -> dispatch:(unit -> ('a, Agent_core.Error.t) result)
+    -> dispatch:
+         (Agent_core.Types.message list -> ('a, Agent_core.Error.t) result)
     -> ('a, Agent_core.Error.t) result
 
   (** Exact-run reference recorded on the turn record. Accepts a reference

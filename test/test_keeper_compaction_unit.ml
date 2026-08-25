@@ -462,7 +462,7 @@ let test_provider_admission_quarantines_malformed_overlap () =
     ]
   in
   let provider_dispatches = ref 0 in
-  let dispatch () =
+  let dispatch _admitted =
     incr provider_dispatches;
     Ok ()
   in
@@ -498,6 +498,53 @@ let test_provider_admission_quarantines_malformed_overlap () =
   | Ok () -> Alcotest.fail "poisoned transcript passed keeper admission"
 ;;
 
+
+
+(* A provider timeout between the two checkpoint stages leaves the transcript
+   ending on a ToolUse with no result. That is the ordinary shape of an
+   interrupted turn, not corruption, so admission closes it and the turn runs;
+   before this, the lane failed every turn until a restart (rondo, 33
+   consecutive, 2026-08-25). *)
+let test_interrupted_tool_cycle_is_closed_and_dispatched () =
+  let interrupted =
+    [ text T.User "do the thing"
+    ; message T.Assistant [ use "call-in-flight" ]
+    ]
+  in
+  (match U.validate_provider_transcript interrupted with
+   | Error (U.Unresolved_tool_results { tool_use_ids = [ "call-in-flight" ] }) -> ()
+   | Error error ->
+     Alcotest.failf
+       "expected an unresolved tool result: %s"
+       (U.show_provider_transcript_error error)
+   | Ok () -> Alcotest.fail "an open cycle must not validate as-is");
+  let dispatched = ref None in
+  let dispatch admitted =
+    dispatched := Some admitted;
+    Ok ()
+  in
+  match
+    Masc.Keeper_agent_run.For_testing.dispatch_after_provider_transcript_admission
+      ~messages:interrupted
+      ~dispatch
+  with
+  | Error error ->
+    Alcotest.failf
+      "an interrupted cycle must not latch the lane: %s"
+      (Agent_core.Error.to_string error)
+  | Ok () ->
+    (match !dispatched with
+     | None -> Alcotest.fail "dispatch never ran"
+     | Some admitted ->
+       Alcotest.(check bool)
+         "the admitted history validates"
+         true
+         (U.validate_provider_transcript admitted = Ok ());
+       Alcotest.(check int)
+         "one synthesized result was appended"
+         (List.length interrupted + 1)
+         (List.length admitted))
+;;
 
 
 let () =
@@ -560,5 +607,7 @@ let () =
             test_close_open_tail_preserves_structural_error
         ; Alcotest.test_case "close_open_tail never fabricates success" `Quick
             test_close_open_tail_never_fabricates_success
+        ; Alcotest.test_case "interrupted tool cycle is closed and dispatched" `Quick
+            test_interrupted_tool_cycle_is_closed_and_dispatched
         ] )
     ]

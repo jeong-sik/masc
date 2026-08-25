@@ -33,13 +33,6 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
     stdin_is_a_field "a heredoc is the child's stdin, and stdin is a typed field"
   | `Here_string ->
     stdin_is_a_field "a here-string is the child's stdin, and stdin is a typed field"
-  | `Command_separator ->
-    Move_to_field
-      { field = Connector
-      ; because =
-          "[;] runs the next command whether or not the last one worked. Say \
-           which you meant: [&&] to keep the failure, or two calls to ignore it"
-      }
   | `Cmd_subst ->
     Call_this_instead
       { call = Execute_twice
@@ -66,11 +59,6 @@ let of_construct : Masc_exec.Parsed.reason_too_complex -> t = function
     Call_this_instead
       { call = Execute_twice
       ; because = "compute the value first and pass the result as an argument"
-      }
-  | `Logic_op ->
-    Move_to_field
-      { field = Connector
-      ; because = "a conditional between two programs is the connector field"
       }
   | `Glob_brace ->
     (* Not stdin and not a file: the expansion is argv, and the caller already

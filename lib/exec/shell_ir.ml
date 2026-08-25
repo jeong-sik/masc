@@ -32,6 +32,7 @@ type simple = {
 type connector =
   | And_if
   | Or_if
+  | Seq
 
 type t =
   | Simple of simple
@@ -59,6 +60,7 @@ let pp_simple fmt s =
 let pp_connector fmt = function
   | And_if -> Format.pp_print_string fmt " && "
   | Or_if -> Format.pp_print_string fmt " || "
+  | Seq -> Format.pp_print_string fmt "; "
 
 let rec pp fmt = function
   | Simple s -> pp_simple fmt s

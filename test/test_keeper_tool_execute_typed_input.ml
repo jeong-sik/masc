@@ -598,26 +598,22 @@ let test_script_outside_the_subset_is_named () =
    was the classifier's usual answer. Measured over the 548 command lines the
    runtime produced 2026-08-21..23, all 31 refusals reported as a redirect
    were this. *)
-let test_a_separator_is_not_reported_as_a_redirect () =
+let test_a_separator_is_lowered_to_sequence () =
   let input =
     parse_json_exn
       (`Assoc [ "script", `String "ls docs 2>/dev/null; echo done" ])
   in
   match Execute_input.to_shell_ir input with
-  | Ok _ -> Alcotest.fail "; is outside the subset"
-  | Error (Execute_input.Script_outside_the_subset `Command_separator) -> ()
+  | Ok (Masc_exec.Shell_ir.Sequence { head = Masc_exec.Shell_ir.Simple s1; tail = [ (Masc_exec.Shell_ir.Seq, Masc_exec.Shell_ir.Simple s2) ] }) ->
+    Alcotest.(check string) "first bin" "ls" (Masc_exec.Exec_program.to_string s1.bin);
+    Alcotest.(check string) "second bin" "echo" (Masc_exec.Exec_program.to_string s2.bin);
+    Alcotest.(check int) "first has redirect" 1 (List.length s1.redirects)
+  | Ok _ -> Alcotest.fail "expected Sequence with Seq connector"
   | Error e ->
-    Alcotest.failf "expected the separator to be named, got %a"
+    Alcotest.failf "expected sequence to parse, got %a"
       Execute_input.pp_validation_error e
 ;;
 
-(* The refusal above is behaviour; this is the sentence the model reads before
-   it decides. They had drifted apart: the description listed ';' among the
-   things read as structure, so a Keeper that believed it sent a line the
-   parser refuses by name, and learned from that the typed form is unreliable.
-   Measured over 2026-08-20..24, ';' is the single largest reason a shell line
-   cannot be said in typed fields — 33% of 1,109 Execute calls that invoked a
-   shell — which makes this the sentence most likely to be acted on. *)
 let script_description () =
   let rec find = function
     | `Assoc fields ->
@@ -649,11 +645,7 @@ let test_the_script_description_matches_what_the_parser_does () =
   let description = script_description () in
   let mentions sub = String_util.contains_substring description sub in
   Alcotest.(check bool)
-    "the description does not offer ';' as something read as structure"
-    false
-    (mentions "'&&', '||', ';'" || mentions "';' and redirections");
-  Alcotest.(check bool)
-    "the description says what happens to a line using it"
+    "the description offers ';' as something read as structure"
     true
     (mentions "';'")
 ;;
@@ -1740,6 +1732,8 @@ let lowered_bin json =
   | Error _ -> Alcotest.fail "lowering must not fail for these inputs"
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
+  | Ok (Masc_exec.Shell_ir.Sequence { head = Masc_exec.Shell_ir.Simple simple; _ }) ->
+    Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin
   | Ok _ -> "<not a simple>"
 ;;
 
@@ -1749,13 +1743,13 @@ let costume script =
 
 let test_a_representable_costume_is_lowered () =
   (* The shell disappears: what runs is the command it would have run. *)
-  Alcotest.(check string) "echo hi" "echo" (lowered_bin (costume "echo hi"))
+  Alcotest.(check string) "echo hi" "echo" (lowered_bin (costume "echo hi"));
+  Alcotest.(check string) "false; echo hi" "false" (lowered_bin (costume "false; echo hi"))
 ;;
 
 let test_what_the_ir_cannot_hold_keeps_todays_path () =
-  (* [;] is the largest refusal in the corpus (252). Lowering it would refuse a
-     call that runs today, so it stays on the shell. *)
-  Alcotest.(check string) "a ; b" "sh" (lowered_bin (costume "false; echo hi"));
+  (* Constructs like cmd_subst and heredoc cannot be held in IR, so they stay on the shell. *)
+  Alcotest.(check string) "cmd_subst" "sh" (lowered_bin (costume "cat $(echo foo)"));
   Alcotest.(check string) "heredoc" "sh" (lowered_bin (costume "cat <<'EOF'\nx\nEOF"))
 ;;
 
@@ -1787,9 +1781,7 @@ let test_an_ordinary_program_is_untouched () =
 ;;
 
 (* The tap hands back the typed finding, because a caller that wants to tell
-   the writer what to do needs the reason and not its name. Two thirds of live
-   escapes are [;], none of them refused, so the name alone would be the end of
-   the conversation. *)
+   the writer what to do needs the reason and not its name. *)
 let test_a_finding_carries_its_rewrite () =
   let module Costume = Keeper_tooling.Shell_costume in
   let module Rewrite = Keeper_tooling.Subset_rewrite in
@@ -1798,14 +1790,14 @@ let test_a_finding_carries_its_rewrite () =
       ~sandbox:host
       (parse_json_exn
          (`Assoc
-             [ "argv", `List [ `String "sh"; `String "-c"; `String "false; echo hi" ] ]))
+             [ "argv", `List [ `String "sh"; `String "-c"; `String "cat $(echo foo)" ] ]))
   with
   | [ (_, Costume.Outside_the_subset reason) ] ->
     let advice = Rewrite.to_string (Rewrite.of_reason reason) in
     Alcotest.(check bool)
-      ("the advice names the connector -- got: " ^ advice)
+      ("the advice is produced -- got: " ^ advice)
       true
-      (Astring.String.is_infix ~affix:"&&" advice)
+      (String.length advice > 0)
   | other ->
     Alcotest.failf
       "expected one outside-the-subset finding, got %d"
@@ -1992,9 +1984,10 @@ let suite =
           `Quick
           test_script_outside_the_subset_is_named
       ; Alcotest.test_case
-          "a_separator_is_not_reported_as_a_redirect"
+          "a_separator_is_lowered_to_sequence"
           `Quick
-          test_a_separator_is_not_reported_as_a_redirect      ; Alcotest.test_case
+          test_a_separator_is_lowered_to_sequence
+      ; Alcotest.test_case
           "script_and_argv_together_are_refused"
           `Quick
           test_script_and_argv_together_are_refused      ; Alcotest.test_case

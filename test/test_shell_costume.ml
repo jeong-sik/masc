@@ -65,9 +65,9 @@ let test_names_what_the_gate_would_have_said () =
   (* Text the IR can hold: nothing is hidden by the costume. *)
   Alcotest.(check string) "plain command" "representable" (tag_of "echo hi");
   Alcotest.(check string) "connector" "representable" (tag_of "true && echo hi");
-  (* [;] is not in Shell_ir.connector on purpose: it means "run the next thing
-     whether or not the last one worked".  Inside the costume it runs anyway. *)
-  Alcotest.(check string) "separator" "command_separator" (tag_of "false; echo hi");
+  (* [;] is a Shell_ir connector now (RFC-0391), so the costume hides nothing
+     the typed path could not have said. *)
+  Alcotest.(check string) "separator" "representable" (tag_of "false; echo hi");
   (* Brace expansion builds argv before exec -- category A in the RFC. *)
   Alcotest.(check string) "brace" "glob_brace" (tag_of "ls {a,b}.txt")
 ;;
@@ -87,10 +87,14 @@ let test_measured_dispositions () =
   case "echo $(date)" "cmd_subst";
   case "sleep 5 &" "background";
   case "cat <<'EOF'\nbody\nEOF" "heredoc";
-  (* A loop is reported by the first thing it trips on, not by what it is: the
-     tag is [command_separator], not [control_flow].  Any count grouped by tag
-     under-reports control flow for exactly this reason. *)
-  case "for f in a b; do echo $f; done" "command_separator"
+  (* A loop is still reported by the first thing it trips on rather than by
+     what it is, but that is no longer [;]: with the separator in the subset
+     (RFC-0391) the loop reaches the classifier, which has no arm for [for],
+     [while], or [if] at all, so it falls through to [parse_error].
+     [`Control_flow] has no producer anywhere -- naming a loop as one is not
+     something this build can do, and a count grouped by tag still does not
+     see control flow. *)
+  case "for f in a b; do echo $f; done" "parse_error"
 ;;
 
 let () =

@@ -1176,9 +1176,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
                 ( "arguments",
                   `Assoc
                     [
-                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                       ("action", `String "claim");
                     ] );
               ] );
@@ -1229,9 +1227,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
       ~arguments:
         (`Assoc
           [
-            ("agent_name", `String "codex");
             ("task_id", `String "task-001");
-            ("agent_name", `String "codex");
             ("action", `String "claim");
           ])
   in
@@ -1250,9 +1246,7 @@ let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
                 ( "arguments",
                   `Assoc
                     [
-                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                       ("action", `String "done");
                       ("notes", `String "Completed task and verified output");
                     ] );
@@ -1326,7 +1320,6 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
                   `Assoc
                     [
                       ("task_id", `String "task-001");
-                      ("agent_name", `String "codex");
                     ] );
               ] );
         ])

@@ -1173,8 +1173,7 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
 let test_validate_args_masc_transition_rejects_json_string_handoff_context () =
   let args =
     `Assoc
-      [ "agent_name", `String "codex-local-admin"
-      ; "task_id", `String "task-1823"
+      [ "task_id", `String "task-1823"
       ; "action", `String "release"
       ; ( "handoff_context"
         , `String
@@ -1639,7 +1638,6 @@ let test_validation_telemetry_rejects_retired_transition_aliases () =
            ~args:
              (`Assoc
                 [
-                  "agent_name", `String "codex-local-admin";
                   "task_id", `String "task-239";
                   "action", `String "claim";
                   "to", `String "claimed";
@@ -1698,7 +1696,6 @@ let test_registered_hook_transition_rejects_to_and_note () =
   let args =
     `Assoc
       [
-        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-239");
         ("action", `String "claim");
         ("to", `String "claimed");
@@ -1726,7 +1723,6 @@ let test_registered_hook_transition_preserves_canonical_action () =
   let args =
     `Assoc
       [
-        ("agent_name", `String "keeper-ani1999-agent");
         ("task_id", `String "task-193");
         ("action", `String "claim");
       ]
@@ -1747,7 +1743,6 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
     `Assoc
       [
         ("_agent_name", `String "codex-local-admin");
-        ("agent_name", `String "codex-local-admin");
         ("task_id", `String "task-216");
         ("action", `String "done");
       ]
@@ -1762,8 +1757,8 @@ let test_registered_hook_transition_strips_internal_agent_marker () =
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
   Alcotest.(check bool) "_agent_name removed before schema validation" true
     (Yojson.Safe.Util.member "_agent_name" forwarded = `Null);
-  Alcotest.(check string) "agent_name preserved" "codex-local-admin"
-    (assoc_string "agent_name" forwarded)
+  Alcotest.(check bool) "caller identity is not forwarded as a tool argument" true
+    (Yojson.Safe.Util.member "agent_name" forwarded = `Null)
 
 let test_registered_hook_goal_list_preserves_blank_optional_enums () =
   let args =
@@ -1908,8 +1903,7 @@ let test_typed_tool_contract_rejection_corpus () =
       , "masc_transition"
       , masc_transition_schema
       , `Assoc
-          [ "agent_name", `String "codex-local-admin"
-          ; "task_id", `String "task-239"
+          [ "task_id", `String "task-239"
           ; "action", `String "claim"
           ; "to", `String "claimed"
           ; "note", `String "PR #8308 Draft"

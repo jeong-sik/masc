@@ -9,7 +9,8 @@ type t =
   | Switch_keeper of string
   | Switch_keeper_missing_name
   | Interrupt_turn
-  | Toggle_thinking
+  | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
+  | Set_tools of [ `Toggle | `Compact | `Full ]
   | Toggle_memory
   | View_image of string
   | View_image_missing_path
@@ -21,7 +22,8 @@ let help_lines =
   [ "/task <title>   create a task for this keeper (lines below become the body)"
   ; "/keeper <name>  switch this pane to another keeper"
   ; "/interrupt      signal the streaming turn to stop"
-  ; "/thinking       fold or unfold reasoning blocks in this pane"
+  ; "/thinking [hidden|folded|full]  set or cycle reasoning visibility"
+  ; "/tools [compact|full]           set or toggle tool-call detail"
   ; "/memory         show or hide Librarian/Memory journal rows"
   ; "/image <path>   draw an image file on the terminal"
   ; "/help           this list"
@@ -58,7 +60,13 @@ let parse text =
     | "keeper", "" -> Switch_keeper_missing_name
     | "keeper", name -> Switch_keeper name
     | "interrupt", _ -> Interrupt_turn
-    | "thinking", _ -> Toggle_thinking
+    | "thinking", "" -> Set_thinking `Cycle
+    | "thinking", "hidden" -> Set_thinking `Hidden
+    | "thinking", "folded" -> Set_thinking `Folded
+    | "thinking", "full" -> Set_thinking `Full
+    | "tools", "" -> Set_tools `Toggle
+    | "tools", "compact" -> Set_tools `Compact
+    | "tools", "full" -> Set_tools `Full
     | "memory", _ -> Toggle_memory
     | "image", "" -> View_image_missing_path
     | "image", path -> View_image path

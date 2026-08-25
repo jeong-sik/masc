@@ -8,12 +8,6 @@ tool. Direct done and approve/reject are deliberately unavailable here. \
 Supports expected_version CAS."""
 
 [[params]]
-name = "agent_name"
-type = "string"
-required = true
-description = "Your agent name"
-
-[[params]]
 name = "task_id"
 type = "string"
 required = true

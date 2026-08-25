@@ -440,8 +440,7 @@ type = "string"
 min_length = 1
 description = """
 Shell form: one command line, parsed rather than handed to a shell. Pipes, \
-'&&', '||' and redirections are read as structure; ';' is not, and a line \
-using it is refused by name. Use this instead of \
+'&&', '||', ';' and redirections are read as structure. Use this instead of \
 putting a script in argv as 'bash -c'. Constructs outside the supported \
 subset are refused by name rather than run. Mutually exclusive with 'argv' \
 and 'pipeline'."""

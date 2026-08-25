@@ -84,7 +84,7 @@ CLEANUP_TASK_FINALIZED=0
 cleanup_contract_task() {
   local exit_status=$?
   if [ "$CLEANUP_TASK_FINALIZED" -ne 1 ] && [ -n "${task_id:-}" ]; then
-    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
+    call_tool 5999 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"cancel",notes:"public tool sweep cleanup after unsuccessful run"}')" >/dev/null 2>&1 || true
   fi
   exit "$exit_status"
 }
@@ -197,7 +197,7 @@ r_tasks="$(call_tool 5014 "masc_tasks" '{}')"
 expect_ok "masc_tasks" "$r_tasks"
 
 next_step "masc_transition claim"
-r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"claim",notes:"public tool sweep claim"}')")"
+r_claim="$(call_tool 5015 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"claim",notes:"public tool sweep claim"}')")"
 expect_ok_or_guard "masc_transition claim" "$r_claim" 'already claimed'
 
 next_step "masc_plan_init"
@@ -221,7 +221,7 @@ r_plan_get="$(call_tool 5020 "masc_plan_get" "$(jq -cn --arg task_id "$task_id" 
 expect_ok "masc_plan_get" "$r_plan_get"
 
 next_step "masc_transition start"
-r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" '{task_id:$task_id,agent_name:$agent_name,action:"start",notes:"public tool sweep start"}')")"
+r_transition="$(call_tool 5021 "masc_transition" "$(jq -cn --arg task_id "$task_id" '{task_id:$task_id,action:"start",notes:"public tool sweep start"}')")"
 expect_ok "masc_transition start" "$r_transition"
 
 next_step "masc_heartbeat"
@@ -321,7 +321,7 @@ done_notes="Public MCP tool live sweep completed all requested tool calls and ve
 done_summary="public tool live sweep verified across the public MCP surface"
 
 next_step "masc_transition submit for verification"
-r_submitted="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg agent_name "$AGENT_NAME" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,agent_name:$agent_name,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
+r_submitted="$(call_tool 5037 "masc_transition" "$(jq -cn --arg task_id "$task_id" --arg notes "$done_notes" --arg summary "$done_summary" --arg evidence_ref "$evidence_ref" '{task_id:$task_id,action:"submit_for_verification",notes:$notes,handoff_context:{summary:$summary,evidence_refs:[$evidence_ref]}}')")"
 expect_ok "masc_transition submit for verification" "$r_submitted"
 
 next_step "masc_tasks post-submission producer credit"

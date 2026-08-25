@@ -57,7 +57,7 @@ let test_concurrent_turns_keep_request_owned_transcripts () =
 
 let test_live_transcripts_are_kept_per_keeper () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   let entry keeper_name started_at =
     let sent_request =
@@ -91,11 +91,110 @@ let test_live_transcripts_are_kept_per_keeper () =
    until enough keys have burned through the invisible excess. *)
 let test_message_scroll_accepts_the_rendered_clamp () =
   let state =
-    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
   in
   state.msg_scroll <- 30;
   Tui_types.apply_clamped_scroll state (Tui_types.Message_scroll 7);
   check int "requested scroll is normalized to the drawn row" 7 state.msg_scroll
+;;
+
+(* The header names what is unusual, not what is normal.
+
+   All three modes default to showing everything, so spelling them all made
+   every chat carry "memory:on reasoning:full tools:full" -- and that pushed
+   the port off the right edge at 170 columns, which is real width spent to
+   say nothing. Measured on a live server: with all three spelled the header
+   ended "(port ~"; with only the unusual ones it ends "(port 8935)".
+
+   Every combination is listed rather than described, because the rule is
+   about which of eight cases produce which string. *)
+let test_the_header_names_only_unusual_modes () =
+  let summary memory_visible reasoning tools =
+    Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools
+  in
+  let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
+  let hidden = Tui_types.Reasoning_hidden in
+  let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
+  check string "everything at its default says nothing" ""
+    (summary true full tools_full);
+  check string "hidden reasoning alone" "reasoning:hidden"
+    (summary true hidden tools_full);
+  check string "folded reasoning alone" "reasoning:folded"
+    (summary true folded tools_full);
+  check string "compact tools alone" "tools:compact"
+    (summary true full compact);
+  check string "memory off alone" "memory:off" (summary false full tools_full);
+  check string "two of them" "reasoning:hidden tools:compact"
+    (summary true hidden compact);
+  check string "all three, in a fixed order"
+    "memory:off reasoning:hidden tools:compact"
+    (summary false hidden compact);
+  (* What this actually buys, stated as the two numbers rather than as a
+     bound. Spelling every mode cost 35 columns on every chat; naming only the
+     unusual ones costs nothing at rest, which is the case that was pushing
+     the port off the edge.
+
+     The worst case is six columns wider than the old always-on line, because
+     "hidden" and "compact" are longer words than "full". That is the trade:
+     the common header shrinks to nothing and the rare one grows slightly, and
+     the rare one only happens after an operator changed all three. *)
+  check int "spelling every mode cost this much" 35
+    (String.length "memory:on reasoning:full tools:full");
+  check int "at rest it now costs nothing" 0
+    (String.length (summary true full tools_full));
+  check int "and the worst case is a little wider than the old always-on line"
+    41
+    (String.length (summary false hidden compact))
+;;
+
+let test_chat_visibility_defaults_and_cycles () =
+  let default =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  check string "reasoning compatibility default" "full"
+    (Tui_types.reasoning_visibility_to_string default.msg_reasoning_visibility);
+  check string "tool compatibility default" "full"
+    (Tui_types.tool_visibility_to_string default.msg_tool_visibility);
+  let configured =
+    Tui_types.create_state
+      ~reasoning_visibility:Tui_types.Reasoning_hidden
+      ~tool_visibility:Tui_types.Tools_compact
+      ~workspace:"test"
+      ~port:8935
+      ~refresh_interval:2.0
+      ()
+  in
+  check string "configured reasoning default" "hidden"
+    (Tui_types.reasoning_visibility_to_string configured.msg_reasoning_visibility);
+  check string "configured tool default" "compact"
+    (Tui_types.tool_visibility_to_string configured.msg_tool_visibility);
+  check (list string) "reasoning cycles through all three states"
+    [ "hidden"; "folded"; "full"; "hidden" ]
+    (let rec collect count mode =
+       if count = 0
+       then [ Tui_types.reasoning_visibility_to_string mode ]
+       else
+         Tui_types.reasoning_visibility_to_string mode
+         :: collect (count - 1) (Tui_types.next_reasoning_visibility mode)
+     in
+     collect 3 Tui_types.Reasoning_hidden);
+  check string "tool detail toggles open" "full"
+    (Tui_types.tool_visibility_to_string
+       (Tui_types.toggle_tool_visibility Tui_types.Tools_compact))
+;;
+
+let test_chat_shortcuts_reach_visibility_state () =
+  List.iter
+    (fun callee ->
+      let count =
+        Ast_grep.count_calls_in_value_binding
+          ~module_path:"bin/masc_tui.ml"
+          ~binding_name:"handle_message_key"
+          ~callee
+      in
+      if count < 1 then
+        failf "handle_message_key must call %s; observed %d call(s)" callee count)
+    [ "next_reasoning_visibility"; "toggle_tool_visibility" ]
 ;;
 
 (* Cancel (Ctrl-K) and edit (Ctrl-P) both act on the newest waiting line, so
@@ -318,6 +417,12 @@ let () =
             test_live_transcripts_are_kept_per_keeper
         ; test_case "message scroll accepts the rendered clamp" `Quick
             test_message_scroll_accepts_the_rendered_clamp
+        ; test_case "chat visibility defaults and cycles" `Quick
+            test_chat_visibility_defaults_and_cycles
+        ; test_case "the header names only unusual modes" `Quick
+            test_the_header_names_only_unusual_modes
+        ; test_case "chat shortcuts reach visibility state" `Quick
+            test_chat_shortcuts_reach_visibility_state
         ; test_case "the row budget counts the queue" `Quick
             test_the_row_budget_counts_the_queue
         ; test_case "the pane draws the queue it counts" `Quick

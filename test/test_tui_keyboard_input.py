@@ -1248,6 +1248,7 @@ def run_terminal_scenario(
     http_requests: HttpRequests | None = None,
     prepare_workspace: WorkspaceSetup | None = None,
     preload_input: bytes | None = None,
+    extra_args: tuple[str, ...] = (),
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1306,6 +1307,7 @@ def run_terminal_scenario(
                         str(server_port),
                         "--refresh",
                         str(refresh),
+                        *extra_args,
                     ],
                     stdin=slave_fd,
                     stdout=slave_fd,
@@ -3582,7 +3584,9 @@ def utf8_message_interaction(requests: HttpRequests) -> Interaction:
     ) -> None:
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
-        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
 
         ascii_frame = send_and_wait(process, master_fd, output, b"A", composer_showing(b"A"))
@@ -3886,6 +3890,59 @@ def memory_journal_timeline_interaction() -> Interaction:
         )
         if b"memory:on" not in restored:
             raise AssertionError(f"Memory timeline did not return to on: {restored!r}")
+        send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+def chat_visibility_modes_interaction() -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
+        pane_start = len(output)
+        initial = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"reasoning:hidden tools:compact",
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"detail rows hidden",
+            start=pane_start,
+            timeout=5.0,
+        )
+        initial += bytes(output[pane_start:])
+        if b"2 reasoning steps, content withheld" in initial:
+            raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
+
+        folded = send_and_wait(
+            process, master_fd, output, b"\x12", b"reasoning:folded"
+        )
+        if b"reasoning line(s) folded" not in folded:
+            raise AssertionError(f"folded reasoning did not draw its count: {folded!r}")
+
+        full = send_and_wait(process, master_fd, output, b"\x12", b"reasoning:full")
+        if b"2 reasoning steps, content withheld" not in full:
+            raise AssertionError(f"full reasoning did not restore content: {full!r}")
+
+        tools = send_and_wait(process, master_fd, output, b"\x04", b"tools:full")
+        for needle in (b"masc_task_history", b"tool_execute"):
+            if needle not in tools:
+                raise AssertionError(
+                    f"full tool view did not restore {needle!r}: {tools!r}"
+                )
         send_and_wait(process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         os.write(master_fd, b"q")
 
@@ -5764,6 +5821,15 @@ def run_keyboard_regression(executable: str) -> None:
             "/api/v1/keepers/alpha/chat/history": (200, []),
             "/api/v1/keepers/alpha/memory-journal?limit=20": memory_journal_fixture(),
         },
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper chat visibility modes",
+        interact=chat_visibility_modes_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
+        },
+        extra_args=("--reasoning", "hidden", "--tool-view", "compact"),
     )
     run_terminal_scenario(
         executable,

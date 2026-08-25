@@ -84,6 +84,8 @@ let for_surface = function
       ; b Navigate "PgUp / PgDn" "history" ~help:"scroll history by a page"
       ; b Navigate "Up / Down" "adjust"
           ~help:"when scrolled back, adjust by one line"
+      ; b Act "Ctrl-R" "reasoning" ~help:"cycle reasoning hidden / folded / full"
+      ; b Act "Ctrl-D" "tool detail" ~help:"toggle compact / full tool-call detail"
       ; b Act "y / n" "approval" ~help:"answer a tool approval"
       ; b Act "Esc" "back" ~help:"back; during a turn, interrupt it"
       ]
@@ -159,7 +161,14 @@ let for_surface = function
          one directory level (the /workspace/children route is lazy). Claimed
          from those two facts rather than from the render, so the footer does
          not advertise a key nothing handles. *)
-      [ b Navigate "j/k" "move"; b Act "Enter" "open" ~help:"drill in, or open the file" ]
+      [ b Navigate "j/k" "move"
+      ; b Act "Enter" "open" ~help:"drill in, or open the file"
+        (* Esc walks back out the way Enter came in: it closes an open file
+           first, and only climbs a directory once no file is open
+           (masc_tui.ml:6001). A key that works and is not listed is the same
+           drift as a listed key that does nothing, pointing the other way. *)
+      ; b Act "Esc" "back" ~help:"close the file, then climb one directory"
+      ]
       @ listing_meta
   | Tools -> b Navigate "j/k" "scroll" :: listing_meta
   | System_logs ->
@@ -179,6 +188,22 @@ let hints_of_bindings bindings =
   |> String.concat "  "
 
 let footer_hints surface = hints_of_bindings (for_surface surface)
+
+(* The Overview footer is the same table plus one runtime fact the renderer
+   owns: whether j/k currently drives the task list (task_focus) or the
+   event list. The table stays the SSOT — this projection only relabels
+   j/k and drops the keys that are dead in the current mode (t enters the
+   task list, Enter/Esc act on the focused task), exactly like the old
+   hand-assembled literal did, but without a second key list. *)
+let footer_hints_overview ~task_focus =
+  let dead = if task_focus then [ "t" ] else [ "Enter"; "Esc" ] in
+  for_surface Overview
+  |> List.filter (fun b -> not (List.mem b.key dead))
+  |> List.map (fun b ->
+         if b.key = "j/k" then
+           { b with label = (if task_focus then "tasks" else "events") }
+         else b)
+  |> hints_of_bindings
 
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays

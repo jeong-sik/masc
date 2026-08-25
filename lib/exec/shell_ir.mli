@@ -34,6 +34,7 @@ type simple = {
 type connector =
   | And_if  (** run the next command only if the one before it exited zero *)
   | Or_if  (** run the next command only if the one before it did not *)
+  | Seq  (** run the next command regardless of exit status (semicolon ;) *)
 
 type t =
   | Simple of simple

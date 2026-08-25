@@ -822,6 +822,29 @@ let initialize_owner_state_blocking
   Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   Discovery_cache.set_env ~sw ~net;
   Gc_sampler.run ~sw ~clock ~interval:30.0;
+  (* The activity-events parse cache alongside the heap gauges: it is retained
+     for the life of each day file, so its size is a steady state rather than
+     churn, and 30s is often enough to see it move when retention sweeps.
+     Sampled here rather than inside [Gc_sampler] so neither that module nor
+     [Activity_graph] gains a dependency on the other. *)
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      (try
+         let stats = Activity_graph.cache_stats () in
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_files
+           (float_of_int stats.Activity_graph.past_day_files);
+         Otel_metric_store.set_gauge
+           Otel_metric_store.metric_activity_cache_records
+           (float_of_int stats.Activity_graph.past_day_records)
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Server.warn "activity cache gauge sample failed: %s" (Printexc.to_string exn));
+      Eio.Time.sleep clock 30.0;
+      loop ()
+    in
+    loop ());
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock 5.0;

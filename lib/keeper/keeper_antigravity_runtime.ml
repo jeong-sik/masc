@@ -648,7 +648,29 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                 ~updated_at:(Time_compat.now ()))
             |> Result.map_error internal_error
           | _, Turn_inflight { turn_id = Some _; _ } -> Ok ()
-          | _, _ -> assert false
+          (* The phase carries six constructors and the entry guard admits
+             three, so this arm is reachable by [Start] and [Active] as well as
+             by anything a concurrent transition leaves behind. It was
+             [assert false]: a claim of unreachability the compiler cannot
+             check, in a chain that already returns [Error]. Returning one
+             loses nothing the assert provided and does not take the process
+             with it -- masc#28983's shape, where a wildcard promise became an
+             Assert_failure at run time. *)
+          | _, other ->
+            let phase_name =
+              match other with
+              | Session_store.Ready -> "Ready"
+              | Session_store.Start _ -> "Start"
+              | Session_store.Active _ -> "Active"
+              | Session_store.Turn_inflight _ -> "Turn_inflight"
+              | Session_store.Recovery_required _ -> "Recovery_required"
+              | Session_store.Settled _ -> "Settled"
+            in
+            Error
+              (internal_error
+                 (Printf.sprintf
+                    "host-stop turn identity: expected Turn_inflight, phase is %s"
+                    phase_name))
         in
         let projected =
           Host.host_stop_result

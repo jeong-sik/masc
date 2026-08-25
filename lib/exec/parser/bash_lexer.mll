@@ -83,6 +83,7 @@ rule token = parse
      and still reaches [classify_too_complex] as `Background. *)
   | "&&"           { incr_tokens (); AND_IF }
   | "||"           { incr_tokens (); OR_IF }
+  | ';'            { incr_tokens (); SEMICOLON }
   | '|'            { incr_tokens (); PIPE }
   | (fd as src) ">&" (fd as dst)
                     { incr_tokens (); FD_REDIRECT (int_of_string src, int_of_string dst) }

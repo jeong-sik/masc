@@ -25,8 +25,12 @@ type t =
   | Interrupt_turn
       (** [/interrupt] — the composer form of the interrupt keybinding, for
           an operator mid-sentence whose hands are already on letters. *)
-  | Toggle_thinking
-      (** [/thinking] — fold or unfold reasoning blocks in this pane. *)
+  | Set_thinking of [ `Cycle | `Hidden | `Folded | `Full ]
+      (** [/thinking [hidden|folded|full]] — set or cycle reasoning visibility.
+          Replaces the earlier [Toggle_thinking]: two states could not say
+          "keep the count but not the text". *)
+  | Set_tools of [ `Toggle | `Compact | `Full ]
+      (** [/tools [compact|full]] — set or toggle tool-call detail. *)
   | Toggle_memory
       (** [/memory] — show or hide Librarian/Memory journal rows. *)
   | View_image of string

@@ -243,6 +243,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0388 | awaiting_tool 대기의 liveness — 취소 도달과 시간 기반 만료 | Draft | - |
 | 0389 | Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다 | Draft | - |
 | 0390 | Official client 네이티브 도구를 keeper 별로 켜고 끈다 | Draft | - |
+| 0391 | Shell IR 세미콜론(;) 순차 실행 커맨드 체이닝 지원 | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |
@@ -252,6 +253,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | RFC-event-queue-admit-all-ready | 이벤트 큐 — 준비된 자극은 한 턴이 전부 본다, 턴 실패는 자극을 버리지 않는다 | Draft | - |
 | RFC-execute-subset-dispositions | Execute subset dispositions: resolve it, spawn it, or name the replacement | Draft | - |
 | RFC-keeper-conversation-hitl-flow | Keeper conversation and non-blocking HITL | Implemented | - |
+| RFC-keeper-external-tools-and-produced-artifacts | Keeper 외부 도구와 생성 이미지 증거를 선언형 계약으로 연결한다 | Draft | - |
 | RFC-keeper-memory-consolidation | Keeper durable memory consolidation — deprecate memory_bank into Memory OS | Implemented | - |
 | RFC-keeper-runtime-context-observation-phase0 | Keeper runtime context observation Phase 0 | Draft | - |
 | RFC-keeper-vision-delegation-tool | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | - |

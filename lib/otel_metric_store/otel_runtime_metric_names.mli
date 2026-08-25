@@ -54,6 +54,14 @@ val metric_gc_promoted_words : string
     [Gc.quick_stat.live_words] and [Sys.word_size]. *)
 val metric_memory_usage_bytes : string
 
+val metric_activity_cache_files : string
+(** Day files the activity-events parse cache is holding. *)
+
+val metric_activity_cache_records : string
+(** Events across those files. This is the number a retention change moves;
+    sizing it from outside the process needed RSS, [live_words] and a guessed
+    parse factor, which is an estimate rather than an answer. *)
+
 (** Eio main-domain scheduler lag (gauge, seconds): 1s sleep overshoot
     sampled by the bootstrap lag fiber.  Sustained values mean the single
     domain is blocked (2026-06 fleet-freeze root cause class). *)

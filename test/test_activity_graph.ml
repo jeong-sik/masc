@@ -707,6 +707,50 @@ let strip_generated_at_iso json =
          fields)
   | other -> other
 
+(* The gauge exists so an operator reads the cache instead of estimating it
+   from RSS, so what has to hold is that the number follows the cache. A
+   fixture day file from the past is what puts anything in the past-day cache
+   at all: today's file belongs to the current-day cache. *)
+let write_past_day_file config ~lines =
+  let root = Filename.concat (Workspace_utils.masc_dir config) Activity_graph.store_dirname in
+  let dir = Filename.concat root "2020-01" in
+  let rec mkdir_p path =
+    if not (Sys.file_exists path)
+    then (
+      mkdir_p (Filename.dirname path);
+      try Unix.mkdir path 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p dir;
+  let path = Filename.concat dir "02.jsonl" in
+  let oc = open_out path in
+  for i = 1 to lines do
+    Printf.fprintf oc
+      {|{"seq":%d,"ts_ms":1577923200000,"ts_iso":"2020-01-02T00:00:00Z","workspace_id":"default","kind":"test.fixture","actor":{"kind":"agent","id":"fixture"},"subject":{"kind":"tool","id":"fixture"},"payload":{}}|}
+      i;
+    output_char oc '\n'
+  done;
+  close_out oc;
+  path
+;;
+
+let test_cache_stats_follow_the_cache () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      let empty = Activity_graph.cache_stats () in
+      check int "a cleared cache holds no files" 0 empty.Activity_graph.past_day_files;
+      check int "and no records" 0 empty.Activity_graph.past_day_records;
+      let _ = write_past_day_file config ~lines:7 in
+      (* Reading is what populates it; the stats are a read, not a trigger. *)
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
+      let warm = Activity_graph.cache_stats () in
+      check int "the past day file is held" 1 warm.Activity_graph.past_day_files;
+      check int "and its records are counted" 7 warm.Activity_graph.past_day_records;
+      Activity_graph.For_testing.reset_past_day_cache_for_testing ();
+      let cleared = Activity_graph.cache_stats () in
+      check int "clearing the cache clears the count" 0 cleared.Activity_graph.past_day_files)
+;;
+
 let test_current_day_cache_reparses_only_appended_delta () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
@@ -893,6 +937,8 @@ let () =
         [
           test_case "warm cache re-parses only the appended delta" `Quick
             test_current_day_cache_reparses_only_appended_delta;
+          test_case "cache_stats follow the cache" `Quick
+            test_cache_stats_follow_the_cache;
           test_case "incremental path output matches full-reparse reference"
             `Quick test_current_day_cache_matches_uncached_golden;
           test_case "truncated file rescans from zero" `Quick

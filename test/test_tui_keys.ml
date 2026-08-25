@@ -61,6 +61,19 @@ let test_listing_footers_share_one_shape () =
         (Masc_tui_keys.footer_hints surface))
     [ Lanes; Verification; Harness; Repositories; Tools; System_logs ]
 
+let test_overview_footer_projects_by_focus () =
+  (* The retired literal said "j/k:events  t:tasks  q:quit  r:refresh
+     Tab:next  2:keepers" (and "j/k:tasks  Enter:detail  esc:events …").
+     The projection keeps every pair, relabels j/k by focus, and drops the
+     keys that are dead in the other mode: t only leaves the event list,
+     Enter/Esc only act on a focused task. *)
+  check str "events mode keeps t and drops the task keys"
+    "j/k:events  t:tasks  2:keepers  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints_overview ~task_focus:false);
+  check str "tasks mode keeps Enter/Esc and drops t"
+    "j/k:tasks  Enter:open  Esc:back  2:keepers  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints_overview ~task_focus:true)
+
 let test_system_logs_lost_the_keys_it_never_had () =
   (* The old help table documented g, G, and f on System logs; the dispatch
      binds them on Acting only. *)
@@ -113,6 +126,8 @@ let () =
     ; ( "projections"
       , [ Alcotest.test_case "plain listings share one footer" `Quick
             test_listing_footers_share_one_shape
+        ; Alcotest.test_case "Overview footer projects by focus" `Quick
+            test_overview_footer_projects_by_focus
         ; Alcotest.test_case "System logs lost the keys it never had" `Quick
             test_system_logs_lost_the_keys_it_never_had
         ; Alcotest.test_case "help documents what was missing" `Quick

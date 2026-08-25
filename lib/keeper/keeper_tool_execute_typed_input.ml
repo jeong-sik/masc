@@ -1038,11 +1038,9 @@ let pp_validation_error ppf = function
        | `Subshell -> "a subshell"
        | `Arith_expansion -> "arithmetic expansion"
        | `Control_flow -> "control flow"
-       | `Logic_op -> "&& or ||"
        | `Function_def -> "a function definition"
        | `Glob_brace -> "brace expansion"
        | `Background -> "a background job"
-       | `Command_separator -> "a ; between commands"
        | `Redirect -> "a redirection"
        | `Unknown_construct name -> name)
       (Keeper_tooling.Subset_rewrite.to_string

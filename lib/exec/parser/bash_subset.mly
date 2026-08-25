@@ -38,6 +38,7 @@ let file_redirect fd target mode =
 %token PIPE
 %token AND_IF
 %token OR_IF
+%token SEMICOLON
 %token EOF
 
 %start <(((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list * (Masc_exec.Shell_ir.connector * ((string * Masc_exec.Shell_ir.arg_meta) * (string * Masc_exec.Shell_ir.arg_meta) list * Masc_exec.Redirect_scope.t list) list) list)> command
@@ -75,14 +76,19 @@ stage:
 pipeline:
   | stages = separated_nonempty_list(PIPE, stage) { stages }
 
-connector:
-  | AND_IF { Masc_exec.Shell_ir.And_if }
-  | OR_IF { Masc_exec.Shell_ir.Or_if }
-
-/* head kept apart from the rest so an empty sequence cannot be written,
-   the same shape [Shell_ir.Sequence] uses. */
 command:
-  | head = pipeline
-    tail = list(pair(connector, pipeline))
-    EOF
-    { (head, tail) }
+  | head = pipeline rest = command_rest EOF
+    { (head, rest) }
+
+command_rest:
+  | /* empty */ { [] }
+  | SEMICOLON { [] }
+  | SEMICOLON head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.Seq, head) :: rest
+    }
+  | AND_IF head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.And_if, head) :: rest
+    }
+  | OR_IF head = pipeline rest = command_rest {
+      (Masc_exec.Shell_ir.Or_if, head) :: rest
+    }

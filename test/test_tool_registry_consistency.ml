@@ -326,9 +326,9 @@ let test_approval_route_auth_keys_are_dedicated_hidden_entries () =
           true
           meta.allow_direct_call_when_hidden;
         Alcotest.(check bool)
-          (name ^ " keeps route authority at broadcast level")
+          (name ^ " keeps route authority at admin tier")
           true
-          (meta.required_permission = Masc_domain.CanBroadcast);
+          (meta.required_permission = Masc_domain.CanAdmin);
         (* Route keys must stay route-only: no schema, no dispatch path. A
            schema here would put an uncallable name on the tool surface. *)
         Alcotest.(check bool)

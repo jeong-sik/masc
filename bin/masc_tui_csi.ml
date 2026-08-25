@@ -56,8 +56,8 @@ let tilde_name = function
   | _ -> None
 
 (* Unicode code points the Kitty protocol reports as themselves. Only the ones
-   with a name here are translated; a letter arrives as its own character, so
-   [Ctrl+P] is ["ctrl-p"] rather than ["ctrl-112"]. *)
+   with a name here are translated; a letter arrives as its own character
+   rather than as its decimal number. *)
 let codepoint_name code =
   if code >= 0x20 && code <= 0x7E then
     Some (String.make 1 (Char.lowercase_ascii (Char.chr code)))
@@ -69,6 +69,17 @@ let codepoint_name code =
     | 127 -> Some "backspace"
     | _ -> None
 
+(* With disambiguation enabled, iTerm reports Ctrl+letter as CSI-u instead of
+   the C0 byte sent in legacy mode. The bindings predate that protocol and
+   intentionally read those bytes, so make both encodings identical here. *)
+let legacy_control_byte { shift; alt; ctrl } name =
+  if ctrl && not shift && not alt && String.length name = 1 then
+    let letter = name.[0] in
+    if letter >= 'a' && letter <= 'z' then
+      Some (String.make 1 (Char.chr (Char.code letter - Char.code 'a' + 1)))
+    else None
+  else None
+
 let name ~parameters ~final =
   let first, second = split_parameters parameters in
   let modifiers = decode_modifiers second in
@@ -78,7 +89,13 @@ let name ~parameters ~final =
   | 'u' -> (
       match int_of_string_opt (String.trim first) with
       | None -> None
-      | Some code -> Option.map (with_modifiers modifiers) (codepoint_name code))
+      | Some code -> (
+          match codepoint_name code with
+          | None -> None
+          | Some key -> (
+              match legacy_control_byte modifiers key with
+              | Some byte -> Some byte
+              | None -> Some (with_modifiers modifiers key))))
   | '~' -> Option.map (with_modifiers modifiers) (tilde_name (String.trim first))
   | 'Z' ->
       (* Backtab has carried its own final since long before modifiers were

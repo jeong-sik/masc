@@ -452,6 +452,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                   ~cwd:Eio.Path.(fs / base_path)
                   config
                   ~prompt
+                  ~images:[]
               with
               | Error error ->
                 Ok

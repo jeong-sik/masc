@@ -47,6 +47,11 @@ let default_config () =
   }
 ;;
 
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
 type thread_mode =
   | Start
   | Resume of { thread_id : string }
@@ -806,6 +811,50 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       ~on_stream_event
 ;;
 
+(* Media types the app-server image item accepts, mirroring the closed set the
+   analyze_image tool and the dashboard composer already use. *)
+let supported_image_media_types =
+  [ "image/png"; "image/jpeg"; "image/gif"; "image/webp" ]
+;;
+
+(* The app-server README is explicit: the [image] input variant takes an inline
+   data URL and rejects remote HTTP(S) URLs, so the payload is inlined here
+   rather than handed over as a link the server would refuse. *)
+let image_input_item (image : image_input) =
+  `Assoc
+    [ "type", `String "image"
+    ; ( "url"
+      , `String
+          (Printf.sprintf "data:%s;base64,%s" image.media_type image.base64_data) )
+    ]
+;;
+
+(* Fail closed before the process boundary. A malformed data URL comes back as a
+   turn rejection several seconds later, attributed to the thread rather than to
+   the caller that built it. *)
+let validate_images images =
+  let rec loop index = function
+    | [] -> Ok ()
+    | image :: rest ->
+      let where = Printf.sprintf "images[%d]" index in
+      if not (List.mem image.media_type supported_image_media_types)
+      then
+        Error
+          (Invalid_config
+             (Printf.sprintf
+                "%s.media_type %S is not one of %s"
+                where
+                image.media_type
+                (String.concat ", " supported_image_media_types)))
+      else if String.trim image.base64_data = ""
+      then Error (Invalid_config (where ^ ".base64_data must not be empty"))
+      else if String.exists (fun c -> c = '\n' || c = '\r') image.base64_data
+      then Error (Invalid_config (where ^ ".base64_data must not contain newlines"))
+      else loop (index + 1) rest
+  in
+  loop 0 images
+;;
+
 let optional_field name = function
   | None -> []
   | Some value -> [ name, `String value ]
@@ -831,7 +880,7 @@ let history_item (message : history_message) =
 ;;
 
 let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_dispatched
+    ~thread_mode ~history ~prompt ~images ~on_thread_ready ~on_turn_starting ~on_turn_dispatched
     ~on_turn_started ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
@@ -925,7 +974,9 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
       (`Assoc
          ([ "threadId", `String thread_id
           ; ( "input"
-            , `List [ `Assoc [ "type", `String "text"; "text", `String prompt ] ] )
+            , `List
+                (List.map image_input_item images
+                 @ [ `Assoc [ "type", `String "text"; "text", `String prompt ] ]) )
           ]
           @ optional_field
               "effort"
@@ -1123,7 +1174,7 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
-    ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
+    ~reasoning_effort ~thread_mode ~history ~prompt ~images ~on_thread_ready
     ~on_turn_starting ~on_turn_dispatched ~on_turn_started ~on_stream_event =
   with_spawned_client
     ~mgr
@@ -1144,6 +1195,7 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
       ~thread_mode
       ~history
       ~prompt
+      ~images
       ~on_thread_ready:(fun ~thread_id ->
         with_admission_timeout (fun () -> on_thread_ready ~thread_id))
       ~on_turn_starting:(fun ~thread_id ->
@@ -1208,7 +1260,10 @@ let validate_dynamic_tools tools =
   loop [] tools
 ;;
 
-let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt =
+let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images =
+  match validate_images images with
+  | Error _ as invalid -> invalid
+  | Ok () ->
   match validate_config config ~cwd ~thread_mode ~prompt with
   | Error _ as error -> error
   | Ok protocol_cwd ->
@@ -1217,8 +1272,8 @@ let validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt =
      | Ok () -> Ok protocol_cwd)
 ;;
 
-let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt =
-  validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt
+let validate_turn ?(dynamic_tools = []) ?(thread_mode = Start) ~cwd config ~prompt ~images =
+  validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images
   |> Result.map (fun _ -> ())
 ;;
 
@@ -1256,7 +1311,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     ?(on_thread_ready = fun ~thread_id:_ -> Ok ())
     ?(on_turn_starting = fun ~thread_id:_ -> Ok ())
     ?(on_turn_started = fun ~thread_id:_ ~turn_id:_ -> Ok ()) ?on_stream_event
-    config ~prompt =
+    config ~prompt ~images =
   (* [turn/start] acceptance is the fact that decides whether a later idle
      timeout is ambiguous (the upstream turn may still commit effects). The
      transport constructs [Timeout] with [turn_accepted = false] because it
@@ -1268,7 +1323,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
     on_turn_started ~thread_id ~turn_id
   in
   let result =
-    match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt with
+    match validate_turn_input ~dynamic_tools ~thread_mode ~cwd config ~prompt ~images with
     | Error _ as error -> error
     | Ok protocol_cwd ->
       (* Eight keepers starting a turn in the same second produced eight
@@ -1296,6 +1351,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~thread_mode
               ~history
               ~prompt
+              ~images
               ~on_thread_ready
               ~on_turn_starting
               ~on_turn_dispatched:(fun () -> turn_accepted := true)

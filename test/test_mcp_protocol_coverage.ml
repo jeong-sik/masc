@@ -293,6 +293,58 @@ let test_make_response_envelope_intact () =
       (match List.assoc_opt "id" fields with Some (`Int 7) -> true | _ -> false)
   | _ -> fail "response must be an object"
 
+(* 2026-07-28 has a server identify itself in every result's _meta. Asserted on
+   [make_response] rather than at a handler, because that is the one seam every
+   result passes through -- the same reason [resultType] is injected there. *)
+let test_every_result_carries_the_server_identity () =
+  let meta_of result =
+    Yojson.Safe.Util.(
+      Mcp_transport_protocol.make_response ~id:(`Int 1) result
+      |> member "result" |> member "_meta"
+      |> member Mcp_transport_protocol.server_info_meta_key)
+  in
+  Alcotest.(check bool)
+    "a bare result gains the key"
+    true
+    (meta_of (`Assoc [ ("ok", `Bool true) ])
+     = Mcp_transport_protocol.server_info_meta_value);
+  Alcotest.(check bool)
+    "an existing _meta keeps its other keys"
+    true
+    Yojson.Safe.Util.(
+      Mcp_transport_protocol.make_response ~id:(`Int 1)
+        (`Assoc [ ("_meta", `Assoc [ ("mine", `Int 7) ]) ])
+      |> member "result" |> member "_meta" |> member "mine"
+      = `Int 7);
+  (* A handler that already identified itself is left alone -- the injection
+     fills a gap, it does not overwrite an answer. *)
+  Alcotest.(check bool)
+    "a handler's own serverInfo survives"
+    true
+    (meta_of
+       (`Assoc
+         [ ( "_meta"
+           , `Assoc
+               [ (Mcp_transport_protocol.server_info_meta_key, `String "theirs")
+               ] )
+         ])
+     = `String "theirs")
+;;
+
+(* The identity has one owner: restating name or version in the handshake is
+   how [Runtime_build_version] says a connector's literal drifted before. *)
+let test_handshake_identity_comes_from_the_same_place () =
+  let field name json = Yojson.Safe.Util.(json |> member name) in
+  List.iter
+    (fun name ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s matches the per-result identity" name)
+        true
+        (field name Masc.Mcp_server.server_info
+         = field name Mcp_transport_protocol.server_info_meta_value))
+    [ "name"; "title"; "version" ]
+;;
+
 let () =
   run "Mcp_transport_protocol Coverage" [
     "constants", [
@@ -363,5 +415,9 @@ let () =
       test_case "adds complete" `Quick test_make_response_adds_complete;
       test_case "keeps input_required" `Quick test_make_response_preserves_existing_result_type;
       test_case "envelope intact" `Quick test_make_response_envelope_intact;
+      test_case "every result carries the server identity" `Quick
+        test_every_result_carries_the_server_identity;
+      test_case "handshake identity has one owner" `Quick
+        test_handshake_identity_comes_from_the_same_place;
     ];
   ]

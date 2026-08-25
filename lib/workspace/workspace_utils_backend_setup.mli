@@ -21,14 +21,14 @@ val resolve_masc_base_path : string -> string
 val resolve_server_default_base_path : string -> string
 val env_opt : string -> string option
 val sanitize_namespace_segment : string -> string
-(** A filesystem path segment for a logical name, injective and bounded.
+(** A bounded filesystem path segment for a logical name.
 
     A name that is already a safe, short, lowercase segment maps to itself. Any
-    other name carries a digest of the exact input, so two names never share a
-    segment -- the previous folding mapped ["a.b"], ["a/b"] and ["a b"] onto
-    one path, and let a name past the filesystem's component limit through
-    (#24342, #24343). Distinct in, distinct out; length at most
-    {!namespace_segment_max_length} + 17. *)
+    other name carries the first 64 bits of its SHA-256 digest. This separates
+    the known folding collisions such as ["a.b"], ["a/b"] and ["a b"] and
+    makes accidental collisions unlikely; it is not a mathematical injectivity
+    guarantee. Length is at most {!namespace_segment_max_length} + 17
+    (#24342, #24343). *)
 
 val namespace_segment_max_length : int
 (** Longest canonical segment kept verbatim. Beyond it the segment is the

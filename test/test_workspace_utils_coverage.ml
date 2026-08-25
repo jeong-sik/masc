@@ -668,7 +668,7 @@ let test_memory_backend_fallback_keys_by_backend_base_path () =
    filesystem's component limit produced a path the OS rejects (#24343). *)
 let segment = Workspace_utils_backend_setup.sanitize_namespace_segment
 
-let test_namespace_segment_is_injective () =
+let test_namespace_segment_separates_representative_names () =
   let names =
     [ "alpha.beta"; "alpha/beta"; "alpha beta"; "alpha-beta"
     ; "ALPHA"; "alpha"; "a:b"; "a*b"; ""; " "; String.make 300 'a'
@@ -815,8 +815,8 @@ let () =
         test_memory_backend_fallback_keys_by_backend_base_path;
     ];
     "namespace_segment", [
-      test_case "distinct names get distinct segments" `Quick
-        test_namespace_segment_is_injective;
+      test_case "representative names get distinct segments" `Quick
+        test_namespace_segment_separates_representative_names;
       test_case "segments stay inside a path component" `Quick
         test_namespace_segment_is_bounded;
       test_case "canonical names are unchanged" `Quick

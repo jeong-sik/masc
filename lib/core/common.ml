@@ -48,6 +48,15 @@ let keepers_runtime_dirname = "keepers"
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname
 
+(* Operator-placed Agent Skills tree. The SINGLE literal behind both consumers:
+   [Keeper_run_tools_setup] reads the directory into the skill catalog, and
+   [Keeper_alerting_path] admits the same tree to a keeper's READ allowlist —
+   the current-task prompt tells the keeper to open a file in here, and until
+   the allowlist agrees that sentence is unenforceable. *)
+let skills_dirname = "skills"
+let skills_rel = Filename.concat masc_dirname skills_dirname
+let skills_dir_from_base_path ~base_path = Filename.concat base_path skills_rel
+
 (* Default-cluster keeper OUTPUT dir for callers holding only [base_path].
    Low-level on purpose: the cluster-aware [Workspace.keepers_runtime_dir]
    cannot be called from workspace-internal or accountability modules without a

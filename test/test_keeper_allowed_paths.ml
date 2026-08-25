@@ -19,21 +19,37 @@ let make_meta ?(allowed_paths = []) ~name () =
 let sandbox_roots meta =
   [ KAP.sandbox_path_of_meta ~meta ]
 
+(* Read carries the skills tree, write does not. The two lists were byte
+   identical until the prompt's "read it before you use it" was found to be
+   unenforceable; keeping them apart here is what stops them collapsing back. *)
+let skills_rel = Common.skills_rel
+
 let test_empty_paths_default_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" () in
-  let expected = sandbox_roots meta in
-  check (list string) "default read paths" expected
+  check (list string) "default read paths carry the skills tree"
+    (skills_rel :: sandbox_roots meta)
     (KAP.effective_allowed_paths ~meta);
-  check (list string) "default write paths" expected
+  check (list string) "default write paths do not" (sandbox_roots meta)
     (KAP.effective_write_allowed_paths ~meta)
 
 let test_explicit_paths_append_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" ~allowed_paths:["src/"; "docs/"] () in
-  let expected = sandbox_roots meta @ [ "src/"; "docs/" ] in
-  check (list string) "read paths append explicit entries" expected
+  check (list string) "read paths append explicit entries"
+    ((skills_rel :: sandbox_roots meta) @ [ "src/"; "docs/" ])
     (KAP.effective_allowed_paths ~meta);
-  check (list string) "write paths append explicit entries" expected
+  check (list string) "write paths append explicit entries"
+    (sandbox_roots meta @ [ "src/"; "docs/" ])
     (KAP.effective_write_allowed_paths ~meta)
+
+(* The prompt names this exact path. If the allowlist stops covering it the
+   keeper is told to read a file it cannot open, which is the state this
+   change ends. *)
+let test_skills_tree_is_readable_not_writable () =
+  let meta = make_meta ~name:"keeper" () in
+  check bool "skills tree is readable" true
+    (List.mem skills_rel (KAP.effective_allowed_paths ~meta));
+  check bool "skills tree is not writable" false
+    (List.mem skills_rel (KAP.effective_write_allowed_paths ~meta))
 
 let test_playground_path_sanitizes_name () =
   let path = KAP.playground_path_of_keeper "my keeper/../../etc" in
@@ -83,6 +99,8 @@ let () =
         ] );
       ( "validation",
         [
+          test_case "skills tree readable, not writable" `Quick
+            test_skills_tree_is_readable_not_writable;
           test_case "rejects wildcard full access" `Quick
             test_validate_rejects_star_wildcard;
           test_case "rejects globs and traversal" `Quick

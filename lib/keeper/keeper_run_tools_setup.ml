@@ -109,7 +109,7 @@ let skill_catalog_io_error ~op ~path exn =
 ;;
 
 let skills_dir_of_base_path ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
+  Common.skills_dir_from_base_path ~base_path
 ;;
 
 (* A directory under skills/ that carries no SKILL.md is not a skill and is

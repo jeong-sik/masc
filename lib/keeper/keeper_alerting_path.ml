@@ -804,12 +804,24 @@ let ensure_sandbox_bundle_for_profile
 ;;
 
 (** Compute effective read allowed_paths from keeper meta.
-    Returns the single sandbox root plus any explicit [allowed_paths]
-    entries. Every additional path must be listed explicitly in
-    [allowed_paths]. *)
+    Returns the sandbox root, the skills tree, plus any explicit
+    [allowed_paths] entries. Every additional path must be listed explicitly
+    in [allowed_paths].
+
+    The skills tree is read-only and unconditional. masc's own current-task
+    prompt tells a keeper its skills are at [.masc/skills/<name>/SKILL.md] and
+    to read one before using it, and the sandbox root is
+    [.masc/playground/<keeper>/] — a sibling. Every attempt answered
+    [path_outside_sandbox] (polisher, 2026-08-25: relative path, then two
+    absolute forms, three failures, then it gave up), so the sentence the
+    prompt has been printing was unenforceable. It is not in
+    {!effective_write_allowed_paths}: a skill is a file the operator placed,
+    and a keeper that could rewrite one could take the whole catalog down —
+    [Keeper_skill_catalog.of_documents] fails the catalog on the first
+    unparsable document, which blocks every keeper's turn. *)
 let effective_allowed_paths ~(meta : Keeper_meta_contract.keeper_meta) : string list =
   let sandbox_paths = Keeper_sandbox.allowed_path_roots_of_meta ~meta in
-  sandbox_paths @ meta.allowed_paths
+  (Common.skills_rel :: sandbox_paths) @ meta.allowed_paths
 ;;
 
 (** Compute effective write allowed_paths from keeper meta.

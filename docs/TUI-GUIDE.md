@@ -694,7 +694,10 @@ workspace, so `v` says so and leaves that row to `o`.
 A file browser over the workspace the server serves, one directory level at
 a time (the tree route is lazy). `j`/`k` move the cursor, `/` jumps it to a
 matching entry, Right or `Enter` drills into a directory or opens the file,
-and Left or `Esc` walks back out the way Enter came in.
+and Left or `Esc` walks back out the way Enter came in. With a file
+focused, `/` searches the file's own lines instead of the tree — typing
+moves the line cursor to the first match, Enter keeps the query for
+`n`/`N`, and the view follows the cursor.
 
 Which workspace is a scope the header always names: the project tree by
 default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),

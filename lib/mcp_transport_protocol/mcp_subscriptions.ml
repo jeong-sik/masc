@@ -64,20 +64,6 @@ let notify_tools_list_changed notification =
     notification
 ;;
 
-let notify_prompts_list_changed notification =
-  deliver
-    ~wants:(fun (f : Mcp_transport_protocol.subscription_filter) ->
-      f.prompts_list_changed)
-    notification
-;;
-
-let notify_resources_list_changed notification =
-  deliver
-    ~wants:(fun (f : Mcp_transport_protocol.subscription_filter) ->
-      f.resources_list_changed)
-    notification
-;;
-
 let notify_resource_updated ~uri notification =
   deliver
     ~wants:(fun (f : Mcp_transport_protocol.subscription_filter) ->

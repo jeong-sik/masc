@@ -32,8 +32,10 @@ val count : unit -> int
 (** Open streams. For operator surfaces and tests. *)
 
 val notify_tools_list_changed : Yojson.Safe.t -> unit
-val notify_prompts_list_changed : Yojson.Safe.t -> unit
-val notify_resources_list_changed : Yojson.Safe.t -> unit
+(** No sibling for [promptsListChanged] or [resourcesListChanged]: masc emits
+    neither, {!honoured_filter} therefore clears both, and nothing can
+    subscribe to a type this server never sends. Adding the notifier before
+    the emitter would leave a function no path can reach. *)
 
 val subscribed_resource_uris : unit -> string list
 (** Every URI any open stream named, deduplicated. The caller decides which of

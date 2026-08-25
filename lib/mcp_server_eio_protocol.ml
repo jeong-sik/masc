@@ -1254,12 +1254,11 @@ let run_stdio ~handle_request ~sw ~env state =
            "subscriptions/listen requires a non-null request id")
     | Some subscription_id ->
       let key = Yojson.Safe.to_string subscription_id in
-      (* fire-and-forget: a client re-listening on an id it already used
-         replaces that
-         subscription. Whether one was open is not interesting here -- either
-         way the id ends up bound to the filter this request named. See the
-         reconnect rule: a client re-sends subscriptions/listen and the server
-         holds nothing across the gap. *)
+      (* A client re-listening on an id it already used replaces that
+         subscription: either way the id ends up bound to the filter this
+         request named. Matches the reconnect rule -- a client re-sends
+         subscriptions/listen and the server holds nothing across the gap. *)
+      (* fire-and-forget: whether one was already open is not interesting. *)
       ignore (close_listen ~mode key subscription_id : bool);
       let filter =
         Mcp_subscriptions.honoured_filter
@@ -1326,23 +1325,32 @@ let run_stdio ~handle_request ~sw ~env state =
             | Some (`String m) -> Some m
             | Some _ | None -> None
           in
-          match Option.bind parsed method_of with
-          | Some "subscriptions/listen" ->
-            serve_stdio_listen ~mode (Option.get parsed);
-            loop (Some mode)
-          (* The stdio way to end a subscription: the client references the
-             listen request's id. Falls through when no such subscription is
-             open, because the same notification cancels ordinary requests. *)
-          | Some "notifications/cancelled"
-            when (match Option.bind parsed (fun j -> json_field j "params") with
-                  | Some params -> (
-                    match json_field params "requestId" with
-                    | Some id ->
-                      close_listen ~mode (Yojson.Safe.to_string id) id
-                    | None -> false)
-                  | None -> false) ->
-            loop (Some mode)
-          | Some _ | None ->
+          let dispatched =
+            (* Matching on the parsed body rather than on its method alone
+               keeps the JSON in scope, so neither arm has to reach back for a
+               value it knows is there. *)
+            match parsed with
+            | None -> false
+            | Some json -> (
+              match method_of json with
+              | Some "subscriptions/listen" ->
+                serve_stdio_listen ~mode json;
+                true
+              (* The stdio way to end a subscription: the client references the
+                 listen request's id. Answers false when no such subscription
+                 is open, because the same notification cancels ordinary
+                 requests and those still need the handler. *)
+              | Some "notifications/cancelled" -> (
+                match json_field json "params" with
+                | Some params -> (
+                  match json_field params "requestId" with
+                  | Some id -> close_listen ~mode (Yojson.Safe.to_string id) id
+                  | None -> false)
+                | None -> false)
+              | Some _ | None -> false)
+          in
+          if dispatched then loop (Some mode)
+          else
             let response =
               handle_request
                 ~clock

@@ -501,6 +501,31 @@ let expressions_of_value_binding ~module_path ~binding_name =
   List.rev !expressions
 ;;
 
+(* [Pexp_field] is a read. Clearing a field is [Pexp_setfield], so a test
+   that pins "this path clears X" has to look for the write or it counts
+   zero while the code is correct. *)
+let count_field_clears_to_none ~module_path ~binding_name ~field_name =
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          (match expression.Parsetree.pexp_desc with
+           | Parsetree.Pexp_setfield (_, { txt; _ }, value)
+             when String.equal (longident_leaf txt) field_name -> (
+             match value.Parsetree.pexp_desc with
+             | Parsetree.Pexp_construct ({ txt; _ }, None)
+               when String.equal (longident_leaf txt) "None" -> incr count
+             | _ -> ())
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  List.iter (iter.expr iter)
+    (expressions_of_value_binding ~module_path ~binding_name);
+  !count
+;;
+
 let rec strip_function_parameters (expression : Parsetree.expression) =
   match expression.pexp_desc with
   | Pexp_function (_, _, Pfunction_body body) -> strip_function_parameters body

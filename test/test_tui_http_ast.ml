@@ -163,31 +163,9 @@ let test_user_message_background_has_one_render_snapshot () =
   let main_path = "bin/masc_tui.ml" in
   let render_path = "bin/masc_tui_render.ml" in
   let ansi_path = "bin/masc_tui_ansi.ml" in
-  let count_field_clears_to_none ~binding_name ~field_name =
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr =
-          (fun self expression ->
-            (match expression.Parsetree.pexp_desc with
-             | Parsetree.Pexp_setfield (_, { txt; _ }, value)
-               when String.equal (Ast_grep.longident_leaf txt) field_name ->
-               (match value.Parsetree.pexp_desc with
-                | Parsetree.Pexp_construct ({ txt; _ }, None)
-                  when String.equal (Ast_grep.longident_leaf txt) "None" ->
-                  incr count
-                | _ -> ())
-             | _ -> ());
-            Ast_iterator.default_iterator.expr self expression)
-      }
-    in
-    List.iter (iter.expr iter)
-      (Ast_grep.expressions_of_value_binding ~module_path:main_path
-         ~binding_name);
-    !count
-  in
   check int "late palette publication clears its callback before use" 1
-    (count_field_clears_to_none ~binding_name:"take_late_palette_publisher"
+    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+       ~binding_name:"take_late_palette_publisher"
        ~field_name:"late_palette_publisher");
   check int "late palette helper gates on its one-shot publisher" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
@@ -253,7 +231,11 @@ let test_user_message_background_has_one_render_snapshot () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
-  check int "bare links and the gutter restore the captured row" 2
+  (* Three sites close back onto the row's own style rather than resetting:
+     a bare link, the folded-origin margin, and the origin drawn left of the
+     rule. A reset at any of them would strip the ambient background from
+     everything after it on the row. *)
+  check int "link, margin, and rule each restore the captured row" 3
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);
@@ -761,10 +743,11 @@ let test_server_identity_is_revalidated_on_every_refresh () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces"
        ~callee:"Masc_tui_types.server_identity_of_refresh");
+  (* The clearing is [state.server_identity <- None], a write. Counting
+     reads of the field found none and called a working path broken. *)
   check int "a failed refresh clears current identity" 1
-    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
-       ~module_path:main_path ~binding_name:"apply_async_message" ~callees:[]
-       ~fields:[ "server_identity" ])
+    (Ast_grep.count_field_clears_to_none ~module_path:main_path
+       ~binding_name:"apply_async_message" ~field_name:"server_identity")
 ;;
 
 let test_planning_refresh_reconciles_navigation_identity () =

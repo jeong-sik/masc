@@ -44,15 +44,22 @@ let create ~capacity ~equal =
   if capacity <= 0 then invalid_arg "Markdown render cache capacity must be positive";
   { capacity; equal; recent = []; growing_recent = [] }
 
-let same_key cache left right =
+(* Annotated because [visual_key] is defined after [key] and repeats four of
+   its five fields. Without the annotation [left.identity] resolves to the
+   later type and [left.text] then names a field it does not have. *)
+let same_key cache (left : _ key) (right : _ key) =
   cache.equal left.identity right.identity
   && String.equal left.text right.text
   && left.width = right.width
   && left.theme_revision = right.theme_revision
   && left.palette_generation = right.palette_generation
 
-let take_matching cache key entries =
-  let rec loop before = function
+(* Annotated for the same reason [same_key] is: [growing] is defined after
+   [rendered] and also carries a [key] field, so an unannotated [entry.key]
+   resolves to the later type. *)
+let take_matching cache key (entries : _ rendered list) =
+  let rec loop before (remaining : _ rendered list) =
+    match remaining with
     | [] -> None
     | entry :: rest when same_key cache key entry.key ->
         Some (entry, List.rev_append before rest)
@@ -76,12 +83,13 @@ let drop count entries =
   in
   loop count entries
 
-let remember cache rendered =
+let remember cache (rendered : _ rendered) =
   (* One width/source/revision tuple per completed entry. A resize or visual
      revision replaces that entry's old rows instead of accumulating variants. *)
   let other_identities =
     List.filter
-      (fun entry -> not (cache.equal rendered.key.identity entry.key.identity))
+      (fun (entry : _ rendered) ->
+        not (cache.equal rendered.key.identity entry.key.identity))
       cache.recent
   in
   cache.recent <- take cache.capacity (rendered :: other_identities)

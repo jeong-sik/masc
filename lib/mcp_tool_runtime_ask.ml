@@ -117,6 +117,16 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
          detail)
   in
   let base_path = ctx.config.base_path in
+  (* A question belongs to the Keeper that asked it, and every surface that
+     renders one resolves the Keeper first. A caller that is not a registered
+     Keeper could still write to the log, but nothing could ever read the row
+     back -- it would be a question with no owner, costing an operator's
+     attention for an answer that reaches nobody. Refuse at the write. *)
+  if not (Keeper_registry.is_registered ~base_path keeper_name) then
+    reject
+      (Printf.sprintf "%s is not a registered keeper, so a question from it could not be read back"
+         keeper_name)
+  else
   match list_field "questions" ctx.arguments with
   | Error detail -> reject detail
   | Ok [] -> reject "at least one question is required"

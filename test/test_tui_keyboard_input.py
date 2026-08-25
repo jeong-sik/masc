@@ -785,7 +785,9 @@ def row_budget_http_fixtures() -> HttpFixtures:
         {
             "id": f"comment-{index}",
             "author": f"author-{index}",
-            "content": f"comment-{index}",
+            "content": (
+                f"**comment-{index}**" if index == 1 else f"comment-{index}"
+            ),
             "created_at_iso": "2026-08-22T00:00:00Z",
         }
         for index in range(1, 6)
@@ -2174,6 +2176,8 @@ def assert_row_budgeted_surfaces(
     ):
         if expected not in board:
             raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
+    if b"**comment-1**" in board:
+        raise AssertionError(f"Board comment leaked Markdown source markers: {board!r}")
     if b"comment-4" in board or b"comment-5" in board:
         raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
     if "└".encode() not in board:
@@ -2775,6 +2779,8 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
         send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+        send_and_wait(process, master_fd, output, b"\x17", b"Board (3)  [j/k]")
+        send_and_wait(process, master_fd, output, b"\x17", b"j/k:scroll")
 
         board = send_and_wait(process, master_fd, output, b"\x1b", screen_header(b"MASC Board", b" (3)"))
         if not selected_b.search(board) or selected_a.search(board):
@@ -3710,7 +3716,15 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                         ],
                     }
                 ],
-            }
+            },
+            {
+                "id": "autonomous:trace-1787333555531-00021#55",
+                "role": "assistant",
+                "content": "",
+                "ts": 1787348491.3,
+                "autonomous_turn": {"turn_id": "trace-1787333555531-00021#55"},
+                "blocks": [],
+            },
         ],
     )
 
@@ -3745,6 +3759,7 @@ def autonomous_turn_history_interaction() -> Interaction:
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
+            ("\u00b7 auto".encode(), "the autonomous origin badge"),
         ):
             if needle not in pane:
                 raise AssertionError(
@@ -3839,21 +3854,31 @@ def live_markdown_interaction(
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
     pane_start = len(output)
     send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
-    tail = b"task478-server-unreadable-store"
+    tail_head = b"task478-server"
+    tail_rest = b"-unreadable-store"
     wait_for_output(
         process,
         master_fd,
         output,
-        tail,
+        tail_head,
         start=pane_start,
         timeout=5.0,
     )
-    frame = frame_containing(bytes(output[pane_start:]), tail)
+    tail_end = end_of_needle(output, tail_head, pane_start)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=tail_end,
+        timeout=3.0,
+    )
+    frame = frame_containing(bytes(output[pane_start:]), tail_head)
     plain = CSI_RE.sub(b"", frame)
     header = "┌─ bash".encode()
     footer = "└".encode()
     prose = "작업 내역".encode()
-    positions = [plain.find(needle) for needle in (header, tail, footer, prose)]
+    positions = [plain.find(needle) for needle in (header, tail_head, tail_rest, footer, prose)]
     if any(position < 0 for position in positions):
         raise AssertionError(
             "live Markdown frame omitted its language header, complete long line, "

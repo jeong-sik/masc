@@ -6,7 +6,7 @@
 # into one reproducible run:
 #
 #   1. Godfile census         (>= 1000 LoC .ml files)
-#   2. ignore() justification (scripts/lint-ignore-without-comment.sh)
+#   2. ignore() justification (scripts/lint-ignore-without-comment.py)
 #   3. Magic number repetition (scripts/lint-magic-number.sh)
 #   4. Catch-all classification (scripts/audit-catchall.sh)
 #      - anonymous `_` RHS-shape buckets
@@ -66,14 +66,14 @@ printf '_\n\n'
 
 # 2. ignore() justification
 printf '## 2. ignore() lacking justification comment\n\n'
-if [[ -x "$SCRIPT_DIR/lint-ignore-without-comment.sh" ]]; then
+if [[ -x "$SCRIPT_DIR/lint-ignore-without-comment.py" ]]; then
   printf '```\n'
-  bash "$SCRIPT_DIR/lint-ignore-without-comment.sh" --counts 2>/dev/null | head -20 || true
+  python3 "$SCRIPT_DIR/lint-ignore-without-comment.py" --counts 2>/dev/null | head -20 || true
   printf '```\n\n'
-  unjust_n=$(bash "$SCRIPT_DIR/lint-ignore-without-comment.sh" 2>/dev/null | wc -l | tr -d ' ')
+  unjust_n=$(python3 "$SCRIPT_DIR/lint-ignore-without-comment.py" 2>/dev/null | wc -l | tr -d ' ')
   printf '_Total unjustified ignore(): %s_\n\n' "$unjust_n"
 else
-  printf '_(lint-ignore-without-comment.sh not present — skipped)_\n\n'
+  printf '_(lint-ignore-without-comment.py not present — skipped)_\n\n'
   unjust_n=0
 fi
 

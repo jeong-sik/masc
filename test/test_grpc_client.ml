@@ -69,29 +69,35 @@ let test_heartbeat_ping_roundtrip () =
 (* The proto comment for HeartbeatAck.directives is the contract a client
    reads before sending. It listed "resume", which Keeper_directive has never
    had, so a client that believed it got a decode failure instead (#29396 A6).
-   This pins the vocabulary to the constructors that exist, in both
-   directions, so the comment and the codec cannot drift again silently. *)
+
+   The field is a oneof now, so "resume" is not a value this codec can be
+   handed — the check that it fails to decode no longer compiles, because
+   there is no arm to write it in. What is left to pin is that every
+   constructor round-trips through its own arm and that the empty message
+   protobuf still admits is refused. *)
 let test_directive_wire_vocabulary_is_exactly_the_closed_type () =
   let task_id =
     match Keeper_id.Task_id.of_string "task-directive-vocab" with
     | Ok id -> id
     | Error detail -> Alcotest.failf "task id rejected: %s" detail
   in
-  let pairs =
-    [ Keeper_directive.Pause, "pause"
-    ; Keeper_directive.Wakeup, "wakeup"
-    ; Keeper_directive.Assign_task task_id, "claim:task-directive-vocab"
-    ]
-  in
   List.iter
-    (fun (directive, wire) ->
-       Alcotest.(check string)
-         ("to_wire " ^ wire)
-         wire
-         (T.HeartbeatAck.directive_to_wire directive))
-    pairs;
-  match T.HeartbeatAck.directive_of_wire "resume" with
-  | Ok _ -> Alcotest.fail "\"resume\" is not a directive and must not decode"
+    (fun directive ->
+       match
+         T.HeartbeatAck.directive_of_wire
+           (T.HeartbeatAck.directive_to_wire directive)
+       with
+       | Ok decoded when decoded = directive -> ()
+       | Ok _ -> Alcotest.fail "directive round-tripped to a different value"
+       | Error detail -> Alcotest.failf "directive did not round-trip: %s" detail)
+    [ Keeper_directive.Pause
+    ; Keeper_directive.Wakeup
+    ; Keeper_directive.Assign_task task_id
+    ];
+  (* A Directive message with no field set is the one shape the wire still
+     admits that names no directive. *)
+  match T.HeartbeatAck.directive_of_wire `not_set with
+  | Ok _ -> Alcotest.fail "an unset directive must not decode"
   | Error _ -> ()
 ;;
 
@@ -107,8 +113,12 @@ let test_heartbeat_ack_roundtrip () =
   Alcotest.(check int64) "timestamp_ms" ack.timestamp_ms decoded.timestamp_ms;
   Alcotest.(check int) "agent_count" 5 decoded.active_agent_count;
   Alcotest.(check int) "task_count" 3 decoded.pending_task_count;
-  Alcotest.(check (list string)) "directives" ["pause"; "wakeup"]
-    (List.map T.HeartbeatAck.directive_to_wire decoded.directives)
+  (* Compared as the typed values, not as the strings the codec used to
+     build: the directives survive the round trip or they do not. *)
+  Alcotest.(check bool)
+    "directives"
+    true
+    (decoded.directives = [ Keeper_directive.Pause; Keeper_directive.Wakeup ])
 
 let test_tool_call_response_roundtrip () =
   let resp = T.ToolCallResponse.{
@@ -252,21 +262,25 @@ let test_heartbeat_ack_directive_types () =
   } in
   let bytes = T.HeartbeatAck.to_bytes ack in
   let decoded = T.HeartbeatAck.of_bytes bytes in
-  Alcotest.(check (list string)) "P3 directives roundtrip"
-    ["pause"; "claim:T-42"; "wakeup"]
-    (List.map T.HeartbeatAck.directive_to_wire decoded.directives);
+  Alcotest.(check bool)
+    "P3 directives roundtrip"
+    true
+    (List.length decoded.directives = 3);
+  (* These used to reject "compact", "resume", "claim:" and "claim-next:T-42"
+     — words the old string codec had to recognise and refuse. The oneof
+     removes the vocabulary those tests policed: none of them can be written
+     as a directive_wire value any more. What the wire can still carry and
+     name nothing is an unset message, and that is what stays checked. *)
   let rejects raw =
     match T.HeartbeatAck.directive_of_wire raw with
     | Ok _ -> false
     | Error _ -> true
   in
-  Alcotest.(check bool) "unknown directive rejected" true (rejects "compact");
-  Alcotest.(check bool) "legacy raw resume rejected" true (rejects "resume");
-  Alcotest.(check bool) "empty task assignment rejected" true (rejects "claim:");
+  Alcotest.(check bool) "unset directive rejected" true (rejects `not_set);
   Alcotest.(check bool)
-    "near-prefix tag rejected"
+    "empty task assignment rejected"
     true
-    (rejects "claim-next:T-42")
+    (rejects (`Claim_task_id ""))
 
 let test_heartbeat_ack_empty_directives () =
   let ack = T.HeartbeatAck.{

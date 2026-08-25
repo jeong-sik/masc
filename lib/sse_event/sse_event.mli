@@ -129,13 +129,13 @@ val slot_scheduler_observed
   -> state:string
   -> Yojson.Safe.t
 
-(** [agent_completed] carries a variable-shape result tail beyond
+(** [agent_completed] carries a variable-shape success-response tail beyond
     the three base fields ([agent_name], [task_id], [elapsed_s]).
     The tail comes from a runtime-local helper that closes over
-    [Agent_core] variant types.  To keep [Sse_event] free of
+    [Agent_core] response types. To keep [Sse_event] free of
     [Agent_core] dependencies, the caller projects the tail into a
     [(string * Yojson.Safe.t) list] and passes it via
-    [~result_fields].  The list is appended to the atd-emitted base
+    [~response_fields]. The list is appended to the atd-emitted base
     record in declaration order, preserving byte equality with the
     previous inline `Assoc-construction path. *)
 
@@ -146,7 +146,7 @@ val agent_completed
   -> agent_name:string
   -> task_id:string
   -> elapsed_s:float
-  -> result_fields:(string * Yojson.Safe.t) list
+  -> response_fields:(string * Yojson.Safe.t) list
   -> Yojson.Safe.t
 
 (** Encode the typed [agent_failed] payload without an envelope. Adapter

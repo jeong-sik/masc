@@ -44,6 +44,24 @@ type keeper_health = Keeper_types.keeper_health
 let keeper_health_to_string = Keeper_status_runtime.keeper_health_to_string
 let keeper_health_of_string = Keeper_status_runtime.keeper_health_of_string_opt
 
+type keeper_health_reading =
+  | Health_running
+  | Health_idle
+  | Health_offline
+  | Health_stale
+  | Health_degraded
+  | Health_zombie
+
+(* Exhaustive on purpose: a seventh member of [Keeper_types.keeper_health]
+   stops the build here rather than arriving on screen as one of these six. *)
+let keeper_health_reading : keeper_health -> keeper_health_reading = function
+  | Keeper_types.KH_healthy -> Health_running
+  | Keeper_types.KH_idle -> Health_idle
+  | Keeper_types.KH_offline -> Health_offline
+  | Keeper_types.KH_stale -> Health_stale
+  | Keeper_types.KH_degraded -> Health_degraded
+  | Keeper_types.KH_zombie -> Health_zombie
+
 let keeper_next_action_of_string =
   Keeper_status_runtime.keeper_next_action_path_of_string_opt
 let keeper_phase_to_string = Keeper_state_machine.phase_to_string
@@ -2772,6 +2790,47 @@ let decode_runtime_resolved json =
              assignment.ra_keeper)
   in
   Ok (snapshot.rrs_runtimes, assignments)
+
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+
+(* [/health] answers before the workspace is fully up, so every field here is
+   optional in practice: a server that cannot yet name its base path still has
+   a version to show, and a footer that fails to render because one string was
+   missing tells the operator less than a footer with a gap in it. *)
+let decode_server_identity json =
+  let* build = optional_object_field json "build" in
+  let* paths = optional_object_field json "paths" in
+  (* A section the probe did not carry leaves its fields unread. Standing an
+     empty object in for it would read the same here and mean something else:
+     absent is what the footer draws as unread. *)
+  let string_in section field =
+    match Option.map (member field) section with
+    | Some (`String value) -> value
+    | Some _ | None -> ""
+  in
+  let sid_binary_commit_age_s =
+    match Option.map (member "binary_commit_age_seconds") build with
+    | Some (`Float value) -> Some value
+    | Some (`Int value) -> Some (float_of_int value)
+    | Some _ | None -> None
+  in
+  Ok
+    { sid_version =
+        (match member "version" json with
+         | `String value -> value
+         | _ -> "")
+    ; sid_binary_commit = string_in build "binary_commit"
+    ; sid_binary_commit_age_s
+    ; sid_base_path = string_in paths "effective_base_path"
+    ; sid_masc_root = string_in paths "effective_masc_root"
+    }
+;;
 
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in

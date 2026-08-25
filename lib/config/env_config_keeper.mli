@@ -19,6 +19,13 @@ module KeeperBootstrap : sig
 end
 (** {1 Keeper metrics rotation} *)
 
+module KeeperSpawn : sig
+  val spawn_output_buffer_bytes : int
+  (** Bytes of each spawned process stream {!Spawn_registry} keeps. Bounded
+      because a process can outrun any reader; [read] reports every byte the
+      bound cost, so this is a limit rather than a silent truncation. *)
+end
+
 module KeeperMetrics : sig
   val max_file_bytes : int
   val max_rotated_files : int

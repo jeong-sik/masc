@@ -88,6 +88,33 @@ let test_message_prefix_is_lowercase_prefix_of_message () =
     variants
 ;;
 
+(* The rejected path is whatever the caller asked for, and a tool argument can
+   carry a newline. The logs are line-delimited JSON, so one such rejection
+   became three lines: a counter read it as three events and the trailing two
+   were dropped as unparseable (#30338, seen 2026-08-24). Every variant that
+   renders a path is checked, not just the one that was observed. *)
+let test_message_is_one_line () =
+  let hostile = "/ws/repos/masc\r slot\n storage\ttail" in
+  List.iter
+    (fun (label, error) ->
+       let message = to_message error in
+       String.iter
+         (fun c ->
+            if c = '\n' || c = '\r' || c = '\t' then
+              Alcotest.failf "%s renders a control character: %S" label message)
+         message)
+    [ ( "path blocked (keeper command)"
+      , Path_outside_whitelist
+          { path = hostile; for_keeper_command = true } )
+    ; ( "path blocked"
+      , Path_outside_whitelist
+          { path = hostile; for_keeper_command = false } )
+    ; ( "cwd not directory"
+      , Cwd_not_directory
+          { path = hostile; hint = None } )
+    ]
+;;
+
 let () =
   Alcotest.run
     "keeper_path_check_error"
@@ -104,6 +131,12 @@ let () =
             "cwd_not_directory no hint"
             `Quick
             test_cwd_not_directory_no_hint
+        ] )
+    ; ( "one line"
+      , [ Alcotest.test_case
+            "a path with newlines renders on one line"
+            `Quick
+            test_message_is_one_line
         ] )
     ; ( "parse_prefix"
       , [ Alcotest.test_case "roundtrip variants" `Quick test_parse_roundtrip_variants

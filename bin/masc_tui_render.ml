@@ -263,9 +263,22 @@ let awaiting_approval_notice (state : state) =
                (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
                where))
 
-let footer_line ?status (state : state) ~hints =
-  Masc_tui_footer.line ?status ~dim:Ansi.dim ~reset:Ansi.reset ~port:state.port
-    ~hints ()
+(* The server names itself in every footer, because "which masc is this"
+   is a question every surface can raise and none of them answered: the tail
+   said [Port: 8935] and two checkouts on that port read identically. *)
+let footer_line ?(status = []) (state : state) ~hints =
+  let build =
+    match state.server_identity with
+    | None -> []
+    | Some identity ->
+        [ Masc_tui_footer.Server_build
+            { version = identity.Tui_decode.sid_version
+            ; commit = identity.Tui_decode.sid_binary_commit
+            }
+        ]
+  in
+  Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
+    ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = composer_of_state state in
@@ -393,8 +406,16 @@ let surface_strip (state : state) ~cols =
 
 (* Side-by-side panes share one threshold and one context-pane width, so
    every split surface folds at the same terminal size. *)
-let keeper_split_threshold_cols = 110
-let keeper_roster_pane_cols = 30
+let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
+let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
+
+(* The roster shows when the terminal can spare its columns and the reader
+   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
+   is theirs, and hiding survives a resize because it is a decision rather
+   than a measurement. *)
+let keeper_roster_pane_shown (state : state) ~cols =
+  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -446,11 +467,12 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
 let connection_badge : Masc_tui_types.connection_status -> string = function
-  | Connected -> Theme.ok ^ "[connected]" ^ Ansi.reset
-  | Degraded -> Theme.warn ^ "[degraded]" ^ Ansi.reset
-  | Connecting -> Theme.warn ^ "[connecting...]" ^ Ansi.reset
-  | Reconnecting -> Theme.warn ^ "[reconnecting...]" ^ Ansi.reset
-  | Disconnected -> Theme.bad ^ "[disconnected]" ^ Ansi.reset
+  | Connected as status ->
+      Theme.ok ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | (Degraded | Connecting | Reconnecting) as status ->
+      Theme.warn ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+  | Disconnected as status ->
+      Theme.bad ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
 ;;
 
 let workspace_health_label = function
@@ -1955,13 +1977,8 @@ let keeper_action_color
   | Some Status.Direct_message -> Theme.ok
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
-  match health with
-  | None -> "-"
-  | Some _ when paused -> "\xe2\x97\x8b"
-  | Some value -> (
-      match Tui_decode.keeper_health_to_string value with
-      | "offline" -> "\xc3\x97"
-      | _ -> "\xe2\x97\x8f")
+  Masc_tui_keeper_mark.glyph ~paused
+    (Option.map Tui_decode.keeper_health_reading health)
 
 (* [None] is a roster that was not read, not a health the roster could not
    name: the word says so, and it is the word the header's tally uses for
@@ -2840,7 +2857,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
   framed_top buf cols;
-  framed_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
+  framed_line buf cols (Ansi.dim ^ " Keepers  ^B:hide" ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -2852,14 +2869,28 @@ let keeper_roster_pane (state : state) ~rows ~cols buf =
     | Some (k : keeper) ->
         let selected = first + i = state.keeper_cursor in
         let name = Terminal_text.single_line k.k_name in
+        (* The same glyph the Keepers surface draws, for the same reading.
+           Without it the pane says a keeper exists and nothing else, so a
+           roster of ten looks identical whether one of them is offline. *)
+        let reading = keeper_reading state k in
+        let glyph =
+          keeper_state_glyph
+            ~paused:reading.Keeper_control.paused
+            ~health:(Keeper_control.health reading)
+        in
         (* Reverse video is the one selection signal every terminal
-           renders, colour or not. *)
+           renders, colour or not, and it owns the whole row: a glyph
+           tinted inside it reads as a second highlight. *)
         let line =
           if selected then
-            Theme.selection ^ " " ^ name
-            ^ String.make (max 0 (cols - 5 - Message_layout.display_width name)) ' '
+            Theme.selection ^ " " ^ glyph ^ " " ^ name
+            ^ String.make
+                (max 0 (cols - 7 - Message_layout.display_width name)) ' '
             ^ Ansi.reset
-          else " " ^ name
+          else
+            " "
+            ^ keeper_action_color (Keeper_control.next_action reading)
+            ^ glyph ^ Ansi.reset ^ " " ^ name
         in
         framed_line buf cols line
     | None -> framed_empty buf cols
@@ -2882,7 +2913,7 @@ let render_keeper_detail (state : state) =
     let footer =
       keeper_action_hints state (Some (keeper_reading state k))
     in
-    if cols < keeper_split_threshold_cols then begin
+    if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
@@ -3064,8 +3095,10 @@ let render_keeper_message (state : state) =
     let status_rows = keeper_message_status_rows state in
     (* Wide terminals keep the roster beside the chat, exactly as the detail
        view does; the chat lays out against its own pane width. *)
-    let split = cols >= keeper_split_threshold_cols in
-    let chat_cols = if split then cols - keeper_roster_pane_cols else cols in
+    let split = keeper_roster_pane_shown state ~cols in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
     if
       not
         (Message_layout.message_viewport_supported ~terminal_rows:rows
@@ -5580,6 +5613,18 @@ let render_resources (state : state) =
        ~hints:"j/k:move  J/K:scroll text  Enter:read  Esc:list  r:reload  Tab:next");
   finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
+(* How long ago the running binary's commit landed. Coarse on purpose: the
+   question is "is this the build I think it is", and minutes answer it while
+   seconds only look precise. *)
+let binary_age_text = function
+  | None -> "age unknown"
+  | Some seconds when seconds < 60. -> "built just now"
+  | Some seconds when seconds < 3600. ->
+      Printf.sprintf "built %.0fm ago" (seconds /. 60.)
+  | Some seconds when seconds < 86400. ->
+      Printf.sprintf "built %.0fh ago" (seconds /. 3600.)
+  | Some seconds -> Printf.sprintf "built %.0fd ago" (seconds /. 86400.)
+
 (* The Config surface: runtime.toml exactly as the server reads it. The
    text is the truth an editor session starts from; editing itself hands
    the terminal to $EDITOR and posts back through the preview gate. *)
@@ -5601,8 +5646,20 @@ let render_config (state : state) =
              now.Unix.tm_sec)
           Ansi.reset)
        (connection_badge state.connection_status));
+  (* Where this server reads from, and how old the binary serving it is. A
+     stale binary answers every request as confidently as a current one, so
+     the age is the only thing on screen that separates them. *)
+  (match state.server_identity with
+   | None -> box_line buf cols (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
+   | Some identity ->
+       box_line buf cols
+         (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
+            (fit_width identity.Tui_decode.sid_base_path 28)
+            (fit_width identity.Tui_decode.sid_masc_root 32)
+            (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
+            Ansi.reset));
   box_divider buf cols;
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - 7) in
   (match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols (Theme.bad ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
@@ -5699,6 +5756,7 @@ let help_sections : (string * (string * string) list) list =
       ; "r", "refresh the current surface"
       ; "i", "focus the composer (message the shown keeper)"
       ; "?", "this help"
+      ; "Ctrl-B", "show or hide the keeper roster beside a surface"
       ; "Ctrl-T", "release the mouse so you can drag-select and copy"
       ; "q", "quit"
       ] )

@@ -21,6 +21,14 @@ type connection_status =
   | Degraded
   | Connected
 
+let connection_status_label = function
+  | Connected -> "connected"
+  | Degraded -> "degraded"
+  | Connecting -> "connecting..."
+  | Reconnecting -> "reconnecting..."
+  | Disconnected -> "disconnected"
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -528,14 +536,15 @@ let listing_chrome ~error = if Option.is_some error then 9 else 7
 let runtime_listing_chrome ~error = listing_chrome ~error + 2
 
 (** Dashboard state *)
-(* A request that has been POSTed and has not settled, with when it went out.
-   The instant rides with the request rather than in a second structure keyed
-   by id: a turn taking minutes is normal here and an operator watching one
-   needs to see it advancing, but two structures for one fact drift the moment
-   somebody adds a third place that removes a request. *)
+(* A request that has been POSTed and has not settled, with when it went out
+   and the live transcript decoded from its stream. Both ride with the request
+   rather than in structures keyed by id: Keepers can stream concurrently, and
+   a single live slot lets the later stream replace the earlier one's tool
+   rows. *)
 type inflight =
   { sent_request : Masc_tui_keeper_chat_projection.request
   ; sent_at : float
+  ; live : Masc_tui_keeper_chat_transcript.t
   }
 
 type state = {
@@ -549,6 +558,13 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* The roster beside a keeper surface costs the chat 30 columns for a
+     list the reader may already know. Hidden is a choice they make, not a
+     width the terminal forces, so it survives resizing. *)
+  mutable roster_pane_hidden: bool;
+  (* Read once and kept: the server names itself at startup and only a
+     restart changes the answer. *)
+  mutable server_identity: Tui_decode.server_identity option;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -799,10 +815,10 @@ type state = {
      operator's own text, so pressing down has nothing to give back. *)
   mutable msg_recall_at: int option;
   mutable msg_recall_draft: string;
-  (* The turn currently streaming, if any. Drawn below the history and
-     discarded when the turn settles; its tool rows are committed to the
-     history first. Never authoritative -- the recorded reply comes from the
-     strict whole-body decode. *)
+  (* The selected Keeper's turn currently streaming, if any. The request-owned
+     copy lives in [msg_inflight]; this slot only chooses what the pane draws.
+     Never authoritative -- the recorded reply comes from the strict
+     whole-body decode. *)
   mutable msg_live: Masc_tui_keeper_chat_transcript.t option;
   (* The keeper's durable transcript as last loaded, for the keeper the pane is
      showing. Replaced wholesale by a load rather than merged: the server holds
@@ -872,6 +888,10 @@ let inflight_for_keeper state keeper_name =
     state.msg_inflight
 ;;
 
+let live_for_keeper state keeper_name =
+  Option.map (fun entry -> entry.live) (inflight_for_keeper state keeper_name)
+;;
+
 let send_disposition state ~keeper_name : send_disposition =
   Masc_tui_send_disposition.of_state
     ~inflight:
@@ -939,6 +959,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks_domain = [];
   task_focus = false;
   help_open = false;
+  roster_pane_hidden = false;
+  server_identity = None;
   help_scroll = 0;
   image_open = None;
   palette_open = false;

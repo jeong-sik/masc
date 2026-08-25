@@ -753,7 +753,23 @@ let append_chat_payload_durable path payload =
 let normalize_tool_args args =
   if String.trim args = "" then "{}" else args
 
-let normalize_tool_call_id ~position call_id =
+(* Two questions were sharing one answer.
+
+   "What did the provider call this?" is a record. It can be unanswered, and
+   the log writer already answers an empty call_id by omitting the field
+   ([keeper_event_bridge.ml:199]). Synthesising "tc-<position>" here made the
+   two writers disagree about the same execution, and the dashboard join
+   matches on that id alone, so the step stayed pending forever (#21894).
+   {!Tool_invocation_ref} states the rule directly: correlation identity is
+   never inferred from names, arguments, timestamps, or hashes.
+
+   "Where does this turn's reply go?" is a delivery address. It has to
+   resolve — [Ids.Execution_id.of_string] takes a string — and position is a
+   legitimate answer because the slot is this store's own. *)
+let provider_tool_call_id call_id =
+  if String.trim call_id = "" then None else Some call_id
+
+let delivery_slot_id ~position call_id =
   if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
 
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
@@ -806,7 +822,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
           encode_line ~role:Role.Tool
             ~content:(normalize_tool_args tc.args)
             ~ts
-            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ?tool_call_id:(provider_tool_call_id tc.call_id)
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -874,7 +890,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
            encode_line ~role:Role.Tool
              ~content:(normalize_tool_args tc.args)
              ~ts
-             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ?tool_call_id:(provider_tool_call_id tc.call_id)
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -908,7 +924,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
            encode_line ~role:Role.Tool
              ~content:(normalize_tool_args tc.args)
              ~ts
-             ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+             ?tool_call_id:(provider_tool_call_id tc.call_id)
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -953,7 +969,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
           encode_line ~role:Role.Tool
             ~content:(normalize_tool_args tc.args)
             ~ts
-            ~tool_call_id:(normalize_tool_call_id ~position tc.call_id)
+            ?tool_call_id:(provider_tool_call_id tc.call_id)
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -1070,7 +1086,7 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
       tool_calls =
   List.mapi
     (fun ordinal tc ->
-       let call_id = normalize_tool_call_id ~position:ordinal tc.call_id in
+       let call_id = delivery_slot_id ~position:ordinal tc.call_id in
        let transcript_slot =
          Keeper_chat_delivery_identity.Tool_call
            { execution_id = Ids.Execution_id.of_string call_id; ordinal }
@@ -1124,7 +1140,7 @@ let append_tool_calls_once
         Keeper_chat_delivery_identity.Tool_call
           { execution_id =
               Ids.Execution_id.of_string
-                (normalize_tool_call_id
+                (delivery_slot_id
                    ~position:ordinal
                    (List.nth tool_calls ordinal).call_id)
           ; ordinal

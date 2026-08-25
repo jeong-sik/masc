@@ -415,6 +415,23 @@ type keeper_health
 val keeper_health_of_string : string -> keeper_health option
 val keeper_health_to_string : keeper_health -> string
 
+type keeper_health_reading =
+  | Health_running  (** Keepalive alive, turns recent, nothing quiet about it *)
+  | Health_idle  (** Keepalive alive, no recent activity *)
+  | Health_offline  (** No agent present, or the agent says it is inactive *)
+  | Health_stale  (** The last signal is older than the health window *)
+  | Health_degraded  (** The agent's status file did not read or decode *)
+  | Health_zombie  (** Registry entry outstanding, its fiber already ended *)
+
+val keeper_health_reading : keeper_health -> keeper_health_reading
+(** The health reading as a variant a surface can match.
+
+    {!keeper_health_to_string} is for showing a person a word. A surface that
+    branches on health matched that word instead, which put a renamed label
+    one edit away from silently reading as the healthy case -- and collapsed
+    stale, degraded, and zombie into it, so three broken keepers drew the
+    same mark as a working one. *)
+
 
 type keeper_runtime = {
   kr_name : string;
@@ -660,6 +677,23 @@ type fleet_safety = {
     but cannot take a turn are [running] minus [executable] — a fiber is
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
+
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+(** Which server the TUI is talking to, as [/health] reports it.
+
+    The footer said [Port: 8935] and nothing else, so two checkouts serving
+    on the same port were indistinguishable from the screen -- and a binary
+    older than the tree it was built from looked exactly like a current one.
+    [sid_binary_commit_age_s] is how long ago that binary's commit landed,
+    which is the number that separates the two. *)
+
+val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
 
 type log_kind =
   | Log_turn

@@ -371,8 +371,9 @@ And the largest live category is the one the IR refuses on purpose. `;` means
 `Shell_ir.connector` omits it deliberately. Six of every ten escapes are
 someone reaching for exactly that.
 
-Except the rewrite is not reaching them, and the same logs say so: 531
-`shell_costume` records, and zero occurrences of any `Subset_rewrite` sentence.
+Except the rewrite was not reaching them, and the logs said so: 531
+`shell_costume` records on 2026-08-24, and zero occurrences of any
+`Subset_rewrite` sentence.
 
 The reason is structural rather than a defect. `Subset_rewrite` speaks on the
 refusal path, and an argv-shaped costume is never refused -- it arrives as one
@@ -382,13 +383,18 @@ and told what to write instead. §3.7 step 4 does not touch it either, because
 it lowers the `representable` ones and deliberately leaves the rest on the
 path they already work on.
 
-So the largest live category has nothing in this plan pointed at it. Refusing
+So the largest live category had nothing in this plan pointed at it. Refusing
 those calls would break work that runs today; saying nothing leaves the caller
-with no reason to stop writing them. What is left is to **tell without
+with no reason to stop writing them. What was left was to **tell without
 refusing**: when a costume is not representable, carry its rewrite back beside
 the successful result, so the caller learns what the call should have been
 while the call still does what it did. That is the same "a refusal is a
 rewrite" shape as §3.1, applied where there is no refusal to carry it.
+
+Shipped. The rewrite rides back on the answer as `escaped_shell` metadata --
+`shell`, `finding`, and `should_have_been`, one entry per costume the gate
+would have refused. The disposition and the payload are untouched, so a call
+that worked still reads as a call that worked.
 
 
 Two entries of the first draft do not survive it.
@@ -422,12 +428,19 @@ Revised order:
    rest on today's path with the tap still recording them. **Shipped.** 1474
    of the corpus's 1484 `representable` calls come out of the lowering wearing
    no shell; none change what they do.
-5. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus, and it
-   splits `dispatch_result` across 14 non-test consumers. The count says this
-   is last on traffic, not that it is unnecessary -- backgrounding has no
-   alternative today, so a caller that needs it cannot ask.
+5. **Tell without refusing** -- shipped, and not in the first draft at all:
+   it exists because step 4 left the largest live category untouched. The
+   rewrite rides back as `escaped_shell` metadata on the answer.
+6. **B (`Spawn`)**, on its own RFC-sized change: 5 calls in the corpus. The
+   count says this is last on traffic, not that it is unnecessary --
+   backgrounding has no alternative today, so a caller that needs it cannot
+   ask. Its core is shipped and its tools are being wired.
 
-Steps 1-4 leave `dispatch_result` untouched.
+No step splits `dispatch_result`. The 14 non-test consumers this RFC priced
+that split at are the reason §4 of the spawn RFC declined it: a spawned
+process answers with a handle, which is a separate tool surface rather than a
+second shape for the same record, so `dispatch_result` keeps the shape only a
+dead process can fill.
 
 ## 4. Rejected alternatives
 

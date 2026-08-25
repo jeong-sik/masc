@@ -147,6 +147,44 @@ let test_zero_exit_stays_ok () =
       check bool "payload reports ok=true" true
         (payload_of execution |> member "ok" |> to_bool))
 
+(* RFC spawn-a-process-that-outlives-the-call §1.0. The advice for [&] says
+   the call waits for the backgrounded child anyway; if that stops being true
+   the sentence becomes wrong, so it is pinned here. A lower bound, because
+   the point is that the call does not return early. *)
+let test_a_backgrounded_child_still_holds_the_call () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = temp_dir "exec_background_holds_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+      let config = Workspace.default_config base in
+      (match Keeper_approval_queue.install_persistence ~base_path:base with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
+      install_always_allow_gate ~base;
+      let meta = make_local_meta ~name:"background-holds" in
+      let cwd = playground_dir ~base ~name:"background-holds" in
+      let execution =
+        run_execute ~config ~meta ~argv:[ "sh"; "-c"; "sleep 1 &" ] ~cwd
+      in
+      let elapsed =
+        match payload_of execution with
+        | `Assoc fields ->
+          (match List.assoc_opt "execution_time_ms" fields with
+           | Some (`Int ms) -> ms
+           | _ -> Alcotest.fail "the payload has no execution_time_ms")
+        | _ -> Alcotest.fail "payload was not an object"
+      in
+      if elapsed < 1000
+      then
+        Alcotest.failf
+          "the call returned in %dms, so [&] now backgrounds and the advice \
+           for it is wrong"
+          elapsed)
+;;
+
 let () =
   run
     "keeper_tool_execute_exit_result"
@@ -156,5 +194,9 @@ let () =
             `Quick
             test_nonzero_exit_is_a_completed_result
         ; test_case "zero exit stays ok" `Quick test_zero_exit_stays_ok
+        ; test_case
+            "a backgrounded child still holds the call"
+            `Quick
+            test_a_backgrounded_child_still_holds_the_call
         ] )
     ]

@@ -60,6 +60,28 @@ end
 
 (** {1 Keeper Metrics Rotation Configuration} *)
 
+module KeeperSpawn = struct
+  (** Bytes of each spawned process stream [Spawn_registry] keeps. A process
+      can outrun any reader, so the buffer is bounded and [read] reports every
+      byte the bound cost -- a cap that says what it discarded rather than one
+      that hides it.
+
+      Default 1 MiB: enough to hold a build's output between two reads of a
+      turn, small enough that a chatty watcher cannot grow a keeper's memory
+      without limit. Floor 4 KiB, because a buffer smaller than a single pipe
+      read drops most of what it is handed. *)
+  (* Reading an env var once at module init is a pure computation: no outcome,
+     no failure, no duration. What is worth observing is what the bound costs,
+     and [Spawn_registry] reports that per read as [dropped_before], where a
+     caller can act on it. The marker sits on the line above the binding
+     because the gate reads a two-line window. *)
+  (* TEL-OK *)
+  let spawn_output_buffer_bytes =
+    Int.max 4096 (get_int_nonneg ~default:1_048_576 "MASC_KEEPER_SPAWN_OUTPUT_BUFFER_BYTES")
+  ;;
+
+end
+
 module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
   let max_file_bytes = get_int_nonneg ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"

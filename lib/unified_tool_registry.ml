@@ -76,6 +76,7 @@ let tag_of_runtime_handler
   | Tool_masc_control_dispatch -> Mod_control
   | Tool_masc_agent_timeline_dispatch -> Mod_agent_timeline
   | Tool_masc_schedule_dispatch -> Mod_schedule
+  | Tool_keeper_spawn_dispatch -> Mod_spawn
   | Tool_masc_misc_dispatch | Tool_web_search | Tool_web_fetch -> Mod_misc
   | Tool_masc_local_runtime_dispatch -> Mod_local_runtime
   | Tool_masc_library_dispatch -> Mod_library

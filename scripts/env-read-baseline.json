@@ -9,7 +9,7 @@
       18
     ],
     "lib/config_dir_resolver/config_dir_resolver.ml": [
-      69
+      64
     ],
     "lib/dashboard/dashboard_cache.ml": [
       68
@@ -172,7 +172,7 @@
       15
     ],
     "lib/workspace/workspace_utils_backend_setup.ml": [
-      211
+      207
     ],
     "packages/agent_core/lib/llm_provider/cli_common_env.ml": [
       11

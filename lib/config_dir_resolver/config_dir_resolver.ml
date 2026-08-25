@@ -52,15 +52,10 @@ let running_under_test_executable () =
     (Host_config.host ()).test_mode
 
 let test_config_path_override_env = "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
-let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
 
 let allow_inherited_test_config_paths () =
   Env_config_core.get_bool ~default:false
     test_config_path_override_env
-
-let allow_inherited_test_base_path () =
-  Env_config_core.get_bool ~default:false
-    test_base_path_override_env
 
 (* RFC-0085 PR-8 — Route path-derived env reads through Host_config.from_env
    so the SSOT lives in lib/host_config/ instead of Env_config_core. *)
@@ -113,7 +108,10 @@ let current_env_base_path_opt () =
   sanitize_inherited_test_base_path_opt
     ~running_under_test_executable:
       (running_under_test_executable ())
-    ~allow_inherited:(allow_inherited_test_base_path ())
+    (* No knob. A test executable never inherits a base path from the shell:
+       the one thing that switch could buy is the one thing that costs a live
+       workspace. *)
+    ~allow_inherited:false
     ~initial:initial_env_base_path
     ~current:((Host_config.from_env ()).base_path)
     ~home:initial_env_home

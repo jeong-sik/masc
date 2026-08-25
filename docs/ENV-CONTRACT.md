@@ -192,7 +192,6 @@ The following flags exist only to make OCaml test executables deterministic:
 
 | Variable | Default test behavior | Opt-in behavior |
 | --- | --- | --- |
-| `MASC_TEST_ALLOW_BASE_PATH_OVERRIDE` | ignore a shell-provided `MASC_BASE_PATH` override and re-sync to the requested path | preserve an explicit `MASC_BASE_PATH` override for resolver coverage |
 | `MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE` | ignore inherited `MASC_CONFIG_DIR` captured from the parent shell | preserve an explicit config-root override for resolver coverage |
 
 These are not operator-facing runtime controls and should not be used as

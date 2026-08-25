@@ -98,15 +98,8 @@ let running_under_test_executable () =
   in
   String.starts_with ~prefix:"test_" executable
 
-let test_base_path_override_env = "MASC_TEST_ALLOW_BASE_PATH_OVERRIDE"
-
-let test_base_path_override_enabled () =
-  Env_config_core.get_bool ~default:false test_base_path_override_env
-
 let sync_test_base_path_env resolved_path =
-  if running_under_test_executable ()
-     && not (test_base_path_override_enabled ())
-  then
+  if running_under_test_executable () then
     match (Host_config.from_env ()).base_path with
     | Some current when String.equal current resolved_path -> ()
     | _ ->
@@ -156,8 +149,8 @@ let resolve_requested_base_path path =
 (** Resolve base_path with a single authority:
     - in normal executables, explicit [MASC_BASE_PATH] wins
     - in test executables, a shell-provided [MASC_BASE_PATH] override is
-      ignored unless it matches the requested path or the test explicitly opts
-      in via [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]
+      ignored unless it matches the requested path. There is no opt-in: the
+      only thing one buys is a test executable writing into a live workspace
     - otherwise resolve the requested path to its git root *)
 let resolved_base_path_cache = Atomic.make None
 
@@ -172,16 +165,19 @@ let resolve_masc_base_path path =
     match (Host_config.from_env ()).base_path with
     | Some explicit
       when running_under_test_executable ()
-           && not (test_base_path_override_enabled ())
            && not (String.equal explicit requested) ->
-        (* Test executable, override not opted in, and the inherited
-           [MASC_BASE_PATH] diverges from the requested path: ignore it. A
-           matching override ([explicit = requested]) is intentionally left to
-           fall through to the [Some explicit] arm below, which keeps it — the
-           docstring's "ignored unless it matches the requested path". The
-           former broad arm (same body, no equality guard) shadowed this
-           narrower one, leaving it unreachable; OCaml does not flag
-           [when]-guard redundancy, so the dead arm compiled silently. *)
+        (* Test executable and the inherited [MASC_BASE_PATH] diverges from
+           the requested path: ignore it. A matching override
+           ([explicit = requested]) is intentionally left to fall through to
+           the [Some explicit] arm below, which keeps it — the docstring's
+           "ignored unless it matches the requested path". The former broad
+           arm (same body, no equality guard) shadowed this narrower one,
+           leaving it unreachable; OCaml does not flag [when]-guard
+           redundancy, so the dead arm compiled silently.
+
+           There is no opt-out. The one thing an opt-out buys is a test
+           executable writing into a live workspace, which is the one outcome
+           this arm exists to prevent. *)
         log_once_info
           "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
           explicit path;

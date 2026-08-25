@@ -337,8 +337,7 @@ let clear_local_workspace (state : state) =
   state.keeper_cursor <- 0;
   state.log_entries <- [];
   state.log_error <- None;
-  state.live_context <- None;
-  state.live_context_error <- None
+  state.live_context <- Context_state.empty
 ;;
 
 (** Add event to the event log *)

@@ -9,6 +9,7 @@ let request : Chat.request =
   { request_id = "tui-request-1";
     keeper_name = "keeper.one";
     message = "hello";
+    attachments = [];
   }
 
 let thread_id = "keeper:" ^ request.keeper_name
@@ -87,7 +88,7 @@ let decode_with_provenance events =
   |> Chat.decode_response_with_provenance ~request
 
 let test_request_body_and_identity () =
-  let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" in
+  let request = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
   check bool "request id prefix" true
     (String.starts_with ~prefix:"tui-" request.request_id);
   let uuid = String.sub request.request_id 4 (String.length request.request_id - 4) in
@@ -98,7 +99,7 @@ let test_request_body_and_identity () =
        {|{"request_id":%S,"name":"keeper.one","message":"hello"}|}
        request.request_id)
     (Chat.request_body request);
-  let second = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" in
+  let second = Chat.create_request ~keeper_name:"keeper.one" ~message:"hello" () in
   check bool "fresh id per send" false
     (String.equal request.request_id second.request_id)
 
@@ -631,7 +632,7 @@ let test_operation_reconciliation_uses_server_canonical_message () =
 
 let test_stale_completion_identity () =
   let current : Chat.request =
-    { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one" }
+    { request_id = "tui-current"; keeper_name = "keeper.one"; message = "one"; attachments = [] }
   in
   let same = { current with message = "same identity" } in
   let stale = { current with request_id = "tui-stale" } in
@@ -682,6 +683,120 @@ let test_operation_reconciliation_binds_original_input () =
   | Ok (Chat.Operation_pending Chat.Running) -> ()
   | Error error -> fail (Chat.stream_error_to_string error)
   | Ok _ -> fail "digest-bound redacted operation projected to the wrong state"
+
+
+(* A one-pixel PNG. The bytes matter: the media type is read from them, so a
+   fixture that only looks like a PNG by filename would pass a test the real
+   path fails. *)
+let png_bytes =
+  "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06"
+;;
+
+let with_temp_file ~suffix contents f =
+  let path = Filename.temp_file "masc-tui-attach-" suffix in
+  let channel = open_out_bin path in
+  output_string channel contents;
+  close_out channel;
+  Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> f path)
+;;
+
+(* The endpoint resolves an image by attachment_id from user_blocks; an
+   attachment no block names is carried and never read. Both halves have to be
+   on the wire or the keeper receives a text-only turn while the operator sees
+   an attached image. *)
+let test_attachment_reaches_both_wire_fields () =
+  let attachment =
+    { Chat.attachment_id = "att-1"
+    ; name = "probe.png"
+    ; mime_type = "image/png"
+    ; size = 12
+    ; data = "AAAA"
+    }
+  in
+  let request =
+    Chat.create_request ~attachments:[ attachment ] ~keeper_name:"k" ~message:"look" ()
+  in
+  let json = Chat.request_to_yojson request in
+  let member name = Yojson.Safe.Util.member name json in
+  (match member "attachments" with
+   | `List [ one ] ->
+     Alcotest.(check string)
+       "attachment id"
+       "att-1"
+       (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "id" one))
+   | other ->
+     Alcotest.failf "attachments should carry one entry, got %s" (Yojson.Safe.to_string other));
+  match member "user_blocks" with
+  | `List [ image; text ] ->
+    Alcotest.(check string)
+      "block references the attachment"
+      "att-1"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "attachment_id" image));
+    Alcotest.(check string)
+      "image leads the blocks"
+      "image"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "type" image));
+    Alcotest.(check string)
+      "message text follows"
+      "look"
+      (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" text))
+  | other ->
+    Alcotest.failf "user_blocks should be image then text, got %s" (Yojson.Safe.to_string other)
+;;
+
+(* A request with nothing staged keeps the shape it always had, so a text-only
+   turn is byte-identical to what this surface sent before attachments existed. *)
+let test_no_attachment_sends_no_multimodal_fields () =
+  let json = Chat.request_to_yojson (Chat.create_request ~keeper_name:"k" ~message:"hi" ()) in
+  Alcotest.(check bool)
+    "no attachments key"
+    true
+    (Yojson.Safe.Util.member "attachments" json = `Null);
+  Alcotest.(check bool)
+    "no user_blocks key"
+    true
+    (Yojson.Safe.Util.member "user_blocks" json = `Null)
+;;
+
+let test_media_type_comes_from_bytes_not_extension () =
+  with_temp_file ~suffix:".txt" png_bytes (fun path ->
+    match Masc_tui_attachment.of_file ~path with
+    | Error error ->
+      Alcotest.failf "a PNG named .txt should attach: %s"
+        (Masc_tui_attachment.error_to_string error)
+    | Ok attachment ->
+      Alcotest.(check string) "sniffed media type" "image/png" attachment.Chat.mime_type;
+      Alcotest.(check int) "size is the file's" (String.length png_bytes) attachment.Chat.size;
+      Alcotest.(check string)
+        "data is raw base64, no data-url prefix"
+        (Base64.encode_string png_bytes)
+        attachment.Chat.data)
+;;
+
+let test_non_image_is_rejected_by_its_bytes () =
+  with_temp_file ~suffix:".png" "this is not an image" (fun path ->
+    match Masc_tui_attachment.of_file ~path with
+    | Ok _ -> Alcotest.fail "a text file named .png must not attach"
+    | Error error ->
+      Alcotest.(check bool)
+        "error names the admitted set"
+        true
+        (String_util.contains_substring
+           (Masc_tui_attachment.error_to_string error)
+           "image/png"))
+;;
+
+let test_missing_file_is_named_in_the_error () =
+  match Masc_tui_attachment.of_file ~path:"/nonexistent/masc-attach-probe.png" with
+  | Ok _ -> Alcotest.fail "a missing path must not attach"
+  | Error error ->
+    Alcotest.(check bool)
+      "error names the path"
+      true
+      (String_util.contains_substring
+         (Masc_tui_attachment.error_to_string error)
+         "masc-attach-probe.png")
+;;
 
 let () =
   run "tui_keeper_chat_projection"
@@ -734,5 +849,17 @@ let () =
             test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick
             test_stale_completion_identity
+        ] )
+    ; ( "attachments"
+      , [ test_case "attachment reaches both wire fields" `Quick
+            test_attachment_reaches_both_wire_fields
+        ; test_case "no attachment sends no multimodal fields" `Quick
+            test_no_attachment_sends_no_multimodal_fields
+        ; test_case "media type comes from bytes" `Quick
+            test_media_type_comes_from_bytes_not_extension
+        ; test_case "non-image is rejected" `Quick
+            test_non_image_is_rejected_by_its_bytes
+        ; test_case "missing file is named" `Quick
+            test_missing_file_is_named_in_the_error
         ] )
     ]

@@ -6141,16 +6141,20 @@ let render_code (state : state) =
                 (state.code_file_hscroll + 1)
             else path
           in
-          if activity_showing then "activity: " ^ path
-          else if notes_showing then "notes: " ^ path
-          else if diff_showing then "diff vs HEAD: " ^ path
-          else if history_showing then "history: " ^ path
-          else (
-            match state.code_lsp_note with
-            | Some note ->
-                path ^ "  " ^ Masc_tui_theme.tone Masc_tui_theme.Accent
-                ^ Terminal_text.single_line note ^ Ansi.reset
-            | None -> path)
+          let base =
+            if activity_showing then "activity: " ^ path
+            else if notes_showing then "notes: " ^ path
+            else if diff_showing then "diff vs HEAD: " ^ path
+            else if history_showing then "history: " ^ path
+            else path
+          in
+          (* The note (a language-server answer, a PR link) rides the title
+             in every view: the history's Enter writes one too. *)
+          (match state.code_lsp_note with
+           | Some note ->
+               base ^ "  " ^ Masc_tui_theme.tone Masc_tui_theme.Accent
+               ^ Terminal_text.single_line note ^ Ansi.reset
+           | None -> base)
       | None -> "(Enter opens the selected file)"
     in
     box_top pane_buf pane_cols;

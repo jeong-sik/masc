@@ -34,6 +34,11 @@ type t = {
   target : target;
   focus : focus;
   draft : string;
+  staged_images : int;
+      (** Images staged with [/attach] and not yet sent. Rendered in the prompt
+          because the draft alone does not show them: an operator who attaches,
+          types for a while, and sends would otherwise have no way to see what
+          leaves with the message. *)
 }
 
 val rows_for : terminal_rows:int -> int

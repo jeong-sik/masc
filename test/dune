@@ -113,11 +113,13 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
   test_keeper_codex_write_path_note
+  test_workspace_message_seq_resume
   test_domain_pool
   test_sse
   test_graphql_api
@@ -454,11 +456,13 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
   test_keeper_codex_error_carriage
   test_keeper_codex_effort_clamp
   test_keeper_codex_write_path_note
+  test_workspace_message_seq_resume
   test_domain_pool
   test_sse
   test_graphql_api
@@ -2165,6 +2169,7 @@
 (include stanzas/test_runtime_agent_close_cancel_source.inc)
 
 (include stanzas/test_keeper_official_client_host.inc)
+(include stanzas/test_keeper_tool_definition_source.inc)
 (include stanzas/test_runtime_codex_app_server.inc)
 (include stanzas/test_runtime_claude_code.inc)
 (include stanzas/test_runtime_antigravity.inc)
@@ -2794,6 +2799,8 @@
  (modules test_tui_keeper_chat_projection)
  (libraries
   alcotest
+  base64
+  masc_tui_attachment
   masc
   masc.keeper_chat_operations
   masc.string_util

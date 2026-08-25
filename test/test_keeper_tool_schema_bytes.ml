@@ -80,8 +80,22 @@ let measured ~surface =
    question a Keeper could not ask before: where a name is defined and what its
    type is, answered from the compiler's view of the code rather than from a
    text match. *)
+
+(* 2026-08-25, an hour later: 74,267 -> 74,521 for the same tool. #30571 grew
+   the [keeper_code_query] description to say that [references] needs the
+   project's reference index, and merged twelve minutes before the re-pin
+   above, which had measured the surface before it. Neither PR touched a file
+   the other did, so nothing conflicted and both were right on their own — the
+   merge order alone produced a number that matched neither. A byte count
+   pinned in one file and moved from another has no way to notice that; what
+   notices is running this file, which is the same thing all four of today's
+   red causes needed.
+
+   The count did not move: the surface is the same tools describing themselves
+   more fully, which is the distinction this pair of numbers exists to draw.
+   (Phrasing from #30611, which reached the same re-pin independently.) *)
 let all_surface_golden_count = 87
-let all_surface_golden_bytes = 74_267
+let all_surface_golden_bytes = 74_521
 
 let test_all_surface_is_unchanged () =
   let count, bytes = measured ~surface:All in

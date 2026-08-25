@@ -1505,6 +1505,8 @@ type repository = {
      (RFC-0378: clients carry this value, they do not re-derive it from the
      url). [None] when the remote cannot canonicalize. *)
   rp_codebase : string option;
+  (* The remote as registered, for building links to it. *)
+  rp_url : string;
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -2201,6 +2203,7 @@ let decode_repository json =
   let* rp_id = required_string_field json "id" in
   let* rp_name = required_string_field json "name" in
   let* rp_codebase = optional_string_field json "codebase" in
+  let* rp_url = required_string_field json "url" in
   let* rp_local_path = required_string_field json "local_path" in
   let* rp_default_branch = required_string_field json "default_branch" in
   let* rp_status = required_string_field json "status" in
@@ -2212,8 +2215,8 @@ let decode_repository json =
     | bad -> field_type_error "auto_sync" "a bool or null" bad
   in
   Ok
-    { rp_id; rp_name; rp_codebase; rp_local_path; rp_default_branch
-    ; rp_status; rp_keepers; rp_auto_sync
+    { rp_id; rp_name; rp_codebase; rp_url; rp_local_path
+    ; rp_default_branch; rp_status; rp_keepers; rp_auto_sync
     }
 
 let decode_repository_snapshot json =

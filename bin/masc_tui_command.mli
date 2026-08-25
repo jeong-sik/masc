@@ -42,6 +42,12 @@ type t =
           nothing but the space after the word: a path may contain spaces,
           and quoting it would be a second grammar. *)
   | View_image_missing_path  (** [/image] with no path on the line. *)
+  | Attach_image of string
+      (** [/attach <path>] — stage an image to send with the next message to
+          this Keeper. Distinct from [/image], which draws on the terminal and
+          sends nothing: one is for the operator to look at, the other is for
+          the Keeper to read. The path grammar matches [/image]. *)
+  | Attach_image_missing_path  (** [/attach] with no path on the line. *)
   | Unknown of string  (** A slash word this build does not know, by name. *)
 
 type command_help = {

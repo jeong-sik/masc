@@ -878,7 +878,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     if String.trim text <> "" then begin
       (* Back to the newest row: the turn that is about to start is drawn
          there, and staying scrolled back would hide the send. *)
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       forget_recall state;
       submit_message text
     end;
@@ -891,14 +891,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.add_char state.msg_input '\n';
     true
   | "up" when state.msg_scroll > 0 ->
-    state.msg_scroll <- state.msg_scroll + 1;
+    set_msg_scroll state (state.msg_scroll + 1);
     (match state.msg_older_cursor with
      | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
   | "down" when state.msg_scroll > 0 ->
-    state.msg_scroll <- max 0 (state.msg_scroll - 1);
+    set_msg_scroll state (state.msg_scroll - 1);
     true
   | "up" ->
     recall_older state;
@@ -912,26 +912,25 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        hundreds of rows -- took hundreds of notches. Three is what a terminal
        reports per detent, so a notch here covers what a notch covers
        everywhere else. *)
-    state.msg_scroll <- state.msg_scroll + wheel_notch_rows;
+    set_msg_scroll state (state.msg_scroll + wheel_notch_rows);
     (match state.msg_older_cursor with
      | Some before when state.msg_older_exist && not state.msg_older_loading ->
          load_older ~before
      | Some _ | None -> ());
     true
   | "wheel-down" ->
-    state.msg_scroll <- max 0 (state.msg_scroll - wheel_notch_rows);
+    set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
     true
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
        single message. A page is the unit the reader actually moves in. *)
-    state.msg_scroll <- state.msg_scroll + keeper_message_page_rows state;
+    set_msg_scroll state (state.msg_scroll + keeper_message_page_rows state);
     true
   | "pagedown" ->
-    state.msg_scroll <-
-      max 0 (state.msg_scroll - keeper_message_page_rows state);
+    set_msg_scroll state (state.msg_scroll - keeper_message_page_rows state);
     true
   | "end" ->
-    state.msg_scroll <- 0;
+    set_msg_scroll state 0;
     true
   | "\127" | "\b" ->
     forget_recall state;
@@ -971,7 +970,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 5 then begin
       (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
          far back is worse than a key that ends the trip. *)
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       true
     end else if c = Some 11 then begin
       (* Ctrl-K: drop the newest waiting line without sending it. The queue
@@ -2712,7 +2711,7 @@ let switch_to_next_keeper_message state ~mailbox =
   | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
       open_message_for_keeper ~return_to:state.msg_return state keeper_name;
       state.keeper_cursor <- cursor;
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       state.msg_loaded <- [];
       state.msg_loaded_keeper <- None;
       state.msg_loaded_error <- None;
@@ -4586,11 +4585,11 @@ let handle_composer_key state ~base_path ~mailbox key =
       let text = Buffer.contents state.msg_input in
       (match Masc_tui_command.parse text with
        | Masc_tui_command.Say _ ->
-           state.msg_scroll <- 0;
+           set_msg_scroll state 0;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
-           state.msg_scroll <- 0
+           set_msg_scroll state 0
        | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_missing_title
        | Masc_tui_command.Help | Masc_tui_command.Switch_keeper_missing_name
        | Masc_tui_command.Interrupt_turn | Masc_tui_command.Set_thinking _
@@ -4745,7 +4744,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       state.palette_query <- "";
       state.palette_cursor <- 0;
       state.search <- None;
-      state.msg_scroll <- 0;
+      set_msg_scroll state 0;
       state.view <- Keepers Keeper_message;
       start_keeper_message ~keeper_name:keeper state ~base_path ~mailbox
         (Masc_tui_command.task_message ~task_id ~title ~body)

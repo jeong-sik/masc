@@ -3564,11 +3564,39 @@ let render_keeper_message (state : state) =
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
+    (* One capture, handed to both the measure and the draw, so the rows the
+       pane counts are the rows it paints. *)
+    let markdown = cached_chat_markdown ~theme:chat_theme in
+    (* [msg_scroll] counts back from the row the operator was last looking at,
+       not from whatever is newest now. Anything that arrived since sits
+       between the two, so its rows are added back here rather than being
+       allowed to push the window down. *)
+    let rows_since_pin =
+      match state.msg_scroll_pin with
+      | None -> 0
+      | Some pin ->
+        let arrived =
+          List.filter
+            (fun (entry : Message_layout.entry) ->
+              match entry.markdown_source with
+              | Message_layout.Markdown_stable { observed_at; _ } ->
+                observed_at > pin
+              (* The turn still streaming is not something that arrived while
+                 the operator read back -- it was already on the pane when they
+                 left the bottom, and its row count changes on every frame. *)
+              | Message_layout.Markdown_growing _
+              | Message_layout.Markdown_streaming -> false)
+            layout_entries
+        in
+        if arrived = [] then 0
+        else
+          Message_layout.total_rows ~markdown ~origin:state.msg_origin_display
+            ~inner_width arrived
+    in
     let scroll, visible_rows =
-      Message_layout.clamped_scrolled_rows
-        ~markdown:(cached_chat_markdown ~theme:chat_theme)
+      Message_layout.clamped_scrolled_rows ~markdown
         ~origin:state.msg_origin_display ~inner_width ~height:history_height
-        ~requested:state.msg_scroll layout_entries
+        ~requested:(state.msg_scroll + rows_since_pin) layout_entries
     in
 
     if visible_rows = [] then begin

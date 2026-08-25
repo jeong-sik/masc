@@ -188,22 +188,25 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_core.Types.conte
   | other -> other
 ;;
 
-(* A runtime takes an image itself only when it accepts provider content blocks
-   AND its model declares image input. The three CLI executions take a prompt
-   string, so an image cannot reach them at all — the same reason
-   [Keeper_vision_tool.vision_runtime_candidates] excludes them. *)
+(* A runtime takes an image itself only when its transport can carry one AND its
+   model declares image input. Both halves are required and neither implies the
+   other: Claude Code carries images over the stream-json content-block array it
+   already speaks, but a model that does not declare image input is still
+   rejected before dispatch. Codex and Antigravity send prompt text only, so an
+   image cannot reach them whatever the model declares. *)
+let transport_carries_images = function
+  | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _ -> true
+  | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _ -> false
+;;
+
 let runtime_takes_images_itself id =
   match Runtime.get_runtime_by_id id with
   | None -> false
   | Some (rt : Runtime.t) ->
-    (match rt.Runtime.execution with
-     | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ -> false
-     | Runtime_execution.Agent_core _ ->
-       Runtime_agent.caps_admit_required_modalities
+    transport_carries_images rt.Runtime.execution
+    && Runtime_agent.caps_admit_required_modalities
          (Runtime_agent.input_capabilities_of_runtime rt)
-         [ "image" ])
+         [ "image" ]
 ;;
 
 (* The whole lane is asked, not just the head. When any candidate takes the

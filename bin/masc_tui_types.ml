@@ -21,6 +21,14 @@ type connection_status =
   | Degraded
   | Connected
 
+let connection_status_label = function
+  | Connected -> "connected"
+  | Degraded -> "degraded"
+  | Connecting -> "connecting..."
+  | Reconnecting -> "reconnecting..."
+  | Disconnected -> "disconnected"
+;;
+
 type event = {
   timestamp: string;
   event_type: string;

@@ -17,6 +17,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
@@ -4570,6 +4571,58 @@ let toggle_mouse_tracking_key = "\020"
    composer every letter is text. *)
 let toggle_roster_pane_key = "\002"
 
+let terminal_title_visible_keeper state =
+  match state.view with
+  | Keepers Keeper_message -> state.msg_target_keeper_name
+  | Keepers
+      (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
+      | Keeper_runtime_pick) ->
+      Option.map
+        (fun (keeper : keeper) -> keeper.k_name)
+        (selected_keeper state)
+  | Overview | Acting | Lanes | Board | Approvals | Planning | Schedules
+  | Verification | Harness | Fusion | Repositories | Changes | Connectors
+  | Runtime | Config | Resources | Tools | System_logs -> None
+;;
+
+let terminal_title_runtime state keeper_name =
+  Option.bind keeper_name (fun name ->
+    List.find_opt
+      (fun (keeper : keeper) -> String.equal keeper.k_name name)
+      state.keepers
+    |> Option.bind (fun keeper ->
+      match (keeper_reading state keeper).Keeper_control.liveness with
+      | Keeper_control.Present runtime -> Some runtime.kr_runtime_id
+      | Keeper_control.Absent | Keeper_control.Unobserved -> None))
+;;
+
+let terminal_title_snapshot state =
+  let live =
+    Option.map Keeper_chat_transcript.keeper_name state.msg_live
+  in
+  let inflight =
+    List.map
+      (fun entry -> entry.sent_request.keeper_name)
+      state.msg_inflight
+  in
+  let keeper_name =
+    Terminal_title.select_keeper
+      ~live
+      ~inflight
+      ~visible:(terminal_title_visible_keeper state)
+  in
+  let activity =
+    match live, inflight with
+    | Some _, _ | None, _ :: _ -> Terminal_title.Working
+    | None, [] -> Terminal_title.Connection state.connection_status
+  in
+  Terminal_title.make
+    ~activity
+    ~keeper_name
+    ~runtime_id:(terminal_title_runtime state keeper_name)
+    ~workspace:state.workspace
+;;
+
 let toggle_mouse_tracking () =
   let on = not (Atomic.get mouse_tracking_on) in
   Atomic.set mouse_tracking_on on;
@@ -4655,6 +4708,7 @@ let main () =
     Frame_presenter.create
       ~synchronized_output:(synchronized_output_enabled ()) ()
   in
+  let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
   let restore_terminal () =
@@ -4662,6 +4716,8 @@ let main () =
        re-enters raw mode after Ctrl-Z would silently lose the wheel. The
        off byte is written once, in [cleanup], at real process exit. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
+      ~flush:(fun () -> flush stdout);
+    Terminal_title.clear terminal_title ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
   in
@@ -6401,6 +6457,9 @@ let main () =
               only exists once the frame is built cannot be bounded before it,
               but the drawing does not have to be the thing that stores it. *)
            Option.iter (apply_clamped_scroll state) clamped;
+           Terminal_title.present terminal_title ~write:(output_string stdout)
+             ~flush:(fun () -> flush stdout)
+             (terminal_title_snapshot state);
            Frame_presenter.present frame_presenter
              ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)

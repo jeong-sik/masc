@@ -210,6 +210,5 @@ let transition_known_args =
     "notes";
     "reason";
     "expected_version";
-    "agent_name";
     "handoff_context";
   ]

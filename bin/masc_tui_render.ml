@@ -213,6 +213,17 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           ~close_style:context.inline_restore
           rest
       in
+      (* Folded origins are drawn left of the rule, dimmed so the rule still
+         marks where the body starts. An empty gutter adds no bytes at all, so
+         a pane showing origins on their own rows draws exactly what it drew
+         before this margin existed. *)
+      let margin =
+        if String.equal row.gutter "" then ""
+        else
+          Printf.sprintf "%s%s%s" Ansi.dim row.gutter
+            (if context.ambient_background then context.inline_restore
+             else Ansi.reset)
+      in
       if
         String.length text >= 2 && Char.equal text.[0] ' '
         && Char.equal text.[1] ' '
@@ -220,12 +231,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         let rest = String.sub text 2 (String.length text - 2) in
         if context.ambient_background then
           box_line_styled buf cols ~style:context.opening
-            (Printf.sprintf "%s\xe2\x94\x82%s %s"
+            (Printf.sprintf "%s%s\xe2\x94\x82%s %s" margin
                (Chat_theme.origin row.style) context.inline_restore
                (dress rest))
         else
           box_line buf cols
-            (Printf.sprintf "%s\xe2\x94\x82%s %s%s%s"
+            (Printf.sprintf "%s%s\xe2\x94\x82%s %s%s%s" margin
                (Chat_theme.origin row.style) Ansi.reset
                (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
@@ -3353,6 +3364,7 @@ let render_keeper_message (state : state) =
          [Tui_types.chat_visibility_summary] for why. *)
       let modes =
         chat_visibility_summary ~memory_visible:state.msg_memory_visible
+          ~origin:state.msg_origin_display
           ~reasoning:state.msg_reasoning_visibility
           ~tools:state.msg_tool_visibility
       in
@@ -3584,8 +3596,8 @@ let render_keeper_message (state : state) =
     let scroll, visible_rows =
       Message_layout.clamped_scrolled_rows
         ~markdown:(cached_chat_markdown ~theme:chat_theme)
-        ~inner_width ~height:history_height ~requested:state.msg_scroll
-        layout_entries
+        ~origin:state.msg_origin_display ~inner_width ~height:history_height
+        ~requested:state.msg_scroll layout_entries
     in
 
     if visible_rows = [] then begin
@@ -3838,11 +3850,11 @@ let render_keeper_message (state : state) =
           if scroll = 0 then "PgUp:history" else "PgDn:newest"
         in
         Printf.sprintf
-          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  %s  %s"
+          "%s  Ctrl-J:NL  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  %s  %s"
           compact_enter_hint compact_scroll_hint escape_hint
       else
         Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  %s%s  %s  Ctrl-U:clear"
+          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  %s%s  %s  Ctrl-U:clear"
           enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf

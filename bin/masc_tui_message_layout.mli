@@ -52,10 +52,27 @@ type row_kind =
   | Metadata of metadata
   | Body
 
+type origin_display =
+  | Origin_row  (** The origin keeps a row of its own, above the body. *)
+  | Origin_inline
+      (** The origin folds into the body's left margin, clock included. *)
+  | Origin_bare  (** The same margin without the clock. *)
+(** Where a message's origin is drawn. [Origin_row] is what the pane has
+    always done. The other two hand that row back to the conversation: eight
+    speakers taking turns spent eight rows of a forty-row pane on headings.
+
+    Every layout and scroll function takes this, and passing it to one but not
+    another would measure the pane against a height it does not draw. *)
+
 type row = {
   style : style;
   kind : row_kind;
   text : string;
+  gutter : string;
+      (** What to draw left of the body's rule. Empty under {!Origin_row};
+          under the other two it holds the origin on a message's first row and
+          the same width in blanks on the rest, so a wrapped body lines up
+          under where it started. *)
 }
 
 val utf8_scalar_byte_length : char -> int option
@@ -163,6 +180,7 @@ val wrap_body :
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   height:int ->
   entry list ->
@@ -180,6 +198,7 @@ val visible_rows :
 
 val total_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   entry list ->
   int
@@ -188,6 +207,7 @@ val total_rows :
 
 val scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   height:int ->
   from_bottom:int ->
@@ -202,6 +222,7 @@ val scrolled_rows :
 
 val clamp_scroll :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   height:int ->
   int ->
@@ -214,6 +235,7 @@ val clamp_scroll :
 
 val clamped_scrolled_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   height:int ->
   requested:int ->
@@ -228,6 +250,7 @@ val clamped_scrolled_rows :
 
 val max_scroll :
   ?markdown:(entry:entry -> width:int -> string list) ->
+  ?origin:origin_display ->
   inner_width:int ->
   height:int ->
   entry list ->

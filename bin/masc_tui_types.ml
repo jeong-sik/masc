@@ -99,6 +99,19 @@ let tool_visibility_to_string = function
   | Tools_full -> "full"
 ;;
 
+let origin_display_to_string = function
+  | Masc_tui_message_layout.Origin_row -> "row"
+  | Masc_tui_message_layout.Origin_inline -> "inline"
+  | Masc_tui_message_layout.Origin_bare -> "off"
+;;
+
+let origin_display_of_string = function
+  | "row" -> Some Masc_tui_message_layout.Origin_row
+  | "inline" -> Some Masc_tui_message_layout.Origin_inline
+  | "off" -> Some Masc_tui_message_layout.Origin_bare
+  | _ -> None
+;;
+
 (* The chat modes worth a place in the header.
 
    Reasoning starts hidden and tools compact, so the answer remains the
@@ -112,10 +125,14 @@ let tool_visibility_to_string = function
 
    Discovery lives in the footer and the help overlay, which name Ctrl-R and
    Ctrl-D whether or not a mode is on. *)
-let chat_visibility_summary ~memory_visible ~reasoning ~tools =
+let chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (if memory_visible then None else Some "memory:off")
+      ; (match origin with
+         | Masc_tui_message_layout.Origin_row -> None
+         | Masc_tui_message_layout.Origin_inline -> Some "clock:inline"
+         | Masc_tui_message_layout.Origin_bare -> Some "clock:off")
       ; (match reasoning with
          | Reasoning_hidden -> None
          | (Reasoning_folded | Reasoning_full) as mode ->
@@ -132,6 +149,16 @@ let next_reasoning_visibility = function
   | Reasoning_hidden -> Reasoning_folded
   | Reasoning_folded -> Reasoning_full
   | Reasoning_full -> Reasoning_hidden
+;;
+
+(* Rows first, then the same origins folded into the margin, then the same
+   margin without the clock. Each step gives the conversation more of the
+   pane, so one key held down walks from the most detail to the most
+   messages. *)
+let next_origin_display = function
+  | Masc_tui_message_layout.Origin_row -> Masc_tui_message_layout.Origin_inline
+  | Masc_tui_message_layout.Origin_inline -> Masc_tui_message_layout.Origin_bare
+  | Masc_tui_message_layout.Origin_bare -> Masc_tui_message_layout.Origin_row
 ;;
 
 let toggle_tool_visibility = function
@@ -1023,6 +1050,7 @@ type state = {
   (* Presentation-only defaults come from the CLI and can be changed in the
      pane without mutating the transcript. *)
   mutable msg_reasoning_visibility: reasoning_visibility;
+  mutable msg_origin_display: Masc_tui_message_layout.origin_display;
   mutable msg_tool_visibility: tool_visibility;
   (* Messages typed while a turn was running, oldest first, each with the
      keeper it was addressed to. Dispatch is serialized on one in-flight
@@ -1347,6 +1375,7 @@ let create_state
   msg_older_loading = false;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
+  msg_origin_display = Masc_tui_message_layout.Origin_row;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;

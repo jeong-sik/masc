@@ -109,6 +109,7 @@ let test_message_scroll_accepts_the_rendered_clamp () =
 let test_the_header_names_only_unusual_modes () =
   let summary memory_visible reasoning tools =
     Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools
+      ~origin:Masc_tui_message_layout.Origin_row
   in
   let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
   let hidden = Tui_types.Reasoning_hidden in

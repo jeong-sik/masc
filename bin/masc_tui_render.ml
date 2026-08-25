@@ -376,7 +376,7 @@ let composer_line state ~cols =
      waiting and where to answer; the answer itself stays in the chat pane,
      where it is unambiguous which keeper and which call it is for. *)
   match awaiting_approval_notice state with
-  | Some notice -> Theme.warn ^ fit_width notice cols ^ Ansi.reset
+  | Some notice -> (Theme.warn ()) ^ fit_width notice cols ^ Ansi.reset
   | None -> tone ^ fit_width body cols ^ Ansi.reset
 
 let composer_cursor state ~rows ~cols =
@@ -464,7 +464,7 @@ let surface_strip (state : state) ~cols =
     if i > lo then Buffer.add_string parts "  ";
     if i = active then
       Buffer.add_string parts
-        (Ansi.bold ^ Theme.info ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
+        (Ansi.bold ^ (Theme.info ()) ^ "\xe2\x96\xb8" ^ label i ^ Ansi.reset)
     else Buffer.add_string parts (Ansi.dim ^ label i ^ Ansi.reset)
   done;
   if hi < n - 1 then
@@ -552,11 +552,11 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 let connection_status_badge : Masc_tui_types.connection_status -> string =
   function
   | Connected as status ->
-      Theme.ok ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+      (Theme.ok ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | (Degraded | Connecting | Reconnecting) as status ->
-      Theme.warn ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+      (Theme.warn ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | Disconnected as status ->
-      Theme.bad ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+      (Theme.bad ()) ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
 ;;
 
 (* Every surface header ends with this, so a workspace the server does not
@@ -586,12 +586,12 @@ let workspace_health_label = function
 let workspace_health_color = function
   | Workspace_health_critical
   | Workspace_health_bad
-  | Workspace_health_risk -> Theme.bad
+  | Workspace_health_risk -> (Theme.bad ())
   | Workspace_health_warning
   | Workspace_health_degraded
   | Workspace_health_initializing
-  | Workspace_health_unknown -> Theme.warn
-  | Workspace_health_ok -> Theme.ok
+  | Workspace_health_unknown -> (Theme.warn ())
+  | Workspace_health_ok -> (Theme.ok ())
 
 let attention_severity_label = function
   | Attention_critical -> "critical"
@@ -600,8 +600,8 @@ let attention_severity_label = function
   | Attention_info -> "info"
 
 let attention_severity_color = function
-  | Attention_critical | Attention_bad -> Theme.bad
-  | Attention_warning -> Theme.warn
+  | Attention_critical | Attention_bad -> (Theme.bad ())
+  | Attention_warning -> (Theme.warn ())
   | Attention_info -> Ansi.cyan
 
 let task_line (task : task) =
@@ -666,7 +666,7 @@ let render_overview (state : state) =
   let summary_line =
     match (ov, overview_error) with
     | _, Some err ->
-        Printf.sprintf "  %s(data unreliable: %s)%s" Theme.bad
+        Printf.sprintf "  %s(data unreliable: %s)%s" (Theme.bad ())
           (fit_width err (cols - 24))
           Ansi.reset
     | None, None ->
@@ -830,7 +830,7 @@ let render_overview (state : state) =
   (match tasks_error with
    | Some err when row_budget.task_error_rows > 0 ->
         box_line buf cols
-          (Theme.bad ^ "  "
+          ((Theme.bad ()) ^ "  "
           ^ fit_width err (cols - 8)
           ^ Ansi.reset)
    | None | Some _ -> ());
@@ -1137,7 +1137,7 @@ let render_approvals (state : state) =
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
          box_line buf cols
-           (Theme.bad ^ "  (data unreliable: "
+           ((Theme.bad ()) ^ "  (data unreliable: "
            ^ fit_width err (cols - 24)
            ^ ")" ^ Ansi.reset)
      | None, None ->
@@ -1207,7 +1207,7 @@ let render_approvals (state : state) =
     match List.nth_opt approvals state.approval_cursor with
     | Some (Operator_row a) -> (
         if action_inflight then
-          Printf.sprintf "  %sApproval request in progress…%s" Theme.warn
+          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
             Ansi.reset
         else
           match state.pending_approval_action with
@@ -1218,7 +1218,7 @@ let render_approvals (state : state) =
                 | Confirm -> "y"
                 | Deny -> "n"
               in
-              Printf.sprintf "  %sPress %s again: %s%s" Theme.warn key
+              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
                 (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
                 Ansi.reset
           | _ ->
@@ -1230,7 +1230,7 @@ let render_approvals (state : state) =
         (* One press answers a held call, matching the chat pane's [y]. The
            question is the whole ask, so it is the row the eye lands on. *)
         Printf.sprintf "  %s%s  [y] allow  [n] deny%s"
-          Theme.warn
+          (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
              (max 8 (cols - 26)))
@@ -1283,7 +1283,7 @@ let board_kind_mark = function
   | Some Post_by_person -> Ansi.bold ^ "@" ^ Ansi.reset
   | Some Post_by_automation -> Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
   | Some Post_by_system -> " "
-  | Some (Post_kind_unknown _) -> Theme.warn ^ "?" ^ Ansi.reset
+  | Some (Post_kind_unknown _) -> (Theme.warn ()) ^ "?" ^ Ansi.reset
   | None -> " "
 ;;
 
@@ -1317,7 +1317,7 @@ let render_board_compose (state : state) =
   (match state.board_post_error with
    | Some err ->
        box_line buf cols
-         (Theme.bad ^ "  "
+         ((Theme.bad ()) ^ "  "
          ^ fit_width (Terminal_text.single_line err) (cols - 8)
          ^ Ansi.reset)
    | None -> ());
@@ -1381,7 +1381,7 @@ let render_board_list (state : state) =
   in
   let render_list_error err =
     box_line buf cols
-      (Theme.bad ^ "  (data unreliable: "
+      ((Theme.bad ()) ^ "  (data unreliable: "
       ^ fit_width err (max 1 (cols - 24))
       ^ ")" ^ Ansi.reset)
   in
@@ -1505,7 +1505,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
     | Board_detail.Loading ->
         [Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset]
     | Board_detail.Failed error ->
-        [ Theme.bad ^ "  Board detail unavailable: "
+        [ (Theme.bad ()) ^ "  Board detail unavailable: "
           ^ fit_width (Terminal_text.single_line error) (max 1 (cols - 32))
           ^ Ansi.reset
         ]
@@ -1676,7 +1676,7 @@ let planning_phase_column =
 let planning_phase_color = function
   | Goal_phase.Executing -> Ansi.cyan
   | Goal_phase.Verifying -> Ansi.magenta
-  | Goal_phase.Completed -> Theme.ok
+  | Goal_phase.Completed -> (Theme.ok ())
   | Goal_phase.Dropped -> Ansi.gray
 
 (* Where the goal stands with the completion judge, in one column. The phase
@@ -1686,10 +1686,10 @@ let planning_phase_color = function
    carry no information. *)
 let planning_proof_mark = function
   | Tui_decode.Proof_idle -> " "
-  | Tui_decode.Proof_pending -> Theme.warn ^ "\xe2\x80\xa6" ^ Ansi.reset
-  | Tui_decode.Proof_proven _ -> Theme.ok ^ "\xe2\x9c\x93" ^ Ansi.reset
-  | Tui_decode.Proof_refuted _ -> Theme.bad ^ "\xe2\x9c\x97" ^ Ansi.reset
-  | Tui_decode.Proof_unreadable _ -> Theme.warn ^ "!" ^ Ansi.reset
+  | Tui_decode.Proof_pending -> (Theme.warn ()) ^ "\xe2\x80\xa6" ^ Ansi.reset
+  | Tui_decode.Proof_proven _ -> (Theme.ok ()) ^ "\xe2\x9c\x93" ^ Ansi.reset
+  | Tui_decode.Proof_refuted _ -> (Theme.bad ()) ^ "\xe2\x9c\x97" ^ Ansi.reset
+  | Tui_decode.Proof_unreadable _ -> (Theme.warn ()) ^ "!" ^ Ansi.reset
 ;;
 
 (* The line under the list, for the goal the cursor is on. A verdict without its
@@ -1697,15 +1697,15 @@ let planning_proof_mark = function
    and the only thing that says what to do next. *)
 let planning_proof_detail (goal : planning_goal) =
   match goal.pg_proof with
-  | Tui_decode.Proof_proven None -> Some (Theme.ok, "proven")
-  | Tui_decode.Proof_proven (Some evidence) -> Some (Theme.ok, "proven: " ^ evidence)
-  | Tui_decode.Proof_refuted None -> Some (Theme.bad, "refused")
-  | Tui_decode.Proof_refuted (Some reason) -> Some (Theme.bad, "refused: " ^ reason)
-  | Tui_decode.Proof_pending -> Some (Theme.warn, "waiting for the completion judge")
+  | Tui_decode.Proof_proven None -> Some ((Theme.ok ()), "proven")
+  | Tui_decode.Proof_proven (Some evidence) -> Some ((Theme.ok ()), "proven: " ^ evidence)
+  | Tui_decode.Proof_refuted None -> Some ((Theme.bad ()), "refused")
+  | Tui_decode.Proof_refuted (Some reason) -> Some ((Theme.bad ()), "refused: " ^ reason)
+  | Tui_decode.Proof_pending -> Some ((Theme.warn ()), "waiting for the completion judge")
   | Tui_decode.Proof_unreadable None ->
-      Some (Theme.warn, "verification ledger unreadable")
+      Some ((Theme.warn ()), "verification ledger unreadable")
   | Tui_decode.Proof_unreadable (Some detail) ->
-      Some (Theme.warn, "verification ledger unreadable: " ^ detail)
+      Some ((Theme.warn ()), "verification ledger unreadable: " ^ detail)
   | Tui_decode.Proof_idle ->
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
@@ -1749,7 +1749,7 @@ let render_planning_list (state : state) =
        (match planning_error with
         | Some err ->
             box_line buf cols
-              (Theme.bad ^ "  (data unreliable: "
+              ((Theme.bad ()) ^ "  (data unreliable: "
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
@@ -1848,9 +1848,9 @@ let planning_detail_fixed_rows = 11
 
 let planning_detail_tone (tone : Planning_detail.tone) =
   match tone with
-  | Planning_detail.Proven -> Theme.ok
-  | Planning_detail.Refused -> Theme.bad
-  | Planning_detail.Waiting | Planning_detail.Unreadable -> Theme.warn
+  | Planning_detail.Proven -> (Theme.ok ())
+  | Planning_detail.Refused -> (Theme.bad ())
+  | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
 
 let render_planning_detail (state : state)
@@ -1902,7 +1902,7 @@ let render_planning_detail (state : state)
   (match armed with
    | Some armed_action ->
        box_line buf cols
-         (Theme.warn ^ Printf.sprintf "  armed: %s -- same key again to send"
+         ((Theme.warn ()) ^ Printf.sprintf "  armed: %s -- same key again to send"
             (match armed_action with
              | Goal_phase.Public_action.Request_complete -> "request completion"
              | Goal_phase.Public_action.Drop -> "drop"
@@ -1912,7 +1912,7 @@ let render_planning_detail (state : state)
   (match state.goal_action_error with
    | Some err ->
        box_line buf cols
-         (Theme.bad ^ "  "
+         ((Theme.bad ()) ^ "  "
          ^ fit_width (Terminal_text.single_line err) (cols - 8)
          ^ Ansi.reset)
    | None -> ());
@@ -1963,9 +1963,9 @@ let render_planning_detail (state : state)
    build does not rank. *)
 let schedule_status_color status =
   match status with
-  | "scheduled" | "due" -> Theme.warn
+  | "scheduled" | "due" -> (Theme.warn ())
   | "running" -> Ansi.cyan
-  | "failed" -> Theme.bad
+  | "failed" -> (Theme.bad ())
   | "succeeded" | "cancelled" | "expired" -> Ansi.dim
   | _ -> Ansi.reset
 
@@ -1996,7 +1996,7 @@ let render_schedule_list (state : state) =
        (match Terminal_text.optional_single_line state.schedules_error with
         | Some err ->
             box_line buf cols
-              (Theme.bad ^ "  (data unreliable: "
+              ((Theme.bad ()) ^ "  (data unreliable: "
               ^ fit_width err (cols - 24)
               ^ ")" ^ Ansi.reset)
         | None ->
@@ -2012,12 +2012,12 @@ let render_schedule_list (state : state) =
          (match snapshot.scs_read_error with
           | Some err ->
               box_line buf cols
-                (Theme.bad ^ "  (data unreliable: "
+                ((Theme.bad ()) ^ "  (data unreliable: "
                 ^ fit_width err (cols - 24)
                 ^ ")" ^ Ansi.reset)
           | None ->
               box_line buf cols
-                (Theme.bad ^ "  (schedule store unreadable)" ^ Ansi.reset));
+                ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
          for _ = 1 to rows - 10 do
            box_empty buf cols
          done
@@ -2103,7 +2103,7 @@ let render_schedule_list (state : state) =
          (match state.schedule_cancel_armed with
           | Some schedule_id ->
               box_line buf cols
-                (Theme.warn
+                ((Theme.warn ())
                 ^ Printf.sprintf
                     "  armed: cancel %s -- same key again to send"
                     (Terminal_text.single_line schedule_id)
@@ -2112,7 +2112,7 @@ let render_schedule_list (state : state) =
          (match state.schedule_cancel_error with
           | Some err ->
               box_line buf cols
-                (Theme.bad ^ "  "
+                ((Theme.bad ()) ^ "  "
                 ^ fit_width (Terminal_text.single_line err) (cols - 8)
                 ^ Ansi.reset)
           | None -> ())
@@ -2259,10 +2259,10 @@ let keeper_action_color
     (action : Status.keeper_next_action_path option) =
   match action with
   | None -> Ansi.dim
-  | Some Status.Auto_restart -> Theme.bad
-  | Some Status.Recover -> Theme.warn
+  | Some Status.Auto_restart -> (Theme.bad ())
+  | Some Status.Recover -> (Theme.warn ())
   | Some Status.Probe -> Ansi.cyan
-  | Some Status.Direct_message -> Theme.ok
+  | Some Status.Direct_message -> (Theme.ok ())
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
   Masc_tui_keeper_mark.glyph ~paused
@@ -2392,7 +2392,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          red: the stance has no column of its own, and the name is what
          the eye finds first. On the selected row the band folds this red
          with every other cell colour. *)
-      (if yolo then Theme.bad ^ name ^ Ansi.reset else name)
+      (if yolo then (Theme.bad ()) ^ name ^ Ansi.reset else name)
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; Printf.sprintf " %s%*d%s" Ansi.dim Render_schedule.keeper_turns_width
         keeper.k_total_turns Ansi.reset
@@ -2417,7 +2417,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
      key that needs two presses does not read like the keys that need one. *)
   let hint action label =
     let key_color =
-      if Keeper_control.requires_confirmation action then Theme.bad else Ansi.cyan
+      if Keeper_control.requires_confirmation action then (Theme.bad ()) else Ansi.cyan
     in
     if List.mem action available then
       Printf.sprintf "%s%s%s %s" key_color (Keeper_control.action_key action)
@@ -2436,7 +2436,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
     | Some reading
       when List.mem reading.Keeper_control.name state.keeper_yolo_names ->
         Ansi.cyan ^ "g" ^ Ansi.reset ^ " auto"
-    | Some _ | None -> Theme.bad ^ "g" ^ Ansi.reset ^ " yolo"
+    | Some _ | None -> (Theme.bad ()) ^ "g" ^ Ansi.reset ^ " yolo"
   in
   match (state.keeper_action_inflight, state.keeper_action_pending) with
   | Some (keeper_name, action), _ ->
@@ -2445,7 +2445,7 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
         (Terminal_text.single_line keeper_name)
         Ansi.reset
   | None, Some pending ->
-      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold Theme.warn
+      Printf.sprintf "  %s%spress %s again to %s %s%s" Ansi.bold (Theme.warn ())
         (Keeper_control.action_key pending.Keeper_control.pending_action)
         (Keeper_control.action_label pending.Keeper_control.pending_action)
         (Terminal_text.single_line pending.Keeper_control.pending_keeper)
@@ -2481,9 +2481,9 @@ let keeper_action_hints ?(offers_chat = true) ?(offers_back = true) state readin
    health vocabulary. [unread] is the roster not answering, which is dim rather
    than any health colour. *)
 let keeper_roster_status_color = function
-  | "healthy" -> Theme.ok
-  | "stale" | "degraded" -> Theme.warn
-  | "zombie" -> Theme.bad
+  | "healthy" -> (Theme.ok ())
+  | "stale" | "degraded" -> (Theme.warn ())
+  | "zombie" -> (Theme.bad ())
   | "offline" | "idle" -> Ansi.gray
   | _ -> Ansi.dim
 
@@ -2514,8 +2514,8 @@ let keeper_fleet_gap_lines (fleet : fleet_safety) =
        match names with
        | [] -> None
        | _ -> Some (color, label, String.concat ", " names))
-    [ (never_started, "not running", Theme.bad)
-    ; (running_without_turn, "running, cannot take a turn", Theme.warn)
+    [ (never_started, "not running", (Theme.bad ()))
+    ; (running_without_turn, "running, cannot take a turn", (Theme.warn ()))
     ]
 
 let render_keeper_list (state : state) =
@@ -2571,13 +2571,13 @@ let render_keeper_list (state : state) =
   (match (state.fleet_safety, state.fleet_safety_error) with
    | _, Some err ->
        box_line buf cols
-         (Theme.bad ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
+         ((Theme.bad ()) ^ "  fleet: " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None, None -> ()
    | Some fleet, None ->
        let tone =
-         if fleet.fs_operator_action_required then Theme.bad
-         else if String.equal fleet.fs_status "ok" then Theme.ok
-         else Theme.warn
+         if fleet.fs_operator_action_required then (Theme.bad ())
+         else if String.equal fleet.fs_status "ok" then (Theme.ok ())
+         else (Theme.warn ())
        in
        let blocker =
          match fleet.fs_blocker with None -> "" | Some b -> "   blocker: " ^ b
@@ -2617,14 +2617,14 @@ let render_keeper_list (state : state) =
   (match state.keeper_roster_error with
    | Some err ->
        box_line buf cols
-         (Theme.warn ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
+         ((Theme.warn ()) ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
   (match state.keeper_roster with
    | Keeper_control.Roster_partial { observed; total } ->
        box_line buf cols
          (Printf.sprintf
             "%s  live status covers %d of %d keepers; the rest read as unknown%s"
-            Theme.warn (List.length observed) total Ansi.reset)
+            (Theme.warn ()) (List.length observed) total Ansi.reset)
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
@@ -2636,7 +2636,7 @@ let render_keeper_list (state : state) =
 
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
   (match keepers_error with
-   | Some err -> box_line buf cols (Theme.bad ^ "  " ^ err ^ Ansi.reset)
+   | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
    | None -> ());
 
   (* Counted rather than recomputed: the chrome above varies with the fleet
@@ -2698,22 +2698,22 @@ let render_keeper_list (state : state) =
 
 let keeper_lane_phase_style (phase : Tui_decode.keeper_lane_phase) =
   match phase with
-  | Lane_phase_running -> (Theme.ok, "\xe2\x97\x8f")
-  | Lane_phase_failing | Lane_phase_crashed -> (Theme.bad, "\xc3\x97")
+  | Lane_phase_running -> ((Theme.ok ()), "\xe2\x97\x8f")
+  | Lane_phase_failing | Lane_phase_crashed -> ((Theme.bad ()), "\xc3\x97")
   | Lane_phase_compacting | Lane_phase_handing_off | Lane_phase_draining
   | Lane_phase_restarting ->
-      (Theme.warn, "\xe2\x97\x90")
-  | Lane_phase_paused -> (Theme.warn, "\xe2\x97\x8b")
+      ((Theme.warn ()), "\xe2\x97\x90")
+  | Lane_phase_paused -> ((Theme.warn ()), "\xe2\x97\x8b")
   | Lane_phase_offline | Lane_phase_stopped -> (Ansi.gray, "\xc3\x97")
-  | Lane_phase_unknown _ -> (Theme.warn, "?")
+  | Lane_phase_unknown _ -> ((Theme.warn ()), "?")
 
 let keeper_lane_turn_style (phase : Tui_decode.keeper_lane_turn_phase) =
   match phase with
   | Lane_turn_executing | Lane_turn_prompting | Lane_turn_routing -> Ansi.cyan
-  | Lane_turn_compacting | Lane_turn_finalizing -> Theme.warn
-  | Lane_turn_exhausted -> Theme.bad
+  | Lane_turn_compacting | Lane_turn_finalizing -> (Theme.warn ())
+  | Lane_turn_exhausted -> (Theme.bad ())
   | Lane_turn_idle -> Ansi.gray
-  | Lane_turn_unknown _ -> Theme.warn
+  | Lane_turn_unknown _ -> (Theme.warn ())
 
 let keeper_lane_idle_text seconds =
   let seconds = max 0 seconds in
@@ -2880,7 +2880,7 @@ let render_lanes (state : state) =
   (match state.lanes_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.lanes_error in
@@ -2953,7 +2953,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_section "Identity";
     add_row "Name:" (Terminal_text.single_line k.k_name);
     add_row "Paused:"
-      (if k.k_paused then Theme.warn ^ "yes" ^ Ansi.reset
+      (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
@@ -2970,7 +2970,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        state.live_context
      with
      | Some error, _ ->
-         add_row "Context:" (Theme.bad ^ error ^ Ansi.reset)
+         add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
      | None, Some observation ->
          (match Observation_layout.context_summary observation with
           | Observation_layout.Context_measured observation ->
@@ -3067,7 +3067,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        answer. *)
     let stamped_or view error =
       match error with
-      | Some detail -> [ Theme.bad ^ "  " ^ detail ^ Ansi.reset ]
+      | Some detail -> [ (Theme.bad ()) ^ "  " ^ detail ^ Ansi.reset ]
       | None -> (
           match view with
           | Some (stamp, lines) when String.equal stamp k.k_name ->
@@ -3307,8 +3307,8 @@ let render_keeper_logs (state : state) =
       | Some error ->
           let style =
             match error with
-            | Metrics_tail.Storage_error _ -> Theme.bad
-            | Metrics_tail.Row_errors _ -> Theme.warn
+            | Metrics_tail.Storage_error _ -> (Theme.bad ())
+            | Metrics_tail.Row_errors _ -> (Theme.warn ())
           in
           let diagnostic =
             Keeper_chat.terminal_safe_text
@@ -3736,7 +3736,7 @@ let render_keeper_message (state : state) =
      | mine, others ->
          List.iter
            (fun entry ->
-             box_line_styled chat_buf chat_cols ~style:Theme.warn
+             box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
                (Printf.sprintf "  (sending %s%s…)"
                   (Keeper_chat.compact_request_id entry.sent_request.request_id)
                   (sending_age entry)))
@@ -3755,11 +3755,11 @@ let render_keeper_message (state : state) =
          (* Cause first. The consequence -- this session only -- is the same
             sentence every time and cost 66 cells before the reader reached the
             part that differs, which the box then cut. *)
-         box_line_styled chat_buf chat_cols ~style:Theme.warn
+         box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            ("  " ^ detail ^ " \xe2\x80\x94 showing this session only")
      | None -> ());
     (if state.msg_loaded_dropped > 0 then
-       box_line_styled chat_buf chat_cols ~style:Theme.warn
+       box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d saved row(s) could not be read and are not shown"
             state.msg_loaded_dropped));
@@ -3767,10 +3767,10 @@ let render_keeper_message (state : state) =
      | false, _ -> ()
      | true, None -> ()
      | true, Some detail ->
-         box_line_styled chat_buf chat_cols ~style:Theme.warn
+         box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
            ("  memory journal unavailable: " ^ detail));
     (if state.msg_memory_visible && state.msg_memory_dropped > 0 then
-       box_line_styled chat_buf chat_cols ~style:Theme.warn
+       box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d memory journal row(s) could not be read and are not shown"
             state.msg_memory_dropped));
@@ -3783,7 +3783,7 @@ let render_keeper_message (state : state) =
      else
        match state.msg_older_error with
        | Some detail ->
-           box_line_styled chat_buf chat_cols ~style:Theme.warn
+           box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
              ("  older messages could not be loaded: " ^ detail)
        | None -> ());
     (match state.msg_live with
@@ -3805,7 +3805,7 @@ let render_keeper_message (state : state) =
                     ("  " ^ spinner ^ " " ^ Ansi.bold ^ "ACTIVE TURN"
                      ^ Ansi.reset ^ Ansi.cyan ^ " · " ^ text)
               | Keeper_chat_transcript.Attention ->
-                  box_line_styled chat_buf chat_cols ~style:Theme.warn ("  " ^ text)))
+                  box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
     (* What is waiting, in the order it will go. Drawn in full rather than as
@@ -3849,7 +3849,7 @@ let render_keeper_message (state : state) =
               "  Keeper %s is no longer registered; draft retained; Esc to choose another"
               display_keeper_name
       in
-      box_line_styled chat_buf chat_cols ~style:Theme.bad unavailable_message
+      box_line_styled chat_buf chat_cols ~style:(Theme.bad ()) unavailable_message
     end;
     let input = Buffer.contents state.msg_input in
     let composer =
@@ -3945,7 +3945,7 @@ let render_keeper_message (state : state) =
       let paint (span : Masc_tui_command.hint_span) =
         match span with
         | Masc_tui_command.Typed text -> Ansi.cyan ^ text ^ Ansi.default_fg
-        | Masc_tui_command.Wrong text -> Theme.bad ^ text ^ Ansi.default_fg
+        | Masc_tui_command.Wrong text -> (Theme.bad ()) ^ text ^ Ansi.default_fg
         | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
       in
       match
@@ -4026,8 +4026,8 @@ let render_keeper_message (state : state) =
 let system_log_level_style : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> Ansi.dim
   | System_info -> Ansi.reset
-  | System_warn -> Theme.warn
-  | System_error -> Theme.bad
+  | System_warn -> (Theme.warn ())
+  | System_error -> (Theme.bad ())
   | System_level_unknown _ -> Ansi.reset
 
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
@@ -4078,7 +4078,7 @@ let render_system_logs (state : state) =
   (match state.system_logs_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   (* The scroll indicator is a real row whenever this page has more entries
@@ -4179,7 +4179,7 @@ let render_verification (state : state) =
   (match state.verification_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.verification_error then 9 else 7 in
@@ -4236,7 +4236,7 @@ let render_verification (state : state) =
                judged as it stands, so it reads as a problem rather than as a
                queue entry. *)
             match r.vr_evidence_error with
-            | Some _ -> Theme.bad
+            | Some _ -> (Theme.bad ())
             | None -> Ansi.reset
           in
           if idx = state.verification_cursor then box_line_selected buf cols line
@@ -4253,7 +4253,7 @@ let render_verification (state : state) =
           "same key again" tail past the box on a narrow terminal, and the
           tail is the half that instructs. *)
        box_line buf cols
-         (Theme.warn
+         ((Theme.warn ())
          ^ Printf.sprintf "  armed: approve %s -- same key again to send"
              (Terminal_text.single_line task_id)
          ^ Ansi.reset)
@@ -4261,7 +4261,7 @@ let render_verification (state : state) =
   (match state.verification_verdict_error with
    | Some err ->
        box_line buf cols
-         (Theme.bad ^ "  "
+         ((Theme.bad ()) ^ "  "
          ^ fit_width (Terminal_text.single_line err) (cols - 8)
          ^ Ansi.reset)
    | None -> ());
@@ -4327,7 +4327,7 @@ let render_harness (state : state) =
   (match state.harness_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.harness_error then 9 else 7 in
@@ -4370,7 +4370,7 @@ let render_harness (state : state) =
           in
           let style =
             match v.hv_fallback_reason with
-            | Some _ -> Theme.warn
+            | Some _ -> (Theme.warn ())
             | None -> Ansi.reset
           in
           if idx = state.harness_cursor then box_line_selected buf cols line
@@ -4386,8 +4386,8 @@ let render_harness (state : state) =
 
 let fusion_run_status_color = function
   | Fusion_running -> Ansi.cyan
-  | Fusion_completed -> Theme.ok
-  | Fusion_failed _ -> Theme.bad
+  | Fusion_completed -> (Theme.ok ())
+  | Fusion_failed _ -> (Theme.bad ())
 
 let fusion_run_clock run =
   Terminal_text.clock_timestamp
@@ -4429,7 +4429,7 @@ let render_fusion_list (state : state) =
   (match state.fusion_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.fusion_error in
@@ -4514,7 +4514,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
     match run.fur_status with
     | Fusion_running | Fusion_completed -> []
     | Fusion_failed failure ->
-        [ Theme.bad
+        [ (Theme.bad ())
         , Printf.sprintf "  Registry failure [%s]: %s"
             (Terminal_text.single_line failure.frs_failure_code)
             (Terminal_text.single_line failure.frs_error)
@@ -4523,9 +4523,9 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let evidence_lines =
     match detail.fud_evidence_status, detail.fud_evidence with
     | Fusion_evidence_pending, None ->
-        [ Theme.warn, "  Evidence: pending (run is still running)" ]
+        [ (Theme.warn ()), "  Evidence: pending (run is still running)" ]
     | Fusion_evidence_absent, None ->
-        [ Theme.warn
+        [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
     | Fusion_evidence_recorded, Some evidence ->
@@ -4547,7 +4547,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
           |> List.mapi (fun index result ->
                  match result with
                  | Fusion_panel_answered answer ->
-                     [ ( Theme.ok
+                     [ ( (Theme.ok ())
                        , Printf.sprintf
                            "  Panel %d [answered] %s  (%d in / %d out)"
                            (index + 1)
@@ -4557,7 +4557,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                      @ fusion_wrapped_block ~width ~indent:"    "
                          answer.fpa_answer
                  | Fusion_panel_failed failure ->
-                     [ ( Theme.bad
+                     [ ( (Theme.bad ())
                        , Printf.sprintf "  Panel %d [failed] %s  [%s]"
                            (index + 1)
                            (Terminal_text.single_line failure.fpf_model)
@@ -4578,14 +4578,14 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
                   judge.fj_resolved_answer
               @ fusion_labeled_block ~width ~label:"Reason" judge.fj_reason
           | Fusion_judge_failed failure ->
-              [ ( Theme.bad
+              [ ( (Theme.bad ())
                 , "  Judge [failed] ["
                   ^ Terminal_text.single_line failure.fj_failure_code
                   ^ "]" )
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
-        [ Theme.ok, "  Evidence: recorded"
+        [ (Theme.ok ()), "  Evidence: recorded"
         ; Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
         ; Ansi.dim, ""
         ; Ansi.magenta, "  RESULT"
@@ -4610,7 +4610,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
         (* The strict decoder makes these states unreachable. Keeping the row
            explicit protects locally-constructed test state from looking like
            a legitimate empty reading. *)
-        [ Theme.bad, "  Fusion evidence invariant violated" ]
+        [ (Theme.bad ()), "  Fusion evidence invariant violated" ]
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
@@ -4635,7 +4635,7 @@ let render_fusion_detail (state : state) run_id =
   (match state.fusion_detail_error with
    | None -> ()
    | Some error ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text error);
        box_divider buf cols);
   let chrome_rows =
@@ -4709,7 +4709,7 @@ let render_repositories (state : state) =
   (match state.repositories_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.repositories_error then 9 else 7 in
@@ -4949,7 +4949,7 @@ let render_changes_list (state : state) =
   (match state.changes_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   (* Changes the log could not carry are said out loud. A list that showed
@@ -5127,7 +5127,7 @@ let render_changes_tree_diff (state : state)
   (match state.changes_tree_diff_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows =
@@ -5235,7 +5235,7 @@ let render_connectors (state : state) =
   (match state.connectors_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = if Option.is_some state.connectors_error then 9 else 7 in
@@ -5274,7 +5274,7 @@ let render_connectors (state : state) =
           let style =
             (* Set up and unreachable is the row to act on: it was working.
                Never configured is dim -- it is a choice, not a fault. *)
-            if c.cn_available && not c.cn_connected then Theme.bad
+            if c.cn_available && not c.cn_connected then (Theme.bad ())
             else if not c.cn_available then Ansi.dim
             else Ansi.reset
           in
@@ -5294,10 +5294,10 @@ let runtime_refresh_badge refresh_state =
   let open Masc.Tui_decode in
   let label, style =
     match refresh_state with
-    | Runtime_probe_fresh -> "fresh", Theme.ok
+    | Runtime_probe_fresh -> "fresh", (Theme.ok ())
     | Runtime_probe_recent -> "recent", Ansi.cyan
-    | Runtime_probe_served_stale -> "stale", Theme.warn
-    | Runtime_probe_warming_up -> "warming", Theme.warn
+    | Runtime_probe_served_stale -> "stale", (Theme.warn ())
+    | Runtime_probe_warming_up -> "warming", (Theme.warn ())
   in
   style ^ label ^ Ansi.reset
 
@@ -5305,16 +5305,16 @@ let runtime_overall_badge status =
   let open Masc.Tui_decode in
   let style =
     match status with
-    | Runtime_probe_reachable -> Theme.ok
+    | Runtime_probe_reachable -> (Theme.ok ())
     | Runtime_probe_no_http_runtimes | Runtime_probe_warming -> Ansi.dim
-    | Runtime_probe_degraded -> Theme.warn
-    | Runtime_probe_unreachable -> Theme.bad
+    | Runtime_probe_degraded -> (Theme.warn ())
+    | Runtime_probe_unreachable -> (Theme.bad ())
   in
   style ^ runtime_probe_status_to_string status ^ Ansi.reset
 
 let runtime_route_badge (runtime : Masc.Tui_decode.runtime_option) =
   if runtime.ro_dispatchable then Ansi.cyan ^ "ready" ^ Ansi.reset
-  else Theme.bad ^ "blocked" ^ Ansi.reset
+  else (Theme.bad ()) ^ "blocked" ^ Ansi.reset
 
 let runtime_probe_badge = function
   | None -> Ansi.dim ^ "unobserved" ^ Ansi.reset
@@ -5322,17 +5322,17 @@ let runtime_probe_badge = function
       let open Masc.Tui_decode in
       let style =
         match probe.rpp_status with
-        | Runtime_provider_reachable -> Theme.ok
+        | Runtime_provider_reachable -> (Theme.ok ())
         | Runtime_provider_skipped_cli -> Ansi.dim
         | Runtime_provider_missing_auth | Runtime_provider_auth_failed ->
-            Theme.warn
+            (Theme.warn ())
         | Runtime_provider_network_error
         | Runtime_provider_server_error
         | Runtime_provider_endpoint_not_found
         | Runtime_provider_http_error
         | Runtime_provider_unknown_http_status
         | Runtime_provider_invalid_endpoint
-        | Runtime_provider_invalid_execution_transport -> Theme.bad
+        | Runtime_provider_invalid_execution_transport -> (Theme.bad ())
       in
       let label =
         match probe.rpp_status with
@@ -5402,14 +5402,14 @@ let render_runtime (state : state) =
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
         let probe_status =
           match snapshot.Masc.Tui_decode.rss_probe with
-          | None -> Theme.warn ^ "probe unavailable" ^ Ansi.reset
+          | None -> (Theme.warn ()) ^ "probe unavailable" ^ Ansi.reset
           | Some probe ->
               runtime_overall_badge probe.rps_status ^ " / "
               ^ runtime_refresh_badge probe.rps_refresh_state
         in
         let probe_read =
           if Option.is_some snapshot.rss_probe_error then
-            Theme.warn ^ " / read failed" ^ Ansi.reset
+            (Theme.warn ()) ^ " / read failed" ^ Ansi.reset
           else ""
         in
         Printf.sprintf "%s (%d lanes, %d candidates)  %s%s  %s  %s"
@@ -5456,7 +5456,7 @@ let render_runtime (state : state) =
   box_divider buf cols;
   let authority_style =
     match state.runtime_surface with
-    | Some snapshot when Option.is_some snapshot.rss_probe_error -> Theme.warn
+    | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
     | Some _ | None -> Ansi.dim
   in
   box_line_styled buf cols ~style:authority_style authority_line;
@@ -5472,7 +5472,7 @@ let render_runtime (state : state) =
   (match state.runtime_surface_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = runtime_listing_chrome ~error:state.runtime_surface_error in
@@ -5600,20 +5600,20 @@ let render_tools (state : state) =
   (match state.tools_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let effective_lines =
     match state.tools_inventory with
-    | None -> [ Theme.warn, " Effective Keeper Surface — not loaded" ]
+    | None -> [ (Theme.warn ()), " Effective Keeper Surface — not loaded" ]
     | Some { Masc.Tui_decode.ts_effective = None; _ } ->
-        [ Theme.warn, " Effective Keeper Surface — no Keeper selected" ]
+        [ (Theme.warn ()), " Effective Keeper Surface — no Keeper selected" ]
     | Some
         { Masc.Tui_decode.ts_effective =
             Some
               (Masc.Tui_decode.Effective_surface_warming { ets_keeper_name });
           _ } ->
-        [ Theme.warn,
+        [ (Theme.warn ()),
           Printf.sprintf " Effective Keeper Surface — %s — warming"
             (Terminal_text.single_line ets_keeper_name) ]
     | Some
@@ -5622,11 +5622,11 @@ let render_tools (state : state) =
               (Masc.Tui_decode.Effective_surface_unavailable
                  { ets_keeper_name; ets_reason; ets_detail });
           _ } ->
-        [ Theme.bad,
+        [ (Theme.bad ()),
           Printf.sprintf " Effective Keeper Surface — %s — unavailable (%s)"
             (Terminal_text.single_line ets_keeper_name)
             (Terminal_text.single_line ets_reason);
-          Theme.bad, "   " ^ Terminal_text.single_line ets_detail ]
+          (Theme.bad ()), "   " ^ Terminal_text.single_line ets_detail ]
     | Some
         { Masc.Tui_decode.ts_effective =
             Some
@@ -5726,7 +5726,7 @@ let render_tools (state : state) =
                  column that says so, so the warning starts there instead of
                  recolouring the name, which is not itself the problem. *)
               let metadata =
-                if tool.tl_surfaces = [] then Theme.warn else Ansi.dim
+                if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
               in
               ( Masc_tui_theme.tone Masc_tui_theme.Normal,
                 Printf.sprintf "      %-30s %s%-8s %s"
@@ -5810,12 +5810,12 @@ let render_keeper_calls (state : state) =
   (match state.keeper_calls_error with
    | None -> ()
    | Some detail ->
-       box_line_styled buf cols ~style:Theme.bad
+       box_line_styled buf cols ~style:(Theme.bad ())
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   (match state.keeper_calls with
    | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 ->
-       box_line_styled buf cols ~style:Theme.warn
+       box_line_styled buf cols ~style:(Theme.warn ())
          (Printf.sprintf
             "  %d row(s) named another keeper and were not drawn"
             snapshot.Masc.Tui_decode.kcs_mismatched);
@@ -5883,7 +5883,7 @@ let render_keeper_calls (state : state) =
           let open Masc.Tui_decode in
           let glyph, style =
             if call.kc_success then ("✓", Ansi.reset)
-            else ("✗", Theme.bad)
+            else ("✗", (Theme.bad ()))
           in
           let duration =
             match call.kc_duration_ms with
@@ -5922,7 +5922,7 @@ let render_keeper_calls (state : state) =
           (match digest with
            | Some digest when !remaining > 0 ->
                box_line_styled buf cols
-                 ~style:(if call.kc_success then Ansi.dim else Theme.bad)
+                 ~style:(if call.kc_success then Ansi.dim else (Theme.bad ()))
                  (Printf.sprintf "  %-8s %s   %s" "" " "
                     (Terminal_text.single_line ("\xe2\x86\x92 " ^ digest)));
                decr remaining
@@ -6076,11 +6076,11 @@ let render_acting (state : state) =
           let style =
             match row.Acting.glyph with
             | Acting.Call_started -> Ansi.cyan
-            | Acting.Call_returned -> Theme.ok
+            | Acting.Call_returned -> (Theme.ok ())
             | Acting.Turn_boundary -> Ansi.reset
             | Acting.Turn_settled -> Ansi.bold
-            | Acting.Failure -> Theme.bad
-            | Acting.Attention -> Theme.warn
+            | Acting.Failure -> (Theme.bad ())
+            | Acting.Attention -> (Theme.warn ())
             | Acting.Quiet -> Ansi.dim
           in
           (* Every row carries the moment the TUI received it, so there is no
@@ -6150,7 +6150,7 @@ let render_runtime_pick (state : state) =
   (match Terminal_text.optional_single_line state.runtime_catalog_error with
    | Some err ->
        box_line buf cols
-         (Theme.bad ^ "  (catalogue unreliable: "
+         ((Theme.bad ()) ^ "  (catalogue unreliable: "
          ^ fit_width err (max 8 (cols - 28))
          ^ ")" ^ Ansi.reset)
    | None ->
@@ -6260,7 +6260,7 @@ let render_code (state : state) =
       match state.code_entries_error with
       | Some detail ->
           framed_line pane_buf pane_cols
-            (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
+            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           1
       | None ->
           if total = 0 then begin
@@ -6347,7 +6347,7 @@ let render_code (state : state) =
        match state.code_notes_error, state.code_notes with
        | Some detail, _ ->
            box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
@@ -6398,7 +6398,7 @@ let render_code (state : state) =
        match state.code_diff_error, state.code_diff with
        | Some detail, _ ->
            box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
@@ -6493,7 +6493,7 @@ let render_code (state : state) =
        match state.code_history_error, state.code_history with
        | Some detail, _ ->
            box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
@@ -6573,7 +6573,7 @@ let render_code (state : state) =
        match state.code_file_error, state.code_file with
        | Some detail, _ ->
            box_line pane_buf pane_cols
-             (Theme.bad ^ "  " ^ Terminal_text.single_line detail
+             ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail
              ^ Ansi.reset);
            for _ = 2 to content_height do
              box_empty pane_buf pane_cols
@@ -6731,7 +6731,7 @@ let render_resources (state : state) =
       match state.resources_error with
       | Some detail ->
           framed_line pane_buf pane_cols
-            (Theme.bad ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
+            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset);
           1
       | None ->
           if total = 0 then begin
@@ -6781,7 +6781,7 @@ let render_resources (state : state) =
     (match state.resource_content_error, state.resource_content with
      | Some detail, _ ->
          box_line pane_buf pane_cols
-           (Theme.bad ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
+           ((Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset);
          for _ = 2 to content_height do
            box_empty pane_buf pane_cols
          done
@@ -6882,7 +6882,7 @@ let render_prompts (state : state) =
   (match state.prompts_error with
    | Some detail ->
      box_line buf cols
-       (Theme.bad ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
+       ((Theme.bad ()) ^ "  " ^ fit_width (Terminal_text.single_line detail) (cols - 6)
         ^ Ansi.reset)
    | None -> ());
   let drawn = ref 0 in
@@ -6891,9 +6891,9 @@ let render_prompts (state : state) =
       if index >= first && index < first + list_height then begin
         incr drawn;
         let mark =
-          if row.Tui_decode.pr_has_override then Theme.warn ^ "*" ^ Ansi.reset
+          if row.Tui_decode.pr_has_override then (Theme.warn ()) ^ "*" ^ Ansi.reset
           else if row.Tui_decode.pr_file_exists then " "
-          else Theme.bad ^ "!" ^ Ansi.reset
+          else (Theme.bad ()) ^ "!" ^ Ansi.reset
         in
         let label =
           Printf.sprintf "%s %s  %s"
@@ -7019,7 +7019,7 @@ let render_config (state : state) =
   let content_height = max 1 (rows - 7) in
   (match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
-       box_line buf cols (Theme.bad ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
+       box_line buf cols ((Theme.bad ()) ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);
        for _ = 2 to content_height do
          box_empty buf cols
        done
@@ -7159,8 +7159,8 @@ let context_component_style = function
   | Turn_record.Prompt_block Prompt_block_id.Memory_os_recall ->
       Ansi.bold ^ Ansi.magenta
   | Turn_record.Prompt_block _ -> Ansi.bold
-  | Turn_record.Tool_schemas -> Theme.warn
-  | Turn_record.Message_user -> Theme.info
+  | Turn_record.Tool_schemas -> (Theme.warn ())
+  | Turn_record.Message_user -> (Theme.info ())
   | Turn_record.Message_tool_use
   | Turn_record.Message_tool_result -> Ansi.cyan
   | Turn_record.Message_system
@@ -7244,7 +7244,7 @@ let context_composition_lines (record : Turn_record.t) =
   in
   let components =
     match record.input_components with
-    | None -> [ Theme.bad ^ "  Exact component attribution unavailable" ^ Ansi.reset ]
+    | None -> [ (Theme.bad ()) ^ "  Exact component attribution unavailable" ^ Ansi.reset ]
     | Some components ->
         let total = Option.value ~default:0 (Inspector.attributed_bytes record) in
         let heading =
@@ -7279,7 +7279,7 @@ let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
   match state.context_inspector_exact with
   | Some index ->
       (match List.nth_opt capture.blocks index with
-       | None -> [ Theme.bad ^ "  Selected prompt block is no longer present" ^ Ansi.reset ]
+       | None -> [ (Theme.bad ()) ^ "  Selected prompt block is no longer present" ^ Ansi.reset ]
        | Some block ->
            let width = max 8 (snd (get_terminal_size ()) - 6) in
            let heading =
@@ -7309,7 +7309,7 @@ let context_prompt_lines state (capture : Masc.Keeper_prompt_capture.capture) =
                && record.absolute_turn = capture.absolute_turn ->
             []
         | Some (_, { Masc_tui_context_inspector.turn = Ok _; _ }) ->
-            [ Theme.warn
+            [ (Theme.warn ())
               ^ "  Prompt capture and component summary describe different turns."
               ^ Ansi.reset ]
         | Some _ | None -> []
@@ -7363,7 +7363,7 @@ let context_input_map_lines state (record : Turn_record.t)
            in
            heading :: "" :: body
        | Some _ | None ->
-           [ Theme.bad ^ "  Exact text is not retained for this component"
+           [ (Theme.bad ()) ^ "  Exact text is not retained for this component"
              ^ Ansi.reset ])
   | None ->
       let identity =
@@ -7412,18 +7412,18 @@ let context_inspector_content_lines state =
            (match reading.turn with
             | Ok record -> context_composition_lines record
             | Error detail ->
-                [ Theme.bad ^ "  Composition unavailable: "
+                [ (Theme.bad ()) ^ "  Composition unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
        | Masc_tui_context_inspector.Prompt_blocks ->
            (match reading.prompt with
             | Ok capture -> context_prompt_lines state capture
             | Error detail ->
-                [ Theme.bad ^ "  Prompt text unavailable: "
+                [ (Theme.bad ()) ^ "  Prompt text unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ])
        | Masc_tui_context_inspector.Input_map ->
            (match reading.turn with
             | Error detail ->
-                [ Theme.bad ^ "  Input map unavailable: "
+                [ (Theme.bad ()) ^ "  Input map unavailable: "
                   ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset ]
             | Ok record ->
                 let capture =
@@ -7452,7 +7452,7 @@ let render_context_inspector state =
   in
   let tab_label tab number label =
     if state.context_inspector_tab = tab then
-      Ansi.bold ^ Theme.info ^ number ^ ":" ^ label ^ Ansi.reset
+      Ansi.bold ^ (Theme.info ()) ^ number ^ ":" ^ label ^ Ansi.reset
     else Ansi.dim ^ number ^ ":" ^ label ^ Ansi.reset
   in
   framed_top buf cols;

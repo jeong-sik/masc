@@ -166,17 +166,27 @@ module For_testing = struct
   let best_color_for_level = project_color_for_level
 end
 
+(* The sixteen slots an SGR colour code selects. A terminal answers for each
+   one separately, and may answer for none of them. *)
+let ansi_slot_count = 16
+
 type t =
   { foreground : rgb
   ; background : rgb
+  ; ansi : rgb option array (* [ansi_slot_count] entries *)
   }
 
 let foreground palette = palette.foreground
 let background palette = palette.background
 
+let ansi palette index =
+  if index < 0 || index >= ansi_slot_count then None else palette.ansi.(index)
+;;
+
 type slot =
   | Foreground
   | Background
+  | Ansi of int
 
 type response =
   | Not_palette_response
@@ -185,7 +195,23 @@ type response =
       ; color : rgb option
       }
 
-let query = "\x1b]10;?\x1b\\\x1b]11;?\x1b\\"
+(* OSC 10 and 11 are the text and the page. OSC 4 asks what each of the
+   sixteen palette entries actually is, which is the only way to know what an
+   SGR colour code will draw on this terminal rather than on the one the
+   colours were picked against.
+
+   All eighteen go out together and the answers are read as they arrive.
+   Nothing waits on the OSC 4 replies: a terminal that answers 10 and 11 but
+   not 4 -- or a multiplexer that answers none -- leaves those slots unknown,
+   which is a state the readers already have to handle. *)
+let osc_query slot = Printf.sprintf "\x1b]%s;?\x1b\\" slot
+
+let query =
+  String.concat ""
+    (osc_query "10" :: osc_query "11"
+     :: List.init ansi_slot_count (fun index ->
+            osc_query (Printf.sprintf "4;%d" index)))
+;;
 
 let hex_component text =
   let is_hex = function
@@ -237,12 +263,40 @@ let parse_response body =
   in
   if String.starts_with ~prefix:"10;" body then parse Foreground "10;"
   else if String.starts_with ~prefix:"11;" body then parse Background "11;"
+  else if String.starts_with ~prefix:"4;" body then
+    (* [4;<index>;<colour>]. The index is the terminal's own echo of what was
+       asked, so an answer for a slot outside the sixteen is not an answer to
+       any question this sent. *)
+    match String.index_opt body ';' with
+    | None -> Not_palette_response
+    | Some first -> (
+      let rest =
+        String.sub body (first + 1) (String.length body - first - 1)
+      in
+      match String.index_opt rest ';' with
+      | None -> Not_palette_response
+      | Some second -> (
+        let index_text = String.sub rest 0 second in
+        match int_of_string_opt index_text with
+        | Some index when index >= 0 && index < ansi_slot_count ->
+          parse (Ansi index) (Printf.sprintf "4;%d;" index)
+        | Some _ | None -> Not_palette_response))
   else Not_palette_response
 ;;
 
-let of_responses ~foreground ~background =
+let of_responses ~foreground ~background ~ansi =
   match foreground, background with
-  | Some foreground, Some background -> Some { foreground; background }
+  | Some foreground, Some background ->
+    (* The sixteen are optional and the two are not: without a background
+       there is nothing to measure a colour against, and every reader here
+       measures against it. A short or long [ansi] is a caller that did not
+       build one slot per code, so it is taken as none rather than silently
+       shifting which colour each code means. *)
+    let ansi =
+      if Array.length ansi = ansi_slot_count then Array.copy ansi
+      else Array.make ansi_slot_count None
+    in
+    Some { foreground; background; ansi }
   | Some _, None | None, Some _ | None, None -> None
 ;;
 

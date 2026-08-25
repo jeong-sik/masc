@@ -78,9 +78,23 @@ type t
 val foreground : t -> rgb
 val background : t -> rgb
 
+val ansi_slot_count : int
+(** Sixteen: the palette entries an SGR colour code can select. *)
+
+val ansi : t -> int -> rgb option
+(** What the terminal said its palette entry [index] is, and [None] where it
+    did not say -- it answered OSC 10 and 11 but not OSC 4, or the index is
+    outside the sixteen. Unknown rather than a guess: a colour picked for one
+    theme is unreadable on another, so a reader that cannot tell has to say
+    so instead of assuming. *)
+
 type slot =
   | Foreground
   | Background
+  | Ansi of int
+      (** One of the sixteen palette entries an SGR colour code selects. The
+          index is inside 0 to {!ansi_slot_count} minus one; a reply naming
+          anything else is not an answer to a question this asked. *)
 
 type response =
   | Not_palette_response
@@ -98,7 +112,16 @@ val parse_response : string -> response
     malformed; [color = None] prevents those bytes from leaking into input
     while keeping the palette unavailable. *)
 
-val of_responses : foreground:rgb option -> background:rgb option -> t option
+val of_responses
+  :  foreground:rgb option
+  -> background:rgb option
+  -> ansi:rgb option array
+  -> t option
+(** [None] without both a foreground and a background: every reading here is
+    against the background, so there is nothing to build. [ansi] is one entry
+    per SGR colour code and any of them may be [None]; an array of the wrong
+    length is taken as all unknown rather than shifting which code means
+    which colour. *)
 (** A palette exists only when both terminal defaults were read. *)
 
 val current : unit -> t option

@@ -4,6 +4,7 @@
    move. *)
 
 module Terminal_palette = Masc_tui_terminal_palette
+module Color = Masc_tui_color
 
 let colors_enabled_for_environment ~force_color ~no_color =
   match force_color with
@@ -64,75 +65,18 @@ let blend_component ~toward ~ratio component =
    Receded text is still text: blended all the way to the background it is
    gone, not quiet. WCAG asks 3:1 of text that is not the main reading, and
    low-contrast themes have little room to spend -- Solarized Dark starts at
-   4.4:1, so a flat two-fifths step lands it at 2.58:1 and turns a quiet row
+   4.75:1, so a flat two-fifths step lands it at 2.58:1 and turns a quiet row
    into an unreadable one. So two fifths is a ceiling rather than the step,
-   and the floor decides what is actually taken. *)
+   and the floor decides what is actually taken.
+
+   The arithmetic is [Masc_tui_color]'s; the two numbers are this module's
+   call about how a row should look. *)
 let recede_max_ratio = 0.4
 let recede_contrast_floor = 3.0
 
-(* Bisection depth. Eight halvings of the ratio range settle it inside
-   0.4/256, finer than one step of an 8-bit channel. *)
-let recede_search_steps = 8
-
-let relative_luminance color =
-  let channel value =
-    let v = float_of_int value /. 255. in
-    if v <= 0.03928 then v /. 12.92 else ((v +. 0.055) /. 1.055) ** 2.4
-  in
-  (0.2126 *. channel (Terminal_palette.red color))
-  +. (0.7152 *. channel (Terminal_palette.green color))
-  +. (0.0722 *. channel (Terminal_palette.blue color))
-;;
-
-let contrast_ratio a b =
-  let x = relative_luminance a and y = relative_luminance b in
-  (Float.max x y +. 0.05) /. (Float.min x y +. 0.05)
-;;
-
-(* The terminal's own text, stepped toward the terminal's own background.
-
-   SGR 2 is what every row used before this, and it blends toward black. On a
-   dark terminal that is a step toward the background and the text recedes,
-   which is the point of it. On a light terminal it is a step away: the faint
-   row comes out darker than the ordinary rows beside it and the page reads
-   upside down (microsoft/terminal#16493). SGR 90 does not rescue it either --
-   Solarized and its relatives remap the bright colours onto a grey ramp, so
-   what it draws answers to the theme rather than to the background.
-
-   Computing the colour answers to neither. The direction comes from the two
-   colours the terminal reported, so it recedes on a light terminal and on a
-   dark one without either being a special case, and the distance is the
-   largest one that still clears the contrast floor. [None] where even the
-   smallest step does not: a theme whose text is already below the floor has
-   no room to give away, and saying so is better than returning a colour that
-   cannot be read. *)
 let recede_rgb ~foreground ~background =
-  let blend ratio =
-    let channel select =
-      blend_component ~toward:(select background) ~ratio (select foreground)
-    in
-    Terminal_palette.make_rgb
-      ~red:(channel Terminal_palette.red)
-      ~green:(channel Terminal_palette.green)
-      ~blue:(channel Terminal_palette.blue)
-  in
-  let clears ratio =
-    contrast_ratio (blend ratio) background >= recede_contrast_floor
-  in
-  if clears recede_max_ratio then Some (blend recede_max_ratio)
-  else if not (clears 0.) then None
-  else
-    (* Contrast falls as the step grows, so the largest step that clears the
-       floor is where bisection lands. [low] always clears and [high] never
-       does, so the answer is [low] whenever the search runs out. *)
-    let rec search ~low ~high steps =
-      if steps = 0 then blend low
-      else
-        let mid = (low +. high) /. 2. in
-        if clears mid then search ~low:mid ~high (steps - 1)
-        else search ~low ~high:mid (steps - 1)
-    in
-    Some (search ~low:0. ~high:recede_max_ratio recede_search_steps)
+  Color.recede_toward ~background ~floor:recede_contrast_floor
+    ~max_ratio:recede_max_ratio foreground
 ;;
 
 let recede_for ~colors_enabled ~dim ~project palette =
@@ -162,20 +106,24 @@ let recede_for ~colors_enabled ~dim ~project palette =
             projected_foreground ~colors_enabled projected))
 ;;
 
+(* How far the reader's own row is set apart from the page behind it. A light
+   page darkens by a little and a dark page lightens by more, because the same
+   step reads as less against a dark ground. *)
+let user_row_light_ratio = 0.04
+let user_row_dark_ratio = 0.12
+
 let user_message_background_rgb background =
-  let red = Terminal_palette.red background in
-  let green = Terminal_palette.green background in
-  let blue = Terminal_palette.blue background in
-  let luminance =
-    (0.299 *. float_of_int red)
-    +. (0.587 *. float_of_int green)
-    +. (0.114 *. float_of_int blue)
+  let toward, ratio =
+    if Color.is_light background then 0, user_row_light_ratio
+    else 255, user_row_dark_ratio
   in
-  let toward, ratio = if luminance > 128. then 0, 0.04 else 255, 0.12 in
+  let component select =
+    blend_component ~toward ~ratio (select background)
+  in
   Terminal_palette.make_rgb
-    ~red:(blend_component ~toward ~ratio red)
-    ~green:(blend_component ~toward ~ratio green)
-    ~blue:(blend_component ~toward ~ratio blue)
+    ~red:(component Terminal_palette.red)
+    ~green:(component Terminal_palette.green)
+    ~blue:(component Terminal_palette.blue)
 ;;
 
 let user_message_background_for ~colors_enabled ~project palette =
@@ -190,14 +138,6 @@ let user_message_background_for ~colors_enabled ~project palette =
       |> projected_background ~colors_enabled
     | None -> ""
 ;;
-
-module For_testing = struct
-  let colors_enabled = colors_enabled_for_environment
-  let user_message_background_rgb = user_message_background_rgb
-  let user_message_background = user_message_background_for
-  let recede_rgb = recede_rgb
-  let recede = recede_for
-end
 
 module Sgr = struct
   let reset = "\027[0m"
@@ -267,6 +207,71 @@ let status = function
   | Bad -> Sgr.red
   | Info -> Sgr.cyan
   | Muted -> Sgr.dim
+
+(* What a status colour has to clear against the page to be read as text.
+   WCAG 2 AA for body text. *)
+let status_contrast_floor = 4.5
+
+(* Which of the sixteen palette entries each status names. The SGR codes above
+   select these, so this is the same decision written as an index; the pair is
+   what lets a reading of state be checked against the theme it lands on. *)
+let status_ansi_index = function
+  | Ok -> 2
+  | Warn -> 3
+  | Bad -> 1
+  | Info -> 6
+  | Muted -> 8
+
+(* A semantic colour, made readable where the terminal's own palette is not.
+
+   The colours were picked against a dark terminal and are drawn out of the
+   reader's palette, so what they come out as is the reader's theme's call.
+   Measured across twelve base16 schemes, that call fails often: yellow at
+   1.44:1 on default-light, bright black at 1.69:1 on Nord. Neither is a
+   dimmer shade of a warning -- they are a warning nobody sees.
+
+   Where the terminal answered OSC 4 and the entry it named does clear the
+   floor, the plain SGR code goes out and the theme keeps its choice. Where it
+   does not, the same colour is lifted in lightness alone until it does, so a
+   red stays a red. Where the terminal said nothing, the plain code goes out,
+   which is what this drew before. *)
+let status_readable_for ~colors_enabled ~project palette state =
+  let code = status state in
+  if not colors_enabled then code
+  else
+    match palette with
+    | None -> code
+    | Some palette -> (
+      match Terminal_palette.ansi palette (status_ansi_index state) with
+      | None -> code
+      | Some entry ->
+        let background = Terminal_palette.background palette in
+        let lifted =
+          Color.lift_for_contrast ~background ~floor:status_contrast_floor
+            entry
+        in
+        if lifted = entry then code
+        else
+          (match project lifted with
+           | None -> code
+           | Some _ as projected ->
+             projected_foreground ~colors_enabled projected))
+;;
+
+module For_testing = struct
+  let colors_enabled = colors_enabled_for_environment
+  let user_message_background_rgb = user_message_background_rgb
+  let user_message_background = user_message_background_for
+  let recede_rgb = recede_rgb
+  let recede = recede_for
+  let status_readable = status_readable_for
+  let status_ansi_index = status_ansi_index
+end
+
+let status_readable palette state =
+  status_readable_for ~colors_enabled ~project:Terminal_palette.best_color
+    palette state
+;;
 
 let selection = Sgr.reverse
 let border_focus = Sgr.cyan

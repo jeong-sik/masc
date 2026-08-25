@@ -6,57 +6,6 @@
     code. [Masc_tui_ansi] re-exports these under its historical names; new call
     sites use this module directly so a theme swap moves every screen at once. *)
 
-(** Test-only environment and projection fixtures. The R12 check in
-    [scripts/check-ssot.sh] is the repository production boundary: code under
-    [bin/] and [lib/] may not name this module outside its owner
-    implementation/interface. Production callers use the semantic tokens
-    below. *)
-module For_testing : sig
-  val colors_enabled
-    :  force_color:string option
-    -> no_color:string option
-    -> bool
-  (** Pure environment-policy fixture. Only [force_color = Some "1"]
-      overrides a non-empty [no_color]. *)
-
-  val user_message_background_rgb
-    :  Masc_tui_terminal_palette.rgb
-    -> Masc_tui_terminal_palette.rgb
-  (** Pure low-contrast blend derived from the terminal's default background.
-      Light backgrounds blend 4 percent toward black; dark backgrounds blend
-      12 percent toward white. *)
-
-  val user_message_background
-    :  colors_enabled:bool
-    -> project:
-         (Masc_tui_terminal_palette.rgb
-          -> Masc_tui_terminal_palette.projected_color option)
-    -> Masc_tui_terminal_palette.t option
-    -> string
-  (** Pure capability/environment fixture for the production semantic token. *)
-
-  val recede_rgb
-    :  foreground:Masc_tui_terminal_palette.rgb
-    -> background:Masc_tui_terminal_palette.rgb
-    -> Masc_tui_terminal_palette.rgb option
-  (** Pure blend: the terminal's text stepped toward its background, as far as
-      the contrast floor allows and no further. Direction comes from the two
-      colours, so it darkens on a light terminal and lightens on a dark one.
-      [None] where the text is already under the floor and has no room to
-      give. *)
-
-  val recede
-    :  colors_enabled:bool
-    -> dim:string
-    -> project:
-         (Masc_tui_terminal_palette.rgb
-          -> Masc_tui_terminal_palette.projected_color option)
-    -> Masc_tui_terminal_palette.t option
-    -> string
-  (** Pure capability/environment fixture for {!val:recede}. [dim] is the
-      fallback the production token passes, so a test can tell the computed
-      colour from the fallback without naming an escape. *)
-end
 
 val colors_enabled : bool
 (** no-color.org: a non-empty NO_COLOR suppresses styling. Structure —
@@ -164,6 +113,92 @@ val tone : tone -> string
 type status = Ok | Warn | Bad | Info | Muted
 
 val status : status -> string
+(** The plain SGR code. What the reader's own theme puts in that palette
+    entry; use {!status_readable} where the palette is known. *)
+
+val status_readable : Masc_tui_terminal_palette.t option -> status -> string
+(** The same colour, made readable against the page it lands on.
+
+    A status colour is drawn out of the reader's palette, so what it comes out
+    as is their theme's call -- and across twelve base16 schemes that call
+    fails often enough to matter: yellow at 1.44:1 on default-light, bright
+    black at 1.69:1 on Nord. That is not a dimmer warning, it is a warning
+    nobody sees.
+
+    Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
+    code goes out and the theme keeps its choice. Where it does not, the same
+    colour is lifted in lightness alone until it does, so a red is still a
+    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    the reply -- the plain code goes out, which is what every row drew before
+    this existed. *)
+
+(** Test-only environment and projection fixtures. The R12 check in
+    [scripts/check-ssot.sh] is the repository production boundary: code under
+    [bin/] and [lib/] may not name this module outside its owner
+    implementation/interface. Production callers use the semantic tokens
+    below. *)
+module For_testing : sig
+  val colors_enabled
+    :  force_color:string option
+    -> no_color:string option
+    -> bool
+  (** Pure environment-policy fixture. Only [force_color = Some "1"]
+      overrides a non-empty [no_color]. *)
+
+  val user_message_background_rgb
+    :  Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb
+  (** Pure low-contrast blend derived from the terminal's default background.
+      Light backgrounds blend 4 percent toward black; dark backgrounds blend
+      12 percent toward white. *)
+
+  val user_message_background
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for the production semantic token. *)
+
+  val recede_rgb
+    :  foreground:Masc_tui_terminal_palette.rgb
+    -> background:Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb option
+  (** Pure blend: the terminal's text stepped toward its background, as far as
+      the contrast floor allows and no further. Direction comes from the two
+      colours, so it darkens on a light terminal and lightens on a dark one.
+      [None] where the text is already under the floor and has no room to
+      give. *)
+
+  val status_readable
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> status
+    -> string
+  (** Pure capability/environment fixture for {!val:status_readable}, so a
+      test can drive it without the process capability deciding the answer. *)
+
+  val status_ansi_index : status -> int
+  (** Which of the sixteen palette entries a status names -- the same decision
+      the SGR code makes, as an index, so a test can look up what the reader's
+      theme actually put there. *)
+
+  val recede
+    :  colors_enabled:bool
+    -> dim:string
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:recede}. [dim] is the
+      fallback the production token passes, so a test can tell the computed
+      colour from the fallback without naming an escape. *)
+end
 
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)

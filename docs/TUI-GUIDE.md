@@ -718,9 +718,14 @@ than slowly. The pane then answers three more questions in place:
 - `m` swaps it for the notes anchored to the file — who left each one, its
   kind, the line span, and the task it rides with. Notes are keyed by the
   server-minted codebase slug, which only a Repositories row carries, so
-  `m` answers in repository scope and says why not in the others.
+  `m` answers in repository scope and says why not in the others. Inside
+  the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
+  Decision / Question / Bookmark); the acting identity is the bearer's.
+- `c` swaps it for the recorded keeper activity — which keeper wrote which
+  lines, through what tool call (or manual note), and when. Same
+  repository-scope rule as the notes.
 
-One overlay at a time — opening any of the three closes the other two, so
+One overlay at a time — opening any of them closes the others, so
 `j`/`k` always has one owner. `Esc` closes the overlay first, then the
 file, then climbs directories.
 
@@ -826,6 +831,8 @@ Per surface:
 | `H` | Code, file open | The commits that touched the file |
 | `d` | Code, file open | The working tree's diff against HEAD |
 | `m` | Code, file open, repository scope | The notes anchored to the file |
+| `w` | Code, notes view | Add a note through the `$EDITOR` form |
+| `c` | Code, file open, repository scope | The recorded keeper edits over the file |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |

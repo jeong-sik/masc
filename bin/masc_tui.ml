@@ -1118,8 +1118,15 @@ type async_msg =
       (Tui_decode.keeper_tool_approval list, string) result
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
-  | Keeper_tool_modes_loaded of ((string * string) list, string) result
-  | Keeper_tool_mode_set of string * string * (unit, string) result
+  | Keeper_tool_modes_loaded of
+      ((string * string) list, string) result * Approval.Flow.generation
+      (** The stance listing replaces the whole yolo set, so a fetch that
+          started before an operator armed a gate would put the pre-press
+          answer back. The generation says which flow the answer belongs to
+          and a stale one is dropped, the same guard the held-call listing
+          already rides. *)
+  | Keeper_tool_mode_set of
+      string * string * (unit, string) result * Approval.Flow.generation
       (** keeper, tool call id, allow, and whether a wait was released — the
           Approvals-surface twin of [Keeper_chat_approval_answered], which
           needs the chat request this path does not have. *)
@@ -1376,48 +1383,70 @@ let launch_keeper_tool_approvals_load state ~mailbox =
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_modes_loaded result)
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_modes_loaded (Error "Eio switch is unavailable"))
+  (* [reserve_refresh] declines while the operator's own press is still in
+     flight: the answer on the way back would be the stance from before it. *)
+  let flow, reserved = Approval.Flow.reserve_refresh state.approval_flow in
+  state.approval_flow <- flow;
+  match reserved with
+  | None -> ()
+  | Some generation -> (
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try Masc_tui_loader.load_keeper_tool_approval_modes ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Keeper_tool_modes_loaded
+               (Error "Eio switch is unavailable", generation)))
 
 let launch_keeper_tool_mode_set state ~mailbox ~keeper_name ~mode =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.post_keeper_tool_approval_mode ~host ~port ~keeper_name
-          ~mode
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Keeper_tool_mode_set (keeper_name, mode, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_tool_mode_set
-           (keeper_name, mode, Error "Eio switch is unavailable"))
+  (* [begin_action] takes the newest generation, so a stance listing already
+     on the wire stops being current and cannot put the old answer back on
+     top of this press. It also refuses a second press while one is open. *)
+  match Approval.Flow.begin_action state.approval_flow with
+  | Error `Already_inflight ->
+      add_event state "system"
+        (Printf.sprintf "%s's gate is already changing; wait for the answer"
+           keeper_name)
+  | Ok (flow, generation) -> (
+      state.approval_flow <- flow;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_http.post_keeper_tool_approval_mode ~host ~port
+              ~keeper_name ~mode
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox
+          (Keeper_tool_mode_set (keeper_name, mode, result, generation))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Keeper_tool_mode_set
+               ( keeper_name,
+                 mode,
+                 Error "Eio switch is unavailable",
+                 generation )))
 
 let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
     ~tool_call_id ~allow =
@@ -4864,19 +4893,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
-  | Keeper_tool_modes_loaded result ->
-      (match result with
-       | Ok overrides ->
-           state.keeper_yolo_names <-
-             List.filter_map
-               (fun (keeper, mode) ->
-                 if String.equal mode "yolo" then Some keeper else None)
-               overrides
-       | Error _ ->
-           (* The stance listing is advisory colouring; a failed fetch keeps
-              the last known set rather than flashing every name back. *)
-           ())
-  | Keeper_tool_mode_set (keeper_name, mode, result) ->
+  | Keeper_tool_modes_loaded (result, generation) ->
+      (* A listing from an older flow describes the stance before the press
+         that superseded it. Dropping it is what keeps an armed gate armed
+         on screen. *)
+      if Approval.Flow.is_current state.approval_flow generation then
+        (match result with
+         | Ok overrides ->
+             state.keeper_yolo_names <-
+               List.filter_map
+                 (fun (keeper, mode) ->
+                   if String.equal mode "yolo" then Some keeper else None)
+                 overrides
+         | Error _ ->
+             (* The stance listing is advisory colouring; a failed fetch keeps
+                the last known set rather than flashing every name back. *)
+             ())
+  | Keeper_tool_mode_set (keeper_name, mode, result, generation) ->
+      let flow, owned = Approval.Flow.finish_action state.approval_flow generation in
+      state.approval_flow <- flow;
+      if not owned then ()
+      else
       (match result with
        | Ok () ->
            state.keeper_yolo_names <-

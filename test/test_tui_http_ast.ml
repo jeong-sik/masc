@@ -767,6 +767,34 @@ let test_server_identity_is_revalidated_on_every_refresh () =
        ~fields:[ "server_identity" ])
 ;;
 
+let test_gate_stance_listing_rides_the_flow_generation () =
+  let main_path = "bin/masc_tui.ml" in
+  (* The stance listing replaces the whole yolo set. Two daemon fibers reach
+     it -- a periodic GET and the operator's own POST -- and the network
+     decides which lands first, so a GET that started before the press can
+     put the pre-press answer back and the armed gate reads as auto again.
+     The next press then computes yolo a second time instead of toggling
+     back, which is what makes it visible rather than a flicker. The held
+     call listing already rides [Approval.Flow]; these four pin the stance
+     listing onto the same guard. *)
+  check int "the stance fetch takes a generation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_modes_load"
+       ~callee:"Approval.Flow.reserve_refresh");
+  check int "arming a gate opens an action" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"launch_keeper_tool_mode_set"
+       ~callee:"Approval.Flow.begin_action");
+  check int "a stale stance listing is dropped" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.is_current");
+  check int "the press closes its own action" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_async_message"
+       ~callee:"Approval.Flow.finish_action")
+;;
+
 let test_planning_refresh_reconciles_navigation_identity () =
   let main_path = "bin/masc_tui.ml" in
   check int "planning apply owns one identity reconciliation" 1
@@ -1558,6 +1586,10 @@ let () =
           "planning refresh reconciles navigation identity"
           `Quick
           test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "gate stance listing rides the flow generation"
+          `Quick
+          test_gate_stance_listing_rides_the_flow_generation;
         test_case
           "the screen does not read the server's bind address"
           `Quick

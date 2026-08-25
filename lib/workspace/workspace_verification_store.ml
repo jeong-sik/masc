@@ -273,25 +273,61 @@ let submitted_evidence_item_withheld_to_yojson = function
     submitted_evidence_item_transport_to_yojson item
 ;;
 
-let submitted_evidence_items_transport_to_yojson items =
-  let rendered, _ =
-    List.fold_left
-      (fun (acc, spent) item ->
-        match item with
-        | Evidence_artifact { content; truncated = false; _ } ->
-          let weight = String.length content in
-          if spent + weight > evidence_transport_max_bytes
-          then submitted_evidence_item_withheld_to_yojson item :: acc, spent
-          else submitted_evidence_item_transport_to_yojson item :: acc, spent + weight
-        | Evidence_note _
-        | Evidence_artifact _
-        | Evidence_invalid_reference
-        | Evidence_artifact_unreadable _ ->
-          submitted_evidence_item_transport_to_yojson item :: acc, spent)
-      ([], 0)
-      items
+(* Which artifacts keep their content, by index. Smallest first, so the budget
+   buys the most items the judge can actually read.
+
+   Filling in submission order instead would let one large-but-under-cap
+   artifact spend the whole budget and push every later item to a link — and
+   which items the judge sees would then depend on the order the producer
+   happened to list its evidence in, not on the evidence. Sorting decides it by
+   size; ties break on index so the choice is the same on every run. The
+   emitted list stays in submission order. *)
+let carried_artifact_indices items =
+  let weighed =
+    List.mapi (fun index item -> index, item) items
+    |> List.filter_map (function
+         | index, Evidence_artifact { content; truncated = false; _ } ->
+           Some (index, String.length content)
+         | ( _
+           , ( Evidence_note _
+             | Evidence_artifact _
+             | Evidence_invalid_reference
+             | Evidence_artifact_unreadable _ ) ) -> None)
   in
-  List.rev rendered
+  let sorted =
+    List.stable_sort
+      (fun (index_a, weight_a) (index_b, weight_b) ->
+        match Int.compare weight_a weight_b with
+        | 0 -> Int.compare index_a index_b
+        | order -> order)
+      weighed
+  in
+  let carried, _ =
+    List.fold_left
+      (fun (carried, spent) (index, weight) ->
+        if spent + weight > evidence_transport_max_bytes
+        then carried, spent
+        else index :: carried, spent + weight)
+      ([], 0)
+      sorted
+  in
+  carried
+;;
+
+let submitted_evidence_items_transport_to_yojson items =
+  let carried = carried_artifact_indices items in
+  List.mapi
+    (fun index item ->
+      match item with
+      | Evidence_artifact { truncated = false; _ } ->
+        if List.mem index carried
+        then submitted_evidence_item_transport_to_yojson item
+        else submitted_evidence_item_withheld_to_yojson item
+      | Evidence_note _
+      | Evidence_artifact _
+      | Evidence_invalid_reference
+      | Evidence_artifact_unreadable _ -> submitted_evidence_item_transport_to_yojson item)
+    items
 ;;
 
 let submitted_evidence_access_transport_to_yojson = function

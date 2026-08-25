@@ -1356,11 +1356,23 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
           ^ Ansi.reset
         ]
     | Board_detail.Ready (_, comments) ->
-        List.map
+        List.concat_map
           (fun c ->
-             Printf.sprintf "  %s: %s"
-               (fit_width (Terminal_text.single_line c.bc_author) 16)
-               (fit_width (Terminal_text.single_line c.bc_content) (cols - 24)))
+             let author = Terminal_text.single_line c.bc_author in
+             let created_at = Terminal_text.single_line c.bc_created_at in
+             let heading =
+               Printf.sprintf "  %s@%s%s%s  %s%s" Ansi.cyan author Ansi.reset
+                 Ansi.dim created_at Ansi.reset
+             in
+             let body =
+               Message_layout.wrap_body ~markdown:chat_markdown
+                 ~max_cells:(max 1 (cols - 10))
+                 ~sanitize:Terminal_text.single_line c.bc_content
+             in
+             match body with
+             | [ line ] -> [ heading ^ "  " ^ line ]
+             | [] -> [ heading ^ "  " ^ Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset ]
+             | lines -> heading :: List.map (fun line -> "    " ^ line) lines)
           comments
   in
   let detail_line_count = List.length detail_lines in
@@ -1400,9 +1412,11 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
    marked, exactly the roster-beside-detail shape. *)
 let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
   framed_top buf cols;
+  let focused = state.board_focus = Board_posts_pane in
   framed_line buf cols
-    (Ansi.dim
-     ^ Printf.sprintf " Board (%d)" (List.length state.board_posts)
+    ((if focused then Ansi.bold else Ansi.dim)
+     ^ Printf.sprintf " Board (%d)%s" (List.length state.board_posts)
+         (if focused then "  [j/k]" else "")
      ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
@@ -1425,11 +1439,13 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
         let title = Terminal_text.single_line post.bp_title in
         let line =
           if first + i = selected_index then
-            Theme.selection ^ " " ^ title
-            ^ String.make
-                (max 0 (cols - 5 - Message_layout.display_width title))
-                ' '
-            ^ Ansi.reset
+            if focused then
+              Theme.selection ^ " " ^ title
+              ^ String.make
+                  (max 0 (cols - 5 - Message_layout.display_width title))
+                  ' '
+              ^ Ansi.reset
+            else Ansi.bold ^ " \xe2\x96\xb8 " ^ title ^ Ansi.reset
           else " " ^ title
         in
         framed_line buf cols line
@@ -1444,7 +1460,14 @@ let render_board_read (state : state) (list_post : board_post) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let footer =
-    footer_line state ~hints:"j/k:scroll  Esc:back  c:reply  r:refresh  Tab:next"
+    let pane_hint =
+      if cols >= keeper_split_threshold_cols then "  Ctrl-W:switch pane" else ""
+    in
+    footer_line state
+      ~hints:
+        (Printf.sprintf "j/k:%s%s  Esc:back  c:reply  r:refresh  Tab:next"
+           (if state.board_focus = Board_posts_pane then "posts" else "scroll")
+           pane_hint)
   in
   if cols < keeper_split_threshold_cols then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in
@@ -1797,7 +1820,7 @@ let schedule_status_color status =
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
     of the whole store this page is. *)
-let render_schedules (state : state) =
+let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface lays
      out fits above it. *)
@@ -1944,10 +1967,75 @@ let render_schedules (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~hints:"j/k:move  x:cancel  r:refresh  Tab:next");
+  Buffer.add_string buf
+    (footer_line state
+       ~hints:"j/k:move  Enter:details  x:cancel  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"schedules" ~rows:terminal_rows
       ~cols buf
+
+let render_schedule_detail (state : state) (row : schedule_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  let due =
+    match row.sch_due_at_iso with
+    | Some iso -> Tui_decode.short_timestamp_for_terminal iso
+    | None -> "\xe2\x80\x94"
+  in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s[%s]%s"
+       (screen_title " MASC Schedules \xe2\x96\xb8 details")
+       (schedule_status_color row.sch_status)
+       (Terminal_text.single_line row.sch_status) Ansi.reset);
+  box_divider buf cols;
+  let field label value =
+    box_line buf cols
+      (Printf.sprintf "  %s%-11s%s %s" Ansi.dim label Ansi.reset
+         (Terminal_text.single_line value))
+  in
+  field "Schedule" row.sch_schedule_id;
+  field "Due" due;
+  field "Recurrence" row.sch_recurrence_summary;
+  field "Source" row.sch_source;
+  field "Target" (Option.value ~default:"\xe2\x80\x94" row.sch_payload_target);
+  box_divider buf cols;
+  box_line buf cols (Ansi.bold ^ "  Payload" ^ Ansi.reset);
+  let payload = Option.value ~default:"(no payload summary)" row.sch_payload_summary in
+  let payload_lines =
+    Message_layout.wrap_body ~markdown:chat_markdown
+      ~max_cells:(max 1 (cols - 8)) ~sanitize:Terminal_text.single_line payload
+  in
+  let content_height = max 1 (rows - 13) in
+  let max_scroll = max 0 (List.length payload_lines - content_height) in
+  let scroll = max 0 (min state.schedule_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt payload_lines (scroll + index) with
+    | Some line -> box_line buf cols ("  " ^ line)
+    | None -> box_empty buf cols
+  done;
+  if max_scroll > 0 then
+    box_line_styled buf cols ~style:Ansi.dim
+      (Printf.sprintf "  [%d/%d]" (scroll + 1) (max_scroll + 1));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state
+       ~hints:"j/k:scroll  Esc:list  x:cancel  r:refresh  Tab:next");
+  finish_surface state ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols
+    buf
+
+let render_schedules (state : state) =
+  match state.schedule_detail_id, state.schedules with
+  | Some schedule_id, Some snapshot ->
+      (match
+         List.find_opt
+           (fun row -> String.equal row.sch_schedule_id schedule_id)
+           snapshot.scs_rows
+       with
+       | Some row -> render_schedule_detail state row
+       | None -> render_schedule_list state)
+  | Some _, None | None, _ -> render_schedule_list state
 
 (** Render the keeper list view *)
 (* Status is shown as a glyph and a word. The glyph is the coarse reading an
@@ -2059,7 +2147,7 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
 let keeper_column_header (columns : Render_schedule.keeper_columns) =
   String.concat ""
     [ String.make Render_schedule.keeper_marker_width ' '
-    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "STATUS"
+    ; Printf.sprintf "%-*s" Render_schedule.keeper_status_width "HEALTH"
     ; " "
     ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
     ; (if columns.kcol_show_flags then
@@ -2067,7 +2155,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
     ; (if columns.kcol_show_runtime then
-         " " ^ fit_width "PHASE / MODEL" columns.kcol_runtime
+         " " ^ fit_width "LIFECYCLE / MODEL" columns.kcol_runtime
        else "")
     ; " "
     ; "TASK"
@@ -2333,6 +2421,8 @@ let render_keeper_list (state : state) =
    | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
 
   let columns = Render_schedule.allocate_keeper_columns ~inner_width:inner in
+  box_line_styled buf cols ~style:Ansi.dim
+    "  Health = heartbeat/readiness   Lifecycle = keeper process   A = autoboot   P = autonomous turns";
   box_line_styled buf cols ~style:Ansi.dim (keeper_column_header columns);
   Buffer.add_string buf
     (Printf.sprintf " %s%s%s\n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset);
@@ -2483,9 +2573,9 @@ let keeper_lane_header (columns : keeper_lane_columns) =
     [ "  "
     ; fit_width "KEEPER" columns.lane_keeper_width
     ; " "
-    ; fit_width "PHASE" columns.lane_phase_width
+    ; fit_width "LIFECYCLE" columns.lane_phase_width
     ; " "
-    ; fit_width "TURN" columns.lane_turn_width
+    ; fit_width "TURN STEP" columns.lane_turn_width
     ; " "
     ; fit_width "IDLE" columns.lane_idle_width
     ; (if columns.lane_show_outcome then
@@ -3138,6 +3228,7 @@ let render_keeper_message (state : state) =
             | Message_keeper ->
                 ( Message_layout.Keeper
                 , Keeper_chat.terminal_safe_text message.me_keeper_name )
+            | Message_autonomous -> Message_layout.Keeper, "\xc2\xb7 auto"
             | Message_status -> Message_layout.Status, "status"
             | Message_error -> Message_layout.Error, "error"
             | Message_tool -> Message_layout.Tool, "tools"
@@ -3151,6 +3242,7 @@ let render_keeper_message (state : state) =
             | Message_thinking when state.msg_thinking_collapsed ->
                 folded_thinking_summary message.me_text
             | Message_thinking | Message_user _ | Message_keeper
+            | Message_autonomous
             | Message_status | Message_error | Message_tool -> message.me_text
           in
           ({ style;
@@ -3509,6 +3601,13 @@ let system_log_level_style : Masc.Tui_decode.system_log_level -> string = functi
   | System_error -> Theme.bad
   | System_level_unknown _ -> Ansi.reset
 
+let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
+  | System_debug -> "\xc2\xb7"
+  | System_info -> "\xe2\x80\xa2"
+  | System_warn -> "!"
+  | System_error -> "\xc3\x97"
+  | System_level_unknown _ -> "?"
+
 let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -3542,7 +3641,7 @@ let render_system_logs (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %-5s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
+    Printf.sprintf "  %-8s %-7s %-16s %-12s %s" "Time" "Level" "Module" "Keeper"
       "Message"
   in
   box_line_styled buf cols ~style:Ansi.dim col_hdr;
@@ -3553,7 +3652,10 @@ let render_system_logs (state : state) =
        box_line_styled buf cols ~style:Theme.bad
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
-  let chrome_rows = if Option.is_some state.system_logs_error then 9 else 7 in
+  (* The scroll indicator is a real row whenever this page has more entries
+     than fit. Reserving it unconditionally keeps the bottom border and footer
+     from becoming the frame's overflow casualty. *)
+  let chrome_rows = system_log_listing_chrome ~error:state.system_logs_error in
   let content_height = max 1 (rows - chrome_rows) in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min state.system_logs_scroll max_scroll) in
@@ -3580,15 +3682,17 @@ let render_system_logs (state : state) =
           let keeper =
             match e.sl_keeper with None -> "-" | Some name -> name
           in
+          let level_style = system_log_level_style e.sl_level in
           let line =
-            Printf.sprintf "  %-8s %-5s %-16s %-12s %s"
-              (Terminal_text.clock_timestamp e.sl_ts)
-              (Masc.Tui_decode.system_log_level_label e.sl_level)
-              (Terminal_text.single_line e.sl_module)
-              (Terminal_text.single_line keeper)
+            Printf.sprintf "  %s%-8s%s %s%s %-5s%s %s%-16s%s %s%-12s%s %s"
+              Ansi.dim (Terminal_text.clock_timestamp e.sl_ts) Ansi.reset
+              level_style (system_log_level_mark e.sl_level)
+              (Masc.Tui_decode.system_log_level_label e.sl_level) Ansi.reset
+              Ansi.cyan (Terminal_text.single_line e.sl_module) Ansi.reset
+              Ansi.magenta (Terminal_text.single_line keeper) Ansi.reset
               (Terminal_text.single_line e.sl_message)
           in
-          box_line_styled buf cols ~style:(system_log_level_style e.sl_level) line
+          box_line buf cols line
     done;
   if total_entries > content_height then
     box_line_styled buf cols ~style:Ansi.dim
@@ -5507,9 +5611,11 @@ let render_resources (state : state) =
   let cursor = max 0 (min state.resources_cursor (total - 1)) in
   let list_pane pane_buf pane_cols =
     framed_top pane_buf pane_cols;
+    let list_focused = not state.resource_focus in
     framed_line pane_buf pane_cols
-      (Ansi.bold ^ " Resources"
+      ((if list_focused then Ansi.bold else Ansi.dim) ^ " Resources"
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
+       ^ (if list_focused then "  [j/k]" else "")
        ^ Ansi.reset);
     framed_divider pane_buf pane_cols;
     (* The status line spends one of the budgeted rows, not an extra one:
@@ -5559,7 +5665,11 @@ let render_resources (state : state) =
       | None -> "(Enter reads the selected resource)"
     in
     box_top pane_buf pane_cols;
-    box_line pane_buf pane_cols (Ansi.bold ^ " " ^ title ^ Ansi.reset);
+    box_line pane_buf pane_cols
+      ((if state.resource_focus then Ansi.bold else Ansi.dim)
+       ^ " " ^ title
+       ^ (if state.resource_focus then "  [j/k]" else "")
+       ^ Ansi.reset);
     box_divider pane_buf pane_cols;
     let content_height = max 1 (rows - 5) in
     (match state.resource_content_error, state.resource_content with
@@ -5574,11 +5684,16 @@ let render_resources (state : state) =
            box_empty pane_buf pane_cols
          done
      | None, Some (_, lines) ->
-         let total_lines = List.length lines in
+         let rendered =
+           Message_layout.wrap_body ~markdown:chat_markdown
+             ~max_cells:(max 1 (pane_cols - 8))
+             ~sanitize:Terminal_text.single_line (String.concat "\n" lines)
+         in
+         let total_lines = List.length rendered in
          let max_scroll = max 0 (total_lines - content_height) in
          let scroll = max 0 (min state.resource_scroll max_scroll) in
          for i = 0 to content_height - 1 do
-           match List.nth_opt lines (scroll + i) with
+           match List.nth_opt rendered (scroll + i) with
            | Some line -> box_line pane_buf pane_cols ("  " ^ line)
            | None -> box_empty pane_buf pane_cols
          done);
@@ -5609,7 +5724,10 @@ let render_resources (state : state) =
    else list_pane buf cols);
   Buffer.add_string buf
     (footer_line state
-       ~hints:"j/k:move  J/K:scroll text  Enter:read  Esc:list  r:reload  Tab:next");
+       ~hints:
+         (Printf.sprintf
+            "j/k:%s  Enter:read  Ctrl-W:switch pane  Esc:list  r:reload  Tab:next"
+            (if state.resource_focus then "scroll text" else "move")));
   finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
 (* How long ago the running binary's commit landed. Coarse on purpose: the
@@ -5788,13 +5906,15 @@ let help_sections : (string * (string * string) list) list =
       ; "Ctrl-G", "next keeper with a chat open"
       ; "Ctrl-U", "clear the draft"
       ; "Ctrl-K / Ctrl-P", "cancel / edit the last queued line"
-      ; "PgUp / PgDn", "scroll history"
+      ; "PgUp / PgDn", "scroll history by a page"
+      ; "Up / Down", "when scrolled back, adjust by one line"
       ; "y / n", "answer a tool approval"
       ; "Esc", "back; during a turn, interrupt it"
       ] )
   ; ( "Board"
     , [ "j / k", "move"
       ; "Enter", "read the post"
+      ; "Ctrl-W", "switch between the post list and detail pane"
       ; "w", "write a post"
       ; "v / V", "vote up / down"
       ; "c", "reply (while reading)"
@@ -5807,10 +5927,17 @@ let help_sections : (string * (string * string) list) list =
     , [ "e", "edit runtime.toml; the server previews before it writes"
       ; "r", "reload"
       ] )
+  ; ( "Schedules"
+    , [ "j / k", "move; in details, scroll the payload"
+      ; "Enter", "open schedule details"
+      ; "Esc", "back to the schedule list"
+      ; "x", "arm / confirm cancellation"
+      ] )
   ; ( "Resources"
     , [ "j / k", "move"
       ; "Enter", "read the selected resource"
-      ; "J / K", "scroll the text"
+      ; "Ctrl-W", "switch between resource list and text"
+      ; "j / k", "scroll the focused text pane"
       ; "Esc", "back to the list"
       ] )
   ; ( "Connectors"

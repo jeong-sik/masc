@@ -50,6 +50,9 @@ type msg_role =
           which is why an agent's broadcast and the operator's own line were
           indistinguishable. *)
   | Message_keeper
+  | Message_autonomous
+      (** A keeper reply produced by an autonomous turn rather than a message
+          sent from this chat. *)
   | Message_status
   | Message_error
   | Message_tool
@@ -175,6 +178,10 @@ type board_mode =
           both fields and no second input mode is needed. Sending is a
           two-step arm, not a key: [esc] offers send-or-discard, so a stray
           Enter during writing cannot publish. *)
+
+type board_focus =
+  | Board_posts_pane
+  | Board_detail_pane
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -534,6 +541,7 @@ type scrolled = {
    move it here in the same change. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 let runtime_listing_chrome ~error = listing_chrome ~error + 2
+let system_log_listing_chrome ~error = listing_chrome ~error + 1
 
 (** Dashboard state *)
 (* A request that has been POSTed and has not settled, with when it went out
@@ -680,6 +688,7 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
+  mutable board_focus: board_focus;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -714,6 +723,7 @@ type state = {
   mutable schedules_error: string option;
   mutable schedule_cursor: int;
   mutable schedule_scroll: int;
+  mutable schedule_detail_id: string option;
   (* A cancel armed for a second keypress: which schedule. The cursor can move
      between the two presses, so the schedule id is captured at arm time and a
      press on a different row re-arms for that row. *)
@@ -1034,6 +1044,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;
+  board_focus = Board_detail_pane;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
@@ -1051,6 +1062,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   schedules_error = None;
   schedule_cursor = 0;
   schedule_scroll = 0;
+  schedule_detail_id = None;
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
@@ -1224,10 +1236,13 @@ let scrolled_surface (state : state) : surface -> scrolled option =
   let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
   function
   | System_logs ->
-      listing ~error:state.system_logs_error
-        (match state.system_logs with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.sys_entries)
+      Some
+        { sc_count =
+            (match state.system_logs with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.sys_entries)
+        ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
+        }
   | Verification ->
       listing ~error:state.verification_error
         (match state.verification with

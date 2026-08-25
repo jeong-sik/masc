@@ -4523,6 +4523,12 @@ let mouse_tracking_disable = "\x1b[?1006;1000l"
 let mouse_tracking_on = Atomic.make true
 let toggle_mouse_tracking_key = "\020"
 
+(* Ctrl-B, as an editor toggles its side bar. The roster beside a keeper chat
+   costs 30 of the terminal's columns, and a reader who knows which keeper
+   they are talking to wants them back. A letter would not do -- in the
+   composer every letter is text. *)
+let toggle_roster_pane_key = "\002"
+
 let toggle_mouse_tracking () =
   let on = not (Atomic.get mouse_tracking_on) in
   Atomic.set mouse_tracking_on on;
@@ -5050,6 +5056,7 @@ let main () =
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
         && key <> Some toggle_mouse_tracking_key
+        && key <> Some toggle_roster_pane_key
         &&
         match key with
         | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
@@ -5069,6 +5076,12 @@ let main () =
           screens worth copying from. *)
        | Some k when String.equal k toggle_mouse_tracking_key ->
            toggle_mouse_tracking ();
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* Also above the modals: the roster is chrome around whatever is
+          showing, and reclaiming its columns should not depend on which
+          surface is up. *)
+       | Some k when String.equal k toggle_roster_pane_key ->
+           state.roster_pane_hidden <- not state.roster_pane_hidden;
            Render_schedule.request render_schedule Render_schedule.Force
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a

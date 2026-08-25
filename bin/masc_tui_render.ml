@@ -393,8 +393,16 @@ let surface_strip (state : state) ~cols =
 
 (* Side-by-side panes share one threshold and one context-pane width, so
    every split surface folds at the same terminal size. *)
-let keeper_split_threshold_cols = 110
-let keeper_roster_pane_cols = 30
+let keeper_split_threshold_cols = Masc_tui_roster_pane.threshold_cols
+let keeper_roster_pane_cols = Masc_tui_roster_pane.pane_cols
+
+(* The roster shows when the terminal can spare its columns and the reader
+   has not put it away. Width is the terminal's answer, [roster_pane_hidden]
+   is theirs, and hiding survives a resize because it is a decision rather
+   than a measurement. *)
+let keeper_roster_pane_shown (state : state) ~cols =
+  Masc_tui_roster_pane.shown ~hidden:state.roster_pane_hidden ~cols
+
 
 (* Finish a frame with the strip on top. Surfaces measured cursor rows inside
    their own frame, so a visible cursor shifts down with the prepend, and the
@@ -2840,7 +2848,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
    cursor the way the detail follows the selection. *)
 let keeper_roster_pane (state : state) ~rows ~cols buf =
   framed_top buf cols;
-  framed_line buf cols (Ansi.dim ^ " Keepers" ^ Ansi.reset);
+  framed_line buf cols (Ansi.dim ^ " Keepers  ^B:hide" ^ Ansi.reset);
   framed_divider buf cols;
   let content_height = max 0 (rows - 5) in
   let first =
@@ -2882,7 +2890,7 @@ let render_keeper_detail (state : state) =
     let footer =
       keeper_action_hints state (Some (keeper_reading state k))
     in
-    if cols < keeper_split_threshold_cols then begin
+    if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
@@ -3064,8 +3072,10 @@ let render_keeper_message (state : state) =
     let status_rows = keeper_message_status_rows state in
     (* Wide terminals keep the roster beside the chat, exactly as the detail
        view does; the chat lays out against its own pane width. *)
-    let split = cols >= keeper_split_threshold_cols in
-    let chat_cols = if split then cols - keeper_roster_pane_cols else cols in
+    let split = keeper_roster_pane_shown state ~cols in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
     if
       not
         (Message_layout.message_viewport_supported ~terminal_rows:rows
@@ -5699,6 +5709,7 @@ let help_sections : (string * (string * string) list) list =
       ; "r", "refresh the current surface"
       ; "i", "focus the composer (message the shown keeper)"
       ; "?", "this help"
+      ; "Ctrl-B", "show or hide the keeper roster beside a surface"
       ; "Ctrl-T", "release the mouse so you can drag-select and copy"
       ; "q", "quit"
       ] )

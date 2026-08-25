@@ -793,16 +793,10 @@ let render_overview (state : state) =
 
   box_bottom buf cols;
 
-  let overview_hint =
-    if state.task_focus then "j/k:tasks  Enter:detail  esc:events"
-    else "j/k:events  t:tasks"
-  in
   Buffer.add_string buf
     (footer_line state
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
-       ~hints:
-         (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers"
-            overview_hint));
+       ~hints:(Masc_tui_keys.footer_hints_overview ~task_focus:state.task_focus));
 
   finish_surface state ~clamped:(Overview_events event_window.oew_offset) ~surface_key:"overview" ~rows:terminal_rows
       ~cols buf

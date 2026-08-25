@@ -37,6 +37,13 @@ val footer_hints : Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order. *)
 
+val footer_hints_overview : task_focus:bool -> string
+(** The Overview footer. Separate from {!footer_hints} because Overview owns
+    one runtime fact the static table cannot: whether j/k currently drives
+    the task list (task_focus) or the event list. The projection relabels
+    j/k by focus and drops the keys dead in the other mode — the table
+    stays the SSOT, no second key list. *)
+
 val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
     the live scroll position, which the static per-surface table cannot know. *)

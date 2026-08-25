@@ -386,6 +386,7 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
             { identity = keeper_name, request_id, observed_at, entry_index;
               text = entry.body;
             }
+      | Layout.Markdown_growing _
       | Layout.Markdown_streaming ->
           Markdown_cache.Streaming_source entry.body
     in

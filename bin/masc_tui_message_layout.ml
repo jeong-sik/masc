@@ -13,6 +13,11 @@ type markdown_source =
       observed_at : float;
       entry_index : int;
     }
+  | Markdown_growing of {
+      keeper_name : string;
+      request_id : string;
+      entry_index : int;
+    }
   | Markdown_streaming
 
 type entry = {

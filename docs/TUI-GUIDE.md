@@ -725,6 +725,13 @@ than slowly. The pane then answers three more questions in place:
 - `c` swaps it for the recorded keeper activity — which keeper wrote which
   lines, through what tool call (or manual note), and when. Same
   repository-scope rule as the notes.
+- `K` asks the language server what a name on the cursor line is, and `D`
+  where it is defined. The palette collects the name (the pane has no
+  character cursor); the answer lands beside the title, and a definition
+  inside the workspace moves the cursor there — another file opens at the
+  answered line, and a location outside the workspace (stdlib, a package)
+  is named rather than opened. The reverse-video gutter is the cursor
+  line, which is what the question is asked about.
 
 One overlay at a time — opening any of them closes the others, so
 `j`/`k` always has one owner. `Esc` closes the overlay first, then the
@@ -834,6 +841,7 @@ Per surface:
 | `m` | Code, file open, repository scope | The notes anchored to the file |
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |
 | `c` | Code, file open, repository scope | The recorded keeper edits over the file |
+| `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
 | `y` / `n` | Approvals | Confirm / deny the selected request |

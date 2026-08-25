@@ -208,6 +208,11 @@ let for_surface = function
           ~help:"close the history, then the file, then climb one directory"
       ; b Navigate "h/l" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
+      ; b Act "K" "hover"
+          ~help:"ask the language server what a name on the cursor line is \
+                 (the palette collects the name)"
+      ; b Act "D" "definition"
+          ~help:"jump to where a name on the cursor line is defined"
       ; b Act "c" "activity"
           ~help:"which keeper wrote which lines, through what, and when \
                  (repository scope)"

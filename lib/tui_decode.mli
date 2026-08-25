@@ -1046,3 +1046,17 @@ type ide_region = {
 
 val decode_ide_regions : Yojson.Safe.t -> (ide_region list, string) result
 (** The route's [{ok; data}] envelope. *)
+
+(** The [/api/v1/lsp/question] answer: where a name is defined (1-based,
+    workspace-relative when inside), or what the server says it is. *)
+type lsp_location = {
+  ll_path : string;
+  ll_inside : bool;
+  ll_line : int;
+}
+
+type lsp_answer =
+  | Lsp_locations of lsp_location list
+  | Lsp_hover of string option
+
+val decode_lsp_answer : Yojson.Safe.t -> (lsp_answer, string) result

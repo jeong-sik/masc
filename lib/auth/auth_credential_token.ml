@@ -276,14 +276,39 @@ let resolve_agent_from_token config ~token : (string, masc_error) result =
   | Error e -> Error e
 ;;
 
+(* The bound is [Masc_domain]'s: the same pair the config decoder enforces, so a
+   window a caller names and a window read off disk are accepted on identical
+   terms. *)
+let expires_at_in_hours hours : (string, masc_error) result =
+  if hours < min_token_expiry_hours || hours > max_token_expiry_hours
+  then
+    Error
+      (System
+         (System_error.ValidationError
+            (Printf.sprintf
+               "token lifetime of %d hours is outside %d..%d"
+               hours
+               min_token_expiry_hours
+               max_token_expiry_hours)))
+  else (
+    let expiry =
+      Time_compat.now () +. (float_of_int hours *. Masc_time_constants.hour)
+    in
+    Ok (Masc_domain.iso8601_of_unix_seconds expiry))
+;;
+
 let expires_at_for_auth_config auth_cfg =
-  if auth_cfg.token_expiry_hours < 1 || auth_cfg.token_expiry_hours > 8_760
-  then invalid_arg "auth config token_expiry_hours is outside 1..8760";
-  let expiry =
-    Time_compat.now ()
-    +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
-  in
-  Some (Masc_domain.iso8601_of_unix_seconds expiry)
+  (* A config that got past decoding cannot carry an out-of-range window, so a
+     rejection here means the record was built in code rather than read from
+     disk -- a bug, not bad input. *)
+  match expires_at_in_hours auth_cfg.token_expiry_hours with
+  | Ok expires_at -> Some expires_at
+  | Error _ ->
+    invalid_arg
+      (Printf.sprintf
+         "auth config token_expiry_hours is outside %d..%d"
+         min_token_expiry_hours
+         max_token_expiry_hours)
 ;;
 
 let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token ~expires_at
@@ -358,6 +383,25 @@ let create_token_without_expiry config ~agent_name ~role
   match save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token with
   | Ok cred -> Ok (raw_token, cred)
   | Error e -> Error e
+;;
+
+let create_token_expiring_in config ~agent_name ~role ~hours
+  : (string * agent_credential, masc_error) result
+  =
+  match expires_at_in_hours hours with
+  | Error _ as error -> error
+  | Ok expires_at ->
+    let raw_token = generate_token () in
+    (match
+       save_raw_token_credential_with_expiry
+         config
+         ~agent_name
+         ~role
+         ~raw_token
+         ~expires_at:(Some expires_at)
+     with
+     | Ok cred -> Ok (raw_token, cred)
+     | Error e -> Error e)
 ;;
 
 (** #10304: rotate shared bearer tokens detected by

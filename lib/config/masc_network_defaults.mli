@@ -74,6 +74,16 @@ val masc_http_default_port : int
 val masc_http_default_port_s : string
 
 val masc_http_default_host : string
+(** Where the MASC HTTP server binds by default. *)
+
+val masc_http_loopback_peer : string
+(** What a client on this machine dials to reach that server.
+
+    The same string as {!masc_http_default_host} today, and a different
+    question. A bind address may be a wildcard -- {!is_unspecified_host}
+    exists because 0.0.0.0 and :: mean "every interface" rather than a
+    reachable peer -- so a client that reads the server's bind setting as its
+    destination can end up dialing an address that is not one. *)
 
 val masc_http_default_max_connections : int
 (** Default concurrent-connection ceiling for the MASC HTTP server.

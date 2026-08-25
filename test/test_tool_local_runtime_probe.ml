@@ -192,6 +192,73 @@ let test_dispatch_rejects_invalid_timeout_before_authorization () =
   expect_rejection "wrong-shape timeout" (`String "301");
   check int "authorization was not invoked" 0 !authorization_calls
 
+(* #24851 stopped timeout_sec from quietly rewriting operator intent. The
+   knobs beside it kept doing it: probe_runs 10 ran 4 times and reported ok,
+   and ps_timeout_sec was declared on the function but never read from the
+   tool arguments at all, so it was pinned at its default. #25006 brings the
+   three in line -- same rejection shape, same place, before the Gate. *)
+let test_bounded_knobs_are_rejected_not_rewritten () =
+  let cases =
+    [ ("probe_runs above range", "probe_runs must be an integer in [1, 4] (got 10)",
+       fun () ->
+         Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+           ~server_url:"http://127.0.0.1:1" ~probe_runs:10 ())
+    ; ("probe_runs below range", "probe_runs must be an integer in [1, 4] (got 0)",
+       fun () ->
+         Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+           ~server_url:"http://127.0.0.1:1" ~probe_runs:0 ())
+    ; ("max_tokens above range", "max_tokens must be an integer in [1, 128] (got 129)",
+       fun () ->
+         Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+           ~server_url:"http://127.0.0.1:1" ~max_tokens:129 ())
+    ; ("ps_timeout_sec above range",
+       "ps_timeout_sec must be an integer in [1, 30] (got 31)",
+       fun () ->
+         Masc.Tool_local_runtime_probe.runtime_ollama_probe_json
+           ~server_url:"http://127.0.0.1:1" ~ps_timeout_sec:31 ())
+    ]
+  in
+  List.iter
+    (fun (label, message, run) ->
+      check_raises label (Invalid_argument message) (fun () -> ignore (run ())))
+    cases
+
+let test_dispatch_rejects_bounded_knobs_before_authorization () =
+  let authorization_calls = ref 0 in
+  let authorize_external_effect ~operation:_ ~input:_ ~continue:_ =
+    incr authorization_calls;
+    fail "out-of-range input must not reach authorization"
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    {
+      config = Masc.Workspace.default_config "/tmp";
+      agent_name = "probe-bounds-test";
+      authorize_external_effect = Some authorize_external_effect;
+    }
+  in
+  let expect_rejection label args =
+    match
+      Masc.Tool_local_runtime.dispatch context
+        ~name:"masc_runtime_ollama_probe"
+        ~args:(`Assoc args)
+    with
+    | None -> fail "Ollama probe handler was not selected"
+    | Some result ->
+        check bool (label ^ " failed") true (Tool_result.is_failed result);
+        check bool
+          (label ^ " is a typed workflow rejection")
+          true
+          (Tool_result.failure_class result = Some Tool_result.Workflow_rejection)
+  in
+  expect_rejection "probe_runs above range" [ ("probe_runs", `Int 10) ];
+  expect_rejection "max_tokens above range" [ ("max_tokens", `Int 500) ];
+  expect_rejection "ps_timeout_sec above range" [ ("ps_timeout_sec", `Int 60) ];
+  (* A string where an integer belongs used to read back as the default and
+     run a probe the caller never asked for. *)
+  expect_rejection "wrong-shape probe_runs" [ ("probe_runs", `String "2") ];
+  expect_rejection "wrong-shape max_tokens" [ ("max_tokens", `Bool true) ];
+  check int "authorization was not invoked" 0 !authorization_calls
+
 let test_normalize_server_url_strips_trailing_slashes () =
   check string "normalizes trailing slash" "http://127.0.0.1:11434"
     (Masc.Tool_local_runtime_probe.normalize_ollama_server_url
@@ -453,5 +520,12 @@ let () =
             test_runtime_verify_pool_selection_fails_closed;
           test_case "runtime verify requests external effect authorization" `Quick
             test_runtime_verify_requests_external_effect_authorization;
+        ] );
+      ( "bounded_knobs",
+        [
+          test_case "out-of-range knobs are rejected, not rewritten" `Quick
+            test_bounded_knobs_are_rejected_not_rewritten;
+          test_case "dispatch rejects them before authorization" `Quick
+            test_dispatch_rejects_bounded_knobs_before_authorization;
         ] );
     ]

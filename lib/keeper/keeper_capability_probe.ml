@@ -74,7 +74,7 @@ let probe_surface ~tool =
 ;;
 
 let model_facing_names () =
-  Keeper_tool_descriptor.model_visible_schemas ()
+  Keeper_tool_descriptor.model_visible_schemas ~surface:All
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 ;;
 
@@ -253,7 +253,7 @@ let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
        Error (Unresolvable_runtime (Printf.sprintf "%s resolved no provider" runtime_id))
      | Ok (config :: _) ->
        let schemas =
-         Keeper_tool_descriptor.model_visible_schemas ()
+         Keeper_tool_descriptor.model_visible_schemas ~surface:All
          |> List.filter (fun (s : Masc_domain.tool_schema) ->
            String.equal s.name model_facing_name)
        in
@@ -361,7 +361,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
             (Printf.sprintf "%s is not a configured runtime" runtime_id))
      | Some rt ->
        let schemas =
-         Keeper_tool_descriptor.model_visible_schemas ()
+         Keeper_tool_descriptor.model_visible_schemas ~surface:All
          |> List.filter (fun (s : Masc_domain.tool_schema) ->
            String.equal s.name model_facing_name)
        in
@@ -398,6 +398,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                { cli_path = exec.cli_path
                ; cwd = base_path
                ; model = exec.model
+               ; native = Runtime_native_tools.claude_code_default
                ; system_prompt = None
                ; admission_timeout_s = exec.timeout_s
                ; timeout_s =
@@ -432,6 +433,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
                ; model = exec.model
+               ; native = Runtime_native_tools.codex_default
                ; developer_instructions = None
                ; admission_timeout_s = exec.timeout_s
                ; timeout_s =
@@ -502,7 +504,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
           Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =
-            Keeper_tool_descriptor.model_visible_schemas ()
+            Keeper_tool_descriptor.model_visible_schemas ~surface:All
             |> List.filter (fun (s : Masc_domain.tool_schema) ->
               String.equal s.name model_facing_name)
           in

@@ -263,6 +263,18 @@ let box_line_styled buf cols ~style content =
   Buffer.add_string buf
     (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
 
+(* The selected row of a borderless list: one reverse-video band across the
+   full row, box_line's geometry (two margin cells each side, content width
+   [cols - 4]). Reverse survives NO_COLOR by contract, so this is also the
+   selection signal a colourless terminal keeps. Content must carry no SGR
+   of its own -- an inner reset would cut the band short; callers fold a
+   styled row with [Masc_tui_theme.strip_sgr] first. *)
+let box_line_selected buf cols content =
+  let inner = cols - 4 in
+  Buffer.add_string buf
+    (Printf.sprintf "%s  %s  %s\n" Masc_tui_theme.selection
+       (fit_width content inner) Ansi.reset)
+
 let box_empty buf cols =
   Buffer.add_string buf (String.make cols ' ');
-  Buffer.add_char buf '\n' 
+  Buffer.add_char buf '\n'

@@ -33,6 +33,12 @@ type error =
       ; detail : string
       }
 
+type keychain_state =
+  | Present
+  | Provisioned
+  | Unsupported  (** no usable [/usr/bin/security]; not macOS *)
+  | Failed of string
+
 type t
 
 val error_to_string : error -> string
@@ -51,6 +57,16 @@ val prepare
     regular 0600 file and is never overwritten by preparation. *)
 
 val home_dir : t -> string
+
+val keychain_state : t -> keychain_state
+(** Outcome of ensuring [<home>/Library/Keychains/login.keychain-db], the only
+    path macOS resolves a HOME's login keychain from. Without it the CLI's
+    token save finds no default keychain and macOS raises an operator dialog
+    asking to create one; the CLI waits 5s and writes the token to a file
+    instead, so a turn still completes. Preparation therefore never fails on
+    this, and the caller reports the state rather than acting on it. *)
+
+val keychain_state_to_string : keychain_state -> string
 
 val publish_mcp_config : t -> Yojson.Safe.t -> (unit, error) result
 (** Atomically publish one turn capability as an exact 0600 MCP config. *)

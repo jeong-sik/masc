@@ -288,6 +288,15 @@ val create_token_without_expiry :
 (** [create_token_without_expiry config ~agent_name ~role] returns a fresh raw
     token and non-expiring credential for local MCP client identity sync. *)
 
+val create_token_expiring_in :
+  string -> agent_name:string -> role:agent_role -> hours:int ->
+  (string * agent_credential, masc_error) result
+(** [create_token_expiring_in config ~agent_name ~role ~hours] returns a fresh
+    raw token whose credential expires [hours] from now. Use it for a client
+    that outlives the workspace's operator-session window but should still lose
+    its bearer eventually. A window outside 1..8760 hours comes back as an
+    error rather than an exception. *)
+
 val verify_token :
   string -> agent_name:string -> token:string ->
   (agent_credential, masc_error) result

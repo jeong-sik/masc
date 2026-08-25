@@ -27,6 +27,8 @@ type t =
           an operator mid-sentence whose hands are already on letters. *)
   | Toggle_thinking
       (** [/thinking] — fold or unfold reasoning blocks in this pane. *)
+  | Toggle_memory
+      (** [/memory] — show or hide Librarian/Memory journal rows. *)
   | View_image of string
       (** [/image <path>] — draw an image file on the terminal, if it can
           hold one. The path is the rest of the first line, untrimmed of

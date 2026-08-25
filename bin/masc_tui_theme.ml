@@ -78,6 +78,24 @@ module Syntax = struct
   let string_ = Sgr.green
 end
 
+let strip_sgr text =
+  (* Rows carry only SGR sequences (ESC '[' … 'm'); a scanner is enough. *)
+  let buf = Buffer.create (String.length text) in
+  let length = String.length text in
+  let rec go i =
+    if i >= length then ()
+    else if Char.equal text.[i] '\027' && i + 1 < length
+            && Char.equal text.[i + 1] '[' then (
+      let j = ref (i + 2) in
+      while !j < length && not (Char.equal text.[!j] 'm') do incr j done;
+      go (min length (!j + 1)))
+    else (
+      Buffer.add_char buf text.[i];
+      go (i + 1))
+  in
+  go 0;
+  Buffer.contents buf
+
 module Glyph = struct
   let task_done = "\xe2\x97\x8f"
   let task_active = "\xe2\x97\x90"

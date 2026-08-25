@@ -365,7 +365,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     (* Before the plan is read; see the note in keeper_codex_runtime.ml. A
        moved surface has to change conversation_mode and the ordinal too, not
        just what the store writes. *)
-    let tool_surface_sha256 = Session_store.tool_surface_sha256 tools in
+    let* native_posture =
+      Host.resolve_native_posture
+        ~base_path
+        ~keeper_name
+        ~client_label:"Antigravity"
+        ~default:Runtime_native_tools.antigravity_default
+        ~none_supported:false
+    in
+    let tool_surface_sha256 =
+      Session_store.tool_surface_sha256 ~native_posture tools
+    in
     let claim_plan =
       Session_store.reconcile_tool_surface claim_plan ~tool_surface_sha256
     in
@@ -463,13 +473,37 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~oauth_source:config.oauth_source
       |> Result.map_error home_error_to_core_error
     in
+    (* Only the states that changed something or explain a later stall are
+       worth a line; [Present] is every turn after the first. *)
+    (match Runtime_antigravity_home.keychain_state home with
+     | Runtime_antigravity_home.Present | Runtime_antigravity_home.Unsupported -> ()
+     | Runtime_antigravity_home.Provisioned ->
+       Log.Keeper.info
+         ~keeper_name
+         "%s login keychain provisioned for the isolated HOME"
+         runtime_label
+     | Runtime_antigravity_home.Failed _ as state ->
+       Log.Keeper.warn
+         ~keeper_name
+         "%s login keychain unavailable (%s) — a token refresh will stall ~5s \
+          and may raise an operator dialog"
+         runtime_label
+         (Runtime_antigravity_home.keychain_state_to_string state));
     let client_config : Runtime_antigravity.config =
       { cli_path = config.cli_path
       ; cwd = base_path
       ; model = config.model
       ; agent = config.agent
       ; effort = config.effort
-      ; execution_mode = Plan
+      ; (* [Plan] holds the built-in tools to observation; [Accept_edits]
+           opens their effects and is admitted only for Yolo keepers
+           (RFC-0390). The sandbox stays on in both postures — it is a
+           separate safety floor, not a tool-availability knob. *)
+        execution_mode =
+          (match native_posture with
+           | Runtime_native_tools.Native_full -> Runtime_antigravity.Accept_edits
+           | Runtime_native_tools.Native_none | Runtime_native_tools.Native_read
+             -> Runtime_antigravity.Plan)
       ; sandbox = true
       ; disable_slash_commands = true
       ; admission_timeout_s = config.timeout_s

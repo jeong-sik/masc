@@ -411,6 +411,21 @@ let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
   let req =
     decode_request_or_raise ~rpc:"Subscribe" T.SubscribeRequest.of_bytes_result bytes
   in
+  (* [since_seq] is declared as "resume from this sequence number", and this
+     endpoint serves no backlog: the only thing it does with the field is seed
+     the outgoing counter, so a client asking to resume from 100 gets the next
+     live event labelled 101 and never learns the events between were dropped.
+     Numbering that reads as continuous over a gap is worse than refusing, so
+     it refuses. Replay itself is #30399; when it lands this goes away. *)
+  if not (Int64.equal req.since_seq 0L)
+  then
+    Grpc_core.Status.raise_error
+      Grpc_core.Status.Unimplemented
+      (Printf.sprintf
+         "Subscribe does not serve a backlog; since_seq=%Ld cannot be honoured. Send \
+          since_seq=0 to stream from now, and read the missed range with the \
+          workspace message tools, which do take since_seq."
+         req.since_seq);
   let stream = Grpc_eio.Stream.create 64 in
   Atomic.incr active_subscribe_streams;
   Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
@@ -458,6 +473,8 @@ let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
      so it MUST NOT block. We use Grpc_eio.Stream.length to check
      capacity before adding. If the stream is full or closed, the event
      is dropped and the subscriber auto-unregisters. *)
+  (* Refused above unless zero, so this is always 1: the stream starts at the
+     first event it actually carries. *)
   let seq_counter = Atomic.make (Int64.to_int req.since_seq + 1) in
   (* Read once per subscribe so existing streams are not disturbed
      mid-flight by a config change; newly-subscribing clients pick up

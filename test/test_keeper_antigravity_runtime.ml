@@ -186,7 +186,11 @@ let seed_ambiguous_resumed_session ~base_path ~tool =
   let module Store = Keeper_official_client_session_store in
   let owner_epoch = "11111111-1111-4111-8111-111111111111" in
   let runtime_id = "antigravity.gemini" in
-  let tool_surface_sha256 = Store.tool_surface_sha256 [ tool ] in
+  let tool_surface_sha256 =
+    Store.tool_surface_sha256
+      ~native_posture:Runtime_native_tools.antigravity_default
+      [ tool ]
+  in
   let claimed =
     Store.claim
       ~base_path

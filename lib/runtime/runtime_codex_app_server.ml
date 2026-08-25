@@ -18,6 +18,7 @@ type config =
   { cli_path : string
   ; model : string option
   ; developer_instructions : string option
+  ; native : Runtime_native_tools.posture
   ; admission_timeout_s : float
   ; timeout_s : float option
   }
@@ -32,7 +33,6 @@ let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
 let approval_policy = "never"
-let permissions_profile = ":read-only"
 let thread_is_ephemeral = false
 
 let client_version = Runtime_build_version.current
@@ -41,6 +41,7 @@ let default_config () =
   { cli_path = "codex"
   ; model = None
   ; developer_instructions = None
+  ; native = Runtime_native_tools.codex_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   }
@@ -160,6 +161,21 @@ type error =
       { seconds : float
       ; turn_accepted : bool
       }
+
+(* The app-server names its sandbox profile with a leading colon; the CLI
+   surface (-s read-only|workspace-write) proves both modes exist. A wrong
+   profile string fails thread/start with a typed protocol error — loud, not
+   silent. [Native_none] never reaches here: neither Codex nor its caller
+   can disable the built-in tools, so the keeper layer rejects it first and
+   this function refuses it as config. *)
+let permissions_profile_of_posture = function
+  | Runtime_native_tools.Native_read -> Ok ":read-only"
+  | Runtime_native_tools.Native_full -> Ok ":workspace-write"
+  | Runtime_native_tools.Native_none ->
+    Error
+      (Invalid_config
+         "Codex cannot disable its built-in tools; use native read or full")
+;;
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Codex app-server config: " ^ detail
@@ -835,6 +851,7 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
     ~params:(`Assoc [ "refreshToken", `Bool false ]);
   let* account = await_response io ~id:2 ~method_:"account/read" in
   let* subscription = parse_subscription account in
+  let* permissions_profile = permissions_profile_of_posture config.native in
   let thread_method, thread_fields, resumed =
     match thread_mode with
     | Start ->

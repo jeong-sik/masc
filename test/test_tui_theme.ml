@@ -87,6 +87,16 @@ let test_the_shim_is_the_same_strings () =
         | Some value when String.length value > 0 -> false
         | Some _ | None -> true))
 
+let test_strip_sgr_removes_only_styles () =
+  check str "plain text passes through" "abc" (Masc_tui_theme.strip_sgr "abc");
+  check str "styles fold, text and glyphs stay"
+    ("   " ^ "\xe2\x97\x8f healthy alpha")
+    (Masc_tui_theme.strip_sgr
+       ("   " ^ "\027[32m\xe2\x97\x8f healthy\027[0m \027[1malpha\027[0m"));
+  check str "an unterminated escape drops without eating the row" "tail"
+    (Masc_tui_theme.strip_sgr "tail\027[31");
+  check str "empty stays empty" "" (Masc_tui_theme.strip_sgr "")
+
 let () =
   Alcotest.run "masc_tui_theme"
     [ ( "unconditional"
@@ -106,5 +116,7 @@ let () =
             test_tone_is_three_values
         ; Alcotest.test_case "glyphs hold their bytes" `Quick
             test_glyphs_hold_their_bytes
+        ; Alcotest.test_case "strip_sgr removes only styles" `Quick
+            test_strip_sgr_removes_only_styles
         ] )
     ]

@@ -600,6 +600,29 @@ let test_planning_cursor_uses_visible_goal_order () =
      >= 2)
 ;;
 
+(* The screen dials one address and it is not a setting.
+
+   MASC_HOST is the *server's* bind address -- [main_eio.ml] spells it
+   "Host/IP to bind" and [Server_auth] calls it [configured_bind_host]. Its
+   documented non-default values are the wildcards 0.0.0.0 and ::, which
+   [Masc_network_defaults.is_unspecified_host] exists to name as "every
+   interface" rather than a reachable peer. Reading it here pointed the screen
+   at an address that is not a destination, and made a second setting: the
+   roster, the backlog, the metrics and the context occupancy come off local
+   disk under [base_path], and nothing checked the two named one machine.
+
+   Pinned at zero rather than described, because the way back is one
+   plausible-looking line. *)
+let test_the_screen_does_not_read_the_servers_bind_address () =
+  let main_path = "bin/masc_tui.ml" in
+  check int "no bind-address reader" 0
+    (Ast_grep.count_calls ~module_path:main_path
+       ~callee:"Env_config_core.masc_host");
+  check int "the peer is named once" 1
+    (Ast_grep.count_value_bindings ~module_path:main_path
+       ~name:"server_peer_host")
+;;
+
 let test_planning_refresh_reconciles_navigation_identity () =
   let main_path = "bin/masc_tui.ml" in
   check int "planning apply owns one identity reconciliation" 1
@@ -1021,6 +1044,28 @@ let test_missing_operator_token_is_reported () =
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Masc_tui_credential.outcome_notice");
+  (* The mint's window is a policy, and the three the type offers mean different
+     things. [Long_lived] leaves an admin secret on disk that nothing retires;
+     [With_expiry] takes the workspace's operator-session day, which is the very
+     window that refuses a session left running overnight. Only a named window
+     is this client's own answer. *)
+  check int "the self-mint does not ask for a bearer that never expires" 0
+    (Ast_grep.count_constructors
+       ~module_path:"bin/masc_tui_http.ml"
+       ~constructor:"Auth_login.Long_lived");
+  check int "the self-mint names its own window" 1
+    (Ast_grep.count_constructors
+       ~module_path:"bin/masc_tui_http.ml"
+       ~constructor:"Auth_login.Expires_in_hours");
+  (* And the number is read off the client's own constant. A literal here would
+     compile, mint, and quietly disagree with what the startup notice tells the
+     operator the credential is good for. *)
+  check int "the window comes from the one place that states it" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:"bin/masc_tui_http.ml"
+       ~binding_name:"install_operator_token"
+       ~callees:[]
+       ~identifiers:[ "Masc_tui_credential.self_mint_expiry_hours" ]);
   (* Both refusal surfaces must ask what this process actually holds. Passing a
      constant would compile and read plausibly while asserting something the
      401 never established -- which is the failure these lines exist to end. *)
@@ -1360,6 +1405,10 @@ let () =
           "planning refresh reconciles navigation identity"
           `Quick
           test_planning_refresh_reconciles_navigation_identity;
+        test_case
+          "the screen does not read the server's bind address"
+          `Quick
+          test_the_screen_does_not_read_the_servers_bind_address;
         test_case
           "overview events use bounded scroll projection"
           `Quick

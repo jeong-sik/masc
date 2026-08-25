@@ -1,6 +1,5 @@
 #![allow(dead_code)] // Infrastructure config — many items used only in wasm32 builds.
 
-use crate::mode::ViewerMode;
 
 // ─── Configuration ──────────────────────────
 
@@ -495,34 +494,6 @@ pub fn trpg_stream_poll_url(after_seq: i64) -> String {
         current_workspace_id(),
         after_seq
     ))
-}
-
-pub fn sse_endpoint(mode: &ViewerMode) -> Option<String> {
-    match mode {
-        ViewerMode::Trpg => Some(build_masc_url(&format!(
-            "api/v1/trpg/stream/sse?workspace_id={}",
-            current_workspace_id()
-        ))),
-        ViewerMode::Monitor => Some(build_masc_url("sse?workspace=monitor")),
-        ViewerMode::Experiment => Some(build_masc_url("sse?workspace=experiment")),
-        ViewerMode::Social => Some(build_masc_url("sse?workspace=social")),
-        ViewerMode::Home => None,
-    }
-}
-
-/// Resolve SSE endpoint by mode name string (for use from async contexts
-/// that don't have access to Bevy State<ViewerMode>).
-pub fn sse_endpoint_by_name(mode_name: &str) -> Option<String> {
-    match mode_name {
-        "Trpg" => Some(build_masc_url(&format!(
-            "api/v1/trpg/stream/sse?workspace_id={}",
-            current_workspace_id()
-        ))),
-        "Monitor" => Some(build_masc_url("sse?workspace=monitor")),
-        "Experiment" => Some(build_masc_url("sse?workspace=experiment")),
-        "Social" => Some(build_masc_url("sse?workspace=social")),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

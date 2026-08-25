@@ -1,3 +1,8 @@
+---
+rfc: "0067"
+status: Active
+---
+
 # RFC-0067: Goal-Scope Observation→Claim Atomicity
 
 **Issue**: #13738

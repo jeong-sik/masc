@@ -1,3 +1,8 @@
+---
+rfc: "0037"
+status: Active
+---
+
 # RFC-0037 — Local-first Keeper Enablement: Harness/User Boundary
 
 - **Status**: Active (Phase 1 harness fixes merged via #14060/#14100/#14109/#14110 — see body §127, §168 "Implemented in PR" markers; later phases per §185 still planned.)

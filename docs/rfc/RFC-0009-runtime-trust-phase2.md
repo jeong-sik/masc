@@ -1,3 +1,8 @@
+---
+rfc: "0009"
+status: Implemented
+---
+
 # RFC-0009 — Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist
 
 **Status**: Implemented (Phase 0a/0b via #10292/#10331. Phase 1 first via #10365, reverted, reinstated as `runtime_trust` module via #12589. Phase 2a operator recommendations live in `lib/dashboard_runtime_recommendations.ml` (action variants `Reduce_weight | Disable | Investigate`); Phase 2b opt-in persist live in `lib/runtime/runtime_trust_persist.{ml,mli}` (JSONL snapshot + hydrate, gated by `MASC_RUNTIME_TRUST_PERSIST`).)

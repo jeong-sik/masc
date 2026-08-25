@@ -24,8 +24,21 @@ val runtime_manifest_context :
   keeper_turn_id:int ->
   Keeper_runtime_manifest.turn_context
 
+val run_teardown_protected :
+  keeper_name:string -> site:string -> (unit -> unit) -> unit
+(** Run a teardown thunk inside [Eio.Cancel.protect] so it still performs its
+    I/O when the caller's context is already cancelled, and report every
+    failure — [Eio.Cancel.Cancelled] included — through the
+    [DispatchEventFailures] counter and a WARN. No failure path is silent.
+
+    Callers must already be inside an Eio context. The thunk is expected to
+    bound its own work; [protect] makes it uncancellable for its duration. *)
+
 val cleanup_agent_setup :
   keeper_name:string -> Keeper_run_tools.agent_setup -> unit
+(** Tear down one turn's tool bundle through {!run_teardown_protected} at site
+    ["tool_cleanup"]. Best effort: it never raises, so it cannot mask the
+    turn's own outcome. *)
 
 val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 

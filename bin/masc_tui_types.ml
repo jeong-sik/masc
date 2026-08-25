@@ -553,6 +553,9 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
+  (* Read once and kept: the server names itself at startup and only a
+     restart changes the answer. *)
+  mutable server_identity: Tui_decode.server_identity option;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -944,6 +947,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   task_focus = false;
   help_open = false;
   roster_pane_hidden = false;
+  server_identity = None;
   help_scroll = 0;
   image_open = None;
   palette_open = false;

@@ -833,6 +833,12 @@ let fetch_verification_requests ~(host : string) ~(port : int) ~(limit : int) :
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"
 
+(** Fetch /health for the server's own identity: version, the commit its
+    binary was built from, and the paths it resolved. The probe shape carries
+    all three, so this does not pay for [full=1]. *)
+let fetch_server_identity ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/health"
+
 (** Fetch the operator fleet reading from /health?full=1.
 
     The operator snapshot does not carry it: [keeper_fleet_safety] is assembled

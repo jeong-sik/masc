@@ -2773,6 +2773,43 @@ let decode_runtime_resolved json =
   in
   Ok (snapshot.rrs_runtimes, assignments)
 
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+
+(* [/health] answers before the workspace is fully up, so every field here is
+   optional in practice: a server that cannot yet name its base path still has
+   a version to show, and a footer that fails to render because one string was
+   missing tells the operator less than a footer with a gap in it. *)
+let decode_server_identity json =
+  let* build = optional_object_field json "build" in
+  let build = Option.value build ~default:(`Assoc []) in
+  let* paths = optional_object_field json "paths" in
+  let paths = Option.value paths ~default:(`Assoc []) in
+  let string_or field source =
+    match member field source with
+    | `String value -> value
+    | _ -> ""
+  in
+  let sid_binary_commit_age_s =
+    match member "binary_commit_age_seconds" build with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  Ok
+    { sid_version = string_or "version" json
+    ; sid_binary_commit = string_or "binary_commit" build
+    ; sid_binary_commit_age_s
+    ; sid_base_path = string_or "effective_base_path" paths
+    ; sid_masc_root = string_or "effective_masc_root" paths
+    }
+;;
+
 let decode_fleet_safety json =
   let* section = required_object_field json "keeper_fleet_safety" in
   let* fs_status = required_string_field section "status" in

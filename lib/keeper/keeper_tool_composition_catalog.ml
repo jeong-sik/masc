@@ -135,6 +135,7 @@ let skill_source_of_tool_name name =
 let plan_execute_tool_name = "keeper_plan_execute"
 let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"
+let skill_tool_name = "keeper_skill"
 
 let execution_mode_to_string = function
   | Inline -> "inline"

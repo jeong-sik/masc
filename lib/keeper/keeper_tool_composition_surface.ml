@@ -864,7 +864,99 @@ let make_request_control_tool
              "validated composition request input lost request_id"))
 ;;
 
+(* An instruction skill is text the keeper is meant to have read before it
+   acts. The prompt used to hand over a path and ask for a [Read], which put
+   three things in the model's hands: whether to open it, whether the path
+   resolved, and whether anyone could tell afterwards. It answered badly on
+   all three -- .masc/skills sits beside the sandbox root, not inside it, so
+   every attempt failed, and over seven days only three of 14,582 [Read]
+   calls even tried.
+
+   The body comes through a tool instead. Progressive disclosure is kept --
+   names and descriptions ride the tool description, the body arrives only
+   when asked for -- but the harness serves it from the catalog it already
+   parsed, so no path is resolved and the call is on the record. *)
+let skill_name_input_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ("name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]) ] )
+    ; "required", `List [ `String "name" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let skill_name_of_validated_input input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "name" fields with
+     | Some (`String name) -> Some name
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
+  let name = Catalog.skill_tool_name in
+  let listed =
+    instruction_skills
+    |> List.map (fun (skill_name, description, _body) ->
+         Printf.sprintf "%s: %s" skill_name description)
+    |> String.concat "
+"
+  in
+  let description =
+    "Read one instruction skill whole, by name. Read a skill before you act on      a task that names it.
+
+Available:
+" ^ listed
+  in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~base_path:config.base_path
+    ~name
+    ~description
+    ~input_schema:skill_name_input_schema
+    (fun _execution_env input ->
+      let start_time = Time_compat.now () in
+      match
+        Tool_input_validation.validate_args ~schema:skill_name_input_schema ~name
+          ~args:input ()
+      with
+      | Error rejection -> rejection
+      | Ok _ ->
+        (match skill_name_of_validated_input input with
+         | None ->
+           Tool_result.runtime_err ~tool_name:name ~start_time
+             "validated skill input lost name"
+         | Some asked ->
+           (match
+              List.find_opt
+                (fun (skill_name, _, _) -> String.equal skill_name asked)
+                instruction_skills
+            with
+            | Some (_, _, body) ->
+              Tool_result.make_ok ~tool_name:name ~start_time
+                ~data:(`Assoc [ "name", `String asked; "body", `String body ])
+                ()
+            | (* A name the catalog does not carry is the caller's error and
+                 says so with the names it does carry, rather than an empty
+                 body the model would read as "this skill says nothing". *)
+              None ->
+              Tool_result.make_err ~tool_name:name
+                ~class_:Tool_result.Workflow_rejection ~start_time
+                (Printf.sprintf
+                   "no instruction skill named %S; this keeper carries: %s"
+                   asked
+                   (match instruction_skills with
+                    | [] -> "(none)"
+                    | skills ->
+                      String.concat ", "
+                        (List.map (fun (n, _, _) -> n) skills))))))
+;;
+
 let make_tools
+      ?(instruction_skills = [])
       ?(skill_composition_entries = [])
       ~(config : Workspace.config)
       ~meta
@@ -1311,6 +1403,15 @@ let make_tools
       declared_entries
   in
   let composition_tools = composition_tools @ [ plan_execute_tool ] in
+  (* A keeper with no instruction skills gets no tool: an empty [Available]
+     list would ask the model to reach for something that answers nothing. *)
+  let composition_tools =
+    match instruction_skills with
+    | [] -> composition_tools
+    | skills ->
+      composition_tools
+      @ [ make_instruction_skill_tool ~config ~instruction_skills:skills ]
+  in
   if not has_async
   then composition_tools
   else

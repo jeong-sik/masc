@@ -959,3 +959,52 @@ let persist_pre_tool_rejects ~session_dir ~session_id rejects =
         | Ok _ -> Ok (List.length rejects)
         | Error detail -> Error detail))
 ;;
+
+let admit_native_posture ~posture ~approval_mode ~none_supported ~client_label =
+  match (posture : Runtime_native_tools.posture), none_supported with
+  | Native_none, false ->
+    Error
+      (Printf.sprintf
+         "%s cannot disable its built-in tools; declare native = \"read\" or \
+          \"full\""
+         client_label)
+  | Native_full, _ ->
+    (match (approval_mode : Keeper_tool_approval_mode.mode) with
+     | Yolo -> Ok ()
+     | Auto ->
+       Error
+         (Printf.sprintf
+            "native = \"full\" runs %s built-in effects outside the approval \
+             gate; set the keeper's tool-approval mode to yolo first"
+            client_label))
+  | Native_none, true | Native_read, _ -> Ok ()
+;;
+
+let resolve_native_posture ~base_path ~keeper_name ~client_label ~default
+    ~none_supported =
+  match
+    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+      ~base_path
+      keeper_name
+  with
+  | Error load_error ->
+    Error
+      (config_error
+         ~field:"keeper.tools.native"
+         (Keeper_types_profile.keeper_toml_load_error_to_string load_error))
+  | Ok defaults ->
+    let posture =
+      Option.value defaults.native_tool_posture ~default
+    in
+    let approval_mode =
+      Keeper_tool_approval_mode.resolve
+        (Keeper_tool_approval_mode.shared ())
+        ~keeper_name
+    in
+    (match
+       admit_native_posture ~posture ~approval_mode ~none_supported
+         ~client_label
+     with
+     | Ok () -> Ok posture
+     | Error detail -> Error (config_error ~field:"keeper.tools.native" detail))
+;;

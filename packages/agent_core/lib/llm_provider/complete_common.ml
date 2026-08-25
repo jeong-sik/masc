@@ -518,7 +518,22 @@ let thinking_control_request_rejection_reason
       ?anthropic_thinking_control
       (config : Provider_config.t)
   =
-  let caps, _source = resolve_capabilities_for_config config in
+  let caps, source = resolve_capabilities_for_config config in
+  (* Naming the resolved dialect and where it came from. Without them the
+     refusal says only that "the resolved typed dialect cannot encode", so a
+     recurrence cannot be told apart from the declaration it was supposed to
+     have fixed: on 2026-08-24 this fired 112 times over twenty minutes with
+     runtime.toml already carrying the correction, and the logs could not say
+     which value the process was actually holding (#26787). *)
+  let resolved_dialect =
+    Printf.sprintf
+      "resolved thinking_control_format=%s from %s"
+      (Capability_vocab.canonical_label_of_thinking_control_format
+         caps.Capabilities.thinking_control_format)
+      (match source with
+       | Model_capability -> "the model capability row"
+       | Provider_default_capability -> "the provider default")
+  in
   match thinking_control_request_rejection ?anthropic_thinking_control ~caps config with
   | None -> None
   | Some Enable_not_declared ->
@@ -528,16 +543,18 @@ let thinking_control_request_rejection_reason
           enable_thinking=true: thinking_control_format=No_thinking_control and \
           supports_reasoning=false. Declare the model's exact thinking_control_format, \
           or declare supports_reasoning=true only for a model whose inherent/default-on \
-          reasoning contract is verified."
-         config.model_id)
+          reasoning contract is verified (%s)."
+         config.model_id
+         resolved_dialect)
   | Some Enable_not_encodable ->
     Some
       (Printf.sprintf
          "model %S declares thinking control, but the resolved typed dialect cannot \
-          encode enable_thinking=true on this OpenAI-compatible request path. Use the \
-          dialect's explicit control value (for example reasoning_effort), or declare \
-          the exact wire dialect for this endpoint."
-         config.model_id)
+          encode enable_thinking=true on this OpenAI-compatible request path (%s). \
+          Use the dialect's explicit control value (for example reasoning_effort), or \
+          declare the exact wire dialect for this endpoint."
+         config.model_id
+         resolved_dialect)
   | Some (Request_control_invalid rejection) ->
     Some (Reasoning_dialect.request_control_rejection_to_message rejection)
   | Some Disable_not_encodable ->
@@ -548,8 +565,9 @@ let thinking_control_request_rejection_reason
           encoded and would be silently dropped, letting the model think freely and \
           corrupt JSON-mode output. Declare a thinking_control_format for this model in \
           Capabilities.for_model_id (models.toml), or route to a model that supports \
-          disabling thinking."
-         config.model_id)
+          disabling thinking (%s)."
+         config.model_id
+         resolved_dialect)
 ;;
 
 let validate_thinking_control_request

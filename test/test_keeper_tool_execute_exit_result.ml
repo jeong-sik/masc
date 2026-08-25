@@ -11,7 +11,12 @@
 
     Pins: a nonzero exit produces a [Completed] execution whose payload
     still reports [ok=false] and the exit status; an exit-0 run stays
-    [Completed] with [ok=true]. *)
+    [Completed] with [ok=true].
+
+    Also pins where the escaped-shell advice lives. The payload is what the
+    model reads -- [raw_output] is the serialized [data] -- and [metadata] is
+    not: every read of [_meta] in agent_core discards it. Advice attached to
+    metadata would be advice the caller it is written for never sees. *)
 
 open Alcotest
 open Masc
@@ -85,6 +90,78 @@ let run_execute ~config ~meta ~argv ~cwd =
 
 let payload_of (execution : Keeper_tool_execution.t) =
   Yojson.Safe.from_string execution.raw_output
+
+let test_escaped_shell_advice_is_in_what_the_model_reads () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base = temp_dir "exec_costume_advice_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+      let config = Workspace.default_config base in
+      (match Keeper_approval_queue.install_persistence ~base_path:base with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_approval_queue.install_error_to_string error));
+      install_always_allow_gate ~base;
+      let meta = make_local_meta ~name:"costume-advice" in
+      let cwd = playground_dir ~base ~name:"costume-advice" in
+      (* [;] is the one thing Shell_ir.connector deliberately cannot say, so
+         this costume is classified outside the subset and still runs. *)
+      let execution =
+        run_execute
+          ~config
+          ~meta
+          ~argv:[ "sh"; "-c"; "echo one; echo two" ]
+          ~cwd
+      in
+      (match execution.disposition with
+       | Tool_result.Completed () -> ()
+       | Tool_result.Failed _ ->
+         Alcotest.fail "telling the caller must not fail the call"
+       | Tool_result.Deferred _ ->
+         Alcotest.fail "telling the caller must not defer the call");
+      let payload = payload_of execution in
+      let field name =
+        match payload with
+        | `Assoc fields -> List.assoc_opt name fields
+        | _ -> Alcotest.fail "payload was not an object"
+      in
+      check (option bool) "the call still reports success" (Some true)
+        (match field "ok" with
+         | Some (`Bool b) -> Some b
+         | _ -> None);
+      match field "escaped_shell" with
+      | Some (`List [ `Assoc entry ]) ->
+        check (option string) "the shell that wore the costume"
+          (Some "sh")
+          (match List.assoc_opt "shell" entry with
+           | Some (`String s) -> Some s
+           | _ -> None);
+        check (option string) "the construct the gate would have refused"
+          (Some "command_separator")
+          (match List.assoc_opt "finding" entry with
+           | Some (`String s) -> Some s
+           | _ -> None);
+        (* Compared against the sentence the library renders, so the
+           expectation cannot drift from it. *)
+        check (option string) "what the call should have been"
+          (Some
+             (Keeper_tooling.Subset_rewrite.to_string
+                (Keeper_tooling.Subset_rewrite.of_reason
+                   (Masc_exec_command_gate.Shell_command_gate.Unsupported_construct
+                      `Command_separator))))
+          (match List.assoc_opt "should_have_been" entry with
+           | Some (`String s) -> Some s
+           | _ -> None)
+      | Some other ->
+        Alcotest.failf
+          "escaped_shell was not one entry: %s"
+          (Yojson.Safe.to_string other)
+      | None ->
+        Alcotest.fail
+          "escaped_shell is absent from the payload the model reads")
+;;
 
 let test_nonzero_exit_is_a_completed_result () =
   Eio_main.run @@ fun env ->
@@ -198,5 +275,9 @@ let () =
             "a backgrounded child still holds the call"
             `Quick
             test_a_backgrounded_child_still_holds_the_call
+        ; test_case
+            "escaped-shell advice is in what the model reads"
+            `Quick
+            test_escaped_shell_advice_is_in_what_the_model_reads
         ] )
     ]

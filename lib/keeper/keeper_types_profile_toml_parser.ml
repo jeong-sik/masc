@@ -37,6 +37,13 @@ let keeper_toml_fields =
   ; "telemetry_feedback_enabled", Field_bool
   ; "telemetry_feedback_window_hours", Field_int
   ; "always_allow", Field_bool
+    (* RFC-0390 and RFC-0389. Both [keeper.tools] keys are declared, so any
+       other key in that table is unknown and fails the load rather than
+       being a silently ignored sibling. A prefix rule would accept
+       [tools.nativ] and leave the runtime on its default posture without a
+       word, which is what naming them here prevents. *)
+  ; "tools.native", Field_string
+  ; "tools.groups", Field_string_array
   ]
 
 let keeper_toml_field_names = List.map fst keeper_toml_fields
@@ -129,6 +136,35 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
   let agent_core_env = extract_agent_core_env_from_doc doc in
+  (* RFC-0389: [keeper.tools] nested table — read groups as a string array
+     and reject unknown names here, at load time. [Keeper_tool_group] is a
+     leaf under this parser and the descriptor, which is what makes the
+     check possible at this end at all: a typo in [keeper.tools] fails the
+     load instead of quietly keeping the full surface. *)
+  let tool_groups_result =
+    match List.assoc_opt "keeper.tools.groups" doc with
+    | None -> Ok None
+    | Some (Keeper_toml_loader.Toml_string_array groups) ->
+      let normalized = normalize_name_list groups in
+      if normalized = [] then Ok None
+      else
+        let unknown =
+          List.filter_map
+            (fun name ->
+               match Keeper_tool_group.of_string name with
+               | Some _ -> None
+               | None -> Some name)
+            normalized
+        in
+        (match unknown with
+         | [] -> Ok (Some normalized)
+         | names ->
+           Error
+             (Printf.sprintf
+                "unknown keeper tool groups (keeper.tools.groups): %s"
+                (String.concat ", " names)))
+    | Some _ -> Ok None
+  in
   let result =
     match detect_unknown_keeper_toml_keys doc with
     | [] -> Ok ()
@@ -137,6 +173,18 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           (Printf.sprintf
              "unknown keeper TOML keys: %s"
              (String.concat ", " fields))
+  in
+  let result =
+    Result.bind result (fun () ->
+        match tool_groups_result with
+        | Ok _ -> Ok ()
+        | Error error -> Error error)
+  in
+  (* The record is built from the checked value; on [Error] the parse below
+     never escapes to a caller anyway, so the fallback here is unreachable
+     bookkeeping rather than a silent pass-through. *)
+  let tool_groups =
+    match tool_groups_result with Ok groups -> groups | Error _ -> None
   in
   let result =
     Result.bind result (fun () ->
@@ -183,6 +231,22 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                      "invalid multimodal_policy '%s' (allowed: %s)"
                      raw
                      (String.concat ", " valid_multimodal_policy_strings)))
+        | None -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () ->
+        match str "tools.native" with
+        | Some raw -> (
+            match Runtime_native_tools.of_string raw with
+            | Some _ -> Ok ()
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid keeper.tools.native '%s' (allowed: %s)"
+                     raw
+                     (String.concat
+                        ", "
+                        Runtime_native_tools.valid_posture_strings)))
         | None -> Ok ())
   in
   let max_context_override_result =
@@ -234,6 +298,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         always_allow = bool_ "always_allow";
+        native_tool_posture =
+          Option.bind (str "tools.native") Runtime_native_tools.of_string;
+        tool_groups;
         agent_core_env;
       })
       max_context_override_result)
@@ -284,6 +351,9 @@ let merge_keeper_profile_defaults
       prefer overlay.telemetry_feedback_window_hours
         base.telemetry_feedback_window_hours;
     always_allow = prefer overlay.always_allow base.always_allow;
+    native_tool_posture =
+      prefer overlay.native_tool_posture base.native_tool_posture;
+    tool_groups = prefer overlay.tool_groups base.tool_groups;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

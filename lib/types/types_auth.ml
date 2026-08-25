@@ -243,12 +243,21 @@ let validate_workspace_secret_hash = function
       "auth_config_of_yojson: field \"workspace_secret_hash\" must be 64 lowercase hexadecimal characters"
 ;;
 
+(* The window a bearer credential may be issued for. One owner for the pair: the
+   config decoder below and every caller that names its own window instead of
+   taking the config's read the same two numbers. *)
+let min_token_expiry_hours = 1
+let max_token_expiry_hours = 8_760
+
 let validate_token_expiry_hours value =
-  if value >= 1 && value <= 8_760
+  if value >= min_token_expiry_hours && value <= max_token_expiry_hours
   then Ok value
   else
     Error
-      "auth_config_of_yojson: field \"token_expiry_hours\" must be between 1 and 8760"
+      (Printf.sprintf
+         "auth_config_of_yojson: field \"token_expiry_hours\" must be between %d and %d"
+         min_token_expiry_hours
+         max_token_expiry_hours)
 ;;
 
 let auth_config_of_yojson json =

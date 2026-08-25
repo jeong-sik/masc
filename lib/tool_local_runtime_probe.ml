@@ -47,14 +47,50 @@ type generate_probe_decision =
   | Skip_generate_probe of generate_probe_skip_reason
 
 
-let clamp ~min_value ~max_value value = max min_value (min max_value value)
-
 let validate_timeout_sec value =
   if value > 0 then
     Ok value
   else
     Error
       (Printf.sprintf "timeout_sec must be a positive integer (got %d)" value)
+
+(* #24851 removed the silent [3, 300] rewrite from [timeout_sec] because a
+   diagnostic tool that answers a different question than it was asked is
+   worse than one that refuses. The same argument covers the knobs beside it:
+   a caller asking for 10 runs and getting 4 back under an ok response cannot
+   tell the difference from having got 10. These bound the same way -- state
+   the range, accept inside it, reject outside it -- so the range appears in
+   the schema, in the rejection text, and in one place in code (#25006). *)
+let validate_in_range ~field ~min_value ~max_value value =
+  if value >= min_value && value <= max_value then
+    Ok value
+  else
+    Error
+      (Printf.sprintf
+         "%s must be an integer in [%d, %d] (got %d)"
+         field
+         min_value
+         max_value
+         value)
+
+let probe_runs_min = 1
+let probe_runs_max = 4
+let max_tokens_min = 1
+let max_tokens_max = 128
+let ps_timeout_sec_min = 1
+let ps_timeout_sec_max = 30
+
+let validate_probe_runs =
+  validate_in_range ~field:"probe_runs" ~min_value:probe_runs_min
+    ~max_value:probe_runs_max
+
+let validate_max_tokens =
+  validate_in_range ~field:"max_tokens" ~min_value:max_tokens_min
+    ~max_value:max_tokens_max
+
+let validate_ps_timeout_sec =
+  validate_in_range ~field:"ps_timeout_sec" ~min_value:ps_timeout_sec_min
+    ~max_value:ps_timeout_sec_max
 
 let normalize_ollama_server_url raw =
   String.trim raw |> Masc_network_defaults.trim_trailing_slashes
@@ -487,14 +523,15 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let prompt =
     Option.bind prompt String_util.trim_nonempty |> Option.value ~default:(default_probe_prompt ())
   in
-  let probe_runs = clamp ~min_value:1 ~max_value:4 probe_runs in
-  let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
-  let timeout_sec =
-    match validate_timeout_sec timeout_sec with
-    | Ok value -> value
+  let accept validate value =
+    match validate value with
+    | Ok accepted -> accepted
     | Error message -> invalid_arg message
   in
-  let ps_timeout_sec = clamp ~min_value:1 ~max_value:30 ps_timeout_sec in
+  let probe_runs = accept validate_probe_runs probe_runs in
+  let max_tokens = accept validate_max_tokens max_tokens in
+  let timeout_sec = accept validate_timeout_sec timeout_sec in
+  let ps_timeout_sec = accept validate_ps_timeout_sec ps_timeout_sec in
   let think_enabled = effective_think_enabled think_mode in
   let before_status, loaded_before, before_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()

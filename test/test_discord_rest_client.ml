@@ -256,7 +256,7 @@ let test_parse_response_rejects_duplicate_id () =
   match R.parse_response ~status:200 ~body () with
   | Error (R.Other { reason; _ }) ->
     check bool "duplicate id is named" true
-      (String_util.string_contains_substring ~needle:"duplicate response field \"id\"" reason)
+      (String_util.string_contains_substring ~needle:"repeats object key \"id\"" reason)
   | Ok _ -> fail "duplicate response id must not be selected"
   | Error error ->
     failf "expected duplicate id rejection, got %s"

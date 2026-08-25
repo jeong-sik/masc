@@ -1737,6 +1737,45 @@ let test_surface_post_descriptions_do_not_promise_ignoring () =
     ]
 ;;
 
+let test_probe_schema_declares_the_bounds_it_enforces () =
+  (* The probe refuses probe_runs/max_tokens/ps_timeout_sec outside their
+     ranges (#25006). A caller that cannot read those ranges off the schema
+     learns them from a rejection instead, one wasted round trip per knob,
+     and nothing in the type system ties the two together. *)
+  (* Not [tool_schema_for]: the probe is an Operator_diagnostic, so it is
+     registered but withheld from the keeper model projection that
+     [surface_tools] is. Read it where it is declared. *)
+  let schema =
+    match
+      List.find_opt
+        (fun (definition : Tool_schemas_local_runtime.definition) ->
+          String.equal definition.schema.name "masc_runtime_ollama_probe")
+        Tool_schemas_local_runtime.definitions
+    with
+    | Some definition -> definition.schema.input_schema
+    | None -> Alcotest.fail "masc_runtime_ollama_probe is not declared"
+  in
+  let bound field key expected =
+    let actual =
+      schema
+      |> Yojson.Safe.Util.member "properties"
+      |> Yojson.Safe.Util.member field
+      |> Yojson.Safe.Util.member key
+    in
+    Alcotest.(check string)
+      (Printf.sprintf "%s declares %s" field key)
+      (Yojson.Safe.to_string (`Int expected))
+      (Yojson.Safe.to_string actual)
+  in
+  bound "probe_runs" "minimum" 1;
+  bound "probe_runs" "maximum" 4;
+  bound "max_tokens" "minimum" 1;
+  bound "max_tokens" "maximum" 128;
+  bound "ps_timeout_sec" "minimum" 1;
+  bound "ps_timeout_sec" "maximum" 30;
+  bound "timeout_sec" "minimum" 1
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
@@ -1947,5 +1986,9 @@ let () =
             "keeper_run_tools_setup avoids public MCP catalog classifier"
             `Quick
             test_run_tools_setup_has_no_direct_public_mcp_catalog_read
+        ; test_case
+            "ollama probe schema declares the bounds it enforces"
+            `Quick
+            test_probe_schema_declares_the_bounds_it_enforces
         ] )
     ]

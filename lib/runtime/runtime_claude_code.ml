@@ -10,6 +10,7 @@ type config =
   ; model : string option
   ; system_prompt : string option
   ; admission_timeout_s : float
+  ; native : Runtime_native_tools.posture
   ; timeout_s : float option
   }
 
@@ -29,6 +30,7 @@ let default_config ~cwd =
   ; cwd
   ; model = None
   ; system_prompt = None
+  ; native = Runtime_native_tools.claude_code_default
   ; admission_timeout_s = default_timeout_s
   ; timeout_s = Some default_timeout_s
   }
@@ -979,14 +981,23 @@ let command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id =
     ; "--system-prompt"
     ; Option.value config.system_prompt ~default:""
     ; "--tools"
-    ; ""
+    ; Runtime_native_tools.claude_code_tools_arg config.native
     ]
-    @ (match dynamic_tools with
+    @ ((* [Native_read] pre-approves its built-in read tools alongside the
+          MCP tools so [dontAsk] never has a prompt to suppress.
+          [Native_full] enables the whole built-in set via [--tools default],
+          which cannot be enumerated here; execution is governed by
+          [--permission-mode dontAsk] and admitted only for Yolo keepers. *)
+       let native_allowed =
+         match config.native with
+         | Runtime_native_tools.Native_read ->
+           Runtime_native_tools.claude_code_read_tool_names
+         | Runtime_native_tools.Native_none
+         | Runtime_native_tools.Native_full -> []
+       in
+       match native_allowed @ List.map allowed_tool_name dynamic_tools with
        | [] -> []
-       | tools ->
-         [ "--allowedTools"
-         ; String.concat "," (List.map allowed_tool_name tools)
-         ])
+       | allowed -> [ "--allowedTools"; String.concat "," allowed ])
     @ (match config.model with
        | None -> []
        | Some model -> [ "--model"; model ])

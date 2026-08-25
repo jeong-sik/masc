@@ -51,19 +51,21 @@ type sse_conn_info = {
 (** {1 Connect-rate guard knobs}
 
     Values come from {!Env_config_runtime.Sse_connect_guard}; the names below
-    are that module's, read once at its initialisation. *)
+    are that module's.  Since task-538 they are read per call through the
+    module's {!Re_read} thunks (the same reader the disable-semantics tests
+    pin), not cached at process start. *)
 
-val sse_reconnect_min_interval_s : float
+val sse_reconnect_min_interval_s : unit -> float
 (** [MASC_SSE_RECONNECT_MIN_INTERVAL_S], default [1.0].  Minimum gap between two SSE connect
     attempts on the same session.  Setting to [0.0] or negative
     disables the per-session cooldown. *)
 
-val sse_connect_window_s : float
+val sse_connect_window_s : unit -> float
 (** [MASC_SSE_CONNECT_WINDOW_S], default [60.0].
     Sliding-window length for the burst-rate guard.  Setting to
     [0.0] or negative disables the window check. *)
 
-val sse_connect_max_in_window : int
+val sse_connect_max_in_window : unit -> int
 (** [MASC_SSE_CONNECT_MAX_IN_WINDOW], default [10].
     Max connect attempts per [sse_connect_window_s] before the
     guard returns [Error ("window_limit", _)]. *)

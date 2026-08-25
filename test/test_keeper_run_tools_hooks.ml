@@ -893,6 +893,38 @@ let test_ends_with_tool_results_is_positional () =
   check bool "an old tool message before a new user turn does not count" false
     (Masc.Keeper_run_prompt.ends_with_tool_results [ user; assistant; tool; user ])
 
+(* The filter that drops the world state on later rounds must not fire on a
+   turn that has injected nothing yet. A keeper whose previous turn ended on a
+   tool result replays that shape into its next turn's first round, which is
+   what silenced 39 of 108 turns on 2026-08-25. *)
+let test_first_round_survives_a_replayed_tool_tail () =
+  let user = message Agent_core.Types.User "ask" in
+  let assistant = message Agent_core.Types.Assistant "plan" in
+  let tool = message Agent_core.Types.Tool "result" in
+  let replayed = [ user; assistant; tool ] in
+  check
+    bool
+    "a first round is not a later round, whatever the history ends with"
+    false
+    (Masc.Keeper_run_prompt.is_later_round_of_this_turn
+       ~injected_this_turn:false
+       replayed);
+  check
+    bool
+    "a round after this turn injected is a later round"
+    true
+    (Masc.Keeper_run_prompt.is_later_round_of_this_turn
+       ~injected_this_turn:true
+       replayed);
+  check
+    bool
+    "a history that does not end on a tool is never a later round"
+    false
+    (Masc.Keeper_run_prompt.is_later_round_of_this_turn
+       ~injected_this_turn:true
+       [ user ])
+
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -901,6 +933,10 @@ let () =
             "the predicate is positional, not containment"
             `Quick
             test_ends_with_tool_results_is_positional
+        ; test_case
+            "a first round survives a replayed tool tail"
+            `Quick
+            test_first_round_survives_a_replayed_tool_tail
         ] )
     ; ( "observation_file_path"
       , [ test_case

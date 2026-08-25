@@ -5315,6 +5315,36 @@ let main () =
                      launch_keeper_history_load state
                        ~mailbox:async_messages ~keeper_name;
                      state.view <- Keepers Keeper_message
+                 | Some (_, Masc_tui_types.Palette_task task_id) ->
+                     (* The palette lands where Enter on the task list would:
+                        Overview with the task's detail open and the cursor
+                        on its row. *)
+                     goto_surface state ~mailbox:async_messages Overview;
+                     state.task_detail_id <- Some task_id;
+                     state.task_detail_scroll <- 0;
+                     let rec index_of i = function
+                       | [] -> None
+                       | (t : Masc_tui_types.task) :: rest ->
+                           if String.equal t.id task_id then Some i
+                           else index_of (i + 1) rest
+                     in
+                     (match index_of 0 state.tasks with
+                      | Some index -> state.task_cursor <- index
+                      | None -> ())
+                 | Some (_, Masc_tui_types.Palette_board_post post_id) ->
+                     goto_surface state ~mailbox:async_messages Board;
+                     let rec find i = function
+                       | [] -> None
+                       | (p : Masc_tui_types.board_post) :: rest ->
+                           if String.equal p.bp_id post_id then Some (i, p)
+                           else find (i + 1) rest
+                     in
+                     (match find 0 state.board_posts with
+                      | Some (index, post) ->
+                          state.board_cursor <- index;
+                          open_board_post state ~mailbox:async_messages
+                            ~focus:Board_detail_pane post
+                      | None -> ())
                  | None -> ())
             | "down" -> state.palette_cursor <- state.palette_cursor + 1
             | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)

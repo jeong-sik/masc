@@ -343,7 +343,7 @@ jobs:
           # runtime.toml, so a fixture edit changes test input while matching
           # none of the suffixes above (.toml is not .ml/.json/.sh) and the
           # Build job would skip.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|scripts/fixtures/|scripts/keeper-full-lifecycle-evidence\.py$|scripts/ci/check_env_reads_below_config\.py$|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -675,6 +675,7 @@ jobs:
           bash scripts/ci/check-silent-failure-patterns.sh
           python3 scripts/ci/check_h2_route_auth_parity.py
           python3 scripts/ci/check_exact_field_decoder_preflight.py
+          python3 scripts/ci/check_env_reads_below_config.py --self-test
           python3 scripts/ci/check_model_prefix_inheritance.py
           bash scripts/ci/check-enum-string-safety.sh
           python3 scripts/ci/check-env-snapshot-default-drift.py
@@ -922,6 +923,12 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      - name: Check direct environment reads against config floor
+        # The checker derives the dependency floor from `dune describe`, so it
+        # belongs in the sole job that installs the OCaml/Dune toolchain. Run
+        # Python under `opam exec` because bare `dune` is not on PATH in CI.
+        run: opam exec -- python3 scripts/ci/check_env_reads_below_config.py
 
       - name: Run source quickstart onboarding smoke
         run: scripts/quickstart-smoke.sh
@@ -1620,4 +1627,3 @@ jobs:
           check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
           check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]
-

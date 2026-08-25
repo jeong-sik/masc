@@ -4,6 +4,19 @@ type verdict =
   | Ask of { because : string }
   | Run of { because : string }
 
+(* The reason a name nothing owns comes back with. Named so the bundle gate
+   can tell "could not classify" from a real classification. *)
+let unclassifiable_because = "no descriptor declares what this tool does"
+
+(* An undescribed name is one of four things. Closed, so a fifth kind of
+   tool added to the bundle stops the build here rather than falling into
+   the reject and asking the operator a question they cannot act on. *)
+type undescribed =
+  | Control of verdict
+  | Composition of string list
+  | Ad_hoc_plan
+  | Unknown
+
 let verdict_because = function
   | Ask { because } | Run { because } -> because
 
@@ -42,31 +55,25 @@ let descriptor_for tool_name =
    Both stay pure. The index read is an in-memory lookup and the input read is
    a JSON walk; neither opens anything, which is what [Hooks.hook] requires of
    whatever runs inside [pre_tool_use]. *)
-let plan_node_tools ~tool_name ~input =
-  if String.equal tool_name Keeper_tool_composition_catalog.plan_execute_tool_name
-  then (
-    match input with
-    | `Assoc fields ->
-      (match List.assoc_opt "nodes" fields with
-       | Some (`List nodes) ->
-         Some
-           (List.filter_map
-              (function
-                | `Assoc node ->
-                  (match List.assoc_opt "tool" node with
-                   | Some (`String tool) -> Some tool
-                   | Some _ | None -> None)
-                | _ -> None)
-              nodes)
-       (* A malformed plan is not a plan whose nodes are all reads. It falls
-          through to the reject below and is asked about, which is also what
-          the tool itself will do with it. *)
-       | Some _ | None -> None)
-    | _ -> None)
-  else
-    Keeper_tool_composition_plan_index.node_tools
-      (Keeper_tool_composition_plan_index.shared ())
-      ~composition:tool_name
+(* The nodes an ad-hoc plan names, read from the tool input. Pure: a JSON
+   walk, which is what [Hooks.hook] requires of anything inside
+   [pre_tool_use]. *)
+let ad_hoc_plan_nodes input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "nodes" fields with
+     | Some (`List nodes) ->
+       Some
+         (List.filter_map
+            (function
+              | `Assoc node ->
+                (match List.assoc_opt "tool" node with
+                 | Some (`String tool) -> Some tool
+                 | Some _ | None -> None)
+              | _ -> None)
+            nodes)
+     | Some _ | None -> None)
+  | _ -> None
 ;;
 
 let rec verdict_for ~tool_name ~input =
@@ -136,47 +143,73 @@ and node_asks_for_approval node =
                (Descriptor.keeper_tool_group_to_string group) )
        else None)
 
-(* The two control tools that ride beside an async composition.
+(* What an undescribed name is, decided once.
 
-   They have no descriptor for the same reason a composition has none — they
-   are materialised as Agent-Core tools — but they are not compositions
-   either, so there is no plan to fold and the arm below would ask about them.
-   Reading the status of a request this keeper already made, and cancelling
-   one, are both smaller than the composition they are about, and neither
-   reaches outside masc. Board tools run unasked on that same reasoning.
+   Two callers need this and they must not answer differently. [verdict_for]
+   asks what to do about a call; the bundle gate asks whether this build can
+   place the name at all. Splitting that into two predicates is how one grows
+   an arm the other does not have, and the gate then passes while the tool
+   still asks with a reason nobody can act on.
 
-   Named through the catalog rather than as literals here: the catalog is what
-   the surface builds them from, so one spelling cannot drift from the other.
-   They only exist on a turn that has an async composition
-   (keeper_tool_composition_surface.ml gates them on [has_async]); naming them
-   on a turn that does not costs nothing, because nothing can call them. *)
-and control_tool_verdict tool_name =
+   [Ad_hoc_plan] is why the two questions are not the same question.
+   [keeper_plan_execute] is a name this build knows, but what it does depends
+   on nodes that arrive in the input — so it is classifiable without being
+   decidable from the name alone. A gate that asked [verdict_for] with an
+   empty input would read that as "cannot classify", which is the empty-input
+   trap this policy already avoids one level down when it judges plan nodes on
+   static facts rather than on a fabricated [{}]. *)
+and undescribed_kind tool_name =
   if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
-  then Some (Run { because = "reads a composition request this keeper made" })
+  then Control (Run { because = "reads a composition request this keeper made" })
   else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
-  then Some (Run { because = "cancels a request inside masc" })
-  else None
+  then Control (Run { because = "cancels a request inside masc" })
+  else if String.equal
+            tool_name
+            Keeper_tool_composition_catalog.plan_execute_tool_name
+  then Ad_hoc_plan
+  else
+    match
+      Keeper_tool_composition_plan_index.node_tools
+        (Keeper_tool_composition_plan_index.shared ())
+        ~composition:tool_name
+    with
+    | Some node_tools -> Composition node_tools
+    | None -> Unknown
+
+and verdict_of_nodes node_tools =
+  match List.find_map node_asks_for_approval node_tools with
+  | Some (node, because) ->
+    Ask { because = Printf.sprintf "node %s: %s" node because }
+  | None ->
+    Run
+      { because =
+          Printf.sprintf "every one of its %d nodes runs unasked"
+            (List.length node_tools)
+      }
 
 and verdict_for_undescribed ~tool_name ~input =
-  match control_tool_verdict tool_name with
-  | Some verdict -> verdict
-  | None ->
-  match plan_node_tools ~tool_name ~input with
-  | None ->
+  match undescribed_kind tool_name with
+  | Control verdict -> verdict
+  | Composition node_tools -> verdict_of_nodes node_tools
+  | Ad_hoc_plan ->
+    (match ad_hoc_plan_nodes input with
+     (* A malformed plan is not a plan whose nodes are all reads. The tool
+        will reject it too; asking about it first is the same answer earlier. *)
+     | None -> Ask { because = "this plan does not say which tools it runs" }
+     | Some node_tools -> verdict_of_nodes node_tools)
+  | Unknown ->
     (* Not a safe tool -- one this build cannot classify. Running it unasked
        would make "no descriptor" the quietest way past the gate. *)
-    Ask { because = "no descriptor declares what this tool does" }
-  | Some node_tools ->
-    let asked = List.find_map node_asks_for_approval node_tools in
-    (match asked with
-     | Some (node, because) ->
-       Ask { because = Printf.sprintf "node %s: %s" node because }
-     | None ->
-       Run
-         { because =
-             Printf.sprintf "every one of its %d nodes runs unasked"
-               (List.length node_tools)
-         })
+    Ask { because = unclassifiable_because }
+;;
+
+let classifies ~tool_name =
+  match descriptor_for tool_name with
+  | Some _ -> true
+  | None ->
+    (match undescribed_kind tool_name with
+     | Control _ | Composition _ | Ad_hoc_plan -> true
+     | Unknown -> false)
 ;;
 
 let question_for ~tool_name ~input =

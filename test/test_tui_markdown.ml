@@ -381,6 +381,40 @@ let test_blank_lines_are_kept () =
     [ "one"; ""; "two" ]
     (render "one\n\ntwo")
 
+let check_stream_boundary label ~source_start ~row_start source =
+  let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
+  check_rows (label ^ " rows") (render source) streamed.rows;
+  Alcotest.(check int) (label ^ " source boundary") source_start
+    streamed.mutable_source_start;
+  Alcotest.(check int) (label ^ " row boundary") row_start
+    streamed.mutable_row_start
+
+let test_streaming_boundary_keeps_only_closed_blocks () =
+  check_stream_boundary "one newline keeps its line mutable" ~source_start:0
+    ~row_start:0 "alpha\n";
+  check_stream_boundary "the previous line closes when the next one arrives"
+    ~source_start:6 ~row_start:1 "alpha\nbeta\n";
+  check_stream_boundary "ordinary prose before an incomplete line is closed"
+    ~source_start:6 ~row_start:1 "alpha\nbeta";
+  check_stream_boundary "a partial delimiter keeps its header mutable"
+    ~source_start:0 ~row_start:0 "| h |\n|";
+  check_stream_boundary "a growing table stays wholly mutable" ~source_start:7
+    ~row_start:1 "before\n| h |\n| - |\n| a |\n";
+  check_stream_boundary "an incomplete possible row keeps its table mutable"
+    ~source_start:0 ~row_start:0 "| h |\n| - |\nafter";
+  check_stream_boundary "an appended pipe row still belongs to its table"
+    ~source_start:0 ~row_start:0 "| h |\n| - |\nafter | x |";
+  check_stream_boundary "the table closes when following prose arrives"
+    ~source_start:25 ~row_start:4
+    "before\n| h |\n| - |\n| a |\nafter\n";
+  check_stream_boundary "an open tagged fence stays wholly mutable"
+    ~source_start:7 ~row_start:1 "before\n```ocaml\nlet x = 1\n";
+  check_stream_boundary "a closed final fence is still the mutable final block"
+    ~source_start:7 ~row_start:1 "before\n```ocaml\nlet x = 1\n```\n";
+  check_stream_boundary "following prose closes the fence block"
+    ~source_start:30 ~row_start:4
+    "before\n```ocaml\nlet x = 1\n```\nafter\n"
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -420,6 +454,8 @@ let () =
             test_rule_fills_the_width
         ; Alcotest.test_case "blank lines are kept" `Quick
             test_blank_lines_are_kept
+        ; Alcotest.test_case "streaming keeps only closed blocks" `Quick
+            test_streaming_boundary_keeps_only_closed_blocks
         ] )
     ; ( "fenced code"
       , [ Alcotest.test_case "keeps its line breaks" `Quick

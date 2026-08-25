@@ -2786,7 +2786,7 @@
 (test
  (name test_tui_markdown_render_cache)
  (modules test_tui_markdown_render_cache)
- (libraries alcotest masc_tui_markdown_render_cache))
+ (libraries alcotest masc_tui_markdown masc_tui_markdown_render_cache))
 
 (test
  (name test_tui_diff)

@@ -336,7 +336,8 @@
 (library
  (name masc_tui_markdown_render_cache)
  (wrapped false)
- (modules masc_tui_markdown_render_cache))
+ (modules masc_tui_markdown_render_cache)
+ (libraries masc_tui_markdown))
 
 (library
  (name masc_tui_send_disposition)

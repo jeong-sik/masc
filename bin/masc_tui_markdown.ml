@@ -52,6 +52,12 @@ let plain_palette =
   ; code_type = ("", "")
   }
 
+type streaming_render = {
+  rows : string list;
+  mutable_source_start : int;
+  mutable_row_start : int;
+}
+
 (* {1 Inline markers} *)
 
 let kind_plain = "plain"
@@ -961,16 +967,40 @@ let table_block palette ~width ~alignments ~header ~body =
 
 (* The table starting at [line], if one starts there: its delimiter row, the
    body rows that follow it, and what is left of the source. *)
+type source_line = {
+  source_text : string;
+  source_start : int;
+  terminal_line : bool;
+  synthetic_terminal : bool;
+}
+
+let source_lines text =
+  let lines = String.split_on_char '\n' text in
+  let last_index = List.length lines - 1 in
+  let ends_with_newline = String.ends_with ~suffix:"\n" text in
+  let offset = ref 0 in
+  List.mapi
+    (fun index source_text ->
+      let source_start = !offset in
+      if index < last_index then
+        offset := source_start + String.length source_text + 1;
+      { source_text;
+        source_start;
+        terminal_line = index = last_index;
+        synthetic_terminal = ends_with_newline && index = last_index;
+      })
+    lines
+
 let table_at line rest =
-  match (table_cells line, rest) with
+  match (table_cells line.source_text, rest) with
   | Some header, delimiter :: after -> (
-      match table_alignments delimiter with
+      match table_alignments delimiter.source_text with
       | None -> None
       | Some alignments ->
           let rec body taken = function
             | next :: more -> (
-                match table_cells next with
-                | Some cells when table_alignments next = None ->
+                match table_cells next.source_text with
+                | Some cells when table_alignments next.source_text = None ->
                     body (cells :: taken) more
                 | Some _ | None -> (List.rev taken, next :: more))
             | [] -> (List.rev taken, [])
@@ -1027,10 +1057,41 @@ let closes_fence line ~opened =
   | Some _, None -> true
   | None, _ -> false
 
-let render ~palette ~width text =
+let render_streaming ~palette ~width text =
   let width = max 1 width in
   let rows = ref [] in
-  let emit_all list = List.iter (fun row -> rows := row :: !rows) list in
+  let rendered_rows = ref 0 in
+  let block_count = ref 0 in
+  let previous_source_start = ref 0 in
+  let previous_row_start = ref 0 in
+  let mutable_source_start = ref 0 in
+  let mutable_row_start = ref 0 in
+  let previous_can_absorb_terminal = ref false in
+  let mutable_can_absorb_terminal = ref false in
+  let mutable_block_started_at_terminal = ref false in
+  let emit_all list =
+    List.iter
+      (fun row ->
+        rows := row :: !rows;
+        incr rendered_rows)
+      list
+  in
+  (* A source ending in a newline produces one synthetic empty line from
+     [String.split_on_char]. It is still rendered -- [render] has always kept
+     that row -- but it cannot close the preceding block: another delta can
+     append a table row or fence content immediately after that newline. *)
+  let begin_block ~can_absorb_terminal line =
+    if not line.synthetic_terminal then begin
+      previous_source_start := !mutable_source_start;
+      previous_row_start := !mutable_row_start;
+      previous_can_absorb_terminal := !mutable_can_absorb_terminal;
+      mutable_source_start := line.source_start;
+      mutable_row_start := !rendered_rows;
+      mutable_can_absorb_terminal := can_absorb_terminal;
+      mutable_block_started_at_terminal := line.terminal_line;
+      incr block_count
+    end
+  in
   (* The fence body is held until the fence closes -- or until the text ends,
      an unclosed fence still renders what it holds -- because the lexer reads
      the body whole; its state, a comment opened rows ago, decides the colour
@@ -1059,14 +1120,16 @@ let render ~palette ~width text =
     | line :: rest -> (
         match fence with
         | Some (marker, language, lexer)
-          when closes_fence line ~opened:(Some marker) ->
+          when closes_fence line.source_text ~opened:(Some marker) ->
             emit_fence ~closed:true language lexer rev_body;
+            mutable_can_absorb_terminal := false;
             walk None [] rest
-        | Some _ -> walk fence (line :: rev_body) rest
+        | Some _ -> walk fence (line.source_text :: rev_body) rest
         | None -> (
-            match fence_marker line with
+            match fence_marker line.source_text with
             | Some marker ->
-                let language = fence_language line in
+                begin_block ~can_absorb_terminal:true line;
+                let language = fence_language line.source_text in
                 let lexer =
                   Option.bind language lexer_of_language
                 in
@@ -1074,12 +1137,37 @@ let render ~palette ~width text =
             | None -> (
                 match table_at line rest with
                 | Some (header, alignments, body, remaining) ->
+                    begin_block ~can_absorb_terminal:true line;
                     emit_all
                       (table_block palette ~width ~alignments ~header ~body);
                     walk None [] remaining
                 | None ->
-                    emit_all (block_rows palette ~width line);
+                    begin_block
+                      ~can_absorb_terminal:
+                        (Option.is_some (table_cells line.source_text))
+                      line;
+                    emit_all (block_rows palette ~width line.source_text);
                     walk None [] rest)))
   in
-  walk None [] (String.split_on_char '\n' text);
-  List.rev !rows
+  walk None [] (source_lines text);
+  let terminal_can_join_previous = !previous_can_absorb_terminal in
+  let mutable_source_start, mutable_row_start =
+    (* An incomplete final physical line can still turn into a table delimiter
+       for a header candidate before it, or into another row of a table. Keep
+       that predecessor mutable until a newline proves the separation. Other
+       preceding blocks are already closed. A final line already inside a
+       fence or table never called [begin_block], so its real boundary remains. *)
+    if
+      !mutable_block_started_at_terminal
+      && !block_count > 1
+      && terminal_can_join_previous
+    then
+      !previous_source_start, !previous_row_start
+    else !mutable_source_start, !mutable_row_start
+  in
+  { rows = List.rev !rows;
+    mutable_source_start;
+    mutable_row_start;
+  }
+
+let render ~palette ~width text = (render_streaming ~palette ~width text).rows

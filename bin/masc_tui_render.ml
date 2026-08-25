@@ -108,7 +108,7 @@ type chat_markdown_identity = {
   cmi_style : Message_layout.style;
   cmi_keeper_name : string;
   cmi_request_id : string;
-  cmi_observed_at : float;
+  cmi_observed_at : float option;
   cmi_entry_index : int;
 }
 
@@ -116,35 +116,51 @@ let equal_chat_markdown_identity left right =
   left.cmi_style = right.cmi_style
   && String.equal left.cmi_keeper_name right.cmi_keeper_name
   && String.equal left.cmi_request_id right.cmi_request_id
-  && Float.equal left.cmi_observed_at right.cmi_observed_at
+  && Option.equal Float.equal left.cmi_observed_at right.cmi_observed_at
   && left.cmi_entry_index = right.cmi_entry_index
 
 let chat_markdown_cache =
   Markdown_cache.create ~capacity:chat_markdown_cache_capacity
     ~equal:equal_chat_markdown_identity
 
+let chat_markdown_streaming ~width body =
+  Markdown.render_streaming ~palette:chat_markdown_palette ~width body
+
 let cached_chat_markdown ~(entry : Message_layout.entry) ~width =
-  let source =
-    match entry.markdown_source with
-    | Message_layout.Markdown_stable
-        { keeper_name; request_id; observed_at; entry_index } ->
+  match entry.markdown_source with
+  | Message_layout.Markdown_stable
+      { keeper_name; request_id; observed_at; entry_index } ->
+      let source =
         Markdown_cache.Stable_source
           { identity =
               { cmi_style = entry.style;
                 cmi_keeper_name = keeper_name;
                 cmi_request_id = request_id;
-                cmi_observed_at = observed_at;
+                cmi_observed_at = Some observed_at;
                 cmi_entry_index = entry_index;
               };
             text = entry.body;
           }
-    | Message_layout.Markdown_streaming ->
-        Markdown_cache.Streaming_source entry.body
-  in
-  Markdown_cache.render chat_markdown_cache
-    ~theme_revision:chat_markdown_theme_revision
-    ~palette_generation:chat_markdown_palette_generation ~width
-    ~renderer:chat_markdown ~source
+      in
+      Markdown_cache.render chat_markdown_cache
+        ~theme_revision:chat_markdown_theme_revision
+        ~palette_generation:chat_markdown_palette_generation ~width
+        ~renderer:chat_markdown ~source
+  | Message_layout.Markdown_growing
+      { keeper_name; request_id; entry_index } ->
+      Markdown_cache.render_growing chat_markdown_cache
+        ~theme_revision:chat_markdown_theme_revision
+        ~palette_generation:chat_markdown_palette_generation ~width
+        ~renderer:chat_markdown_streaming
+        ~identity:
+          { cmi_style = entry.style;
+            cmi_keeper_name = keeper_name;
+            cmi_request_id = request_id;
+            cmi_observed_at = None;
+            cmi_entry_index = entry_index;
+          }
+        ~text:entry.body
+  | Message_layout.Markdown_streaming -> chat_markdown ~width entry.body
 
 (* Conversation colour names the source, not the prose. A keeper can return a
    page of Markdown; painting every byte green turns syntax, emphasis, links,
@@ -3272,17 +3288,16 @@ let render_keeper_message (state : state) =
       | Some live
         when String.equal (Keeper_chat_transcript.keeper_name live) keeper_name
         ->
-          let request_label =
-            Keeper_chat.compact_request_id
-              (Keeper_chat_transcript.request_id live)
-          in
-          let entry style role_label body =
+          let request_id = Keeper_chat_transcript.request_id live in
+          let request_label = Keeper_chat.compact_request_id request_id in
+          let entry ?(markdown_source = Message_layout.Markdown_streaming) style
+              role_label body =
             ({ style;
                timestamp = "live";
                role_label;
                request_label;
                body;
-               markdown_source = Message_layout.Markdown_streaming;
+               markdown_source;
              }
               : Message_layout.entry)
           in
@@ -3296,8 +3311,8 @@ let render_keeper_message (state : state) =
             Keeper_chat.terminal_safe_text
               (Keeper_chat_transcript.keeper_name live)
           in
-          List.map
-            (fun (item : Keeper_chat_transcript.trail_item) ->
+          List.mapi
+            (fun entry_index (item : Keeper_chat_transcript.trail_item) ->
               match item with
               | Keeper_chat_transcript.Trail_thinking lines ->
                   entry Message_layout.Thinking "thinking"
@@ -3312,7 +3327,14 @@ let render_keeper_message (state : state) =
                   entry Message_layout.Tool "tools"
                     (String.concat "\n" projection.rows)
               | Keeper_chat_transcript.Trail_text text ->
-                  entry Message_layout.Keeper keeper_label text)
+                  entry
+                    ~markdown_source:
+                      (Message_layout.Markdown_growing
+                         { keeper_name;
+                           request_id;
+                           entry_index;
+                         })
+                    Message_layout.Keeper keeper_label text)
             (Keeper_chat_transcript.trail live)
       | Some _ | None -> []
     in

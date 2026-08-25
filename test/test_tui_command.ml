@@ -209,7 +209,7 @@ let describe_hint = function
   | Command.No_command -> "none"
   | Command.Chosen entry -> "chosen:" ^ entry.Command.word
   | Command.Unknown_command word -> "unknown:" ^ word
-  | Command.Candidates entries ->
+  | Command.Candidates { entries; _ } ->
       "candidates:"
       ^ String.concat "," (List.map (fun e -> e.Command.word) entries)
 
@@ -223,7 +223,7 @@ let test_plain_text_has_no_hint () =
 let test_a_lone_slash_lists_everything () =
   check int "one candidate per command" (List.length Command.catalog)
     (match Command.hint "/" with
-     | Command.Candidates entries -> List.length entries
+     | Command.Candidates { entries; _ } -> List.length entries
      | Command.No_command | Command.Chosen _ | Command.Unknown_command _ -> 0)
 
 let test_a_prefix_narrows_the_list () =
@@ -313,6 +313,85 @@ let test_help_lines_come_from_the_catalog () =
          && String.length line > String.length (Command.usage entry)))
     Command.catalog Command.help_lines
 
+let describe_span = function
+  | Command.Typed text -> "T[" ^ text ^ "]"
+  | Command.Untyped text -> "U[" ^ text ^ "]"
+  | Command.Detail text -> "D[" ^ text ^ "]"
+  | Command.Wrong text -> "W[" ^ text ^ "]"
+
+let spans text =
+  String.concat ""
+    (List.map describe_span (Command.hint_spans (Command.hint text)))
+
+let test_the_typed_run_is_what_was_pressed () =
+  (* One candidate left, so the argument comes along with it. *)
+  check string "a prefix highlights through the slash"
+    "T[/ta]U[sk]D[ <title>]" (spans "/ta");
+  (* Three left, so names only -- and each carries the same typed run. *)
+  check string "one glyph, three candidates"
+    "T[/t]U[ask]D[  ]T[/t]U[hinking]D[  ]T[/t]U[ools]" (spans "/t");
+  check string "the bare slash highlights only itself"
+    "T[/]U[task]" (spans "/" |> fun row ->
+      match String.index_opt row 'D' with
+      | Some at -> String.sub row 0 at
+      | None -> row)
+
+(* Splitting the word for colour must not lose or duplicate a glyph. *)
+let test_colour_boundaries_keep_every_glyph () =
+  List.iter
+    (fun (typed, word) ->
+      match Command.hint_spans (Command.hint typed) with
+      | Command.Typed head :: Command.Untyped tail :: _ ->
+          check string
+            (Printf.sprintf "%s spells /%s" typed word)
+            ("/" ^ word) (head ^ tail)
+      | _ -> failf "%s did not open with a typed run" typed)
+    (* [/i] is left out on purpose: it opens both [interrupt] and [image], and
+       the first span then spells whichever the catalog lists first. Each pair
+       here names a prefix only one command answers. *)
+    [ ("/ta", "task")
+    ; ("/th", "thinking")
+    ; ("/im", "image")
+    ; ("/k", "keeper")
+    ; ("/interrup", "interrupt")
+    ]
+
+let test_a_complete_word_needs_no_untyped_run () =
+  check string "nothing left to type"
+    "T[/memory]D[ \xe2\x80\x94 show or hide Librarian/Memory journal rows]"
+    (spans "/memory");
+  check bool "an argument stays a detail" true
+    (match Command.hint_spans (Command.hint "/thinking") with
+     | Command.Typed "/thinking" :: Command.Detail args :: _ ->
+         String.equal args " [hidden|folded|full]"
+     | _ -> false)
+
+let test_an_unknown_word_is_marked_wrong () =
+  check bool "the word carries the wrong span" true
+    (match Command.hint_spans (Command.hint "/zork") with
+     | Command.Wrong "/zork" :: Command.Detail rest :: [] ->
+         String.starts_with ~prefix:" is not a command" rest
+     | _ -> false)
+
+(* The row the renderer paints and the row the tests read have to be the same
+   row, or one of them is describing a footer nobody sees. *)
+let test_the_line_is_the_spans_joined () =
+  List.iter
+    (fun text ->
+      let joined =
+        match Command.hint_spans (Command.hint text) with
+        | [] -> None
+        | spans ->
+            Some
+              (String.concat ""
+                 (List.map Command.hint_span_text spans))
+      in
+      check (option string)
+        (Printf.sprintf "%S joins to its line" text)
+        (Command.hint_line (Command.hint text))
+        joined)
+    [ ""; "hello"; "/"; "/t"; "/th"; "/thinking"; "/task a b"; "/zork" ]
+
 let () =
   run "tui command"
     [ ( "composer"
@@ -346,6 +425,16 @@ let () =
             test_every_catalogued_command_parses
         ; test_case "help lines come from the catalog" `Quick
             test_help_lines_come_from_the_catalog
+        ; test_case "the typed run is what was pressed" `Quick
+            test_the_typed_run_is_what_was_pressed
+        ; test_case "colour boundaries keep every glyph" `Quick
+            test_colour_boundaries_keep_every_glyph
+        ; test_case "a complete word needs no untyped run" `Quick
+            test_a_complete_word_needs_no_untyped_run
+        ; test_case "an unknown word is marked wrong" `Quick
+            test_an_unknown_word_is_marked_wrong
+        ; test_case "the line is the spans joined" `Quick
+            test_the_line_is_the_spans_joined
         ] )
     ; ( "tools/call"
       , [ test_case "a tool answer is read off the SSE body" `Quick

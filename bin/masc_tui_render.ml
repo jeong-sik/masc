@@ -3842,11 +3842,27 @@ let render_keeper_message (state : state) =
        them back; what the operator is looking at is the command they are
        part way through typing, and until now the only way to find out
        whether it existed was to send it. *)
-    let footer_hints =
+    (* The footer is drawn dim, so a span that changes colour restores the
+       foreground rather than resetting: a reset would drop the dim from
+       everything after it. What is highlighted is the run the operator has
+       actually pressed, which is what tells them how far along the word they
+       are. *)
+    let slash_hint =
+      let paint (span : Masc_tui_command.hint_span) =
+        match span with
+        | Masc_tui_command.Typed text -> Ansi.cyan ^ text ^ Ansi.default_fg
+        | Masc_tui_command.Wrong text -> Theme.bad ^ text ^ Ansi.default_fg
+        | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
+      in
       match
-        Masc_tui_command.hint_line
+        Masc_tui_command.hint_spans
           (Masc_tui_command.hint (Buffer.contents state.msg_input))
       with
+      | [] -> None
+      | spans -> Some (String.concat "" (List.map paint spans))
+    in
+    let footer_hints =
+      match slash_hint with
       | Some line -> line
       | None ->
       if chat_cols < 120 then

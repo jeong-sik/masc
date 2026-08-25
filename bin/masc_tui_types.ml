@@ -549,6 +549,10 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* The roster beside a keeper surface costs the chat 30 columns for a
+     list the reader may already know. Hidden is a choice they make, not a
+     width the terminal forces, so it survives resizing. *)
+  mutable roster_pane_hidden: bool;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -926,6 +930,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   tasks_domain = [];
   task_focus = false;
   help_open = false;
+  roster_pane_hidden = false;
   help_scroll = 0;
   image_open = None;
   palette_open = false;

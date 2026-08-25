@@ -2903,6 +2903,11 @@
  (libraries alcotest masc masc_tui_planning_detail))
 
 (test
+ (name test_tui_roster_pane)
+ (modules test_tui_roster_pane)
+ (libraries alcotest masc_tui_roster_pane))
+
+(test
  (name test_tui_render_schedule)
  (modules test_tui_render_schedule)
  (libraries alcotest masc_tui_render_schedule))

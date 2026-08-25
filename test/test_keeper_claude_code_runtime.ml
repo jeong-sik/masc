@@ -227,11 +227,20 @@ let message role text : Agent_core.Types.message =
   { role; content = [ Text text ]; name = None; tool_call_id = None; metadata = [] }
 ;;
 
+(* The wire carries content blocks, not a string: #30567 gave a Claude Code
+   keeper the image itself instead of a description of it, and a turn now
+   sends any images ahead of one text block. What these tests are about is the
+   prompt, so the text blocks are what they read. *)
 let content_of_wire_message raw =
   Yojson.Safe.from_string raw
   |> Yojson.Safe.Util.member "message"
   |> Yojson.Safe.Util.member "content"
-  |> Yojson.Safe.Util.to_string
+  |> Yojson.Safe.Util.to_list
+  |> List.filter_map (fun block ->
+       match Yojson.Safe.Util.member "type" block with
+       | `String "text" -> Some (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "text" block))
+       | _ -> None)
+  |> String.concat ""
 ;;
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus

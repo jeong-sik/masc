@@ -4870,7 +4870,19 @@ let render_changes_list (state : state) =
     + (if Option.is_some state.changes_error then 2 else 0)
     + (if Option.is_some budget_note then 2 else 0)
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  let total_content = max 1 (rows - chrome_rows) in
+  (* The cursor row's recorded diff previews under the list, from the same
+     local snapshot Enter renders -- no request rides a keypress. The list
+     keeps at least five rows; the preview takes what remains. *)
+  let cursor_change =
+    if shown = 0 then None else List.nth_opt changes state.changes_scroll
+  in
+  let preview_height =
+    match cursor_change with
+    | None -> 0
+    | Some _ -> max 0 (min (total_content - 5) (total_content / 2))
+  in
+  let content_height = max 1 (total_content - preview_height) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
   if shown = 0 then begin
@@ -4909,6 +4921,25 @@ let render_changes_list (state : state) =
           let marker = if idx = scroll then ">" else " " in
           box_line_styled buf cols ~style (marker ^ String.sub line 1 (String.length line - 1))
     done;
+  (match cursor_change with
+   | None -> ()
+   | Some change when preview_height >= 2 ->
+       let before, after = change_diff_halves change in
+       let diff_rows = Diff.rows ~before ~after in
+       let removed, added = Diff.counts diff_rows in
+       box_divider buf cols;
+       box_line_styled buf cols ~style:Ansi.dim
+         (Printf.sprintf "  preview %s  -%d +%d  (Enter opens, scrolls)"
+            (Terminal_text.single_line (change_row_address change))
+            removed added);
+       let body_height = preview_height - 2 in
+       for i = 0 to body_height - 1 do
+         match List.nth_opt diff_rows i with
+         | Some row ->
+             box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
+         | None -> box_empty buf cols
+       done
+   | Some _ -> ());
   if shown > content_height then
     box_line_styled buf cols ~style:Ansi.dim
       (Printf.sprintf "[%d changes, scroll %d]" shown scroll);

@@ -5255,6 +5255,18 @@ def changes_keeper_and_arrow_detail_interaction(
     _base_path: str,
 ) -> None:
     tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    # The cursor row's diff previews under the list without Enter -- the
+    # recorded before/after pair, rendered locally.
+    wait_for_output(
+        process, master_fd, output, b"preview masc:lib/example.ml",
+        start=0, timeout=3.0,
+    )
+    preview_plain = CSI_RE.sub(b"", bytes(output)).decode("utf-8")
+    for needle in ("-1 +1", "let a = 1", "let a = 2"):
+        if needle not in preview_plain:
+            raise AssertionError(
+                f"the preview missed {needle!r}: {preview_plain[-600:]!r}"
+            )
     beta = send_and_wait(process, master_fd, output, b"]", b"masc:lib/beta.ml")
     if b"MASC Changes beta" not in CSI_RE.sub(b"", beta):
         raise AssertionError(f"Changes did not switch to beta: {beta!r}")

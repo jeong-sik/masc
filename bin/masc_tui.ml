@@ -4735,6 +4735,31 @@ let spill_stamp () =
 let spill_nonce () =
   String.sub (Random_id.uuid_v7 ()) 0 8
 
+(* A file dropped on the composer arrives as a paste. An image is meant to be
+   looked at, so it is staged rather than spelled out; every other file keeps
+   its path in the draft, which is how an operator names a file they want read.
+
+   Shares handle_paste's guard: a staged image with no keeper to send it to is
+   the same silence as a paste with nowhere to go. *)
+let attach_dropped_image state ~base_path ~mailbox attachment =
+  let in_chat = state.view = Keepers Keeper_message in
+  if not (in_chat || state.composer_focused) then
+    ignore
+      (handle_composer_key state ~base_path ~mailbox Composer.focus_key : bool);
+  if not (in_chat || state.composer_focused) then
+    add_event state "error"
+      (Printf.sprintf "Dropped %s with no Keeper to send it to"
+         attachment.Masc_tui_keeper_chat_projection.name)
+  else begin
+    state.msg_attachments <- state.msg_attachments @ [ attachment ];
+    add_event state "system"
+      (Printf.sprintf "Attached %s (%s, %d bytes) — %d staged for the next message"
+         attachment.Masc_tui_keeper_chat_projection.name
+         attachment.Masc_tui_keeper_chat_projection.mime_type
+         attachment.Masc_tui_keeper_chat_projection.size
+         (List.length state.msg_attachments))
+  end
+
 let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
@@ -6551,13 +6576,20 @@ let main () =
               filesystem is the check that keeps this from touching text that
               merely looks like a path: an existing file is what the operator
               dropped, and anything else is left byte-for-byte as pasted. *)
-           let paste =
-             match Masc_tui_paste.unescaped_path paste.Masc_tui_paste.text with
-             | Some path when Sys.file_exists path ->
-                 { paste with Masc_tui_paste.text = path }
-             | Some _ | None -> paste
-           in
-           handle_paste state ~base_path ~mailbox:async_messages ~paste
+           (match Masc_tui_paste.unescaped_path paste.Masc_tui_paste.text with
+            | Some path when Sys.file_exists path -> (
+                match Masc_tui_attachment.classify_drop ~path with
+                | Masc_tui_attachment.Attach attachment ->
+                    attach_dropped_image state ~base_path
+                      ~mailbox:async_messages attachment
+                | Masc_tui_attachment.Keep_path ->
+                    handle_paste state ~base_path ~mailbox:async_messages
+                      ~paste:{ paste with Masc_tui_paste.text = path }
+                | Masc_tui_attachment.Refuse error ->
+                    add_event state "error"
+                      (Masc_tui_attachment.error_to_string error))
+            | Some _ | None ->
+                handle_paste state ~base_path ~mailbox:async_messages ~paste)
        (* A graphics reply is read and dropped. Nothing asks for one outside
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)

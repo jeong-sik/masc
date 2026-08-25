@@ -63,3 +63,15 @@ let error_to_string = function
       max
   | Unsupported { path; detail } -> Printf.sprintf "%s: %s" path detail
 ;;
+
+type drop =
+  | Attach of Masc_tui_keeper_chat_projection.attachment
+  | Keep_path
+  | Refuse of error
+
+let classify_drop ~path =
+  match of_file ~path with
+  | Ok attachment -> Attach attachment
+  | Error (Unsupported _) -> Keep_path
+  | Error error -> Refuse error
+;;

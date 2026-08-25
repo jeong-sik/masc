@@ -57,17 +57,23 @@ let test_body_is_kept_whole () =
     (String.trim skill.SD.body = "본문 첫 줄.")
 ;;
 
-let test_missing_name_is_an_error () =
+(* [name] is optional in the standard and defaults to the directory name. A
+   skill written for another runtime that relied on that default has to load
+   here too — rejecting it was the one place this loader broke the
+   cross-runtime contract it exists to honour. *)
+let test_omitted_name_defaults_to_the_directory () =
   let contents = {|---
 description: 설명만 있다
 ---
 
 본문.
 |} in
-  match error_exn ~directory_name:"nameless" contents with
-  | SD.Missing_name -> ()
-  | other ->
-    failf "expected Missing_name, got: %s" (SD.load_error_to_string other)
+  match SD.load ~directory_name:"nameless" ~contents with
+  | Ok skill ->
+    check string "name comes from the directory" "nameless" skill.SD.name;
+    check string "description" "설명만 있다" skill.SD.description
+  | Error error ->
+    failf "an omitted name must load: %s" (SD.load_error_to_string error)
 ;;
 
 let test_missing_description_is_an_error () =
@@ -98,13 +104,45 @@ let test_name_must_match_its_directory () =
     failf "expected Name_mismatch, got: %s" (SD.load_error_to_string other)
 ;;
 
-let test_no_frontmatter_is_missing_name () =
+let test_no_frontmatter_is_missing_description () =
   (* Frontmatter.parse hands back an unread document when there is no opening
-     delimiter, so both required fields read empty and name is reported first. *)
+     delimiter, so every field reads empty. The directory still supplies a
+     name, which leaves the description as the one thing masc cannot do
+     without. *)
   match error_exn ~directory_name:"plain" "본문만 있는 파일.\n" with
-  | SD.Missing_name -> ()
+  | SD.Missing_description -> ()
   | other ->
-    failf "expected Missing_name, got: %s" (SD.load_error_to_string other)
+    failf "expected Missing_description, got: %s" (SD.load_error_to_string other)
+;;
+
+(* [disable-model-invocation] is a standard field. Dropping it would let a
+   skill that asked not to be reached for automatically be reached for anyway,
+   which is a declared intent silently reversed. *)
+let test_disable_model_invocation_is_read () =
+  let contents = {|---
+name: quiet
+description: 모델이 스스로 부르지 않기를 선언한 스킬
+disable-model-invocation: true
+---
+
+본문.
+|} in
+  match SD.load ~directory_name:"quiet" ~contents with
+  | Ok skill -> check bool "not model invocable" false skill.SD.model_invocable
+  | Error error -> failf "must load: %s" (SD.load_error_to_string error)
+;;
+
+let test_model_invocable_by_default () =
+  let contents = {|---
+name: loud
+description: 아무것도 선언하지 않은 스킬
+---
+
+본문.
+|} in
+  match SD.load ~directory_name:"loud" ~contents with
+  | Ok skill -> check bool "model invocable" true skill.SD.model_invocable
+  | Error error -> failf "must load: %s" (SD.load_error_to_string error)
 ;;
 
 (* Frontmatter written for other runtimes. Shape taken from a published skill
@@ -153,7 +191,8 @@ let () =
     [ ( "required fields"
       , [ test_case "name and description are read" `Quick test_required_fields_are_read
         ; test_case "the body is kept whole" `Quick test_body_is_kept_whole
-        ; test_case "a missing name is an error" `Quick test_missing_name_is_an_error
+        ; test_case "an omitted name defaults to the directory" `Quick
+            test_omitted_name_defaults_to_the_directory
         ; test_case
             "a missing description is an error"
             `Quick
@@ -165,7 +204,7 @@ let () =
         ; test_case
             "a file with no frontmatter is missing a name"
             `Quick
-            test_no_frontmatter_is_missing_name
+            test_no_frontmatter_is_missing_description
         ] )
     ; ( "foreign metadata"
       , [ test_case
@@ -176,6 +215,16 @@ let () =
             "another runtime's blocks stay out of the body"
             `Quick
             test_foreign_metadata_does_not_leak_into_the_body
+        ] )
+    ; ( "standard fields"
+      , [ test_case
+            "disable-model-invocation is read"
+            `Quick
+            test_disable_model_invocation_is_read
+        ; test_case
+            "model invocable by default"
+            `Quick
+            test_model_invocable_by_default
         ] )
     ]
 ;;

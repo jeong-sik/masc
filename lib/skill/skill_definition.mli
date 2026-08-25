@@ -1,8 +1,8 @@
 (** Skill_definition — one [SKILL.md] read into the two fields masc uses.
 
-    Agent Skills is an open standard: [name] and [description] are the only
-    required frontmatter fields, and a conforming runtime ignores keys it does
-    not recognise. A skill written for OpenClaw carries [metadata.openclaw],
+    Agent Skills is an open standard: [name] is optional and defaults to the
+    directory name, [description] is what a runtime is expected to carry, and a
+    conforming runtime ignores keys it does not recognise. A skill written for OpenClaw carries [metadata.openclaw],
     one written for Hermes carries [metadata.hermes], and the same file is
     expected to load in both. Rejecting a file for carrying another runtime's
     keys would break that contract, so unknown keys are dropped here.
@@ -12,17 +12,25 @@
     with itself — a key it does not know is masc's bug. A [SKILL.md] is not
     masc's contract; it is someone else's file that masc agreed to read.
 
-    What is still fail-closed is the pair masc depends on. A skill without a
-    name cannot be referenced by a task, and one without a description tells a
-    keeper nothing about when it applies — neither is a skill masc can use, so
-    both are [Error] rather than a blank that surfaces later as an empty prompt
-    block.
+    What is still fail-closed is the description masc depends on: a skill
+    without one tells a keeper nothing about when it applies, so it is [Error]
+    rather than a blank that surfaces later as an empty prompt block. A missing
+    name is not an error — the directory supplies it, which is what a task
+    references anyway. [Missing_name] therefore only reaches a caller that
+    passes an empty directory name.
 
     RFC skills-declared-not-discovered §4.1. *)
 
 type t =
   { name : string
   ; description : string
+  ; model_invocable : bool
+        (** [false] when the frontmatter carries
+            [disable-model-invocation: true]. The standard field says the
+            author does not want a model reaching for this on its own, so a
+            composition skill that sets it stays off the model-visible tool
+            surface. Ignoring it would let a declared intent be silently
+            reversed. *)
   ; body : string
         (** Everything after the frontmatter, verbatim. Not trimmed to a
             summary: a task that names a skill has already chosen it, so the

@@ -83,14 +83,20 @@ let composition_of_block ~skill block =
 let parse_skill ~directory content =
   match Skill_definition.load ~directory_name:directory ~contents:content with
   | Error error -> Error (Definition_rejected { directory; error })
-  | Ok { Skill_definition.name; description; body } ->
+  | Ok { Skill_definition.name; description; body; model_invocable } ->
     (match composition_blocks body with
      | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
      | Ok [] -> Ok { name; description; body; surface = Instruction }
      | Ok [ block ] ->
        (match composition_of_block ~skill:name block with
         | Error _ as error -> error
-        | Ok entry -> Ok { name; description; body; surface = Composition entry })
+        | Ok entry ->
+          (* [disable-model-invocation: true] says the author does not want a
+             model reaching for this by itself. The composition still parses
+             and the skill still loads — it just does not become a tool the
+             model can see. *)
+          let surface = if model_invocable then Composition entry else Instruction in
+          Ok { name; description; body; surface })
      | Ok blocks ->
        Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))
 ;;

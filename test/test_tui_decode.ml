@@ -2407,6 +2407,63 @@ let test_runtime_surface_keeps_resolved_rows_without_a_probe () =
                 (fun row -> Option.is_none row.Tui_decode.rcr_probe)
                 snapshot.rss_candidates))
 
+(* [/health] answers before the workspace is fully up, and the footer that
+   reads it draws on every surface. A decode that failed on one missing string
+   would take the whole tail down to say less than a tail with a gap in it. *)
+let health_probe =
+  `Assoc
+    [ ("status", `String "ok");
+      ("server", `String "masc");
+      ("version", `String "0.24.0");
+      ("build", `Assoc [
+        ("binary_commit", `String "030fa9043aafc5c2003f830c86720afff8e8e2ff");
+        ("binary_commit_age_seconds", `Float 1106.0);
+      ]);
+      ("paths", `Assoc [
+        ("cwd", `String "/Users/dancer/me");
+        ("effective_base_path", `String "/Users/dancer/me");
+        ("effective_masc_root", `String "/Users/dancer/me/.masc");
+      ]);
+    ]
+
+let test_decode_server_identity_reads_a_probe () =
+  match Tui_decode.decode_server_identity health_probe with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check string) "version" "0.24.0" identity.Tui_decode.sid_version;
+    Alcotest.(check string) "binary commit"
+      "030fa9043aafc5c2003f830c86720afff8e8e2ff"
+      identity.Tui_decode.sid_binary_commit;
+    Alcotest.(check string) "base path" "/Users/dancer/me"
+      identity.Tui_decode.sid_base_path;
+    Alcotest.(check string) "masc root" "/Users/dancer/me/.masc"
+      identity.Tui_decode.sid_masc_root;
+    Alcotest.(check (option (float 0.001))) "binary age" (Some 1106.0)
+      identity.Tui_decode.sid_binary_commit_age_s
+
+let test_decode_server_identity_survives_a_bare_health () =
+  match Tui_decode.decode_server_identity (`Assoc [ ("status", `String "ok") ]) with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check string) "no version reads empty rather than failing" ""
+      identity.Tui_decode.sid_version;
+    Alcotest.(check string) "no base path either" ""
+      identity.Tui_decode.sid_base_path;
+    Alcotest.(check (option (float 0.001))) "and no age is None" None
+      identity.Tui_decode.sid_binary_commit_age_s
+
+let test_decode_server_identity_takes_an_integer_age () =
+  (* The server writes the age as a float today; a whole-second value would
+     arrive as an int and must not read as "age unknown". *)
+  let json =
+    `Assoc [ ("build", `Assoc [ ("binary_commit_age_seconds", `Int 60) ]) ]
+  in
+  match Tui_decode.decode_server_identity json with
+  | Error detail -> Alcotest.fail detail
+  | Ok identity ->
+    Alcotest.(check (option (float 0.001))) "an int age still reads"
+      (Some 60.0) identity.Tui_decode.sid_binary_commit_age_s
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -2647,6 +2704,15 @@ let () =
           test_x10_clicks_and_drags_stay_unclaimed;
         Alcotest.test_case "agrees with the SGR decoder" `Quick
           test_x10_and_sgr_agree_on_the_wheel;
+      ] );
+    ( "server_identity",
+      [
+        Alcotest.test_case "reads a health probe" `Quick
+          test_decode_server_identity_reads_a_probe;
+        Alcotest.test_case "survives a bare health" `Quick
+          test_decode_server_identity_survives_a_bare_health;
+        Alcotest.test_case "takes an integer age" `Quick
+          test_decode_server_identity_takes_an_integer_age;
       ] );
     ( "bounded_parent_depth",
       [

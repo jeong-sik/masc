@@ -263,9 +263,22 @@ let awaiting_approval_notice (state : state) =
                (Terminal_text.single_line awaiting.Keeper_chat_transcript.tool_name)
                where))
 
-let footer_line ?status (state : state) ~hints =
-  Masc_tui_footer.line ?status ~dim:Ansi.dim ~reset:Ansi.reset ~port:state.port
-    ~hints ()
+(* The server names itself in every footer, because "which masc is this"
+   is a question every surface can raise and none of them answered: the tail
+   said [Port: 8935] and two checkouts on that port read identically. *)
+let footer_line ?(status = []) (state : state) ~hints =
+  let build =
+    match state.server_identity with
+    | None -> []
+    | Some identity ->
+        [ Masc_tui_footer.Server_build
+            { version = identity.Tui_decode.sid_version
+            ; commit = identity.Tui_decode.sid_binary_commit
+            }
+        ]
+  in
+  Masc_tui_footer.line ~status:(status @ build) ~dim:Ansi.dim ~reset:Ansi.reset
+    ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = composer_of_state state in
@@ -5599,6 +5612,18 @@ let render_resources (state : state) =
        ~hints:"j/k:move  J/K:scroll text  Enter:read  Esc:list  r:reload  Tab:next");
   finish_surface state ~surface_key:"resources" ~rows:terminal_rows ~cols buf
 
+(* How long ago the running binary's commit landed. Coarse on purpose: the
+   question is "is this the build I think it is", and minutes answer it while
+   seconds only look precise. *)
+let binary_age_text = function
+  | None -> "age unknown"
+  | Some seconds when seconds < 60. -> "built just now"
+  | Some seconds when seconds < 3600. ->
+      Printf.sprintf "built %.0fm ago" (seconds /. 60.)
+  | Some seconds when seconds < 86400. ->
+      Printf.sprintf "built %.0fh ago" (seconds /. 3600.)
+  | Some seconds -> Printf.sprintf "built %.0fd ago" (seconds /. 86400.)
+
 (* The Config surface: runtime.toml exactly as the server reads it. The
    text is the truth an editor session starts from; editing itself hands
    the terminal to $EDITOR and posts back through the preview gate. *)
@@ -5620,8 +5645,20 @@ let render_config (state : state) =
              now.Unix.tm_sec)
           Ansi.reset)
        (connection_badge state.connection_status));
+  (* Where this server reads from, and how old the binary serving it is. A
+     stale binary answers every request as confidently as a current one, so
+     the age is the only thing on screen that separates them. *)
+  (match state.server_identity with
+   | None -> box_line buf cols (Ansi.dim ^ "  (server identity unread)" ^ Ansi.reset)
+   | Some identity ->
+       box_line buf cols
+         (Printf.sprintf "%s  base %s   masc %s   binary %s%s" Ansi.dim
+            (fit_width identity.Tui_decode.sid_base_path 28)
+            (fit_width identity.Tui_decode.sid_masc_root 32)
+            (binary_age_text identity.Tui_decode.sid_binary_commit_age_s)
+            Ansi.reset));
   box_divider buf cols;
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - 7) in
   (match state.runtime_config_view_error, state.runtime_config_view with
    | Some detail, _ ->
        box_line buf cols (Theme.bad ^ "  " ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset);

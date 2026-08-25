@@ -678,6 +678,23 @@ type fleet_safety = {
     alive, its durable demand is not admissible. Collapsing the two reads a
     live fleet as a stopped one. *)
 
+type server_identity = {
+  sid_version : string;
+  sid_binary_commit : string;
+  sid_binary_commit_age_s : float option;
+  sid_base_path : string;
+  sid_masc_root : string;
+}
+(** Which server the TUI is talking to, as [/health] reports it.
+
+    The footer said [Port: 8935] and nothing else, so two checkouts serving
+    on the same port were indistinguishable from the screen -- and a binary
+    older than the tree it was built from looked exactly like a current one.
+    [sid_binary_commit_age_s] is how long ago that binary's commit landed,
+    which is the number that separates the two. *)
+
+val decode_server_identity : Yojson.Safe.t -> (server_identity, string) result
+
 type log_kind =
   | Log_turn
   | Log_heartbeat

@@ -196,6 +196,16 @@ module For_testing : sig
     (string, workspace_file_read_error) result
 end
 
+module For_testing_log : sig
+  (** White-box helper for the [/api/v1/git/log] row format. Not part of the
+      stable/public workspace API. *)
+
+  (** [git_log_row_of_line line] reads one
+      [%h%x09%ad%x09%an%x09%s]-formatted row; only the first three tabs
+      split, so a subject keeps its own. Malformed rows answer [None]. *)
+  val git_log_row_of_line : string -> Yojson.Safe.t option
+end
+
 module For_testing_blame : sig
   (** White-box helpers for [git blame --porcelain] parsing regression
       tests. Not part of the stable/public workspace API. *)

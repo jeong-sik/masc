@@ -185,17 +185,6 @@ let body_jsonrpc_params body_str =
   | `Assoc fields -> List.assoc_opt "params" fields
   | _ | (exception Yojson.Json_error _) -> None
 
-(* masc emits neither prompts/list_changed nor resources/list_changed -- its
-   capabilities declare listChanged false for both -- and the acknowledgement
-   reports "the subset the server agreed to honor", with unsupported types
-   omitted rather than refused. *)
-let acknowledged_subscription_filter
-      (filter : Mcp_transport_protocol.subscription_filter) =
-  { filter with
-    Mcp_transport_protocol.prompts_list_changed = false
-  ; resources_list_changed = false
-  }
-
 let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
       ~clock ~body_str reqd =
   match body_jsonrpc_id body_str with
@@ -222,39 +211,18 @@ let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version ~sw
     spawn_post_sse_keepalive ~sw ~clock info;
     let send json = send_raw info (Sse.format_event (Yojson.Safe.to_string json)) in
     let filter =
-      acknowledged_subscription_filter
+      Mcp_subscriptions.honoured_filter
         (Mcp_transport_protocol.subscription_filter_of_params
            (body_jsonrpc_params body_str))
     in
-    (* MUST be the first message on the subscription, and no notification may
-       precede it -- so it is sent before the entry is registered. *)
-    let acknowledged =
-      Mcp_transport_protocol.tag_notification_with_subscription ~subscription_id
-        (Mcp_transport_protocol.jsonrpc_notification
-           "notifications/subscriptions/acknowledged"
-           ~params:
-             (`Assoc
-               [ ( "notifications"
-                 , Mcp_transport_protocol.subscription_filter_to_json filter )
-               ]))
-    in
-    if send acknowledged then (
+    if send (Mcp_subscriptions.acknowledgement ~subscription_id filter) then (
       let token = Mcp_subscriptions.register ~subscription_id ~filter ~send in
       (* [close_sse_conn] is the one chokepoint every stop path resolves --
          peer disconnect, eviction, shutdown -- so awaiting it here is how this
          request stays open for the life of the subscription. *)
       Eio.Promise.await info.stop_promise;
       Mcp_subscriptions.unregister token;
-      ignore
-        (send
-           (Mcp_transport_protocol.make_response ~id:subscription_id
-              (`Assoc
-                [ ( "_meta"
-                  , `Assoc
-                      [ ( Mcp_transport_protocol.subscription_id_meta_key
-                        , subscription_id )
-                      ] )
-                ]))))
+      ignore (send (Mcp_subscriptions.graceful_closure ~subscription_id)))
 
 let should_stream_post_tools_call request body_str accept_mode =
   should_use_sse_for_body request body_str accept_mode

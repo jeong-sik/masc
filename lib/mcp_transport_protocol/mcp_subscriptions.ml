@@ -98,4 +98,47 @@ let subscribed_resource_uris () =
       [])
   |> List.sort_uniq String.compare
 
+(* Both transports build these. Keeping them here is the difference between
+   one contract and two that agree today: HTTP/1 and h2c already drifted on the
+   header-mismatch body until it moved to one place. *)
+
+(* masc emits neither prompts/list_changed nor resources/list_changed -- its
+   capabilities declare listChanged false for both -- and the acknowledgement
+   reports "the subset the server agreed to honor", with unsupported types
+   omitted rather than refused. *)
+let honoured_filter (filter : Mcp_transport_protocol.subscription_filter) =
+  { filter with
+    Mcp_transport_protocol.prompts_list_changed = false
+  ; resources_list_changed = false
+  }
+;;
+
+(* MUST be the first message on the subscription, with no notification before
+   it, so a caller sends this before registering. *)
+let acknowledgement ~subscription_id filter =
+  Mcp_transport_protocol.tag_notification_with_subscription
+    ~subscription_id
+    (Mcp_transport_protocol.jsonrpc_notification
+       "notifications/subscriptions/acknowledged"
+       ~params:
+         (`Assoc
+           [ ( "notifications"
+             , Mcp_transport_protocol.subscription_filter_to_json filter )
+           ]))
+;;
+
+(* The JSON-RPC response to the long-lived request. A client that receives it
+   knows the subscription closed cleanly; a transport that drops without one
+   is an unexpected disconnect. *)
+let graceful_closure ~subscription_id =
+  Mcp_transport_protocol.make_response
+    ~id:subscription_id
+    (`Assoc
+      [ ( "_meta"
+        , `Assoc
+            [ (Mcp_transport_protocol.subscription_id_meta_key, subscription_id)
+            ] )
+      ])
+;;
+
 let reset_for_test () = with_lock (fun () -> Hashtbl.reset entries)

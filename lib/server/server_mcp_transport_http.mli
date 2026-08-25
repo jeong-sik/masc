@@ -122,6 +122,19 @@ val request_force_json_response : Httpun.Request.t -> bool
 val classify_mcp_accept :
   Httpun.Request.t -> Mcp_transport_protocol.Http_negotiation.accept_mode
 val request_uses_stateless_protocol : Httpun.Request.t -> string -> bool
+val body_jsonrpc_id : string -> Yojson.Safe.t option
+(** The [id] of a JSON-RPC body, or [None] when absent or unparseable. Absent
+    and [null] are different answers and stay so: JSON-RPC 2.0 requires a
+    request to carry an id. *)
+
+val body_is_subscriptions_listen : string -> bool
+(** Whether the body is a [subscriptions/listen] request, which every transport
+    answers with a long-lived stream rather than a single response. *)
+
+val body_jsonrpc_params : string -> Yojson.Safe.t option
+(** [params] of a JSON-RPC body, or [None] when it is absent or the body does
+    not parse. *)
+
 val validate_2026_request_headers :
   Httpun.Request.t ->
   string ->

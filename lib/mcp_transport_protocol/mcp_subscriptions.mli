@@ -43,4 +43,24 @@ val subscribed_resource_uris : unit -> string list
 val notify_resource_updated : uri:string -> Yojson.Safe.t -> unit
 (** Reaches only streams that named [uri] in [resourceSubscriptions]. *)
 
+val honoured_filter :
+  Mcp_transport_protocol.subscription_filter ->
+  Mcp_transport_protocol.subscription_filter
+(** The subset this server can serve. [promptsListChanged] and
+    [resourcesListChanged] come back off because masc emits neither. *)
+
+val acknowledgement :
+  subscription_id:Yojson.Safe.t ->
+  Mcp_transport_protocol.subscription_filter ->
+  Yojson.Safe.t
+(** The first message on a subscription, which no notification may precede —
+    so send it before {!register}. *)
+
+val graceful_closure : subscription_id:Yojson.Safe.t -> Yojson.Safe.t
+(** The JSON-RPC response to the long-lived request, marking a clean end. A
+    transport that drops without it is an unexpected disconnect.
+
+    Built here rather than at each transport: HTTP/1 and h2c wrote their own
+    header-mismatch body and drifted until that moved to one place. *)
+
 val reset_for_test : unit -> unit

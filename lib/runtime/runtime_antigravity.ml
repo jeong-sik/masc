@@ -182,6 +182,18 @@ let required_string ?(nonempty = true) stage name fields =
   | None -> protocol_error stage (Printf.sprintf "missing field %S" name)
 ;;
 
+(* The init event states the conversation's identity; step_update and result
+   restate it. Present and non-blank is a restatement; missing, null, or
+   blank is silence. [required_string] cannot express that difference -- it
+   rejects a blank before anything decides whether the value was needed. *)
+let restated_string stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) when String.trim value = "" -> Ok None
+  | Some (`String value) -> Ok (Some value)
+  | Some _ -> protocol_error stage (Printf.sprintf "field %S must be a string" name)
+;;
+
 let required_nonnegative_int stage name fields =
   match List.assoc_opt name fields with
   | Some (`Int value) when value >= 0 -> Ok value
@@ -215,12 +227,12 @@ type wire_event =
       ; permission_mode : permission_mode
       }
   | Step_update of
-      { conversation_id : string
+      { conversation_id : string option
       ; state : step_state
       ; step_type : step_type
       }
   | Result of
-      { conversation_id : string
+      { conversation_id : string option
       ; status : result_status
       ; response : string
       ; error : string option
@@ -333,7 +345,7 @@ let parse_step_update fields =
   let stage = "step_update event" in
   let* step_json = required_member stage "step_update" fields in
   let* step_fields = assoc_at stage step_json in
-  let* conversation_id = required_string stage "conversation_id" step_fields in
+  let* conversation_id = restated_string stage "conversation_id" step_fields in
   (* [step_index] is not read; [state] and [step_type] are what this event
      contributes. Requiring a non-negative int on an unread ordinal made a
      step update fail on a value nothing consumes (#28010). *)
@@ -348,7 +360,7 @@ let parse_result fields =
   let stage = "result event" in
   let* result_json = required_member stage "result" fields in
   let* result_fields = assoc_at stage result_json in
-  let* conversation_id = required_string stage "conversation_id" result_fields in
+  let* conversation_id = restated_string stage "conversation_id" result_fields in
   let* status_string = required_string stage "status" result_fields in
   let* status = parse_result_status stage status_string in
   let* response = required_string ~nonempty:false stage "response" result_fields in
@@ -568,6 +580,18 @@ let verify_identity ~stage ~expected actual =
   | None | Some _ -> Ok ()
 ;;
 
+(* A restatement the CLI left blank makes no claim, so there is nothing to
+   contradict -- and the id the turn carries comes from the init event either
+   way. Requiring it non-empty turned a value nothing consumes into a terminal
+   parse error: 110 turns over five days died at attempt=1 with
+   [field "conversation_id" must not be empty], across three keepers. This is
+   the shape #28010 closed for [step_index] and #28008/#28027 closed for
+   [permission_mode] and [step_type]. *)
+let verify_restatement ~stage ~expected = function
+  | None -> Ok ()
+  | Some actual -> verify_identity ~stage ~expected:(Some expected) actual
+;;
+
 let apply_event (config : config) ~conversation_mode ~on_conversation_ready
     ~on_stream_event state = function
   | Init { conversation_id; model; cwd; permission_mode } ->
@@ -612,7 +636,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
     (match state.init with
      | None -> protocol_error stage "received step_update before init"
      | Some (expected, _, _) ->
-       let* () = verify_identity ~stage ~expected:(Some expected) conversation_id in
+       let* () = verify_restatement ~stage ~expected conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received step_update after result"
        else
@@ -631,7 +655,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
     (match state.init with
      | None -> protocol_error stage "received result before init"
      | Some (expected, _, _) ->
-       let* () = verify_identity ~stage ~expected:(Some expected) conversation_id in
+       let* () = verify_restatement ~stage ~expected conversation_id in
        if Option.is_some state.result
        then protocol_error stage "received more than one result event"
        else (

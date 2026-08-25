@@ -937,6 +937,20 @@ val decode_file_change_snapshot :
     is the part the tool-call reading cannot have: an [Edit] records two
     pieces of text and no idea where in the file they sit. *)
 
+(** One node of the workspace tree family
+    ([/api/v1/workspace/tree], [/workspace/children]). *)
+type workspace_tree_node = {
+  wt_path : string;
+  wt_label : string;
+  wt_has_children : bool;
+}
+
+val decode_workspace_tree :
+  Yojson.Safe.t -> (workspace_tree_node list, string) result
+
+(** The whole file from [/api/v1/workspace/file]'s [{ok, content}]. *)
+val decode_workspace_file : Yojson.Safe.t -> (string, string) result
+
 type git_diff_row_kind =
   | Gd_context
   | Gd_added

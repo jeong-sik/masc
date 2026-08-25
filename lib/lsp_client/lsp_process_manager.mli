@@ -31,7 +31,6 @@ type language =
   | Go
 
 val lang_id_of_language : language -> string
-val language_of_lang_id : string -> language option
 
 (** The executable and argv that start this language's server. *)
 val command_of_language : language -> string * string list
@@ -40,15 +39,11 @@ val command_of_language : language -> string * string list
     {!Lsp_project_root} walks a file's ancestors looking for these. *)
 val project_markers_of_language : language -> string list
 
-(** The language of a file, by extension. [None] for a file no server here
-    covers. *)
-val language_of_path : string -> language option
-
 (** Language → command mapping. Returns [(executable, argv)] or [None]. *)
 val command_for_lang : string -> (string * string list) option
 
 (** Detect language from file extension, as the wire id the IDE proxy speaks.
-    ["unknown"] where {!language_of_path} answers [None]. *)
+    ["unknown"] for a file no server here covers. *)
 val lang_of_path : string -> string
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)

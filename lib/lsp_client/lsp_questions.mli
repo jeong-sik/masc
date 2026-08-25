@@ -13,9 +13,6 @@ type question =
 val question_of_string : string -> question option
 val string_of_question : question -> string
 
-(** The LSP method each question is asked with. *)
-val method_of_question : question -> string
-
 type location =
   { path : string
   ; line : int

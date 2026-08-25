@@ -114,6 +114,7 @@ let tool_name_prefix = "keeper_compose_"
 let maximum_tool_name_bytes = 64
 let maximum_composition_name_bytes = maximum_tool_name_bytes - String.length tool_name_prefix
 let tool_name entry = tool_name_prefix ^ entry.name
+let plan_execute_tool_name = "keeper_plan_execute"
 let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"
 

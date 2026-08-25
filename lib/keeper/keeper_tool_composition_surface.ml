@@ -1,7 +1,7 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
 
-let plan_execute_tool_name = "keeper_plan_execute"
+let plan_execute_tool_name = Catalog.plan_execute_tool_name
 
 let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
 
@@ -893,6 +893,18 @@ let make_tools
     declared_entries
     |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
+    (* The approval policy cannot look this tool up: it is an Agent-Core tool,
+       not a keeper descriptor, so a descriptor lookup finds nothing and the
+       policy asks. Declaring the plan's node tools here lets it judge the
+       composition by what the composition runs. Written once per turn, at the
+       one point that already holds the plan. *)
+    Keeper_tool_composition_plan_index.record
+      (Keeper_tool_composition_plan_index.shared ())
+      ~composition:tool_name
+      ~node_tools:
+        (List.map
+           (fun (node : Keeper_tool_plan.node) -> node.Keeper_tool_plan.tool_name)
+           (Keeper_tool_plan.nodes entry.plan));
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
       match entry.execution, completion with

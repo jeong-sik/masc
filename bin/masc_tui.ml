@@ -13,6 +13,7 @@ module Chat_queue = Masc_tui_keeper_chat_queue
 module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Composer = Masc_tui_composer
+module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
@@ -4454,36 +4455,11 @@ let handle_keeper_action state ~base_path ~mailbox action =
         | Keeper_control.Gate_submit ->
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
-(* The composer as the key loop sees it. The renderer builds the same reading
-   for the row it draws, so the key that lands and the row the operator read
-   before pressing it agree on who the recipient is. *)
-let composer_state (state : state) : Composer.t =
-  let target =
-    match selected_keeper state with
-    | None -> Composer.No_target
-    | Some keeper ->
-        if keeper_available_for_new_message state keeper.k_name then
-          Composer.Ready keeper.k_name
-        else
-          Composer.Unreachable
-            { keeper = keeper.k_name
-            ; reason =
-                (match state.keepers_error with
-                 | Some _ -> "keeper list unread"
-                 | None -> "no longer in the roster")
-            }
-  in
-  { Composer.target
-  ; focus =
-      (if state.composer_focused then Composer.Focused else Composer.Unfocused)
-  ; draft = Buffer.contents state.msg_input
-  }
-
 (* Apply one keystroke the composer claimed. Sending routes through the same
    chat surface the [c] key opens, so a message typed on the roster and one
    typed in the chat view take the identical dispatch path. *)
 let handle_composer_key state ~base_path ~mailbox key =
-  let composer = composer_state state in
+  let composer = Composer_projection.of_state state in
   match Composer.classify_key composer key with
   | Composer.Pass_to_surface -> false
   | Composer.Take_focus ->

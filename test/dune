@@ -2895,6 +2895,20 @@
  (libraries alcotest masc_tui_composer masc_tui_render_schedule))
 
 (test
+ (name test_tui_composer_projection)
+ (modules test_tui_composer_projection)
+ (libraries
+  alcotest
+  ast_grep
+  compiler-libs.common
+  masc
+  masc_tui_composer
+  masc_tui_composer_projection
+  masc_tui_types)
+ (deps
+  (source_tree ../bin)))
+
+(test
  (name test_tui_credential)
  (modules test_tui_credential)
  (libraries alcotest masc.string_util masc_tui_credential))

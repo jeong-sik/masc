@@ -2912,3 +2912,104 @@ let handle_keeper_ask_answer state request reqd =
                       ( "open_remaining",
                         `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name) );
                     ]))
+
+(* GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>
+
+   What one Keeper is waiting on a human for. A surface renders these rows and
+   answers through POST /api/v1/keepers/ask-answer; the choice ids it sends
+   back come from the rows it was given, so no surface ever matches on label
+   text and rewording a choice cannot orphan an answer. *)
+let ask_choice_json (choice : Keeper_ask.choice) =
+  `Assoc
+    [
+      ("choice_id", `String choice.choice_id);
+      ("label", `String choice.label);
+      ( "description",
+        match choice.description with None -> `Null | Some text -> `String text );
+    ]
+
+let ask_question_json (question : Keeper_ask.question) =
+  `Assoc
+    [
+      ("question_id", `String question.question_id);
+      ("header", `String question.header);
+      ("prompt", `String question.prompt);
+      ( "mode",
+        `String (match question.mode with Keeper_ask.Single -> "single" | Keeper_ask.Multi -> "multi") );
+      ( "free_text",
+        match question.free_text with
+        | Keeper_ask.Choices_only -> `Assoc [ ("allowed", `Bool false) ]
+        | Keeper_ask.Free_text_allowed { hint } ->
+            `Assoc
+              [
+                ("allowed", `Bool true);
+                ("hint", match hint with None -> `Null | Some text -> `String text);
+              ] );
+      ("choices", `List (List.map ask_choice_json question.choices));
+    ]
+
+let ask_resolution_json = function
+  | Keeper_ask.Open -> `Assoc [ ("state", `String "open") ]
+  | Keeper_ask.Answered_by { answers; answered_at; _ } ->
+      `Assoc
+        [
+          ("state", `String "answered");
+          ("answered_at", `Float answered_at);
+          ( "answered_question_ids",
+            `List
+              (List.map
+                 (fun (answer : Keeper_ask.answer) -> `String answer.question_id)
+                 answers) );
+        ]
+  | Keeper_ask.Withdrawn_because { reason; withdrawn_at } ->
+      `Assoc
+        [
+          ("state", `String "withdrawn");
+          ("reason", `String reason);
+          ("withdrawn_at", `Float withdrawn_at);
+        ]
+
+let ask_row_is_open = function
+  | Keeper_ask.Open -> true
+  | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
+
+let handle_keeper_asks_list state request reqd =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Server_utils.query_param request "name" with
+  | None ->
+      respond_json_value_with_cors ~status:`Bad_request request reqd
+        (keeper_chat_stream_error_json "name (query parameter) is required")
+  | Some keeper_name ->
+      if not (Keeper_registry.is_registered ~base_path keeper_name) then
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (keeper_chat_stream_error_json "keeper not registered")
+      else
+        let include_resolved =
+          Server_utils.bool_query_param request "include_resolved" ~default:false
+        in
+        let rows =
+          List.filter
+            (fun (_, (_, resolution)) -> include_resolved || ask_row_is_open resolution)
+            (Keeper_ask_store.rows ~base_path ~keeper_name)
+        in
+        respond_json_value_with_cors ~status:`OK request reqd
+          (`Assoc
+            [
+              ("keeper", `String keeper_name);
+              ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
+              ("returned", `Int (List.length rows));
+              ( "asks",
+                `List
+                  (List.map
+                     (fun (ask_id, ((a : Keeper_ask.ask), resolution)) ->
+                       `Assoc
+                         [
+                           ("ask_id", `String ask_id);
+                           ("asked_at", `Float a.asked_at);
+                           ( "context",
+                             match a.context with None -> `Null | Some text -> `String text );
+                           ("questions", `List (List.map ask_question_json a.questions));
+                           ("resolution", ask_resolution_json resolution);
+                         ])
+                     rows) );
+            ])

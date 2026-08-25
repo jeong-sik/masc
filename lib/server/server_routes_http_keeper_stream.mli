@@ -374,3 +374,15 @@ val handle_keeper_ask_answer :
     [`Not_found] means the ask or the keeper is unknown, [`Bad_request] that
     the submissions do not satisfy the recorded question, and [`Conflict] that
     the ask was already answered or withdrawn. *)
+
+val handle_keeper_asks_list :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
+
+    Returns the Keeper's questions with their choices and current resolution.
+    Defaults to open questions only.
+
+    A surface renders these rows and answers through
+    {!handle_keeper_ask_answer}, sending back choice ids taken from the rows it
+    was given. No surface matches on label text, so rewording a choice cannot
+    orphan an answer already recorded. *)

@@ -129,9 +129,13 @@ let chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (if memory_visible then None else Some "memory:off")
-      ; (match origin with
-         | Masc_tui_message_layout.Origin_row -> None
-         | Masc_tui_message_layout.Origin_inline -> Some "clock:inline"
+      ; (* The default is the inline margin, so it is the one that says
+           nothing. [Origin_row] is now the deviation: it is the older, roomier
+           layout an operator can go back to, and the header should say when
+           they have. *)
+        (match origin with
+         | Masc_tui_message_layout.Origin_inline -> None
+         | Masc_tui_message_layout.Origin_row -> Some "clock:row"
          | Masc_tui_message_layout.Origin_bare -> Some "clock:off")
       ; (match reasoning with
          | Reasoning_hidden -> None
@@ -1474,7 +1478,11 @@ let create_state
   msg_older_loading = false;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
-  msg_origin_display = Masc_tui_message_layout.Origin_row;
+  (* The origin folds into the body's left margin by default. On a row of its
+     own it cost one row per message: eight speakers taking turns spent eight
+     of a forty-row pane saying who was talking. Ctrl-F cycles back to the
+     roomier layout for anyone who wants it. *)
+  msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;

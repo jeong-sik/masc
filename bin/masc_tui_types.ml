@@ -591,9 +591,10 @@ type state = {
   (* [/] on the roster: a search that moves the cursor, not a filter that
      subsets the list -- every action reads the same [keepers] the rows
      draw, so nothing can act on a hidden row. [Some q] while typing;
-     [roster_search_last] feeds n/N after Enter. *)
-  mutable roster_search: string option;
-  mutable roster_search_last: string;
+     [search_last] feeds n/N after Enter. Every surface that answers
+     {!surface_row_texts} searches through the same pair. *)
+  mutable search: string option;
+  mutable search_last: string;
   (* Detail pane tab, and the per-keeper reads the non-Info tabs show. Each
      read is stamped with the keeper it answers for, so a cursor move cannot
      show one keeper's instructions under another's name. *)
@@ -988,8 +989,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   palette_open = false;
   palette_query = "";
   palette_cursor = 0;
-  roster_search = None;
-  roster_search_last = "";
+  search = None;
+  search_last = "";
   resources_list = None;
   resources_error = None;
   resources_cursor = 0;
@@ -1320,6 +1321,74 @@ let scrolled_surface (state : state) : surface -> scrolled option =
      list. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources ->
+      None
+
+(* The text a "/" search reads for each row: the identifiers an operator
+   would type, not the drawn bytes. [Some texts] means the surface is
+   searchable and [texts] is the same decoded list the row cursor names, in
+   the same order -- a match index is a cursor position. [None] keeps "/"
+   closed on that surface. *)
+let surface_row_texts (state : state) : surface -> string list option = function
+  | Keepers Keeper_list ->
+      Some (List.map (fun (k : keeper) -> k.k_name) state.keepers)
+  | Lanes ->
+      Option.map
+        (fun s ->
+          List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
+        state.lanes
+  | Verification ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+              ^ r.Tui_decode.vr_submitted_by)
+            s.Tui_decode.vs_requests)
+        state.verification
+  | Harness ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun v -> v.Tui_decode.hv_task_id ^ " " ^ v.Tui_decode.hv_task_title)
+            s.Tui_decode.hs_verdicts)
+        state.harness
+  | Repositories ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun r ->
+              r.Tui_decode.rp_name ^ " " ^ r.Tui_decode.rp_default_branch)
+            s.Tui_decode.rs_repositories)
+        state.repositories
+  | Connectors ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c -> c.Tui_decode.cn_id ^ " " ^ c.Tui_decode.cn_display_name)
+            s.Tui_decode.cs_connectors)
+        state.connectors
+  | Runtime ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun c ->
+              c.Tui_decode.rcr_lane_id ^ " "
+              ^ c.Tui_decode.rcr_runtime.Tui_decode.ro_id)
+            s.Tui_decode.rss_candidates)
+        state.runtime_surface
+  | System_logs ->
+      Option.map
+        (fun s ->
+          List.map
+            (fun e ->
+              e.Tui_decode.sl_module ^ " "
+              ^ Option.value ~default:"" e.Tui_decode.sl_keeper
+              ^ " " ^ e.Tui_decode.sl_message)
+            s.Tui_decode.sys_entries)
+        state.system_logs
+  (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
+  | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
+  | Fusion | Resources | Changes | Config | Tools ->
       None
 
 let keeper_message_status_rows (state : state) =

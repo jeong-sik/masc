@@ -26,11 +26,30 @@ type error =
       ; detail : string
       }
 
+(* macOS finds a HOME's login keychain by path convention —
+   [$HOME/Library/Keychains/login.keychain-db] — and nothing else. The HOME
+   masc hands the CLI has no such file, so `security` reports no default
+   keychain at all and the CLI's token save asks macOS to create one. That
+   authorization (system.keychain.create.loginkc) opens an operator dialog on
+   a turn nobody is watching. The CLI waits 5s, gives up, and writes the token
+   to a file instead, so the turn survives — the cost is the stall and the
+   dialog, once per token refresh (~hourly, per keeper). masc#28922.
+
+   Creating the file is the whole fix; no default-keychain setting is needed.
+   Measured on 2026-08-25: 13 `Keyring SaveToken timed out` in one day before,
+   none after, with the following refresh saving in 0.7s. *)
+type keychain_state =
+  | Present
+  | Provisioned
+  | Unsupported
+  | Failed of string
+
 type t =
   { home_dir : string
   ; settings_path : string
   ; mcp_config_path : string
   ; oauth_path : string
+  ; keychain : keychain_state
   }
 
 let error_to_string = function
@@ -280,6 +299,151 @@ let inspect_managed_oauth path =
 
 let ( let* ) = Result.bind
 
+let security_tool = "/usr/bin/security"
+
+let mkdir_if_absent path =
+  try
+    Unix.mkdir path 0o700;
+    Ok ()
+  with
+  | Unix.Unix_error (Unix.EEXIST, _, _) -> Ok ()
+  | Unix.Unix_error (error, fn, arg) -> Error (unix_error_detail error fn arg)
+;;
+
+(* [verify_private_directory]'s exact-0700 contract does not apply to these
+   two: the CLI creates [Library] itself at 0755 for its own caches, so
+   demanding a mode here would fail every turn on a home that already exists.
+   Ownership plus the 0700 home above them is what keeps the keychain
+   private. *)
+let verify_owned_directory path =
+  try
+    let stat = Unix.lstat path in
+    if stat.Unix.st_kind <> Unix.S_DIR
+    then Error ("expected directory, found " ^ file_kind_name stat.Unix.st_kind)
+    else if stat.Unix.st_uid <> effective_uid
+    then
+      Error
+        (Printf.sprintf
+           "owned by uid %d, expected %d"
+           stat.Unix.st_uid
+           effective_uid)
+    else Ok ()
+  with
+  | Unix.Unix_error (error, fn, arg) -> Error (unix_error_detail error fn arg)
+;;
+
+(* The keychain has to be created by [security]; the format is not something
+   to write by hand. Spawning goes through the Eio process manager whenever a
+   runtime is up: a raw [Unix.waitpid] inside a fiber is interrupted by Eio's
+   own signal handling, which took down every lifecycle case in
+   test_keeper_antigravity_runtime with EINTR. The direct path stays for
+   callers with no Eio runtime, which is how preparation is exercised in
+   test_runtime_antigravity_home, and retries EINTR for the same reason. *)
+let run_security_direct args =
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  let close () = try Unix.close devnull with Unix.Unix_error _ -> () in
+  match
+    Unix.create_process
+      security_tool
+      (Array.of_list (security_tool :: args))
+      devnull
+      devnull
+      devnull
+  with
+  | exception Unix.Unix_error (error, fn, arg) ->
+    close ();
+    Error (unix_error_detail error fn arg)
+  | pid ->
+    let rec wait () =
+      match Unix.waitpid [] pid with
+      | _, status -> Ok status
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+      | exception Unix.Unix_error (error, fn, arg) ->
+        Error (unix_error_detail error fn arg)
+    in
+    let result = wait () in
+    close ();
+    Result.bind result (function
+      | Unix.WEXITED 0 -> Ok ()
+      | Unix.WEXITED code -> Error (Printf.sprintf "security exited with %d" code)
+      | Unix.WSIGNALED signal ->
+        Error (Printf.sprintf "security killed by signal %d" signal)
+      | Unix.WSTOPPED signal ->
+        Error (Printf.sprintf "security stopped by signal %d" signal))
+;;
+
+let run_security_eio mgr args =
+  match
+    Eio.Switch.run (fun sw ->
+      Eio.Process.spawn ~sw mgr (security_tool :: args) |> Eio.Process.await)
+  with
+  | `Exited 0 -> Ok ()
+  | `Exited code -> Error (Printf.sprintf "security exited with %d" code)
+  | `Signaled signal -> Error (Printf.sprintf "security killed by signal %d" signal)
+  | exception Eio.Cancel.Cancelled cause -> raise (Eio.Cancel.Cancelled cause)
+  | exception exn -> Error (Printexc.to_string exn)
+;;
+
+let run_security args =
+  match Process_eio.get_proc_mgr () with
+  | Ok mgr -> run_security_eio mgr args
+  | Error _ -> run_security_direct args
+;;
+
+let inspect_keychain_path path =
+  try
+    let stat = Unix.lstat path in
+    if stat.Unix.st_kind <> Unix.S_REG
+    then `Unusable ("expected regular file, found " ^ file_kind_name stat.Unix.st_kind)
+    else if stat.Unix.st_uid <> effective_uid
+    then
+      `Unusable
+        (Printf.sprintf "owned by uid %d, expected %d" stat.Unix.st_uid effective_uid)
+    else `Present
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> `Missing
+  | Unix.Unix_error (error, fn, arg) -> `Unusable (unix_error_detail error fn arg)
+;;
+
+(* Never fails preparation. A home without a keychain still runs turns — the
+   CLI falls back to file storage — so a failure here costs the stall and the
+   dialog, not the turn. The state is carried out so the caller can say so
+   instead of the attempt disappearing. *)
+let ensure_login_keychain home_dir =
+  let path =
+    List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
+  in
+  match inspect_keychain_path path with
+  | `Present -> Present
+  | `Unusable detail -> Failed detail
+  | `Missing ->
+    if not (try Unix.access security_tool [ Unix.X_OK ]; true with Unix.Unix_error _ -> false)
+    then Unsupported
+    else (
+      let library = Filename.concat home_dir "Library" in
+      let keychains = Filename.concat library "Keychains" in
+      let ( let* ) = Result.bind in
+      let provisioned =
+        let* () = mkdir_if_absent library in
+        let* () = verify_owned_directory library in
+        let* () = mkdir_if_absent keychains in
+        let* () = verify_owned_directory keychains in
+        (* The empty passphrase leaves the keychain unlocked for every later
+           turn, which is the point: no operator is present to type one. It
+           guards nothing that the filesystem does not already guard — the
+           file holds the same OAuth token that sits beside it at 0600 inside
+           a 0700 home, and any passphrase usable unattended would have to be
+           stored next to it. *)
+        let* () = run_security [ "create-keychain"; "-p"; ""; path ] in
+        (try Unix.chmod path 0o600 with
+         | Unix.Unix_error (error, fn, arg) -> ignore (unix_error_detail error fn arg));
+        Ok ()
+      in
+      match provisioned with
+      | Ok () -> Provisioned
+      | Error detail -> Failed detail)
+;;
+
 let prepare ~runtime_root ~owner_leaf ~oauth_source =
   if not (Fs_compat.is_capability_leaf owner_leaf)
   then Error (Invalid_owner_leaf owner_leaf)
@@ -306,10 +470,19 @@ let prepare ~runtime_root ~owner_leaf ~oauth_source =
           oauth_seed
     in
     let* () = write_private_settings settings_path in
-    Ok { home_dir; settings_path; mcp_config_path; oauth_path }
+    let keychain = ensure_login_keychain home_dir in
+    Ok { home_dir; settings_path; mcp_config_path; oauth_path; keychain }
 ;;
 
 let home_dir t = t.home_dir
+let keychain_state t = t.keychain
+
+let keychain_state_to_string = function
+  | Present -> "present"
+  | Provisioned -> "provisioned"
+  | Unsupported -> "unsupported"
+  | Failed detail -> "failed: " ^ detail
+;;
 
 let publish_mcp_config t config =
   write_private_file

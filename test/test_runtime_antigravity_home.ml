@@ -228,6 +228,97 @@ let test_rejects_owner_path_escape_before_mutation () =
     (Sys.file_exists (Filename.concat runtime_root "official-clients"))
 ;;
 
+let security_available =
+  try
+    Unix.access "/usr/bin/security" [ Unix.X_OK ];
+    true
+  with
+  | Unix.Unix_error _ -> false
+;;
+
+let keychain_path home_dir =
+  List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
+;;
+
+let seeded_prepare runtime_root =
+  let oauth_source = Filename.concat runtime_root "operator-oauth-token" in
+  if not (Sys.file_exists oauth_source)
+  then write_file ~mode:0o600 oauth_source "operator-secret-canary";
+  Runtime_antigravity_home.prepare
+    ~runtime_root
+    ~owner_leaf:"keeper-alpha"
+    ~oauth_source
+  |> require_ok
+;;
+
+(* macOS resolves a HOME's login keychain only from this path. Without the
+   file the CLI's token save finds no default keychain and macOS raises an
+   operator dialog asking to create one (masc#28922). *)
+let test_provisions_login_keychain_at_the_conventional_path () =
+  with_temp_root
+  @@ fun runtime_root ->
+  let layout = seeded_prepare runtime_root in
+  let path = keychain_path (Runtime_antigravity_home.home_dir layout) in
+  match Runtime_antigravity_home.keychain_state layout with
+  | Runtime_antigravity_home.Provisioned ->
+    check bool "security available" true security_available;
+    check bool "keychain exists" true (Sys.file_exists path);
+    check int "keychain mode" 0o600 (permission path)
+  | Runtime_antigravity_home.Unsupported ->
+    check bool "no security tool" false security_available;
+    check bool "no keychain written" false (Sys.file_exists path)
+  | state ->
+    fail
+      ("unexpected keychain state: "
+       ^ Runtime_antigravity_home.keychain_state_to_string state)
+;;
+
+let test_second_preparation_keeps_the_existing_keychain () =
+  with_temp_root
+  @@ fun runtime_root ->
+  let first = seeded_prepare runtime_root in
+  let path = keychain_path (Runtime_antigravity_home.home_dir first) in
+  if not security_available
+  then check bool "no keychain written" false (Sys.file_exists path)
+  else (
+    let before = (Unix.lstat path).Unix.st_ino in
+    let second = seeded_prepare runtime_root in
+    check
+      string
+      "second preparation reports present"
+      "present"
+      (Runtime_antigravity_home.keychain_state second
+       |> Runtime_antigravity_home.keychain_state_to_string);
+    check bool "same file" true (before = (Unix.lstat path).Unix.st_ino))
+;;
+
+(* The CLI creates [Library] itself at 0755 for its own caches, so a home that
+   has already run a turn carries a directory the 0700 contract would reject.
+   Preparation must survive it — every antigravity turn calls this. *)
+let test_tolerates_a_cli_created_library_directory () =
+  with_temp_root
+  @@ fun runtime_root ->
+  let home_dir =
+    List.fold_left
+      Filename.concat
+      runtime_root
+      [ "official-clients"; "antigravity"; "keeper-alpha" ]
+  in
+  List.iter
+    (fun path -> if not (Sys.file_exists path) then Unix.mkdir path 0o700)
+    [ Filename.concat runtime_root "official-clients"
+    ; Filename.concat (Filename.concat runtime_root "official-clients") "antigravity"
+    ; home_dir
+    ];
+  Unix.mkdir (Filename.concat home_dir "Library") 0o755;
+  let layout = seeded_prepare runtime_root in
+  match Runtime_antigravity_home.keychain_state layout with
+  | Runtime_antigravity_home.Failed detail -> fail ("keychain provisioning failed: " ^ detail)
+  | Runtime_antigravity_home.Present
+  | Runtime_antigravity_home.Provisioned
+  | Runtime_antigravity_home.Unsupported -> ()
+;;
+
 let () =
   run
     "runtime_antigravity_home"
@@ -256,6 +347,18 @@ let () =
             "owner path containment"
             `Quick
             test_rejects_owner_path_escape_before_mutation
+        ; test_case
+            "login keychain at the conventional path"
+            `Quick
+            test_provisions_login_keychain_at_the_conventional_path
+        ; test_case
+            "second preparation keeps the keychain"
+            `Quick
+            test_second_preparation_keeps_the_existing_keychain
+        ; test_case
+            "CLI-created Library directory"
+            `Quick
+            test_tolerates_a_cli_created_library_directory
         ] )
     ]
 ;;

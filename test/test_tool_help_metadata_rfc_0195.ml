@@ -149,6 +149,25 @@ let test_entry_json_includes_populated_fields () =
       "populated alternatives list emitted in JSON" true (has_key "alternatives")
   | _ -> Alcotest.fail "entry_json must return an Assoc"
 
+(* A tool that behaved unexpectedly is one an operator wants to open, so the
+   name has to resolve to the file it shipped from. Derived from the embedded
+   file list, not composed from the name, so a tool with no shipped definition
+   says so instead of naming a path that is not there. *)
+let test_definition_source_names_the_shipped_file () =
+  match Registry.definition_source "keeper_spawn" with
+  | Some rel ->
+    Alcotest.(check string) "shipped definition path" "tools/keeper_spawn.toml" rel
+  | None -> Alcotest.fail "a shipped tool must name its definition"
+;;
+
+let test_definition_source_is_none_without_an_asset () =
+  match
+    Registry.definition_source "no_such_tool_ships_under_this_name"
+  with
+  | None -> ()
+  | Some rel -> Alcotest.failf "named a file that does not ship: %s" rel
+;;
+
 let () =
   Alcotest.run "tool_help_metadata_rfc_0195"
     [
@@ -165,6 +184,13 @@ let () =
         [
           Alcotest.test_case "alternatives names resolve through find_entry"
             `Quick test_alternatives_never_dangling;
+        ] );
+      ( "definition_source",
+        [
+          Alcotest.test_case "a shipped tool names its file"
+            `Quick test_definition_source_names_the_shipped_file;
+          Alcotest.test_case "an unshipped name resolves to none"
+            `Quick test_definition_source_is_none_without_an_asset;
         ] );
       ( "json_projection",
         [

@@ -584,6 +584,18 @@ let test_rest_generate_openapi_document_relative_server_fallback () =
   check string "relative server url when host unknown" "/"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
+(* [host] defaults to MASC_HOST, the bind setting, and the HTTP callers pass a
+   Host header -- either can name every interface instead of a peer. "servers"
+   is what a reader dials, so it gets folded (#30383). *)
+let test_rest_generate_openapi_document_folds_a_wildcard_host () =
+  let open Yojson.Safe.Util in
+  let doc =
+    Transport.Rest.generate_openapi_document ~host:"0.0.0.0" ~port:8935 ()
+  in
+  check string "a bind wildcard is not advertised as a server address"
+    "http://127.0.0.1:8935"
+    (doc |> member "servers" |> index 0 |> member "url" |> to_string)
+
 
 
 (* generate_request_id, parallel_requests, batch_requests removed: dead code (#2990) *)
@@ -736,6 +748,8 @@ let () =
       test_case "document" `Quick test_rest_generate_openapi_document;
       test_case "relative server fallback" `Quick
         test_rest_generate_openapi_document_relative_server_fallback;
+      test_case "openapi document folds a wildcard host" `Quick
+        test_rest_generate_openapi_document_folds_a_wildcard_host;
     ];
     "stats", [
       test_case "record success" `Quick test_stats_record_request_success;

@@ -34,25 +34,17 @@ type http_context = {
       never sets it). *)
 
 val normalize_advertised_host : string -> string
-(** [normalize_advertised_host host] returns the trimmed
-    [host], unless it is one of the loopback aliases — in
-    which case it returns
-    {!Masc_network_defaults.masc_http_default_host}.
+(** Re-export of {!Masc_network_defaults.normalize_advertised_host}, which
+    owns the rule and documents the exact input table.
 
-    {2 Loopback alias set}
+    Named here because the operator-visible callers reach for it through this
+    module: the frontend redirect helpers and the runtime route build URLs out
+    of a request [Host] header, which a client is free to send as
+    ["0.0.0.0:8935"].
 
-    | Input | Treated as loopback |
-    |---|---|
-    | unspecified IPv4 (`0.0.0.0`) | yes |
-    | unspecified IPv6 (`::`) | yes |
-    | `127.0.0.1` (and any `127.x.x.x`) | yes |
-    | IPv6 `::1` | yes |
-    | string `"localhost"` (case-insensitive) | yes |
-    | other | no |
-
-    Pinning the alias set at the contract seam: a future
-    "treat 127.0.0.1:8935 differently from 0.0.0.0:8935" PR
-    must touch this explicitly so dashboard URLs do not break. *)
+    The table this file used to carry said any [127.x.x.x] folded to
+    127.0.0.1. It never did — [test_transport_read_model] has pinned
+    [127.0.1.1] as preserved the whole time (#30383). *)
 
 val make_http_context :
   ?include_configured:bool ->

@@ -97,6 +97,54 @@ let test_loopback_stops_at_the_prefix () =
     ]
 ;;
 
+(* The advertised-host fold takes the two wildcards and the two loopback
+   spellings that some clients resolve to an IPv6-only socket. It is
+   deliberately narrower than [is_loopback_host], which accepts all of
+   127.0.0.0/8. Asserting that the two disagree on that range is the point:
+   widening the fold has to delete a test rather than slip past one, because
+   the difference is invisible at 127.0.0.1 -- the fold's own answer. *)
+let test_advertised_host_folds_what_cannot_be_dialled () =
+  List.iter
+    (fun host ->
+      check string
+        (Printf.sprintf "%S is dialled as loopback" host)
+        Masc_network_defaults.masc_http_default_host
+        (Masc_network_defaults.normalize_advertised_host host))
+    [ "0.0.0.0"; "::"; "  0.0.0.0  "; "localhost"; "LocalHost"; "::1" ]
+;;
+
+let test_advertised_host_keeps_the_rest_of_the_range () =
+  List.iter
+    (fun host ->
+      check bool
+        (Printf.sprintf "%S is loopback" host)
+        true
+        (Masc_network_defaults.is_loopback_host host);
+      check string
+        (Printf.sprintf "%S is still dialled as written" host)
+        host
+        (Masc_network_defaults.normalize_advertised_host host))
+    [ "127.0.1.1"; "127.255.255.254"; "::ffff:127.0.0.1" ]
+;;
+
+let test_advertised_host_leaves_a_remote_name_alone () =
+  check string "a remote host is not rewritten" "masc.crying.pictures"
+    (Masc_network_defaults.normalize_advertised_host "  masc.crying.pictures  ")
+;;
+
+let test_base_url_folds_a_wildcard_authority () =
+  check string "a URL naming every interface is not one to dial"
+    "http://127.0.0.1:4318"
+    (Masc_network_defaults.normalize_loopback_base_url "http://0.0.0.0:4318/")
+;;
+
+let test_base_url_leaves_a_dialable_url_untouched () =
+  check string "no rewrite means no re-serialization"
+    "http://127.0.1.1:8935/api"
+    (Masc_network_defaults.normalize_loopback_base_url
+       "http://127.0.1.1:8935/api/")
+;;
+
 let () =
   run
     "trailing_slash_rules"
@@ -111,5 +159,17 @@ let () =
             test_loopback_covers_rfc1122
         ; test_case "stops at the prefix boundary" `Quick
             test_loopback_stops_at_the_prefix
+        ] )
+    ; ( "advertised host"
+      , [ test_case "folds what cannot be dialled" `Quick
+            test_advertised_host_folds_what_cannot_be_dialled
+        ; test_case "keeps the rest of 127.0.0.0/8" `Quick
+            test_advertised_host_keeps_the_rest_of_the_range
+        ; test_case "leaves a remote name alone" `Quick
+            test_advertised_host_leaves_a_remote_name_alone
+        ; test_case "folds a wildcard base URL" `Quick
+            test_base_url_folds_a_wildcard_authority
+        ; test_case "leaves a dialable base URL untouched" `Quick
+            test_base_url_leaves_a_dialable_url_untouched
         ] )
     ]

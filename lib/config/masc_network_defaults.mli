@@ -110,11 +110,31 @@ val is_unspecified_host : string -> bool
 (** [true] for the wildcard bind addresses 0.0.0.0 and ::. A wildcard means
     "every interface", so it is not a peer any caller can reach back on. *)
 
+val normalize_advertised_host : string -> string
+(** Turn a host that may have been written as a bind setting into one a
+    client can dial.
+
+    | Input | Result |
+    |---|---|
+    | [0.0.0.0], [::] | {!masc_http_default_host} |
+    | ["localhost"] (any case), [::1] | {!masc_http_default_host} |
+    | [127.0.1.1] and the rest of 127.0.0.0/8 | unchanged |
+    | anything else | unchanged, trimmed |
+
+    The third row is the one to read twice: this is narrower than
+    {!is_loopback_host}, which accepts the whole /8. An operator who writes
+    127.0.1.1 named one interface and keeps it. A change that widens this
+    has to edit the table above, which is the point of writing it down. *)
+
 val normalize_loopback_base_url : string -> string
-(** Strip trailing slashes from [base_url] and canonicalize loopback
-    aliases that can resolve to IPv6-only sockets in client libraries:
-    ["localhost"] and [[::1]] become {!masc_http_default_host}. Remote
-    hosts and IPv4 literals are preserved. *)
+(** Strip trailing slashes from [base_url] and put its host through
+    {!normalize_advertised_host}. Returns the input untouched when the host
+    needs no rewrite, so a URL that is already dialable is not re-serialized.
+
+    Note that {!Transport_read_model} has a function of the same name that
+    always rebuilds through [Uri]. That one pairs the URL with a separate
+    [host] field and the two have to agree (#29806); this one hands back a
+    single URL and has no second value to keep in step. *)
 
 (** {1 Vite dev frontend} *)
 

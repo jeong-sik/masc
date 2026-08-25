@@ -29,25 +29,12 @@ let websocket_url_from_base_url base_url =
 let configured_http_port () = Env_config_core.masc_http_port_int ()
 let configured_http_host () = Env_config_core.masc_host ()
 
-let is_unspecified_host = Masc_network_defaults.is_unspecified_host
-
-let is_canonical_loopback_alias host =
-  let normalized = String.trim host |> String.lowercase_ascii in
-  match normalized with
-  | "localhost" -> true
-  | _ -> (
-      match Ipaddr.of_string normalized with
-      | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-      | Ok (Ipaddr.V4 _) -> false
-      | Error _ -> false)
-;;
-
-let normalize_advertised_host host =
-  let trimmed = String.trim host in
-  if is_unspecified_host trimmed || is_canonical_loopback_alias trimmed
-  then Masc_network_defaults.masc_http_default_host
-  else trimmed
-;;
+(* The fold itself lives beside the predicates it asks -- [is_unspecified_host]
+   is in [Masc_network_defaults], and this module carried a second copy of the
+   same rule until #30383. [Transport.Rest.generate_openapi_document] needs it
+   too and cannot reach this module (Transport_read_model already depends on
+   Transport), which is what made the duplicate visible. *)
+let normalize_advertised_host = Masc_network_defaults.normalize_advertised_host
 
 (* Rebuild through [Uri] even when the host is unchanged. [Uri.of_string]
    reads the leading dotted quad of "127.0.0.1.example.com" as an IPv4 literal

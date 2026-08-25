@@ -191,28 +191,40 @@ let trim_trailing_slashes value =
   let last = last_non_slash (len - 1) in
   if last = len - 1 then value else String.sub value 0 (last + 1)
 
-let normalize_loopback_host host =
+(** [normalize_advertised_host host] answers "what should a client dial?" for
+    a host that may have been written as a bind setting.
+
+    Rewrites two kinds of address to {!masc_http_default_host}:
+
+    - the wildcards 0.0.0.0 and :: ({!is_unspecified_host}), which name every
+      interface rather than a peer anyone can reach back on;
+    - the two loopback spellings that some client libraries resolve to an
+      IPv6-only socket: ["localhost"] and [::1].
+
+    Every other host is returned trimmed, {b including the rest of
+    127.0.0.0/8}. That is deliberately narrower than {!is_loopback_host},
+    which accepts the whole /8: an operator who writes 127.0.1.1 picked one
+    interface out of that range and keeps it. Widening this to
+    [is_loopback_host] would rewrite that choice without saying so. *)
+let normalize_advertised_host host =
   let trimmed = String.trim host in
-  let normalized = String.lowercase_ascii trimmed in
-  match normalized with
-  | "localhost" -> masc_http_default_host
-  | _ -> (
-      match Ipaddr.of_string normalized with
-      | Ok ip -> (
-          match ip with
-          | Ipaddr.V6 addr ->
-              if Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0 then
-                masc_http_default_host
-              else trimmed
-          | Ipaddr.V4 _ -> trimmed)
-      | Error _ -> trimmed)
+  if is_unspecified_host trimmed then masc_http_default_host
+  else
+    match String.lowercase_ascii trimmed with
+    | "localhost" -> masc_http_default_host
+    | normalized -> (
+        match Ipaddr.of_string normalized with
+        | Ok (Ipaddr.V6 addr) when Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
+          ->
+            masc_http_default_host
+        | Ok (Ipaddr.V6 _ | Ipaddr.V4 _) | Error _ -> trimmed)
 
 let normalize_loopback_base_url base_url =
   let trimmed = String.trim base_url |> trim_trailing_slashes in
   let uri = Uri.of_string trimmed in
   match Uri.host uri with
   | Some host ->
-      let normalized_host = normalize_loopback_host host in
+      let normalized_host = normalize_advertised_host host in
       if String.equal normalized_host host then trimmed
       else
         Uri.with_host uri (Some normalized_host)

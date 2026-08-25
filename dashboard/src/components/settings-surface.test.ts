@@ -1566,8 +1566,11 @@ describe('SettingsSurface', () => {
   })
 
   it('log filter chips filter live rows from the ring', async () => {
-    // 7 ring entries mapped to rows: tool(category/details or /masc_/)=4,
-    // success(ok)=4, failure(fail)=2.
+    // 7 ring entries mapped to rows: tool=4, success(ok)=4, failure(fail)=2.
+    // The four tool rows carry the producer's category. Three of them used to
+    // be found by a /masc_/ test on the message body instead, which #30463
+    // removed -- the body is not where the kind lives. This chip test is about
+    // the filtering, so the fixture states the kind the way the producer does.
     apiMock.fetchLogs.mockReturnValue(Effect.succeed(makeLogsData([
         makeLogEntry({
           seq: 7,
@@ -1576,10 +1579,28 @@ describe('SettingsSurface', () => {
           category: 'tool',
           details: { tool_name: 'shell.exec' },
         }),
-        makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
-        makeLogEntry({ seq: 5, level: 'INFO', message: 'masc_compact 완료' }),
+        makeLogEntry({
+          seq: 6,
+          level: 'INFO',
+          message: 'grep completed',
+          category: 'tool',
+          details: { tool_name: 'grep' },
+        }),
+        makeLogEntry({
+          seq: 5,
+          level: 'INFO',
+          message: 'read completed',
+          category: 'tool',
+          details: { tool_name: 'read' },
+        }),
         makeLogEntry({ seq: 4, level: 'WARN', message: '컨텍스트 91% — compact 예약' }),
-        makeLogEntry({ seq: 3, level: 'ERROR', message: 'masc_trace_window 실패' }),
+        makeLogEntry({
+          seq: 3,
+          level: 'ERROR',
+          message: 'write failed',
+          category: 'tool',
+          details: { tool_name: 'write' },
+        }),
         makeLogEntry({ seq: 2, level: 'ERROR', message: 'restart failed (3/3)' }),
         makeLogEntry({ seq: 1, level: 'INFO', message: 'handoff 시작' }),
       ])))

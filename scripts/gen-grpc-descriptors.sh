@@ -4,7 +4,8 @@
 #
 # Usage:
 #   scripts/gen-grpc-descriptors.sh          # print to stdout
-#   scripts/gen-grpc-descriptors.sh --check  # verify current OCaml matches generated\n#   scripts/gen-grpc-descriptors.sh --write  # rewrite the OCaml in place
+#   scripts/gen-grpc-descriptors.sh --check  # verify current OCaml matches generated
+#   scripts/gen-grpc-descriptors.sh --write  # rewrite the OCaml in place
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

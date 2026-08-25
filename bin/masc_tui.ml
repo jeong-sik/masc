@@ -139,12 +139,19 @@ let keeper_log_content_height (state : state) =
    one read whether or not this asks for them one at a time.
 
    The unserved tail is also the pushback: an invalid UTF-8 continuation has
-   to leave the byte it rejected for the next key, and stepping [position]
-   back one is that, with no second place for a byte to hide. *)
+   to leave the byte it rejected for the next key. [last_source] steps back
+   either the terminal probe's replay or [position], with no second reader for
+   a byte to hide in. *)
+type input_source =
+  | Probe_replay
+  | Terminal_buffer
+
 type input_reader = {
   bytes : Bytes.t;
   mutable filled : int;
   mutable position : int;
+  mutable terminal_probe : Masc_tui_terminal_probe.decoder option;
+  mutable last_source : input_source option;
   mutable partial_scalar : string;
       (** The head of a multi-byte character whose tail has not arrived.
 
@@ -172,6 +179,8 @@ let create_input_reader () =
     bytes = Bytes.create input_buffer_bytes;
     filled = 0;
     position = 0;
+    terminal_probe = None;
+    last_source = None;
     partial_scalar = "";
   }
 
@@ -203,10 +212,9 @@ let refill_input_reader reader ~timeout =
       true
   | None -> false
 
-let take_input_byte reader ~timeout =
+let take_terminal_buffer_byte reader ~timeout =
   if
-    reader.position >= reader.filled
-    && not (refill_input_reader reader ~timeout)
+    reader.position >= reader.filled && not (refill_input_reader reader ~timeout)
   then None
   else begin
     let byte = Bytes.get reader.bytes reader.position in
@@ -214,11 +222,64 @@ let take_input_byte reader ~timeout =
     Some byte
   end
 
-(* Give back the byte just taken. Only ever called on the byte this reader
-   served last, which is still the one before [position] in the same buffer: a
-   refill happens only when the buffer runs out, and taking a byte leaves at
-   least that one behind. *)
-let return_input_byte reader = reader.position <- max 0 (reader.position - 1)
+let take_input_byte reader ~timeout =
+  let timeout_ns =
+    Int64.of_float (max 0.0 timeout *. nanoseconds_per_second)
+  in
+  let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+  let terminal_byte () =
+    let remaining_ns =
+      Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+    in
+    take_terminal_buffer_byte reader
+      ~timeout:
+        (if Int64.compare remaining_ns 0L <= 0 then 0.0
+         else Int64.to_float remaining_ns /. nanoseconds_per_second)
+  in
+  match reader.terminal_probe with
+  | None ->
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder
+    when (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder ->
+    reader.terminal_probe <- None;
+    (match terminal_byte () with
+     | None ->
+       reader.last_source <- None;
+       None
+     | Some byte ->
+       reader.last_source <- Some Terminal_buffer;
+       Some byte)
+  | Some decoder ->
+    (match Masc_tui_terminal_probe.next decoder ~next_raw:terminal_byte with
+     | Some byte ->
+       reader.last_source <- Some Probe_replay;
+       Some byte
+     | None ->
+       if
+         (not (Masc_tui_terminal_probe.has_replay decoder))
+         && Masc_tui_terminal_probe.complete decoder
+       then reader.terminal_probe <- None;
+       reader.last_source <- None;
+       None)
+
+(* Give back the byte just taken. Probe replay and the terminal buffer are two
+   sources inside this reader, not two readers. The source marker puts an
+   invalid UTF-8 continuation back where it came from. *)
+let return_input_byte reader =
+  (match reader.last_source with
+   | Some Probe_replay ->
+     Option.iter Masc_tui_terminal_probe.return_replay reader.terminal_probe
+   | Some Terminal_buffer -> reader.position <- max 0 (reader.position - 1)
+   | None -> ());
+  reader.last_source <- None
+;;
 
 let is_utf8_continuation = Masc_tui_utf8_input.is_continuation
 
@@ -4726,11 +4787,45 @@ let toggle_mouse_tracking () =
 
    Written and cleared beside the mouse mode, for the reasons its comment
    gives about when a byte may be put on this stream. *)
-(* How long to wait for the graphics query's answer. A terminal that
-   implements the protocol replies as soon as it has parsed the escape; one
-   that does not never replies, and this is the whole cost of finding that
-   out, paid once at startup. *)
-let graphics_query_wait_seconds = 0.2
+(* How long to wait for the combined palette and graphics answers. A terminal
+   replies as soon as it has parsed a supported query; an unsupported query
+   says nothing, and this is the whole cost of finding that out, paid once at
+   startup. *)
+let terminal_probe_wait_seconds = 0.2
+
+let read_terminal_probe reader ~palette_requested =
+  Eio_guard.run_in_systhread (fun () ->
+      let decoder =
+        Masc_tui_terminal_probe.create ~palette_requested
+      in
+      let timeout_ns =
+        Int64.of_float
+          (terminal_probe_wait_seconds *. nanoseconds_per_second)
+      in
+      let deadline_ns = Int64.add (Mtime_clock.elapsed_ns ()) timeout_ns in
+      let bytes_read = ref 0 in
+      let finished = ref false in
+      while
+        (not !finished)
+        && !bytes_read < Masc_tui_terminal_probe.max_bytes
+        && not (Masc_tui_terminal_probe.complete decoder)
+      do
+        let remaining_ns =
+          Int64.sub deadline_ns (Mtime_clock.elapsed_ns ())
+        in
+        if Int64.compare remaining_ns 0L <= 0 then finished := true
+        else
+          match
+            take_terminal_buffer_byte reader
+              ~timeout:(Int64.to_float remaining_ns /. nanoseconds_per_second)
+          with
+          | None -> finished := true
+          | Some byte ->
+            incr bytes_read;
+            Masc_tui_terminal_probe.feed decoder byte
+      done;
+      decoder, Masc_tui_terminal_probe.snapshot decoder)
+;;
 
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
@@ -4924,21 +5019,25 @@ let main () =
      change, rather than asking each of the places that change it to remember. *)
   let drawn_needs = ref (Masc_tui_types.surface_needs state.view) in
   let input_reader = create_input_reader () in
-  (* Ask once whether this terminal draws pictures, here rather than when one
-     is first asked for: the answer cannot change while the process runs, the
-     stream is quiet between session entry and the first frame, and a query
-     sent later would drop its reply into the middle of the operator's typing.
-     A terminal that does not implement the protocol says nothing at all, so
-     the deadline is the answer for those. *)
-  write_to_terminal Masc_tui_graphics.query;
+  (* Palette and graphics share one bounded startup probe because both replies
+     arrive on the key stream. The probe removes only replies to these exact
+     questions and puts every other consumed byte back into this same reader.
+     NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
+  let palette_requested = Masc_tui_theme.colors_enabled in
+  write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
+  let terminal_probe_decoder, terminal_probe =
+    read_terminal_probe input_reader ~palette_requested
+  in
+  (* Do not finish the decoder at the startup deadline. A terminal may have
+     split OSC 10/11 across that boundary; the same reader continues this
+     exact state before serving its replay or unread terminal-buffer tail. *)
+  input_reader.terminal_probe <- Some terminal_probe_decoder;
+  Masc_tui_terminal_palette.set_current terminal_probe.palette;
   terminal_draws_images :=
     Some
-      (match read_input ~timeout:graphics_query_wait_seconds input_reader () with
-       | Some (Graphics_reply body) -> (
-           match Masc_tui_graphics.parse_query_reply body with
-           | Some Masc_tui_graphics.Supported -> true
-           | Some (Masc_tui_graphics.Refused _) | None -> false)
-       | Some (Key _) | Some (Pasted _) | None -> false);
+      (match terminal_probe.graphics with
+       | Some Masc_tui_graphics.Supported -> true
+       | Some (Masc_tui_graphics.Refused _) | None -> false);
 
   (* ── Keeper settings over $EDITOR (#29684) ─────────────────────
      The editor itself is the confirmation step: an exit other than 0

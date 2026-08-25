@@ -3055,6 +3055,16 @@
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
+
+(test
+ (name test_tui_terminal_probe)
+ (modules test_tui_terminal_probe)
+ (libraries
+  alcotest
+  masc_tui_terminal_palette
+  masc_tui_terminal_probe
+  masc_tui_graphics))
+
 (include stanzas/test_tui_paste_spill.inc)
 (include stanzas/test_keeper_sandbox_root_by_profile.inc)
 

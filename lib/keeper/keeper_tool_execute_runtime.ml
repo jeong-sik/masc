@@ -622,19 +622,17 @@ let handle_tool_execute_typed
              argv-shaped costume arrives as one opaque program, so the gate has
              nothing to object to and the call runs.  Refusing them would break
              work that runs today; saying nothing gives the writer no reason to
-             stop.  The rewrite rides back as metadata, which
-             [Tool_result.with_metadata] documents as a projection that leaves
-             the disposition and payload alone -- the call did what it did, and
-             the answer also says what it should have been. *)
-          (* The advice has to be in the payload, not in [metadata]. A
-             completed result's model-visible text is the serialized [data]
-             (Tool_result.message), and every read of [_meta] in agent_core
-             discards it -- agent_tools.ml answers `Ok { content; _meta = _ }`
-             where a tool result becomes conversation. Metadata reaches
-             observers and an MCP wire client; it does not reach the caller
-             this is written for. A field beside the others leaves [ok], the
-             status and the streams alone, so a call that worked still reads
-             as a call that worked. *)
+             stop.  So the answer also says what the call should have been.
+
+             It goes in the payload, not in [metadata].  A completed result's
+             model-visible text is the serialized [data]
+             ([Tool_result.message]); [_meta] is a separate field, and every
+             read of it in agent_core discards it -- [agent_tools.ml] answers
+             [Ok { content; _meta = _ }] at the point a tool result becomes
+             conversation.  Metadata reaches dispatch observers and an MCP wire
+             client; it does not reach the keeper this sentence is written for.
+             A field beside the others leaves [ok], the status and the streams
+             alone, so a call that worked still reads as a call that worked. *)
           let costume_advice =
             List.filter_map
               (fun (shell, finding) ->

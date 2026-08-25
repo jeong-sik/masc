@@ -45,14 +45,16 @@ sys.stdout.buffer.write(data[i:])
   base64 < "${tmp_raw}" | tr -d '\n'
 }
 
+# Only masc_workspace. The health and reflection descriptors in
+# masc_grpc_server.ml carry the canonical gRPC file names
+# (grpc/health/v1/health.proto), which is what a reflection client resolves;
+# generating from proto/grpc_health_v1.proto would name the local file instead
+# and no longer match. That proto stays for the transport harness, which feeds
+# it to grpcurl directly.
 do_generate() {
   check_protoc
   echo "--- masc_workspace.proto ---"
   gen_descriptor_b64 "masc_workspace.proto"
-  echo ""
-  echo ""
-  echo "--- grpc_health_v1.proto ---"
-  gen_descriptor_b64 "grpc_health_v1.proto"
   echo ""
 }
 

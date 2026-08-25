@@ -310,15 +310,9 @@ let is_valid_filename name =
     c = '_' || c = '-' || c = '.'
   ) name
 
-(** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_<agent>_broadcast.json" *)
-let extract_seq_from_filename name =
-  match String.index_opt name '_' with
-  | None -> 0
-  | Some idx -> Safe_ops.int_of_string_with_default ~default:0 (String.sub name 0 idx)
-
 let select_recent_message_names ~since_seq ~limit names =
   let insert_candidate acc name =
-    let seq = extract_seq_from_filename name in
+    let seq = message_seq_of_filename name in
     if limit <= 0 || seq <= since_seq then
       acc
     else
@@ -343,7 +337,7 @@ let select_recent_message_names ~since_seq ~limit names =
 let select_all_message_names ~since_seq names =
   names
   |> List.filter_map (fun name ->
-       let seq = extract_seq_from_filename name in
+       let seq = message_seq_of_filename name in
        if seq <= since_seq then None else Some (seq, name))
   |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
        let cmp = compare seq_a seq_b in
@@ -398,7 +392,7 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
       | [] -> List.rev acc
       | name :: rest ->
           safe_yield ();
-          if extract_seq_from_filename name <= since_seq then List.rev acc
+          if message_seq_of_filename name <= since_seq then List.rev acc
           else
             let path = Filename.concat msgs_path name in
             match read_json config path with

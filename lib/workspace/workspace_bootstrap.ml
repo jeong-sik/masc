@@ -6,11 +6,35 @@
 open Masc_domain
 open Workspace_utils
 
+(* Where the message counter starts when there is no state to read it from.
+
+   The counter is not the authority on what has been said -- the message files
+   are -- so a lost counter is recovered from them rather than restarted. Left
+   at zero beside a store that already holds messages, every new message takes
+   a number below the old ones, and a reader that pages in sequence order
+   never reaches it however far back it asks.
+
+   That is not hypothetical. On 2026-08-25 the workspace state was rebuilt at
+   04:38:42Z while the store held 2,604 messages. Eight and a half hours of
+   broadcasts landed at sequences 1 through 75 and stayed invisible to
+   [masc_messages]: keepers asking each other for help, and the answers nobody
+   could see they were owed. Seven sequence numbers were issued twice. *)
+let resume_message_seq config =
+  let dir = messages_dir config in
+  match Sys.readdir dir with
+  | exception Sys_error _ -> 0
+  | names ->
+    Array.fold_left
+      (fun highest name -> max highest (message_seq_of_filename name))
+      0
+      names
+;;
+
 let default_workspace_state config = {
   protocol_version = "0.1.0";
   project = Filename.basename config.base_path;
   started_at = now_iso ();
-  message_seq = 0;
+  message_seq = resume_message_seq config;
   active_agents = [];
   paused = false;
   pause_reason = None;

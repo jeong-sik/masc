@@ -23,6 +23,12 @@ val masc_dir : config -> string
 val agents_dir : config -> string
 val tasks_dir : config -> string
 val messages_dir : config -> string
+
+val message_seq_of_filename : string -> int
+(** The sequence a committed message's filename carries, or [0] for a name
+    that is not one. Shared by the reader that pages in sequence order and the
+    bootstrap that resumes the counter, so the two cannot read a name
+    differently. *)
 val state_path : config -> string
 val backlog_path : config -> string
 val archive_path : config -> string

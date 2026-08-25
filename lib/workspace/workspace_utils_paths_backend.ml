@@ -39,6 +39,19 @@ let backlog_filename = "backlog.json"
 let tasks_dir config = Filename.concat (masc_dir config) tasks_dirname
 let messages_dir config = Filename.concat (masc_dir config) "messages"
 let state_path config = Filename.concat (masc_dir config) "state.json"
+
+(* A committed message is filed as "<seq>_<agent>_<request-id>_broadcast.json".
+   The sequence is the order readers page through, so both the reader that
+   sorts by it and the bootstrap that has to resume it read the name the same
+   way. A name that does not start with digits is not one of ours and counts
+   as no sequence at all. *)
+let message_seq_of_filename name =
+  match String.index_opt name '_' with
+  | None -> 0
+  | Some at -> (
+      match int_of_string_opt (String.sub name 0 at) with
+      | Some seq when seq > 0 -> seq
+      | Some _ | None -> 0)
 let backlog_path config = Filename.concat (tasks_dir config) backlog_filename
 let archive_path config = Filename.concat (masc_dir config) "tasks-archive.json"
 

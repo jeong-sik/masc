@@ -206,10 +206,13 @@ let resolve_server_default_base_path path = resolve_masc_base_path path
    let a test executable resolve to a live base — was removed in #30487.
    This guard is defense-in-depth: whatever future path makes a temp-dir
    base request resolve outside temp, the resolution is refused and the
-   scratch dir is kept, so a test harness can never rewrite a live
-   workspace. Production requests are unaffected: the predicate only
-   fires when the requested path itself is a scratch/temp directory
-   whose resolved base escapes it. *)
+   scratch dir is kept, so a temp-shaped base request can never resolve
+   to a non-temp base — whatever executable makes it, test-named or not.
+   Note the guard fires on the only remaining branch: a non-test-named
+   binary with an inherited MASC_BASE_PATH (| Some explicit -> explicit).
+   test_-prefixed executables keep temp on every branch already; scratch
+   dirs outside the four temp roots (e.g. a fixture dir inside the repo)
+   are not covered by this predicate — that is a separate concern. *)
 let temp_dir_roots =
   [ Filename.get_temp_dir_name (); "/tmp"; "/var/tmp"; "/dev/shm" ]
 

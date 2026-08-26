@@ -1,0 +1,14 @@
+name = "keeper_composition_cancel"
+description = "Request cancellation of one async Keeper composition by its exact durable request id."
+additional_properties = false
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1
+# The request_id param carries no description ON PURPOSE: its input schema
+# must stay byte-identical to the request_id_input_schema this tool built
+# inline before externalization, which test_composition_control_tool_toml
+# pins. Adding `description = "..."` here would put a description in the
+# property and break that pin — revert the addition, do not edit the test.

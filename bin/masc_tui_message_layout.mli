@@ -126,6 +126,12 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val split_at_cells : string -> int -> string * string
+(** The longest prefix fitting in the given cells without cutting a grapheme,
+    and the rest. For wrapping, where nothing may be lost: a wide grapheme
+    that straddles the boundary moves to the tail whole, rather than being
+    given up and padded the way {!take_cells} gives it up to hold a column. *)
+
 val take_cells : string -> int -> string
 (** Keep the first [cells] display cells, the counterpart to [drop_cells]: the
     two halves of a cut add up to the whole, and a zero-cell head is empty.

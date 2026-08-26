@@ -8172,7 +8172,12 @@ let main () =
             | "]" -> move_ask_cursor state 1
             | "s" | "S" -> skip_ask_question state
             | "c" | "C" -> clear_ask_question state
-            | "enter" -> handle_ask_submit state ~mailbox:async_messages
+            (* Terminals send Enter as CR. "enter" is the name the Kitty
+               protocol gives codepoint 13, and this was the only site in the
+               file waiting for it -- the other twelve read "\r" -- so the
+               answer could be composed and never sent. *)
+            | "\r" | "\n" | "enter" ->
+                handle_ask_submit state ~mailbox:async_messages
             | digit when String.length digit = 1 -> (
                 (* Parsed, not matched: a choice is picked by its position in
                    the list the server sent, and anything that is not a

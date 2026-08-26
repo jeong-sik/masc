@@ -2906,6 +2906,7 @@ def assert_overview_event_rows(
 # the same surface. Nothing in this suite had ever driven it, so the answer flow
 # shipped on the word of the compiler alone.
 KEEPER_ASKS_PATH = "/api/v1/keepers/asks"
+KEEPER_ASK_ANSWER_PATH = "/api/v1/keepers/ask-answer"
 
 
 def keeper_asks_response() -> HttpFixture:
@@ -2940,7 +2941,9 @@ def keeper_asks_response() -> HttpFixture:
     )
 
 
-def keeper_ask_answer_interaction(fixtures: HttpFixtures) -> Interaction:
+def keeper_ask_answer_interaction(
+    fixtures: HttpFixtures, ask_requests: HttpRequests
+) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
         master_fd: int,
@@ -2986,9 +2989,35 @@ def keeper_ask_answer_interaction(fixtures: HttpFixtures) -> Interaction:
                     f"answering the ask did not draw {needle!r}: {answering!r}"
                 )
 
-        # Leave the answer mode, then arm the exit the harness confirms.
-        os.write(master_fd, b"\x1b")
+        # Pick, arm, send. Each step has to be visible: the answer used to be
+        # composable and unsendable, because this was the one site in the file
+        # waiting for Enter under the name terminals do not send.
+        # send_and_wait reads the raw stream and colour sits between the mark
+        # and the label, so wait on the mark and check the pairing on the
+        # stripped frame.
+        picked = send_and_wait(process, master_fd, output, b"1", b"1 (o) ")
+        picked_plain = CSI_RE.sub(b"", picked)
+        if b"(o) c-yes" not in picked_plain:
+            raise AssertionError(f"picking did not mark c-yes: {picked!r}")
+        if b"(o) c-no" in picked_plain:
+            raise AssertionError(f"picking one choice marked both: {picked!r}")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Press Enter again to send"
+        )
+        os.write(master_fd, b"\r")
         drain_until_quiet(process, master_fd, output)
+        sent = [
+            body
+            for path, body in ask_requests
+            if path == KEEPER_ASK_ANSWER_PATH
+            and b'"ask_id":"ask-1"' in body
+            and b'"c-yes"' in body
+        ]
+        if not sent:
+            raise AssertionError(
+                f"the answer never reached the server: {ask_requests!r}"
+            )
+
         os.write(master_fd, b"q")
 
     return interact
@@ -8196,11 +8225,14 @@ def run_keyboard_regression(executable: str) -> None:
     board_reference_fixtures = board_reference_http_fixtures()
     keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
     keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
+    keeper_ask_fixtures[KEEPER_ASK_ANSWER_PATH] = (200, {"ok": True})
+    ask_requests: HttpRequests = []
     run_terminal_scenario(
         executable,
         description="Answering a Keeper's question from an approval detail",
-        interact=keeper_ask_answer_interaction(keeper_ask_fixtures),
+        interact=keeper_ask_answer_interaction(keeper_ask_fixtures, ask_requests),
         http_fixtures=keeper_ask_fixtures,
+        http_requests=ask_requests,
     )
     run_terminal_scenario(
         executable,

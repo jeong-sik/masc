@@ -231,7 +231,7 @@ let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
 let of_snapshot snapshot =
   Skill_catalog_snapshot.effective_entries snapshot
   |> List.fold_left
-       (fun (catalog, diagnostics) entry ->
+       (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
           match parse_document ~conformance:entry.conformance entry.document with
           | Ok skill ->
             ( { skill with provenance = provenance_of_entry snapshot entry } :: catalog

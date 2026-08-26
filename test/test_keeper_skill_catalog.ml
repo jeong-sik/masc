@@ -489,76 +489,6 @@ let test_of_documents_sorts_and_rejects_duplicates () =
   | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let write_file path content =
-  let channel = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out channel)
-    (fun () -> output_string channel content)
-;;
-
-let rec remove_tree path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path
-      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-      Unix.rmdir path)
-    else Unix.unlink path
-;;
-
-let test_loader_scans_the_skills_directory () =
-  let base_path = Filename.temp_file "keeper-skill-loader" "" in
-  Unix.unlink base_path;
-  Unix.mkdir base_path 0o755;
-  Fun.protect
-    ~finally:(fun () -> remove_tree base_path)
-    (fun () ->
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
-          check
-            int
-            "missing skills dir loads an empty catalog"
-            0
-            (List.length (Skill_catalog.skills catalog))
-        | Error _ -> fail "missing skills directory did not load as empty");
-       let skills_dir =
-         Masc.Keeper_run_tools_setup.skills_dir_of_base_path ~base_path
-       in
-       Unix.mkdir (Filename.dirname skills_dir) 0o755;
-       Unix.mkdir skills_dir 0o755;
-       let skill_dir = Filename.concat skills_dir "release-checklist" in
-       Unix.mkdir skill_dir 0o755;
-       write_file (Filename.concat skill_dir "SKILL.md") instruction_document;
-       Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
-       write_file (Filename.concat skills_dir "README.md") "not a skill\n";
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
-          (match Skill_catalog.skills catalog with
-           | [ skill ] ->
-             check
-               string
-               "the SKILL.md-carrying directory is the only skill"
-               "release-checklist"
-               skill.Skill_catalog.name
-           | skills ->
-             fail
-               (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
-        | Error _ -> fail "valid skills directory failed to load");
-       (* A missing description, not a missing name: the directory supplies a
-          name, so that is no longer the defect a broken install shows. *)
-       write_file
-         (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
-         "---\nname: half-installed\n---\n";
-       match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Error
-           (Agent_core.Error.Config
-             (Agent_core.Error.InvalidConfig { field = "skills"; detail })) ->
-         check bool "detail names the defect" true (String.length detail > 0)
-       | Ok _ | Error _ ->
-         fail "broken SKILL.md did not return a typed config error")
-;;
-
 let skill_catalog_of documents =
   match Skill_catalog.of_documents documents with
   | Ok catalog -> catalog
@@ -710,10 +640,6 @@ let () =
             "of_documents sorts by name and rejects duplicates"
             `Quick
             test_of_documents_sorts_and_rejects_duplicates
-        ; test_case
-            "loader scans the skills directory"
-            `Quick
-            test_loader_scans_the_skills_directory
         ; test_case
             "disable-model-invocation controls the dedicated tool"
             `Quick

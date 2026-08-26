@@ -1039,7 +1039,11 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls ~on_turn_started
       ~on_stream_event ~stream_started ~response_emitted ~ignored:(ignored + 1)
-  | "system" when ignored < max_ignored_messages ->
+  | ("system" | "tool_progress") when ignored < max_ignored_messages ->
+    (* Claude Code emits [tool_progress] while a built-in tool is still
+       running.  It is observation-only: tool ownership and completion still
+       arrive through assistant/user messages.  Consume it as bounded stream
+       activity without treating an in-flight tool as a protocol failure. *)
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started

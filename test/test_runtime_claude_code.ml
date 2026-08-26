@@ -25,6 +25,10 @@ let native_tool_result =
   {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"native-call-1","content":"fixture"}]}}|}
 ;;
 
+let tool_progress =
+  {|{"type":"tool_progress","session_id":"__SESSION__","uuid":"tool-progress-1","tool_use_id":"native-call-1","tool_name":"Bash","elapsed_time_seconds":240}|}
+;;
+
 let result =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-fixture-1","result":"MASC_CLAUDE_OK","api_error_status":null}|}
 ;;
@@ -1349,10 +1353,17 @@ let test_unknown_stream_type_fails_closed () =
     {|{"type":"future_magic","session_id":"__SESSION__","uuid":"future-1"}|}
   in
   with_fixture [ Emit unknown ] (fun path ->
-    match run_fixture path with
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
     | Error (Runtime_claude_code.Protocol_error _) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "unknown stream type was silently ignored")
+;;
+
+let test_tool_progress_keeps_stream_open () =
+  with_fixture [ Emit tool_progress; Emit assistant; Emit result ] (fun path ->
+    match run_fixture ~timeout_s:window_outlasting_process_start_s path with
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok turn -> check string "text" "MASC_CLAUDE_OK" turn.text)
 ;;
 
 let test_allowed_tools_tokenizer_chars_are_validated () =
@@ -1658,6 +1669,10 @@ let () =
         ] )
     ; ( "hard-cut"
       , [ test_case
+            "tool progress keeps stream open"
+            `Quick
+            test_tool_progress_keeps_stream_open
+        ; test_case
             "unknown stream type fails closed"
             `Quick
             test_unknown_stream_type_fails_closed

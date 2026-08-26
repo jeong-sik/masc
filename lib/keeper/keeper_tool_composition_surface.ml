@@ -179,6 +179,57 @@ let instruction_skill_description instruction_skills =
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
+let set_assoc_field ~name ~value fields =
+  let rec loop reversed = function
+    | [] -> List.rev ((name, value) :: reversed)
+    | (key, _) :: rest when String.equal key name ->
+      List.rev_append reversed ((key, value) :: rest)
+    | field :: rest -> loop (field :: reversed) rest
+  in
+  loop [] fields
+;;
+
+(* The catalog is the authority for readable names. Leaving [name] as an
+   unconstrained string made the model discover that authority by failing:
+   first with no argument, then with a plausible but nonexistent skill. Keep
+   the TOML schema as the shape owner and replace only its dynamic enum. *)
+let instruction_skill_input_schema instruction_skills =
+  let available_names =
+    instruction_skills
+    |> List.map (fun (name, _description, _body) -> `String name)
+    |> fun names -> `List names
+  in
+  match skill_tool_schema.input_schema with
+  | `Assoc root_fields ->
+    (match List.assoc_opt "properties" root_fields with
+     | Some (`Assoc properties) ->
+       (match List.assoc_opt "name" properties with
+        | Some (`Assoc name_fields) ->
+          let name_schema =
+            `Assoc
+              (set_assoc_field
+                 ~name:"enum"
+                 ~value:available_names
+                 name_fields)
+          in
+          let properties =
+            set_assoc_field
+              ~name:"name"
+              ~value:name_schema
+              properties
+          in
+          `Assoc
+            (set_assoc_field
+               ~name:"properties"
+               ~value:(`Assoc properties)
+               root_fields)
+        | Some _ | None ->
+          invalid_arg "keeper_skill schema has no object name property")
+     | Some _ | None ->
+       invalid_arg "keeper_skill schema has no object properties field")
+  | _ -> invalid_arg "keeper_skill schema root is not an object"
+;;
+
 let schema_tools ?(skill_composition_entries = [])
       ?(instruction_skills = []) () =
   let composition_tools =
@@ -202,7 +253,7 @@ let schema_tools ?(skill_composition_entries = [])
       [ schema_tool
           ~name:Catalog.skill_tool_name
           ~description:(instruction_skill_description instruction_skills)
-          ~input_schema:skill_tool_schema.input_schema
+          ~input_schema:(instruction_skill_input_schema instruction_skills)
       ]
     else []
   in
@@ -1115,12 +1166,6 @@ let make_request_control_tool
    names and descriptions ride the tool description, the body arrives only
    when asked for -- but the harness serves it from the catalog it already
    parsed, so no path is resolved and the call is on the record. *)
-(* Declared in [config/tools/keeper_skill.toml] with every other tool rather
-   than built here. Which skills are readable is workspace state and is
-   appended below; the argument's shape and the sentence saying when to reach
-   for the tool are not, and the model-prose ratchet is what says so. *)
-let skill_name_input_schema = skill_tool_schema.input_schema
-
 let skill_name_of_validated_input input =
   match input with
   | `Assoc fields ->
@@ -1133,17 +1178,17 @@ let skill_name_of_validated_input input =
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in
+  let input_schema = instruction_skill_input_schema instruction_skills in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
     ~name
     ~description
-    ~input_schema:skill_name_input_schema
+    ~input_schema
     (fun _execution_env input ->
       let start_time = Time_compat.now () in
       match
-        Tool_input_validation.validate_args ~schema:skill_name_input_schema ~name
-          ~args:input ()
+        Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
       with
       | Error rejection -> rejection
       | Ok _ ->

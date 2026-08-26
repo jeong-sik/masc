@@ -658,6 +658,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
   in
   match bridge_state.scope_failure, quarantined_content_rejection with
   | Some _, _ -> { bridge_state; chat_events = [] }
+  | None, Some rejected when tools_in_current_scope bridge_state = [] -> rejected
   | None, _ when not (content_event_allowed bridge_state evt) ->
     poison_scope bridge_state ~kind:Keeper_chat_events.Stream_event_after_terminal
       ~reason:"content event arrived after the provider content became terminal"

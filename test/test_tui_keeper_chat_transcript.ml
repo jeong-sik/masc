@@ -239,7 +239,7 @@ let test_quarantine_freezes_late_args_and_result () =
   match Transcript.unreadable t with
   | Some { count = 2; last_detail } ->
     check bool "late result names the quarantined occurrence" true
-      (contains ~needle:"targets quarantined" last_detail)
+      (String_util.contains_substring last_detail "targets quarantined")
   | Some { count; _ } ->
     failf "expected quarantine and late-result diagnostics, got %d" count
   | None -> fail "quarantine diagnostics were dropped"

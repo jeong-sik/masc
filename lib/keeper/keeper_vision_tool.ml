@@ -10,24 +10,13 @@ type complete_fn = Keeper_provider_subcall.complete_fn
    So we leave thinking uncontrolled (enable_thinking=None below — the guard
    admits it) and rely on clear_thinking/preserve_thinking to keep the reply
    clean; on /v1 the model's reasoning lands in a separate response field and
-   never enters the JSON content. The budget must now cover the answer PLUS
-   any reasoning the model spends first, since that phase can no longer be
-   suppressed; truncated_of_stop_reason still flags a MaxTokens cut.
-
-   4096 was too small: on a 2026-08-27 live probe a MiniMax M3 Korean image
-   description was cut mid-reply because the reasoning phase drained the
-   budget before the visible answer closed its JSON, so the structured parse
-   failed. This is the documented reasoning-model budget trap. The value now
-   follows published guidance for reasoning models, which count reasoning as
-   output tokens: OpenAI advises reserving >= 25000 output tokens for
-   reasoning plus answer, and DeepSeek-R1's standard generation length is
-   32768. A describe call normally finishes far below this — max_tokens is a
-   ceiling billed only for tokens generated, not a target — so the raise
-   removes the truncation without changing typical cost; the ceiling only
-   bounds a runaway. It stays well under M3's declared output ceiling
-   (128k-512k across providers) and sits at the conservative end of what OSS
-   reasoning-model tooling uses (Aider and Cline cap such models at 64000). *)
-let vision_default_max_tokens = 32768
+   never enters the JSON content. The budget must cover the answer PLUS any
+   reasoning the model spends first, since that phase can no longer be
+   suppressed; truncated_of_stop_reason still flags a MaxTokens cut. The value
+   is the [Env_config_keeper.KeeperVision.max_output_tokens] knob — one /v1 pool
+   shared by reasoning and answer, defaulting generous so reasoning cannot
+   truncate the reply the way the former 4096 did (2026-08-27 MiniMax M3). *)
+let vision_default_max_tokens () = Env_config_keeper.KeeperVision.max_output_tokens ()
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
@@ -57,7 +46,7 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
     max_tokens =
       (match provider_cfg.max_tokens with
        | Some _ as configured -> configured
-       | None -> Some vision_default_max_tokens)
+       | None -> Some (vision_default_max_tokens ()))
   ; tool_choice = None
   ; disable_parallel_tool_use = true
   ; enable_thinking = None

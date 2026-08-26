@@ -17,9 +17,10 @@
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-val vision_default_max_tokens : int
+val vision_default_max_tokens : unit -> int
 (** Fallback output budget for the one-shot vision sub-call when the selected
-    runtime has not configured [max_tokens]. *)
+    runtime has not configured [max_tokens]. Reads the
+    [Env_config_keeper.KeeperVision.max_output_tokens] knob. *)
 
 val max_image_bytes : unit -> int
 (** Maximum raw artifact bytes accepted by the tool before base64 provider-message

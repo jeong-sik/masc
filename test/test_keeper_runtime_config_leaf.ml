@@ -40,6 +40,19 @@ let test_resolve_overrides_keeps_env_precedence () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides)
 ;;
 
+let test_vision_max_output_tokens_maps_from_toml () =
+  let _, overrides =
+    K.resolve_overrides
+      ~env_lookup:empty_env
+      [ "vision.max_output_tokens", T.Toml_int 40000 ]
+  in
+  check
+    (option string)
+    "vision.max_output_tokens maps to its env name"
+    (Some "40000")
+    (List.assoc_opt "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" overrides)
+;;
+
 let retired_toml_keys =
   [ "autonomous.fairness_cooldown_sec"
   ; "heartbeat.board_wakeup_max"
@@ -117,6 +130,8 @@ let () =
             test_resolve_overrides_maps_known_keys
         ; test_case "env vars preempt TOML" `Quick
             test_resolve_overrides_keeps_env_precedence
+        ; test_case "vision output budget maps from TOML" `Quick
+            test_vision_max_output_tokens_maps_from_toml
         ] )
     ; ( "setting_registry"
       , [ test_case "registry identities and consumers are valid" `Quick

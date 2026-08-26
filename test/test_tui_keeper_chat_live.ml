@@ -34,9 +34,9 @@ let delta_to_string : Live.delta -> string = function
           quarantined_occurrence
       in
       Printf.sprintf "stream_protocol_error(%s,%s)" occurrence detail
-  | Live.Approval_requested { call_id; tool_name; args; question } ->
-      Printf.sprintf "approval_requested(%s,%s,%s,%s)" call_id tool_name args
-        question
+  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+      Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name
+        args question because
   | Live.Approval_settled { call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
   | Live.Checkpoint -> "checkpoint"

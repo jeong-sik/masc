@@ -107,6 +107,7 @@ type KeeperChatCustomEvent =
         tool_call_name: string
         args: string
         question: string
+        because?: string
       }
     }
   | {

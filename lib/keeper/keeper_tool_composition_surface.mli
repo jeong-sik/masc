@@ -64,16 +64,6 @@ val schema_tool_rows :
     preserves typed provenance through materialization instead of recovering it
     from a generated tool name. *)
 
-val schema_tools :
-  ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
-  ?instruction_skills:instruction_skill list ->
-  unit ->
-  Agent_core.Tool.t list
-(** Handler-free materialization of the exact model-visible composition tool
-    schemas.  Names, descriptions, and input schemas are shared with
-    {!make_tools}; callers use this to project and hash the effective surface
-    without constructing turn sandboxes or executable handlers. *)
-
 val merge_instruction_skills :
   task:instruction_skill list ->
   global:instruction_skill list ->

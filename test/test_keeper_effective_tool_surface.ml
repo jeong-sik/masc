@@ -222,16 +222,11 @@ let test_projection_names_equal_turn_surface_authority () =
       (Skill_catalog_snapshot.snapshot_revision_to_string
          surface.skill_snapshot_revision);
     let instruction_entries = task_instruction_skills in
-    let schema_tool =
-      Keeper_tool_composition_surface.schema_tools
+    let tool =
+      Keeper_tool_composition_surface.instruction_skill_schema_tool
         ~instruction_skills:instruction_entries
-        ()
-      |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
-        String.equal tool.schema.name "keeper_skill")
     in
-    (match schema_tool with
-     | None -> fail "schema-only surface omitted keeper_skill"
-     | Some tool ->
+    (
        check string "projection carries the exact Available list"
          (Keeper_tool_composition_surface.For_testing.instruction_skill_description
             instruction_entries)

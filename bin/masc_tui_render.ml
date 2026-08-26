@@ -3637,7 +3637,12 @@ let secret_lines (state : state) (k : keeper) =
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
 let identity_lines (state : state) (k : keeper) ~cols providers =
-  let connectable = Masc_tui_types.identity_connectable providers in
+  (* Everything on this pane reads the filtered list: the rows drawn, the
+     number beside each one, and the row the marker is on. A screen that
+     numbered the whole set while the keys acted on a subset would start the
+     wrong service. *)
+  let query = Option.value state.identity_filter ~default:"" in
+  let connectable = Masc_tui_types.identity_connectable ~query providers in
   let tools_of id =
     List.find_map
       (function
@@ -3666,7 +3671,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
            and the marker is what says which one enter would start. *)
         let here =
           index
-          = Masc_tui_types.identity_cursor_clamped ~providers
+          = Masc_tui_types.identity_cursor_clamped ~query ~providers
               state.identity_cursor
         in
         let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
@@ -3746,11 +3751,25 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         else Theme.bad () ^ line ^ Ansi.reset)
       attempt
   in
-  if numbered = [] && rejected = [] then
+  (* The query, and what it left. Shown even when it matches nothing --
+     otherwise an empty pane is indistinguishable from a service list that
+     failed to load. *)
+  let filter_rows =
+    List.map
+      (fun line -> if line = "" then line else Theme.ok () ^ line ^ Ansi.reset)
+      (Masc_tui_types.identity_filter_rows ~providers state.identity_filter)
+  in
+  if numbered = [] && rejected = [] && state.identity_filter <> None then
+    Masc_tui_types.identity_preamble
+      ~keeper:(Terminal_text.single_line k.k_name)
+      ~notice:(attempt @ filter_rows)
+    @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
+  else if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name) ~notice:attempt
+      ~keeper:(Terminal_text.single_line k.k_name)
+      ~notice:(attempt @ filter_rows)
     @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
@@ -3949,7 +3968,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | Detail_github -> "[ ]:tab  L:login"
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
-      | Detail_identity -> "[ ]:tab  arrows+enter:connect  1-9:jump  R:refresh"
+      | Detail_identity ->
+        "[ ]:tab  arrows+enter:connect  /:filter  1-9:jump  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

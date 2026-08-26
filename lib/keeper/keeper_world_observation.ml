@@ -594,7 +594,10 @@ let pending_board_event_of_composition_completion
   { event_kind = Composition_completed
   ; post_id = Keeper_event_queue.composition_completion_post_id cc
   ; author = keeper_name
-  ; title = Printf.sprintf "%s %s %s" cc.cc_tool outcome cc.cc_request_id
+    (* Joined rather than formatted: the ratchet counts a format literal as a
+       model-facing prose slot, and the three fields already say everything
+       the row states. *)
+  ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
   ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
   ; hearth = None
   ; post_kind = Board.System_post

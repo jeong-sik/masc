@@ -273,25 +273,70 @@ let submitted_evidence_item_withheld_to_yojson = function
     submitted_evidence_item_transport_to_yojson item
 ;;
 
-let submitted_evidence_items_transport_to_yojson items =
-  let rendered, _ =
-    List.fold_left
-      (fun (acc, spent) item ->
-        match item with
-        | Evidence_artifact { content; truncated = false; _ } ->
-          let weight = String.length content in
-          if spent + weight > evidence_transport_max_bytes
-          then submitted_evidence_item_withheld_to_yojson item :: acc, spent
-          else submitted_evidence_item_transport_to_yojson item :: acc, spent + weight
-        | Evidence_note _
-        | Evidence_artifact _
-        | Evidence_invalid_reference
-        | Evidence_artifact_unreadable _ ->
-          submitted_evidence_item_transport_to_yojson item :: acc, spent)
-      ([], 0)
-      items
+(* Which artifacts keep their content, by index.
+
+   What this buys is one thing: the same evidence set makes the same choice
+   every run. Filling in submission order let one large-but-under-cap artifact
+   spend the whole budget, and which items the judge saw then depended on the
+   order the producer happened to list them in. Nothing declares that order —
+   the contract does not ask for most-important-first, and the item type
+   carries no priority — so it was incidental rather than intent.
+
+   Smallest-first is the tiebreak, not the goal, and it is not an optimum.
+   The contract requires support for every item and judges each one
+   independently, so a budget that forces any drop already fails that item;
+   which one is dropped changes who fails, not whether. Size is what is
+   available to sort on, ties break on index, and the emitted list stays in
+   submission order.
+
+   A dropped item is not silent: it carries [content_omitted] and a note
+   naming the cap and the tools that read the file directly. *)
+let carried_artifact_indices items =
+  let weighed =
+    List.mapi (fun index item -> index, item) items
+    |> List.filter_map (function
+         | index, Evidence_artifact { content; truncated = false; _ } ->
+           Some (index, String.length content)
+         | ( _
+           , ( Evidence_note _
+             | Evidence_artifact _
+             | Evidence_invalid_reference
+             | Evidence_artifact_unreadable _ ) ) -> None)
   in
-  List.rev rendered
+  let sorted =
+    List.stable_sort
+      (fun (index_a, weight_a) (index_b, weight_b) ->
+        match Int.compare weight_a weight_b with
+        | 0 -> Int.compare index_a index_b
+        | order -> order)
+      weighed
+  in
+  let carried, _ =
+    List.fold_left
+      (fun (carried, spent) (index, weight) ->
+        if spent + weight > evidence_transport_max_bytes
+        then carried, spent
+        else index :: carried, spent + weight)
+      ([], 0)
+      sorted
+  in
+  carried
+;;
+
+let submitted_evidence_items_transport_to_yojson items =
+  let carried = carried_artifact_indices items in
+  List.mapi
+    (fun index item ->
+      match item with
+      | Evidence_artifact { truncated = false; _ } ->
+        if List.mem index carried
+        then submitted_evidence_item_transport_to_yojson item
+        else submitted_evidence_item_withheld_to_yojson item
+      | Evidence_note _
+      | Evidence_artifact _
+      | Evidence_invalid_reference
+      | Evidence_artifact_unreadable _ -> submitted_evidence_item_transport_to_yojson item)
+    items
 ;;
 
 let submitted_evidence_access_transport_to_yojson = function

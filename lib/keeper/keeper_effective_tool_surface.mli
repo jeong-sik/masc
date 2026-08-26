@@ -16,10 +16,15 @@ type tool =
   ; origin : tool_origin
   }
 
+type tool_delivery =
+  | Tools_delivered
+  | Tools_suppressed_runtime_unsupported
+
 type t =
   { keeper_name : string
   ; runtime_id : string
   ; official_client_kind : string
+  ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
@@ -53,6 +58,7 @@ module For_testing : sig
     runtime_id:string ->
     skills_left_out:string list ->
     official_client_kind:string ->
+    tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
     tool_groups:string list option ->
     current_task_id:string option ->

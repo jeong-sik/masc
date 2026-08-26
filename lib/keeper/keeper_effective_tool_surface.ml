@@ -11,10 +11,15 @@ type tool =
   ; origin : tool_origin
   }
 
+type tool_delivery =
+  | Tools_delivered
+  | Tools_suppressed_runtime_unsupported
+
 type t =
   { keeper_name : string
   ; runtime_id : string
   ; official_client_kind : string
+  ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
@@ -96,6 +101,7 @@ let project
       ~runtime_id
       ~skills_left_out
       ~official_client_kind
+      ~tool_delivery
       ~native_posture
       ~tool_groups
       ~current_task_id
@@ -158,8 +164,12 @@ let project
       @ instruction_rows
       @ composition_rows skill_catalog
     in
-    let tools = List.map fst rows in
-    let schema_tools = List.map snd rows in
+    let instruction_skills, composition_skills, tools, schema_tools =
+      match tool_delivery with
+      | Tools_delivered ->
+        instruction_skills, composition_skills, List.map fst rows, List.map snd rows
+      | Tools_suppressed_runtime_unsupported -> [], [], [], []
+    in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->
@@ -172,6 +182,7 @@ let project
       { keeper_name
       ; runtime_id
       ; official_client_kind
+      ; tool_delivery
       ; native_posture
       ; tool_groups = Option.value ~default:[] tool_groups
       ; current_task_id
@@ -244,6 +255,26 @@ let resolve_native_posture ~base_path ~keeper_name (runtime : Runtime.t) =
     |> Result.map Option.some
 ;;
 
+let runtime_tool_delivery (runtime : Runtime.t) =
+  match runtime.execution with
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Antigravity_cli _ -> Tools_delivered
+  | Runtime_execution.Claude_code _ ->
+    if runtime.model.tools_support
+    then Tools_delivered
+    else Tools_suppressed_runtime_unsupported
+  | Runtime_execution.Agent_core provider_config ->
+    let capabilities =
+      match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
+      | Some capabilities -> capabilities
+      | None ->
+        Llm_provider.Capabilities.capabilities_of_kind provider_config.kind
+    in
+    if capabilities.supports_tools
+    then Tools_delivered
+    else Tools_suppressed_runtime_unsupported
+;;
+
 let unavailable keeper_name (reason, detail) =
   Unavailable { keeper_name; reason; detail }
 ;;
@@ -309,6 +340,7 @@ let resolve ~config ~keeper_name =
                      ~keeper_name
                      ~runtime_id
                      ~official_client_kind:(client_kind runtime)
+                     ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
                      ~tool_groups:meta.tool_groups
                      ~current_task_id
@@ -326,6 +358,14 @@ let resolve ~config ~keeper_name =
 
 let string_list values = `List (List.map (fun value -> `String value) values)
 let reference_list values = Skill_reference.list_to_yojson values
+
+let tool_delivery_to_yojson = function
+  | Tools_delivered -> `Assoc [ "status", `String "delivered" ]
+  | Tools_suppressed_runtime_unsupported ->
+    `Assoc
+      [ "status", `String "suppressed"
+      ; "reason", `String "runtime_tools_unsupported"
+      ]
 
 let origin_to_yojson = function
   | Descriptor { group } ->
@@ -357,6 +397,7 @@ let to_yojson = function
       ; "keeper_name", `String surface.keeper_name
       ; "runtime_id", `String surface.runtime_id
       ; "official_client_kind", `String surface.official_client_kind
+      ; "tool_delivery", tool_delivery_to_yojson surface.tool_delivery
       ; ( "native_posture"
         , match surface.native_posture with
           | None -> `Null

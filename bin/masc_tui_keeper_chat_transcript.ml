@@ -75,6 +75,10 @@ type awaiting_approval =
   { call_id : string
   ; tool_name : string
   ; question : string
+  ; (* Why the call was held. attached under the question so the reader who
+       answers [y]/[n] from this pane sees the reason the approval list
+       screen shows. *)
+    because : string
   }
 
 type unreadable =
@@ -516,7 +520,10 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question)
+      let base = Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question in
+      match awaiting.because with
+      | "" -> base
+      | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
 let status_rows ~now t =
@@ -582,14 +589,14 @@ let apply t (delta : Live.delta) =
       update_call t call_id (fun call -> { call with ended = true })
   | Live.Tool_result { call_id } ->
       update_call t call_id (fun call -> { call with result_ready = true })
-  | Live.Approval_requested { call_id; tool_name; args; question } ->
+  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
       (* The arguments go on the call's own row, which the pane already draws;
          the prompt carries the question. *)
       (match args with
        | "" -> ()
        | args ->
            update_call t call_id (fun call -> { call with args }));
-      t.awaiting <- Some { call_id; tool_name; question }
+      t.awaiting <- Some { call_id; tool_name; question; because }
   | Live.Approval_settled { call_id; outcome = _ } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has

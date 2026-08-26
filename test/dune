@@ -128,6 +128,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -472,6 +473,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -1151,6 +1153,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -1294,6 +1297,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -3238,9 +3242,21 @@
   yojson))
 
 (test
+ (name test_skill_catalog_snapshot_service)
+ (modules test_skill_catalog_snapshot_service)
+ (libraries
+  alcotest
+  masc.skill_snapshot_service
+  masc.skill_snapshot
+  masc.skill_config
+  unix))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))
+
+(include stanzas/test_rest_approvals_because.inc)
 
 (include stanzas/test_keeper_ask.inc)
 

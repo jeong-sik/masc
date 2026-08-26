@@ -19,9 +19,11 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
         | Mode.Auto -> (
             match Policy.verdict_for ~tool_name ~input with
             | Policy.Run _ -> Agent_core.Hooks.Continue
-            | Policy.Ask _ ->
+            | Policy.Ask { because } ->
                 Agent_core.Hooks.ElicitToolApproval
-                  { question = Policy.question_for ~tool_name ~input }))
+                  { question = Policy.question_for ~tool_name ~input
+                  ; because
+                  }))
     (* This hook is installed at pre_tool_use only, so no other stage reaches
        it. Named rather than left to a catch-all: a stage added later should
        stop the build here and be decided on. *)
@@ -45,12 +47,14 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
          ; tool_call_name = request.tool_name
          ; args = Yojson.Safe.to_string request.input
          ; question = request.prompt.question
+         ; because = request.prompt.because
          });
     let outcome =
       Registry.await registry ~clock ~keeper_name ~tool_call_id
         ~tool_name:request.tool_name
         ~args:(Yojson.Safe.to_string request.input)
-        ~question:request.prompt.question ~timeout_sec
+        ~question:request.prompt.question ~because:request.prompt.because
+        ~timeout_sec
     in
     let decision, label =
       match outcome with

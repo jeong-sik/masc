@@ -158,8 +158,10 @@ type elicitation_callback = elicitation_request -> elicitation_response
 (** A pre-tool authorization cannot be represented by [Answer of Yojson.Safe.t]:
     that value is user input, not execution authority. Keep the prompt and the
     exact runtime request distinct so malformed data is unrepresentable at the
-    authorization boundary. *)
-type tool_approval_prompt = { question : string }
+    authorization boundary. [because] is the policy's one-line reason for
+    asking rather than running; an operator deciding cannot see the policy
+    table, only this string. *)
+type tool_approval_prompt = { question : string; because : string }
 
 type tool_approval_request =
   { prompt : tool_approval_prompt

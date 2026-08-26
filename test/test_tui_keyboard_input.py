@@ -6520,6 +6520,14 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
+        footer = (
+            b"j/k:move  PgUp / PgDn:page  Right / Enter:detail  "
+            b"Esc:overview  r:refresh  Tab:next  q:quit"
+        )
+        if footer not in plain:
+            raise AssertionError(
+                f"Fusion list footer disagrees with its exercised keys: {plain!r}"
+            )
 
         selected = send_and_wait(process, master_fd, output, b"j", b"fusion-target-501")
         if re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", selected)) is None:
@@ -6552,7 +6560,7 @@ def fusion_list_detail_interaction(
             b"RESULT",
             b"QUESTION",
             b"PANEL RESPONSES",
-            b"PgUp/PgDn:page",
+            b"PgUp / PgDn:page",
         ):
             if needle not in detail_plain:
                 raise AssertionError(

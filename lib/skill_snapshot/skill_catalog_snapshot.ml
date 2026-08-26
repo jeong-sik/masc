@@ -138,6 +138,7 @@ let config_source_revision_to_string revision = revision
 let config_revision_to_string revision = revision
 let catalog_revision_to_string revision = revision
 let snapshot_revision_to_string revision = revision
+let equal_snapshot_revision = String.equal
 
 let digest_fields fields =
   let buffer = Buffer.create (List.length fields) in

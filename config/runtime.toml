@@ -527,6 +527,23 @@ supports-multimodal-inputs = false
 # [runtime].default on ollama_cloud.deepseek-v4-flash.
 [ollama_cloud.ollama-cloud-deepseek-v4-flash-0731]
 max-request-body-bytes = 524288
+# 2026-08-25: this model collapses into single-token repetition and, with no
+# declared budget, runs the collapse to ollama.com's own 65536-token cap. Wire
+# capture for 2026-08-24..25 caught 11 such generations verbatim -- ~228,000
+# characters of one word ("cryptic", "crowded") after a normal opening sentence
+# -- and turn records put the wall-clock at a 252s median, 7.09h across one day.
+#
+# Output tokens over the same 1516 turns: 1392 at <= 2048, 38 in 2048..8192,
+# then 86 at exactly 65536. The 8192..65535 band is empty, so this budget sits
+# between the two populations: it cannot truncate anything healthy that was
+# observed, and it bounds a collapse to a quarter of its former length -- both
+# the wall-clock and the garbage that a truncated turn leaves in the history the
+# next turn replays.
+#
+# It bounds the damage; it does not stop the collapse. The model is the one
+# repeating, and ollama.com/v1 ignores repeat_penalty (probed 2026-08-25 at seed
+# 7: 65 completion tokens against a 63-token baseline).
+max-tokens = 16384
 
 [models.ollama-cloud-deepseek-v4-pro]
 api-name = "deepseek-v4-pro"

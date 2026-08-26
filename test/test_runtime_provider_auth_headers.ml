@@ -71,6 +71,7 @@ let runpod_binding =
   ; wizard_default = false
   ; max_concurrent = None
   ; max_request_body_bytes = None
+  ; max_tokens = None
   ; price_input = None
   ; price_output = None
   ; keep_alive = None

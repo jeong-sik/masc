@@ -53,6 +53,7 @@ let base_observation : WO.world_observation =
     active_goals = [];
     unclaimed_task_count = 0;
     claimable_tasks = [];
+    held_task_skills = [];
     failed_task_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_revision = Some 1;
@@ -320,6 +321,63 @@ let test_current_task_section_renders () =
   check bool "no evidence line when the note records no refs" false
     (contains ~needle:"- Handoff evidence:" user)
 
+(* task-364: the other held tasks' skills get their own lines. *)
+let test_held_task_skills_section_renders () =
+  let user =
+    user_message
+      { base_observation with
+        held_task_skills =
+          [ { Inputs.held_task_id = "task-364"; held_skills = [ "mission-snapshot"; "work-intake" ] } ]
+      }
+  in
+  check bool "heading" true (contains ~needle:"### Skills Named by Tasks You Hold" user);
+  check bool "line names the task and its skills" true
+    (contains ~needle:"task-364 (held by you) names skills: mission-snapshot, work-intake" user);
+  check bool "tool named" true (contains ~needle:"`keeper_skill`" user)
+
+let test_held_task_skills_section_absent_without_held_tasks () =
+  let user = user_message base_observation in
+  check bool "no heading without held skills" false
+    (contains ~needle:"Skills Named by Tasks You Hold" user)
+
+(* The projection reads ownership off the tasks: held by this keeper, naming
+   a skill, and not the current task. *)
+let test_held_task_skills_projection () =
+  let config = Lazy.force prompt_config in
+  let assignee = meta.agent_name in
+  let held id ~by ~skills ~status =
+    let task_status =
+      match status with
+      | `Claimed -> Masc_domain.Claimed { assignee = by; claimed_at = "2026-08-26T00:00:00Z" }
+      | `In_progress -> Masc_domain.InProgress { assignee = by; started_at = "2026-08-26T00:00:00Z" }
+    in
+    { (make_task ~task_status ()) with id; skills }
+  in
+  let tasks =
+    [ held "task-42" ~by:assignee ~skills:[ "a" ] ~status:`In_progress
+    ; held "task-43" ~by:assignee ~skills:[ "b"; "c" ] ~status:`Claimed
+    ; held "task-44" ~by:"someone-else" ~skills:[ "d" ] ~status:`Claimed
+    ; held "task-45" ~by:assignee ~skills:[] ~status:`In_progress
+    ; { (make_task ~task_status:Masc_domain.Todo ()) with id = "task-46"; skills = [ "e" ] }
+    ]
+  in
+  let meta =
+    { meta with
+      current_task_id = Some (Keeper_id.Task_id.of_string "task-42" |> Result.get_ok) }
+  in
+  let projected = Inputs.held_task_skills_of_tasks ~config ~meta tasks in
+  check (list string) "only the other held task that names skills"
+    [ "task-43" ]
+    (List.map (fun (h : Inputs.held_task_skills) -> h.held_task_id) projected);
+  check (list string) "its skills in declaration order"
+    [ "b"; "c" ]
+    (List.concat_map (fun (h : Inputs.held_task_skills) -> h.held_skills) projected);
+  let meta = { meta with current_task_id = None } in
+  check (list string) "without a current task both held tasks project"
+    [ "task-42"; "task-43" ]
+    (List.map (fun (h : Inputs.held_task_skills) -> h.held_task_id)
+       (Inputs.held_task_skills_of_tasks ~config ~meta tasks))
+
 let test_current_task_section_absent_without_task () =
   let user = user_message base_observation in
   check bool "no section without current task" false
@@ -411,6 +469,7 @@ let test_direct_turn_reuses_current_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:(Inputs.Current_task task)
+      ~held_task_skills:[]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:"worktree state"
       ~telemetry_feedback_text:"telemetry state"
@@ -427,10 +486,31 @@ let test_direct_turn_reuses_current_task_context () =
   check bool "other fresh direct context is preserved" true
     (contains ~needle:"recent owner message" context)
 
+(* task-364: the direct-message lane carries the held tasks' skills even when
+   no task is current, so an owner asking the keeper about the work it just
+   claimed gets the same skill lines the scheduled lane renders. *)
+let test_direct_turn_carries_held_task_skills () =
+  let context =
+    Turn.For_testing.direct_turn_dynamic_context
+      ~current_task:Inputs.No_current_task
+      ~held_task_skills:
+        [ { Inputs.held_task_id = "task-364"; held_skills = [ "mission-snapshot" ] } ]
+      ~recent_direct_conversation_text:"recent owner message"
+      ~worktree_text:""
+      ~telemetry_feedback_text:""
+      ~turn_instructions_text:""
+  in
+  check bool "held skills heading" true
+    (contains ~needle:"### Skills Named by Tasks You Hold" context);
+  check bool "held skills line" true
+    (contains ~needle:"task-364 (held by you) names skills: mission-snapshot" context);
+  check bool "no synthetic current task" false (contains ~needle:"### Current Task" context)
+
 let test_direct_turn_has_no_synthetic_task_context () =
   let context =
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:Inputs.No_current_task
+      ~held_task_skills:[]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
@@ -697,6 +777,12 @@ let () =
             test_current_task_section_renders;
           test_case "absent without a held task" `Quick
             test_current_task_section_absent_without_task;
+          test_case "held task skills section renders" `Quick
+            test_held_task_skills_section_renders;
+          test_case "held task skills section absent without held tasks" `Quick
+            test_held_task_skills_section_absent_without_held_tasks;
+          test_case "held task skills projection" `Quick
+            test_held_task_skills_projection;
           test_case "unavailable backlog remains explicit" `Quick
             test_current_task_unavailable_is_explicit;
           test_case "dangling task id remains explicit" `Quick
@@ -707,6 +793,8 @@ let () =
             test_direct_turn_reuses_current_task_context;
           test_case "direct reply invents no task when none is held" `Quick
             test_direct_turn_has_no_synthetic_task_context;
+          test_case "direct turn carries held task skills" `Quick
+            test_direct_turn_carries_held_task_skills;
           test_case "direct and autonomous turns share the stable contract"
             `Quick
             test_direct_and_autonomous_share_system_prompt;

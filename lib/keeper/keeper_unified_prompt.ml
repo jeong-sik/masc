@@ -170,6 +170,45 @@ let format_task_skills skills =
     "- skills=" ^ skill_names
 ;;
 
+(* The other held tasks' skills, one line each, under their own heading. The
+   current task's block already names its skills; this covers a keeper that
+   holds more than one task, where the reconciler keeps the earlier one
+   current and the later claim's skills had no line at all (task-364).
+   Heading and lines are prompt templates; a template that does not render
+   is logged and falls back to the bare data, never to prose written here. *)
+let format_held_task_skills
+      (held : Keeper_world_observation_inputs.held_task_skills list)
+  : string option
+  =
+  match held with
+  | [] -> None
+  | held ->
+    let render key vars ~fallback =
+      match Prompt_registry.render_prompt_template key vars with
+      | Ok text -> String.trim text
+      | Error detail ->
+        Log.Misc.error
+          "keeper held-task skills prompt %s did not render, falling back to the bare data: %s"
+          key
+          detail;
+        fallback
+    in
+    let heading =
+      render Prompt_names.keeper_held_task_skills_heading [] ~fallback:""
+    in
+    let lines =
+      List.map
+        (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
+           let skill_names = String.concat ", " entry.held_skills in
+           render
+             Prompt_names.keeper_held_task_skills
+             [ "task_id", entry.held_task_id; "skill_names", skill_names ]
+             ~fallback:(entry.held_task_id ^ ": " ^ skill_names))
+        held
+    in
+    Some (String.concat "\n" ((if String.equal heading "" then [] else [ heading ]) @ lines) ^ "\n\n")
+;;
+
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
@@ -1060,7 +1099,13 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
-      format_current_task_observation current_task
+      (match
+         ( format_current_task_observation current_task
+         , format_held_task_skills observation.held_task_skills )
+       with
+       | None, None -> None
+       | Some block, None | None, Some block -> Some block
+       | Some current, Some held -> Some (current ^ held))
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
        or transport flaps (RFC-0223 P2). Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only

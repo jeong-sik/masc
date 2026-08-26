@@ -40,4 +40,6 @@ let keeper_observation_current_task_unobservable =
 ;;
 
 let keeper_current_task_skills = "keeper.current_task.skills"
+let keeper_held_task_skills = "keeper.held_task.skills"
+let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"
 let librarian = "librarian"

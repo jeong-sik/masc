@@ -104,6 +104,7 @@ let base_obs : WO.world_observation =
   ; active_goals = []
   ; unclaimed_task_count = 0
   ; claimable_tasks = []
+  ; held_task_skills = []
   ; failed_task_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_revision = Some 1

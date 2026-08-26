@@ -32,6 +32,8 @@ val keeper_observation_current_task_absent : string
 val keeper_observation_current_task_absent_in_recovery : string
 val keeper_observation_current_task_unobservable : string
 val keeper_current_task_skills : string
+val keeper_held_task_skills : string
+val keeper_held_task_skills_heading : string
 (** The instruction attached to the skills named by the current task. *)
 
 (** Goal success-criterion viability review (RFC-0387 B2): is the declared

@@ -876,6 +876,12 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_tool_call_log_requeue_on_failure)
+ (modules test_tool_call_log_requeue_on_failure)
+ (deps %{workspace_root}/lib/keeper_tool_call_log.ml)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (deps

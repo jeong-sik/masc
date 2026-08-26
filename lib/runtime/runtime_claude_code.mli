@@ -158,6 +158,11 @@ type error =
       ; response_emitted : bool
       }
   | Turn_failed of string
+  | Turn_failed_with_observation of
+      { detail : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
   | Stopped_by_host of host_stop
   | Quota_blocked of
       { api_error_status : int option

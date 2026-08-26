@@ -239,7 +239,8 @@ let claude_error_to_core_error = function
          ; retry_after = retry_after_of_rate_limit rate_limit
          ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
          })
-  | Runtime_claude_code.Turn_failed detail ->
+  | Runtime_claude_code.Turn_failed detail
+  | Runtime_claude_code.Turn_failed_with_observation { detail; _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderReportedError
          { provider = "claude_code"; error_type = Some "turn_failed"; detail })
@@ -296,6 +297,7 @@ let recovery_failure_of_client_error = function
     Session_store.Protocol_failed
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Turn_failed _
+  | Runtime_claude_code.Turn_failed_with_observation _
   | Runtime_claude_code.Quota_blocked _ ->
     Session_store.Provider_rejected
   | Runtime_claude_code.Context_window_exceeded
@@ -824,6 +826,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                   { tool_effect_attempted = false; response_emitted = false; _ } ->
                 true
               | _ -> false);
+           (* A provider can reject after the child process spawned but
+              before any response or MCP tool effect. Preserve the typed
+              no-effect fact so failover is allowed for that narrow case. *)
+           (match error with
+            | Runtime_claude_code.Turn_failed_with_observation
+                { tool_effect_attempted = false; response_emitted = false; _ } ->
+              Atomic.set
+                effect_disposition
+                Keeper_provider_attempt_effect.No_effect_observed
+            | _ -> ());
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;
            Error (claude_error_to_core_error error)

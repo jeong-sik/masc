@@ -503,6 +503,26 @@ let test_runtime_attempt_restarts_agent_core_turn_coordinates () =
        Option.map Ids.Execution_id.to_string call.execution_id))
 ;;
 
+let test_empty_unsealed_message_start_opens_retry_scope () =
+  let t = A.create () in
+  start_runtime_attempt t;
+  A.on_event t (message_start "overflowed-attempt");
+  A.on_event t (message_start "shrunk-retry");
+  check int "retry starts a distinct stream scope" 1
+    (A.current_stream_scope t);
+  A.on_event t
+    (start ~index:0 ~tool_id:(Some "retry-call") ~tool_name:(Some "Read"));
+  A.on_event t (json_snapshot ~index:0 {|{"path":"fresh.ml"}|});
+  A.on_event t (stop ~index:0);
+  (match A.close_turn_without_sources t ~turn:0 with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  check (list string) "only the retry tool is delivery evidence"
+    [ "retry-call" ]
+    (A.to_tool_calls t
+     |> List.map (fun (call : Masc.Keeper_chat_store.tool_call) -> call.call_id))
+;;
+
 let test_committed_message_replay_is_quarantined () =
   let t = A.create () in
   let emit_message () =
@@ -1198,6 +1218,8 @@ let () =
             test_blank_message_id_does_not_cross_runtime_attempts
         ; test_case "runtime attempt restarts turn coordinates" `Quick
             test_runtime_attempt_restarts_agent_core_turn_coordinates
+        ; test_case "empty MessageStart opens shrink retry scope" `Quick
+            test_empty_unsealed_message_start_opens_retry_scope
         ; test_case "committed MessageStart replay is quarantined" `Quick
             test_committed_message_replay_is_quarantined
         ; test_case "producer occurrence settles once" `Quick

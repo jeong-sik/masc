@@ -97,7 +97,7 @@ let test_inline_closers_restore_the_ambient_row () =
   in
   check_rows "strong, code, and both link spans restore the row"
     [ "<b>bold<restore> <c>code<restore> \
-       <a>docs<restore><u>https://x<restore>"
+       <a>docs<restore> <u>(https://x)<restore>"
     ]
     (render ~width:80 ~palette:restoring
        "**bold** `code` [docs](https://x)");
@@ -139,8 +139,21 @@ let test_underscore_emphasis_still_works_between_words () =
 let test_link_keeps_both_halves () =
   Alcotest.(check segments_testable)
     "label and target"
-    [ ("see ", "plain"); ("the PR", "link_text"); ("https://x/1", "link_target") ]
+    [ ("see ", "plain")
+    ; ("the PR", "link_text")
+    ; (" (https://x/1)", "link_target")
+    ]
     (Markdown.inline_segments "see [the PR](https://x/1)")
+
+let test_plain_link_keeps_a_printable_boundary () =
+  check_rows "plain link"
+    [ "read docs (https://example.invalid/path) next" ]
+    (render ~width:80 ~palette:Markdown.plain_palette
+       "read [docs](https://example.invalid/path) next");
+  check_rows "target wraps with its opening parenthesis"
+    [ "docs"; "(https://x)" ]
+    (render ~width:11 ~palette:Markdown.plain_palette
+       "[docs](https://x)")
 
 let test_inline_segments_names_each_marker () =
   Alcotest.(check segments_testable)
@@ -606,6 +619,8 @@ let () =
             test_underscore_emphasis_still_works_between_words
         ; Alcotest.test_case "a link keeps both halves" `Quick
             test_link_keeps_both_halves
+        ; Alcotest.test_case "a plain link keeps its boundary" `Quick
+            test_plain_link_keeps_a_printable_boundary
         ; Alcotest.test_case "segments name each marker" `Quick
             test_inline_segments_names_each_marker
         ] )

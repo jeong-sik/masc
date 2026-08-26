@@ -201,7 +201,10 @@ let inline_segments text =
           else literal ()
       | '[' -> (
           (* [label](target). Both halves are kept: a terminal cannot follow a
-             link, so hiding the target loses the only usable half. *)
+             link, so hiding the target loses the only usable half. The target
+             keeps its parentheses and a separating space; colour is not a
+             delimiter, and copied or NO_COLOR text must not collapse the two
+             halves into [labeltarget]. *)
           match find_char text ~from:(index + 1) ']' with
           | Some close_label
             when starts_at text (close_label + 1) "(" -> (
@@ -216,7 +219,7 @@ let inline_segments text =
                       (close_target - close_label - 2)
                   in
                   emit label kind_link_text;
-                  emit target kind_link_target;
+                  emit (" (" ^ target ^ ")") kind_link_target;
                   walk (close_target + 1))
           | Some _ | None -> literal ())
       | _ -> literal ()

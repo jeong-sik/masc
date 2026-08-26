@@ -126,8 +126,12 @@ let handle_attached_tools request reqd =
    consent somewhere else. Not scoped to a Keeper -- the client belongs to
    the install, the same as one this server registered. *)
 let handle_set_client request reqd =
-  Server_auth.with_admin_auth
-    (fun state req reqd ->
+  (* The same authority as starting a login, and for the same reason the
+     login route gives: what this writes is what redeems a code. A stricter
+     tier here refused the operator token the TUI carries, which is the one
+     that is allowed to begin the flow this feeds. *)
+  Server_auth.with_token_permission_auth ~permission:Masc_domain.CanAdmin
+    (fun state _agent_name req reqd ->
       let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
       Http.Request.read_body_async reqd (fun body_str ->
         let answer =

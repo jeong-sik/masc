@@ -663,6 +663,7 @@ let prepare_agent_setup
     ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
     ; on_runtime_attempt
+    ; checkpoint_owner = (fun () -> !active_checkpoint_owner)
     ; tool_result_commit_required
     ; on_tool_stream_observation
     ; skill_activation_context

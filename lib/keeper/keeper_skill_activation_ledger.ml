@@ -1216,7 +1216,7 @@ let decode_activation ~expected_trace_id json =
     ~activated_at
   in
   (match delivery with
-   | Some observed when observed.agent_core_turn <= activation.agent_core_turn ->
+   | Some observed when observed.agent_core_turn < activation.agent_core_turn ->
      Error
        (Invalid_delivery_agent_core_turn observed.agent_core_turn)
    | Some observed ->
@@ -1512,7 +1512,7 @@ let observe_delivery
                    ; observed_at = delivered_at
                    }
                , Conflicting_delivery activation.skill_tool_use_id )
-           else if agent_core_turn <= activation.agent_core_turn
+           else if agent_core_turn < activation.agent_core_turn
            then
              Some
                ( Delivery_order_rejected

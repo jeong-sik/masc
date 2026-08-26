@@ -90,17 +90,23 @@ let ask_json (a : Keeper_ask.ask) =
              a.questions) );
     ]
 
+(* Which Keeper is calling.
+
+   A Keeper reaches its own tools under whatever name its runtime was spawned
+   with -- the [keeper-<name>-agent] alias, a bare [keeper-<name>], or a
+   generated nickname -- while the registry holds one name. RFC-0232 put every
+   spelling behind [canonical_keeper_name]; matching one of them here by hand
+   is how a live Keeper ends up refused by a guard written for unregistered
+   callers. A name it does not recognise passes through and fails the registry
+   check, which is the honest answer for a caller that is not a Keeper.
+
+   Named rather than inlined so the tests call the resolution the tools use
+   instead of a lookalike beside it. *)
+let asking_keeper_name agent_name =
+  Option.value (Keeper_identity.canonical_keeper_name agent_name) ~default:agent_name
+
 let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
-  (* A Keeper reaches its own tools under the agent alias its runtime was
-     spawned with ([keeper-<name>-agent]); an operator and the tests use the
-     bare registry name. One codec owns both spellings, so the registry
-     lookup below sees the same name either way -- without it a live Keeper
-     is refused by a guard meant for unregistered callers. *)
-  let keeper_name =
-    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
-    | Some name -> name
-    | None -> ctx.agent_name
-  in
+  let keeper_name = asking_keeper_name ctx.agent_name in
   let reject detail =
     (* A refused question is worth a line. The Keeper sees the rejection in
        its own result; an operator wondering why nothing is waiting on them
@@ -258,15 +264,11 @@ let is_open = function
 
 let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let base_path = ctx.config.base_path in
-  (* Same spelling problem as the write side: a Keeper reads its own questions
-     back under the agent alias its runtime spawned with, and the store is
-     keyed on the registry name. Reading through the alias would show an empty
-     list rather than an error, which is the worse failure of the two. *)
-  let keeper_name =
-    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
-    | Some name -> name
-    | None -> ctx.agent_name
-  in
+  (* The same resolution the write side uses, and for a sharper reason: the
+     store is keyed on the registry name, so reading under an unresolved
+     spelling returns an empty list rather than an error. A Keeper would be
+     told it never asked. *)
+  let keeper_name = asking_keeper_name ctx.agent_name in
   let include_resolved = bool_field "include_resolved" ctx.arguments in
   let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
   let rows = Keeper_ask_store.rows ~base_path ~keeper_name in

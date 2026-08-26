@@ -19,7 +19,7 @@ const LAB_SECS = [
 const LAB_CONFIG_RES = [
   { k: 'config root', v: '~/.masc', src: 'MASC_CONFIG_ROOT' },
   { k: 'workspace root marker', v: '.masc/root-state.json', src: '단일 마커' },
-  { k: 'model catalog', v: 'OAS embedded + oas-models-overlay.toml', src: 'OAS_MODEL_CATALOG' },
+  { k: 'model catalog', v: 'AGENT_CORE embedded + agent-core-models-overlay.toml', src: 'MASC_MODEL_CATALOG' },
   { k: 'stream idle timeout', v: '600s (floor)', src: '미설정 시 기본 · boot log 가 출처 명시' },
   { k: 'tool_policy.toml', v: 'config-root 마커 · 런타임 masc-improver비', src: 'legacy' },
 ];

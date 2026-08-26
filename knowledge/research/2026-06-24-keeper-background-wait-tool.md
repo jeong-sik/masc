@@ -1,7 +1,7 @@
 # Research: keeper "백그라운드 실행 후 대기/재개" 내부 tool
 
 - 작성: 2026-06-24, vincent (+ Claude Opus 4.8)
-- 방법: ultracode multi-agent workflow (5 reader 병렬 정독 → 설계 3안 → 안별 적대 검증 → 종합). 11/12 agent 성공, OAS async_agent reader 2회 모두 API 끊김으로 미완 → 해당 영역은 "확인 필요"로 명시.
+- 방법: ultracode multi-agent workflow (5 reader 병렬 정독 → 설계 3안 → 안별 적대 검증 → 종합). 11/12 agent 성공, agent_core async_agent reader 2회 모두 API 끊김으로 미완 → 해당 영역은 "확인 필요"로 명시.
 - 후속: RFC-0290 (이 문서가 근거)
 - 관련 RFC: RFC-0020 (hint/data 분리), RFC-0252/0266 (fusion), RFC-0286 (exec/keeper boundary), RFC-0287 (ws-direct)
 
@@ -19,7 +19,7 @@ keeper는 turn마다 재기동되지 않는다. keeper당 장기 Eio fiber 하�
 - 루프 본체: `keeper_heartbeat_loop.ml:738 let rec loop ()` — `if Atomic.get stop then () else (... loop ())`
 - 각 iteration: (1) 메타/presence 동기화 → (2) smart-heartbeat gate 판정 → (3) turn 실행 → (4) 다음 cadence까지 sleep
 
-핵심 구분: **"sustained fiber" ≠ "sustained in-memory context".** LLM 메시지 히스토리는 fiber 메모리에 상주하지 않고 매 turn 디스크 OAS checkpoint에서 재로드된다. OAS checkpoint의 typed message history가 대화 연속성의 SSOT이며, MASC의 task/goal/event 상태는 별도 typed store가 소유한다.
+핵심 구분: **"sustained fiber" ≠ "sustained in-memory context".** LLM 메시지 히스토리는 fiber 메모리에 상주하지 않고 매 turn 디스크 agent_core checkpoint에서 재로드된다. agent_core checkpoint의 typed message history가 대화 연속성의 SSOT이며, MASC의 task/goal/event 상태는 별도 typed store가 소유한다.
 
 ### 1.2 잠듦(wait): atomic-polling chunked sleep — Promise.await가 아님
 
@@ -98,7 +98,7 @@ fusion 대비 차이: 디스크 영속 있음, child switch 격리(더 강건), 
 - 치명: keeper=1 fiber serial → await 중 그 keeper가 board/mention에 deaf (head-of-line block). "zero latency" pro는 이 결함의 재서술. fusion이 fire-and-forget 택한 이유.
 - "reuses verified infra"는 거짓: fusion은 fork 후 즉시 반환, await 절대 안 함. turn fiber가 root-switch fork promise를 block하는 것은 선례 없는 **새 wait primitive**.
 - double-delivery: poll+wake 양쪽 결과 주입, drain 경계에 consumed guard 없음.
-- 필수 fix: wait_ms 단자리 초 hard-clamp / typed `consumed` CAS flag / OAS async_agent LLM-job 분기 제거 / terminal exactly-once 4분기 테스트.
+- 필수 fix: wait_ms 단자리 초 hard-clamp / typed `consumed` CAS flag / agent_core async_agent LLM-job 분기 제거 / terminal exactly-once 4분기 테스트.
 
 ### 3.2 B안 — false (P0 3개)
 
@@ -115,20 +115,20 @@ fusion 대비 차이: 디스크 영속 있음, child switch 격리(더 강건), 
 
 ---
 
-## 4. OAS 경계 (부분 — async_agent API 미정독)
+## 4. agent_core 경계 (부분 — async_agent API 미정독)
 
 확인된 사실:
-- keeper turn이 OAS 위에서 돈다(`run_turn`이 매 turn OAS checkpoint 로드, `keeper_agent_run.ml:262-263`).
-- subprocess timeout primitive `Autonomy_exec.run`은 transport-level (OAS/Eio 측), keeper coordination 아님.
+- keeper turn이 agent_core 위에서 돈다(`run_turn`이 매 turn agent_core checkpoint 로드, `keeper_agent_run.ml:262-263`).
+- subprocess timeout primitive `Autonomy_exec.run`은 transport-level (agent_core/Eio 측), keeper coordination 아님.
 
 경계 규칙 (3안 일치):
 - **MASC-only (OAS가 몰라야 함)**: bg run registry, `Keeper_event_queue` 완료 stimulus, `wakeup_keeper`/`fiber_wakeup`, heartbeat-loop drain, board 포스팅, keeper-scope 필터, tool descriptor.
-- **OAS/Eio (MASC가 소비만)**: subprocess spawn/timeout, per-turn checkpoint, (있다면) async-agent 동시성 회계.
-- **위반**: OAS async-tool 레이어가 `wakeup_keeper`를 호출하면 OAS가 keeper registry+board+event queue를 알게 됨(역방향 의존). result→wake 브릿지는 오직 MASC tool fiber의 terminal 콜백에서만.
+- **agent_core/Eio (MASC가 소비만)**: subprocess spawn/timeout, per-turn checkpoint, (있다면) async-agent 동시성 회계.
+- **위반**: agent_core async-tool 레이어가 `wakeup_keeper`를 호출하면 OAS가 keeper registry+board+event queue를 알게 됨(역방향 의존). result→wake 브릿지는 오직 MASC tool fiber의 terminal 콜백에서만.
 
 확인 필요 (정독 안 됨):
-- OAS `async_agent`/`approval` surface 정확한 API. 3안 모두 "LLM-job은 OAS async_agent 재사용"이라 했으나 미검증 추천.
-- checkpoint **write** 타이밍 + root task fiber와 turn fiber의 동시 checkpoint read/write 위험 (C안 검증이 지목한 가장 유력한 OAS 경계 hazard).
+- agent_core `async_agent`/`approval` surface 정확한 API. 3안 모두 "LLM-job은 agent_core async_agent 재사용"이라 했으나 미검증 추천.
+- checkpoint **write** 타이밍 + root task fiber와 turn fiber의 동시 checkpoint read/write 위험 (C안 검증이 지목한 가장 유력한 agent_core 경계 hazard).
 
 ---
 

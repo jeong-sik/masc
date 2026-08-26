@@ -138,6 +138,7 @@ let config_source_revision_to_string revision = revision
 let config_revision_to_string revision = revision
 let catalog_revision_to_string revision = revision
 let snapshot_revision_to_string revision = revision
+let equal_snapshot_revision = String.equal
 
 let digest_fields fields =
   let buffer = Buffer.create (List.length fields) in
@@ -332,15 +333,31 @@ let build_entries sources =
          List.fold_left
            (fun (entries, rejections) candidate ->
               match candidate with
+              (* The name is checked before the file, the same order the
+                 readable branch below uses. A directory that cannot be a
+                 package id has no identity to reject under, so that is the
+                 reason it is rejected for; erasing it to [None] here made the
+                 field say "unnamed" for both a bad name and a good one. *)
               | Candidate_unreadable { directory; path; detail } ->
-                ( entries
-                , { source_index
-                  ; source_id
-                  ; package_id = Result.to_option (package_id_of_directory directory)
-                  ; directory
-                  ; reason = Document_unreadable { path; detail }
-                  }
-                  :: rejections )
+                (match package_id_of_directory directory with
+                 | Error package_error ->
+                   ( entries
+                   , { source_index
+                     ; source_id
+                     ; package_id = None
+                     ; directory
+                     ; reason = Invalid_package_id package_error
+                     }
+                     :: rejections )
+                 | Ok package_id ->
+                   ( entries
+                   , { source_index
+                     ; source_id
+                     ; package_id = Some package_id
+                     ; directory
+                     ; reason = Document_unreadable { path; detail }
+                     }
+                     :: rejections ))
               | Candidate_document { directory; source_text } ->
                 (match package_id_of_directory directory with
                  | Error package_error ->

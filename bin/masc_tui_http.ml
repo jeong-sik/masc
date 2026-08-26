@@ -305,11 +305,15 @@ let repo_query_suffix = function
 let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) () :
     (Masc.Tui_decode.workspace_tree_node list, string) result =
+  (* One route for every level, the root included: [tree?depth=0] walks the
+     whole workspace and returned nested files under a 200-node cap, so the
+     root pane showed ".ci/hardening-baseline.json" beside ".ci". The server
+     answers a bare list, so ask for its maximum and let the pane read a full
+     page as truncated. *)
   let route =
-    (if String.equal path "" then "/api/v1/workspace/tree?depth=0&limit=200"
-     else
-       Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
-         (percent_encode_query_value path))
+    Printf.sprintf "/api/v1/workspace/children?path=%s&limit=%d"
+      (percent_encode_query_value path)
+      Server_routes_http_routes_workspace.max_tree_node_limit
     ^ keeper_query_suffix keeper
     ^ repo_query_suffix repo
   in
@@ -1360,3 +1364,73 @@ let fetch_git_diff ?repo ~(host : string) ~(port : int)
       | json -> Masc.Tui_decode.decode_git_diff json
       | exception Yojson.Json_error detail ->
           Error ("git diff was not JSON: " ^ detail))
+
+(** The questions one keeper is waiting on the operator for
+    ([GET /api/v1/keepers/asks]).
+
+    Open questions only. The rows carry choice ids next to labels and
+    {!submit_keeper_ask_answer} takes ids back, so nothing on this side ever
+    matches a choice by its wording. *)
+let fetch_keeper_asks ?keeper_name ~(host : string) ~(port : int) () :
+    (Masc.Tui_decode.asks_snapshot, string) result =
+  (* No keeper named means the whole fleet. An operator opening this surface
+     does not know which Keeper is stuck yet, and asking them to pick a name
+     first is asking them to guess. *)
+  let path =
+    match keeper_name with
+    | None -> "/api/v1/keepers/asks"
+    | Some name ->
+        Printf.sprintf "/api/v1/keepers/asks?name=%s" (percent_encode_query_value name)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (Printf.sprintf "asks returned %d: %s" status body)
+  | Ok (_, body) -> (
+      match Yojson.Safe.from_string body with
+      | json -> Masc.Tui_decode.decode_asks_snapshot json
+      | exception Yojson.Json_error detail -> Error ("asks were not JSON: " ^ detail))
+
+(** Answer one question of one ask ([POST /api/v1/keepers/ask-answer]).
+
+    A [409] is not a transport failure: another surface answered first. The
+    body carries what landed, and the caller surfaces that rather than
+    retrying — resubmitting would only lose again, and the operator needs to
+    see the decision that stands. *)
+let submit_keeper_ask_answer ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(ask_id : string) ~(question_id : string) ~(choice_ids : string list) :
+    (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("name", `String keeper_name);
+          ("ask_id", `String ask_id);
+          ( "answers",
+            `List
+              [
+                `Assoc
+                  [
+                    ("question_id", `String question_id);
+                    ( "response",
+                      `Assoc
+                        [
+                          ("kind", `String "chose");
+                          ( "choice_ids",
+                            `List (List.map (fun id -> `String id) choice_ids) );
+                        ] );
+                  ];
+              ] );
+        ])
+  in
+  match
+    http_post ~headers:(auth_headers ()) ~host ~port ~path:"/api/v1/keepers/ask-answer" ~body
+  with
+  | Error detail -> Error detail
+  | Ok (status, response_body) when Masc.Tui_decode.is_success_http_status status ->
+      let (_ : string) = response_body in
+      Ok ()
+  | Ok (409, response_body) ->
+      Error (Printf.sprintf "another surface answered first: %s" response_body)
+  | Ok (status, response_body) ->
+      Error (Printf.sprintf "answer returned %d: %s" status response_body)

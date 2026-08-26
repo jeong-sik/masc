@@ -1,0 +1,126 @@
+name = "masc_ask"
+description = """
+Ask the operator a question that carries named choices, then keep working.
+
+The question is recorded durably and appears on every surface the operator \
+watches. Your turn does not stop and your lane is not held. The answer may \
+arrive in a minute or after a night, and it reaches you as a separate wake.
+
+Use this when the next step depends on a choice that is not yours to make. \
+Do not use it to confirm work you could verify yourself, and do not use it \
+to ask whether you may run a tool -- that is what the approval gate is for.
+
+The opposite mistake is the expensive one. A question costs one person one \
+minute. A wrong silent guess in an unattended run burns hours before anyone \
+sees it went wrong, and the work it produced has to be thrown away. When you \
+are weighing whether the choice is really yours, that asymmetry is the answer.
+
+The result tells you how many of your questions are still open. Several at \
+once is not an error, but a human reading a list answers the top one and \
+leaves the rest -- so ask what actually blocks your next step, not everything \
+you are curious about.
+
+Put the reason in `context`. A reader who cannot see why you are asking \
+cannot tell a decision that matters from one that does not.
+
+Give a choice a `choice_id` that will still mean the same thing after \
+someone rewords its label: the answer names the id, never the label."""
+additional_properties = false
+
+[[params]]
+name = "questions"
+type = "array"
+required = true
+description = """
+One or more questions asked together. Ask together what the operator can \
+decide together; a question that depends on the answer to another belongs \
+in a later ask."""
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "question_id"
+type = "string"
+required = true
+description = "Stable id for this question within the ask. The answer names it."
+
+[[params.items.params]]
+name = "header"
+type = "string"
+required = true
+description = """
+Two or three words naming the decision. Narrow surfaces such as the TUI show \
+this instead of the full prompt."""
+
+[[params.items.params]]
+name = "prompt"
+type = "string"
+required = true
+description = "The question as the operator reads it."
+
+[[params.items.params]]
+name = "mode"
+type = "string"
+required = true
+enum = ["single", "multi"]
+description = "single takes one choice; multi takes several."
+
+[[params.items.params]]
+name = "free_text"
+type = "boolean"
+description = """
+Whether the operator may type an answer instead of picking one. Defaults to \
+false. A question with no choices requires this to be true, otherwise \
+nothing could answer it and the ask is refused."""
+
+[[params.items.params]]
+name = "free_text_hint"
+type = "string"
+description = "Placeholder shown where free text is typed."
+
+[[params.items.params]]
+name = "choices"
+type = "array"
+description = "Named choices. May be omitted only when free_text is true."
+
+[params.items.params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params.items.params]]
+name = "choice_id"
+type = "string"
+required = true
+description = """
+Stable id. The recorded answer names this and never the label, so rewording \
+a label does not orphan answers already given."""
+
+[[params.items.params.items.params]]
+name = "label"
+type = "string"
+required = true
+description = "What the operator reads on the choice."
+
+[[params.items.params.items.params]]
+name = "description"
+type = "string"
+description = "What picking this choice commits to."
+
+[[params]]
+name = "context"
+type = "string"
+description = """
+Why you are asking, in your own words. Surfaces render this beside the \
+prompt."""
+
+[[params]]
+name = "task_id"
+type = "string"
+description = "Task this question belongs to, when it belongs to one."
+
+[[params]]
+name = "goal_id"
+type = "string"
+description = "Goal this question belongs to, when it belongs to one."

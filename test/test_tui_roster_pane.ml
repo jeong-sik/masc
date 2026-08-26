@@ -87,8 +87,16 @@ let test_selected_name_window_marks_hidden_edges () =
     (Pane.name_window ~selected:true ~frame:8 ~width:8 "abcdefghij")
 
 let test_name_window_is_static_until_selected_and_overflowing () =
-  check_string "an unselected name keeps ordinary truncation" "abcdefg~"
+  (* An unselected row does not move, but it still has to be identifiable.
+     It used to keep the head and drop the tail ("abcdefg~"), which rendered
+     every keeper sharing a prefix the same. It now drops the middle, so both
+     the shared family and the deciding tail survive; only the cursor row
+     scrolls the whole name. See [Masc_tui_message_layout.fit_middle]. *)
+  check_string "an unselected name keeps both ends" "ab\xe2\x80\xa6fghij"
     (Pane.name_window ~selected:false ~frame:8 ~width:8 "abcdefghij");
+  check_int "and still occupies the exact cell budget" 8
+    (Masc_tui_message_layout.display_width
+       (Pane.name_window ~selected:false ~frame:8 ~width:8 "abcdefghij"));
   check_string "a short selected name stays still" "abc     "
     (Pane.name_window ~selected:true ~frame:99 ~width:8 "abc");
   check_int "a wide name still occupies the exact cell budget" 8

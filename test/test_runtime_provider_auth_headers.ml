@@ -71,6 +71,7 @@ let runpod_binding =
   ; wizard_default = false
   ; max_concurrent = None
   ; max_request_body_bytes = None
+  ; max_tokens = None
   ; price_input = None
   ; price_output = None
   ; keep_alive = None
@@ -2012,7 +2013,7 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
      | Ok None -> true
      | Ok (Some _) | Error _ -> false)
 
-(* RFC-OAS-037: the first-event (TTFT/prefill) bound has the same clock
+(* RFC-AC-037: the first-event (TTFT/prefill) bound has the same clock
    dependency as the idle bound — configured without a resolvable clock it
    must fail loudly, naming its own knob. *)
 let test_clock_failfast_returns_typed_error_when_first_event_set_without_clock () =
@@ -2299,7 +2300,7 @@ let () =
             `Quick
             test_clock_failfast_opt_out_when_no_idle_no_clock
         ; test_case
-            "clock fail-fast raises when first-event set without clock (RFC-OAS-037)"
+            "clock fail-fast raises when first-event set without clock (RFC-AC-037)"
             `Quick
             test_clock_failfast_returns_typed_error_when_first_event_set_without_clock
         ; test_case

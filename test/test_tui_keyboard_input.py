@@ -12,7 +12,6 @@ from pathlib import Path
 import re
 import select
 import signal
-import socket
 import struct
 import zlib
 import subprocess
@@ -60,6 +59,12 @@ FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
+# A lexed OCaml keyword, whichever colour the theme dresses it in. Pinning the
+# code -- yellow, once -- meant #30723's palette change failed four scenarios
+# with a timeout that named a colour instead of the thing under test: that the
+# file arrived lexed rather than printed.
+LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
+
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
@@ -128,23 +133,23 @@ class GatedHttpResponse:
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
     requests: HttpRequests | None,
-) -> Iterator[tuple[int, Callable[[], None]]]:
-    if fixtures is None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
-            stalled_endpoint.bind(("127.0.0.1", 0))
-            stalled_endpoint.listen(1)
+) -> Iterator[tuple[int, Callable[[], None], Callable[[str], None]]]:
+    fixtures = {} if fixtures is None else fixtures
+    workspace_base_path: str | None = None
 
-            def start_endpoint() -> None:
-                pass
-
-            yield int(stalled_endpoint.getsockname()[1]), start_endpoint
-        return
+    def set_workspace_base_path(base_path: str) -> None:
+        nonlocal workspace_base_path
+        workspace_base_path = base_path
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
             fixture = fixtures.get(
                 self.path,
-                (503, {"error": "fixture endpoint unavailable"}),
+                (200, {})
+                if self.path == "/health"
+                else fleet_safety_fixture()
+                if self.path == "/health?full=1"
+                else (503, {"error": "fixture endpoint unavailable"}),
             )
             resolved = fixture() if callable(fixture) else fixture
             extra_headers: tuple[tuple[str, str], ...] = ()
@@ -155,6 +160,23 @@ def test_http_endpoint(
                 extra_headers = resolved.headers
             else:
                 status, payload = resolved
+                if (
+                    self.path in ("/health", "/health?full=1")
+                    and status == 200
+                    and isinstance(payload, dict)
+                    and workspace_base_path is not None
+                ):
+                    payload = dict(payload)
+                    paths = dict(payload.get("paths", {}))
+                    paths.update(
+                        {
+                            "effective_base_path": workspace_base_path,
+                            "effective_masc_root": os.path.join(
+                                workspace_base_path, ".masc"
+                            ),
+                        }
+                    )
+                    payload["paths"] = paths
                 body = json.dumps(payload).encode()
                 content_type = "application/json"
             self.send_response(status)
@@ -190,7 +212,11 @@ def test_http_endpoint(
             thread.start()
 
         try:
-            yield int(server.server_address[1]), start_endpoint
+            yield (
+                int(server.server_address[1]),
+                start_endpoint,
+                set_workspace_base_path,
+            )
         finally:
             if thread is not None:
                 server.shutdown()
@@ -877,6 +903,52 @@ def fleet_safety_fixture() -> HttpResponse:
     return (200, {"keeper_fleet_safety": {"status": "ok"}})
 
 
+def with_workspace_identity(
+    fixtures: HttpFixtures | None, base_path: str
+) -> HttpFixtures:
+    """Answer /health?full=1 with the workspace the harness actually chose.
+
+    The TUI canonicalises its own base path against the one this reports and
+    refuses local Keeper/context/metrics reads when they differ. A fixture
+    that names no path leaves every scenario reading an unproven workspace,
+    which is not the state any of them mean to describe.
+
+    Scenario-owned health fixtures keep their fields; only the paths block is
+    filled in. A raw or callable response is left alone -- a scenario that
+    writes its own health body owns what it says.
+    """
+    # In place, not a copy: a scenario keeps the dict it handed over and swaps
+    # a response into it mid-run (a lane read that starts failing, a board list
+    # that arrives late). A copy leaves the server reading the original, and
+    # nine scenarios waited out their timeouts for a response that had already
+    # been written somewhere the server could not see.
+    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
+    paths = {
+        "cwd": base_path,
+        "effective_base_path": base_path,
+        "effective_masc_root": os.path.join(base_path, ".masc"),
+        "effective_has_masc_dir": True,
+    }
+    # The identity probe reads the compact /health; the fleet reading reads
+    # /health?full=1. Both carry the paths block, and a scenario may declare
+    # either, so both keys are filled.
+    for key in ("/health", "/health?full=1"):
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = (200, {"paths": paths})
+            continue
+        if isinstance(existing, tuple):
+            status, payload = existing
+            if isinstance(payload, dict):
+                body = dict(cast(dict[str, object], payload))
+                body["paths"] = {
+                    **cast(dict[str, object], body.get("paths", {})),
+                    **paths,
+                }
+                merged[key] = (status, body)
+    return merged
+
+
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
@@ -1279,38 +1351,19 @@ def run_terminal_scenario(
     master_fd, slave_fd = os.openpty()
     output = bytearray()
     process: subprocess.Popen[bytes] | None = None
-    identity_base_path: list[str | None] = [None]
-    effective_http_fixtures = http_fixtures
-    if http_fixtures is not None and "/health" not in http_fixtures:
-        copied_http_fixtures = dict(http_fixtures)
-
-        def current_workspace_identity() -> HttpResponse:
-            base_path = identity_base_path[0]
-            if base_path is None:
-                return 503, {"error": "PTY workspace is not ready"}
-            return (
-                200,
-                {
-                    "status": "ok",
-                    "paths": {
-                        "effective_base_path": base_path,
-                        "effective_masc_root": str(Path(base_path, ".masc")),
-                    },
-                },
-            )
-
-        copied_http_fixtures["/health"] = current_workspace_identity
-        effective_http_fixtures = copied_http_fixtures
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
-        with test_http_endpoint(effective_http_fixtures, http_requests) as (
-            server_port,
-            start_http_endpoint,
-        ):
-            with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
-                identity_base_path[0] = base_path
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+            with test_http_endpoint(
+                with_workspace_identity(http_fixtures, base_path), http_requests
+            ) as (
+                server_port,
+                start_http_endpoint,
+                set_workspace_base_path,
+            ):
                 seed_workspace(base_path)
+                set_workspace_base_path(base_path)
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -1331,6 +1384,7 @@ def run_terminal_scenario(
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
+                        "MASC_BASE_PATH_INPUT": base_path,
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
@@ -4002,14 +4056,28 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"superseded by provider grouping",
             start=start,
             timeout=5.0,
         )
-        visible = bytes(output[start:])
+        last_row_end = output.find(b"superseded by provider grouping", start) + len(
+            b"superseded by provider grouping"
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=last_row_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
+        visible = bytes(output[start:frame_end])
         for needle in (
-            b"[fact] the Runtime probe shares one provider endpoint",
-            b"[constraint] probe every model separately",
+            b"[fact] the Runtime probe shares",
+            b"one provider endpoint",
+            b"[constraint] probe",
+            b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
@@ -4971,7 +5039,7 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         "task_id": task_id,
         "task_title": f"finish {task_id}",
         "request_kind": "completion",
-        "request_summary": f"prove {task_id} is done",
+        "request_summary": "" if task_id == "task-901" else f"prove {task_id} is done",
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
         "required_artifacts": ["diff"],
@@ -5032,10 +5100,11 @@ def note_editor_script() -> Iterator[str]:
 
 
 def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
-    """`a` arms and only the second `a` sends the approve; `x` collects a
-    reason through $EDITOR and sends the reject. Both assertions read the
-    recorded POST bodies -- the wire, not the paint -- and the frame between
-    the two presses proves the first one sent nothing.
+    """Enter explains what the request asks for and which evidence exists.
+    Then `a` arms and only the second `a` sends the approve; `x` collects a
+    reason through $EDITOR and sends the reject. The verdict assertions read
+    the recorded POST bodies -- the wire, not the paint -- and the frame
+    between the two presses proves the first one sent nothing.
     """
 
     def verdict_bodies() -> list[bytes]:
@@ -5056,6 +5125,30 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         wait_for_output(
             process, master_fd, output, b"task-901", start=0, timeout=3.0
         )
+        detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"HOW TO READ THIS",
+        )
+        detail_plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"vr-task-901",
+            b"finish task-901",
+            b"completion",
+            b"No request summary was recorded",
+            b"review the diff",
+            b"REQUIRED ARTIFACTS (1)",
+            b"SUBMITTED EVIDENCE (1)",
+            b"diff",
+            b"left/Esc:list",
+        ):
+            if needle not in detail_plain:
+                raise AssertionError(
+                    f"Verification detail omitted {needle!r}: {detail_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"task-901")
         send_and_wait(
             process,
             master_fd,
@@ -5072,6 +5165,11 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         approve_payload = json.loads(approve_body)
         if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
             raise AssertionError(f"approve body: {approve_payload!r}")
+        # Let the approve completion and its queue reload settle before the
+        # editor temporarily gives up the alternate screen. Otherwise the
+        # redraw from that reload can race the terminal handoff and leave the
+        # editor wait with no frame to drain.
+        drain_until_quiet(process, master_fd, output)
         # Reject on the same row: the $EDITOR stub saves the reason form, so
         # the second verdict body carries it.
         read_available(master_fd, output)
@@ -5506,7 +5604,7 @@ def changes_keeper_and_arrow_detail_interaction(
     # own workspace (?keeper=alpha), so the header names whose tree it is
     # and the bytes arrive lexed.
     code = send_and_wait(
-        process, master_fd, output, b"v", b"\x1b[33mlet\x1b[0m"
+        process, master_fd, output, b"v", LEXED_LET
     )
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "alpha ▸ repos/masc/lib" not in code_plain:
@@ -5583,8 +5681,8 @@ def enter_outside_changes_interaction(
 
 
 
-WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/tree?depth=0&limit=200"
-WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=500"
+WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/children?path=&limit=2000"
+WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=2000"
 WORKSPACE_FILE_AML_PATH = "/api/v1/workspace/file?path=lib/a.ml"
 
 
@@ -5692,22 +5790,36 @@ def code_lane_interaction(
         if needle not in plain:
             raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
     send_and_wait(process, master_fd, output, b"\r", b"a.ml")
-    opened = send_and_wait(
-        process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
-    )
+    # Which colour a keyword wears belongs to the theme, and the theme moves:
+    # #30723 turned it bright magenta and this waited out its timeout on the
+    # old yellow. What this scenario is about is that the file arrived lexed,
+    # so it asks for a style around the span and not for a particular one.
+    opened = send_and_wait(process, master_fd, output, b"\r", LEXED_LET)
     if re.search(rb"\x1b\[7m\s+1\x1b\[0m", opened) is None:
         raise AssertionError(
             f"the cursor line's gutter is not highlighted: {opened!r}"
         )
-    if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
+    if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
-    # l pans the open file sideways by one cell: the keyword span is cut
-    # mid-word but its colour still opens the remainder, and the title says
-    # the view is shifted. h pans back and the full keyword returns.
-    panned = send_and_wait(process, master_fd, output, b"ll", b"(col 3)")
-    if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
+    # Shift-Right pans the open file sideways by one cell: lowercase h/l now
+    # choose the split pane. The keyword span is cut mid-word but its colour
+    # still opens the remainder, and the title says the view is shifted.
+    panned = send_and_wait(
+        process, master_fd, output, b"\x1b[1;2C\x1b[1;2C", b"(col 3)"
+    )
+    cut_under_style = re.compile(
+        rb"\x1b\[[0-9;]*m" + re.escape(b"t") + rb"\x1b\[0m x = "
+        rb"\x1b\[[0-9;]*m" + re.escape(b"1") + rb"\x1b\[0m"
+    )
+    if cut_under_style.search(panned) is None:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
-    send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[1;2D\x1b[1;2D",
+        LEXED_LET,
+    )
     # With the file focused, "/" searches its lines: typing jumps the line
     # cursor (the reverse gutter) to the match, and Enter keeps the query.
     searched = send_and_wait(process, master_fd, output, b"/hi", b"/hi")
@@ -5727,7 +5839,7 @@ def code_lane_interaction(
     # The added row now arrives lexed, so the wait needle is the keyword
     # span rather than the plain text the styles split apart.
     diff_frame = send_and_wait(
-        process, master_fd, output, b"d", b"\x1b[33mlet\x1b[0m"
+        process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
     for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
@@ -5737,11 +5849,11 @@ def code_lane_interaction(
             )
     # The added row is the working tree's own line, so it carries the
     # lexer's colours (the keyword span) inside the diff band.
-    if b"\x1b[33mlet\x1b[0m" not in diff_frame:
+    if LEXED_LET.search(diff_frame) is None:
         raise AssertionError(
             f"the added diff row lost the lexer's colours: {diff_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).
     # The needle is a commit hash so the wait crosses the "(loading
@@ -5758,7 +5870,7 @@ def code_lane_interaction(
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # The search above left the cursor on line 2; the lsp fixtures answer
     # about line 1, so put the cursor back where the question is.
     send_and_wait(process, master_fd, output, b"k", b"\x1b[7m   1\x1b[0m")
@@ -6408,6 +6520,14 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
+        footer = (
+            b"j/k:move  PgUp / PgDn:page  Right / Enter:detail  "
+            b"Esc:overview  r:refresh  Tab:next  q:quit"
+        )
+        if footer not in plain:
+            raise AssertionError(
+                f"Fusion list footer disagrees with its exercised keys: {plain!r}"
+            )
 
         selected = send_and_wait(process, master_fd, output, b"j", b"fusion-target-501")
         if re.search(rb">[^\r\n]*fusion-target-501", CSI_RE.sub(b"", selected)) is None:
@@ -6440,7 +6560,7 @@ def fusion_list_detail_interaction(
             b"RESULT",
             b"QUESTION",
             b"PANEL RESPONSES",
-            b"PgUp/PgDn:page",
+            b"PgUp / PgDn:page",
         ):
             if needle not in detail_plain:
                 raise AssertionError(
@@ -6960,8 +7080,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     code_file = (200, {"ok": True, "content": "let a = 2\n"})
     for children_path in (
-        "/api/v1/workspace/children?path=repos/masc/lib&limit=500&keeper=alpha",
-        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=500&keeper=alpha",
+        "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
+        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
     ):
         changes_navigation_fixtures[children_path] = code_children
     for file_path in (
@@ -7032,7 +7152,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     repositories_fixtures = keeper_runtime_http_fixtures()
     repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
-    repositories_fixtures["/api/v1/workspace/tree?depth=0&limit=200&repo_id=masc"] = (
+    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
         200,
         [
             {"path": "src", "label": "src", "depth": 0, "parent": "",

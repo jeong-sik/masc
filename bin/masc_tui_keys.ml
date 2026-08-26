@@ -71,7 +71,7 @@ let for_surface = function
       @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
-      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Instructions / GitHub"
+      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / GitHub"
       ; b Act "L" "gh login" ~help:"on the GitHub tab: start the gh device-flow login"
       ; b Act "o" "logs" ~help:"open this Keeper's logs"
       ; b Act "Left / Esc" "back"
@@ -144,10 +144,11 @@ let for_surface = function
       ]
       @ listing_meta
   | Verification ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
+      ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
-      ; b Act "Esc" "overview"
       ]
       @ listing_meta
   | Harness ->
@@ -157,8 +158,9 @@ let for_surface = function
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
+      ; b Navigate "PgUp / PgDn" "page"
       ; b Act "Right / Enter" "detail"
-      ; b Act "Left / Esc" "back"
+      ; b Act "Esc" "overview"
       ]
       @ listing_meta
   | Repositories ->
@@ -310,7 +312,7 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
   Printf.sprintf "%s  (%d/%d)"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp/PgDn" "page"
+        ; b Navigate "PgUp / PgDn" "page"
         ; b Act "Left / Esc" "back"
         ]
         @ listing_meta))

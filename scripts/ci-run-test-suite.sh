@@ -11,17 +11,59 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$repo_root" || exit 2
 
+# The names of the suites that failed, one per line.
+#
+# A failed suite prints a header naming the stanza that declared it, then the
+# stanza dune quoted. Where the name sits inside that quote depends on the
+# stanza:
+#   File "test/dune", line 1089, ...            /  1089 |   test_fs_compat
+#   File "test/stanzas/test_x.inc", line 7, ... /     7 |  (name test_x)
+#   File "test/dune", lines 2961-2970, ...      /  2961 | (rule
+#                                               /  2962 |  (alias runtest-x)
+# Reading only the first quoted line attributed nothing to the two suites a
+# (rule ...) declares -- the PTY keyboard suite and the dashboard behaviour
+# contracts -- and a failure that names no suite is dropped whenever another
+# suite also fails. So the whole quote is read, and an alias name counts.
+extract_failed_names() {
+  awk '
+    /^File "test\/(dune|stanzas\/[a-z0-9_]+\.inc)", line/ { block = 1; named = 0; next }
+    !block { next }
+    $0 !~ /^ *[0-9]+ \|/ { block = 0; next }
+    named { next }
+    match($0, /\(alias +runtest-[A-Za-z0-9_-]+/) {
+      name = substr($0, RSTART, RLENGTH)
+      sub(/.*runtest-/, "", name)
+      print name; named = 1; next
+    }
+    match($0, /test_[a-z0-9_]+/) { print substr($0, RSTART, RLENGTH); named = 1 }
+  ' "$1"
+}
+
 print_failure_block() {
   local name="$1"
   local source_log="$2"
   awk -v n="$name" '
+    function name_in(line,   s) {
+      if (match(line, /\(alias +runtest-[A-Za-z0-9_-]+/)) {
+        s = substr(line, RSTART, RLENGTH); sub(/.*runtest-/, "", s); return s
+      }
+      if (match(line, /test_[a-z0-9_]+/)) return substr(line, RSTART, RLENGTH)
+      return ""
+    }
     /^File "test\/(dune|stanzas\/[a-z0-9_]+\.inc)", line/ {
       if (printing) exit
       header = $0
-      if ((getline stanza) <= 0) next
-      if (match(stanza, /test_[a-z0-9_]+/) && substr(stanza, RSTART, RLENGTH) == n) {
+      stanza = ""
+      found = ""
+      while ((getline line) > 0) {
+        if (line !~ /^ *[0-9]+ \|/) break
+        stanza = stanza line "\n"
+        if (found == "") found = name_in(line)
+      }
+      if (found == n) {
         print header
-        print stanza
+        printf "%s", stanza
+        print line
         printing = 1
       }
       next
@@ -70,6 +112,51 @@ EOF
   fi
 
   echo "[test-suite] self-test OK - blank line and prefix collision"
+
+  rule_log="$(mktemp "${TMPDIR:-/tmp}/masc-test-suite-rule.XXXXXX")"
+  cat > "$rule_log" <<'EOF'
+File "test/dune", lines 2961-2970, characters 0-202:
+2961 | (rule
+2962 |  (alias runtest-test_tui_keyboard_input)
+2963 |  (deps
+2964 |   test_tui_keyboard_input.py
+2965 |   ../bin/masc_tui.exe)
+2966 |  (action
+2967 |   (run
+2968 |    python3
+2969 |    %{dep:test_tui_keyboard_input.py}
+2970 |    %{dep:../bin/masc_tui.exe})))
+Traceback (most recent call last):
+AssertionError: a scenario the gate could not name
+File "test/dune", lines 1449-1460, characters 0-180:
+1449 | (rule
+1450 |  (alias runtest-dashboard-http-behavior-contracts)
+1451 |  (deps a b))
+Command exited with code 1.
+File "test/stanzas/test_keeper_toml.inc", line 2, characters 1-40:
+2 |  (name test_keeper_toml)
+
+  [FAIL]        toml          3   a named suite still reads.
+EOF
+
+  names="$(extract_failed_names "$rule_log" | sort -u | tr '\n' ' ')"
+  [ "$names" = "dashboard-http-behavior-contracts test_keeper_toml test_tui_keyboard_input " ] \
+    || { echo "[test-suite] self-test FAIL - rule-declared suites are unnamed: $names" >&2
+         rm -f "$rule_log"; exit 1; }
+
+  printf '%s\n' "$(print_failure_block test_tui_keyboard_input "$rule_log")" \
+    | grep -Fq 'AssertionError: a scenario the gate could not name' \
+    || { echo "[test-suite] self-test FAIL - a rule's own output is missing" >&2
+         rm -f "$rule_log"; exit 1; }
+
+  if printf '%s\n' "$(print_failure_block test_tui_keyboard_input "$rule_log")" \
+     | grep -Fq 'a named suite still reads'; then
+    echo "[test-suite] self-test FAIL - a later suite leaked into the rule block" >&2
+    rm -f "$rule_log"; exit 1
+  fi
+
+  rm -f "$rule_log"
+  echo "[test-suite] self-test OK - a (rule ...) stanza names its suite"
 }
 
 if [ "${1:-}" = "--self-test" ]; then
@@ -101,14 +188,7 @@ if [ "$rc" = 124 ]; then
   exit 2
 fi
 
-# A failed suite prints a header naming the stanza that declared it, then the
-# stanza line itself. Both shapes carry the name on that second line:
-#   File "test/dune", line 1089, ...        /  1089 |   test_fs_compat
-#   File "test/stanzas/test_x.inc", line 7  /     7 |  (name test_x)
-awk '
-  /^File "test\/(dune|stanzas\/[a-z0-9_]+\.inc)", line/ { want = 1; next }
-  want { if (match($0, /test_[a-z0-9_]+/)) print substr($0, RSTART, RLENGTH); want = 0 }
-' "$log" | sort -u > "${RUNNER_TEMP:-/tmp}/failed.txt"
+extract_failed_names "$log" | sort -u > "${RUNNER_TEMP:-/tmp}/failed.txt"
 
 sed 's/#.*//' "$known_file" | tr -d '[:blank:]' | grep -v '^$' | sort -u \
   > "${RUNNER_TEMP:-/tmp}/known.txt"

@@ -6,35 +6,6 @@
     code. [Masc_tui_ansi] re-exports these under its historical names; new call
     sites use this module directly so a theme swap moves every screen at once. *)
 
-(** Test-only environment and projection fixtures. The R12 check in
-    [scripts/check-ssot.sh] is the repository production boundary: code under
-    [bin/] and [lib/] may not name this module outside its owner
-    implementation/interface. Production callers use the semantic tokens
-    below. *)
-module For_testing : sig
-  val colors_enabled
-    :  force_color:string option
-    -> no_color:string option
-    -> bool
-  (** Pure environment-policy fixture. Only [force_color = Some "1"]
-      overrides a non-empty [no_color]. *)
-
-  val user_message_background_rgb
-    :  Masc_tui_terminal_palette.rgb
-    -> Masc_tui_terminal_palette.rgb
-  (** Pure low-contrast blend derived from the terminal's default background.
-      Light backgrounds blend 4 percent toward black; dark backgrounds blend
-      12 percent toward white. *)
-
-  val user_message_background
-    :  colors_enabled:bool
-    -> project:
-         (Masc_tui_terminal_palette.rgb
-          -> Masc_tui_terminal_palette.projected_color option)
-    -> Masc_tui_terminal_palette.t option
-    -> string
-  (** Pure capability/environment fixture for the production semantic token. *)
-end
 
 val colors_enabled : bool
 (** no-color.org: a non-empty NO_COLOR suppresses styling. Structure —
@@ -49,6 +20,32 @@ val user_message_background : Masc_tui_terminal_palette.t option -> string
 (** A low-contrast background derived from a known terminal palette and
     projected through the process stdout capability. Missing palette,
     disabled colours, and unsupported projection all produce [""]. *)
+
+val recede
+  :  theme_mode:Masc_tui_terminal_palette.theme_mode option
+  -> Masc_tui_terminal_palette.t option
+  -> string
+(** What a row draws to sit behind the ones around it.
+
+    [Sgr.dim] is SGR 2, and SGR 2 blends the foreground toward black. On a
+    dark terminal that is a step toward the background and the row recedes.
+    On a light one it is a step away, so the row meant to be quiet comes out
+    darker than its neighbours and the page reads upside down
+    (microsoft/terminal#16493). [Sgr.gray] is no safer: Solarized and its
+    relatives remap the bright colours onto a grey ramp, so it answers to the
+    theme rather than to the background.
+
+    So this computes instead of naming: the terminal's own text stepped
+    toward the terminal's own background, projected through what the process
+    can emit.
+
+    Without a palette the page may still have been reported on its own, by
+    DECSET 996 or 2031, which a multiplexer passes through where it answers
+    no OSC colour query. Where it says light, [Sgr.gray] recedes and
+    [Sgr.dim] does not -- SGR 2 blends toward black, so on a light terminal
+    it walks away from the page. Where it says dark, or says nothing,
+    [Sgr.dim] is what every row drew before this existed and is right on a
+    dark one. Disabled colours produce [""]. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is
@@ -75,6 +72,15 @@ module Sgr : sig
       and dim alone, so it can sit inside an emphasised run. *)
 
   val gray : string
+
+  val bright_red : string
+  val bright_green : string
+  val bright_yellow : string
+  val bright_blue : string
+  val bright_magenta : string
+  val bright_cyan : string
+  (** Terminal-native bright slots. These remain palette-relative instead of
+      forcing a dark-theme RGB value onto an unknown terminal background. *)
 
   val background : Masc_tui_terminal_palette.projected_color option -> string
   (** Serialize a projected background as SGR [48;2] or [48;5]. [None] and
@@ -123,7 +129,127 @@ val tone : tone -> string
     names, so one remap moves every reading at once. *)
 type status = Ok | Warn | Bad | Info | Muted
 
+(** The ANSI colours masc names. Only the ones something draws a meaning
+    through: a colour absent here is one nothing reads a meaning out of. *)
+type ansi_color =
+  | Bright_red
+  | Bright_green
+  | Bright_yellow
+  | Bright_blue
+  | Bright_magenta
+  | Bright_cyan
+  | Bright_black
+
+val ansi_readable
+  :  Masc_tui_terminal_palette.t option
+  -> ansi_color
+  -> string
+(** The colour, made readable against the page it lands on.
+
+    masc draws these out of the reader's own palette, so what they come out as
+    is their theme's call -- and across twelve base16 schemes that call fails
+    often enough to matter: yellow at 1.44:1 on default-light, bright black at
+    1.69:1 on Nord. That is not a dimmer warning, it is a warning nobody sees.
+
+    Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
+    code goes out and the theme keeps its choice. Where it does not, the same
+    colour is lifted in lightness alone until it does, so a red is still a
+    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    the reply -- the plain code goes out, which is what every row drew before
+    this existed. *)
+
 val status : status -> string
+(** The plain SGR code. What the reader's own theme puts in that palette
+    entry; use {!status_readable} where the palette is known. *)
+
+val status_readable : Masc_tui_terminal_palette.t option -> status -> string
+(** The same colour, made readable against the page it lands on.
+
+    A status colour is drawn out of the reader's palette, so what it comes out
+    as is their theme's call -- and across twelve base16 schemes that call
+    fails often enough to matter: yellow at 1.44:1 on default-light, bright
+    black at 1.69:1 on Nord. That is not a dimmer warning, it is a warning
+    nobody sees.
+
+    Where the terminal answered OSC 4 and its entry clears 4.5:1, the plain
+    code goes out and the theme keeps its choice. Where it does not, the same
+    colour is lifted in lightness alone until it does, so a red is still a
+    red. Where the terminal said nothing -- a multiplexer, an emulator without
+    the reply -- the plain code goes out, which is what every row drew before
+    this existed. *)
+
+(** Test-only environment and projection fixtures. The R12 check in
+    [scripts/check-ssot.sh] is the repository production boundary: code under
+    [bin/] and [lib/] may not name this module outside its owner
+    implementation/interface. Production callers use the semantic tokens
+    below. *)
+module For_testing : sig
+  val colors_enabled
+    :  force_color:string option
+    -> no_color:string option
+    -> bool
+  (** Pure environment-policy fixture. Only [force_color = Some "1"]
+      overrides a non-empty [no_color]. *)
+
+  val user_message_background_rgb
+    :  Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb
+  (** Pure low-contrast blend derived from the terminal's default background.
+      Light backgrounds blend 4 percent toward black; dark backgrounds blend
+      12 percent toward white. *)
+
+  val user_message_background
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for the production semantic token. *)
+
+  val recede_rgb
+    :  foreground:Masc_tui_terminal_palette.rgb
+    -> background:Masc_tui_terminal_palette.rgb
+    -> Masc_tui_terminal_palette.rgb option
+  (** Pure blend: the terminal's text stepped toward its background, as far as
+      the contrast floor allows and no further. Direction comes from the two
+      colours, so it darkens on a light terminal and lightens on a dark one.
+      [None] where the text is already under the floor and has no room to
+      give. *)
+
+  val ansi_color_index : ansi_color -> int
+  (** Which of the sixteen palette entries a colour is -- the same decision
+      the SGR code makes, as an index, so a test can look up what the reader's
+      theme actually put there. *)
+
+  val ansi_color_code : ansi_color -> string
+  (** The plain SGR code, conditional on colours as everything else is. *)
+
+  val ansi_readable
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> ansi_color
+    -> string
+  (** Pure capability/environment fixture for {!val:ansi_readable}, so a test
+      can drive it without the process capability deciding the answer. *)
+
+  val recede
+    :  colors_enabled:bool
+    -> dim:string
+    -> gray:string
+    -> theme_mode:Masc_tui_terminal_palette.theme_mode option
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:recede}. [dim] is the
+      fallback the production token passes, so a test can tell the computed
+      colour from the fallback without naming an escape. *)
+end
 
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)

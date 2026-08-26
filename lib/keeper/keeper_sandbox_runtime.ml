@@ -500,7 +500,7 @@ let cleanup_stale_containers
     }
 ;;
 
-let docker_filter_args ?keeper_name ?container_kind ~base_path () =
+let docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path () =
   let label_filter key value = [ "--filter"; "label=" ^ key ^ "=" ^ value ] in
   label_filter sandbox_component_label_key sandbox_component_label_value
   @ label_filter sandbox_base_path_hash_label_key (base_path_hash base_path)
@@ -508,19 +508,27 @@ let docker_filter_args ?keeper_name ?container_kind ~base_path () =
      | Some name when String.trim name <> "" ->
        label_filter sandbox_keeper_label_key (sanitize_label_value name)
      | _ -> [])
+  @ (match container_kind with
+     | Some kind when String.trim kind <> "" ->
+       label_filter sandbox_kind_label_key (sanitize_label_value kind)
+     | _ -> [])
+  @ (match owner_pid with
+     | Some pid -> label_filter sandbox_owner_pid_label_key (string_of_int pid)
+     | None -> [])
   @
-  match container_kind with
-  | Some kind when String.trim kind <> "" ->
-    label_filter sandbox_kind_label_key (sanitize_label_value kind)
-  | _ -> []
+  match turn_id with
+  | Some id -> label_filter sandbox_turn_id_label_key (string_of_int id)
+  | None -> []
 ;;
 
-let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
+let list_container_ids
+      ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ~timeout_sec ()
+  =
   try
     let argv =
       docker_command_argv ()
       @ [ "ps"; "-aq"; "--no-trunc" ]
-      @ docker_filter_args ?keeper_name ?container_kind ~base_path ()
+      @ docker_filter_args ?keeper_name ?container_kind ?owner_pid ?turn_id ~base_path ()
     in
     let st, out =
       run_docker_argv_with_status
@@ -541,6 +549,72 @@ let list_container_ids ?keeper_name ?container_kind ~base_path ~timeout_sec () =
       (Printf.sprintf
          "keeper sandbox container listing failed: %s"
          (Printexc.to_string exn))
+;;
+
+(* Collect this keeper's turn containers left behind by earlier turns.
+
+   Teardown at turn end is the primary path (#30604). This is what closes the
+   window that opens when teardown does not run at all: nothing else removes a
+   turn container while its owning process is alive, because the sweep's
+   [should_remove_container] needs the container stopped, its owner dead, or a
+   ttl label the turn path does not set.
+
+   A turn's own containers carry its [masc.mcp.turn_id], so a sibling created
+   earlier in the same turn is never a target — the factory caches one runtime
+   per (playground, network, root, image), so one turn can hold several. Docker
+   label filters express equality only, which is why "mine except this turn's"
+   is two listings and a difference rather than one negated filter.
+
+   The owner_pid filter keeps this inside the current process. Another server's
+   containers are its own to collect, and removing one would cut a live turn
+   elsewhere. *)
+let reap_prior_turn_containers ~base_path ~keeper_name ~turn_id ~timeout_sec () =
+  let owner_pid = current_owner_pid () in
+  let listing ?turn_id () =
+    list_container_ids
+      ~keeper_name
+      ~container_kind:turn_container_kind
+      ~owner_pid
+      ?turn_id
+      ~base_path
+      ~timeout_sec
+      ()
+  in
+  (* The wide listing is taken first, and the [let] bindings are what make that
+     true: OCaml does not specify the evaluation order of a tuple, and the
+     native compiler generally evaluates right to left, so reading both inside
+     one [match] would have taken this turn's listing first.
+
+     Order decides whether a live sibling can be reaped. This function runs at
+     every container creation and a turn can hold several, so a container the
+     current turn creates between the two listings is a real case. Taken wide
+     first, such a container is absent from [every_turn_of_mine] and cannot be
+     a target; taken narrow first, it would appear only in the wide list and
+     would be killed while its turn was still using it. *)
+  let every_turn_of_mine = listing () in
+  let this_turn = listing ~turn_id () in
+  match every_turn_of_mine, this_turn with
+  | Error err, _ | Ok _, Error err ->
+    { scanned = 0; removed = 0; already_absent = 0; errors = [ err ] }
+  | Ok every_turn_of_mine, Ok this_turn ->
+    let targets =
+      List.filter (fun id -> not (List.mem id this_turn)) every_turn_of_mine
+    in
+    let removed, already_absent, errors =
+      List.fold_left
+        (fun (removed, already_absent, errors) container_id ->
+           match remove_cleanup_container ~container_id ~timeout_sec with
+           | Ok Cleanup_removed -> removed + 1, already_absent, errors
+           | Ok Cleanup_remove_already_absent -> removed, already_absent + 1, errors
+           | Error err -> removed, already_absent, err :: errors)
+        (0, 0, [])
+        targets
+    in
+    { scanned = List.length targets
+    ; removed
+    ; already_absent
+    ; errors = List.rev errors
+    }
 ;;
 
 let live_inspect_format =

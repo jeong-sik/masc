@@ -80,6 +80,20 @@ type tool_projection = private
   ; rows : string list
   ; hidden_activity_rows : int
   ; omitted_steps : int
+  ; summary_outcome : tool_outcome option
+        (** The outcome the folded summary row stands for, and [None] when
+            nothing was folded.
+
+            A chat body is sanitized before it is drawn -- a row cannot carry
+            an escape into the terminal -- so a marker inside the text cannot
+            be coloured, and the row's own style is the only channel a reading
+            of state has. Folding is what makes that channel matter: [Full]
+            gives every call a row and a glyph of its own, while a fold puts
+            six calls behind one line where "1 failed" sits mid-sentence in
+            the same colour as "5 returned".
+
+            Same precedence as the summary glyph, from the same function, so
+            the mark and the colour cannot disagree about one block. *)
   }
 
 val make_tool_activity :
@@ -107,11 +121,13 @@ type unreadable =
   ; last_detail : string
   }
 
-(** A tool call the keeper is holding, waiting to be answered. *)
+(** A tool call the keeper is holding, waiting to be answered. [because] is
+    why it was held; it is drawn under the question in the pane. *)
 type awaiting_approval =
   { call_id : string
   ; tool_name : string
   ; question : string
+  ; because : string
   }
 
 type t

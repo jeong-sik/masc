@@ -35,6 +35,11 @@
 
 ; Group 1: Pure synchronous tests
 
+(test
+ (name test_tui_keeper_config)
+ (modules test_tui_keeper_config)
+ (libraries alcotest masc_tui_keeper_config yojson str))
+
 (tests
  (names
   test_keeper_lifecycle_gate
@@ -123,6 +128,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -199,6 +205,7 @@
   test_lsp_process_manager
   test_keeper_tool_code_query
   test_lsp_questions
+  test_lsp_message_router
   test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge
@@ -466,6 +473,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -542,6 +550,7 @@
   test_lsp_process_manager
   test_keeper_tool_code_query
   test_lsp_questions
+  test_lsp_message_router
   test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge
@@ -869,6 +878,12 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_tool_call_log_requeue_on_failure)
+ (modules test_tool_call_log_requeue_on_failure)
+ (deps %{workspace_root}/lib/keeper_tool_call_log.ml)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
  (deps
@@ -1138,6 +1153,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -1281,6 +1297,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -2812,6 +2829,11 @@
  (libraries alcotest masc.masc_types masc_tui_code_lexer masc_tui_types))
 
 (test
+ (name test_tui_workspace_entries)
+ (modules test_tui_workspace_entries)
+ (libraries alcotest masc.server masc_tui_types))
+
+(test
  (name test_tui_acting)
  (modules test_tui_acting)
  (libraries alcotest masc_tui_acting masc_tui_observer))
@@ -2834,6 +2856,22 @@
   masc_tui_keeper_chat_projection
   masc.masc_random_id
   yojson))
+
+(test
+ (name test_tui_fit_middle)
+ (modules test_tui_fit_middle)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
+ (name test_tui_role_label_boundary)
+ (modules test_tui_role_label_boundary)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
 
 (test
  (name test_tui_message_layout)
@@ -3146,6 +3184,7 @@
 (include stanzas/test_tui_mode.inc)
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
+(include stanzas/test_tui_theme_contrast.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -3187,7 +3226,7 @@
 (test
  (name test_skill_source_config)
  (modules test_skill_source_config)
- (libraries alcotest masc.skill_config))
+ (libraries alcotest masc.skill_config masc.keeper_toml yojson))
 
 (test
  (name test_skill_source_runtime_integration)
@@ -3205,6 +3244,26 @@
   yojson))
 
 (test
+ (name test_skill_catalog_snapshot_service)
+ (modules test_skill_catalog_snapshot_service)
+ (libraries
+  alcotest
+  masc.skill_snapshot_service
+  masc.skill_snapshot
+  masc.skill_config
+  unix))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))
+
+(include stanzas/test_rest_approvals_because.inc)
+
+(include stanzas/test_keeper_ask.inc)
+
+(include stanzas/test_keeper_ask_store.inc)
+
+(include stanzas/test_masc_ask_tool_surface.inc)
+
+(include stanzas/test_tui_ask_projection.inc)

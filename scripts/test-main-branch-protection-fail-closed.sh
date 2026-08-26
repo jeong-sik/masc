@@ -22,8 +22,10 @@ cat >"$work/bin/gh" <<'MOCK'
 case "${MOCK_GH_MODE:-ok}" in
   401) echo "gh: Requires authentication (HTTP 401)" >&2; exit 1 ;;
   403) echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1 ;;
-  missing_context) echo "Some Other Check"; exit 0 ;;
-  ok) echo "CI Gate"; exit 0 ;;
+  missing_context) printf 'context=Some Other Check\nenforce_admins=true\n'; exit 0 ;;
+  admin_false) printf 'context=CI Gate\nenforce_admins=false\n'; exit 0 ;;
+  admin_unreadable) printf 'context=CI Gate\nenforce_admins=unreadable\n'; exit 0 ;;
+  ok) printf 'context=CI Gate\nenforce_admins=true\n'; exit 0 ;;
   *) echo "unknown MOCK_GH_MODE" >&2; exit 2 ;;
 esac
 MOCK
@@ -49,6 +51,17 @@ expect_exit() {
   echo "ok: ${label} (exit ${actual})"
 }
 
+expect_output() {
+  local label="$1" expected="$2"
+  if ! grep -Fq "$expected" "$work/out"; then
+    echo "FAIL: ${label}: missing output: ${expected}"
+    sed 's/^/    /' "$work/out"
+    failures=$((failures + 1))
+    return
+  fi
+  echo "ok: ${label}"
+}
+
 # An unreadable audit is not a passing audit.
 expect_exit "401 fails closed" 1 401
 expect_exit "403 fails closed" 1 403
@@ -64,9 +77,17 @@ expect_exit "retired bypass variable does not reopen 403" 1 403 \
 # is what lets an unchecked merge land.
 expect_exit "absent required context is drift" 1 missing_context
 
-# And a clean read still passes, so the cases above are not passing for the
-# trivial reason that everything fails.
-expect_exit "clean protection passes" 0 ok
+# The non-failing admin policy is still reported truthfully in both the GitHub
+# annotation and the final status. A missing field is an unreadable audit.
+expect_exit "admin enforcement enabled passes" 0 ok
+expect_output "enabled admin state reaches final status" "admin enforcement: enabled"
+
+expect_exit "disabled admin enforcement warns without failing" 0 admin_false
+expect_output "disabled admin state emits tracked GitHub warning" "::warning title=Admin merge bypass enabled::enforce_admins=false for owner/repo/main; admins can bypass required status checks. Tracked by #25861"
+expect_output "disabled admin state reaches final status" "admin enforcement: disabled; admin merge bypass active; tracked by #25861"
+
+expect_exit "unreadable admin enforcement fails closed" 1 admin_unreadable
+expect_output "unreadable admin state names the failed field" "Could not read enforce_admins.enabled"
 
 if ((failures > 0)); then
   echo "branch protection fail-closed fixture: ${failures} failure(s)"

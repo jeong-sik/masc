@@ -1,0 +1,290 @@
+(* Wire boundary for masc_ask: tool arguments in, a recorded question out.
+
+   The tool surface spells free text as a boolean plus a hint because that is
+   what a JSON schema can express. The domain spells it as one sum. Widening
+   happens here so no value downstream can carry a bool and a hint that
+   disagree. Every other rejection is the domain's: this module shapes
+   arguments and hands them to Keeper_ask, which decides whether they make a
+   question anyone could answer. *)
+
+open Mcp_tool_runtime_types
+
+let field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let string_field key json =
+  match field key json with
+  | Some (`String s) -> Ok s
+  | Some _ -> Error (key ^ " must be a string")
+  | None -> Error (key ^ " is required")
+
+let string_option_field key json =
+  match field key json with
+  | None | Some `Null -> None
+  | Some (`String s) -> Some s
+  | Some _ -> None
+
+let bool_field key json =
+  match field key json with Some (`Bool b) -> b | Some _ | None -> false
+
+let list_field key json =
+  match field key json with
+  | None | Some `Null -> Ok []
+  | Some (`List items) -> Ok items
+  | Some _ -> Error (key ^ " must be an array")
+
+let ( let* ) = Result.bind
+
+let rec map_results f = function
+  | [] -> Ok []
+  | x :: rest ->
+      let* y = f x in
+      let* ys = map_results f rest in
+      Ok (y :: ys)
+
+let choice_of_json json =
+  let* choice_id = string_field "choice_id" json in
+  let* label = string_field "label" json in
+  let description = string_option_field "description" json in
+  Result.map_error Keeper_ask.invalid_choice_to_string
+    (Keeper_ask.choice ~choice_id ~label ?description ())
+
+let mode_of_string = function
+  | "single" -> Ok Keeper_ask.Single
+  | "multi" -> Ok Keeper_ask.Multi
+  | other -> Error (Printf.sprintf "mode must be single or multi, got %s" other)
+
+let question_of_json json =
+  let* question_id = string_field "question_id" json in
+  let* header = string_field "header" json in
+  let* prompt = string_field "prompt" json in
+  let* mode_label = string_field "mode" json in
+  let* mode = mode_of_string mode_label in
+  let* choice_items = list_field "choices" json in
+  let* choices = map_results choice_of_json choice_items in
+  let free_text =
+    if bool_field "free_text" json then
+      Keeper_ask.Free_text_allowed { hint = string_option_field "free_text_hint" json }
+    else Keeper_ask.Choices_only
+  in
+  Result.map_error Keeper_ask.invalid_question_to_string
+    (Keeper_ask.question ~question_id ~header ~prompt ~choices ~mode ~free_text)
+
+let ask_json (a : Keeper_ask.ask) =
+  `Assoc
+    [
+      ("ask_id", `String a.ask_id);
+      ("keeper_name", `String a.keeper_name);
+      ("question_count", `Int (List.length a.questions));
+      ( "questions",
+        `List
+          (List.map
+             (fun (q : Keeper_ask.question) ->
+               `Assoc
+                 [
+                   ("question_id", `String q.question_id);
+                   ("header", `String q.header);
+                   ("choice_count", `Int (List.length q.choices));
+                 ])
+             a.questions) );
+    ]
+
+let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+  (* A Keeper reaches its own tools under the agent alias its runtime was
+     spawned with ([keeper-<name>-agent]); an operator and the tests use the
+     bare registry name. One codec owns both spellings, so the registry
+     lookup below sees the same name either way -- without it a live Keeper
+     is refused by a guard meant for unregistered callers. *)
+  let keeper_name =
+    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
+    | Some name -> name
+    | None -> ctx.agent_name
+  in
+  let reject detail =
+    (* A refused question is worth a line. The Keeper sees the rejection in
+       its own result; an operator wondering why nothing is waiting on them
+       has only the log. *)
+    Log.Keeper.info "keeper_ask: keeper=%s refused=%s" keeper_name detail;
+    Some
+      (Tool_result.error ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time
+         detail)
+  in
+  let base_path = ctx.config.base_path in
+  (* A question belongs to the Keeper that asked it, and every surface that
+     renders one resolves the Keeper first. A caller that is not a registered
+     Keeper could still write to the log, but nothing could ever read the row
+     back -- it would be a question with no owner, costing an operator's
+     attention for an answer that reaches nobody. Refuse at the write. *)
+  if not (Keeper_registry.is_registered ~base_path keeper_name) then
+    reject
+      (Printf.sprintf "%s is not a registered keeper, so a question from it could not be read back"
+         keeper_name)
+  else
+  match list_field "questions" ctx.arguments with
+  | Error detail -> reject detail
+  | Ok [] -> reject "at least one question is required"
+  | Ok question_items -> (
+      match map_results question_of_json question_items with
+      | Error detail -> reject detail
+      | Ok questions -> (
+          let context = string_option_field "context" ctx.arguments in
+          let task_id = string_option_field "task_id" ctx.arguments in
+          let goal_id = string_option_field "goal_id" ctx.arguments in
+          let continuation =
+            match Keeper_continuation_channel.keeper ~keeper_name with
+            | Ok channel -> channel
+            | Error detail ->
+                (* A keeper name the channel refuses is not a route we can
+                   invent one for; record why rather than pick a surface. *)
+                Keeper_continuation_channel.unrouted detail
+          in
+          let ask_id = Random_id.prefixed ~prefix:"ask" ~bytes:8 in
+          let asked_at = Time_compat.now () in
+          match
+            Keeper_ask.ask ~ask_id ~keeper_name ~questions ?context ?task_id ?goal_id
+              ~continuation ~asked_at ()
+          with
+          | Error e -> reject (Keeper_ask.invalid_ask_to_string e)
+          | Ok a -> (
+              match Keeper_ask_store.record_ask ~base_path a with
+              | Error detail ->
+                  Some
+                    (Tool_result.error ~failure_class:Tool_result.Runtime_failure ~tool_name
+                       ~start_time detail)
+              | Ok () ->
+                  (* The reply says how many of this Keeper's questions are now
+                     open. A Keeper that cannot see its own queue growing asks
+                     again instead of waiting, and a human reading a list of
+                     five answers the top one. *)
+                  let open_count =
+                    Keeper_ask_store.open_ask_count ~base_path ~keeper_name
+                  in
+                  (* Recording a question spends an operator's attention
+                     later, so the act is logged where it happens rather than
+                     inferred from the store's file changing. *)
+                  Log.Keeper.info
+                    "keeper_ask: keeper=%s ask_id=%s questions=%d open=%d" keeper_name
+                    a.ask_id (List.length a.questions) open_count;
+                  let body =
+                    match ask_json a with
+                    | `Assoc fields ->
+                        `Assoc (fields @ [ ("open_count", `Int open_count) ])
+                    | other -> other
+                  in
+                  Some
+                    (Tool_result.ok ~tool_name ~start_time
+                       (Yojson.Safe.to_string body)))))
+
+(* masc_ask_status: what the Keeper asked and what came back.
+
+   An answer does not interrupt the asking Keeper, so a question it never
+   reads is worse than one it never asked -- the operator spent attention on a
+   decision that went nowhere. This is the read side that closes that loop. *)
+
+let response_json = function
+  | Keeper_ask.Chose { choice_ids } ->
+      `Assoc
+        [
+          ("kind", `String "chose");
+          ("choice_ids", `List (List.map (fun id -> `String id) choice_ids));
+        ]
+  | Keeper_ask.Wrote text -> `Assoc [ ("kind", `String "wrote"); ("text", `String text) ]
+  | Keeper_ask.Skipped -> `Assoc [ ("kind", `String "skipped") ]
+
+let answer_json (answer : Keeper_ask.answer) =
+  `Assoc
+    [
+      ("question_id", `String answer.question_id);
+      ("response", response_json answer.response);
+    ]
+
+let responder_json (responder : Keeper_ask.responder) =
+  `Assoc
+    [
+      ("surface", Surface_ref.to_json responder.surface);
+      ( "actor_id",
+        match responder.actor_id with None -> `Null | Some id -> `String id );
+      ( "display_name",
+        match responder.display_name with None -> `Null | Some name -> `String name );
+    ]
+
+let resolution_json = function
+  | Keeper_ask.Open -> `Assoc [ ("state", `String "open") ]
+  | Keeper_ask.Answered_by { answers; responder; answered_at } ->
+      `Assoc
+        [
+          ("state", `String "answered");
+          ("answered_at", `Float answered_at);
+          ("responder", responder_json responder);
+          ("answers", `List (List.map answer_json answers));
+        ]
+  | Keeper_ask.Withdrawn_because { reason; withdrawn_at } ->
+      `Assoc
+        [
+          ("state", `String "withdrawn");
+          ("reason", `String reason);
+          ("withdrawn_at", `Float withdrawn_at);
+        ]
+
+let question_summary_json (q : Keeper_ask.question) =
+  `Assoc
+    [
+      ("question_id", `String q.question_id);
+      ("header", `String q.header);
+      ("prompt", `String q.prompt);
+      ( "choices",
+        `List
+          (List.map
+             (fun (c : Keeper_ask.choice) ->
+               `Assoc [ ("choice_id", `String c.choice_id); ("label", `String c.label) ])
+             q.choices) );
+    ]
+
+let row_json (ask_id, ((a : Keeper_ask.ask), resolution)) =
+  `Assoc
+    [
+      ("ask_id", `String ask_id);
+      ("asked_at", `Float a.asked_at);
+      ("context", match a.context with None -> `Null | Some c -> `String c);
+      ("questions", `List (List.map question_summary_json a.questions));
+      ("resolution", resolution_json resolution);
+    ]
+
+let is_open = function
+  | Keeper_ask.Open -> true
+  | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
+
+let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+  let base_path = ctx.config.base_path in
+  (* Same spelling problem as the write side: a Keeper reads its own questions
+     back under the agent alias its runtime spawned with, and the store is
+     keyed on the registry name. Reading through the alias would show an empty
+     list rather than an error, which is the worse failure of the two. *)
+  let keeper_name =
+    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
+    | Some name -> name
+    | None -> ctx.agent_name
+  in
+  let include_resolved = bool_field "include_resolved" ctx.arguments in
+  let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
+  let rows = Keeper_ask_store.rows ~base_path ~keeper_name in
+  let selected =
+    List.filter
+      (fun (ask_id, (_, resolution)) ->
+        let id_matches =
+          match wanted_ask_id with None -> true | Some wanted -> String.equal wanted ask_id
+        in
+        id_matches && (include_resolved || is_open resolution))
+      rows
+  in
+  Some
+    (Tool_result.ok ~tool_name ~start_time
+       (Yojson.Safe.to_string
+          (`Assoc
+            [
+              ("keeper_name", `String keeper_name);
+              ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
+              ("returned", `Int (List.length selected));
+              ("asks", `List (List.map row_json selected));
+            ])))

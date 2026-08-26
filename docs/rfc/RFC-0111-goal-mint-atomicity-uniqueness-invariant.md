@@ -142,7 +142,7 @@ P3 가 핵심 — concurrent mint 의 race window 가 진짜 닫힘. P5 는 cap 
 
 ## §6 Risk & rollback
 
-- **Risk 1**: P2 `Goal.t.source` 필드 추가가 disk format 변경. 옛 binary 가 새 format goal 읽기 가능해야 함. → P2 의 yojson decoder 가 missing `source` 필드 = default `Auto_system` 로 fallback (RFC-OAS-008 패턴).
+- **Risk 1**: P2 `Goal.t.source` 필드 추가가 disk format 변경. 옛 binary 가 새 format goal 읽기 가능해야 함. → P2 의 yojson decoder 가 missing `source` 필드 = default `Auto_system` 로 fallback (RFC-AC-008 패턴).
 - **Risk 2**: P3 의 Eio.Mutex 가 mint-rate hot path 에 lock contention. → mint 는 (현재 측정) 분당 < 10 calls — overhead 무시 가능. RFC-0107 의 per-path Eio.Mutex 패턴 차용.
 - **Risk 3**: Legacy goal 의 `(auto)` 접미사 가 janitor sweep 의미 carry. P4 에서 sweep 결정이 `source` 기반으로 바뀌면 옛 goal sweep 제외 가능. → P4 migration step: 옛 goal scan, title 에 `(auto)` 있고 `source = Auto_system "legacy"` 면 `source = Auto_keeper_repair { name = <derive> }` 로 in-place 갱신.
 

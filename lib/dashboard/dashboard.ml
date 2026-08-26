@@ -283,6 +283,68 @@ let format_elapsed_float now ts =
   else if Stdlib.Float.compare elapsed Masc_time_constants.hour < 0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
   else Printf.sprintf "%.1fh" (elapsed /. Masc_time_constants.hour)
 
+(** [tool_failure_total] is the single source of truth for the "tool errors"
+    count shown by both dashboard renderings. [generate] (Keepers section
+    title) and [generate_compact] (TOOL-ERR suffix) must aggregate the same
+    metric set, otherwise the two views disagree on the same store. *)
+let tool_failure_total () =
+  List.fold_left
+    (fun acc metric ->
+      acc
+      + (Otel_metric_store.metric_total Keeper_metrics.(to_string metric) |> int_of_float))
+    0
+    [
+      ToolSelectionFailures;
+      TaskLoadFailures;
+      ReconcileFailures;
+      DecisionAuditFlushFailures;
+      WorkspaceInitFailures;
+      PresenceSyncFailures;
+      CycleExceptions;
+      SnapshotWriteFailures;
+      SseBroadcastFailures;
+      WorkspaceHeartbeatFailures;
+      TurnMetricsSnapshotFailures;
+      Agent_coreExecutionErrors;
+      (* MemoryOsLibrarianFailures is intentionally excluded: librarian
+         failures are not tool errors and are surfaced separately in the
+         LIBRARIAN header segment (LIBRARIAN-FAILURES-SINCE-START). *)
+      MemoryActivityEmitFailures;
+      SupervisorSweepFailures;
+      TomlReconcileSweepFailures;
+      ToolUsageFlushFailures;
+      TurnTimeoutCommitted;
+      TurnErrorAfterTools;
+      TurnCleanupFailures;
+      CleanupTrackingFailures;
+      RuntimeSyncFailures;
+      LocalDiscoveryFailures;
+      ThinkingPersistFailures;
+      CheckpointFailures;
+      WriteMetaCycleFailures;
+      MetricsSseFailures;
+      DispatchEventFailures;
+      SessionCleanupFailures;
+      ChatStoreFailures;
+      ObservationQueryFailures;
+      ToolUseFailure;
+      ConfigEnvParseFailures;
+      ReceiptUnmappedDisposition;
+      PostTurnWireinFailures;
+      MetaReadFailures;
+      ApprovalQueueFailures;
+      ProfileLoadFailures;
+      FsFailures;
+      CrashPersistenceFailures;
+      KeepaliveSignalFailures;
+      MetaJsonFailures;
+      ToolsAgent_coreFailures;
+      TurnUpUpdateFailures;
+      ExecutionReceiptFailures;
+      ToolExecuteFailures;
+      RolloverFailures;
+    ]
+
 (** Keepers section: real-time FSM phase from Keeper_registry.
     Reads registry snapshot each render — no dashboard-side cache. *)
 let keepers_section now : section =
@@ -313,10 +375,7 @@ let keepers_section now : section =
   let write_meta_failures =
     Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
   in
-  let tool_failures =
-    (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
-    + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
-  in
+  let tool_failures = tool_failure_total () in
   let title =
     match guard_violations, write_meta_failures, tool_failures with
     | 0, 0, 0 -> "Keepers"
@@ -448,57 +507,7 @@ let generate_compact ?(scope = Dashboard_scope_all) (config : Workspace_utils.co
       let write_meta_failures =
         Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
       in
-      let tool_failures =
-        (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReconcileFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string DecisionAuditFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceHeartbeatFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnMetricsSnapshotFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string Agent_coreExecutionErrors) |> int_of_float)
-        (* MemoryOsLibrarianFailures is intentionally excluded: librarian
-           failures are not tool errors and are surfaced separately in the
-           LIBRARIAN header segment (LIBRARIAN-FAILURES-SINCE-START). *)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryActivityEmitFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUsageFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnTimeoutCommitted) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CleanupTrackingFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string RuntimeSyncFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string LocalDiscoveryFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ThinkingPersistFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CheckpointFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaCycleFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetricsSseFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string DispatchEventFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SessionCleanupFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ChatStoreFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ObservationQueryFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUseFailure) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ConfigEnvParseFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReceiptUnmappedDisposition) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string PostTurnWireinFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string CrashPersistenceFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string KeepaliveSignalFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaJsonFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsAgent_coreFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
-+ (Otel_metric_store.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
-+ (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)
-      + (Otel_metric_store.metric_total Keeper_metrics.(to_string RolloverFailures) |> int_of_float)
-      in
+      let tool_failures = tool_failure_total () in
       let tool_suffix =
         if tool_failures > 0
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures

@@ -1,6 +1,6 @@
-# OAS Performance SLO
+# agent_core Performance SLO
 
-Service Level Objectives for the OAS streaming-completion path.  RFC
+Service Level Objectives for the agent_core streaming-completion path.  RFC
 sources are cited at each row; calibration history is at the bottom.
 
 ## TTFT — Time To First Token
@@ -9,7 +9,7 @@ sources are cited at each row; calibration history is at the bottom.
 to the first parsed chunk that carries a non-empty user-visible
 delta (text / reasoning / tool-call argument).  Captured in-process
 in `Complete.publish_summary` and emitted as
-`Streaming_summary.ttft_ms : float option` (RFC-OAS-020 §3.2).
+`Streaming_summary.ttft_ms : float option` (RFC-AC-020 §3.2).
 
 Distinct from `Streaming_first_chunk.ttfrc_ms` which fires on the
 first chunk regardless of payload — TTFT skips role-only preludes
@@ -17,12 +17,12 @@ and finish-only finalizer chunks.
 
 | Provider | P50 target | P95 target | Source |
 |---|---|---|---|
-| Anthropic (cloud) | ≤ 400 ms | ≤ 1500 ms | RFC-OAS-020 §3.3 baseline (calibration pending — see below) |
-| Local llama-server (LAN) | ≤ 150 ms | ≤ 500 ms | RFC-OAS-020 §3.3 baseline (calibration pending) |
-| ZAI GLM (cloud) | ≤ 500 ms | ≤ 1500 ms | RFC-OAS-020 §3.3 baseline (calibration pending) |
+| Anthropic (cloud) | ≤ 400 ms | ≤ 1500 ms | RFC-AC-020 §3.3 baseline (calibration pending — see below) |
+| Local llama-server (LAN) | ≤ 150 ms | ≤ 500 ms | RFC-AC-020 §3.3 baseline (calibration pending) |
+| ZAI GLM (cloud) | ≤ 500 ms | ≤ 1500 ms | RFC-AC-020 §3.3 baseline (calibration pending) |
 
 Targets are **uncalibrated baseline values** at PR-1b.  The
-calibration run described in RFC-OAS-020 §3.5 has not been executed
+calibration run described in RFC-AC-020 §3.5 has not been executed
 because real provider keys / a live local llama-server are not
 available to the agent that authored this file.  When operator runs
 `scripts/bench/ttft_distribution.sh` for the first time, this table
@@ -69,12 +69,12 @@ SLOs: `ttft_to_client_ms ≈ ttft_ms + transport_overhead_ms` where
 `transport_overhead_ms` is the masc-mcp-side time from first SSE
 chunk arrival to flush-to-client (typically < 5 ms).  That
 composition lives in masc-mcp `docs/PERFORMANCE-SLO.md` (TBD) and
-is intentionally *not* coupled to this oas-side document.
+is intentionally *not* coupled to this agent_core-side document.
 
 ## References
 
-- RFC-OAS-020 — TTFT instrumentation in `Streaming_summary` (Active)
-- RFC-OAS-019 — Stream-lifetime telemetry aggregation (Active)
+- RFC-AC-020 — TTFT instrumentation in `Streaming_summary` (Active)
+- RFC-AC-019 — Stream-lifetime telemetry aggregation (Active)
 - `lib/llm_provider/complete.ml` — capture site (`first_token_at_ref`,
   `first_event_at_ref`)
 - `lib/llm_provider/streaming.ml` — typed predicates

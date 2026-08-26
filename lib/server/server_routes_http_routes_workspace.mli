@@ -134,6 +134,11 @@ val resolve_workspace_path : string -> string -> path_resolution
     unit testing. *)
 val tree_node_limit_of_query : string option -> int
 
+(** The largest [limit] the tree and children routes honour; a larger request
+    is clamped to it. The TUI asks for exactly this many and treats a full
+    page as "more not listed". *)
+val max_tree_node_limit : int
+
 (** [scan_dir ~base ~depth ~max_depth ~max_nodes acc dir] returns at most
     [max_nodes] tree nodes. The cap prevents a dashboard file-tree request
     against a large workspace root from monopolizing the server event loop.

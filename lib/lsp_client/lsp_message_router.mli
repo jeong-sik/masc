@@ -36,3 +36,9 @@ val start_response_reader :
   on_exit:(reason:string -> unit) option ->
   on_notification:(client_id:int -> method_:string -> Yojson.Safe.t -> unit) ->
   unit
+
+(** [parse_response json] reads one JSON-RPC response into its request id and
+    [Ok result] or [Error message]; an error's [data.exn] rides in the message
+    after the server's own text. [None] when the object has no integer id.
+    Exposed for unit testing; the router calls it on every server line. *)
+val parse_response : Yojson.Safe.t -> (int * (Yojson.Safe.t, string) result) option

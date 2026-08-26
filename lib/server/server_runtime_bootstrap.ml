@@ -531,7 +531,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Log.Runtime.info
         ~category:Log.Boundary
         "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
-  (* RFC-OAS-037: same boot observability for the first-event (TTFT/prefill)
+  (* RFC-AC-037: same boot observability for the first-event (TTFT/prefill)
      budget — configured-vs-effective must stay distinguishable at runtime,
      the exact ambiguity #25128 hit for the idle knob. *)
   Keeper_runtime_resolved.(

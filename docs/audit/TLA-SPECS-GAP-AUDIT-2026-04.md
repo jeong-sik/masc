@@ -13,7 +13,7 @@ The repo has **84 manual `.tla` specs** across 17 domains (per `specs/INDEX.md`,
 
 > **양쪽 cfg 모두 통과해야 spec이 유효하다**: clean이 pass하는데 buggy도 pass하면 invariant가 너무 약한 것. clean이 fail하면 모델이 잘못된 것.
 
-This audit measures *how widely the rule is applied* and surfaces three classes of gap. As with the OAS audit chain (Phase 1→3), this is a **survey, not a design proposal** — fixes need domain expertise per spec and are deferred.
+This audit measures *how widely the rule is applied* and surfaces three classes of gap. As with the agent_core audit chain (Phase 1→3), this is a **survey, not a design proposal** — fixes need domain expertise per spec and are deferred.
 
 ## 2. Method
 
@@ -144,7 +144,7 @@ Each Bug Model needs a domain-specific `BugAction` describing a real production 
 
 Writing a buggy cfg without that domain knowledge produces *fake* Bug Models — an `assert false` in the BugAction would trip any invariant. The audit's role is to *flag the gap*, not to fabricate models.
 
-This mirrors the OAS audit chain's discipline: Phase 2 refined Phase 1's verdict via taxonomy (C1–C4), it didn't refactor Layer C blindly.
+This mirrors the agent_core audit chain's discipline: Phase 2 refined Phase 1's verdict via taxonomy (C1–C4), it didn't refactor Layer C blindly.
 
 ## 6. Recommended ratchet (descriptive, not enforced)
 
@@ -160,7 +160,7 @@ candidate_tautology_specs: count of specs where INDEX.md shows clean={X} buggy={
 # Floor: 21 (current). Inform per-spec triage.
 ```
 
-The ratchet wouldn't gate CI immediately — both metrics need a sweep PR (or several) before the floor becomes a meaningful enforcement target. The OAS chain spent four phases moving from "needs sweep" to "ratchet enforced" exactly for this reason.
+The ratchet wouldn't gate CI immediately — both metrics need a sweep PR (or several) before the floor becomes a meaningful enforcement target. The agent_core chain spent four phases moving from "needs sweep" to "ratchet enforced" exactly for this reason.
 
 ## 7. Suggested next steps (out of scope here)
 

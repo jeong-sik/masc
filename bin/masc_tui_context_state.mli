@@ -1,11 +1,15 @@
 module Decode = Masc.Tui_decode
 
-type t = {
+type reading = {
   observation : Decode.context_observation option;
   error : string option;
 }
 
+type t
+
 val empty : t
+
+val reading_for_keeper : keeper_name:string -> t -> reading option
 
 val resolve_with :
   project:

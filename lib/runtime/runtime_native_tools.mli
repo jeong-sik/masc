@@ -39,6 +39,13 @@ val antigravity_default : posture
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)
 
+val degrade_on_admission : posture:posture -> none_supported:bool -> unit -> posture
+(** The safest posture the client can run when admission cannot honor the
+    declared one: [full] degrades to [read] (effects stay behind the MASC
+    approval gate), [none] on a client without a disable switch degrades
+    to [read]. Used with a typed event, never silently — see
+    RFC-0390 admission review. *)
+
 val claude_code_tools_arg : posture -> string
 (** Value for the [--tools] flag: [""] disables the built-in set,
     ["default"] enables all of it, otherwise a comma-separated allowlist. *)

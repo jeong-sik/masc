@@ -5150,12 +5150,13 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match Masc_tui_command.parse text with
        | Masc_tui_command.Say _ ->
            set_msg_scroll state 0;
-           if state.view <> Keepers Keeper_message then
+           if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
              | Some keeper_name ->
                  reset_message_file_changes state keeper_name;
                  launch_keeper_history_load state ~mailbox ~keeper_name
-             | None -> ();
+             | None -> ()
+           end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)

@@ -127,7 +127,6 @@ let skill_to_json (skill : Skill_document.t) =
   `Assoc
     [ "name", `String skill.name
     ; "description", `String skill.description
-    ; "allowed_tools", Util.json_of_string_opt skill.allowed_tools
     ]
 ;;
 

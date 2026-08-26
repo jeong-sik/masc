@@ -8,6 +8,10 @@ open Alcotest
 module A = Keeper_stream_tool_accum
 module S = Agent_core.Llm_provider.Complete_stream_acc
 
+let start_runtime_attempt t =
+  ignore (A.start_runtime_attempt t : A.runtime_attempt_transition)
+;;
+
 let record_execution_id ?(turn = 0) ?(planned_index = 0) t ~tool_call_id
     ~execution_id =
   A.record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id
@@ -444,12 +448,12 @@ let test_blank_message_id_replays_unsealed_scope () =
 
 let test_blank_message_id_does_not_cross_runtime_attempts () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (message_start "");
   A.on_event t
     (start ~index:0 ~tool_id:(Some "blank-attempt") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"stale");
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (message_start "");
   A.on_event t
     (start ~index:0 ~tool_id:(Some "blank-attempt") ~tool_name:(Some "Read"));
@@ -474,12 +478,12 @@ let test_blank_message_id_does_not_cross_runtime_attempts () =
 
 let test_runtime_attempt_restarts_agent_core_turn_coordinates () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "attempt-first") ~tool_name:(Some "Read"));
   A.on_event t (stop ~index:0);
   seal_turn ~turn:0 t [ 0 ];
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "attempt-second") ~tool_name:(Some "Write"));
   A.on_event t (stop ~index:0);
@@ -737,13 +741,13 @@ let test_failure_preserves_sealed_scope () =
 
 let test_failure_snapshot_keeps_only_prior_sealed_scopes () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "prior-call") ~tool_name:(Some "Read"));
   A.on_event t (json_snapshot ~index:0 {|{"path":"prior.ml"}|});
   A.on_event t (stop ~index:0);
   seal_turn t [ 0 ];
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "failed-call") ~tool_name:(Some "Write"));
   A.on_event t (json_snapshot ~index:0 {|{"path":"failed.ml"}|});
@@ -756,18 +760,41 @@ let test_failure_snapshot_keeps_only_prior_sealed_scopes () =
 
 let test_fallback_quarantines_prior_unsealed_finalized_scope () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "abandoned-call") ~tool_name:(Some "Read"));
   A.on_event t (json_snapshot ~index:0 {|{"path":"abandoned.ml"}|});
   A.on_event t (stop ~index:0);
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t
     (start ~index:0 ~tool_id:(Some "fallback-call") ~tool_name:(Some "Write"));
   A.on_event t (json_snapshot ~index:0 {|{"path":"fallback.ml"}|});
   A.on_event t (stop ~index:0);
   check (list tool_call) "neither unsealed candidate survives final failure" []
     (A.to_tool_calls_for_failure t)
+;;
+
+let test_runtime_attempt_transition_uses_seal_authority () =
+  let sealed = A.create () in
+  let first = A.start_runtime_attempt sealed in
+  check bool "first attempt has no prior scope to abandon" false
+    first.abandon_previous_scope;
+  A.on_event sealed
+    (start ~index:0 ~tool_id:(Some "sealed-call") ~tool_name:(Some "Read"));
+  A.on_event sealed (json_snapshot ~index:0 {|{"path":"sealed.ml"}|});
+  A.on_event sealed (stop ~index:0);
+  seal_turn sealed [ 0 ];
+  let fallback = A.start_runtime_attempt sealed in
+  check bool "sealed prior scope is preserved" false
+    fallback.abandon_previous_scope;
+  let unsealed = A.create () in
+  start_runtime_attempt unsealed;
+  A.on_event unsealed
+    (start ~index:0 ~tool_id:(Some "unsealed-call") ~tool_name:(Some "Read"));
+  A.on_event unsealed (stop ~index:0);
+  let fallback = A.start_runtime_attempt unsealed in
+  check bool "unsealed finalized prior scope is abandoned" true
+    fallback.abandon_previous_scope
 ;;
 
 let test_failure_preserves_official_closed_scope () =
@@ -864,7 +891,7 @@ let test_replay_identity_is_compared_before_trimming () =
 
 let test_conflicting_start_cannot_reopen_until_stop () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (start ~index:0 ~tool_id:(Some "call-a") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}" );
   (* A conflicting identity invalidates this provider block. A later start at
@@ -881,7 +908,7 @@ let test_conflicting_start_cannot_reopen_until_stop () =
   A.on_event t (stop ~index:0);
   check (list tool_call) "later block after stop remains dropped" []
     (A.to_tool_calls t);
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (start ~index:0 ~tool_id:(Some "call-e") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"e.ml\"}");
   A.on_event t (stop ~index:0);
@@ -946,7 +973,7 @@ let test_malformed_tool_use_start_invalidates_active_tool () =
    later valid start; the collector must not open a fresh block either. *)
 let test_valid_start_after_malformed_tool_use_on_same_index_is_dropped () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (start ~index:0 ~tool_id:None ~tool_name:None);
   A.on_event t (start ~index:0 ~tool_id:(Some "call-e") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"e.ml\"}");
@@ -959,7 +986,7 @@ let test_valid_start_after_malformed_tool_use_on_same_index_is_dropped () =
   A.on_event t (stop ~index:0);
   check (list tool_call) "index remains closed after malformed block's stop" []
     (A.to_tool_calls t);
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (start ~index:0 ~tool_id:(Some "call-g") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"g.ml\"}");
   A.on_event t (stop ~index:0);
@@ -988,7 +1015,7 @@ let test_invalid_tool_starts_are_ignored () =
    cannot create a reload-only tool row. *)
 let test_tool_start_on_media_occupied_index_is_dropped () =
   let t = A.create () in
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (media_delta ~index:0 "iVBORw0KGgo=");
   A.on_event t (start ~index:0 ~tool_id:(Some "call-m") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"a.ml\"}");
@@ -1000,7 +1027,7 @@ let test_tool_start_on_media_occupied_index_is_dropped () =
   A.on_event t (stop ~index:0);
   check (list tool_call) "index remains closed after media stop" []
     (A.to_tool_calls t);
-  A.start_runtime_attempt t;
+  start_runtime_attempt t;
   A.on_event t (start ~index:0 ~tool_id:(Some "call-o") ~tool_name:(Some "Read"));
   A.on_event t (json_delta ~index:0 "{\"path\":\"c.ml\"}");
   A.on_event t (stop ~index:0);
@@ -1189,6 +1216,8 @@ let () =
             test_failure_snapshot_keeps_only_prior_sealed_scopes
         ; test_case "fallback quarantines prior unsealed finalized scope" `Quick
             test_fallback_quarantines_prior_unsealed_finalized_scope
+        ; test_case "runtime attempt transition uses seal authority" `Quick
+            test_runtime_attempt_transition_uses_seal_authority
         ; test_case "failure preserves official closed scope" `Quick
             test_failure_preserves_official_closed_scope
         ] )

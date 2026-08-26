@@ -17,6 +17,8 @@
 
 type t
 
+type runtime_attempt_transition = { abandon_previous_scope : bool }
+
 val create : unit -> t
 
 val current_stream_scope : t -> int
@@ -29,14 +31,16 @@ val current_scope_is_sealed : t -> bool
     without exact tool sources. Outer failures must not revoke that sealed
     evidence. *)
 
-val start_runtime_attempt : t -> unit
+val start_runtime_attempt : t -> runtime_attempt_transition
 (** Mark the exact resolved-candidate attempt boundary before its first stream
     event. The first attempt retains the initial scope; every later attempt
     advances to a fresh scope and quarantines every unsealed row from the
     failed attempt, including syntactically finalized tool blocks. Already
-    sealed source evidence remains append-only. This is what lets blank
-    provider message ids replay within one attempt without aliasing a lane
-    fallback or outer retry. *)
+    sealed source evidence remains append-only. The returned transition carries
+    that same pre-advance disposition so the live bridge cannot independently
+    disagree about whether to tombstone the prior scope. This is what lets
+    blank provider message ids replay within one attempt without aliasing a
+    lane fallback or outer retry. *)
 
 val on_event : t -> Agent_core.Types.sse_event -> unit
 (** Feed one raw AGENT_CORE stream event. A tool-bearing [ContentBlockStart] opens a

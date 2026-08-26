@@ -46,6 +46,8 @@ type stream_phase =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
+type runtime_attempt_transition = { abandon_previous_scope : bool }
+
 type t = {
   mutable blocks : (int * open_block) list;
   (* A conflicting start makes the whole provider block untrustworthy.  Keep
@@ -154,8 +156,11 @@ let fail_current_scope t =
 ;;
 
 let start_runtime_attempt t =
-  if t.runtime_attempt_seen
-  then (
+  let abandon_previous_scope =
+    t.runtime_attempt_seen && not (current_scope_is_sealed t)
+  in
+  (if t.runtime_attempt_seen
+   then (
     (* A candidate may have closed a syntactically complete ToolUse block and
        then failed before Agent Core sealed its source map. Quarantine that
        uncommitted scope before advancing; otherwise a later fallback failure
@@ -168,7 +173,8 @@ let start_runtime_attempt t =
        append-only across that boundary. *)
     t.turns <- [];
     t.unmapped_turns <- [])
-  else t.runtime_attempt_seen <- true
+   else t.runtime_attempt_seen <- true);
+  { abandon_previous_scope }
 ;;
 
 let record_protocol_error t kind occurrence detail =

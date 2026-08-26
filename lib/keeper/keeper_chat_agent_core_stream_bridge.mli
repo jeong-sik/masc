@@ -21,10 +21,15 @@ type translated_event = {
 
 val empty_state : unit -> state
 
-val start_runtime_attempt : state -> translated_event
-(** Terminalize each still-open tool occurrence as superseded, then reset the
-    unfinished live projection state at an exact resolved-runtime attempt
-    boundary. Finalized delivery evidence and stream-wide limits remain intact. *)
+val start_runtime_attempt
+  :  abandon_current_scope:bool
+  -> state
+  -> translated_event
+(** Reset unfinished text/thinking state at an exact resolved-runtime attempt
+    boundary. When [abandon_current_scope] is true, terminalize every tool
+    occurrence in that unsealed scope as superseded. The durable tool
+    accumulator computes this disposition before advancing, so a sealed or
+    result-ready occurrence remains intact on both live and persisted surfaces. *)
 
 val fail_stream : state -> reason:string -> translated_event
 (** Quarantine every tool occurrence in the current provider scope when the

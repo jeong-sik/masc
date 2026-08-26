@@ -1290,7 +1290,7 @@ let test_keeper_stream_bridge_terminalizes_superseded_attempt_tool () =
        in
        let superseded =
          Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
-           first.bridge_state
+           ~abandon_current_scope:true first.bridge_state
        in
        (match superseded.chat_events with
         | [ Keeper_chat_events.Agent_core_stream_protocol_error error
@@ -1322,6 +1322,37 @@ let test_keeper_stream_bridge_terminalizes_superseded_attempt_tool () =
                 occurrence.stream_scope = 1
               | _ -> false)
             fallback.chat_events))
+
+let test_keeper_stream_bridge_preserves_authoritative_attempt_tool () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-sealed-attempt-boundary" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0 state event
+       in
+       let started =
+         translate (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-sealed-attempt"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate started.bridge_state (ContentBlockStop { index = 0 })
+       in
+       let preserved =
+         Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+           ~abandon_current_scope:false finalized.bridge_state
+       in
+       match preserved.chat_events with
+       | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+       | _ -> fail "authoritative prior tool was quarantined at fallback boundary")
 
 let test_keeper_stream_bridge_quarantines_transport_failed_scope () =
   let open Agent_core.Types in
@@ -3254,6 +3285,8 @@ let () =
             test_keeper_stream_bridge_quarantines_args_after_stop;
           test_case "stream bridge terminalizes superseded attempt tool" `Quick
             test_keeper_stream_bridge_terminalizes_superseded_attempt_tool;
+          test_case "stream bridge preserves authoritative attempt tool" `Quick
+            test_keeper_stream_bridge_preserves_authoritative_attempt_tool;
           test_case "stream bridge quarantines transport-failed scope" `Quick
             test_keeper_stream_bridge_quarantines_transport_failed_scope;
           test_case "stream bridge terminalizes conflicting message tool" `Quick

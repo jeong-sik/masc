@@ -1758,8 +1758,17 @@ let render_approvals (state : state) =
     match state.ask_answer_mode with
     | Ask_browsing ->
         "j/k:move  y/n:decide  a:answer a question  r:refresh  Tab:next"
-    | Ask_answering _ ->
-        "j/k:question  [/]:ask  1-9:pick  s:skip  c:clear  Enter:answer  Esc:back"
+    | Ask_answering { aam_ask_id } ->
+        (* Say when the next Enter sends. The approval queue two panes up
+           already draws its armed state; this one announced itself only as an
+           event, on a surface that draws no events, so the first Enter looked
+           like a key that had not landed. *)
+        (match state.pending_ask_submit with
+         | Some armed when String.equal armed aam_ask_id ->
+             "Press Enter again to send  |  s:skip  c:clear  Esc:back"
+         | Some _ | None ->
+             "j/k:question  [/]:ask  1-9:pick  s:skip  c:clear  Enter:answer  \
+              Esc:back")
   in
   Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 

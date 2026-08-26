@@ -1142,6 +1142,21 @@ jobs:
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
 
+      - name: Reclaim completed test artifacts
+        # The cold @check graph leaves every native test executable under
+        # _build/default/test. The OCaml suite and transport harness are done
+        # by this point; the remaining contract and release smokes boot only
+        # _build/default/bin/main_eio.exe. On the 72 GB private runner this
+        # subtree is the difference between 2 GB free and enough I/O headroom
+        # for the dashboard contract to finish instead of timing out.
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        run: |
+          echo "Completed test artifacts before reclaim:"
+          du -sh _build/default/test _build/.sandbox 2>/dev/null || true
+          rm -rf _build/default/test _build/.sandbox
+          echo "Disk after completed test artifact reclaim:"
+          df -h /
+
       - name: Run contract harness suite
         id: contract_harness_suite
         if: ${{ always() && steps.build_step.outcome == 'success' }}

@@ -7,11 +7,15 @@ let instruction_tool_name = "keeper_skill"
 
 (* [keeper_skill] serves the body when it is called with a name alone and one
    of the skill's own files when [file] rides along, so the argument is what
-   tells the two uses apart -- the tool name cannot. *)
-let skill_row_named skill_name ~with_file row =
-  String.equal
-    (Option.value ~default:"" (Safe_ops.json_string_opt "tool" row))
-    instruction_tool_name
+   tells the two uses apart -- the tool name cannot.
+
+   [tool] is passed in rather than read again here. Its only caller has
+   already decided what an absent tool means (the row does not match), and
+   reading it a second time needed a default for that case -- which put a row
+   with no tool through the same comparison as a row with one, and got the
+   right answer only because no tool is named "". *)
+let skill_row_named skill_name ~with_file ~tool row =
+  String.equal tool instruction_tool_name
   &&
   match Safe_ops.json_member_opt "input" row with
   | None -> false
@@ -29,8 +33,10 @@ let row_matches use row =
   | Some tool ->
     (match use with
      | Composition_tool tool_name -> String.equal tool tool_name
-     | Instruction_read skill_name -> skill_row_named skill_name ~with_file:false row
-     | Reference_read skill_name -> skill_row_named skill_name ~with_file:true row)
+     | Instruction_read skill_name ->
+       skill_row_named skill_name ~with_file:false ~tool row
+     | Reference_read skill_name ->
+       skill_row_named skill_name ~with_file:true ~tool row)
 ;;
 
 let count ~rows use =

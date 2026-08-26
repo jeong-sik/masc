@@ -81,6 +81,7 @@ let test_projection_names_equal_turn_surface_authority () =
     let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
+        ~identity_tool_names:[]
         ~skill_catalog:(skill_catalog ())
         ~model_visible_descriptors:descriptors
     in

@@ -50,6 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
+      ?(identity_tools : Agent_core.Tool.t list = [])
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -409,7 +410,7 @@ let make_tool_bundle_for_descriptors
         ~on_externalization_error:mark_completed_terminal_externalization_failed
         ()
   in
-  { tools = descriptor_tools @ composition_tools
+  { tools = descriptor_tools @ composition_tools @ identity_tools
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
@@ -429,6 +430,7 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?skill_catalog
+      ?identity_tools
       ?turn_ctx_cell
       ()
   =
@@ -449,6 +451,7 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?skill_catalog
+    ?identity_tools
     ?turn_ctx_cell
     ~descriptors
     ()

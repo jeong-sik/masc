@@ -984,9 +984,11 @@ let post_keeper_ask_answer ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/keepers/ask-answer"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board (post list). *)
-let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/board"
+(** Fetch /api/v1/board (post list) in the operator-selected server order. *)
+let fetch_board ~(host : string) ~(port : int)
+    ~(sort_by : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/board?sort_by=" ^ sort_by)
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server
@@ -1221,6 +1223,24 @@ let fetch_keeper_github_identity ~(host : string) ~(port : int)
     ~path:
       (Printf.sprintf "/api/v1/keepers/%s/github-identity"
          (percent_encode_path_segment keeper_name))
+
+(** GET /api/v1/keepers/oauth/providers — what a Keeper can be attached to. *)
+let fetch_oauth_providers ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/keepers/oauth/providers"
+
+(** POST /api/v1/keepers/:name/oauth-login — begin attaching this Keeper to
+    [provider_id]. Answers with the URL the operator has to open; nothing is
+    written to the Keeper until the browser comes back. *)
+let post_keeper_oauth_login ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(provider_id : string) :
+    (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/oauth-login"
+         (percent_encode_path_segment keeper_name))
+    ~body:
+      (Yojson.Safe.to_string (`Assoc [ "provider", `String provider_id ]))
 
 (** GET /api/v1/runtime/config/raw — runtime.toml's path and text as the
     server reads them. *)

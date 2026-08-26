@@ -86,6 +86,84 @@ let handle_keeper_github_login_post state req reqd =
               | Error _ -> ()))
 ;;
 
+let declared_provider_id json =
+  match Json_util.assoc_member_opt "provider" json with
+  | Some (`String value) when String.trim value <> "" -> Ok (String.trim value)
+  | Some _ -> Error "provider must be a non-empty string"
+  | None -> Error "provider required"
+;;
+
+(* Attaching one Keeper to one declared work service. Answers with the URL
+   the operator has to open; the provider sends the browser to
+   [Server_keeper_oauth_http]'s callback, which is where credentials are
+   actually written. Nothing is written to the Keeper by this request. *)
+let handle_keeper_oauth_login_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_oauth_login in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      (match Yojson.Safe.from_string body_str with
+       | exception Yojson.Json_error detail -> respond_error reqd detail
+       | args ->
+         (match declared_provider_id args with
+          | Error message -> respond_error reqd message
+          | Ok provider_id ->
+            (match
+               Server_keeper_oauth.start
+                 ~base_path:config.Workspace.base_path
+                 ~keeper:name
+                 ~provider_id
+                 ~now:(Unix.gettimeofday ())
+             with
+             | Error message -> respond_error reqd message
+             | Ok payload ->
+               Http.Response.json_value ~compress:true ~request:req payload reqd)))
+;;
+
+(* Ask an attached service again what tools it has. The same work the
+   callback does when a Keeper attaches, reachable on its own so a catalog
+   that went stale does not need a whole new consent. *)
+let handle_keeper_identity_refresh_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name =
+    extract_keeper_name_for_suffix req_path keeper_suffix_identity_refresh
+  in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      (match Yojson.Safe.from_string body_str with
+       | exception Yojson.Json_error detail -> respond_error reqd detail
+       | args ->
+         (match declared_provider_id args with
+          | Error message -> respond_error reqd message
+          | Ok provider_id ->
+            (match
+               Server_keeper_oauth.refresh_tools
+                 ~base_path:config.Workspace.base_path
+                 ~keeper:name
+                 ~provider_id
+                 ~now:(Unix.gettimeofday ())
+             with
+             | Error message -> respond_error reqd message
+             | Ok payload ->
+               Http.Response.json_value ~compress:true ~request:req payload reqd)))
+;;
+
 let parse_fusion_result text =
   try Yojson.Safe.from_string text with
   | Yojson.Json_error _ -> `Assoc [ "ok", `Bool false; "error", `String text ]

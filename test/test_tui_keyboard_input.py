@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+import base64
 import errno
 import fcntl
 import hashlib
@@ -381,6 +382,17 @@ def send_and_wait(
     )
     frame_end = output.find(FRAME_END, needle_end) + len(FRAME_END)
     return bytes(output[start:frame_end])
+
+
+def copy_reference(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    reference: bytes,
+) -> bytes:
+    """Press the shared copy key and require the exact OSC 52 payload."""
+    osc52 = b"\x1b]52;c;" + base64.b64encode(reference) + b"\x07"
+    return send_and_wait(process, master_fd, output, b"Y", osc52)
 
 
 # How many screens the Tab cycle holds is a property of the code under test,
@@ -869,7 +881,7 @@ def row_budget_http_fixtures() -> HttpFixtures:
                 "agent_briefs": [],
             },
         ),
-        "/api/v1/board": (200, {"posts": [post]}),
+        "/api/v1/board?sort_by=hot": (200, {"posts": [post]}),
         "/api/v1/board/post-1?format=flat": (
             200,
             {"post": post, "comments": comments},
@@ -971,7 +983,7 @@ def overview_event_http_fixtures() -> HttpFixtures:
                 }
             },
         ),
-        "/api/v1/board": (200, {"posts": []}),
+        "/api/v1/board?sort_by=hot": (200, {"posts": []}),
         "/api/v1/dashboard/planning": (
             200,
             {
@@ -1203,7 +1215,7 @@ def board_selection_http_fixtures() -> HttpFixtures:
     bravo_detail = board_selection_post("b", "Bravo", bravo_body)
     charlie_detail = board_selection_post("c", "Charlie", "detail-body-charlie")
     fixtures = overview_event_http_fixtures()
-    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-b?format=flat"] = (
         200,
         {"post": bravo_detail, "comments": []},
@@ -1230,7 +1242,7 @@ def board_detail_authority_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
         board_selection_post("b", "Bravo", "list-body-b"),
     ]
     fixtures = overview_event_http_fixtures()
-    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
         {
@@ -1261,7 +1273,7 @@ def board_detail_isolation_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespo
         board_selection_post("b", "Bravo", "list-body-b"),
     ]
     fixtures = overview_event_http_fixtures()
-    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
         {
@@ -1280,7 +1292,7 @@ def board_missing_target_http_fixtures() -> tuple[HttpFixtures, GatedHttpRespons
         board_selection_post("b", "Bravo", "list-body-b"),
     ]
     fixtures = overview_event_http_fixtures()
-    fixtures["/api/v1/board"] = (200, {"posts": posts})
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
     fixtures["/api/v1/board/post-a?format=flat"] = (
         200,
         {
@@ -2846,10 +2858,16 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
         assert_planning_goal_selected(refreshed, b"plan-beta-29424")
 
         detail = send_and_wait(process, master_fd, output, b"\x1b[C", b"goal-b-29424")
-        if b"plan-beta-29424" not in detail or b"left/Esc:back" not in detail:
+        goal_reference = b"masc://planning/goal-b-29424"
+        if (
+            b"plan-beta-29424" not in detail
+            or b"left/Esc:back" not in detail
+            or goal_reference not in detail
+        ):
             raise AssertionError(
                 f"Planning refresh opened a different goal detail: {detail!r}"
             )
+        copy_reference(process, master_fd, output, goal_reference)
         listing = send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Planning")
         assert_planning_goal_selected(listing, b"plan-beta-29424")
         os.write(master_fd, b"q")
@@ -2964,9 +2982,20 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
         selected_a = selected_row(b"post-a")
         selected_new = selected_row(b"post-new")
         send_and_wait(process, master_fd, output, b"j", selected_b)
-        send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+        detail = send_and_wait(process, master_fd, output, b"\r", b"detail-body-bravo")
+        reference = b"masc://board/post-b"
+        if reference not in detail:
+            raise AssertionError(f"Board detail omitted its stable link: {detail!r}")
+        copy_reference(process, master_fd, output, reference)
+        wide = send_and_wait(process, master_fd, output, b"z", b"z:wide")
+        wide_frame = frame_containing(wide, reference)
+        if b"Board (3)" in wide_frame:
+            raise AssertionError(
+                f"Board wide detail kept the list pane visible: {wide_frame!r}"
+            )
         # iTerm reports Ctrl-W as CSI-u after the TUI enables keyboard
         # disambiguation. It must reach the same pane binding as legacy 0x17.
+        send_and_wait(process, master_fd, output, b"z", b"h/l:pane")
         send_and_wait(process, master_fd, output, b"\x1b[119;5u", b"Board (3)  [j/k]")
         send_and_wait(process, master_fd, output, b"j", b"detail-body-charlie")
         send_and_wait(process, master_fd, output, b"k", b"detail-body-bravo")
@@ -2979,7 +3008,26 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
                 f"Board detail return changed the selected post: {board!r}"
             )
 
-        fixtures["/api/v1/board"] = (
+        fixtures["/api/v1/board?sort_by=trending"] = (
+            200,
+            {
+                "posts": [
+                    board_selection_post(
+                        "trend", "Trending order", "server-trending-order"
+                    ),
+                    board_selection_post("a", "Alpha", "list-body-a"),
+                    board_selection_post("b", "Bravo", "list-body-b"),
+                    board_selection_post("c", "Charlie", "list-body-c"),
+                ]
+            },
+        )
+        board = send_and_wait(
+            process, master_fd, output, b"s", b"post-trend"
+        )
+        if b"order:trending" not in board:
+            raise AssertionError(f"Board sort did not expose its order: {board!r}")
+
+        fixtures["/api/v1/board?sort_by=trending"] = (
             200,
             {
                 "posts": [
@@ -2990,7 +3038,17 @@ def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
                 ]
             },
         )
-        board = send_and_wait(process, master_fd, output, b"r", b"post-new")
+        send_and_wait(process, master_fd, output, b"r", b"post-new")
+        board = resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=179,
+            needle=screen_header(b"MASC Board", b" (4)"),
+            controls=(FULL_REDRAW,),
+            final_cursor=b"\x1b[?25l",
+        )
         if not selected_b.search(board) or selected_new.search(board):
             raise AssertionError(
                 f"Board list refresh changed the selected post: {board!r}"
@@ -3105,7 +3163,7 @@ def board_detail_authority_interaction(
         completed = False
         try:
             open_loaded_board(process, master_fd, output, post_count=2)
-            fixtures["/api/v1/board"] = late_list
+            fixtures["/api/v1/board?sort_by=hot"] = late_list
             fixtures["/api/v1/dashboard/briefing"] = (
                 200,
                 overview_event_briefing("late-list-applied"),
@@ -3186,7 +3244,7 @@ def board_missing_target_interaction(
             )
             send_and_wait(process, master_fd, output, b"\r", b"b-initial-comment")
 
-            fixtures["/api/v1/board"] = (
+            fixtures["/api/v1/board?sort_by=hot"] = (
                 200,
                 {"posts": [board_selection_post("a", "Alpha", "list-body-a")]},
             )
@@ -4021,7 +4079,7 @@ def autonomous_turn_history_interaction() -> Interaction:
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
             ("TURN \u00b7 THINKING".encode(), "the turn start"),
-            ("\u21b3 TOOLS".encode(), "the nested tool block"),
+            ("TOOLS\u2502".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(
@@ -6329,6 +6387,8 @@ def schedule_detail_interaction() -> Interaction:
         )
         plain = CSI_RE.sub(b"", detail)
         for needle in (
+            b"masc://schedules/schedule-proof-701",
+            b"masc://keepers/alpha",
             b"Dispatch",
             b"Operator Proof (human_operator)",
             b"keeper_wake",
@@ -6337,6 +6397,12 @@ def schedule_detail_interaction() -> Interaction:
         ):
             if needle not in plain:
                 raise AssertionError(f"Schedule detail omitted {needle!r}: {plain!r}")
+        copy_reference(
+            process,
+            master_fd,
+            output,
+            b"masc://schedules/schedule-proof-701",
+        )
         evidence = send_and_wait(
             process, master_fd, output, b"\x1b[6~", b"matched_pending"
         )
@@ -6448,6 +6514,25 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     target = fusion_run("fusion-target-501", keeper="beta")
     new = fusion_run("fusion-new-501", keeper="gamma")
     fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/harness-health"] = (
+        200,
+        {
+            "generated_at": 1787557669.0,
+            "recent_verdicts": [
+                {
+                    "timestamp": 1787557668.0,
+                    "task_id": "task-linked-501",
+                    "task_title": "linked Harness task",
+                    "agent_name": "beta",
+                    "gate": "verify",
+                    "verdict": "approve",
+                    "evaluator_runtime": "glm-coding",
+                    "fallback_reason": None,
+                }
+            ],
+            "calibration": {},
+        },
+    )
     initial_runs = GatedHttpResponse(fusion_runs_response([alpha, target]))
     fixtures[FUSION_RUNS_PATH] = initial_runs
     fixtures[f"{FUSION_RUNS_PATH}/fusion-alpha-501"] = fusion_detail_response(
@@ -6466,7 +6551,7 @@ def fusion_list_detail_interaction(
     fixtures: HttpFixtures,
     initial_runs: GatedHttpResponse,
 ) -> Interaction:
-    """Select by run id across reorder, then show the result before evidence."""
+    """Select by run id across reorder, then read the four-stage flow."""
 
     def interact(
         process: subprocess.Popen[bytes],
@@ -6475,7 +6560,13 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Harness")
+        tab_until(process, master_fd, output, b"task-linked-501")
+        copy_reference(
+            process,
+            master_fd,
+            output,
+            b"masc://overview/tasks/task-linked-501",
+        )
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -6521,8 +6612,8 @@ def fusion_list_detail_interaction(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
                 )
         footer = (
-            b"j/k:move  PgUp / PgDn:page  Right / Enter:detail  "
-            b"Esc:overview  r:refresh  Tab:next  q:quit"
+            b"j/k:move  PgUp/PgDn:page  Enter:detail  "
+            b"Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
         )
         if footer not in plain:
             raise AssertionError(
@@ -6546,26 +6637,33 @@ def fusion_list_detail_interaction(
                 f"Fusion refresh moved selection off its run id: {refreshed!r}"
             )
 
-        detail = send_and_wait(process, master_fd, output, b"\r", b"judge-proof-501")
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", b"Flow: Question"
+        )
         detail_plain = CSI_RE.sub(b"", detail)
-        judge_index = detail_plain.find(b"judge-proof-501")
-        first_panel_index = detail_plain.find(b"panel-answer-first-501")
-        if judge_index < 0 or (
-            first_panel_index >= 0 and judge_index > first_panel_index
-        ):
+        question_index = detail_plain.find(b"1  QUESTION")
+        first_panel_index = detail_plain.find(b"2  PANEL RESPONSES")
+        if question_index < 0 or first_panel_index < question_index:
             raise AssertionError(
-                f"Fusion detail did not put the result before panel evidence: {detail_plain!r}"
+                f"Fusion detail did not start with question then panel: {detail_plain!r}"
             )
         for needle in (
-            b"RESULT",
-            b"QUESTION",
-            b"PANEL RESPONSES",
-            b"PgUp / PgDn:page",
+            b"masc://fusion/fusion-target-501",
+            b"masc://keepers/beta",
+            b"1  QUESTION",
+            b"2  PANEL RESPONSES",
+            b"PgUp/PgDn:page",
         ):
             if needle not in detail_plain:
                 raise AssertionError(
                     f"Fusion detail omitted the {needle!r} summary: {detail_plain!r}"
                 )
+        copy_reference(
+            process,
+            master_fd,
+            output,
+            b"masc://fusion/fusion-target-501",
+        )
         panel = send_and_wait(
             process, master_fd, output, b"\x1b[6~", b"panel-failure-second-501"
         )
@@ -6580,6 +6678,15 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Fusion panel page omitted {needle!r}: {panel_plain!r}"
                 )
+        if (
+            b"3  JUDGE" not in panel_plain
+            or b"judge-proof-501" not in panel_plain
+            or b"4  EVIDENCE RECORDED" not in panel_plain
+            or b"masc://board/post-fusion-target-501" not in panel_plain
+        ):
+            raise AssertionError(
+                f"Fusion flow did not end with Judge then Evidence: {panel_plain!r}"
+            )
         if (
             b"wrong-alpha-judge-501" in detail_plain
             or b"wrong-new-judge-501" in detail_plain
@@ -6613,7 +6720,7 @@ def observer_http_fixtures() -> HttpFixtures:
         # connection reading counts the overview, board, planning, and
         # approval loads - so one of those must answer.
         "/api/v1/dashboard/briefing": (200, overview_event_briefing()),
-        "/api/v1/board": (200, {"posts": []}),
+        "/api/v1/board?sort_by=hot": (200, {"posts": []}),
         "/mcp": RawHttpResponse(
             200,
             json.dumps({"jsonrpc": "2.0", "id": 1, "result": {}}).encode(),

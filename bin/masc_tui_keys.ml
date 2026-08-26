@@ -115,6 +115,9 @@ let for_surface = function
       ; b Act "w" "write" ~help:"write a post"
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
+      ; b Navigate "s" "sort" ~help:"cycle hot / trending / recent / updated / discussed"
+      ; b Navigate "z" "wide detail" ~help:"hide or show the post list while reading"
+      ; b Act "Y" "copy link" ~help:"copy the selected post reference"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
       ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
       ]
@@ -135,6 +138,7 @@ let for_surface = function
       ; b Act "c" "complete" ~help:"complete goal"
       ; b Act "x" "drop"
       ; b Act "o" "reopen"
+      ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
       ]
       @ listing_meta
   | Schedules ->
@@ -142,6 +146,7 @@ let for_surface = function
       ; b Act "Right / Enter" "details" ~help:"open schedule details"
       ; b Act "Left / Esc" "back" ~help:"back to the schedule list"
       ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
+      ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
       ]
       @ listing_meta
   | Verification ->
@@ -153,15 +158,20 @@ let for_surface = function
       ]
       @ listing_meta
   | Harness ->
-      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
+      [ b Navigate "j/k" "scroll"
+      ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
+      ; b Act "Esc" "overview"
+      ]
+      @ listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
       [ b Navigate "j/k" "move"
-      ; b Navigate "PgUp / PgDn" "page"
-      ; b Act "Right / Enter" "detail"
-      ; b Act "Esc" "overview"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Act "Enter" "detail" ~help:"Right or Enter opens detail"
+      ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
+      ; b Act "Esc" "back" ~help:"leave detail, or return to Overview"
       ]
       @ listing_meta
   | Repositories ->
@@ -315,8 +325,9 @@ let footer_hints_fusion_detail ~scroll ~max_scroll =
   Printf.sprintf "%s  (%d/%d)"
     (hints_of_bindings
        ([ b Navigate "j/k" "scroll"
-        ; b Navigate "PgUp / PgDn" "page"
-        ; b Act "Left / Esc" "back"
+        ; b Navigate "PgUp/PgDn" "page"
+        ; b Act "Y" "copy"
+        ; b Act "Esc" "back" ~help:"Left or Esc returns to the run list"
         ]
         @ listing_meta))
     scroll max_scroll

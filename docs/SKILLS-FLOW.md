@@ -60,8 +60,15 @@ flowchart LR
   Q -->|"2+"| ERR2["Error<br/>Multiple_compositions"]
   COM --> NM{"fence name<br/>= 스킬 이름?"}
   NM -->|"아니오"| ERR3["Error<br/>Composition_name_mismatch"]
-  NM -->|"예"| OK["surface = Composition entry"]
+  NM -->|"예"| MI{"disable-model-<br/>invocation?"}
+  MI -->|"true"| HID["승격 없음<br/>지시 스킬처럼 남는다"]
+  MI -->|"없음 / false"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
+
+fence 개수가 유일한 갈림길은 아니다. frontmatter `disable-model-invocation: true`는
+합성이 정상 파싱되고 스킬도 로드되지만 **모델이 볼 수 있는 도구로는 안 올린다** — 절차를
+파일로 남기되 모델이 스스로 집어들지 않게 하는 손잡이다. `docs/SKILLS.md §1`이 유일하게
+무시하지 않는 확장 키로 적어둔 그 값이다.
 
 **오류는 턴을 막는다**: `of_documents`(`keeper_skill_catalog.ml:112`)가 하나라도
 파싱 실패하면 카탈로그 전체가 `Error`. 필수 키 누락·이름 불일치·fence 문법 오류·중복

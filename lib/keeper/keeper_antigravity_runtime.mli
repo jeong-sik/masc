@@ -24,6 +24,8 @@ val run :
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
+  ?on_model_input_window_observation:
+    (Runtime_model_input_tail_window.window_observation -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -36,6 +38,8 @@ module For_testing : sig
     :  declared_max_prompt_bytes:int option
     -> system_prompt:string
     -> goal:string
+    -> ?on_model_input_window_observation:
+         (Runtime_model_input_tail_window.window_observation -> unit)
     -> Agent_core.Agent.model_input_projection option
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
   (** The admission contract over the provider-bound history. [None] declared

@@ -21,6 +21,7 @@ let make_routes ~port ~host:_ ~sw ~clock =
   Http.Router.create ()
   |> Server_routes_http_routes_frontend.add_routes ~port ~sw ~clock
   |> Server_oauth_http.add_routes
+  |> Server_keeper_oauth_http.add_routes
   |> Server_routes_http_routes_workspace.add_routes
   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock
   |> Server_routes_http_routes_provider_runs.add_routes ~sw

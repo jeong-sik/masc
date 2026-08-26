@@ -3037,6 +3037,16 @@
  (modules test_tui_board_detail)
  (libraries alcotest masc_tui_board_detail))
 
+(test
+ (name test_tui_link)
+ (modules test_tui_link)
+ (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_planning_order)
+ (modules test_tui_planning_order)
+ (libraries alcotest masc.masc_goal masc_tui_types))
+
 (rule
  (alias runtest-test_tui_keyboard_input)
  (deps
@@ -3217,6 +3227,10 @@
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_theme_contrast.inc)
+
+(include stanzas/test_tui_file_icon.inc)
+
+(include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -3306,6 +3320,17 @@
 
 (include stanzas/test_keeper_ask_store.inc)
 
+(include stanzas/test_keeper_oauth_identity.inc)
+
+(include stanzas/test_mcp_client.inc)
+
+(include stanzas/test_keeper_identity_tools.inc)
+
 (include stanzas/test_masc_ask_tool_surface.inc)
 
 (include stanzas/test_tui_ask_projection.inc)
+
+(test
+ (name test_tui_identity_tab)
+ (modules test_tui_identity_tab)
+ (libraries alcotest masc_tui_types))

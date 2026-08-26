@@ -49,8 +49,12 @@ export type SkillsResponse =
       schema: string
       state: 'ready'
       snapshot: SkillSnapshot
-      usage: SkillUsage[]
-      recent_window_rows: number
+      // Optional on the wire, not in the contract: the dashboard bundle ships
+      // separately from the OCaml server (vite build -> dist), so a deploy can
+      // put this panel in front of a server that predates the usage join. A
+      // missing field must read as "not reported", never crash the panel.
+      usage?: SkillUsage[]
+      recent_window_rows?: number
     }
   | { schema: string; state: 'not_registered' | 'uninitialized' | 'invalid_workspace' }
 

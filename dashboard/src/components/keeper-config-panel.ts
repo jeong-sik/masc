@@ -61,6 +61,7 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
 import { KeeperGithubIdentityPanel } from './keeper-github-identity-panel'
+import { KeeperIdentityPanel } from './keeper-identity-panel'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -2006,6 +2007,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </div>
 
     <${KeeperGithubIdentityPanel} keeperName=${keeperName} />
+
+    <${KeeperIdentityPanel} keeperName=${keeperName} />
 
   `
 

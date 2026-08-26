@@ -513,7 +513,35 @@ type planning_snapshot = Tui_decode.planning_snapshot
 }
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
-  goals
+  let phase_rank = function
+    | Goal_phase.Executing -> 0
+    | Goal_phase.Verifying -> 1
+    | Goal_phase.Completed -> 2
+    | Goal_phase.Dropped -> 3
+  in
+  (* The server already keeps equally-ranked goals newest first. Group the
+     lifecycle and priority here, but keep that useful recency ordering for
+     ties instead of inventing another timestamp contract in the TUI. *)
+  List.stable_sort
+    (fun left right ->
+       match Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase) with
+       | 0 -> Int.compare left.pg_priority right.pg_priority
+       | order -> order)
+    goals
+
+type board_sort =
+  | Board_hot
+  | Board_trending
+  | Board_recent
+  | Board_updated
+  | Board_discussed
+
+let board_sort_label = function
+  | Board_hot -> "hot"
+  | Board_trending -> "trending"
+  | Board_recent -> "recent"
+  | Board_updated -> "updated"
+  | Board_discussed -> "discussed"
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -533,15 +561,44 @@ type keeper_detail_tab =
   | Detail_instructions
   | Detail_secrets
   | Detail_github
+  | Detail_identity
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github ]
+  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github
+  ; Detail_identity ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
+  | Detail_identity -> "Identity"
+
+(** One line of the Identity tab. A declaration nobody can read is carried
+    rather than dropped: an operator who came looking for a provider needs to
+    see why it is not on offer, not a shorter list. *)
+type identity_provider =
+  | Identity_declared of { idp_id: string; idp_label: string }
+  | Identity_unreadable of { idp_id: string; idp_problem: string }
+
+(** The providers a key can act on, in the order the screen numbers them.
+    Both the renderer and the key handler read this, so the number an
+    operator sees and the provider a keypress starts cannot drift apart. *)
+let identity_connectable providers =
+  List.filter_map
+    (function
+      | Identity_declared { idp_id; idp_label } -> Some (idp_id, idp_label)
+      | Identity_unreadable _ -> None)
+    providers
+
+(** A login the operator has started but not finished: they have to open
+    [ils_url] in a browser, and until they come back nothing has been
+    written to the Keeper. *)
+type identity_login_started = {
+  ils_keeper: string;
+  ils_label: string;
+  ils_url: string;
+}
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
@@ -863,6 +920,14 @@ type state = {
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
+  (* The Identity tab. Stamped with the keeper it was fetched for, like the
+     other fetched tabs, so the pane shows loading rather than another
+     keeper's answer. The providers are held rather than pre-rendered lines
+     because the screen's numbering and the key that acts on it have to come
+     out of one list -- see [identity_connectable]. *)
+  mutable identity_view: (string * identity_provider list) option;
+  mutable identity_view_error: string option;
+  mutable identity_login: identity_login_started option;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -960,9 +1025,14 @@ type state = {
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
   mutable board_cursor: int;
+  mutable board_sort: board_sort;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
+  (* Wide terminals normally keep the Board list beside the open post. [z]
+     lets the reader spend those columns on a long post or comment instead;
+     this is an explicit reading choice, so resizing must not reset it. *)
+  mutable board_detail_wide: bool;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -1405,6 +1475,9 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  identity_view = None;
+  identity_view_error = None;
+  identity_login = None;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;
@@ -1465,9 +1538,11 @@ let create_state
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
   board_cursor = 0;
+  board_sort = Board_hot;
   board_scroll = 0;
   board_mode = Board_list;
   board_focus = Right_pane;
+  board_detail_wide = false;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;

@@ -37,10 +37,10 @@ are doing; they read and write the same `.masc/` state.
 | **Dashboard** | Reading the whole workspace in a browser and taking operator actions | Served at `/dashboard/` by the same process |
 | **TUI** | Watching and steering Keepers from a terminal, including browsing code and diffs | `masc-tui`, installed beside `masc` or built from source |
 
-![MASC dashboard overview](docs/screenshots/dashboard/2026-08-25/01-overview.png)
+![MASC dashboard overview](docs/screenshots/dashboard/2026-08-26/01-overview.png)
 
 This image was captured from a live local runtime with operational identifiers
-redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-25/README.md)
+redacted. The [dashboard inventory](docs/screenshots/dashboard/2026-08-26/README.md)
 contains 24 screens and the exact capture metadata.
 
 ## Start here
@@ -140,9 +140,13 @@ masc_status()
 
 `masc_start` selects the project, joins the workspace, and optionally creates
 and claims a task. Goals, tasks, board posts, and status changes are then shared
-through the MASC tool set. The public MCP surface currently exposes 39 tools,
-grouped as workspace lifecycle, messaging, tasks, goals, plans, Keeper control,
-and the board; `masc_tool_help` describes any one of them from inside a client.
+through the MASC tool set, grouped as workspace lifecycle, messaging, tasks,
+goals, plans, schedules, Keeper control, and the board. `masc_tool_help`
+describes any one of them from inside a client.
+
+The set grows, so ask the server you are on rather than trusting a number
+written here — `tools/list` over the same session answers it. A 2026-08-26
+build answered with 43.
 
 URL-only configuration fails with `401 Unauthorized` under the default local
 auth policy. For other client formats, a direct initialize probe, and manual
@@ -166,10 +170,10 @@ dune build --root . bin/masc_tui.exe
 `MASC_BASE_PATH` and then the current directory. `dune install` or an opam
 install puts the same program on `PATH` as `masc-tui`.
 
-![MASC terminal UI](docs/screenshots/tui/2026-08-25/surfaces/01-overview.png)
+![MASC terminal UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
 
 Keeper names and the base path in this frame were replaced with stand-ins of the
-same width; the [surface inventory](docs/screenshots/tui/2026-08-25/surfaces/README.md)
+same width; the [surface inventory](docs/screenshots/tui/2026-08-26/surfaces/README.md)
 holds four more and the capture metadata.
 
 `Tab` rotates through 20 surfaces, and the active one is highlighted in a strip
@@ -179,19 +183,30 @@ on the top row:
 |---|---|
 | Overview | Workspace summary, the task backlog, and what needs attention |
 | Acting | Every Keeper's tool calls, turn boundaries, and settlements as they land |
-| Keepers | The roster, plus per-Keeper chat, logs, tool calls, and runtime |
+| Keepers | The roster, plus per-Keeper chat, logs, tool calls, runtime, and the names of the secrets it holds |
 | Lanes, Runtime | Runtime lanes, their ordered candidates, and provider reachability |
-| Approvals | The Gate queue, approved or denied from the terminal |
+| Approvals | The Gate queue, approved or denied from the terminal, and the questions Keepers are waiting on an answer to |
 | Board | Posts from people, agents, automation, and the system |
 | Planning, Schedules, Verify | Plans and goals, scheduled work, and verification verdicts |
 | Repositories, Code, Changes | Registered repositories, a file browser over them, and recent Keeper edits |
 | Harness, Fusion, Tools, Resources, Config, Connectors, Logs | Harness runs, panel and judge runs, the tool tree, MCP resources, `runtime.toml`, external channels, and the runtime log |
 
-Two things make it more than a viewer. The input row at the bottom sends a
-message to the Keeper it names, and `/task <title>` creates a task through
-`masc_add_task` and hands the Keeper its id in the same breath. On the Code
-surface, `Enter` opens a file, `d` shows its working-tree diff against HEAD,
-`H` shows the commits that touched it, and `m` shows the notes anchored to it.
+Above the input row, one line on every surface names the next scheduled wake
+and whichever Keeper is stopped waiting on a person. It is absent when there is
+neither.
+
+Three things make it more than a viewer. The input row at the bottom sends a
+message to the Keeper it names. `/task <title>` creates a task through
+`masc_add_task` and hands the Keeper its id in the same breath. And a Keeper
+that asked a question through `masc_ask` is answered from the terminal, which
+is what the line above the composer is pointing at. On the Code surface,
+`Enter` opens a file, `d` shows its working-tree diff against HEAD, `H` shows
+the commits that touched it, and `m` shows the notes anchored to it.
+
+The header says when the TUI and the server disagree about which workspace
+they are on: `[workspace mismatch]` beside the connection badge, with both
+paths in the footer. Reads that would mix the two are refused while it is up;
+everything the server answers still draws.
 
 Without a server the Keeper roster, per-Keeper detail, and the task backlog
 still read from disk. Approvals, Board, Planning, Fusion, Runtime, the logs,
@@ -236,6 +251,12 @@ different config root.
 | `repositories.toml` | Registered repository identity and checkout metadata for repository workflows |
 | `keeper_repo_mappings.toml` | Keeper-to-repository preferences; these are defaults, not an authorization boundary |
 | `.env.local` | Provider environment variables written by current installer and quickstart flows |
+
+One directory below the same root is authored rather than generated:
+
+| Path | Purpose |
+|---|---|
+| `<base-path>/.masc/skills/<name>/SKILL.md` | A capability a Keeper can be handed by name. `name` in the frontmatter has to equal the directory name, because a task names a skill by that directory |
 
 A Keeper is one authored file, `<base-path>/.masc/config/keepers/reviewer.toml`:
 
@@ -318,7 +339,7 @@ Visible second-level sections:
 
 | Screen | Sections |
 |---|---|
-| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory` |
+| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory`, `skills` |
 | Work | `work`, `planning`, `repositories`, `verification` |
 | Connectors | `connector-status` |
 | IDE | `ide-shell` |
@@ -333,7 +354,7 @@ Route examples required by the current dashboard contract:
 `dashboard#connectors?section=connector-status`, and
 `dashboard#workspace?section=verification`. `journey` is a hidden diagnostic.
 
-See the [24-screen inventory](docs/screenshots/dashboard/2026-08-25/README.md)
+See the [24-screen inventory](docs/screenshots/dashboard/2026-08-26/README.md)
 for the captured primary, Monitor, Work, and Lab views.
 
 ## Repository layout
@@ -359,6 +380,7 @@ masc/
 | [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | Terminal UI surfaces, keys, and troubleshooting |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Configuring, starting, and watching Keepers |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Current Keeper file and runtime assignment contract |
+| [`docs/SKILLS.md`](docs/SKILLS.md) | Declaring a capability in `SKILL.md` and handing it to a Keeper |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | Environment variables the runtime reads |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | Local bearer and dashboard write access |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | Responsibility split between MASC and embedded Agent Core |

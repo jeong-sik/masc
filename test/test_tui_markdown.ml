@@ -255,9 +255,12 @@ let test_untagged_fence_stays_single_span () =
     (render "```\nlet x = 1\n```")
 
 let test_unknown_language_stays_single_span () =
+  (* cobol has no lexer, so its fence stays one plain span. (rust used to sit
+     here; it gained a lexer with the c-family languages, so it is no longer an
+     example of an unlexed tag.) *)
   check_rows "unknown tag, no colour"
-    (tagged_fence "rust" [ "<c>\xe2\x94\x82 fn main() {}</c>" ])
-    (render "```rust\nfn main() {}\n```")
+    (tagged_fence "cobol" [ "<c>\xe2\x94\x82 IDENTIFICATION DIVISION.</c>" ])
+    (render "```cobol\nIDENTIFICATION DIVISION.\n```")
 
 (* Strings, and a capitalised identifier as a constructor or module. *)
 let test_ocaml_strings_and_types () =

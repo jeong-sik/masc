@@ -5,6 +5,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -148,12 +149,30 @@ def write_persistent_work_evidence(
     tool: str = "tool_execute",
     top_level_generation: bool = True,
 ) -> None:
+    # Relative timestamps: scan_persistent_work_evidence() drops manifest rows
+    # older than max_silence_hours (audit_args pins 2400h) via min_ts. A fixed
+    # calendar date rots out of that window (#30748); anchor to "now" instead.
+    # Row shape required by manifest_turn_has_successful_provider(): every turn
+    # needs provider_attempt_started, provider_attempt_finished with a
+    # non-error status, and (when present) turn_finished with a non-error
+    # status. If you change the emitted events, re-check that gate.
+    base_ts = time.time()
+    base_dir = datetime.fromtimestamp(base_ts, tz=timezone.utc).strftime("%Y-%m")
+    base_day = datetime.fromtimestamp(base_ts, tz=timezone.utc).day
+
+    def ts_at(offset: int) -> str:
+        return (
+            datetime.fromtimestamp(base_ts + offset, tz=timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+
     trace = f"trace-{keeper}"
     manifest_dir = root / ".masc" / "keepers" / keeper / "runtime-manifests"
     checkpoint_path = (
         root / ".masc" / "keepers" / keeper / "checkpoints" / "turn-1.json"
     )
-    tool_log_path = root / ".masc" / "tool_calls" / "2026-05" / "15.jsonl"
+    tool_log_path = root / ".masc" / "tool_calls" / base_dir / f"{base_day}.jsonl"
     history_path = root / ".masc" / "traces" / trace / "history.jsonl"
     for path in (
         manifest_dir,
@@ -189,7 +208,7 @@ def write_persistent_work_evidence(
     )
     rows = [
         {
-            "ts": "2026-05-15T00:00:00Z",
+            "ts": ts_at(0),
             "keeper_name": keeper,
             "trace_id": trace,
             "generation": 1,
@@ -199,7 +218,7 @@ def write_persistent_work_evidence(
             "links": {},
         },
         {
-            "ts": "2026-05-15T00:00:01Z",
+            "ts": ts_at(1),
             "keeper_name": keeper,
             "trace_id": trace,
             "generation": 1,
@@ -209,7 +228,7 @@ def write_persistent_work_evidence(
             "links": {},
         },
         {
-            "ts": "2026-05-15T00:00:02Z",
+            "ts": ts_at(2),
             "keeper_name": keeper,
             "trace_id": trace,
             "generation": 1,
@@ -219,7 +238,7 @@ def write_persistent_work_evidence(
             "links": {"checkpoint_path": str(checkpoint_path)},
         },
         {
-            "ts": "2026-05-15T00:00:03Z",
+            "ts": ts_at(3),
             "keeper_name": keeper,
             "trace_id": trace,
             "generation": 1,
@@ -577,7 +596,14 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
             write_persistent_work_evidence(root, "alpha")
-            tool_log_path = root / ".masc" / "tool_calls" / "2026-05" / "15.jsonl"
+            now = datetime.now(tz=timezone.utc)
+            tool_log_path = (
+                root
+                / ".masc"
+                / "tool_calls"
+                / now.strftime("%Y-%m")
+                / f"{now.day}.jsonl"
+            )
             tool_log_path.write_text(
                 json.dumps(
                     {

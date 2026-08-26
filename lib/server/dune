@@ -37,6 +37,11 @@
   ;; re-export it through the masc dep, so masc_server lists it explicitly.
   masc.keeper_compaction_evidence
   masc.keeper_approval
+  ;; Attaching a Keeper to a work service: the exchange lives in
+  ;; masc.keeper_identity, which refuses to know where a Keeper's
+  ;; credentials go, and server_keeper_oauth is the half that does.
+  masc.keeper_identity
+  masc.mcp_client
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.

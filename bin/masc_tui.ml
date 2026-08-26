@@ -19,6 +19,7 @@ module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
@@ -1205,6 +1206,9 @@ type async_msg =
       string * string * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
+  | Identity_providers_loaded of
+      string * (Masc_tui_types.identity_provider list, string) result
+  | Identity_login_started of string * (string * string, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
@@ -2197,6 +2201,62 @@ let launch_github_identity_view state ~mailbox keeper_name =
       enqueue_async mailbox
         (Github_identity_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_identity_view state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_identity_providers ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_providers_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_providers_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* Begin a login. The answer is a URL the operator has to open; nothing is
+   written to the keeper until the browser comes back to the server. *)
+let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
+            ~provider_id
+        with
+        | Error err -> Error err
+        | Ok json -> (
+            match json with
+            | `Assoc fields -> (
+                match List.assoc_opt "authorize_url" fields with
+                | Some (`String url) -> Ok (label, url)
+                | Some _ | None ->
+                    Error "the server answered without an authorize_url")
+            | _ -> Error "the server answered with something this cannot read")
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_login_started (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_login_started (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = server_peer_host in
@@ -3315,6 +3375,61 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+let selected_surface_reference state =
+  let board () =
+    match state.board_mode with
+    | Board_read post_id -> Some (Link.reference Board_post post_id)
+    | Board_list ->
+        Option.map
+          (fun post -> Link.reference Board_post post.bp_id)
+          (List.nth_opt state.board_posts state.board_cursor)
+    | Board_compose -> None
+  in
+  let planning () =
+    match state.planning_mode with
+    | Planning_detail goal_id -> Some (Link.reference Goal goal_id)
+    | Planning_list ->
+        Option.bind state.planning (fun snapshot ->
+            planning_visible_goals snapshot.pl_goals
+            |> Fun.flip List.nth_opt state.planning_cursor
+            |> Option.map (fun goal -> Link.reference Goal goal.pg_id))
+  in
+  match state.view with
+  | Board -> board ()
+  | Planning -> planning ()
+  | Schedules ->
+      (match state.schedule_detail_id, state.schedules with
+       | Some schedule_id, _ -> Some (Link.reference Schedule schedule_id)
+       | None, Some snapshot ->
+           Option.map
+             (fun row -> Link.reference Schedule row.sch_schedule_id)
+             (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+       | None, None -> None)
+  | Harness ->
+      Option.bind state.harness (fun snapshot ->
+          Option.map
+            (fun verdict -> Link.reference Task verdict.Tui_decode.hv_task_id)
+            (List.nth_opt snapshot.Tui_decode.hs_verdicts state.harness_cursor))
+  | Fusion ->
+      (match state.fusion_mode, state.fusion_runs with
+       | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
+       | Fusion_list, Some snapshot ->
+           Option.map
+             (fun (run : Tui_decode.fusion_run) ->
+                Link.reference Fusion_run run.fur_run_id)
+             (List.nth_opt snapshot.fus_runs state.fusion_cursor)
+       | Fusion_list, None -> None)
+  | Overview | Acting | Keepers _ | Lanes | Approvals | Verification
+  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+  | Code | System_logs -> None
+
+let next_board_sort = function
+  | Board_hot -> Board_trending
+  | Board_trending -> Board_recent
+  | Board_recent -> Board_updated
+  | Board_updated -> Board_discussed
+  | Board_discussed -> Board_hot
+
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
    to say so would hide the only surface that can say it. *)
@@ -3838,7 +3953,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation
+let load_http_surfaces ~host ~port ~approval_generation ~board_sort
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
@@ -3859,7 +3974,8 @@ let load_http_surfaces ~host ~port ~approval_generation
         Masc_tui_http.fetch_keeper_asks ~host ~port ())
   in
   let http_board =
-    when_needed needs.needs_board (fun () -> load_board_list ~host ~port)
+    when_needed needs.needs_board (fun () ->
+        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort))
   in
   let http_planning =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
@@ -3973,7 +4089,11 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
        | Detail_github ->
            state.github_identity_view <- None;
            state.github_identity_view_error <- None;
-           launch_github_identity_view state ~mailbox keeper.k_name)
+           launch_github_identity_view state ~mailbox keeper.k_name
+       | Detail_identity ->
+           state.identity_view <- None;
+           state.identity_view_error <- None;
+           launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
@@ -4093,7 +4213,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~needs))
+             (load_http_surfaces ~host ~port ~approval_generation
+                ~board_sort:state.board_sort ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -4110,7 +4231,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~needs))
+               (load_http_surfaces ~host ~port ~approval_generation
+                  ~board_sort:state.board_sort ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -5568,6 +5690,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.github_identity_view <- Some (keeper_name, lines);
             state.github_identity_view_error <- None
         | Error detail -> state.github_identity_view_error <- Some detail)
+  | Identity_providers_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok providers ->
+            state.identity_view <- Some (keeper_name, providers);
+            state.identity_view_error <- None
+        | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_login_started (keeper_name, result) -> (
+      match result with
+      | Ok (label, url) ->
+          state.identity_login <-
+            Some { ils_keeper = keeper_name; ils_label = label; ils_url = url };
+          state.identity_view_error <- None
+      (* Shown on the tab rather than swallowed: the operator pressed a key
+         and has to learn that nothing is going to open. *)
+      | Error detail -> state.identity_view_error <- Some detail)
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -6125,6 +6268,11 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
 
+let copy_reference_to_terminal render_schedule reference =
+  Terminal_write_repair.note ();
+  write_to_terminal (Link.osc52_copy reference);
+  request_console_write_repair render_schedule
+
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
    TUI's frame on a non-alternate screen -- or turns it into arrow keys only
@@ -6317,6 +6465,16 @@ let main () =
       ~refresh_interval:refresh ()
   in
   state.view <- Overview;
+
+  (* A theme named in runtime.toml's [tui] section is applied at boot, so the
+     reader's pick survives a restart instead of being re-chosen each session.
+     Absent or unknown, the TUI follows the terminal exactly as before:
+     Theme_choice.apply returns false for a name no scheme carries, and the
+     [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.theme ~base_path with
+   | Some name when Masc_tui_theme_choice.apply name ->
+       state.theme_choice <- Some name
+   | Some _ | None -> ());
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
@@ -7432,6 +7590,10 @@ let main () =
                 state.github_identity_view_error <- None;
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
+            | Some keeper, Detail_identity ->
+                state.identity_view <- None;
+                state.identity_view_error <- None;
+                launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
        | Some (("[" | "]") as bracket)
          when state.view = Changes && not compact_viewport ->
@@ -7451,6 +7613,32 @@ let main () =
                   Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
+       (* The number the Identity tab printed. Both sides index
+          [identity_connectable], so what the screen numbered and what this
+          starts are the same list. *)
+       | Some digit
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport
+              && String.length digit = 1
+              && digit.[0] >= '1'
+              && digit.[0] <= '9' -> (
+           let wanted = Char.code digit.[0] - Char.code '1' in
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 List.nth_opt
+                   (Masc_tui_types.identity_connectable providers)
+                   wanted
+               with
+               | Some (provider_id, label) ->
+                   state.identity_login <- None;
+                   state.identity_view_error <- None;
+                   launch_identity_login state ~mailbox:async_messages
+                     ~keeper_name:keeper.k_name ~provider_id ~label
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" when state.view = Resources && not compact_viewport ->
            (match
               Option.bind state.resources_list (fun rows ->
@@ -7592,7 +7780,8 @@ let main () =
            state.palette_cursor <- 0
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols ->
+              && terminal_columns >= keeper_split_threshold_cols
+              && not state.board_detail_wide ->
            (match state.board_mode with
             | Board_read _ ->
                 state.board_focus <-
@@ -7753,13 +7942,19 @@ let main () =
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
+       | Some ("z" | "Z") when state.view = Board ->
+           (match state.board_mode with
+            | Board_read _ ->
+                state.board_detail_wide <- not state.board_detail_wide;
+                state.board_focus <- Right_pane
+            | Board_list | Board_compose -> ())
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with
                   | Overview | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> true
+                       | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some state.code_file
                   | Acting | Keepers _ | Lanes | Approvals | Planning
@@ -7783,7 +7978,24 @@ let main () =
             | System_logs -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
-       | Some "y" | Some "Y" ->
+       | Some "Y" ->
+           (match selected_surface_reference state with
+            | Some reference ->
+                copy_reference_to_terminal render_schedule reference;
+                add_event state "system" ("copied " ^ reference)
+            | None when state.view = Approvals ->
+                (match List.nth_opt (approval_items state) state.approval_cursor with
+                 | Some (Operator_row a) ->
+                     handle_approval_decision state a Confirm
+                       ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:true
+                 | None -> ())
+            | None -> add_event state "system" "nothing on this surface has a link")
+       | Some "y" ->
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
@@ -8830,7 +9042,12 @@ let main () =
                           state.github_identity_view <- None;
                           state.github_identity_view_error <- None;
                           launch_github_identity_view state
-                            ~mailbox:async_messages k.k_name)
+                            ~mailbox:async_messages k.k_name
+                      | Detail_identity ->
+                          state.identity_view <- None;
+                          state.identity_view_error <- None;
+                          launch_identity_view state ~mailbox:async_messages
+                            k.k_name)
                  | None -> ())
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
@@ -9297,9 +9514,20 @@ let main () =
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
+            | Board ->
+                (match state.board_mode with
+                 | Board_compose -> ()
+                 | Board_list | Board_read _ ->
+                     state.board_sort <- next_board_sort state.board_sort;
+                     add_event state "system"
+                       ("Board order: "
+                        ^ board_sort_label state.board_sort);
+                     start_http_refresh state ~host:server_peer_host
+                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~mailbox:async_messages)
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,

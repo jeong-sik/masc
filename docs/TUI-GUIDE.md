@@ -89,6 +89,16 @@ row it shows.
 `NO_COLOR` (non-empty) suppresses colour; borders, markers, and the
 reverse-video selection stay. `MASC_TUI_FORCE_COLOR=1` overrides.
 
+The Config surface's Themes pane picks a bundled base16 scheme (monokai,
+solarized, and others) for the session. To keep a pick across restarts,
+name it in `runtime.toml` under a `[tui]` table — the TUI reads it at boot
+and applies it, and an absent or unknown name just follows the terminal:
+
+```toml
+[tui]
+theme = "monokai"
+```
+
 Keeper sub-views spell their position as a breadcrumb in the header:
 `Keepers ▸ <name> ▸ chat` (also `logs`, `calls`, `runtime`).
 
@@ -692,8 +702,14 @@ workspace, so `v` says so and leaves that row to `o`.
 ### Code
 
 A file browser over the workspace the server serves, one directory level at
-a time (the tree route is lazy). `j`/`k` move the cursor, `/` jumps it to a
-matching entry, Right or `Enter` drills into a directory or opens the file,
+a time (the tree route is lazy). Each row carries a one-column type mark: a
+folder shows `▸`, and a file shows a glyph coloured by its extension — `◆`
+code (cyan), `▤` data or config (yellow), `≡` prose (green), `»` script
+(magenta), `◈` web or style (blue), `▨` media (magenta), `·` anything else
+(dim). The glyphs are plain unicode, so no patched font is needed; under
+`NO_COLOR` the glyph stays and the colour drops. `j`/`k` move the cursor,
+`/` jumps it to a matching entry, Right or `Enter` drills into a directory or
+opens the file,
 and Left or `Esc` walks back out the way Enter came in. With a file
 focused, `/` searches the file's own lines instead of the tree — typing
 moves the line cursor to the first match, Enter keeps the query for
@@ -706,8 +722,12 @@ or a registered repository after `Enter` on a Repositories row
 scopes are one field, so the surface cannot read two workspaces at once.
 
 An open file arrives whole and is lexed once — OCaml (nested comments
-included), bash, and JSON colour; a file past 500 KB draws plain rather
-than slowly. The pane then answers three more questions in place:
+included), bash, JSON, the curly-brace family (TypeScript/JavaScript,
+C/C++, Go, Rust, Java, and their kin: `//` and `/* */` comments, strings,
+numbers, keywords), and Python (`#` comments, triple-quoted strings)
+colour; an extension without a lexer draws plain, and a file past 500 KB
+draws plain rather than slowly. The pane then answers three more questions
+in place:
 
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads

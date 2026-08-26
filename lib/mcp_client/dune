@@ -1,0 +1,19 @@
+;; masc talking to somebody else's MCP server.
+;;
+;; The rest of masc is an MCP server; this is the one direction that was
+;; missing. It knows JSON-RPC over streamable HTTP and nothing about
+;; Keepers, OAuth or where a token came from -- a bearer string is handed
+;; in, which is what keeps this reusable for the next server that is not
+;; Atlassian.
+
+(include_subdirs no)
+
+(library
+ (name masc_mcp_client)
+ (public_name masc.mcp_client)
+ (modules mcp_client)
+ (wrapped false)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries yojson masc.build_version masc.http_client
+  masc.mcp_transport_protocol))

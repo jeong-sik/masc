@@ -6755,9 +6755,9 @@ let render_changes_list (state : state) =
     (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:diff  [/]:keeper  d:tree diff  v:code  o:editor  r:refresh  q:quit");
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
-(* One tree-diff row. Same three layers as the tool-call reading, plus the
-   line numbers git computed -- the part an [Edit] cannot have, because it
-   records two pieces of text and not where in the file they sit. *)
+(* One current-tree diff row. Same three layers as the tool-call reading, plus
+   git's per-row numbers. Producer-recorded Edit ranges describe the completed
+   tool execution instead; they are not this later tree observation. *)
 let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
   let background, marker =
     match row.Masc.Tui_decode.gdr_kind with

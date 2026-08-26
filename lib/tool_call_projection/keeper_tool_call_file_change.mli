@@ -57,8 +57,9 @@ type t = {
   task_id : string option;
   execution_id : string option;
   line_evidence : Keeper_file_change_evidence.t option;
-      (** Producer-recorded 1-based ranges. [None] belongs to rows written
-          before the evidence contract existed. *)
+      (** Producer-owned actual line ranges from the same execution row.
+          Historical rows carry [None]; malformed evidence makes the row
+          {!Unreadable} rather than inventing coordinates. *)
   location : location;
   kind : kind;
   succeeded : bool;

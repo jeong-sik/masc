@@ -48,6 +48,10 @@ val rows :
 
     An [Edited] record is labelled as a replacement (or replace-all template),
     not a whole-file diff. Its typed path and [+added -removed] size share one
-    heading. A [Written] record reports its body row count instead of inventing
-    a removal count, because its producer never read [before]; a failed call is
-    labelled as an attempt rather than as rows written. *)
+    heading. Producer-recorded old/new ranges are shown only when carried by
+    that exact execution; at most three replace-all ranges are annotated and
+    the remainder is counted. A bounded [occurrences=null] record shows only
+    its exact match count. A [Written] record reports its body row count and
+    optional new full-body range instead of inventing a removal count, because
+    its producer never read [before]; a failed call is labelled as an attempt
+    rather than as rows written. *)

@@ -2,6 +2,7 @@ open Alcotest
 
 module Chat_diff = Masc_tui_keeper_chat_diff
 module Transcript = Masc_tui_keeper_chat_transcript
+module Evidence = Masc.Keeper_file_change_evidence
 
 let contains ~needle text =
   let needle_length = String.length needle in
@@ -207,11 +208,77 @@ let test_target_line_without_evidence_is_the_visible_top () =
     (Masc.Tui_decode.file_change_target_line change)
 ;;
 
+let test_mismatched_or_unjoinable_evidence_is_rejected () =
+  let write_evidence = Evidence.written "body" |> Evidence.to_yojson in
+  let edit_evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:1
+          ~new_start_line:1
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  let two_occurrences =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:1
+          ~new_start_line:1
+          ~old_string:"old"
+          ~new_string:"new"
+      ; Evidence.edit_occurrence
+          ~old_start_line:3
+          ~new_start_line:3
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  let cases =
+    [ ( "kind mismatch"
+      , change_json ~line_evidence:write_evidence () )
+    ; ( "missing execution id"
+      , change_json
+          ~execution_id:None
+          ~line_evidence:write_evidence
+          ~kind:(`Write "body")
+          () )
+    ; ( "failed mutation"
+      , change_json
+          ~succeeded:false
+          ~line_evidence:edit_evidence
+          () )
+    ; ( "single Edit count"
+      , change_json ~line_evidence:two_occurrences () )
+    ]
+  in
+  List.iter
+    (fun (label, change) ->
+       match
+         Masc.Tui_decode.decode_file_change_snapshot
+           (snapshot_json [ change ])
+       with
+       | Error _ -> ()
+       | Ok _ -> failf "%s evidence was accepted" label)
+    cases
+;;
+
 let test_full_projection_weaves_recorded_replacement () =
   let rows =
     projected_rows Transcript.Full (index [ change_json () ])
       [ activity ~execution_id:"exec-edit-1" () ]
   in
+  check (list string) "historical Full rows are byte-compatible"
+    [ "✓ Edit lib/example.ml · 12ms"
+    ; "↳ masc:lib/example.ml (+1 -1)"
+    ; "  recorded replacement"
+    ; "```diff"
+    ; "-let answer = 41"
+    ; "+let answer = 42"
+    ; "```"
+    ]
+    rows;
   let body = body rows in
   List.iter
     (fun needle ->
@@ -222,7 +289,185 @@ let test_full_projection_weaves_recorded_replacement () =
     ; "```diff"
     ; "-let answer = 41"
     ; "+let answer = 42"
-    ]
+    ];
+  check bool "historical row does not invent a line range" false
+    (contains ~needle:"old L" body)
+;;
+
+let test_full_projection_shows_actual_edit_range () =
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:42
+          ~new_start_line:42
+          ~old_string:"old a\nold b"
+          ~new_string:"new a\nnew b\nnew c"
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:
+               (`Edit
+                 ( "old a\nold b"
+                 , "new a\nnew b\nnew c"
+                 , false ))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check bool "producer range sits beside the recorded replacement" true
+    (contains ~needle:"old L42-43 -> new L42-44" (body rows))
+;;
+
+let test_replace_all_shows_bounded_actual_ranges () =
+  let occurrence old_start new_start =
+    Evidence.edit_occurrence
+      ~old_start_line:old_start
+      ~new_start_line:new_start
+      ~old_string:"old"
+      ~new_string:"new\nextra"
+  in
+  let evidence =
+    Evidence.edited
+      [ occurrence 2 2
+      ; occurrence 5 6
+      ; occurrence 8 10
+      ; occurrence 13 16
+      ]
+    |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new\nextra", true))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let body = body rows in
+  List.iter
+    (fun needle ->
+       check bool ("body contains " ^ needle) true (contains ~needle body))
+    [ "4 matches"
+    ; "#1 old L2 -> new L2-3"
+    ; "#3 old L8 -> new L10-11"
+    ; "1 more recorded line range withheld"
+    ];
+  check bool "fourth range is not rendered inline" false
+    (contains ~needle:"old L13 -> new L16-17" body)
+;;
+
+let test_omitted_ranges_keep_count_without_inventing_coordinates () =
+  let occurrence_count = Evidence.max_recorded_edit_occurrences + 1 in
+  let evidence =
+    Evidence.edited_ranges_omitted ~occurrence_count |> Evidence.to_yojson
+  in
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:evidence
+             ~kind:(`Edit ("old", "new", true))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let body = body rows in
+  check bool "exact match count remains visible" true
+    (contains
+       ~needle:
+         (Printf.sprintf "%d matches · line ranges omitted" occurrence_count)
+       body);
+  check bool "no line coordinate is invented" false
+    (contains ~needle:"old L" body)
+;;
+
+let test_deletion_and_write_ranges_are_explicit () =
+  let deletion =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:7
+          ~new_start_line:7
+          ~old_string:"delete me\n"
+          ~new_string:""
+      ]
+    |> Evidence.to_yojson
+  in
+  let deletion_rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:deletion
+             ~kind:(`Edit ("delete me\n", "", false))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check bool "deletion has no fabricated new coordinate" true
+    (contains ~needle:"old L7 -> deleted" (body deletion_rows));
+  let write = Evidence.written "first\nsecond\n" |> Evidence.to_yojson in
+  let write_rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:write
+             ~kind:(`Write "first\nsecond\n")
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  check bool "Write names only its new full-body range" true
+    (contains ~needle:"new L1-2" (body write_rows))
+;;
+
+let test_narrow_evidence_rows_keep_the_authoritative_fact () =
+  let occurrence_count = Evidence.max_recorded_edit_occurrences + 1 in
+  let omitted =
+    Evidence.edited_ranges_omitted ~occurrence_count |> Evidence.to_yojson
+  in
+  let omitted_rows =
+    projected_rows ~max_line_cells:24 Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:omitted
+             ~kind:(`Edit ("old", "new", true))
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let count_label = Printf.sprintf "%d matches" occurrence_count in
+  let omitted_evidence_row =
+    match List.find_opt (contains ~needle:count_label) omitted_rows with
+    | Some row -> row
+    | None -> failf "narrow Edit dropped %s" count_label
+  in
+  let write = Evidence.written "first\nsecond\n" |> Evidence.to_yojson in
+  let write_rows =
+    projected_rows ~max_line_cells:24 Transcript.Full
+      (index
+         [ change_json
+             ~line_evidence:write
+             ~kind:(`Write "first\nsecond\n")
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let write_evidence_row =
+    match List.find_opt (contains ~needle:"new L1-2") write_rows with
+    | Some row -> row
+    | None -> fail "narrow Write dropped new L1-2"
+  in
+  List.iter
+    (fun row ->
+       check bool "narrow evidence row fits its cell budget" true
+         (Masc_tui_message_layout.display_width row <= 24))
+    [ omitted_evidence_row; write_evidence_row ]
 ;;
 
 let test_compact_projection_is_byte_unchanged () =
@@ -407,10 +652,22 @@ let () =
             test_target_line_comes_from_producer_evidence
         ; test_case "historical row opens at the top" `Quick
             test_target_line_without_evidence_is_the_visible_top
+        ; test_case "mismatched or unjoinable evidence is rejected" `Quick
+            test_mismatched_or_unjoinable_evidence_is_rejected
         ] )
     ; ( "projection"
       , [ test_case "full projection weaves replacement" `Quick
             test_full_projection_weaves_recorded_replacement
+        ; test_case "actual Edit range" `Quick
+            test_full_projection_shows_actual_edit_range
+        ; test_case "replace-all range annotations are bounded" `Quick
+            test_replace_all_shows_bounded_actual_ranges
+        ; test_case "omitted ranges keep count only" `Quick
+            test_omitted_ranges_keep_count_without_inventing_coordinates
+        ; test_case "deletion and Write ranges" `Quick
+            test_deletion_and_write_ranges_are_explicit
+        ; test_case "narrow evidence keeps authoritative facts" `Quick
+            test_narrow_evidence_rows_keep_the_authoritative_fact
         ; test_case "compact projection is unchanged" `Quick
             test_compact_projection_is_byte_unchanged
         ; test_case "write states unknown before" `Quick

@@ -1411,9 +1411,8 @@ let post_keeper_github_login_streaming ~clock ~(host : string) ~(port : int)
 (** Fetch what the working tree holds for one file ([GET /api/v1/git/diff]).
 
     The other half of the diff story. A file change says what a keeper tried
-    to write and carries no line numbers, because an [Edit] records two pieces
-    of text and not where in the file they sit. This says what is in the tree
-    now, with the numbers git computed.
+    to write and may carry producer-recorded ranges for that completed call.
+    This says what is in the tree now, with per-row numbers git computed.
 
     [keeper] names whose playground the path is read under, and the path is
     relative to that playground -- the same address the Changes surface

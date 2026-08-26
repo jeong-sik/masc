@@ -156,6 +156,14 @@ let decode_occurrences values =
   in
   loop [] values
 
+let list_has_exact_length expected values =
+  let rec loop remaining = function
+    | [] -> remaining = 0
+    | _ :: _ when remaining = 0 -> false
+    | _ :: rest -> loop (remaining - 1) rest
+  in
+  loop expected values
+
 let of_yojson = function
   | `Assoc fields ->
     (match List.assoc_opt "kind" fields with
@@ -171,12 +179,13 @@ let of_yojson = function
             then Error "edit ranges may be omitted only above the durable limit"
             else Ok (Edited { occurrence_count; occurrences = None })
           | Some (`List values) ->
-            let* occurrences = decode_occurrences values in
-            if List.length occurrences <> occurrence_count
-            then Error "edit occurrence_count does not match occurrences"
-            else if occurrence_count > max_recorded_edit_occurrences
+            if occurrence_count > max_recorded_edit_occurrences
             then Error "edit occurrence list exceeds the durable limit"
-            else Ok (Edited { occurrence_count; occurrences = Some occurrences })
+            else if not (list_has_exact_length occurrence_count values)
+            then Error "edit occurrence_count does not match occurrences"
+            else
+              let* occurrences = decode_occurrences values in
+              Ok (Edited { occurrence_count; occurrences = Some occurrences })
           | Some value ->
             Error
               (Printf.sprintf "occurrences must be an array or null, got %s"
@@ -185,9 +194,11 @@ let of_yojson = function
      | Some (`String "write") ->
        (match List.assoc_opt "new_range" fields with
         | Some value ->
-          Result.map
-            (fun new_range -> Written { new_range })
-            (optional_line_range_of_yojson value)
+          Result.bind (optional_line_range_of_yojson value) (fun new_range ->
+            match new_range with
+            | Some range when range.start_line <> 1 ->
+              Error "write new_range must start at line one"
+            | Some _ | None -> Ok (Written { new_range }))
         | None -> Error "new_range is absent")
      | Some (`String kind) -> Error (Printf.sprintf "unknown evidence kind %S" kind)
      | Some value ->

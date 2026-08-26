@@ -1898,8 +1898,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
       :: List.map
            (fun (kind, id) ->
+             (* [Link.parse] percent-decodes the id segment, so a body that
+                writes masc://board/%1b%5b2J hands this line real escape
+                bytes. The kind is a closed variant and needs no sanitizer;
+                the id is whatever the writer typed. *)
              Printf.sprintf "  %s%-10s %s%s" Ansi.reset
-               (Link.kind_label kind) id Ansi.reset)
+               (Link.kind_label kind)
+               (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
+               Ansi.reset)
            referenced
   in
   let related_lines =

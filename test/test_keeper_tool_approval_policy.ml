@@ -3,14 +3,14 @@ open Alcotest
 module Policy = Masc.Keeper_tool_approval_policy
 module Descriptor = Masc.Keeper_tool_descriptor
 
-let asks ?composition_plan_index ~tool_name ~input =
-  match Policy.verdict_for ?composition_plan_index ~tool_name ~input with
+let asks ~composition_plan_index ~tool_name ~input =
+  match Policy.verdict_for ~composition_plan_index ~tool_name ~input with
   | Policy.Ask _ -> true
   | Policy.Run _ -> false
 
-let because ?composition_plan_index ~tool_name ~input =
+let because ~composition_plan_index ~tool_name ~input =
   Policy.verdict_because
-    (Policy.verdict_for ?composition_plan_index ~tool_name ~input)
+    (Policy.verdict_for ~composition_plan_index ~tool_name ~input)
 
 let no_input = `Assoc []
 
@@ -20,7 +20,7 @@ let no_input = `Assoc []
 let test_the_split_over_the_real_catalogue () =
   let asked, ran =
     Descriptor.public_names ()
-    |> List.partition (fun tool_name -> asks ~tool_name ~input:no_input)
+    |> List.partition (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
   in
   check (slist string String.compare) "only the tools that change something"
     [ "Edit"; "Execute"; "Write" ] asked;
@@ -30,26 +30,26 @@ let test_the_split_over_the_real_catalogue () =
 let test_reading_is_never_asked_about () =
   (* Reading to answer a question is the bulk of what a keeper does. *)
   check bool "reading a file" false
-    (asks ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+    (asks ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
   check string "and the reason says why" "this call only reads"
-    (because ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
+    (because ~composition_plan_index:None ~tool_name:"Read" ~input:(`Assoc [ "file_path", `String "a.ml" ]))
 
 let test_writing_and_running_are_asked_about () =
   check bool "editing a file" true
-    (asks ~tool_name:"Edit" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+    (asks ~composition_plan_index:None ~tool_name:"Edit" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
   check bool "writing a file" true
-    (asks ~tool_name:"Write" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
+    (asks ~composition_plan_index:None ~tool_name:"Write" ~input:(`Assoc [ "file_path", `String "a.ml" ]));
   check bool "running a program" true
-    (asks ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
+    (asks ~composition_plan_index:None ~tool_name:"Execute" ~input:(`Assoc [ "argv", `List [ `String "rm" ] ]))
 
 let test_an_unclassifiable_tool_is_asked_about () =
   (* An unknown tool is not a safe tool. If it ran unasked, "no descriptor"
      would be the quietest way past the gate. *)
   check bool "a tool no descriptor claims" true
-    (asks ~tool_name:"not-a-real-tool" ~input:no_input);
+    (asks ~composition_plan_index:None ~tool_name:"not-a-real-tool" ~input:no_input);
   check string "and the reason names the gap"
     "no descriptor declares what this tool does"
-    (because ~tool_name:"not-a-real-tool" ~input:no_input)
+    (because ~composition_plan_index:None ~tool_name:"not-a-real-tool" ~input:no_input)
 
 let test_every_group_is_classified () =
   (* The groups are a closed type and the policy matches all of them, so this
@@ -111,11 +111,11 @@ let with_index rows f =
 let test_a_plan_of_reads_runs_unasked () =
   with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun index ->
     check bool "a composition that only reads is not asked about" false
-      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_reading"
+      (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_reading"
          ~input:no_input);
     check bool "the reason counts the nodes it cleared" true
       (String.length
-         (because ~composition_plan_index:index
+         (because ~composition_plan_index:(Some index)
             ~tool_name:"keeper_compose_reading" ~input:no_input)
        > 0))
 ;;
@@ -123,10 +123,10 @@ let test_a_plan_of_reads_runs_unasked () =
 let test_one_writing_node_asks_and_names_itself () =
   with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun index ->
     check bool "one node that changes something asks for the whole plan" true
-      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+      (asks ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_mixed"
          ~input:no_input);
     let reason =
-      because ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+      because ~composition_plan_index:(Some index) ~tool_name:"keeper_compose_mixed"
         ~input:no_input
     in
     (* Without the node name the operator sees a composition name and has to
@@ -142,21 +142,21 @@ let test_same_name_is_isolated_between_turn_indexes () =
   Index.record first_turn ~composition ~node_tools:[ "Read" ];
   Index.record second_turn ~composition ~node_tools:[ "Write" ];
   check bool "first turn keeps its read-only plan" false
-    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input);
+    (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input);
   check bool "second turn sees its writing plan" true
-    (asks ~composition_plan_index:second_turn ~tool_name:composition ~input:no_input);
+    (asks ~composition_plan_index:(Some second_turn) ~tool_name:composition ~input:no_input);
   check bool "second writer did not mutate the first turn" false
-    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input)
+    (asks ~composition_plan_index:(Some first_turn) ~tool_name:composition ~input:no_input)
 ;;
 
 let test_an_unrecorded_name_is_still_unclassifiable () =
   with_index [] (fun index ->
     check bool "a name that is not a composition keeps the old answer" true
-      (asks ~composition_plan_index:index
+      (asks ~composition_plan_index:(Some index)
          ~tool_name:"keeper_compose_never_declared" ~input:no_input);
     check string "and keeps the old reason"
       "no descriptor declares what this tool does"
-      (because ~composition_plan_index:index
+      (because ~composition_plan_index:(Some index)
          ~tool_name:"keeper_compose_never_declared" ~input:no_input))
 ;;
 
@@ -180,20 +180,20 @@ let plan_input tools =
 let test_ad_hoc_plan_of_reads_runs_unasked () =
   with_index [] (fun _ ->
     check bool "an ad-hoc plan of reads is not asked about" false
-      (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Grep" ])))
+      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Grep" ])))
 ;;
 
 let test_ad_hoc_plan_with_a_write_asks () =
   with_index [] (fun _ ->
     check bool "an ad-hoc plan that writes is asked about" true
-      (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Execute" ])));
+      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Execute" ])));
 ;;
 
 let test_a_malformed_plan_is_asked_about () =
   with_index [] (fun _ ->
     (* Not "a plan whose nodes are all reads". The tool will reject it too. *)
     check bool "a plan_execute call with no nodes field is asked about" true
-      (asks ~tool_name:"keeper_plan_execute" ~input:no_input))
+      (asks ~composition_plan_index:None ~tool_name:"keeper_plan_execute" ~input:no_input))
 ;;
 
 (* The invariant every task in this goal is checked against: nothing that runs
@@ -203,7 +203,7 @@ let test_no_direct_call_became_asked () =
   with_index [] (fun _ ->
     let asked_now =
       Descriptor.public_names ()
-      |> List.filter (fun tool_name -> asks ~tool_name ~input:no_input)
+      |> List.filter (fun tool_name -> asks ~composition_plan_index:None ~tool_name ~input:no_input)
     in
     check (slist string String.compare) "the asked set is unchanged"
       [ "Edit"; "Execute"; "Write" ] asked_now)
@@ -218,13 +218,13 @@ module Catalog = Masc.Keeper_tool_composition_catalog
 let test_reading_a_request_status_runs_unasked () =
   with_index [] (fun _ ->
     check bool "reading the status of a request this keeper made is not asked about"
-      false (asks ~tool_name:Catalog.status_tool_name ~input:no_input))
+      false (asks ~composition_plan_index:None ~tool_name:Catalog.status_tool_name ~input:no_input))
 ;;
 
 let test_cancelling_a_request_runs_unasked () =
   with_index [] (fun _ ->
     check bool "cancelling a request inside masc is not asked about" false
-      (asks ~tool_name:Catalog.cancel_tool_name ~input:no_input))
+      (asks ~composition_plan_index:None ~tool_name:Catalog.cancel_tool_name ~input:no_input))
 ;;
 
 (* The names come from the catalog the surface builds these tools from, so a

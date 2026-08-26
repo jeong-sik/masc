@@ -937,11 +937,19 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_keeper_message"
        ~callee:"Observation_layout.context_header_item");
-  check int "chat context item measures the actual header budget" 2
-    (Ast_grep.count_calls_in_value_binding
+  (* The budget handed to the context item must come from measured cells, or
+     a CJK title (two cells per character) overflows the box and [box_line]
+     cuts a reading into a different statement. Counting every
+     [display_width] in this binding froze the header's shape instead: the
+     identity budget measures here too, so adding a header segment moved the
+     total and failed a contract it never touched. Bind the measurement to
+     the argument that needs it. *)
+  check int "chat context item measures the actual header budget" 1
+    (Ast_grep.count_applications_with_label_containing_call_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_keeper_message"
-       ~callee:"Message_layout.display_width");
+       ~callee:"Observation_layout.context_header_item" ~label:"max_cells"
+       ~nested_callee:"Message_layout.display_width");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1809,7 +1817,12 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ];
   check_fields "render_board_list"
     [ "board_list_error"; "bp_id"; "bp_author"; "bp_title" ];
-  check_fields ~non_rendering_calls:[ "Board_detail.view_for" ]
+  (* [String.equal] keeps a post out of its own related list. Comparison never
+     reaches the terminal, and sanitizing first would be wrong besides: two
+     different ids can fold to one line, and identity must read the raw id. *)
+  check_fields
+    ~non_rendering_calls:
+      [ "Board_detail.view_for"; "String.equal"; "Link.scan" ]
     "board_read_pane"
     [ "bp_id"
     ; "bp_author"
@@ -1819,9 +1832,16 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
     ; "bc_author"
     ; "bc_content"
     ];
+  (* [Link.scan] reads the body without drawing it, but what it returns is
+     drawn -- and [Link.parse] percent-decodes, so an id can carry the escape
+     bytes the body could not. Sanitize where it lands. *)
+  check_identifiers ~module_path:render_path ~binding:"board_read_pane"
+    ~callees:sanitizer_calls [ "id" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
-  check_fields "render_planning_detail"
+  (* [List.mem] asks which tasks name this goal. Membership never reaches the
+     terminal, and the rows it selects are sanitized where they are drawn. *)
+  check_fields ~non_rendering_calls:[ "List.mem" ] "render_planning_detail"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could

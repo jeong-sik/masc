@@ -273,7 +273,9 @@ let test_every_bundle_tool_is_classifiable () =
     let unclassifiable =
       List.filter
         (fun tool_name ->
-           not (Policy.classifies ~composition_plan_index ~tool_name))
+           not
+             (Policy.classifies
+                ~composition_plan_index:(Some composition_plan_index) ~tool_name))
         names
     in
     match unclassifiable with

@@ -135,7 +135,8 @@ let snapshot_rejections_json snapshot =
    Dashboard projected the configured source set; one workspace therefore had
    two different answers. Refreshing through the publisher preserves exact
    source precedence and gives the turn the same immutable bytes the operator
-   sees. Any rejected document still fails the turn closed. *)
+   sees. Rejected documents remain absent from the tool surface and visible in
+   the snapshot/API; they do not take unrelated Keeper turns down with them. *)
 let load_skill_catalog ~base_path =
   match refresh_skill_snapshot ~base_path with
   | Error _ as error -> error
@@ -150,27 +151,29 @@ let load_skill_catalog ~base_path =
      | Skill_catalog_snapshot.Config_unreadable { detail } ->
        Error (skill_catalog_config_error detail)
      | Skill_catalog_snapshot.Configured _ ->
-       let rejections = Skill_catalog_snapshot.rejections snapshot in
-       if rejections <> []
+       let snapshot_rejections = Skill_catalog_snapshot.rejections snapshot in
+       if snapshot_rejections <> []
        then
-         Error
-           (skill_catalog_config_error
-              (Printf.sprintf
-                 "published skill snapshot rejected %d document(s): %s"
-                 (List.length rejections)
-                 (Yojson.Safe.to_string (snapshot_rejections_json snapshot))))
-       else (
-         let documents =
-           Skill_catalog_snapshot.effective_entries snapshot
-           |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
-             entry.directory, entry.source_text)
-         in
-         match Keeper_skill_catalog.of_documents documents with
-         | Ok catalog -> Ok catalog
-         | Error error ->
-           Error
-             (skill_catalog_config_error
-                (Keeper_skill_catalog.error_to_string error))))
+         Log.Keeper.warn
+           "Skill snapshot omitted %d rejected document(s): %s"
+           (List.length snapshot_rejections)
+           (Yojson.Safe.to_string (snapshot_rejections_json snapshot));
+       let documents =
+         Skill_catalog_snapshot.effective_entries snapshot
+         |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
+           entry.directory, entry.source_text)
+       in
+       let catalog, keeper_rejections =
+         Keeper_skill_catalog.partition_documents documents
+       in
+       List.iter
+         (fun (rejected : Keeper_skill_catalog.rejected_document) ->
+            Log.Keeper.warn
+              "Skill %S is absent from the Keeper surface: %s"
+              rejected.directory
+              (Keeper_skill_catalog.error_to_string rejected.error))
+         keeper_rejections;
+       Ok catalog)
 ;;
 
 let expected_model_tool_names ~skill_catalog ~identity_tool_names

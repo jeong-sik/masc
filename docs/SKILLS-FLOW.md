@@ -69,9 +69,11 @@ fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클
 `disable-model-invocation`은 둘 다 명시적으로 거부한다. composition 선언을 남겨 놓고
 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
 
-**실패와 편차는 다르다**: `of_documents`가 문서를 실제로 파싱하지 못하면 카탈로그
-전체가 `Error`다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/
-plan 오류·중복 스킬은 turn-blocking이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
+**실패와 편차는 다르다**: strict validator인 `of_documents`는 첫 파싱 실패를 `Error`로
+돌려준다. 실제 turn loader는 `partition_documents`로 잘못된 문서만 표면에서 제외하고
+나머지 스킬을 계속 제공한다. 그 이름을 task가 지명하면 admission에서 typed missing으로
+막힌다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/plan 오류·중복
+스킬은 해당 문서의 rejection이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
 `Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
 디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
 

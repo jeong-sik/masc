@@ -1516,6 +1516,12 @@ let assistant_message_of_response (response : api_response) =
 
 type content_delta =
   | TextDelta of string
+  | TextSnapshot of string
+  (** A complete text value at this content-block index. Unlike [TextDelta],
+          this constructor explicitly authorizes exact-prefix reconciliation:
+          the canonical stream state emits only the unseen suffix and suppresses
+          an equal/older replay. Producers must never label an ordinary
+          incremental chunk as a snapshot. *)
   | ThinkingDelta of string
   | ThinkingSignatureDelta of string
   | ReasoningDetailsDelta of
@@ -1646,6 +1652,14 @@ type stream_error =
       ; response : string
       ; raw : string
       }
+
+(** Canonical decision for one provider stream event. The stream state machine
+    is the sole producer; effect shells and projections consume this closed
+    sum instead of redeclaring their own resolution vocabulary. *)
+type stream_event_resolution =
+  | Stream_event_accepted of sse_event
+  | Stream_event_suppressed
+  | Stream_event_rejected of stream_error
 
 (** {1 Convenience Constructors}
 

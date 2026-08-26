@@ -64,6 +64,21 @@ let mcp_call_with_id id =
 
 let mcp_call = mcp_call_with_id "1"
 
+let native_tool_call_block ~turn_id ~call_id ~tool_name =
+  Printf.sprintf
+    {|{"type":"assistant","session_id":"__SESSION__","uuid":"assistant-%s","message":{"role":"assistant","model":"claude-fixture","content":[{"type":"tool_use","id":"%s","name":"%s"}]}}|}
+    turn_id
+    call_id
+    tool_name
+;;
+
+let native_tool_result ~call_id ~content =
+  Printf.sprintf
+    {|{"type":"user","session_id":"__SESSION__","uuid":"user-native-result-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%S}]}}|}
+    call_id
+    content
+;;
+
 type fixture_step =
   | Emit of string
   | Emit_and_read of string
@@ -628,6 +643,112 @@ let test_keeper_projects_masc_tool () =
                "RAW trace contains tool output"
                true
                (String_util.contains_substring raw "MASC_TOOL_RESULT")))
+;;
+
+(* WP1 completion trigger (native tool provenance): each official-client
+   runtime fixture must emit a native tool event that is distinguishable from
+   a MASC/MCP dynamic-tool event by a typed record_type, not by a string
+   heuristic over tool names, with matching counts and zero unknown-origin
+   events. antigravity (test_keeper_antigravity_runtime.ml) and codex
+   (test_runtime_codex_app_server.ml) already cover this; before this test,
+   claude_code had zero coverage even though runtime_claude_code.ml emits
+   [Native_tool_started]/[Native_tool_finished] (see await_terminal) alongside
+   [Dynamic_tool_started]/[Dynamic_tool_finished] for MCP/MASC tool calls on a
+   separate control-request channel. This fixture drives one of each in a
+   single turn and asserts the RAW trace record_type counts. *)
+let test_keeper_distinguishes_native_and_masc_tool_provenance () =
+  let base_path = temp_workspace () in
+  let raw_trace_path = Filename.concat base_path "claude-native-raw-trace.jsonl" in
+  let raw_trace =
+    Agent_core.Raw_trace.create ~path:raw_trace_path ()
+    |> Result.map_error (fun error -> fail (Agent_core.Error.to_string error))
+    |> Result.get_ok
+  in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-native-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Bash")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (assistant ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ; Emit (result ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~base_path
+               ~cli_path
+               ~goal:"USE_NATIVE_AND_MASC_TOOLS"
+               ~raw_trace
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok turn ->
+             check string
+               "native+masc tool response"
+               "MASC_CLAUDE_NATIVE"
+               (keeper_response_text turn);
+             let records =
+               match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
+               | Ok records -> records
+               | Error error -> fail (Agent_core.Error.to_string error)
+             in
+             let records_of_type record_type =
+               List.filter
+                 (fun (record : Agent_core.Raw_trace.record) ->
+                    record.record_type = record_type)
+                 records
+             in
+             check int
+               "native tool start count"
+               1
+               (List.length (records_of_type Native_tool_started));
+             check int
+               "native tool finish count"
+               1
+               (List.length (records_of_type Native_tool_finished));
+             check int
+               "MASC tool execution start count"
+               1
+               (List.length (records_of_type Tool_execution_started));
+             check int
+               "MASC tool execution finish count"
+               1
+               (List.length (records_of_type Tool_execution_finished));
+             let native_start = List.hd (records_of_type Native_tool_started) in
+             check
+               (option string)
+               "native call id"
+               (Some "native-call-1")
+               native_start.tool_use_id;
+             check
+               (option string)
+               "native tool name"
+               (Some "Bash")
+               native_start.tool_name))
 ;;
 
 let test_keeper_streams_text_and_tool_events () =
@@ -1395,6 +1516,10 @@ let () =
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
         ; test_case "projects MASC tool" `Quick test_keeper_projects_masc_tool
+        ; test_case
+            "distinguishes native and MASC tool provenance"
+            `Quick
+            test_keeper_distinguishes_native_and_masc_tool_provenance
         ; test_case
             "streams text and tool events"
             `Quick

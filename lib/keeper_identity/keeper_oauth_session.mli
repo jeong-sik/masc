@@ -31,11 +31,16 @@ type started = {
   state : string;
       (** What the callback will echo. Returned so a caller can show which
           login it is waiting on without reaching into the table. *)
-  client_id : string;
+  credentials : Keeper_oauth_client_store.credentials;
+      (** What the exchange will be redeemed with. A secret is here when the
+          server answered registration with one, which is how a confidential
+          client is recognised -- the metadata cannot be read for it: Vercel
+          and Hugging Face both omit "none" from the methods they publish and
+          both register a public client. *)
   registered_now : bool;
       (** True when this call had to register the client. The caller should
-          persist [client_id] when so; otherwise every login registers again
-          and leaves a client record behind each time. *)
+          persist [credentials] when so; otherwise every login registers
+          again and leaves a client record behind each time. *)
 }
 
 val start :
@@ -46,10 +51,10 @@ val start :
      redirect_uri:string ->
      (Keeper_oauth_registration.registered, Keeper_oauth_registration.error) result) ->
   provider:Keeper_oauth_provider.t ->
-  configured_client_id:string option ->
-      (** What an operator already set up, if anything. An operator who made
-          their own app keeps using it; registration is only for the case
-          where nobody did. *)
+  configured:Keeper_oauth_client_store.credentials option ->
+      (** What this install already registered, if anything. Reused rather
+          than registering again, which would leave a second client behind on
+          a server nobody here administers. *)
   client_name:string ->
   redirect_uri:string ->
   keeper:string ->

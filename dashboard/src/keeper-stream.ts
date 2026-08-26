@@ -3,6 +3,7 @@ import {
   operationDeliveryProvenance,
   isOperationDeliveryProvenance,
   toolCallDeliveryProvenance,
+  toolDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
   formatKeeperVisibleReply,
@@ -43,7 +44,6 @@ import {
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import {
   nonBlankToolCallId,
-  toolEntryIdFromCallId,
 } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-local'
@@ -51,7 +51,6 @@ import { updateTrackedKeeperChatAssistantDraft } from './keeper-chat-operations-
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
-const pendingAgentCoreToolBlockIndexes = new Map<string, number>()
 const pendingAgentCoreTextBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingState {
@@ -62,6 +61,57 @@ interface PendingThinkingState {
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
+const quarantinedToolOccurrences = new Set<string>()
+
+function liveToolEntryPrefix(assistantEntryId: string): string {
+  return `tool-delivery-${assistantEntryId}-`
+}
+
+function streamedToolOccurrenceId(
+  assistantEntryId: string,
+  streamScope: number,
+  blockIndex: number,
+): string {
+  return `${liveToolEntryPrefix(assistantEntryId)}stream-${streamScope}-block-${blockIndex}`
+}
+
+function quarantinedToolOccurrenceKey(
+  keeperName: string,
+  assistantEntryId: string,
+  toolOccurrenceId: string,
+): string {
+  return `${keeperName}\u0000${assistantEntryId}\u0000${toolOccurrenceId}`
+}
+
+function quarantineToolOccurrence(
+  keeperName: string,
+  assistantEntryId: string,
+  toolOccurrenceId: string,
+): void {
+  quarantinedToolOccurrences.add(
+    quarantinedToolOccurrenceKey(keeperName, assistantEntryId, toolOccurrenceId),
+  )
+}
+
+function isToolOccurrenceQuarantined(
+  keeperName: string,
+  assistantEntryId: string,
+  toolOccurrenceId: string,
+): boolean {
+  return quarantinedToolOccurrences.has(
+    quarantinedToolOccurrenceKey(keeperName, assistantEntryId, toolOccurrenceId),
+  )
+}
+
+function clearQuarantinedToolOccurrences(
+  keeperName: string,
+  assistantEntryId: string,
+): void {
+  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
+  for (const key of quarantinedToolOccurrences) {
+    if (key.startsWith(prefix)) quarantinedToolOccurrences.delete(key)
+  }
+}
 
 // AG-UI text messages are delivered at-least-once: a WS/SSE reconnect can
 // replay a message's START/CONTENT/END, and an overlapping observer socket can
@@ -98,6 +148,44 @@ function textStreamMessageId(value: unknown): string | null {
 
 function clearTextMessageStreamState(keeperName: string, assistantEntryId: string): void {
   textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
+}
+
+function resetUnfinishedRuntimeAttempt(
+  keeperName: string,
+  assistantEntryId: string,
+): void {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  const pending = pendingThinkingDeltas.get(key)
+  if (pending?.flushHandle) cancelStreamFlush(pending.flushHandle)
+  pendingThinkingDeltas.delete(key)
+  clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+  clearTextMessageStreamState(keeperName, assistantEntryId)
+  updateThreadEntry(keeperName, assistantEntryId, entry => ({
+    ...entry,
+    text: '',
+    rawText: '',
+    blocks: (entry.blocks ?? []).filter(block => (
+      block.t !== 'p' && block.t !== 'thinking'
+    )),
+    traceSteps: (entry.traceSteps ?? []).filter(step => step.kind === 'tool'),
+    details: entry.details
+      ? {
+          ...entry.details,
+          providerMessageId: null,
+          modelUsed: null,
+          stopReason: null,
+          usage: null,
+          costUsd: null,
+        }
+      : entry.details,
+    streamState: 'streaming',
+    delivery: 'streaming',
+    streamContract: keeperStreamContract(
+      'sse_event',
+      'backend_stream_event',
+      { eventName: 'KEEPER_RUNTIME_ATTEMPT_STARTED' },
+    ),
+  }))
 }
 
 function scheduleThinkingFlush(callback: () => void): ScheduledFlushHandle {
@@ -214,9 +302,9 @@ export function _resetKeeperStreamBuffersForTests(): void {
     }
   }
   pendingThinkingDeltas.clear()
-  pendingAgentCoreToolBlockIndexes.clear()
   pendingAgentCoreTextBlockIndexes.clear()
   textMessageStreamStates.clear()
+  quarantinedToolOccurrences.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -248,7 +336,10 @@ function recordStreamProtocolError(
   keeperName: string,
   assistantEntryId: string,
   message: string,
-  toolCallId?: string,
+  target: {
+    toolOccurrenceId?: string
+    authoritativeQuarantine?: boolean
+  } = {},
 ): void {
   updateThreadEntry(keeperName, assistantEntryId, entry => {
     const line = `[stream protocol] ${message}`
@@ -258,61 +349,26 @@ function recordStreamProtocolError(
       error: message,
     }
   })
-  const id = nonBlankToolCallId(toolCallId)
-  if (id) {
-    markAssistantToolTraceErrored(keeperName, assistantEntryId, id)
-    updateThreadEntry(keeperName, toolEntryIdFromCallId(id), entry => ({
-      ...entry,
-      delivery: 'error',
-      streamState: null,
-      error: message,
-    }))
+  const occurrenceId = target.toolOccurrenceId?.trim()
+  if (!occurrenceId) return
+  const toolEntry = (keeperThreads.value[keeperName] ?? []).find(entry => (
+    entry.role === 'tool'
+    && entry.id === occurrenceId
+    && entry.id.startsWith(liveToolEntryPrefix(assistantEntryId))
+    && (target.authoritativeQuarantine || entry.executionId == null)
+  ))
+  if (!toolEntry) return
+  if (target.authoritativeQuarantine) {
+    quarantineToolOccurrence(keeperName, assistantEntryId, occurrenceId)
   }
-}
-
-function agentCoreToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
-  return `${keeperName}\u0000${assistantEntryId}\u0000${toolCallId}`
-}
-
-function rememberAgentCoreToolBlockIndex(
-  keeperName: string,
-  assistantEntryId: string,
-  toolCallId: string,
-  index: number | undefined,
-): void {
-  const id = nonBlankToolCallId(toolCallId)
-  if (!id || index === undefined) return
-  pendingAgentCoreToolBlockIndexes.set(agentCoreToolBlockKey(keeperName, assistantEntryId, id), index)
-}
-
-function takeAgentCoreToolBlockIndex(
-  keeperName: string,
-  assistantEntryId: string,
-  toolCallId: string,
-): number | undefined {
-  const key = agentCoreToolBlockKey(keeperName, assistantEntryId, toolCallId)
-  const index = pendingAgentCoreToolBlockIndexes.get(key)
-  pendingAgentCoreToolBlockIndexes.delete(key)
-  return index
-}
-
-function forgetAgentCoreToolBlockIndexByIndex(
-  keeperName: string,
-  assistantEntryId: string,
-  index: number | undefined,
-): void {
-  if (index === undefined) return
-  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const [key, value] of pendingAgentCoreToolBlockIndexes.entries()) {
-    if (key.startsWith(prefix) && value === index) pendingAgentCoreToolBlockIndexes.delete(key)
-  }
-}
-
-function clearPendingAgentCoreToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
-  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
-  for (const key of pendingAgentCoreToolBlockIndexes.keys()) {
-    if (key.startsWith(prefix)) pendingAgentCoreToolBlockIndexes.delete(key)
-  }
+  markAssistantToolTraceErrored(keeperName, assistantEntryId, toolEntry.id)
+  updateThreadEntry(keeperName, toolEntry.id, entry => ({
+    ...entry,
+    toolCallEnded: target.authoritativeQuarantine ? true : entry.toolCallEnded,
+    delivery: 'error',
+    streamState: null,
+    error: message,
+  }))
 }
 
 function rememberAgentCoreTextBlockIndex(
@@ -419,8 +475,8 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       error: null,
       timestamp: new Date().toISOString(),
     })
-    clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, entryId)
     clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
+    clearQuarantinedToolOccurrences(keeperName, entryId)
   }
   if (operationId) clearActiveStream(keeperName, operationId)
   if (activeStreamEntryId(keeperName) === null) {
@@ -636,19 +692,24 @@ export function applyKeeperStreamEvent(
         if (streamState.activeMessageId === messageId) streamState.activeMessageId = null
       }
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       markFinalizingIfLive('TEXT_MESSAGE_END')
       return null
     }
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = nonBlankToolCallId(event.toolCallId)
+      const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
       const toolName = event.toolCallName?.trim()
-      if (!toolCallId || !toolName) {
+      const toolOccurrenceId = streamedToolOccurrenceId(
+        assistantEntryId,
+        event.toolStreamScope,
+        event.toolCallBlockIndex,
+      )
+      if (!toolName) {
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
-          'TOOL_CALL_START missing toolCallId or toolCallName',
+          'TOOL_CALL_START missing toolCallName',
+          { toolOccurrenceId },
         )
         return null
       }
@@ -657,29 +718,47 @@ export function applyKeeperStreamEvent(
       })
       const assistantEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === assistantEntryId)
+      const existingOccurrence = (keeperThreads.value[keeperName] ?? [])
+        .find(entry => entry.id === toolOccurrenceId)
+      if (existingOccurrence) {
+        const providerIdConflict = toolCallId
+          && existingOccurrence.toolCallId
+          && existingOccurrence.toolCallId !== toolCallId
+        if (existingOccurrence.label !== toolName || providerIdConflict) {
+          recordStreamProtocolError(
+            keeperName,
+            assistantEntryId,
+            'TOOL_CALL_START conflicts with an existing server occurrence',
+            { toolOccurrenceId },
+          )
+        }
+        return null
+      }
+      const agentCoreBlockIndex = event.toolCallBlockIndex
       const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
-      const existingOrdinal = toolSteps.findIndex(step => step.toolCallId === toolCallId)
-      const toolOrdinal = existingOrdinal >= 0 ? existingOrdinal : toolSteps.length
-      const deliveryProvenance = toolCallDeliveryProvenance(
+      const toolOrdinal = toolSteps.length
+      const deliveryProvenance = toolDeliveryProvenance(
         assistantEntry?.deliveryProvenance,
-        toolCallId,
         toolOrdinal,
       )
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
+        toolOccurrenceId,
         name: toolName,
-        agentCoreBlockIndex: takeAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId),
+        agentCoreBlockIndex,
       })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
       insertThreadEntryBefore(keeperName, assistantEntryId, {
-        id: toolEntryIdFromCallId(toolCallId),
+        id: toolOccurrenceId,
         role: 'tool',
         source: 'tool_result',
         label: toolName,
         text: '',
         rawText: '',
         timestamp: new Date().toISOString(),
+        toolCallId,
+        toolCallEnded: false,
         deliveryProvenance,
         delivery: 'streaming',
         streamState: 'streaming',
@@ -690,26 +769,54 @@ export function applyKeeperStreamEvent(
     }
     case 'TOOL_CALL_ARGS': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = nonBlankToolCallId(event.toolCallId)
-      if (!toolCallId) {
+      const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
+      const snapshot = event.snapshot
+      const toolOccurrenceId = streamedToolOccurrenceId(
+        assistantEntryId,
+        event.toolStreamScope,
+        event.toolCallBlockIndex,
+      )
+      const toolEntry = (keeperThreads.value[keeperName] ?? [])
+        .find(entry => entry.id === toolOccurrenceId)
+      if (!toolEntry) {
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
-          'TOOL_CALL_ARGS missing toolCallId',
+          'TOOL_CALL_ARGS names no open server occurrence',
+          { toolOccurrenceId },
         )
         return null
       }
-      const snapshot = event.snapshot
-      if (toolCallId && typeof snapshot === 'string') {
-        setAssistantToolTraceArgsSnapshot(keeperName, assistantEntryId, toolCallId, snapshot)
-        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
+      if (toolEntry.toolCallEnded) {
+        // The occurrence already has an authoritative terminal state (normal
+        // END/RESULT or quarantine). Diagnose the late event on the assistant
+        // row without rewriting that terminal tool evidence.
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_ARGS names no open server occurrence',
+        )
+        return null
+      }
+      if (toolCallId && toolEntry.toolCallId && toolEntry.toolCallId !== toolCallId) {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_ARGS provider correlation conflicts with its server occurrence',
+          { toolOccurrenceId },
+        )
+        return null
+      }
+      if (typeof snapshot === 'string') {
+        setAssistantToolTraceArgsSnapshot(keeperName, assistantEntryId, toolEntry.id, snapshot)
+        updateThreadEntry(keeperName, toolEntry.id, entry => ({
           ...entry,
           text: snapshot,
           rawText: snapshot,
         }))
-      } else if (toolCallId && typeof event.delta === 'string' && event.delta) {
-        appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolCallId, event.delta)
-        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
+      } else if (typeof event.delta === 'string' && event.delta) {
+        appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolEntry.id, event.delta)
+        updateThreadEntry(keeperName, toolEntry.id, entry => ({
           ...entry,
           text: `${entry.text}${event.delta}`,
           rawText: `${entry.rawText ?? entry.text}${event.delta}`,
@@ -719,36 +826,110 @@ export function applyKeeperStreamEvent(
     }
     case 'TOOL_CALL_END': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      const toolCallId = nonBlankToolCallId(event.toolCallId)
-      if (!toolCallId) {
+      const toolCallId = nonBlankToolCallId(event.toolCallId) ?? undefined
+      const toolOccurrenceId = streamedToolOccurrenceId(
+        assistantEntryId,
+        event.toolStreamScope,
+        event.toolCallBlockIndex,
+      )
+      const toolEntry = (keeperThreads.value[keeperName] ?? [])
+        .find(entry => entry.id === toolOccurrenceId)
+      if (!toolEntry) {
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
-          'TOOL_CALL_END missing toolCallId',
+          'TOOL_CALL_END names no server occurrence',
+          { toolOccurrenceId },
         )
         return null
       }
-      if (toolCallId) {
-        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => {
-          if (entry.delivery === 'delivered') return entry
-          return {
-            ...entry,
-            delivery: 'streaming',
-            streamState: 'streaming',
-            streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
-          }
-        })
+      if (isToolOccurrenceQuarantined(keeperName, assistantEntryId, toolOccurrenceId)) {
+        updateThreadEntry(keeperName, toolEntry.id, entry => ({
+          ...entry,
+          toolCallEnded: true,
+        }))
+        return null
       }
+      if (toolEntry.toolCallEnded) return null
+      if (toolCallId && toolEntry.toolCallId && toolEntry.toolCallId !== toolCallId) {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_END provider correlation conflicts with its server occurrence',
+          { toolOccurrenceId },
+        )
+        return null
+      }
+      updateThreadEntry(keeperName, toolEntry.id, entry => {
+        if (entry.delivery === 'delivered') return { ...entry, toolCallEnded: true }
+        return {
+          ...entry,
+          toolCallEnded: true,
+          delivery: 'streaming',
+          streamState: 'streaming',
+          streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
+        }
+      })
       return null
     }
     case 'CUSTOM': {
       const customEventName: string = event.name
       if (event.name === 'KEEPER_TOOL_RESULT_READY') {
-        const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
-        if (!toolCallId) return 'KEEPER_TOOL_RESULT_READY missing tool_call_id'
-        markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
-        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
+        const toolCallId = nonBlankToolCallId(event.value.toolCallId) ?? undefined
+        const executionId = event.value.executionId
+        if (!executionId.trim()) return 'KEEPER_TOOL_RESULT_READY missing executionId'
+        const toolOccurrenceId = streamedToolOccurrenceId(
+          assistantEntryId,
+          event.value.toolStreamScope,
+          event.value.toolCallBlockIndex,
+        )
+        if (isToolOccurrenceQuarantined(keeperName, assistantEntryId, toolOccurrenceId)) {
+          return 'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence'
+        }
+        const toolEntry = (keeperThreads.value[keeperName] ?? [])
+          .find(entry => entry.id === toolOccurrenceId)
+        if (!toolEntry) return 'KEEPER_TOOL_RESULT_READY names no streamed server occurrence'
+        if (toolEntry.executionId === executionId) return null
+        const executionOwner = (keeperThreads.value[keeperName] ?? []).find(entry => (
+          entry.role === 'tool'
+          && entry.id.startsWith(liveToolEntryPrefix(assistantEntryId))
+          && entry.executionId === executionId
+        ))
+        if (executionOwner) {
+          return 'KEEPER_TOOL_RESULT_READY execution_id belongs to another tool occurrence'
+        }
+        if (toolCallId && toolEntry.toolCallId && toolEntry.toolCallId !== toolCallId) {
+          return 'KEEPER_TOOL_RESULT_READY provider correlation conflicts with its server occurrence'
+        }
+        const currentSlot = toolEntry?.deliveryProvenance?.transcript_slot
+        if (
+          currentSlot?.kind === 'tool_call'
+          && currentSlot.execution_id !== executionId
+        ) {
+          return 'KEEPER_TOOL_RESULT_READY conflicts with the recorded execution_id'
+        }
+        if (toolEntry.executionId != null) {
+          return toolEntry.executionId === executionId
+            ? null
+            : 'KEEPER_TOOL_RESULT_READY conflicts with the recorded execution_id'
+        }
+        const ordinal = currentSlot?.kind === 'tool_delivery' || currentSlot?.kind === 'tool_call'
+          ? currentSlot.ordinal
+          : null
+        const deliveryProvenance = ordinal === null
+          ? toolEntry?.deliveryProvenance ?? null
+          : toolCallDeliveryProvenance(toolEntry?.deliveryProvenance, executionId, ordinal)
+        markAssistantToolTraceEnded(
+          keeperName,
+          assistantEntryId,
+          toolEntry.id,
+          executionId,
+        )
+        updateThreadEntry(keeperName, toolEntry.id, entry => ({
           ...entry,
+          executionId,
+          toolCallEnded: true,
+          deliveryProvenance,
           delivery: 'delivered',
           streamState: null,
           streamContract: keeperStreamContract(
@@ -791,6 +972,10 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
+      if (event.name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') {
+        resetUnfinishedRuntimeAttempt(keeperName, assistantEntryId)
+        return null
+      }
       if (event.name === 'KEEPER_TOOL_APPROVAL_REQUESTED') {
         const toolCallId = nonBlankToolCallId(event.value.tool_call_id)
         if (!toolCallId) return 'KEEPER_TOOL_APPROVAL_REQUESTED missing tool_call_id'
@@ -803,6 +988,7 @@ export function applyKeeperStreamEvent(
           toolName,
           args: event.value.args,
           question,
+          because: event.value.because ?? '',
           askedAtMs: Date.now(),
           timeoutSec: null,
           answering: false,
@@ -859,7 +1045,6 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
         markFinalizingIfLive('KEEPER_STREAM_MESSAGE_STOP')
         return null
       }
@@ -878,13 +1063,8 @@ export function applyKeeperStreamEvent(
         const value = isRecord(event.value) ? event.value : null
         const agentCoreBlockIndex = asNumber(value?.index)
         const contentType = asString(value?.content_type)
-        const toolCallId = asString(value?.tool_call_id)
-        const toolName = asString(value?.tool_call_name)
         if (contentType === 'text') {
           rememberAgentCoreTextBlockIndex(keeperName, assistantEntryId, agentCoreBlockIndex)
-        }
-        if (toolCallId && toolName) {
-          rememberAgentCoreToolBlockIndex(keeperName, assistantEntryId, toolCallId, agentCoreBlockIndex)
         }
         setAssistantStreamState(
           keeperName,
@@ -897,12 +1077,6 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        const value = isRecord(event.value) ? event.value : null
-        forgetAgentCoreToolBlockIndexByIndex(
-          keeperName,
-          assistantEntryId,
-          asNumber(value?.index),
-        )
         setAssistantStreamState(
           keeperName,
           assistantEntryId,
@@ -932,17 +1106,22 @@ export function applyKeeperStreamEvent(
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
-        const value = isRecord(event.value) ? event.value : null
-        forgetAgentCoreToolBlockIndexByIndex(
-          keeperName,
-          assistantEntryId,
-          asNumber(value?.index),
-        )
+        const quarantinedOccurrence = event.value.quarantined_occurrence
+        const toolOccurrenceId = quarantinedOccurrence
+          ? streamedToolOccurrenceId(
+              assistantEntryId,
+              quarantinedOccurrence.toolStreamScope,
+              quarantinedOccurrence.toolCallBlockIndex,
+            )
+          : undefined
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
           streamProtocolMessage(event.value, 'stream protocol error'),
-          asString(value?.tool_call_id),
+          {
+            toolOccurrenceId,
+            authoritativeQuarantine: quarantinedOccurrence !== undefined,
+          },
         )
         return null
       }
@@ -1080,9 +1259,9 @@ export function applyKeeperStreamEvent(
     }
     case 'RUN_FINISHED':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
+      clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (!isOperationDeliveryProvenance(
@@ -1113,9 +1292,9 @@ export function applyKeeperStreamEvent(
       return null
     case 'RUN_ERROR':
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
-      clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
       clearTextMessageStreamState(keeperName, assistantEntryId)
+      clearQuarantinedToolOccurrences(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'

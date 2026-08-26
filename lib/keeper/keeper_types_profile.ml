@@ -40,9 +40,15 @@ let tool_result_ok_data ?(tool_name = "") data : tool_result =
     ()
 ;;
 
+(* [class_] is required, matching [Tool_result.error] one layer down. It used
+   to default to [Runtime_failure], which meant 80 of the 83 call sites said
+   "this tool crashed" without anyone deciding that. Argument validation and
+   not-found both arrived as faults, and [Tool_bridge] lowers a fault to
+   [Unknown] rather than [Deterministic] -- so an agent retried calls that
+   could never succeed. A default here undid a required argument there. *)
 let tool_result_error
       ?(tool_name = "")
-      ?(class_ = Tool_result.Runtime_failure)
+      ~class_
       body
   : tool_result
   =
@@ -56,7 +62,7 @@ let tool_result_error
 
 let tool_result_error_data
       ?(tool_name = "")
-      ?(class_ = Tool_result.Runtime_failure)
+      ~class_
       data
   : tool_result
   =

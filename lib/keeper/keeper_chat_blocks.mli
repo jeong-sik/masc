@@ -155,6 +155,9 @@ type trace_step =
   | Trace_tool of {
       name : string;
       tool_call_id : string option;
+      execution_id : Ids.Execution_id.t option;
+        (** Canonical execution identity. Never substituted into provider
+            [tool_call_id], which may be absent or reused. *)
       status : trace_tool_status option;
       dur : string option;
       args : Yojson.Safe.t option;

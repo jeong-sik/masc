@@ -158,9 +158,11 @@ let for_surface = function
       ]
       @ listing_meta
   | Harness ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
+      ; b Navigate "PgUp/PgDn" "page"
+      ; b Act "Right / Enter" "verdict" ~help:"open the full harness verdict"
+      ; b Act "Left / Esc" "back" ~help:"back to the verdict list"
       ; b Act "Y" "copy task" ~help:"copy a link to the task on Overview"
-      ; b Act "Esc" "overview"
       ]
       @ listing_meta
   | Fusion ->

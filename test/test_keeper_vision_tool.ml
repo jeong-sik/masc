@@ -241,6 +241,28 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
    | Agent_core.Types.JsonMode
    | Agent_core.Types.JsonSchema _ -> failwith "vision provider must not request a wire format")
 
+(* The 2026-08 fix: vision must NOT force enable_thinking=false. The
+   media_failover fleet is entirely /v1 "none" thinking-control lanes —
+   reasoning-capable models with no wire field to disable thinking — where a
+   disable request is fail-closed by the agent_core guard (Disable_not_encodable),
+   which broke every image analysis. Leaving enable_thinking=None lets the guard
+   admit the call (complete_common: None -> admitted); the reply is still kept
+   clean by preserve_thinking=false + clear_thinking=true, which strip any
+   reasoning the model emits without requesting an impossible disable. *)
+let test_provider_for_vision_leaves_thinking_uncontrolled () =
+  let base =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"vision-model"
+      ~base_url:"http://example.invalid"
+      ()
+  in
+  let configured = Vt.provider_for_vision base in
+  assert (configured.enable_thinking = None);
+  assert (configured.preserve_thinking = Some false);
+  assert (configured.clear_thinking = Some true);
+  assert (configured.thinking_budget = None)
+
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
     assert (Vt.max_image_bytes () = 128))
@@ -1087,6 +1109,7 @@ let () =
   test_message_of_request ();
   test_first_vision_runtime_id_total ();
   test_provider_for_vision_preserves_configured_max_tokens ();
+  test_provider_for_vision_leaves_thinking_uncontrolled ();
   test_max_image_bytes_reads_env_config ();
   test_vision_env_knobs_are_bounded ();
   test_missing_eio_context_is_runtime_failure ();

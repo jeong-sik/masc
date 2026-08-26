@@ -15,6 +15,7 @@ function pendingRow(toolCallId: string): void {
     toolName: 'Execute',
     args: '{"argv":["ls"]}',
     question: 'Execute ls 를 실행할까요?',
+    because: 'process execution requires approval',
     askedAtMs: Date.now(),
     timeoutSec: 180,
     answering: false,
@@ -122,6 +123,7 @@ describe('hydrateKeeperToolApprovals', () => {
             tool: 'StaleOverwrite',
             args: '{}',
             question: 'stale?',
+            because: 'stale reason',
             asked_at: 1,
             timeout_sec: 180,
           },
@@ -131,6 +133,7 @@ describe('hydrateKeeperToolApprovals', () => {
             tool: 'Execute',
             args: '{}',
             question: '보고서를 날릴까요?',
+            because: 'external side effect',
             asked_at: 1787636000,
             timeout_sec: 180,
           },
@@ -147,6 +150,7 @@ describe('hydrateKeeperToolApprovals', () => {
     const hydrated = keeperToolApprovals.value.sangsu?.['call-hydrated']
     expect(hydrated?.toolName).toBe('Execute')
     expect(hydrated?.question).toBe('보고서를 날릴까요?')
+    expect(hydrated?.because).toBe('external side effect')
     expect(hydrated?.askedAtMs).toBe(1787636000 * 1000)
   })
 

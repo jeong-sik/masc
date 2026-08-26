@@ -65,15 +65,24 @@ let begin_authorization
   =
   let verifier = fresh_verifier () in
   let state = fresh_state () in
+  (* A server that names no scopes gets no scope parameter. "scope=" is not
+     an empty list, it is a malformed one, and some servers answer it with
+     invalid_scope. *)
+  let scope =
+    match discovered.Keeper_oauth_discovery.scopes_supported with
+    | [] -> []
+    (* Everything the server said it offers. Narrowing here would be this
+       code deciding what a Keeper may reach, which is the declaration's
+       business at most and the operator's at the consent screen. *)
+    | scopes -> [ "scope", String.concat " " scopes ]
+  in
   let parameters =
     [ "response_type", "code"
     ; "client_id", client_id
     ; "redirect_uri", redirect_uri
-      (* Everything the server said it offers. Narrowing here would be this
-         code deciding what a Keeper may reach, which is the declaration's
-         business at most and the operator's at the consent screen. *)
-    ; "scope", String.concat " " discovered.Keeper_oauth_discovery.scopes_supported
-    ; "state", state
+    ]
+    @ scope
+    @ [ "state", state
     ; "code_challenge", Auth_oauth.pkce_s256 verifier
     ; "code_challenge_method", "S256"
       (* RFC 8707: name the resource the token is for, so a token minted for
@@ -137,6 +146,15 @@ let tokens_of_response ~now body =
      | Some _ | None ->
        Error (Malformed_response "the answer carries no non-empty access_token"))
 
+(* RFC 6749 2.3.1 allows the secret in the form body. Sent only when one
+   came back from registration: a server that answered without one refuses a
+   redemption that carries an empty client_secret, so an absent secret has to
+   be an absent parameter rather than an empty one. *)
+let with_client_secret client_secret parameters =
+  match client_secret with
+  | None -> parameters
+  | Some secret -> parameters @ [ "client_secret", secret ]
+
 let exchange ~post ~discovered ~now parameters =
   match
     post ~url:discovered.Keeper_oauth_discovery.token_url ~headers:form_headers
@@ -149,6 +167,7 @@ let exchange ~post ~discovered ~now parameters =
 
 let complete
       ?(post = default_post)
+      ?client_secret
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
       ~pending
@@ -163,16 +182,18 @@ let complete
   then Error State_mismatch
   else
     exchange ~post ~discovered ~now
-      [ "grant_type", "authorization_code"
-      ; "client_id", client_id
-      ; "code", code
-      ; "redirect_uri", pending.redirect_uri
-      ; "code_verifier", pending.verifier
-      ; "resource", discovered.Keeper_oauth_discovery.resource
-      ]
+      (with_client_secret client_secret
+         [ "grant_type", "authorization_code"
+         ; "client_id", client_id
+         ; "code", code
+         ; "redirect_uri", pending.redirect_uri
+         ; "code_verifier", pending.verifier
+         ; "resource", discovered.Keeper_oauth_discovery.resource
+         ])
 
 let refresh
       ?(post = default_post)
+      ?client_secret
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
       ~refresh_token
@@ -180,11 +201,12 @@ let refresh
       ()
   =
   exchange ~post ~discovered ~now
-    [ "grant_type", "refresh_token"
-    ; "client_id", client_id
-    ; "refresh_token", refresh_token
-    ; "resource", discovered.Keeper_oauth_discovery.resource
-    ]
+    (with_client_secret client_secret
+       [ "grant_type", "refresh_token"
+       ; "client_id", client_id
+       ; "refresh_token", refresh_token
+       ; "resource", discovered.Keeper_oauth_discovery.resource
+       ])
 
 let needs_renewal ~(provider : Provider.t) ~expires_at ~now =
   now +. float_of_int provider.Provider.renew_before_sec >= expires_at

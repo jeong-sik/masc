@@ -599,14 +599,62 @@ let identity_connectable providers =
       | Identity_unreadable _ -> None)
     providers
 
+(** The lines the Identity pane prints above the provider rows.
+
+    Here rather than in the renderer because the key handler has to know how
+    far down the pane a provider sits: it moves a cursor over
+    [identity_connectable] and then scrolls the pane's lines so that row
+    stays visible. A header written in the renderer and counted in the key
+    handler is two numbers that drift the first time a line is added. *)
+let identity_preamble ~keeper =
+  [ "  Move with the arrows and press enter to connect " ^ keeper
+    ^ ", R to ask again what tools exist."
+  ; ""
+  ]
+
+(** Which pane line the provider at [index] is drawn on. *)
+let identity_provider_line ~index =
+  List.length (identity_preamble ~keeper:"") + index
+
+(** The cursor held inside the list it names. A cursor left behind by a
+    shorter list answers from the last row rather than from one that is no
+    longer there. *)
+let identity_cursor_clamped ~providers cursor =
+  let count = List.length (identity_connectable providers) in
+  if count = 0 then 0 else max 0 (min cursor (count - 1))
+
+(** The provider a keypress on the cursor would start, if any. *)
+let identity_cursor_provider ~providers cursor =
+  List.nth_opt
+    (identity_connectable providers)
+    (identity_cursor_clamped ~providers cursor)
+
 (** A login the operator has started but not finished: they have to open
     [ils_url] in a browser, and until they come back nothing has been
     written to the Keeper. *)
 type identity_login_started = {
   ils_keeper: string;
+  ils_provider: string;
+      (** Which service, by id. The label is for a screen; matching on it
+          would tie "this login landed" to a display string that a
+          declaration is free to change. *)
   ils_label: string;
   ils_url: string;
 }
+
+(** Whether the login [login] started has landed: the service it was for now
+    reports tools for this Keeper.
+
+    This is what ends the tick's re-asking. A poll with no end condition is a
+    poll that runs for the life of the process, so the condition is named
+    here and tested rather than being a line inside the message handler. *)
+let identity_login_landed ~providers ~login =
+  List.exists
+    (function
+      | Identity_declared { idp_id; idp_tools = Some _; _ } ->
+        String.equal idp_id login.ils_provider
+      | Identity_declared _ | Identity_unreadable _ -> false)
+    providers
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
@@ -921,7 +969,11 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
-  mutable runtime_config_view: (string * string list) option;
+  (* Rows of coloured segments, the shape the Code surface keeps, so the two
+     surfaces read the same file the same way. Plain text is derived where it
+     is needed rather than stored beside them: two copies of the same rows
+     drift the moment one is rebuilt and the other is not. *)
+  mutable runtime_config_view: (string * (string * string) list list) option;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
@@ -936,6 +988,10 @@ type state = {
   mutable identity_view: (string * identity_provider list) option;
   mutable identity_view_error: string option;
   mutable identity_login: identity_login_started option;
+  (* Which provider the arrows are on. Held rather than derived because a
+     screen that renumbered under a moving cursor would start the wrong
+     service; [identity_cursor_clamped] is what keeps it inside the list. *)
+  mutable identity_cursor: int;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -972,6 +1028,16 @@ type state = {
   mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: surface;
+  (* Where Esc goes back to after following a reference, and what was open
+     there. The surfaces print [masc://] references beside the thing they
+     name -- a verdict says which task it judged -- and following one is only
+     half a move: an operator who cannot get back reads the id, walks over by
+     hand, and loses the row they were on.
+
+     One step, not a stack. A second jump replaces the first: the way back
+     from two hops is the surface strip, and a stack that grew without a
+     screen showing it would be state nobody can see. *)
+  mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
   (* The runtime picker: the keeper it is choosing for, its cursor into the
      dispatchable catalogue, and the catalogue itself with where every keeper
@@ -1200,6 +1266,11 @@ type state = {
   mutable harness_error: string option;
   mutable harness_scroll: int;
   mutable harness_cursor: int;
+  (* The verdict opened from the list. Task id alone is not an identity: the
+     same task can pass through several gates, so retain the record timestamp
+     with it. *)
+  mutable harness_detail: (string * float) option;
+  mutable harness_detail_scroll: int;
   mutable fusion_runs: Tui_decode.fusion_snapshot option;
   mutable fusion_error: string option;
   mutable fusion_cursor: int;
@@ -1287,6 +1358,17 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* Recorded file changes are a separate chat cache. [changes] belongs to the
+     Changes surface and follows its own keeper selection; sharing it would
+     make visiting one surface change what the other says. The canonical
+     execution index is prepared once when a stamped snapshot arrives. *)
+  mutable msg_file_changes: Tui_decode.file_change_snapshot option;
+  mutable msg_file_changes_keeper: string option;
+  mutable msg_file_change_index: Masc_tui_keeper_chat_diff.index;
+  mutable msg_file_changes_loading: bool;
+  mutable msg_file_changes_refresh_pending: bool;
+  mutable msg_file_changes_error: string option;
+  mutable msg_file_changes_generation: int;
   mutable msg_memory_visible: bool;
   mutable msg_memory_error: string option;
   mutable msg_memory_dropped: int;
@@ -1494,6 +1576,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
+  identity_cursor = 0;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;
@@ -1515,6 +1598,7 @@ let create_state
   connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;
+  followed_from = None;
   keeper_cursor = 0;
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;
@@ -1645,6 +1729,8 @@ let create_state
   harness_error = None;
   harness_scroll = 0;
   harness_cursor = 0;
+  harness_detail = None;
+  harness_detail_scroll = 0;
   fusion_runs = None;
   fusion_error = None;
   fusion_cursor = 0;
@@ -1689,6 +1775,13 @@ let create_state
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_file_changes = None;
+  msg_file_changes_keeper = None;
+  msg_file_change_index = Masc_tui_keeper_chat_diff.empty;
+  msg_file_changes_loading = false;
+  msg_file_changes_refresh_pending = false;
+  msg_file_changes_error = None;
+  msg_file_changes_generation = 0;
   msg_memory_visible = true;
   msg_memory_error = None;
   msg_memory_dropped = 0;
@@ -1810,6 +1903,7 @@ type clamped_scroll =
   | Keeper_calls of int
   | Acting of int
   | Verification_detail_scroll of int
+  | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -1830,6 +1924,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting value -> state.acting_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
+  | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -1942,10 +2037,12 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          | None -> 0
          | Some s -> List.length s.Tui_decode.kls_lanes)
   | Harness ->
-      listing ~error:state.harness_error
-        (match state.harness with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.hs_verdicts)
+      if Option.is_some state.harness_detail then None
+      else
+        listing ~error:state.harness_error
+          (match state.harness with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.hs_verdicts)
   | Repositories ->
       listing ~error:state.repositories_error
         (match state.repositories with
@@ -1985,7 +2082,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       listing ~error:state.runtime_config_view_error
         (match state.runtime_config_view with
          | None -> 0
-         | Some (_, lines) -> List.length lines)
+         | Some (_, rows) -> List.length rows)
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,

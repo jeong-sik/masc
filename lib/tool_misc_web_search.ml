@@ -723,6 +723,13 @@ let cache_store key response now =
 (* Rendered when the provider chain is empty — the operator-facing
    remedy travels with the failure instead of a bare symptom. Shared
    with the test simulator so both boundaries report the same fact. *)
+(* Why the chain produced nothing. An empty chain and an exhausted one read
+   the same in prose but are not the same failure: nothing was tried in the
+   first, so the retry-safety argument below does not apply to it. *)
+type search_failure =
+  | No_provider_configured
+  | All_providers_failed of string
+
 let no_provider_configured_message =
   "no web search provider is configured: set web_search.searxng_url \
    (MASC_SEARXNG_URL) or a provider API key (BRAVE_SEARCH_API_KEY / \
@@ -732,10 +739,11 @@ let search_impl ~query ~limit =
   let rec loop errors = function
     | [] ->
         Error
-          (if Stdlib.List.length errors = 0 then no_provider_configured_message
+          (if Stdlib.List.length errors = 0 then No_provider_configured
            else
-             "all web search providers failed: "
-             ^ String.concat "; " (List.rev errors))
+             All_providers_failed
+               ("all web search providers failed: "
+                ^ String.concat "; " (List.rev errors)))
     | provider :: rest -> (
         match fetch_provider ~query ~limit provider with
         | Ok (Hits { hits = _ :: _; _ } as payload) -> Ok payload
@@ -775,8 +783,8 @@ let simulated_search_impl ~outcomes ~query ~limit =
   let rec loop errors = function
     | [] ->
         Error
-          (if Stdlib.List.length errors = 0 then no_provider_configured_message
-           else String.concat "; " (List.rev errors))
+          (if Stdlib.List.length errors = 0 then No_provider_configured
+           else All_providers_failed (String.concat "; " (List.rev errors)))
     | (provider_name, outcome) :: rest -> (
         match outcome with
         | `Hits hits when Stdlib.List.length hits > 0 ->
@@ -813,25 +821,35 @@ let with_simulated_search_for_test ~outcomes f =
    substring matching):
 
    - [Workflow_rejection]: empty query input.
-   - [Runtime_failure]:    [search_impl] aggregate — either
-     [no_provider_configured_message] (empty credentialed
-     chain) or "all web search providers failed: ..." (chain
-     exhausted). Per-provider transport vs server distinction
-     is preserved as typed [provider_error] variants
+   - [Dependency_unavailable]: the credentialed chain was empty
+     ([No_provider_configured]). Nothing was called, so the
+     retry-safety argument below does not reach it: what is
+     missing is configuration, and the operator adds it.
+   - [Runtime_failure]:    the chain was exhausted
+     ([All_providers_failed]). Per-provider transport vs server
+     distinction is preserved as typed [provider_error] variants
      ([Transport] / [Server] / [Config] / [Parse]) and rendered
      into the aggregate string via [provider_error_to_string].
-     The aggregate boundary remains [Runtime_failure] for now
-     because blind-retry is not guaranteed safe (some providers
-     may have returned 4xx).
+     This boundary stays [Runtime_failure] because blind-retry is
+     not guaranteed safe (some providers may have returned 4xx).
 
-   [simulate_for_test] uses the same boundary: empty outcomes
-   list or aggregate failure → [Runtime_failure]. *)
+   The two used to share [Runtime_failure]. A tool that says "it
+   crashed" when it means "you have not configured me" tells the
+   model to retry something no retry can fix.
+
+   [simulate_for_test] uses the same boundary. *)
 
 let data_ok ~tool_name ~start_time data : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data ()
 
 let workflow_err = Tool_result.workflow_err
 let runtime_err = Tool_result.runtime_err
+
+(* Nothing was configured to call. The operator adds a provider; the model must
+   not treat that as something to try again. *)
+let dependency_err ~tool_name ~start_time message =
+  Tool_result.error ~failure_class:Tool_result.Dependency_unavailable ~tool_name
+    ~start_time message
 
 let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
@@ -855,7 +873,10 @@ let handle ~tool_name ~start_time args : Tool_result.result =
            in
            cache_store key data now;
            data_ok ~tool_name ~start_time data
-         | Error message -> runtime_err ~tool_name ~start_time message)
+         | Error No_provider_configured ->
+             dependency_err ~tool_name ~start_time no_provider_configured_message
+         | Error (All_providers_failed detail) ->
+             runtime_err ~tool_name ~start_time detail)
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   match simulated_search_impl ~outcomes ~query ~limit with
@@ -868,5 +889,8 @@ let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   | Ok (Grounded context) ->
       data_ok ~tool_name:"masc_web_search" ~start_time:0.0
         (grounded_result_data ~query context)
-  | Error message ->
-      runtime_err ~tool_name:"masc_web_search" ~start_time:0.0 message
+  | Error No_provider_configured ->
+      dependency_err ~tool_name:"masc_web_search" ~start_time:0.0
+        no_provider_configured_message
+  | Error (All_providers_failed detail) ->
+      runtime_err ~tool_name:"masc_web_search" ~start_time:0.0 detail

@@ -217,6 +217,36 @@ describe('KeeperWorkspaceChat', () => {
     expect(navigate).toHaveBeenCalledWith('approvals')
   })
 
+  it('shows why an in-chat tool approval was held', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const { keeperToolApprovals } = await import('../../keeper-state')
+    keeperToolApprovals.value = {
+      sangsu: {
+        'tool-call-1': {
+          toolCallId: 'tool-call-1',
+          toolName: 'Execute',
+          args: '{}',
+          question: '이 명령을 실행할까요?',
+          because: 'process execution requires approval',
+          askedAtMs: null,
+          timeoutSec: 180,
+          answering: false,
+          answeredDecision: null,
+          answeredOutcome: null,
+          settled: false,
+        },
+      },
+    }
+
+    await act(async () => {
+      render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
+    })
+
+    const card = container.querySelector('[data-testid="keeper-tool-approval-card"]')
+    expect(card?.textContent).toContain('이 명령을 실행할까요?')
+    expect(card?.textContent).toContain('보류 사유 · process execution requires approval')
+  })
+
   it('hides the pending-approval badge when the keeper has no pending decision', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
 

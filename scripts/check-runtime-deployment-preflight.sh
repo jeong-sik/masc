@@ -293,13 +293,12 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     mkdir -p "$signal_dir"
     jq -cn --argjson include_instance "$include_instance" '
       {event_type: "schedule.due_candidate",
-       occurrence_id: "bd1ec0652900d5f5d24968875fa05cb6c2386ccd1fa75ca9582eefe93a2a7906",
+       occurrence_id: "ab265db772e34d79bac08002a1f19c2aef1aed4e9de6bfab9c6ffe8924ea79bb",
        schedule_id: "schedule-fixture",
        emitted_at: 1,
        due_at: 1,
-       payload_digest: "d5cba4a1998d29ccaae48a7f9fef641e4fbb91b11299f8ba03005d5786ff6edc",
-       payload: {kind: "consumer.note", schema_version: 1,
-                 body: {text: "fixture"}}}
+       payload_digest: "a4e68d60f1990929e4c12f5d3645bbd997e62c9183cfde4f2332d5ad0361f2c4",
+       payload: {kind: "consumer.note", body: {text: "fixture"}}}
       + (if $include_instance
          then {schedule_instance_id: "instance-fixture"}
          else {}

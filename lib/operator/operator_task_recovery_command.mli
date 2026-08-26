@@ -4,7 +4,6 @@
     version and persisted assignee. It performs no liveness or elapsed-time
     inference. *)
 
-val tool_command_schema : string
 val result_schema : string
 
 type t =
@@ -23,7 +22,6 @@ type input_error =
       { field : string
       ; expectation : string
       }
-  | Unsupported_schema of string
 
 val input_error_to_string : input_error -> string
 val input_error_to_json : input_error -> Yojson.Safe.t

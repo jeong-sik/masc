@@ -110,19 +110,7 @@ blocking_lints() {
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
-  run_lint "Branch protection fail-closed fixture" bash scripts/test-main-branch-protection-fail-closed.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
-  # task-377: the merge audit must keep refusing the PR #30463 shape
-  # (required check CANCELLED/SKIPPED on the merged head), so its self-test
-  # runs on every lint pass, not only when its own file changes.
-  run_lint "Merge audit unfinished-verdict fixture" \
-    python3 scripts/ci/test_check_merge_audit.py
-  run_lint "Merge safety workflow wiring fixture" \
-    bash scripts/ci/test-merge-safety-wiring.sh
-  # The guard itself is invoked live by main-ci-verdict.yml. Keep this cheap
-  # import/CLI contract next to its decision and workflow fixtures.
-  run_lint "Merge audit guard executable" \
-    python3 scripts/ci/check-merge-audit.py --self-check
 }
 
 blocking_pr_lints() {

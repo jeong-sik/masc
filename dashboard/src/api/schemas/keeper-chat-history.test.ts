@@ -133,6 +133,20 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.turn_ref).toBe('trace-1780648779957-00000#4071')
   })
 
+  it('preserves provider and canonical tool identities separately', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'tool',
+        content: '{}',
+        tool_call_id: 'provider-call-7',
+        execution_id: 'exec-7',
+        tool_call_name: 'Read',
+      }),
+    )
+    expect(out?.tool_call_id).toBe('provider-call-7')
+    expect(out?.execution_id).toBe('exec-7')
+  })
+
   it('passes the backend stream contract read model through when present', () => {
     const out = safeParseKeeperChatHistoryMessage(
       validMessage({
@@ -393,7 +407,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
             t: 'trace',
             trace: [
               { kind: 'think', text: 'checking', ts: '2026-07-05T00:00:00Z' },
-              { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', status: 'ok', args: {}, result: { ok: true } },
+              { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', execution_id: 'exec-1', status: 'ok', args: {}, result: { ok: true } },
             ],
           },
           { t: 'thinking', content: '', redacted: true },
@@ -412,7 +426,7 @@ describe('safeParseKeeperChatHistoryMessage', () => {
         t: 'trace',
         trace: [
           { kind: 'think', text: 'checking', ts: '2026-07-05T00:00:00Z' },
-          { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', status: 'ok', args: {}, result: { ok: true } },
+          { kind: 'tool', name: 'keeper_tasks_list', tool_call_id: 'tc-1', execution_id: 'exec-1', status: 'ok', args: {}, result: { ok: true } },
         ],
       },
       { t: 'thinking', content: '', redacted: true },

@@ -1007,7 +1007,11 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
-def keeper_runtime_http_fixtures() -> HttpFixtures:
+def keeper_runtime_http_fixtures(
+    *,
+    alpha_runtime_id: str = "anthropic.claude-opus-5",
+    beta_runtime_id: str = "anthropic.claude-sonnet-4",
+) -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/gate/keepers?detailed=true"] = (
         200,
@@ -1026,7 +1030,7 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "keepalive_running": True,
                     "autoboot_enabled": True,
                     "proactive_enabled": True,
-                    "runtime_id": "anthropic.claude-opus-5",
+                    "runtime_id": alpha_runtime_id,
                 },
                 {
                     "runtime_class": "keeper",
@@ -1038,7 +1042,7 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "keepalive_running": True,
                     "autoboot_enabled": True,
                     "proactive_enabled": False,
-                    "runtime_id": "anthropic.claude-sonnet-4",
+                    "runtime_id": beta_runtime_id,
                 },
             ],
         },
@@ -1061,6 +1065,8 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "title": title,
         "phase": "executing",
         "priority": 1,
+        "metric": f"metric-{goal_id}",
+        "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
     }
 
@@ -1600,7 +1606,7 @@ def navigate_with_arrows_and_quit(
     )
 
 
-def keeper_runtime_phase_and_model_interaction(
+def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
     _slave_fd: int,
@@ -1620,13 +1626,54 @@ def keeper_runtime_phase_and_model_interaction(
         master_fd,
         output,
         b"2",
-        b"running claude-opus-5",
+        b"running anthropic.claude-opus-5",
     )
     wait_for_output(
         process,
         master_fd,
         output,
-        b"paused claude-sonnet-4",
+        b"LIFECYCLE / RUNTIME",
+        start=0,
+        timeout=3.0,
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"paused anthropic.claude-sonnet-4",
+        start=0,
+        timeout=3.0,
+    )
+    os.write(master_fd, b"q")
+
+
+def keeper_long_runtime_identity_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=140,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"2",
+        b"running antigrav\xe2\x80\xa6.gemini-3-7-flash",
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"\xe2\x80\xa6on.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -2783,12 +2830,11 @@ def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     had required whitespace there.
     """
     plain = CSI_RE.sub(b"", frame)
-    # What sits between the status bracket and the priority is the renderer's
-    # business: #29786 put a proof mark there and this assertion, which only
-    # means "this goal is the selected row", started failing as a shape
-    # mismatch.
+    # What sits between the status bracket, priority, goal id, and title is the
+    # renderer's business. This assertion means only "this goal is the selected
+    # row"; information columns can be inserted without changing that fact.
     selected = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[ \t]+" + re.escape(title)
+        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[^\r\n]*?" + re.escape(title)
     )
     if selected.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
@@ -2825,6 +2871,10 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
     ) -> None:
         open_loaded_planning(process, master_fd, output)
         selected = send_and_wait(process, master_fd, output, b"j", b"plan-beta-29424")
+        if b"metric-goal-b-29424" not in CSI_RE.sub(b"", selected):
+            raise AssertionError(
+                f"Planning selected row omitted its metric/target: {selected!r}"
+            )
         assert_planning_goal_selected(
             frame_containing(selected, b"plan-beta-29424"),
             b"plan-beta-29424",
@@ -4489,6 +4539,14 @@ def chat_visibility_modes_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=110,
+            needle=b"MASC Overview",
+        )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -4499,6 +4557,14 @@ def chat_visibility_modes_interaction() -> Interaction:
             output,
             b"m",
             "\u2717 Tools 2".encode(),
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"anthropic.claude-opus-5",
+            start=pane_start,
+            timeout=5.0,
         )
         wait_for_output(
             process,
@@ -4532,9 +4598,23 @@ def chat_visibility_modes_interaction() -> Interaction:
         if b"2 reasoning steps, content withheld" not in full:
             raise AssertionError(f"full reasoning did not restore content: {full!r}")
 
+        tools_start = len(output)
         tools = send_and_wait(
-            process, master_fd, output, b"\x04", b"masc_task_history"
+            process,
+            master_fd,
+            output,
+            b"\x04",
+            b"reasoning:full tools:full",
         )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc_task_history",
+            start=tools_start,
+            timeout=5.0,
+        )
+        tools += bytes(output[tools_start:])
         for needle in (b"masc_task_history", b"tool_execute"):
             if needle not in tools:
                 raise AssertionError(
@@ -4794,7 +4874,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             b"2",
-            b"running claude-opus-5",
+            b"running anthropic.claude-opus-5",
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -4849,7 +4929,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         beta_plain = CSI_RE.sub(b"", beta_frame)
         for expected in (
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-            b"idle \xc2\xb7 paused claude-sonnet-4",
+            b"idle \xc2\xb7 paused anthropic.claude-sonnet-4",
             b"beta-current-history-marker",
         ):
             if expected not in beta_plain:
@@ -4888,7 +4968,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
         for expected in (
-            b"healthy \xc2\xb7 running claude-opus-5",
+            b"healthy \xc2\xb7 running anthropic.claude-opus-5",
             b"alpha-current-history-marker",
             b"> alpha-draft",
         ):
@@ -5671,11 +5751,15 @@ def changes_keeper_and_arrow_detail_interaction(
         start=0, timeout=3.0,
     )
     preview_plain = CSI_RE.sub(b"", bytes(output)).decode("utf-8")
-    for needle in ("-1 +1", "let a = 1", "let a = 2"):
+    for needle in ("EDIT", "APPLIED", "-1 +1", "let a = 1", "let a = 2"):
         if needle not in preview_plain:
             raise AssertionError(
                 f"the preview missed {needle!r}: {preview_plain[-600:]!r}"
             )
+    raw = bytes(output)
+    for badge in (b"EDIT", b"APPLIED"):
+        if re.search(rb"\x1b\[[0-9;]*m" + badge + rb"[^\x1b]*\x1b\[0m", raw) is None:
+            raise AssertionError(f"Changes badge {badge!r} was not highlighted")
     # Down moves the marked row, not just the window. The mark used to be the
     # window's top row, so on a list that fits the screen it could not move at
     # all and Enter opened the first change whatever the operator pressed.
@@ -6475,7 +6559,18 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Schedules")
+        listing = tab_until(process, master_fd, output, b"MASC Schedules")
+        listing_plain = CSI_RE.sub(b"", listing)
+        for needle in (
+            b"wake:succeeded",
+            b"dispatch:running",
+            b"queue:matched_pending/2 pending",
+            b"reaction:matched_recorded",
+        ):
+            if needle not in listing_plain:
+                raise AssertionError(
+                    f"Schedule list omitted {needle!r}: {listing_plain!r}"
+                )
         detail = send_and_wait(
             process, master_fd, output, b"\x1b[C", b"instance-proof-701"
         )
@@ -6654,13 +6749,37 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"task-linked-501")
+        harness = tab_until(process, master_fd, output, b"task-linked-501")
+        harness_plain = CSI_RE.sub(b"", harness)
+        for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
+            if needle not in harness_plain:
+                raise AssertionError(
+                    f"Harness list omitted {needle!r}: {harness_plain!r}"
+                )
         copy_reference(
             process,
             master_fd,
             output,
             b"masc://overview/tasks/task-linked-501",
         )
+        verdict = send_and_wait(
+            process, master_fd, output, b"\r", b"HARNESS VERDICT"
+        )
+        verdict_plain = CSI_RE.sub(b"", verdict)
+        for needle in (
+            b"linked Harness task",
+            b"Agent",
+            b"beta",
+            b"approve",
+            b"glm-coding",
+            b"Fallback",
+            b"left/Esc:list",
+        ):
+            if needle not in verdict_plain:
+                raise AssertionError(
+                    f"Harness detail omitted {needle!r}: {verdict_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -6700,7 +6819,16 @@ def fusion_list_detail_interaction(
         frame_end = output.find(FRAME_END, target_end) + len(FRAME_END)
         loaded = bytes(output[start:frame_end])
         plain = CSI_RE.sub(b"", loaded)
-        for column in (b"TIME", b"STATUS", b"KEEPER", b"PRESET", b"TOPOLOGY", b"RUN"):
+        for column in (
+            b"TIME",
+            b"AGE",
+            b"STATUS",
+            b"KEEPER",
+            b"PRESET",
+            b"TOPOLOGY",
+            b"RUN",
+            b"Flow: Question",
+        ):
             if column not in plain:
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"
@@ -7118,6 +7246,10 @@ def run_keyboard_regression(executable: str) -> None:
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
     missing_target_fixtures, late_b = board_missing_target_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    chat_visibility_fixtures = keeper_runtime_http_fixtures()
+    chat_visibility_fixtures["/api/v1/keepers/alpha/chat/history"] = (
+        autonomous_turn_history_fixture()
+    )
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
@@ -7228,9 +7360,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="Keeper chat visibility modes",
         interact=chat_visibility_modes_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
-        },
+        http_fixtures=chat_visibility_fixtures,
     )
     run_terminal_scenario(
         executable,
@@ -7585,9 +7715,18 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Keeper phase and model",
-        interact=keeper_runtime_phase_and_model_interaction,
+        description="Keeper phase and runtime identity",
+        interact=keeper_runtime_phase_and_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper long runtime identities remain distinguishable",
+        interact=keeper_long_runtime_identity_interaction,
+        http_fixtures=keeper_runtime_http_fixtures(
+            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash",
+            beta_runtime_id="antigravity_subscription.claude-sonnet-4",
+        ),
     )
     run_terminal_scenario(
         executable,

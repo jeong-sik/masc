@@ -15,29 +15,42 @@ type call =
   ; mutable args : string
   }
 
+module Occurrence = struct
+  type t = int * int
+  let equal (left_scope, left_index) (right_scope, right_index) =
+    left_scope = right_scope && left_index = right_index
+  let hash = Hashtbl.hash
+end
+
+module Occurrence_table = Hashtbl.Make (Occurrence)
+
 type t =
-  { by_id : (string, call) Hashtbl.t
+  { by_occurrence : call Occurrence_table.t
   ; mutable rev_order : call list
   }
 
-let create () = { by_id = Hashtbl.create 8; rev_order = [] }
+let create () = { by_occurrence = Occurrence_table.create 8; rev_order = [] }
+
+let occurrence_key (occurrence : Keeper_chat_events.tool_stream_occurrence) =
+  occurrence.stream_scope, occurrence.block_index
+;;
 
 let on_event t (event : Keeper_chat_events.keeper_chat_event) =
   match event with
-  | Tool_call_start { tool_call_id; tool_call_name } ->
-    (* A repeated id is the same call, not a second one. *)
-    if not (Hashtbl.mem t.by_id tool_call_id)
+  | Tool_call_start { occurrence; tool_call_name; _ } ->
+    let key = occurrence_key occurrence in
+    if not (Occurrence_table.mem t.by_occurrence key)
     then begin
       let call = { name = tool_call_name; args = "" } in
-      Hashtbl.replace t.by_id tool_call_id call;
+      Occurrence_table.replace t.by_occurrence key call;
       t.rev_order <- call :: t.rev_order
     end
-  | Tool_call_args { tool_call_id; delta } ->
-    (match Hashtbl.find_opt t.by_id tool_call_id with
+  | Tool_call_args { occurrence; delta; _ } ->
+    (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()
      | Some call -> call.args <- call.args ^ delta)
-  | Tool_call_args_snapshot { tool_call_id; snapshot } ->
-    (match Hashtbl.find_opt t.by_id tool_call_id with
+  | Tool_call_args_snapshot { occurrence; snapshot; _ } ->
+    (match Occurrence_table.find_opt t.by_occurrence (occurrence_key occurrence) with
      | None -> ()
      | Some call -> call.args <- snapshot)
   | _ ->
@@ -274,5 +287,4 @@ let append_to ?max_rows t ~text =
     | None -> text
     | Some rows -> Printf.sprintf "%s\n```\n%s\n```" text rows)
 ;;
-
 

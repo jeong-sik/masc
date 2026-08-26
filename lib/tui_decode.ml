@@ -3489,6 +3489,7 @@ type file_change = {
   fc_keeper : string;
   fc_turn : int option;
   fc_task_id : string option;
+  fc_execution_id : string option;
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -3553,12 +3554,22 @@ let decode_file_change json =
   let* fc_keeper = required_string_field json "keeper" in
   let* fc_turn = optional_int_or_null json "turn" in
   let* fc_task_id = optional_string_field json "task_id" in
+  let* fc_execution_id = optional_string_field json "execution_id" in
   let* location_json = required_object_field json "location" in
   let* fc_location = decode_file_change_location location_json in
   let* kind_json = required_object_field json "change" in
   let* fc_kind = decode_file_change_kind kind_json in
   let* fc_succeeded = required_bool_field json "succeeded" in
-  Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
+  Ok
+    { fc_at
+    ; fc_keeper
+    ; fc_turn
+    ; fc_task_id
+    ; fc_execution_id
+    ; fc_location
+    ; fc_kind
+    ; fc_succeeded
+    }
 
 (* ── Workspace tree (/api/v1/workspace/tree, /workspace/children) ──────
 
@@ -3617,6 +3628,20 @@ let decode_file_change_snapshot json =
   let* fcs_calls_in_window = required_int_field json "calls_in_window" in
   let* changes_json = required_list_field json "changes" in
   let* fcs_changes = decode_list "changes" decode_file_change changes_json in
+  let* () =
+    match
+      List.find_opt
+        (fun (change : file_change) ->
+          not (String.equal change.fc_keeper fcs_keeper))
+        fcs_changes
+    with
+    | None -> Ok ()
+    | Some change ->
+        Error
+          (Printf.sprintf
+             "file-change row named keeper %s inside snapshot for %s"
+             change.fc_keeper fcs_keeper)
+  in
   let* fcs_over_budget = required_int_field json "over_budget" in
   let* fcs_malformed = required_int_field json "malformed" in
   Ok

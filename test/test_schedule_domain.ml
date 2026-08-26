@@ -3,14 +3,13 @@ open Schedule_domain
 
 let human ?display_name id = { id; kind = Human_operator; display_name }
 
-let payload_json ?(kind = "consumer.note") ?(schema_version = 1) ?body () =
+let payload_json ?(kind = "consumer.note") ?body () =
   let body =
     Option.value body
       ~default:(`Assoc [ "text", `String "ship the thing" ])
   in
   `Assoc
     [ "kind", `String kind
-    ; "schema_version", `Int schema_version
     ; "body", body
     ]
 ;;
@@ -64,6 +63,24 @@ let test_payload_requires_known_envelope_fields () =
   with
   | Ok _ -> fail "expected invalid payload"
   | Error msg -> check string "payload error" "missing field: kind" msg
+;;
+
+let test_payload_rejects_retired_schema_version () =
+  let payload =
+    match payload_json () with
+    | `Assoc fields -> `Assoc (("schema_version", `Int 1) :: fields)
+    | other -> other
+  in
+  match
+    create_request ~schedule_id:"sched-1" ~requested_by:(human "requester")
+      ~scheduled_by:(human "scheduler") ~requested_at:100.0 ~due_at:200.0
+      ~payload ~source:Operator_request ()
+  with
+  | Ok _ -> fail "retired payload schema_version was silently accepted"
+  | Error msg ->
+    check string "retired field error"
+      "schedule payload contains unsupported field schema_version"
+      msg
 ;;
 
 let test_invalid_recurrence_rejected () =
@@ -357,6 +374,8 @@ let () =
             test_payload_requires_object_envelope;
           test_case "payload requires envelope fields" `Quick
             test_payload_requires_known_envelope_fields;
+          test_case "payload rejects retired schema_version" `Quick
+            test_payload_rejects_retired_schema_version;
           test_case "invalid recurrence rejected" `Quick
             test_invalid_recurrence_rejected;
           test_case "mark due only affects scheduled" `Quick

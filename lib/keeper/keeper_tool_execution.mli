@@ -68,6 +68,10 @@ val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 (** Attach the resolved post target only to a completed execution. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
-    handler. A [`String] payload stays opaque and is never interpreted as
-    JSON. *)
-val of_tool_result : Tool_result.result -> t
+    handler. [failure_effect_disposition] lets a producer preserve a phase it
+    can prove; generic producers default to [Effect_outcome_unknown]. A
+    [`String] payload stays opaque and is never interpreted as JSON. *)
+val of_tool_result
+  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  -> Tool_result.result
+  -> t

@@ -8,6 +8,7 @@ type skill =
   { name : string
   ; description : string
   ; body : string
+  ; conformance : Agent_core.Skill_document.conformance
   ; surface : surface
   }
 
@@ -40,30 +41,83 @@ type error =
 let composition_fence_open = "```toml composition"
 let fence_close = "```"
 
+(* The run of fence characters a line opens or closes with, if any: three or
+   more backticks or tildes, counted the CommonMark way — the two characters
+   do not close each other, and a longer run encloses a shorter one. *)
+let fence_run line =
+  let length = String.length line in
+  if length = 0
+  then None
+  else (
+    let fence_char = line.[0] in
+    if not (Char.equal fence_char '`' || Char.equal fence_char '~')
+    then None
+    else (
+      let index = ref 0 in
+      while !index < length && Char.equal line.[!index] fence_char do
+        incr index
+      done;
+      if !index < 3
+      then None
+      else Some (fence_char, !index, String.sub line !index (length - !index))))
+;;
+
+let closes_fence ~fence_char ~length trimmed =
+  match fence_run trimmed with
+  | Some (other_char, other_length, info) ->
+    Char.equal other_char fence_char
+    && other_length >= length
+    && String.equal (String.trim info) ""
+  | None -> false
+;;
+
+(* Where the scan is when it reads the next line. [Enclosing_fence] is the state
+   that makes the difference: a skill that *documents* the composition grammar
+   wraps the example in a longer outer fence, the CommonMark way, and the inner
+   ```toml composition must then be read as text. Without this state the scanner
+   matched that example, promoted a documentation skill to a composition (or
+   failed it on the name), and — because [of_documents] fails the whole catalog
+   on the first bad file — took every keeper turn down with it. *)
+type fence_scan =
+  | Outside
+  | Reading_composition of string list
+  | Enclosing_fence of
+      { fence_char : char
+      ; length : int
+      }
+
 (* A fence line is compared after trimming so CRLF bodies and trailing
    spaces read the same as a bare fence, matching [Frontmatter]'s delimiter
-   rule. Inside an open block the first close fence ends it; an instruction
-   skill that wants to *show* a composition block as documentation escapes
-   it the CommonMark way, with a longer outer fence. *)
+   rule. Inside an open composition block the first close fence ends it. *)
 let composition_blocks body =
-  let rec scan closed current = function
+  let rec scan closed state = function
     | [] ->
-      (match current with
-       | None -> Ok (List.rev closed)
-       | Some _ -> Error `Unterminated)
+      (match state with
+       | Reading_composition _ -> Error `Unterminated
+       (* An unclosed ordinary fence runs to the end of the document, as
+          CommonMark says — whatever it swallowed was never a declaration. *)
+       | Outside | Enclosing_fence _ -> Ok (List.rev closed))
     | line :: rest ->
       let trimmed = String.trim line in
-      (match current with
-       | None ->
+      (match state with
+       | Outside ->
          if String.equal trimmed composition_fence_open
-         then scan closed (Some []) rest
-         else scan closed None rest
-       | Some block ->
+         then scan closed (Reading_composition []) rest
+         else (
+           match fence_run trimmed with
+           | Some (fence_char, length, _info) ->
+             scan closed (Enclosing_fence { fence_char; length }) rest
+           | None -> scan closed Outside rest)
+       | Enclosing_fence { fence_char; length } ->
+         if closes_fence ~fence_char ~length trimmed
+         then scan closed Outside rest
+         else scan closed state rest
+       | Reading_composition block ->
          if String.equal trimmed fence_close
-         then scan (String.concat "\n" (List.rev block) :: closed) None rest
-         else scan closed (Some (line :: block)) rest)
+         then scan (String.concat "\n" (List.rev block) :: closed) Outside rest
+         else scan closed (Reading_composition (line :: block)) rest)
   in
-  scan [] None (String.split_on_char '\n' body)
+  scan [] Outside (String.split_on_char '\n' body)
 ;;
 
 let composition_of_block ~skill block =
@@ -83,7 +137,7 @@ let composition_of_block ~skill block =
 let parse_skill ~directory content =
   match Agent_core.Skill_document.decode ~directory_name:directory content with
   | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
-  | Loaded { document; _ } ->
+  | Loaded { document; conformance } ->
     let { Agent_core.Skill_document.name; description; body; extensions; _ } = document in
     let model_invocable =
       match List.assoc_opt "disable-model-invocation" extensions with
@@ -92,7 +146,7 @@ let parse_skill ~directory content =
     in
     (match composition_blocks body with
      | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
-     | Ok [] -> Ok { name; description; body; surface = Instruction }
+     | Ok [] -> Ok { name; description; body; conformance; surface = Instruction }
      | Ok [ block ] ->
        (match composition_of_block ~skill:name block with
         | Error _ as error -> error
@@ -102,7 +156,7 @@ let parse_skill ~directory content =
              and the skill still loads — it just does not become a tool the
              model can see. *)
           let surface = if model_invocable then Composition entry else Instruction in
-          Ok { name; description; body; surface })
+          Ok { name; description; body; conformance; surface })
      | Ok blocks ->
        Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))
 ;;

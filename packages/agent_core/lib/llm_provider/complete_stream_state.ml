@@ -33,8 +33,13 @@ type input_piece =
   | Delta_bytes of int
   | Snapshot_bytes of int
 
+type block_lifecycle =
+  | Open
+  | Closed
+
 type block =
   { header : block_header
+  ; lifecycle : block_lifecycle
   ; text_chunks_rev : string list
   ; input_pieces_rev : input_piece list
   ; input_piece_count : int
@@ -55,6 +60,11 @@ type completion =
   | Terminal_without_stop_reason
   | Stopped of Types.stop_reason
 
+type message_lifecycle =
+  | Accepting_content
+  | Stop_reason_seen
+  | Message_stopped
+
 type disposition =
   | Natural
   | Incomplete of string
@@ -62,8 +72,11 @@ type disposition =
 type t =
   { id : string
   ; model : string
+  ; message_started : bool
+  ; message_start : (string * string * Types.api_usage option) option
   ; usage : usage
   ; completion : completion
+  ; message_lifecycle : message_lifecycle
   ; disposition : disposition
   ; failure : Types.stream_error option
   ; blocks : block Blocks.t
@@ -80,8 +93,11 @@ let empty_usage =
 let empty =
   { id = ""
   ; model = ""
+  ; message_started = false
+  ; message_start = None
   ; usage = empty_usage
   ; completion = Awaiting_stop
+  ; message_lifecycle = Accepting_content
   ; disposition = Natural
   ; failure = None
   ; blocks = Blocks.empty
@@ -90,6 +106,7 @@ let empty =
 
 let empty_block =
   { header = Unannounced
+  ; lifecycle = Open
   ; text_chunks_rev = []
   ; input_pieces_rev = []
   ; input_piece_count = 0
@@ -113,7 +130,41 @@ let block_kind_of_string = function
   | other -> Unknown_block other
 ;;
 
+let block_kind_equal left right =
+  match left, right with
+  | Text_block, Text_block
+  | Thinking_block, Thinking_block
+  | Reasoning_details_block, Reasoning_details_block
+  | Redacted_thinking_block, Redacted_thinking_block
+  | Tool_use_block, Tool_use_block
+  | Image_block, Image_block
+  | Document_block, Document_block
+  | Audio_block, Audio_block -> true
+  | Tool_result_block left, Tool_result_block right ->
+    Bool.equal left.is_error right.is_error
+  | Unknown_block left, Unknown_block right -> String.equal left right
+  | _ -> false
+;;
+
+let block_header_equal left right =
+  match left, right with
+  | Unannounced, Unannounced -> true
+  | Announced left, Announced right ->
+    block_kind_equal left.kind right.kind
+    && Option.equal String.equal left.tool_id right.tool_id
+    && Option.equal String.equal left.tool_name right.tool_name
+  | Unannounced, Announced _ | Announced _, Unannounced -> false
+;;
+
 let text_of_block block = String.concat "" (List.rev block.text_chunks_rev)
+
+let block_has_payload block =
+  block.text_chunks_rev <> []
+  || block.input_piece_count > 0
+  || block.signature_chunks_rev <> []
+  || block.reasoning_details_rev <> []
+  || Option.is_some block.media
+;;
 
 let max_input_trace_pieces = 32
 
@@ -190,32 +241,312 @@ let capture_failure failure state =
   | None -> { state with failure = Some failure }
 ;;
 
+let close_all_blocks state =
+  { state with
+    blocks = Blocks.map (fun block -> { block with lifecycle = Closed }) state.blocks
+  }
+;;
+
+let message_start_equal
+    (left_id, left_model, left_usage)
+    (right_id, right_model, right_usage) =
+  String.equal left_id right_id
+  && String.equal left_model right_model
+  && Option.equal ( = ) left_usage right_usage
+;;
+
+let terminal_event_failure reason state =
+  capture_failure
+    (Types.Stream_parse_failed { reason; raw = "" })
+    state
+;;
+
+let delta_kind_name = function
+  | Types.TextDelta _ -> "text"
+  | Types.TextSnapshot _ -> "text_snapshot"
+  | Types.ThinkingDelta _ -> "thinking"
+  | Types.ThinkingSignatureDelta _ -> "thinking_signature"
+  | Types.ReasoningDetailsDelta _ -> "reasoning_details"
+  | Types.InputJsonDelta _ -> "input_json_delta"
+  | Types.InputJsonSnapshot _ -> "input_json_snapshot"
+  | Types.MediaDelta _ -> "media"
+;;
+
+let block_kind_name = function
+  | Text_block -> "text"
+  | Thinking_block -> "thinking"
+  | Reasoning_details_block -> "reasoning_details"
+  | Redacted_thinking_block -> "redacted_thinking"
+  | Tool_use_block -> "tool_use"
+  | Tool_result_block { is_error = false } -> "tool_result"
+  | Tool_result_block { is_error = true } -> "tool_result_error"
+  | Image_block -> "image"
+  | Document_block -> "document"
+  | Audio_block -> "audio"
+  | Unknown_block kind -> kind
+;;
+
+let block_kind_accepts_delta kind delta =
+  match kind, delta with
+  | Text_block, (Types.TextDelta _ | Types.TextSnapshot _)
+  | Tool_result_block _, (Types.TextDelta _ | Types.TextSnapshot _)
+  | Thinking_block, Types.ThinkingDelta _
+  | Thinking_block, Types.ThinkingSignatureDelta _
+  | Reasoning_details_block, Types.ReasoningDetailsDelta _
+  | Tool_use_block, Types.InputJsonDelta _
+  | Tool_use_block, Types.InputJsonSnapshot _
+  | Image_block, Types.MediaDelta _
+  | Document_block, Types.MediaDelta _
+  | Audio_block, Types.MediaDelta _ -> true
+  | Redacted_thinking_block, _
+  | Unknown_block _, _
+  | Text_block, _
+  | Thinking_block, _
+  | Reasoning_details_block, _
+  | Tool_use_block, _
+  | Tool_result_block _, _
+  | Image_block, _
+  | Document_block, _
+  | Audio_block, _ -> false
+;;
+
+let normalize_text_snapshot ~accumulated snapshot =
+  let accumulated_length = String.length accumulated in
+  let snapshot_length = String.length snapshot in
+  if String.equal accumulated snapshot
+  then Ok None
+  else if String.starts_with ~prefix:accumulated snapshot
+  then
+    Ok
+      (Some
+         (String.sub snapshot accumulated_length (snapshot_length - accumulated_length)))
+  else if String.starts_with ~prefix:snapshot accumulated
+  then Ok None
+  else Error "text_snapshot_conflict"
+;;
+
+let normalize_event state event =
+  match event with
+  | Types.ContentBlockDelta { index; delta = Types.TextSnapshot snapshot } ->
+    (match Blocks.find_opt index state.blocks with
+     | Some
+         ({ header = Announced { kind = (Text_block | Tool_result_block _); _ }
+          ; lifecycle = Open
+          ; _
+          } as block) ->
+       let accumulated = text_of_block block in
+       (match normalize_text_snapshot ~accumulated snapshot with
+        | Ok (Some suffix) ->
+          Ok
+            (Some
+               (Types.ContentBlockDelta
+                  { index; delta = Types.TextDelta suffix }))
+        | Ok None -> Ok None
+        | Error reason ->
+          Error
+            (Types.Stream_parse_failed
+               { reason = Printf.sprintf "%s:index:%d" reason index; raw = "" }))
+     | Some _ | None -> Ok (Some event))
+  | Types.MessageStart _
+  | Types.ContentBlockStart _
+  | Types.ContentBlockDelta _
+  | Types.ContentBlockStop _
+  | Types.MessageDelta _
+  | Types.MessageStop
+  | Types.Ping
+  | Types.SSEError _
+  | Types.NDJSONError _
+  | Types.SSEParseFailed _
+  | Types.NDJSONParseFailed _
+  | Types.SSEUnknownEventType _
+  | Types.SSEUnsupportedPart _
+  | Types.SSEUnsupportedResponse _
+  | Types.Connected
+  | Types.Timeout _
+  | Types.StreamIncomplete _ -> Ok (Some event)
+;;
+
 let transition_open state = function
   | Types.MessageStart { id; model; usage } ->
-    let usage =
-      match usage with
-      | None -> state.usage
-      | Some wire -> usage_from_message_start wire
-    in
-    { state with id; model; usage }
-  | Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
-    let block =
-      { empty_block with
-        header =
-          Announced { kind = block_kind_of_string content_type; tool_id; tool_name }
+    let incoming_start = id, model, usage in
+    if state.message_lifecycle <> Accepting_content
+    then terminal_event_failure "message_start_after_terminal" state
+    else if not state.message_started && Blocks.is_empty state.blocks
+    then
+      let usage =
+        match usage with
+        | None -> state.usage
+        | Some wire -> usage_from_message_start wire
+      in
+      { state with
+        id
+      ; model
+      ; message_started = true
+      ; message_start = Some incoming_start
+      ; usage
       }
-    in
-    { state with blocks = Blocks.add index block state.blocks }
+    else if
+      state.message_started
+      && state.completion = Awaiting_stop
+      && Option.equal message_start_equal (Some incoming_start) state.message_start
+    then
+      (* A repeated prelude for the same provider message does not reset block
+         assembly. Block-level replay ambiguity is handled at its own header. *)
+      let usage =
+        match usage with
+        | None -> state.usage
+        | Some wire -> usage_from_message_start wire
+      in
+      { state with usage }
+    else
+      capture_failure
+        (Types.Stream_parse_failed
+           { reason = "message_start_conflict"; raw = "" })
+        state
+  | Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
+    if state.message_lifecycle <> Accepting_content
+    then terminal_event_failure "content_block_start_after_terminal" state
+    else
+      let kind = block_kind_of_string content_type in
+      let tool_identity_missing =
+        match kind with
+        | Tool_use_block ->
+          (match tool_id, tool_name with
+           | Some id, Some name ->
+             String.trim id = "" || String.trim name = ""
+           | None, _ | _, None -> true)
+        | Text_block
+        | Thinking_block
+        | Reasoning_details_block
+        | Redacted_thinking_block
+        | Tool_result_block _
+        | Image_block
+        | Document_block
+        | Audio_block
+        | Unknown_block _ -> false
+      in
+      if
+        match kind with
+        | Unknown_block _ -> true
+        | Text_block
+        | Thinking_block
+        | Reasoning_details_block
+        | Redacted_thinking_block
+        | Tool_use_block
+        | Tool_result_block _
+        | Image_block
+        | Document_block
+        | Audio_block -> false
+      then
+        terminal_event_failure
+          (Printf.sprintf "unsupported_content_block_kind:%s:index:%d" content_type index)
+          state
+      else if tool_identity_missing
+      then
+        terminal_event_failure
+          (Printf.sprintf "malformed_tool_use:index:%d:missing_identity" index)
+          state
+      else
+      let header = Announced { kind; tool_id; tool_name } in
+      (match Blocks.find_opt index state.blocks with
+     | Some block when block_header_equal block.header header ->
+       (match block.lifecycle with
+        | Open when not (block_has_payload block) ->
+          (* A duplicate header before payload is idempotent: preserve/reset
+             are byte-identical, so all stream consumers can accept it. *)
+          state
+        | Open ->
+          capture_failure
+            (Types.Stream_parse_failed
+               { reason =
+                   Printf.sprintf
+                     "content_block_start_after_payload:index:%d"
+                     index
+               ; raw = ""
+               })
+            state
+        | Closed ->
+          capture_failure
+            (Types.Stream_parse_failed
+               { reason =
+                   Printf.sprintf "content_block_start_after_stop:index:%d" index
+               ; raw = ""
+               })
+            state)
+     | Some _ ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason = Printf.sprintf "content_block_start_conflict:index:%d" index
+            ; raw = ""
+            })
+         state
+     | None ->
+       let block = { empty_block with header } in
+       { state with blocks = Blocks.add index block state.blocks })
   | Types.ContentBlockDelta { index; delta } ->
-    update_block
-      index
-      (fun block ->
-         match delta with
+    if state.message_lifecycle <> Accepting_content
+    then terminal_event_failure "content_block_delta_after_terminal" state
+    else
+      (match Blocks.find_opt index state.blocks, delta with
+     | Some { lifecycle = Closed; _ }, _ ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason = Printf.sprintf "content_block_delta_after_stop:index:%d" index
+            ; raw = ""
+            })
+         state
+     | None, _ ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason = Printf.sprintf "content_block_delta_without_start:index:%d" index
+            ; raw = ""
+            })
+         state
+     | Some { header = Unannounced; _ }, _ ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason = Printf.sprintf "content_block_delta_without_start:index:%d" index
+            ; raw = ""
+            })
+         state
+     | Some { header = Announced { kind; _ }; _ }, delta
+       when not (block_kind_accepts_delta kind delta) ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason =
+                Printf.sprintf
+                  "content_block_delta_kind_mismatch:index:%d:block:%s:delta:%s"
+                  index
+                  (block_kind_name kind)
+                  (delta_kind_name delta)
+            ; raw = ""
+            })
+         state
+     | ( Some { media = Some media; _ }
+       , Types.MediaDelta { media_type; source_type; _ } )
+       when not
+              (String.equal media.media_type media_type && media.source_type = source_type)
+       ->
+       capture_failure
+         (Types.Stream_parse_failed
+            { reason = Printf.sprintf "media_delta_metadata_conflict:index:%d" index
+            ; raw = ""
+            })
+         state
+     | _ ->
+       update_block
+         index
+         (fun block ->
+            match delta with
          | Types.TextDelta text | Types.ThinkingDelta text ->
-           (* Incremental deltas append unconditionally. A whole-value re-emit
-              has its own [InputJsonSnapshot] constructor below, so no string
-              heuristic guesses whether an object-shaped fragment replaces. *)
+           (* Incremental deltas append unconditionally. Whole text values have
+              the distinct [TextSnapshot] constructor, so repeated tokens are
+              never guessed to be transport replays. *)
            { block with text_chunks_rev = text :: block.text_chunks_rev }
+         | Types.TextSnapshot text ->
+           (* Valid snapshots are normalized to [TextDelta] before transition.
+              Retain totality for any future internal caller. *)
+           { block with text_chunks_rev = [ text ] }
          | Types.InputJsonDelta text ->
            { block with text_chunks_rev = text :: block.text_chunks_rev }
            |> record_input_piece (Delta_bytes (String.length text))
@@ -240,20 +571,43 @@ let transition_open state = function
            { block with
              signature_chunks_rev = signature :: block.signature_chunks_rev
            })
-      state
-  | Types.ContentBlockStop _ -> state
+         state)
+  | Types.ContentBlockStop { index } ->
+    if state.message_lifecycle = Message_stopped
+    then terminal_event_failure "content_block_stop_after_message_stop" state
+    else
+      (match Blocks.find_opt index state.blocks with
+     | None -> state
+     | Some block ->
+       { state with
+         blocks = Blocks.add index { block with lifecycle = Closed } state.blocks
+       })
   | Types.MessageDelta { stop_reason; usage } ->
-    let completion =
-      match stop_reason with
-      | None -> state.completion
-      | Some stop_reason -> Stopped stop_reason
-    in
-    let usage =
-      match usage with
-      | None -> state.usage
-      | Some delta -> overlay_delta_usage state.usage delta
-    in
-    { state with completion; usage }
+    if state.message_lifecycle = Message_stopped
+    then terminal_event_failure "message_delta_after_message_stop" state
+    else
+      let usage =
+        match usage with
+        | None -> state.usage
+        | Some delta -> overlay_delta_usage state.usage delta
+      in
+      (match state.completion, stop_reason with
+       | Awaiting_stop, None -> { state with usage }
+       | Awaiting_stop, Some stop_reason ->
+         close_all_blocks
+           { state with
+             completion = Stopped stop_reason
+           ; message_lifecycle = Stop_reason_seen
+           ; usage
+           }
+       | Stopped _, None -> { state with usage }
+       | Stopped recorded, Some replay when recorded = replay ->
+         { state with usage }
+       | Stopped _, Some _ ->
+         terminal_event_failure "stop_reason_conflict" state
+       | Terminal_without_stop_reason, None
+       | Terminal_without_stop_reason, Some _ ->
+         terminal_event_failure "message_delta_after_message_stop" state)
   | Types.SSEError { message; error_type; raw }
   | Types.NDJSONError { message; error_type; raw } ->
     capture_failure (Types.Stream_provider_error { message; error_type; raw }) state
@@ -272,22 +626,39 @@ let transition_open state = function
   | Types.StreamIncomplete { reason } ->
     { state with disposition = Incomplete reason }
   | Types.MessageStop ->
-    let completion =
-      match state.completion with
-      | Awaiting_stop -> Terminal_without_stop_reason
-      | Terminal_without_stop_reason | Stopped _ as completion -> completion
-    in
-    { state with completion }
+    (match state.message_lifecycle with
+     | Message_stopped -> state
+     | Accepting_content | Stop_reason_seen ->
+       let completion =
+         match state.completion with
+         | Awaiting_stop -> Terminal_without_stop_reason
+         | Terminal_without_stop_reason | Stopped _ as completion -> completion
+       in
+       close_all_blocks
+         { state with completion; message_lifecycle = Message_stopped })
   | Types.Ping | Types.Connected | Types.Timeout _ -> state
 ;;
 
-let transition state event =
+let transition_with_resolution state event =
   match state.failure with
-  | Some _ -> state
-  | None -> transition_open state event
+  | Some _ -> state, Types.Stream_event_suppressed
+  | None ->
+    (match normalize_event state event with
+     | Ok None -> state, Types.Stream_event_suppressed
+     | Error failure ->
+       let next = capture_failure failure state in
+       next, Types.Stream_event_rejected failure
+     | Ok (Some normalized_event) ->
+       let next = transition_open state normalized_event in
+       (match next.failure with
+        | Some failure -> next, Types.Stream_event_rejected failure
+        | None -> next, Types.Stream_event_accepted normalized_event))
 ;;
 
+let transition state event = fst (transition_with_resolution state event)
+
 let has_failed state = Option.is_some state.failure
+let failure state = state.failure
 
 let stream_parse_failed ~reason ?(raw = "") () =
   Error (Types.Stream_parse_failed { reason; raw })

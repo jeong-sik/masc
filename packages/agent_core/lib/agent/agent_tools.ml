@@ -241,17 +241,28 @@ let resolve_tool_call tool_index name input =
 type tool_use_admission =
   { admitted : Types.content_block list
   ; rejected : int
+  ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
 let admit_tool_use_names tool_index blocks =
   let rejected = ref 0 in
+  let next_planned_index = ref 0 in
+  let next_source_tool_use_ordinal = ref 0 in
+  let admitted_tool_sources = ref [] in
   let admitted =
     List.filter_map
       (fun (block : Types.content_block) ->
          match block with
          | Types.ToolUse { id; name; input } ->
+           let source_tool_use_ordinal = !next_source_tool_use_ordinal in
+           incr next_source_tool_use_ordinal;
            (match resolve_tool_call tool_index name input with
             | resolved, resolved_input, Some _ ->
+              let planned_index = !next_planned_index in
+              incr next_planned_index;
+              admitted_tool_sources :=
+                { Hooks.planned_index; source_tool_use_ordinal }
+                :: !admitted_tool_sources;
               Some (Types.ToolUse { id; name = resolved; input = resolved_input })
             | _, _, None ->
               incr rejected;
@@ -266,7 +277,13 @@ let admit_tool_use_names tool_index blocks =
          | Types.Audio _ -> Some block)
       blocks
   in
-  { admitted; rejected = !rejected }
+  { admitted
+  ; rejected = !rejected
+  ; tool_source_map =
+      { Hooks.admitted_tool_sources = List.rev !admitted_tool_sources
+      ; source_tool_use_count = !next_source_tool_use_ordinal
+      }
+  }
 ;;
 
 let schedule_tool_use ~tool_index index (id, name, input) =

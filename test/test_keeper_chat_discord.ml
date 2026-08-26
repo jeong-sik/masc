@@ -193,6 +193,38 @@ let test_terminal_callback_once_for_fallback_post () =
   check_single_ok "fallback terminal result" outcomes;
   check (list string) "one final POST" [ "hello" ] (List.rev !final_posts)
 
+let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
+  let final_posts = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-retry"; thread_id = "thread-retry" }
+      ; Masc.Keeper_chat_events.Text_delta "stale"
+      ; Masc.Keeper_chat_events.Tool_call_start
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-retry"
+          ; tool_call_name = "Read"
+          }
+      ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+      ; Masc.Keeper_chat_events.Text_delta "fresh"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-retry" }
+      ]
+      ~post_message:(fun ~content:_ -> fail "single words stay buffered")
+      ~edit_message:(fun ~message_id:_ ~content:_ ->
+        fail "retry fixture never opens a streaming message")
+      ~send_message:(fun ~content ->
+        final_posts := content :: !final_posts;
+        Ok ())
+  in
+  check_single_ok "runtime attempt terminal result" outcomes;
+  match List.rev !final_posts with
+  | [ content ] ->
+      check bool "prior attempt text is discarded" false (contains content "stale");
+      check bool "fresh attempt text is delivered" true (contains content "fresh");
+      check bool "prior tool evidence is retained" true (contains content "Read")
+  | posts -> failf "expected one final POST, got %d" (List.length posts)
+
 let test_adapter_empty_terminal_is_local_error () =
   let sends = ref 0 in
   let outcomes =
@@ -346,14 +378,22 @@ let test_tool_activity_uses_native_surface_without_messages () =
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-tool"; thread_id = "thread-tool" }
       ; Masc.Keeper_chat_events.Tool_call_start
-          { tool_call_id = "call-1"; tool_call_name = "keeper_surface_read" }
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-1"
+          ; tool_call_name = "keeper_surface_read"
+          }
       ; Masc.Keeper_chat_events.Tool_context_block
           { tool_call_id = "call-1"
           ; name = "keeper_surface_read"
           ; args_summary = "surface=discord"
           ; result_summary = Some "private tool result"
           }
-      ; Masc.Keeper_chat_events.Tool_call_end { tool_call_id = "call-1" }
+      ; Masc.Keeper_chat_events.Tool_call_end
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-1"
+          }
       ; Masc.Keeper_chat_events.Text_delta "done"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-tool" }
       ]
@@ -394,6 +434,8 @@ let () =
             test_final_split_redacts_before_chunking
         ; test_case "callback once for fallback POST" `Quick
             test_terminal_callback_once_for_fallback_post
+        ; test_case "runtime retry drops stale text and keeps tool evidence" `Quick
+            test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail
         ; test_case "empty terminal is local-only" `Quick
             test_adapter_empty_terminal_is_local_error
         ; test_case "completed effect sends no duplicate reply" `Quick

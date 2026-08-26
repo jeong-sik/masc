@@ -241,7 +241,7 @@ let handle ~(config : Workspace.config) args : tool_result =
   let names = requested_names ~config args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
-    tool_result_error_data
+    tool_result_error_data ~class_:Tool_result.Policy_rejection
       (error_assoc
          [ "error_code", `String (error_code_to_string Validation_error)
          ; ( "message"

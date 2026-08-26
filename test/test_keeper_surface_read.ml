@@ -23,6 +23,7 @@ let msg ~ts ?lane ?speaker ~role content : Store.chat_message =
     ts;
     attachments = None;
     tool_call_id = None;
+    execution_id = None;
     tool_call_name = None;
     surface;
     conversation_id = None;

@@ -99,6 +99,7 @@ called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"na
 assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool"}}\n' "$conversation"
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool"}}\n' "$conversation"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
@@ -396,34 +397,72 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          (observation.usage_scope
                           = Runtime_usage_scope.Conversation_cumulative)
                      | None -> fail "Antigravity runtime observation is missing");
+                    (* The exact event order below is not hand-guessed: the MCP
+                       tool_use block comes from the fixture's own HTTP call to
+                       this process's MCP server (synchronous, inside the
+                       python heredoc), while the native tool_use block comes
+                       from parsing the CLI's step_update stdout lines -- two
+                       different channels whose relative interleaving under Eio
+                       is not a contract either channel promises. The WP1
+                       completion trigger only asks for typed counts (native
+                       tool count 1, MASC/MCP tool count 1, unknown-origin
+                       count 0), not a byte-exact transcript, so that is what
+                       is checked here instead of one brittle exhaustive
+                       pattern match. *)
                     (match List.rev !stream_events with
-                     | [ Agent_core.Types.MessageStart
-                           { id = "conversation-antigravity-fixture:ordinal:1"
-                           ; model = "gemini-fixture"
-                           ; usage = None
-                           }
-                       ; ContentBlockStart
-                           { index = 1
-                           ; content_type = "tool_use"
-                           ; tool_id = Some "call-1"
-                           ; tool_name = Some "masc_probe"
-                           }
-                       ; ContentBlockDelta
-                           { index = 1
-                           ; delta = InputJsonSnapshot arguments
-                           }
-                       ; ContentBlockStop { index = 1 }
-                       ; ContentBlockDelta
-                           { index = 0
-                           ; delta = TextDelta "MASC_ANTIGRAVITY_KEEPER_OK"
-                           }
-                       ; MessageStop
-                       ] ->
-                       check string
-                         "streamed tool arguments"
-                         {|{"marker":"from-antigravity"}|}
-                         arguments
-                     | _ -> fail "Keeper did not project the exact Antigravity stream");
+                     | Agent_core.Types.MessageStart
+                         { id = "conversation-antigravity-fixture:ordinal:1"
+                         ; model = "gemini-fixture"
+                         ; usage = None
+                         }
+                       :: rest ->
+                       (match List.rev rest with
+                        | Agent_core.Types.MessageStop :: _ ->
+                          let starts =
+                            List.filter_map
+                              (function
+                                | Agent_core.Types.ContentBlockStart
+                                    { content_type; _ } -> Some content_type
+                                | _ -> None)
+                              rest
+                          in
+                          let count_of value =
+                            List.length (List.filter (String.equal value) starts)
+                          in
+                          let native_count =
+                            count_of Runtime_native_tools.stream_content_type
+                          in
+                          let mcp_count = count_of "tool_use" in
+                          check int "native tool count" 1 native_count;
+                          check int "MASC tool count" 1 mcp_count;
+                          check
+                            int
+                            "unknown-origin tool count"
+                            0
+                            (List.length starts - native_count - mcp_count);
+                          let arguments =
+                            List.find_map
+                              (function
+                                | Agent_core.Types.ContentBlockDelta
+                                    { delta =
+                                        Agent_core.Types.InputJsonSnapshot
+                                          arguments
+                                    ; _
+                                    } -> Some arguments
+                                | _ -> None)
+                              rest
+                          in
+                          (match arguments with
+                           | Some arguments ->
+                             check string
+                               "streamed tool arguments"
+                               {|{"marker":"from-antigravity"}|}
+                               arguments
+                           | None ->
+                             fail "no tool_use input snapshot in Antigravity stream")
+                        | _ -> fail "Antigravity stream did not end with MessageStop")
+                     | _ ->
+                       fail "Antigravity stream did not open with the expected MessageStart");
                     observed_initial_prompt :=
                       Some
                         (In_channel.with_open_bin

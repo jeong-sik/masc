@@ -262,36 +262,6 @@ let peek_when ~ready state =
 
 let select_when ~ready state = first_ready_entry ~ready state.pending_entries
 
-(* RFC-0377: once [select_when] has picked a Connector_attention primary,
-   gather every OTHER pending entry for the same conversation so one turn
-   admits the whole backlog instead of one message per turn. Read-only, like
-   [select_when] — it removes nothing from [state]; the caller is
-   responsible for admitting and later acknowledging each returned entry
-   through the normal pending-selection lifecycle (RFC-0020 §3 claim
-   semantics unchanged). [state.pending_entries] preserves arrival order
-   among same-urgency entries ([Keeper_event_queue.enqueue] only appends,
-   and [sort_by_urgency] is a stable sort), and every Connector_attention
-   stimulus is enqueued at [Low] urgency, so the returned list is already in
-   arrival order. *)
-let connector_attention_conversation_batch ~(primary : pending_selection) state =
-  match
-    Keeper_event_queue.connector_attention_channel primary.source.Keeper_event_queue.payload
-  with
-  | None -> []
-  | Some primary_channel ->
-    List.filter
-      (fun (entry : pending_selection) ->
-         (not (entry = primary))
-         &&
-         match
-           Keeper_event_queue.connector_attention_channel
-             entry.source.Keeper_event_queue.payload
-         with
-         | Some entry_channel ->
-           Keeper_continuation_channel.same_conversation primary_channel entry_channel
-         | None -> false)
-      state.pending_entries
-
 let validate_pending_selection
       ~(selection : pending_selection)
       state
@@ -451,7 +421,10 @@ let source_terminal_receipt_of_stimulus source =
   (* Transferable receipts are the ones an operator can hand to another
      Keeper. A delegation answer belongs to the Keeper that asked; moving it
      would deliver an answer to someone who never asked. *)
-  | Keeper_event_queue.Delegate_completed _ ->
+  | Keeper_event_queue.Delegate_completed _
+  (* Same reason: an async composition's result belongs to the Keeper that
+     submitted it. *)
+  | Keeper_event_queue.Composition_completed _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

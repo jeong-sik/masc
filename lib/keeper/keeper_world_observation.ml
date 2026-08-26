@@ -25,6 +25,7 @@ type pending_board_event_kind =
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
   | Delegate_completed
+  | Composition_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -60,6 +61,10 @@ let is_board_activity_event (event : pending_board_event) =
      renders the row's title and preview, and the answer is the whole point of
      the wake. Excluded, the Keeper would be woken with nothing to read. *)
   | Delegate_completed
+  (* Same shape: no Board post behind the id, and this block is the only one
+     that renders the row, so leaving it out would wake the Keeper with an
+     empty pending-events list. *)
+  | Composition_completed
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
@@ -75,6 +80,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_vote_cast _
   | Fusion_completed
   | Delegate_completed
+  | Composition_completed
   | External_attention _
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
@@ -89,6 +95,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_vote_cast _
   | Fusion_completed
   | Delegate_completed
+  | Composition_completed
   | Schedule_due _
   | External_attention _
   | Task_cancelled _ -> false
@@ -101,6 +108,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   match event.event_kind with
   | Task_cancelled _ -> true
   | Delegate_completed
+  | Composition_completed
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
@@ -561,6 +569,48 @@ let pending_board_event_of_fusion_completion
 
 let delegate_reply_preview_max_len = 480
 
+(* An async composition this Keeper submitted has settled. It arrives as a
+   just-arrived board event for the same reason a delegation answer does: the
+   submitter is mid-cycle and reads its pending events, not a request store.
+   The Keeper is its own author here -- it submitted the work.
+
+   A success carries no preview. The result lives in the async request record
+   and [keeper_composition_status] reads it by the request id in the title;
+   putting the body here would duplicate a durable store into the prompt.
+   A failure or cancellation carries its detail, which exists nowhere the
+   Keeper can otherwise act on. *)
+let pending_board_event_of_composition_completion
+      ~(keeper_name : string)
+      ~(arrived_at : float)
+      (cc : Keeper_event_queue.composition_completion)
+  : pending_board_event
+  =
+  let outcome, message =
+    match cc.cc_terminal with
+    | Keeper_event_queue.Composition_succeeded -> "succeeded", ""
+    | Keeper_event_queue.Composition_failed detail -> "failed", detail
+    | Keeper_event_queue.Composition_cancelled reason -> "cancelled", reason
+  in
+  { event_kind = Composition_completed
+  ; post_id = Keeper_event_queue.composition_completion_post_id cc
+  ; author = keeper_name
+    (* Joined rather than formatted: the ratchet counts a format literal as a
+       model-facing prose slot, and the three fields already say everything
+       the row states. *)
+  ; title = String.concat " " [ cc.cc_tool; outcome; cc.cc_request_id ]
+  ; preview = short_preview ~max_len:delegate_reply_preview_max_len message
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 (* The answer to a turn this Keeper asked another Keeper to run. It arrives as
    a just-arrived board event for the same reason a Fusion result does: the
    asker is mid-cycle and reads its pending events, not a request store. The
@@ -806,6 +856,13 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_delegate_completion
             ~arrived_at:stimulus.arrived_at
             dc))
+  | Keeper_event_queue.Composition_completed cc ->
+    Ok
+      (Some
+         (pending_board_event_of_composition_completion
+            ~keeper_name:meta.name
+            ~arrived_at:stimulus.arrived_at
+            cc))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

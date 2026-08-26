@@ -344,6 +344,8 @@ let board_event_kind_label = function
     "completion_authority_rejected"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
   | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
+  | Keeper_world_observation.Composition_completed ->
+    "keeper_composition_completed"
 ;;
 
 let quote_prompt_field value =
@@ -486,7 +488,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Schedule_due _
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_cancelled _
-  | Keeper_world_observation.Delegate_completed -> []
+  | Keeper_world_observation.Delegate_completed
+  | Keeper_world_observation.Composition_completed -> []
 ;;
 
 let board_event_fields
@@ -581,6 +584,99 @@ let scheduled_wake_fields ~occurrence_id
   @ [ "message", wake.message ]
 ;;
 
+type scheduled_wake_group =
+  { wake : Keeper_event_queue.scheduled_wake
+  ; first_occurrence_id : string
+  ; first_due_at : float
+  ; last_occurrence_id : string
+  ; last_due_at : float
+  ; occurrence_count : int
+  }
+
+let same_scheduled_wake_series
+      (left : Keeper_event_queue.scheduled_wake)
+      (right : Keeper_event_queue.scheduled_wake)
+  =
+  String.equal left.schedule_id right.schedule_id
+  && String.equal left.schedule_instance_id right.schedule_instance_id
+  && String.equal left.payload_digest right.payload_digest
+;;
+
+let group_scheduled_wake_events events =
+  let add_event groups (event : Keeper_world_observation.pending_board_event) =
+    match event.event_kind with
+    | Keeper_world_observation.Schedule_due wake ->
+      let rec update prefix = function
+        | [] ->
+          List.rev_append
+            prefix
+            [ { wake
+              ; first_occurrence_id = event.post_id
+              ; first_due_at = wake.due_at
+              ; last_occurrence_id = event.post_id
+              ; last_due_at = wake.due_at
+              ; occurrence_count = 1
+              }
+            ]
+        | group :: rest when same_scheduled_wake_series group.wake wake ->
+          let first_occurrence_id, first_due_at =
+            if wake.due_at < group.first_due_at
+            then event.post_id, wake.due_at
+            else group.first_occurrence_id, group.first_due_at
+          in
+          let last_occurrence_id, last_due_at =
+            if wake.due_at > group.last_due_at
+            then event.post_id, wake.due_at
+            else group.last_occurrence_id, group.last_due_at
+          in
+          List.rev_append
+            prefix
+            ({ group with
+               first_occurrence_id
+             ; first_due_at
+             ; last_occurrence_id
+             ; last_due_at
+             ; occurrence_count = group.occurrence_count + 1
+             }
+             :: rest)
+        | group :: rest -> update (group :: prefix) rest
+      in
+      update [] groups
+    | Keeper_world_observation.Board_post_created
+    | Keeper_world_observation.Board_comment_added
+    | Keeper_world_observation.Board_reaction_changed _
+    | Keeper_world_observation.Board_vote_cast _
+    | Keeper_world_observation.Fusion_completed
+    | Keeper_world_observation.External_attention _
+    | Keeper_world_observation.Completion_authority_rejected _
+    | Keeper_world_observation.Task_cancelled _
+    | Keeper_world_observation.Delegate_completed
+    | Keeper_world_observation.Composition_completed -> groups
+  in
+  List.fold_left add_event [] events
+;;
+
+let scheduled_wake_group_fields group =
+  if group.occurrence_count = 1
+  then scheduled_wake_fields ~occurrence_id:group.first_occurrence_id group.wake
+  else
+    let title_field =
+      match group.wake.title with
+      | None -> []
+      | Some title -> [ "title", title ]
+    in
+    [ "schedule_id", group.wake.schedule_id
+    ; "occurrence_count", string_of_int group.occurrence_count
+    ; "first_due_at_unix", Printf.sprintf "%.17g" group.first_due_at
+    ; "last_due_at_unix", Printf.sprintf "%.17g" group.last_due_at
+    ; "first_occurrence_id", group.first_occurrence_id
+    ; "last_occurrence_id", group.last_occurrence_id
+    ; "payload_digest", group.wake.payload_digest
+    ]
+    @ title_field
+    @ [ "message", group.wake.message ]
+;;
+
 module For_testing = struct
   let board_event_fields = board_event_fields
   let scheduled_wake_fields = scheduled_wake_fields
@@ -629,37 +725,28 @@ let format_scheduled_wake_observations
   then None
   else (
     let ubuf = Buffer.create 512 in
+    let groups = group_scheduled_wake_events events in
     Buffer.add_string ubuf
-      (Printf.sprintf "### Scheduled Wake (%d due)\n" (List.length events));
+      (match events, groups with
+       | [ _ ], [ _ ] -> "### Scheduled Wake (1 due)\n"
+       | _ ->
+         Printf.sprintf
+           "### Scheduled Wake (%d due across %d series)\n"
+           (List.length events)
+           (List.length groups));
     Buffer.add_string ubuf
-      "Rows below are scheduled work requests, not Board posts. The \
-       occurrence_id is correlation metadata only: never pass it to a Board \
-       tool. Pass schedule_id to masc_schedule_get. The tool returns the current \
-       durable request; a recurring schedule may already point at its next \
-       occurrence. The row's message is the exact wake message. External effects \
-       still cross the Gate.\n";
+      "Scheduled rows are not Board posts. occurrence_id is correlation \
+       metadata only: never pass it to a Board tool. first/last ids are metadata \
+       too. Repeated unchanged schedules appear once with occurrence_count. Pass \
+       schedule_id to masc_schedule_get; it returns the current durable request \
+       and may point to the next recurrence. message is the exact wake message. \
+       External effects still cross the Gate.\n";
     List.iter
-      (fun (event : Keeper_world_observation.pending_board_event) ->
-         match event.event_kind with
-         | Keeper_world_observation.Schedule_due wake ->
-           Buffer.add_string ubuf
-             (format_prompt_row
-                (scheduled_wake_fields ~occurrence_id:event.post_id wake));
-           Buffer.add_char ubuf '\n'
-         (* [events] is pre-filtered by [is_scheduled_automation_event], so the
-            arms below are unreachable. They are enumerated rather than folded
-            into a catch-all so that an eleventh constructor fails to compile
-            here instead of being silently dropped from the block. *)
-         | Keeper_world_observation.Board_post_created
-         | Keeper_world_observation.Board_comment_added
-         | Keeper_world_observation.Board_reaction_changed _
-         | Keeper_world_observation.Board_vote_cast _
-         | Keeper_world_observation.Fusion_completed
-         | Keeper_world_observation.External_attention _
-         | Keeper_world_observation.Completion_authority_rejected _
-         | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed -> ())
-      events;
+      (fun group ->
+         Buffer.add_string ubuf
+           (format_prompt_row (scheduled_wake_group_fields group));
+         Buffer.add_char ubuf '\n')
+      groups;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
 ;;
@@ -691,7 +778,8 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
-         | Keeper_world_observation.Delegate_completed -> None)
+         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Composition_completed -> None)
       events
   in
   match rows with
@@ -743,7 +831,8 @@ let format_task_cancellation_observations
          | Keeper_world_observation.Schedule_due _
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
-         | Keeper_world_observation.Delegate_completed -> None)
+         | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Composition_completed -> None)
       events
   in
   match rows with
@@ -777,52 +866,14 @@ let combine_prompt_sections sections =
    and exact-mention state remain source/routing context only; none of them
    grants instruction authority. Relevance and action remain model decisions,
    while external effects still cross the Gate. *)
-(* Board Activity was the one per-turn list with no bound. Its two siblings in
-   the same observation have one — [scheduled_automation_item_limit = 5] and
-   [Keeper_config.keeper_board_own_recent_max] — so the absence here was a gap,
-   not a policy.
-
-   The gap is invisible while a Keeper keeps up: the cursor advances each turn
-   and the list is short. It opens on resume. A Keeper down for hours comes back
-   to everything posted meanwhile, and the live board has produced 269 posts in
-   a day (2026-08-05); at ~220 bytes a row that is tens of KB in one turn,
-   against a 9,167-byte system prompt.
-
-   Bounded at the render, not at collection: [pending_board_events] also drives
-   the wake decision, and dropping events before that would change which turns
-   happen at all. This changes only what a turn that already happened reads.
-
-   Under the budget the output is byte-identical to before — same order, same
-   heading. Over it, mentions come first (an unread mention is the row whose
-   loss costs most), recency breaks the rest, and the heading states both counts
-   and the tool that fetches the remainder. Nothing is silently dropped. *)
-let board_activity_render_budget_rows = 20
-
-(* Same reason as the Board budget above: expose enough typed identities for a
-   keeper to pick one, and say how many were held back rather than truncating
-   silently. *)
+(* Claimable Tasks are a discovery list rather than already-admitted durable
+   input. Keep that projection bounded. Board Activity is intentionally not
+   bounded here: all-ready Event Queue admission ACKs the whole batch on turn
+   completion, so hiding any admitted row would claim the Keeper saw input that
+   never reached its prompt. *)
 let claimable_task_render_budget_rows = 10
 
 let take n xs = List.filteri (fun i _ -> i < n) xs
-
-let board_activity_render_budget
-      (events : Keeper_world_observation.pending_board_event list)
-  : Keeper_world_observation.pending_board_event list
-  =
-  if List.length events <= board_activity_render_budget_rows
-  then events
-  else
-    events
-    |> List.stable_sort
-         (fun
-           (a : Keeper_world_observation.pending_board_event)
-           (b : Keeper_world_observation.pending_board_event)
-         ->
-           match compare b.explicit_mention a.explicit_mention with
-           | 0 -> compare b.updated_at a.updated_at
-           | ordered -> ordered)
-    |> List.filteri (fun i _ -> i < board_activity_render_budget_rows)
-;;
 
 let render_board_observations
       (events : Keeper_world_observation.pending_board_event list)
@@ -1312,19 +1363,10 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       in
       if board_events <> [] then (
         let total = List.length board_events in
-        let shown = board_activity_render_budget board_events in
-        let shown_count = List.length shown in
         let ubuf = Buffer.create 256 in
         Buffer.add_string ubuf
-          (if shown_count < total
-           then
-             Printf.sprintf
-               "### Board Activity (%d new, %d shown — read the rest with \
-                masc_board_list)\n"
-               total
-               shown_count
-           else Printf.sprintf "### Board Activity (%d new)\n" total);
-        Buffer.add_string ubuf (render_board_observations shown);
+          (Printf.sprintf "### Board Activity (%d new)\n" total);
+        Buffer.add_string ubuf (render_board_observations board_events);
         Buffer.add_string ubuf "\n\n";
         Some (Buffer.contents ubuf))
       else None

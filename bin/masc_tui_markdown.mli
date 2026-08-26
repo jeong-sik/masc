@@ -39,6 +39,13 @@ type palette = {
   quote_gutter : string;
   table_header : span;
   table_gutter : string;
+  (** What joins the rule row between columns, in place of the gutter running
+      through it. Must measure the same cells as {!table_gutter} or the rule
+      stops lining up with the rows it divides. *)
+  table_rule_gutter : string;
+  (** Draw the outer box. The columns pay for it -- four cells -- so it is a
+      choice rather than the default. *)
+  table_frame : bool;
   (** Drawn between a table's columns. *)
   (* Styles for fenced code that names a language this module lexes
      (ocaml, bash/sh, json). A fence with no tag, or one naming anything
@@ -56,6 +63,12 @@ type palette = {
 val plain_palette : palette
 (** A palette whose spans are all empty and whose gutters are ASCII. What the
     reader would see with styling stripped. *)
+
+val non_colliding_fence_marker : string list -> string option
+(** Choose a Markdown fence marker that none of [lines] can close under this
+    renderer's own fence grammar. [None] means both supported markers collide.
+    Generated blocks must use this authority rather than reimplementing the
+    security-sensitive closing predicate. *)
 
 type streaming_render = private {
   rows : string list;

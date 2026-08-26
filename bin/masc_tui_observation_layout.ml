@@ -36,6 +36,22 @@ type log_cells = {
    of it that could not read anything but ASCII. *)
 let cells = Masc_tui_message_layout.display_width
 
+type context_pressure =
+  | Quiet
+  | Pressure
+  | Danger
+
+(* The detail row shows one decimal place. Returning that displayed unit keeps
+   its label, pressure thresholds, and bar fill on one rounding authority. *)
+let percentage_tenths ratio = int_of_float (Float.round (ratio *. 1000.0))
+
+let context_pressure ratio =
+  let percentage_tenths = percentage_tenths ratio in
+  if percentage_tenths >= 800 then Danger
+  else if percentage_tenths >= 500 then Pressure
+  else Quiet
+;;
+
 (* [fit_width] pads on the right as it fits, which is exactly [pad_right]. *)
 let pad_right width value = Masc_tui_message_layout.fit_width value width
 

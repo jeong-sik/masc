@@ -54,6 +54,7 @@ let msg ~role ?(id = "test-msg") ?(ts = 1.0) ?(surface = None) ?(speaker = None)
   ; ts
   ; attachments = None
   ; tool_call_id = None
+  ; execution_id = None
   ; tool_call_name = None
   ; surface
   ; conversation_id = None
@@ -308,6 +309,7 @@ let tool_line : Store.chat_message =
   ; ts = 10.5
   ; attachments = None
   ; tool_call_id = Some "tc-0"
+  ; execution_id = None
   ; tool_call_name = Some "Read"
   ; surface = None
   ; conversation_id = None

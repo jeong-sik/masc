@@ -147,9 +147,10 @@ let test_append_turn_roundtrip () =
         ~user_attachments:[]
         ~tool_calls:
           [
-            { K.call_id = " toolu_1 "; call_name = "Read"; args = {|{"path":"x"}|} };
-            (* Empty args normalise to "{}", empty id to a positional one. *)
-            { K.call_id = ""; call_name = "masc_status"; args = "  " };
+            { K.call_id = " toolu_1 "; execution_id = None; call_name = "Read"; args = {|{"path":"x"}|} };
+            (* Empty args normalise to "{}"; an unnamed provider call keeps no
+               provider id and uses only its typed delivery ordinal. *)
+            { K.call_id = ""; execution_id = None; call_name = "masc_status"; args = "  " };
           ]
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
         ~assistant_content:"all green"
@@ -188,7 +189,7 @@ let test_tool_only_continuations_do_not_fabricate_assistant_rows () =
     (fun () ->
       let keeper_name = "keeper-chat-tool-only" in
       let tool_calls =
-        [ { K.call_id = "call-1"; call_name = "Read"; args = {|{"path":"x"}|} } ]
+        [ { K.call_id = "call-1"; execution_id = None; call_name = "Read"; args = {|{"path":"x"}|} } ]
       in
       (match
          K.append_user_and_tool_calls_result ~base_dir ~keeper_name
@@ -342,6 +343,7 @@ let test_recent_direct_context_renders_prior_reply_and_tool_evidence () =
         ~user_attachments:[]
         ~tool_calls:
           [ { K.call_id = "toolu_board";
+              execution_id = None;
               call_name = "masc_board_list";
               args = {|{"limit":20}|} } ]
         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
@@ -474,6 +476,7 @@ let test_append_turn_redacts_projected_secrets () =
               data = file_secret } ]
         ~tool_calls:
           [ { K.call_id = "toolu_1";
+              execution_id = None;
               call_name = "keeper_exec";
               args = {|{"token":"|} ^ env_secret ^ {|"}|} } ]
         ~assistant_content:("done " ^ file_secret)
@@ -800,7 +803,7 @@ let test_window_keeps_tool_lines_of_retained_turns () =
           ~user_content:(Printf.sprintf "u%d" i)
           ~user_attachments:[]
           ~tool_calls:
-            [ { K.call_id = Printf.sprintf "t%d" i; call_name = "Read"; args = "{}" } ]
+            [ { K.call_id = Printf.sprintf "t%d" i; execution_id = None; call_name = "Read"; args = "{}" } ]
           ~assistant_content:(Printf.sprintf "a%d" i)
           ()
       done;
@@ -844,7 +847,7 @@ let test_leading_failure_tool_batch_is_retained () =
            ~content:"Keeper request failed: projection rejected"
            ~tool_calls:
              [ { K.call_id = "failure-call"
-               ; call_name = "Read"
+               ; execution_id = None; call_name = "Read"
                ; args = {|{"path":"lib/a.ml"}|}
                }
              ]
@@ -886,7 +889,7 @@ let test_identified_tool_only_history_is_not_trimmed () =
          K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
            ~tool_calls:
              [ { K.call_id = "call-only"
-               ; call_name = "Read"
+               ; execution_id = None; call_name = "Read"
                ; args = {|{"path":"lib/a.ml"}|}
                }
              ]
@@ -1277,7 +1280,7 @@ let test_user_and_tool_rows_have_no_blocks () =
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"https://x.com/post"
         ~user_attachments:[]
-        ~tool_calls:[ { K.call_id = "t1"; call_name = "Read"; args = "{}" } ]
+        ~tool_calls:[ { K.call_id = "t1"; execution_id = None; call_name = "Read"; args = "{}" } ]
         ~assistant_content:"done"
         ();
       let messages = K.load ~base_dir ~keeper_name in
@@ -1391,6 +1394,8 @@ let test_append_turn_redacts_all_supplied_block_strings () =
                   ; B.Trace_tool
                       { name = "tool " ^ secret
                       ; tool_call_id = Some ("call " ^ secret)
+                      ; execution_id =
+                          Some (Ids.Execution_id.of_string "exec-redaction-test")
                       ; status = Some B.Trace_tool_err
                       ; dur = Some ("dur " ^ secret)
                       ; args =
@@ -1623,7 +1628,7 @@ let test_turn_ref_persisted_on_turn_rows () =
       let tref = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:7 in
       K.append_turn ~base_dir ~keeper_name ~user_content:"do it"
         ~user_attachments:[]
-        ~tool_calls:[ { K.call_id = "t1"; call_name = "Read"; args = "{}" } ]
+        ~tool_calls:[ { K.call_id = "t1"; execution_id = None; call_name = "Read"; args = "{}" } ]
         ~turn_ref:tref ~assistant_content:"done" ();
       let messages = K.load ~base_dir ~keeper_name in
       List.iter
@@ -1640,6 +1645,45 @@ let test_turn_ref_persisted_on_turn_rows () =
       Alcotest.(check bool) "turn_ref present in to_json_array" true
         (String_util.contains_substring s "trace-abc#7"))
 
+let test_tool_identities_persist_and_project_separately () =
+  let base_dir = temp_base_path "keeper-chat-store-execution-id" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-execution-id" in
+      let execution_id = Ids.Execution_id.of_string "exec-canonical-7" in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"edit it"
+        ~user_attachments:[]
+        ~tool_calls:
+          [ { K.call_id = "provider-call-7"
+            ; execution_id = Some execution_id
+            ; call_name = "Edit"
+            ; args = "{}"
+            }
+          ]
+        ~assistant_content:"done" ();
+      let tool =
+        K.load ~base_dir ~keeper_name
+        |> List.find (fun (message : K.chat_message) ->
+             K.Role.equal message.role K.Role.Tool)
+      in
+      Alcotest.(check (option string)) "provider id"
+        (Some "provider-call-7") tool.tool_call_id;
+      Alcotest.(check (option string)) "canonical execution id"
+        (Some "exec-canonical-7")
+        (Option.map Ids.Execution_id.to_string tool.execution_id);
+      let projected = K.to_json_array [ tool ] in
+      let row = projected |> Yojson.Safe.Util.to_list |> List.hd in
+      Alcotest.(check (option string)) "provider id on history JSON"
+        (Some "provider-call-7")
+        (row |> Yojson.Safe.Util.member "tool_call_id"
+         |> Yojson.Safe.Util.to_string_option);
+      Alcotest.(check (option string)) "canonical id on history JSON"
+        (Some "exec-canonical-7")
+        (row |> Yojson.Safe.Util.member "execution_id"
+         |> Yojson.Safe.Util.to_string_option))
+;;
+
 let test_to_json_array_appends_trace_block_to_assistant_turn () =
   let base_dir = temp_base_path "keeper-chat-store-turn-trace" in
   Fun.protect
@@ -1649,7 +1693,7 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
       let tref = Ids.Turn_ref.make ~trace_id:"trace-ui" ~absolute_turn:12 in
       K.append_turn ~base_dir ~keeper_name ~user_content:"status"
         ~user_attachments:[]
-        ~tool_calls:[ { K.call_id = "exec-1"; call_name = "keeper_tasks_list"; args = "{}" } ]
+        ~tool_calls:[ { K.call_id = "exec-1"; execution_id = None; call_name = "keeper_tasks_list"; args = "{}" } ]
         ~turn_ref:tref ~assistant_content:"done" ();
       let messages = K.load ~base_dir ~keeper_name in
       let trace_block_by_turn_ref turn_ref =
@@ -1671,7 +1715,9 @@ let test_to_json_array_appends_trace_block_to_assistant_turn () =
                      B.Trace_tool
                          {
                            name = "keeper_tasks_list";
-                           tool_call_id = Some "exec-1";
+                           tool_call_id = Some "provider-1";
+                           execution_id =
+                             Some (Ids.Execution_id.of_string "exec-1");
                            status = Some B.Trace_tool_ok;
                            dur = Some "1ms";
                          args = Some (`Assoc []);
@@ -1851,7 +1897,7 @@ let test_to_json_array_stream_contract_lifecycle_replay () =
       in
       K.append_turn ~base_dir ~keeper_name ~user_content:"inspect"
         ~user_attachments:[]
-        ~tool_calls:[ { K.call_id = "toolu_life"; call_name = "Read"; args = "{}" } ]
+        ~tool_calls:[ { K.call_id = "toolu_life"; execution_id = None; call_name = "Read"; args = "{}" } ]
         ~turn_ref:tref ~stream_lifecycle ~assistant_content:"done" ();
       (match K.load ~base_dir ~keeper_name with
        | [ user; tool; assistant ] ->
@@ -2147,6 +2193,439 @@ let operation_delivery_key value =
   | Ok request_id -> Keeper_chat_delivery_identity.Operation request_id
   | Error detail -> Alcotest.fail detail
 
+let persisted_provenance_row ~id ~role ~content ~delivery_key ~transcript_slot
+    ?execution_id ?tool_call_name () =
+  let provenance : Keeper_chat_delivery_identity.delivery_provenance =
+    { delivery_key; transcript_slot }
+  in
+  `Assoc
+    ([ "id", `String id
+     ; "role", `String role
+     ; "content", `String content
+     ; "ts", `Float 1.0
+     ]
+     @ Keeper_chat_delivery_identity.delivery_provenance_fields provenance
+     @ Option.fold ~none:[]
+         ~some:(fun execution_id -> [ "execution_id", `String execution_id ])
+         execution_id
+     @ Option.fold ~none:[]
+         ~some:(fun tool_call_name ->
+           [ "tool_call_name", `String tool_call_name ])
+         tool_call_name)
+;;
+
+let persisted_canonical_tool_row ~id ~delivery_key ~execution_id ~ordinal =
+  persisted_provenance_row ~id ~role:"tool" ~content:"{}" ~delivery_key
+    ~transcript_slot:
+      (Keeper_chat_delivery_identity.Tool_call
+         { execution_id = Ids.Execution_id.of_string execution_id; ordinal })
+    ~execution_id ~tool_call_name:"Read" ()
+;;
+
+let test_duplicate_provenance_poisons_whole_delivery_key () =
+  let base_dir = temp_base_path "keeper-chat-store-duplicate-provenance" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-duplicate-provenance" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let delivery_key = operation_delivery_key "kmsg-duplicate-provenance" in
+      let row id =
+        persisted_provenance_row ~id ~role:"user" ~content:"hello"
+          ~delivery_key
+          ~transcript_slot:Keeper_chat_delivery_identity.Accepted_user ()
+      in
+      write_file path
+        (String.concat "\n"
+           [ Yojson.Safe.to_string (row "duplicate-a")
+           ; Yojson.Safe.to_string (row "duplicate-b")
+           ]
+         ^ "\n");
+      let before = read_file path in
+      (match
+         K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+           ~content:"must not append" ()
+       with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.fail
+           "a duplicate accepted-user provenance did not quarantine its delivery");
+      Alcotest.(check string) "quarantined delivery stays byte-identical" before
+        (read_file path);
+      match
+        K.append_user_message_once ~base_dir ~keeper_name
+          ~delivery_key:(operation_delivery_key "kmsg-unrelated-after-duplicate")
+          ~content:"fresh" ()
+      with
+      | Ok (K.Appended _) -> ()
+      | Ok (K.Already_present _) -> Alcotest.fail "fresh delivery already existed"
+      | Error detail ->
+        Alcotest.failf "duplicate provenance poisoned an unrelated delivery: %s"
+          detail)
+;;
+
+let test_duplicate_tool_ordinal_poisons_whole_delivery_key () =
+  let base_dir = temp_base_path "keeper-chat-store-duplicate-tool-ordinal" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-duplicate-tool-ordinal" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let delivery_key = operation_delivery_key "kmsg-duplicate-tool-ordinal" in
+      write_file path
+        (String.concat "\n"
+           [ persisted_canonical_tool_row ~id:"tool-a" ~delivery_key
+               ~execution_id:"exec-ordinal-a" ~ordinal:0
+             |> Yojson.Safe.to_string
+           ; persisted_canonical_tool_row ~id:"tool-b" ~delivery_key
+               ~execution_id:"exec-ordinal-b" ~ordinal:0
+             |> Yojson.Safe.to_string
+           ]
+         ^ "\n");
+      match
+        K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+          ~content:"must not append" ()
+      with
+      | Error _ -> ()
+      | Ok _ ->
+        Alcotest.fail
+          "duplicate tool ordinals did not quarantine the whole delivery")
+;;
+
+let canonical_tool_call ~call_id ~execution_id ~call_name =
+  { K.call_id = call_id
+  ; execution_id = Some (Ids.Execution_id.of_string execution_id)
+  ; call_name
+  ; args = "{}"
+  }
+;;
+
+let test_execution_id_cannot_cross_delivery_keys () =
+  let base_dir = temp_base_path "keeper-chat-store-cross-delivery-execution" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-cross-delivery-execution" in
+      let execution_id = "exec-one-delivery-only" in
+      let first_key = operation_delivery_key "kmsg-execution-owner" in
+      let second_key = operation_delivery_key "kmsg-execution-reuse" in
+      let call = canonical_tool_call ~call_id:"provider-a" ~execution_id
+          ~call_name:"Read" in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key:first_key
+           ~tool_calls:[ call ] ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "first execution already existed"
+       | Error detail -> Alcotest.fail detail);
+      let reused = { call with call_id = "provider-b"; call_name = "Write" } in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key:second_key
+           ~tool_calls:[ reused ] ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "one execution_id authorized two delivery keys");
+      Alcotest.(check int) "only the owning execution row remains" 1
+        (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
+let test_existing_execution_reuse_poisons_both_delivery_keys () =
+  let base_dir = temp_base_path "keeper-chat-store-existing-execution-reuse" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-existing-execution-reuse" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let first_key = operation_delivery_key "kmsg-existing-execution-a" in
+      let second_key = operation_delivery_key "kmsg-existing-execution-b" in
+      let execution_id = "exec-existing-reuse" in
+      write_file path
+        (String.concat "\n"
+           [ persisted_canonical_tool_row ~id:"execution-a"
+               ~delivery_key:first_key ~execution_id ~ordinal:0
+             |> Yojson.Safe.to_string
+           ; persisted_canonical_tool_row ~id:"execution-b"
+               ~delivery_key:second_key ~execution_id ~ordinal:0
+             |> Yojson.Safe.to_string
+           ]
+         ^ "\n");
+      let check_poisoned label delivery_key =
+        match
+          K.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
+            ~content:"must not append" ()
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.failf "%s reused execution delivery was writable" label
+      in
+      check_poisoned "first" first_key;
+      check_poisoned "second" second_key;
+      match
+        K.append_user_message_once ~base_dir ~keeper_name
+          ~delivery_key:(operation_delivery_key "kmsg-after-existing-reuse")
+          ~content:"fresh" ()
+      with
+      | Ok (K.Appended _) -> ()
+      | Ok (K.Already_present _) -> Alcotest.fail "fresh delivery already existed"
+      | Error detail ->
+        Alcotest.failf "execution reuse poisoned an unrelated delivery: %s" detail)
+;;
+
+let test_execution_id_cannot_cross_tool_ordinals () =
+  let base_dir = temp_base_path "keeper-chat-store-cross-ordinal-execution" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-cross-ordinal-execution" in
+      let delivery_key = operation_delivery_key "kmsg-execution-ordinal-owner" in
+      let execution_id = "exec-one-ordinal-only" in
+      let first = canonical_tool_call ~call_id:"provider-a" ~execution_id
+          ~call_name:"Read" in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:[ first ] ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "first ordinal already existed"
+       | Error detail -> Alcotest.fail detail);
+      let second = { first with call_id = "provider-b"; call_name = "Write" } in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:[ first; second ] ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "one execution_id authorized two tool ordinals");
+      Alcotest.(check int) "only the owning ordinal remains" 1
+        (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
+let test_blank_execution_id_is_rejected_before_append () =
+  let base_dir = temp_base_path "keeper-chat-store-blank-execution" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-blank-execution" in
+      let delivery_key = operation_delivery_key "kmsg-blank-execution" in
+      let call = canonical_tool_call ~call_id:"provider-blank" ~execution_id:"   "
+          ~call_name:"Read" in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:[ call ] ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "blank canonical execution_id was persisted");
+      Alcotest.(check int) "blank execution writes no row" 0
+        (List.length (K.load ~base_dir ~keeper_name)))
+;;
+
+let test_append_once_tool_slots_keep_identity_kinds_separate () =
+  let base_dir = temp_base_path "keeper-chat-store-tool-slot-kinds" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool-slot-kinds" in
+      let delivery_key = operation_delivery_key "kmsg-tool-slot-kinds" in
+      let execution_id = Ids.Execution_id.of_string "exec-tool-slot" in
+      let tool_calls =
+        [ { K.call_id = "provider-call"
+          ; execution_id = Some execution_id
+          ; call_name = "Read"
+          ; args = "{}"
+          }
+        ; { K.call_id = ""
+          ; execution_id = None
+          ; call_name = "Write"
+          ; args = "{}"
+          }
+        ]
+      in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "tool rows already existed"
+       | Error detail -> Alcotest.fail detail);
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls ()
+       with
+       | Ok (K.Already_present _) -> ()
+       | Ok (K.Appended _) -> Alcotest.fail "tool rows were appended twice"
+       | Error detail -> Alcotest.fail detail);
+      let changed_execution =
+        { (List.hd tool_calls) with
+          execution_id = Some (Ids.Execution_id.of_string "exec-conflict")
+        }
+        :: List.tl tool_calls
+      in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:changed_execution ()
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "same delivery ordinal accepted a changed execution");
+      let promoted_delivery =
+        let canonical = List.hd tool_calls in
+        let delivery = List.nth tool_calls 1 in
+        [ canonical
+        ; { delivery with
+            execution_id = Some (Ids.Execution_id.of_string "exec-promoted")
+          }
+        ]
+      in
+      (match
+         K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+           ~tool_calls:promoted_delivery ()
+       with
+       | Error _ -> ()
+       | Ok _ ->
+         Alcotest.fail
+           "delivery-only ordinal was overwritten by a later canonical execution");
+      match K.load ~base_dir ~keeper_name with
+      | [ canonical; delivery_only ] ->
+        Alcotest.(check (option string)) "canonical provider id"
+          (Some "provider-call") canonical.tool_call_id;
+        Alcotest.(check (option string)) "canonical execution id"
+          (Some "exec-tool-slot")
+          (Option.map Ids.Execution_id.to_string canonical.execution_id);
+        (match canonical.delivery_provenance with
+         | Some
+             { transcript_slot =
+                 Keeper_chat_delivery_identity.Tool_call
+                   { execution_id = stored; ordinal = 0 }
+             ; _
+             } ->
+           Alcotest.(check bool) "canonical slot keeps exact execution" true
+             (Ids.Execution_id.equal stored execution_id)
+         | _ -> Alcotest.fail "canonical tool row used the wrong transcript slot");
+        Alcotest.(check (option string)) "unnamed provider id stays absent"
+          None delivery_only.tool_call_id;
+        Alcotest.(check (option string)) "delivery-only execution stays absent"
+          None
+          (Option.map Ids.Execution_id.to_string delivery_only.execution_id);
+        (match delivery_only.delivery_provenance with
+         | Some
+             { transcript_slot =
+                 Keeper_chat_delivery_identity.Tool_delivery { ordinal = 1 }
+             ; _
+             } -> ()
+         | _ -> Alcotest.fail "delivery-only tool row used an execution slot")
+      | rows -> Alcotest.failf "expected two tool rows, got %d" (List.length rows))
+;;
+
+let test_persisted_tool_execution_identity_is_one_ssot () =
+  let base_dir = temp_base_path "keeper-chat-store-tool-execution-ssot" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-tool-execution-ssot" in
+      let path = chat_path ~base_dir ~keeper_name in
+      let delivery_key operation_id =
+        `Assoc
+          [ "kind", `String "operation"
+          ; "operation_id", `String operation_id
+          ]
+      in
+      let tool_call_slot execution_id =
+        `Assoc
+          [ "kind", `String "tool_call"
+          ; "execution_id", `String execution_id
+          ; "ordinal", `Int 0
+          ]
+      in
+      let tool_delivery_slot =
+        `Assoc [ "kind", `String "tool_delivery"; "ordinal", `Int 0 ]
+      in
+      let accepted_user_slot = `Assoc [ "kind", `String "accepted_user" ] in
+      let row ?(role = "tool") ~id ~operation_id ?execution_id transcript_slot =
+        `Assoc
+          ([ "id", `String id
+           ; "role", `String role
+           ; "content", `String "{}"
+           ; "ts", `Float 1.0
+           ; "tool_call_name", `String "Read"
+           ; "delivery_key", delivery_key operation_id
+           ; "transcript_slot", transcript_slot
+           ]
+           @ Option.fold ~none:[]
+               ~some:(fun value -> [ "execution_id", `String value ])
+               execution_id)
+      in
+      let rows =
+        [ row ~id:"mismatch" ~operation_id:"kmsg-exec-mismatch"
+            ~execution_id:"exec-row"
+            (tool_call_slot "exec-slot")
+        ; row ~id:"missing" ~operation_id:"kmsg-exec-missing"
+            (tool_call_slot "exec-slot-only")
+        ; row ~id:"delivery-has-exec" ~operation_id:"kmsg-delivery-has-exec"
+            ~execution_id:"exec-forbidden"
+            tool_delivery_slot
+        ; row ~id:"blank-exec" ~operation_id:"kmsg-blank-exec"
+            ~execution_id:"   "
+            (tool_call_slot "exec-slot-blank-row")
+        ; row ~role:"assistant" ~id:"tool-slot-assistant-role"
+            ~operation_id:"kmsg-tool-slot-assistant-role"
+            ~execution_id:"exec-role"
+            (tool_call_slot "exec-role")
+        ; row ~id:"accepted-user-tool-role"
+            ~operation_id:"kmsg-accepted-user-tool-role"
+            accepted_user_slot
+        ]
+      in
+      let invalid_payload = Read_drop_reason.to_wire Read_drop_reason.Invalid_payload in
+      let before = drop_value invalid_payload in
+      write_file path
+        (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n");
+      Alcotest.(check int) "all inconsistent rows are dropped" 0
+        (List.length (K.load ~base_dir ~keeper_name));
+      Alcotest.(check (float 0.001)) "each inconsistency is reported" 6.0
+        (drop_value invalid_payload -. before);
+      let delivery_key = operation_delivery_key "kmsg-exec-mismatch" in
+      (match
+        K.append_tool_calls_once ~base_dir ~keeper_name ~delivery_key
+          ~tool_calls:
+            [ { K.call_id = "provider"
+              ; execution_id = Some (Ids.Execution_id.of_string "exec-new")
+              ; call_name = "Read"
+              ; args = "{}"
+              }
+            ]
+          ()
+      with
+      | Error _ -> ()
+      | Ok _ ->
+          Alcotest.fail
+            "append-once ignored an inconsistent persisted execution identity");
+      let fresh_execution_id = Ids.Execution_id.of_string "exec-fresh" in
+      (match
+         K.append_tool_calls_once
+           ~base_dir
+           ~keeper_name
+           ~delivery_key:(operation_delivery_key "kmsg-exec-fresh")
+           ~tool_calls:
+             [ { K.call_id = "provider-fresh"
+               ; execution_id = Some fresh_execution_id
+               ; call_name = "Read"
+               ; args = "{}"
+               }
+             ]
+           ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "fresh delivery already existed"
+       | Error detail ->
+         Alcotest.failf
+           "unrelated invalid provenance blocked a fresh operation: %s"
+           detail);
+      match K.load ~base_dir ~keeper_name with
+      | [ fresh ] ->
+        Alcotest.(check (option string)) "fresh canonical execution persists"
+          (Some "exec-fresh")
+          (Option.map Ids.Execution_id.to_string fresh.execution_id)
+      | loaded ->
+        Alcotest.failf "expected only the fresh valid row, got %d" (List.length loaded))
+;;
+
 (* Async/queued user rows are accepted before a turn_ref exists. The terminal
    assistant's typed delivery key is the only authority that may join that
    user row into the exact turn transcript; a different operation must not
@@ -2384,6 +2863,8 @@ let () =
         [
           Alcotest.test_case "append_turn roundtrip" `Quick
             test_append_turn_roundtrip;
+          Alcotest.test_case "provider and canonical ids stay separate" `Quick
+            test_tool_identities_persist_and_project_separately;
           Alcotest.test_case "tool-only continuations omit assistant rows" `Quick
             test_tool_only_continuations_do_not_fabricate_assistant_rows;
           Alcotest.test_case "structured-only assistant rows survive reload"
@@ -2436,6 +2917,22 @@ let () =
             test_half_provenance_reads_none;
           Alcotest.test_case "half a provenance pair blocks append-once"
             `Quick test_half_provenance_blocks_append_once;
+          Alcotest.test_case "duplicate provenance poisons its delivery key"
+            `Quick test_duplicate_provenance_poisons_whole_delivery_key;
+          Alcotest.test_case "duplicate tool ordinal poisons its delivery key"
+            `Quick test_duplicate_tool_ordinal_poisons_whole_delivery_key;
+          Alcotest.test_case "execution id cannot cross delivery keys" `Quick
+            test_execution_id_cannot_cross_delivery_keys;
+          Alcotest.test_case "existing execution reuse poisons both deliveries"
+            `Quick test_existing_execution_reuse_poisons_both_delivery_keys;
+          Alcotest.test_case "execution id cannot cross tool ordinals" `Quick
+            test_execution_id_cannot_cross_tool_ordinals;
+          Alcotest.test_case "blank execution id is rejected before append"
+            `Quick test_blank_execution_id_is_rejected_before_append;
+          Alcotest.test_case "append-once tool slots keep identity kinds separate"
+            `Quick test_append_once_tool_slots_keep_identity_kinds_separate;
+          Alcotest.test_case "persisted tool execution identity has one SSOT"
+            `Quick test_persisted_tool_execution_identity_is_one_ssot;
           Alcotest.test_case
             "transcript_of_messages joins turn_ref (RFC-0233 §7)" `Quick
             test_transcript_of_messages_joins_turn_ref;

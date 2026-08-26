@@ -126,12 +126,24 @@ val display_width : string -> int
     grapheme clusters as indivisible layout pieces. Renderer-owned ANSI CSI,
     combining marks, variation selectors, and joiners have zero width. *)
 
+val take_cells : string -> int -> string
+(** Keep the first [cells] display cells, the counterpart to [drop_cells]: the
+    two halves of a cut add up to the whole, and a zero-cell head is empty.
+    Not [split_cells], which wraps and so always takes one piece -- as a
+    prefix that invents a cell the caller never asked for. *)
+
 val drop_cells : string -> int -> string
 (** Drop the first [cells] display cells, keeping every ANSI sequence crossed
     so the remainder opens under the styles the cut passed through. A wide
     grapheme straddling the boundary is padded with spaces so the columns to
     its right stay aligned. The horizontal-scroll counterpart of
     [fit_width]'s right-edge cut. *)
+
+val bare_urls : string -> string list
+(** The bare [http]/[https] URLs in this text, in the order they appear and cut
+    at the same place {!dress_bare_links} stops underlining them. One rule, so
+    a caller naming what a link points at reads exactly the text the pane
+    draws as the link. *)
 
 val dress_bare_links :
   open_style:string -> close_style:string -> string -> string

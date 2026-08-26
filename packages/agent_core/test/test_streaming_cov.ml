@@ -191,14 +191,17 @@ let test_accumulate_content_block_delta_json () =
   | _ -> Alcotest.fail "expected tool block"
 ;;
 
-let test_accumulate_content_block_delta_new_index () =
+let test_accumulate_content_block_delta_rejects_new_index () =
   let acc = Streaming.create_stream_acc () in
-  (* Delta for index without prior ContentBlockStart *)
   Streaming.accumulate_event
     acc
     (Types.ContentBlockDelta { index = 5; delta = Types.TextDelta "orphan" });
-  let response = finalize_ok acc in
-  Alcotest.(check int) "unannounced delta omitted" 0 (List.length response.content)
+  match Streaming.finalize_stream_acc acc with
+  | Error
+      (Types.Stream_parse_failed
+         { reason = "content_block_delta_without_start:index:5"; raw = "" }) -> ()
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "delta without a typed block start must fail closed"
 ;;
 
 let test_accumulate_message_delta () =
@@ -398,7 +401,7 @@ let test_finalize_invalid_tool_json () =
   match Streaming.finalize_stream_acc acc with
   | Error (Types.Stream_parse_failed { reason; raw }) ->
     (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis (the Unknown_block/media arms still omit it). *)
+       diagnosis; structural failures intentionally omit provider payloads. *)
     Alcotest.(check string) "raw preserved" "not json{" raw;
     Alcotest.(check bool)
       "malformed tool args"
@@ -475,7 +478,7 @@ let () =
         ; Alcotest.test_case
             "delta new index"
             `Quick
-            test_accumulate_content_block_delta_new_index
+            test_accumulate_content_block_delta_rejects_new_index
         ; Alcotest.test_case
             "message_delta with usage"
             `Quick

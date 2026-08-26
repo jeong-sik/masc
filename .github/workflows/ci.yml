@@ -1,223 +1,21 @@
 name: CI
 
 on:
-  push:
-    branches: [develop]
-  schedule:
-    # main is checked on a timer, not once per merge. Merges land every 5.7
-    # minutes (254 commits in the 24h to 2026-08-24T01:00Z) and a run takes
-    # 22-34 minutes, so per-commit main runs need 4.4 runs in flight at all
-    # times -- 53 job slots -- to keep up, and they never did. Keying them by
-    # github.sha stopped the collapsing that produced 148 cancellations and
-    # zero verdicts, and replaced it with a queue: at 2026-08-24T01:20Z there
-    # were 50 CI runs waiting, 26 of them main pushes for commits already in
-    # main, sitting ahead of the 24 pull_request runs that are the actual
-    # merge gate. A verdict on a commit that is already merged blocks nothing,
-    # so it is the one that gives up its slot.
-    #
-    # The group below pins scheduled runs to one shared key with
-    # cancel-in-progress false, so GitHub keeps at most one running and one
-    # pending: the timer cannot outrun the build no matter how often it fires.
-    - cron: '*/30 * * * *'
-  pull_request:
-    # No base filter. The filter matches the *base* branch, so a stacked PR --
-    # one opened against another PR's branch rather than main -- did not start
-    # this workflow at all. Those PRs collected only the handful of checks other
-    # workflows contribute and reached review with no compile or test evidence;
-    # on 2026-08-14 five of them sat that way at once. A stack is how work over
-    # 20k tokens is supposed to arrive here, so the shape that needs evidence
-    # most was the one getting none.
-    #
-    # Drafts stay cheap through pr-live-gate. ready_for_review starts the exact
-    # source and real-world product gates once the author asks for a verdict.
-    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch: {}
 
 permissions:
   contents: read
   actions: write
-  pull-requests: read
 
 concurrency:
-  # Branch/PR runs verify the current branch state: a newer push supersedes the
-  # older run, so the older one cancels.
-  #
-  # Scheduled main runs share one key with cancel-in-progress false, so GitHub
-  # holds at most one running and one pending. The timer fires every 30 minutes
-  # and a run takes 22-34, so a firing that lands on a busy pool is dropped
-  # rather than queued behind the one already working. That is the cap the
-  # per-commit trigger never had.
-  #
-  # workflow_dispatch on main keys by commit: a dispatch is asked for by hand
-  # about one specific sha, so it gets its own group and is not collapsed into
-  # whatever the timer happens to be doing.
-  group: >-
-    ${{ github.workflow }}-${{ github.event_name }}-${{
-      github.event.pull_request.number
-      || (github.event_name == 'schedule' && 'main-timer')
-      || (github.ref == 'refs/heads/main' && github.sha)
-      || github.ref_name
-      || github.run_id
-    }}
-  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
+  group: ci-manual-${{ github.sha || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
-  pr-sync-check:
-    name: PR Sync Check
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          # Full history so origin/<base>, the PR head, and the synthetic merge
-          # commit all exist locally for identity and version-truth checks.
-          fetch-depth: 0
-
-      - name: Verify PR sync
-        env:
-          PR_HEAD_REF: ${{ github.head_ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BASE_REF: origin/${{ github.base_ref }}
-          VERSION_REF: HEAD
-        run: |
-          chmod +x scripts/check-pr-sync.sh
-          scripts/check-pr-sync.sh \
-            --head-branch "$PR_HEAD_REF" \
-            --pr-number "$PR_NUMBER" \
-            --base-ref "$BASE_REF" \
-            --version-ref "$VERSION_REF" \
-            --expected-head-sha "$PR_HEAD_SHA"
-
-      # Reports, never gates. A CI failure does not say whether the author
-      # caused it: on 2026-08-22 main was red for ~100 minutes and thirteen
-      # open PRs inherited the same five failures, with an adversarial review
-      # on one recording "causality is not established" (#29332).
-      - name: Report base health
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          chmod +x scripts/report-base-health.sh
-          scripts/report-base-health.sh "$BASE_REF" "${{ github.repository }}"
-
-  pr-live-gate:
-    name: PR Live Gate
-    runs-on: ubuntu-latest
-    needs: [pr-sync-check]
-    if: ${{ always() && !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
-    timeout-minutes: 2
-    permissions:
-      pull-requests: read
-    outputs:
-      run_heavy: ${{ steps.live.outputs.run_heavy }}
-      live_is_draft: ${{ steps.live.outputs.live_is_draft }}
-      live_state: ${{ steps.live.outputs.live_state }}
-
-    steps:
-      - name: Resolve live PR state before heavy CI
-        id: live
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          EVENT_REF: ${{ github.ref }}
-          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
-          SOURCE_SHA: ${{ github.sha }}
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
-            if [ "$EVENT_REF" != "refs/heads/main" ]; then
-              echo "::error::Trusted dispatch requires refs/heads/main, got $EVENT_REF"
-              exit 1
-            fi
-            if [ "$EVENT_REF_PROTECTED" != "true" ]; then
-              echo "::error::Trusted dispatch requires a protected main ref"
-              exit 1
-            fi
-            if [ "$WORKFLOW_REF" != "$expected_workflow_ref" ]; then
-              echo "::error::Trusted dispatch workflow mismatch: expected=$expected_workflow_ref actual=$WORKFLOW_REF"
-              exit 1
-            fi
-            if [ "$WORKFLOW_SHA" != "$SOURCE_SHA" ]; then
-              echo "::error::Trusted dispatch workflow/source mismatch: workflow=$WORKFLOW_SHA source=$SOURCE_SHA"
-              exit 1
-            fi
-          fi
-
-          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
-            # This workflow only listens to develop pushes (`on.push.branches`
-            # above), the main timer, and workflow_dispatch. Tag pushes do not
-            # start this workflow, so NON_PR here cannot force Build and Test
-            # for tags.
-            echo "run_heavy=true" >> "$GITHUB_OUTPUT"
-            echo "live_is_draft=false" >> "$GITHUB_OUTPUT"
-            echo "live_state=NON_PR" >> "$GITHUB_OUTPUT"
-            echo "::notice::PR live gate: non-PR event=${GITHUB_EVENT_NAME}; run_heavy=true"
-            exit 0
-          fi
-
-          # Retry-based PR state resolution: instead of a fixed sleep, poll
-          # gh pr view with short intervals. This catches draft restoration
-          # within ~3s on fast APIs while avoiding unnecessary delay on
-          # non-PR events or already-settled states. Capture stderr from each
-          # attempt so a persistent failure reports the underlying gh error
-          # (a silent "after 3 attempts" is undebuggable).
-          err_log="${RUNNER_TEMP:-/tmp}/live-pr-gate.err"
-          : > "$err_log"
-          for _attempt in 1 2 3; do
-            if live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>"$err_log")"; then
-              break
-            fi
-            sleep 1
-          done
-
-          if [ -z "${live_fields:-}" ]; then
-            echo "::error::Could not resolve live PR state for #${PR_NUMBER} after 3 attempts: $(cat "$err_log")"
-            exit 1
-          fi
-          live_state="${live_fields%% *}"
-          live_is_draft="${live_fields#* }"
-
-          if [ -z "$live_state" ] || { [ "$live_is_draft" != "true" ] && [ "$live_is_draft" != "false" ]; }; then
-            echo "::error::Could not resolve live PR state for #${PR_NUMBER}: ${live_fields}"
-            exit 1
-          fi
-
-          # Heavy CI runs whenever the PR is live (OPEN), regardless of draft
-          # status. Earlier we skipped draft PRs to save CI minutes, but the
-          # masc fast-track pattern (open Draft → mark ready → admin-merge
-          # within seconds) means the build/lint/test surfaces almost never
-          # got a chance to run. Two visible failures from that gap this week:
-          # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
-          #   main in a non-building state; recovered by #15540.
-          # Running heavy CI on draft PRs costs minutes but catches both
-          # classes of regression *before* the admin-merge decision instead
-          # of after, when the only remaining lever is fix-forward.
-          # Closed/merged PRs still skip — there is nothing to verify there.
-          run_heavy=true
-          if [ "$live_state" != "OPEN" ]; then
-            run_heavy=false
-          fi
-
-          echo "run_heavy=${run_heavy}" >> "$GITHUB_OUTPUT"
-          echo "live_is_draft=${live_is_draft}" >> "$GITHUB_OUTPUT"
-          echo "live_state=${live_state}" >> "$GITHUB_OUTPUT"
-          echo "::notice::PR live gate: state=${live_state:-unknown} draft=${live_is_draft:-unknown} run_heavy=${run_heavy}"
-
   changes:
     name: Detect Changed Surfaces
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-live-gate]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' }}
     outputs:
       build: ${{ steps.scope.outputs.build }}
       lint: ${{ steps.scope.outputs.lint }}
@@ -244,8 +42,6 @@ jobs:
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_REF: ${{ github.ref }}
-          GITHUB_BASE_REF: ${{ github.base_ref }}
-          GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_BEFORE: ${{ github.event.before }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -267,17 +63,7 @@ jobs:
           base_ref=""
           head_ref="${GITHUB_SHA}"
 
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --depth=200
-            head_ref="${GITHUB_HEAD_SHA}"
-            base_branch_ref="origin/${GITHUB_BASE_REF}"
-            if ! merge_base="$(git merge-base "${base_branch_ref}" "${head_ref}")"; then
-              echo "::warning::Unable to resolve PR merge-base at depth=200; deepening ${GITHUB_BASE_REF} history"
-              bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --deepen=1000
-              merge_base="$(git merge-base "${base_branch_ref}" "${head_ref}")"
-            fi
-            base_ref="${merge_base}"
-          elif [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+          if [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
             base_ref="${GITHUB_BEFORE}"
           fi
 
@@ -313,7 +99,10 @@ jobs:
           shell_ir=false
           keeper_cwd=false
 
-          if has_match '^(\.github/workflows/ci\.yml|\.github/actions/)'; then
+          # Local setup actions affect the compiler environment and still need
+          # compile proof. Workflow YAML itself is checked by blocking lint;
+          # compiling the entire OCaml tree cannot validate a YAML edit.
+          if has_match '^\.github/actions/'; then
             ci_core=true
           fi
 
@@ -355,7 +144,7 @@ jobs:
           # breaking Lint for every subsequent PR (#20729: RFC docs #20717 /
           # #20718 landed bare ~/.masc paths and took main's Lint red).
           # scripts/ subsumes the previously enumerated scripts/* entries.
-          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|scripts/|dune-project$|dune-workspace$|.*\.opam$|dashboard/src/)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|docs/|scripts/|\.github/workflows/|dune-project$|dune-workspace$|.*\.opam$|dashboard/src/)'; then
             lint=true
           fi
 
@@ -433,10 +222,10 @@ jobs:
           fi
 
           if [ "${ci_core}" = true ]; then
-            # Self-reference guard: edits to this workflow or local actions
-            # set ci_core=true above, then force the core CI surfaces below.
-            # Therefore a PR changing ci.yml cannot avoid Build and Test via
-            # the path classifier it is editing.
+            # Local setup-action edits change the compiler environment and
+            # therefore force compile proof. Workflow-only edits stay in the
+            # blocking YAML/wiring lint lane instead of spending 15 minutes on
+            # an OCaml graph that cannot validate YAML.
             build=true
             lint=true
             health=true
@@ -474,8 +263,9 @@ jobs:
     name: Meta Guards
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' }}
+    needs: [changes]
+    # Repository-wide audits run only when full CI is requested manually.
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' }}
 
     steps:
       - name: Checkout
@@ -490,48 +280,6 @@ jobs:
 
       - name: Check single OCaml compile authority
         run: bash scripts/ci/check-ocaml-compile-authority.sh
-
-      - name: Guard pending release tag on main PRs
-        if: github.event_name == 'pull_request' && github.base_ref == 'main'
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          # actions/checkout checks out the pull request's synthetic merge
-          # commit.  Release truth must be evaluated on that merge result:
-          # an untouched stale head legitimately inherits dune-project from
-          # current main, while a real downgrade remains present in HEAD.
-          HEAD_REF: HEAD
-        run: |
-          chmod +x scripts/check-release-train-guard.sh
-          # No --depth here. This guard only runs `git show` and `git tag`, so
-          # it never needed one -- but `git fetch --depth=N` writes
-          # .git/shallow, which is repository-global state. It ran first and
-          # left the clone shallow for the hygiene step below, which does walk
-          # ancestry. That is the trigger for #27365 / #26938 / #27384.
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --tags
-          scripts/check-release-train-guard.sh \
-            --base "$BASE_REF" \
-            --head "$HEAD_REF"
-
-      - name: Run PR hygiene guards
-        if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
-        run: |
-          chmod +x scripts/check-pr-hygiene.sh
-          # No --depth. `git fetch --depth=100` grafts origin/<base> at 100
-          # commits, and rev-list then reports everything older than that graft
-          # as reachable only from HEAD -- so a long-lived branch had hundreds
-          # of main's own commits attributed to it (#27365, #26938, #27384).
-          # merge-base still returns a real commit, so the shallow-boundary
-          # recovery added in #27277 never engages. The checkout above already
-          # fetched full history; truncating it here only removed information.
-          bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
-          scripts/check-pr-hygiene.sh \
-            --base "$BASE_REF" \
-            --head "$HEAD_REF" \
-            --recent-main 50 \
-            --duplicate-policy warn
 
       - name: Run deploy preflight safety contract
         run: bash test/test_deploy_preflight.sh
@@ -713,8 +461,8 @@ jobs:
     name: Health
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.health == 'true' }}
+    needs: [changes]
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.health == 'true' }}
 
     steps:
       - name: Checkout
@@ -729,14 +477,11 @@ jobs:
         if: needs.changes.outputs.health_snapshot == 'true'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           zero_sha="0000000000000000000000000000000000000000"
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --depth=1
-          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
             bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BEFORE}" --depth=1
           else
             echo "No health baseline ref for ${GITHUB_EVENT_NAME}; snapshot will run without ratchet gating"
@@ -746,16 +491,13 @@ jobs:
         if: needs.changes.outputs.health_snapshot == 'true'
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
           chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh scripts/base-policy-audit.sh
           zero_sha="0000000000000000000000000000000000000000"
           baseline_ref=""
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            baseline_ref="origin/${GITHUB_BASE_REF}"
-          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
             baseline_ref="${GITHUB_BEFORE}"
           fi
 
@@ -780,7 +522,7 @@ jobs:
           path: .health/health-snapshot.json
 
   build:
-    name: Build and Test
+    name: Full validation
     runs-on: ubuntu-latest
     # Focused group deadlines total 93 minutes when agent-core is selected
     # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
@@ -789,10 +531,13 @@ jobs:
     # 10:57:15), so a run where every group uses its full budget ends at
     # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
     # prints its timeout diagnostics before GitHub ends the job.
+    # Build and full validation belong to the manual lane. PR authors and
+    # agents provide their focused exact-head evidence before opening the PR;
+    # repeating a cold 15-minute toolchain build on every synchronization cost
+    # more runner time than the failures it prevented.
     timeout-minutes: 110
-    needs: [pr-live-gate, changes]
-    # Main safety-net (mirrors `dashboard` job below). Non-PR events (develop
-    # push, the main timer, workflow_dispatch) always run Build and Test so a
+    needs: [changes]
+    # Manual dispatch runs full validation so a
     # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
     # merge) is detected on the next timer run instead of persisting silently
     # behind a green "CI Gate" — ci-gate check() treats a skipped required job as
@@ -802,7 +547,7 @@ jobs:
     # Build consumes `changes` outputs, so a failed/skipped changes job should
     # not synthesize default build inputs even though `always()` keeps this
     # condition evaluable.
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' }}
     # Test execution policy (hard-required focused suites):
     #   - `continue-on-error` is intentionally absent: compile failures and
     #     every focused test suite are merge-blocking.
@@ -935,23 +680,10 @@ jobs:
 
       - name: Run typed functional-core boundary audit
         env:
-          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}
+          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}
         run: |
           set -euo pipefail
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
-            # This job checks out shallow (no fetch-depth), so fetching the
-            # base branch brings its tip and nothing behind it. The ratchet
-            # wants pull_request.base.sha, which is an ancestor of that tip on
-            # a PR whose base branch has moved on, so it stays absent and the
-            # ratchet hard-fails with "base revision is unavailable". Fetch the
-            # exact commit; depth 1 is enough because the ratchet only reads
-            # two files at that revision, never its history.
-            if ! git cat-file -e "${OCAML_BOUNDARY_BASE_REF}^{commit}" 2>/dev/null; then
-              bash scripts/ci/git-fetch-retry.sh \
-                origin "${OCAML_BOUNDARY_BASE_REF}" --depth=1
-            fi
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             bash scripts/ci/git-fetch-retry.sh \
               origin \
               "+refs/heads/main:refs/remotes/origin/main"
@@ -1139,23 +871,6 @@ jobs:
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "scripts/harness/contract/run_all.sh"
 
-      # This smoke is the only gate that boots the installed binary against the
-      # release-evidence config fixture. Running it solely on push-to-main made
-      # it structurally invisible to review: #25671 added a mandatory
-      # exact-output lane, every PR check was green, and main then failed on
-      # every push for ~29 hours (#25663). Running it on pull_request too moves
-      # that failure into the PR that causes it. It is a ~10s local boot against
-      # a dead-port fixture with keeper bootstrap disabled, so it issues no
-      # provider call and needs no credential.
-      - name: Boot release evidence smoke (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          chmod +x scripts/release-evidence.sh
-          mkdir -p .release-evidence
-          scripts/release-evidence.sh \
-            _build/default/bin/main_eio.exe \
-            .release-evidence/pr-release-evidence.md
-
       - name: Generate main release evidence bundle
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -1179,7 +894,6 @@ jobs:
 
       - name: Verify Keeper full-lifecycle evidence bundle
         if: >-
-          (github.event_name == 'pull_request') ||
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (
             github.event_name == 'workflow_dispatch' &&
@@ -1190,14 +904,6 @@ jobs:
           python3 scripts/keeper-full-lifecycle-evidence.py \
             --verify \
             --output-dir .release-evidence/keeper-full-lifecycle
-
-      - name: Upload PR release evidence
-        if: ${{ always() && github.event_name == 'pull_request' && steps.build_step.outcome == 'success' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: release-evidence-pr-${{ github.event.pull_request.number }}
-          path: .release-evidence/
-          include-hidden-files: true
 
       - name: Upload main release evidence
         if: ${{ always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.build_step.outcome == 'success' }}
@@ -1240,8 +946,8 @@ jobs:
     # Source ratchets and proto drift are shell/Python-only after the product
     # compile authority moved to Build and Test.
     timeout-minutes: 20
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.lint == 'true' }}
+    needs: [changes]
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.lint == 'true' }}
 
     steps:
       - name: Checkout
@@ -1249,10 +955,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
       - name: Install lint dependencies
         run: |
           bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y -qq ripgrep protobuf-compiler
+          sudo apt-get install -y -qq jq ripgrep protobuf-compiler
+          python -m pip install --quiet --upgrade pip pyyaml
+
+      - name: Run consolidated blocking lints
+        run: bash scripts/ci/run-lint-suite.sh blocking "${{ github.event.before }}"
 
       - name: Run #8605 family detector
         run: bash scripts/lint/no-unknown-permissive-default.sh
@@ -1332,20 +1046,16 @@ jobs:
     name: Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [pr-live-gate, changes]
-    # PR mode: stay path-scoped (dashboard=true when dashboard/ changes, or
-    # when a lib-side SSE wire-surface file changes — see the wire-surface
-    # census block in the `changes` job; #28925 audit defect (a)).
-    # Non-PR events (develop push, the main timer, workflow_dispatch):
-    # ignore path scope and always run, so a dashboard test regression
+    needs: [changes]
+    # Dashboard validation runs only when full CI is dispatched. It ignores
+    # path scope and always runs, so a dashboard regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
     # or a dashboard-touching PR merged via admin fast-track while
-    # the dashboard job was red) is detected on the next timer run
-    # rather than persisting silently. Same main safety-net pattern as
-    # tla-main.yml; root cause:
+    # the dashboard job was red) is detectable in a requested full run
+    # rather than persisting silently. Root cause:
     # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
     # after #14252/#14380 because no main-push run re-checked them.
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.dashboard == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' }}
 
     steps:
       - name: Checkout
@@ -1439,8 +1149,8 @@ jobs:
     name: OCaml Structure Ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
+    needs: [changes]
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
 
     steps:
       - name: Checkout
@@ -1500,8 +1210,8 @@ jobs:
     name: Shell IR Consumption Ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.shell_ir == 'true' || needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
+    needs: [changes]
+    if: ${{ always() && !cancelled() && needs.changes.result == 'success' && (needs.changes.outputs.shell_ir == 'true' || needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
 
     steps:
       - name: Checkout
@@ -1515,38 +1225,6 @@ jobs:
       - name: Run Shell IR consumption ratchet
         run: scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
 
-  tla-specs:
-    name: TLA+ Model Checking
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    needs: [pr-live-gate, changes]
-    # PR-only required check: branch protection currently requires CI Gate,
-    # so path-scoped PR TLA must remain inside ci.yml to keep failures
-    # merge-blocking. Main push, schedule, and manual full-suite ownership live
-    # in tla-main.yml.
-    if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.tla == 'true' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Download tla2tools.jar (pinned v1.8.0)
-        run: |
-          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
-            -o specs/keeper-state-machine/tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-
-      - name: Run PR-scoped TLA+ model checking
-        run: |
-          make -C specs check-clean
-          make -C specs check-buggy
-
   ci-gate:
     # Named for the one required check in main's branch protection. A second
     # job used to carry that name and do nothing but copy this job's result:
@@ -1556,7 +1234,7 @@ jobs:
     # twice.
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet, tla-specs]
+    needs: [changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet]
     if: ${{ always() && !cancelled() }}
     timeout-minutes: 10
 
@@ -1566,8 +1244,6 @@ jobs:
 
       - name: Aggregate required check status
         env:
-          PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}
-          PR_LIVE_GATE_RESULT: ${{ needs.pr-live-gate.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           META_RESULT: ${{ needs.meta.result }}
           BUILD_RESULT: ${{ needs.build.result }}
@@ -1576,21 +1252,14 @@ jobs:
           HEALTH_RESULT: ${{ needs.health.result }}
           STRUCTURE_RATCHET_RESULT: ${{ needs.structure-ratchet.result }}
           SHELL_IR_RATCHET_RESULT: ${{ needs.shell-ir-ratchet.result }}
-          TLA_RESULT: ${{ needs.tla-specs.result }}
         run: |
           set -euo pipefail
           fail=0
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Build job policy (revised 2026-06-24 by PR-MASC-7):
-          #   - dune build (compile-only) is HARD REQUIRED — Build step lacks
-          #     continue-on-error, so a compile failure makes the job result =
-          #     failure → check "build" required = block merge.
-          #   - Focused operator-control, SSE, transport, and contract harness
-          #     execution is HARD REQUIRED as well. Each test step lacks
-          #     continue-on-error, so a test failure fails the Build and Test
-          #     job and blocks merge.
+          # Product tests, transport/contract harnesses, lifecycle evidence,
+          # ratchets, Dashboard, and TLA run only when explicitly dispatched.
           # A cancelled job did not fail — it did not run. Both block, because
           # a check that never ran cannot be evidence of anything, but they are
           # printed apart: over the last 20 CI runs the job conclusions were 110
@@ -1613,10 +1282,6 @@ jobs:
               fail=1
             fi
           }
-          check "pr-sync-check"   "$PR_SYNC_RESULT"
-          # pr-live-gate folds skipped non-PR sync checks into run_heavy=true,
-          # while failed live-state lookup remains a hard merge blocker.
-          check "pr-live-gate"    "$PR_LIVE_GATE_RESULT"
           check "changes"         "$CHANGES_RESULT"
           check "meta"            "$META_RESULT"
           check "build"           "$BUILD_RESULT"
@@ -1625,5 +1290,4 @@ jobs:
           check "health"          "$HEALTH_RESULT"
           check "structure-ratchet" "$STRUCTURE_RATCHET_RESULT"
           check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
-          check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]

@@ -33,11 +33,7 @@ let test_boundary_lands_after_the_mark () =
        let label = Layout.align_role_label ~column ~style "TOOLS" in
        let at = Layout.role_label_mark_cells ~column ~style () in
        check bool (name ^ ": the mark is kept at this width") true (at > 0);
-       let head =
-         match Layout.split_cells ~max_cells:at label with
-         | first :: _ -> first
-         | [] -> ""
-       in
+       let head = Layout.take_cells label at in
        let tail = Layout.drop_cells label at in
        check
          int
@@ -90,6 +86,55 @@ let test_boundary_is_within_the_label () =
     styles
 ;;
 
+(* The renderer cuts the gutter at the boundary and writes both halves back
+   out, one styled as a glyph and one as a name. So the halves have to add up
+   to what they were cut from -- at every column, including the narrow ones
+   where the boundary is zero because there is no mark left to colour.
+
+   Cutting with [split_cells] did not add up. That one wraps, and a wrapper
+   has to move forward or it never ends, so at zero cells it still handed back
+   a piece: the head came out holding a character the tail also held. On the
+   Keepers pane every row that continued the speaker above it reported no
+   mark, and every one of them drew its clock's first digit twice -- a row
+   sent at 22:32 read "222:32". *)
+let test_cut_conserves_the_label () =
+  List.iter
+    (fun (name, style) ->
+       List.iter
+         (fun column ->
+            let label = Layout.align_role_label ~column ~style "TOOLS" in
+            let at = Layout.role_label_mark_cells ~column ~style () in
+            let head = Layout.take_cells label at in
+            let tail = Layout.drop_cells label at in
+            check
+              int
+              (Printf.sprintf "%s at %d: the halves add up" name column)
+              (Layout.display_width label)
+              (Layout.display_width head + Layout.display_width tail);
+            check
+              int
+              (Printf.sprintf "%s at %d: the head is the boundary" name column)
+              at
+              (Layout.display_width head))
+         [ 1; 2; 3; 4; 8; 16; 24 ])
+    styles
+;;
+
+(* The case above is only carried by columns that actually report no mark. If
+   the narrow widths ever start keeping one, the zero-cut goes untested and
+   the conservation check passes on rows that were never the problem. *)
+let test_the_zero_cut_is_covered () =
+  let zero_cuts =
+    List.concat_map
+      (fun (_, style) ->
+         List.filter
+           (fun column -> Layout.role_label_mark_cells ~column ~style () = 0)
+           [ 1; 2; 3; 4; 8; 16; 24 ])
+      styles
+  in
+  check bool "some column cuts at zero" true (zero_cuts <> [])
+;;
+
 let () =
   run
     "tui role label boundary"
@@ -97,6 +142,8 @@ let () =
       , [ test_case "boundary lands after the mark" `Quick test_boundary_lands_after_the_mark
         ; test_case "narrow column reports no mark" `Quick test_narrow_column_reports_no_mark
         ; test_case "boundary is within the label" `Quick test_boundary_is_within_the_label
+        ; test_case "cut conserves the label" `Quick test_cut_conserves_the_label
+        ; test_case "the zero cut is covered" `Quick test_the_zero_cut_is_covered
         ] )
     ]
 ;;

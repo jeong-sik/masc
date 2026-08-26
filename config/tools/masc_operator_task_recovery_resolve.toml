@@ -6,12 +6,6 @@ performs no liveness or elapsed-time inference."""
 additional_properties = false
 
 [[params]]
-name = "schema"
-type = "string"
-required = true
-enum = ["workspace.task.operator_recovery.command.v1"]
-
-[[params]]
 name = "task_id"
 type = "string"
 required = true

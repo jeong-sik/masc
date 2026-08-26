@@ -35,6 +35,24 @@ type tool_failure_stage =
   | Validation_before_execution
   | Execution
 
+(** Exact mapping retained across tool-name admission. [planned_index] is the
+    ordinal assigned to a surviving ToolUse; [source_tool_use_ordinal] is its ordinal
+    among all well-formed ToolUse blocks before unroutable calls were removed.
+    It is deliberately not a raw content-block index: response assembly may
+    omit empty non-tool blocks. *)
+type admitted_tool_use_source =
+  { planned_index : int
+  ; source_tool_use_ordinal : int
+  }
+
+type admitted_tool_source_map =
+  { admitted_tool_sources : admitted_tool_use_source list
+  ; source_tool_use_count : int
+      (** Total well-formed ToolUse inventory before admission. It distinguishes
+          no tool calls from an all-rejected turn and proves that the streamed
+          inventory contains neither missing nor extra calls. *)
+  }
+
 (** Events emitted during agent execution *)
 type hook_event =
   | BeforeTurn of
@@ -51,6 +69,11 @@ type hook_event =
   | AfterTurn of
       { turn : int
       ; response : Types.api_response
+      ; tool_source_map : admitted_tool_source_map option
+        (** [Some] only when this producer retained the exact pre-admission
+            ToolUse mapping before execution. Official-client hosts that run
+            tools while consuming their own protocol use [None] and expose
+            scheduling through their PreToolUse invocations instead. *)
       }
   | PreToolUse of
       { invocation : Tool_contract.Invocation.t

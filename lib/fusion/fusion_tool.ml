@@ -33,7 +33,7 @@ let worker_result ~compute ~net ~policy ~topology ~request_id ~keeper ~prompt
     Keeper_types_profile.tool_result_ok_data
       (Fusion_types.deliberation_evidence_to_yojson evidence)
   | Fusion_orchestrator.Compute_denied reason ->
-    Keeper_types_profile.tool_result_error_data
+    Keeper_types_profile.tool_result_error_data ~class_:Tool_result.Workflow_rejection
       (`Assoc
          [ "error", `String "fusion_compute_denied"
          ; "reason", `String (Fusion_types.deny_reason_label reason)

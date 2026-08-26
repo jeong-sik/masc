@@ -1,41 +1,44 @@
-(** Source-disposal decision tests for
-    [Keeper_heartbeat_loop.failed_source_disposition] (#26546).
+(** A failed Keeper turn has no authority to dispose of Event Queue input.
 
-    With automatic overflow-compaction recovery removed, the heartbeat owns
-    typed liveness disposition for a failed turn holding a pending Event Queue
-    selection: a frozen successor preserves it, transient failure rotates it
-    behind independent work, deterministic failure quarantines only the source,
-    an effect-fenced provider failure quarantines that source even if a stale
-    successor exists. *)
+    Provider, configuration, context-window, and tool failures describe the
+    runtime attempt, not the independent Board/Schedule/Task facts admitted to
+    that attempt. Every such outcome therefore maps to [Batch_no_action]; only
+    a completed turn can ACK the batch. *)
 
 open Alcotest
 
 module KFR = Keeper_runtime_failure_route
 module Turn = Masc.Keeper_unified_turn
 module Loop = Masc.Keeper_heartbeat_loop
+module Cycle = Masc.Keeper_heartbeat_loop_cycle
 
-let overflow_error =
-  Agent_core.Error.Api
-    (ContextOverflow { message = "exceeded"; limit = Some 32768 })
+let test_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+         [ "name", `String "failed-batch"
+         ; "agent_name", `String "keeper-failed-batch-agent"
+         ; "trace_id", `String "trace-failed-batch"
+         ])
+  with
+  | Ok meta -> meta
+  | Error detail -> failf "meta fixture failed: %s" detail
 ;;
 
-let failure ?deferred_runtime_lane ~route ~source_disposition error =
-  { Turn.error
-  ; runtime_id = "lane-a"
-  ; route
-  ; source_disposition
-  ; deferred_runtime_lane
-  }
-;;
+let error = Agent_core.Error.Internal "test runtime failure"
 
-let overflow_failure ?deferred_runtime_lane () =
-  (* Route through the real classifier so this test also pins
-     "typed ContextOverflow maps to the Context_overflow terminal". *)
-  failure
-    ?deferred_runtime_lane
-    ~route:(KFR.route_of_error ~boundary:KFR.Agent_core_execution overflow_error)
-    ~source_disposition:Turn.Follow_failure_route
-    overflow_error
+let failed_outcome ?deferred_runtime_lane route =
+  let meta = test_meta () in
+  Cycle.Failed
+    { meta
+    ; failure =
+        { Turn.error
+        ; runtime_id = "lane-a"
+        ; route
+        ; source_disposition = Turn.Follow_failure_route
+        ; deferred_runtime_lane
+        }
+    }
 ;;
 
 let deferred_lane =
@@ -44,213 +47,69 @@ let deferred_lane =
     ~failed_runtime_id:"lane-a"
     ~next_runtime_id:"lane-b"
     ~later_runtime_ids:[]
-    ~failure:overflow_error
+    ~failure:error
 ;;
 
-let test_overflow_without_successor_terminalizes () =
-  match Loop.failed_source_disposition (overflow_failure ()) with
-  | Loop.Quarantine_source { detail } ->
-    check bool "detail is non-empty" true (String.length detail > 0)
-  | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail ->
-    fail
-      "context overflow with no recovery successor must terminalize the \
-       selection: retrying re-dispatches the same bounded payload every \
-       heartbeat"
+let assert_no_queue_action label outcome =
+  match Loop.batch_disposition_of_cycle_outcome (Some outcome) with
+  | Loop.Batch_no_action -> ()
+  | Loop.Batch_ack_completed _ ->
+    failf "%s incorrectly authorized ACK of failed-turn input" label
 ;;
 
-let test_overflow_with_deferred_lane_preserves () =
-  check bool "a frozen successor lane keeps the selection bound to it" true
-    (match
-       Loop.failed_source_disposition
-         (overflow_failure ~deferred_runtime_lane:deferred_lane ())
-     with
-     | Loop.Preserve_for_deferred_runtime -> true
-     | Loop.Defer_to_queue_tail
-     | Loop.Quarantine_source _ -> false)
-;;
-
-let test_effect_fenced_failure_terminalizes_exact_source () =
-  let error =
-    Masc.Keeper_turn_driver.core_error_of_masc_internal_error
-      (Masc.Keeper_turn_driver.Provider_attempt_effect_fenced
-         { runtime_id = "effect-owner"
-         ; effect_disposition =
-             Masc.Keeper_provider_attempt_effect.Observation_unavailable
-         ; diagnostic = "provider failed after dispatch"
-         })
+let test_every_failure_route_preserves_batch () =
+  let exhausted label terminal =
+    KFR.Exhausted_visible_alive
+      { terminal
+      ; provenance = KFR.Masc_internal_error
+      ; detail = label
+      }
   in
-  let route =
-    KFR.route_of_error ~boundary:KFR.Masc_execution error
-  in
-  match
-    Loop.failed_source_disposition
-      (failure
-         ~deferred_runtime_lane:deferred_lane
-         ~route
-         ~source_disposition:Turn.Follow_failure_route
-         error)
-  with
-  | Loop.Quarantine_source { detail } ->
-    check bool "detail is non-empty" true (String.length detail > 0)
-  | Loop.Preserve_for_deferred_runtime
-  | Loop.Defer_to_queue_tail ->
-    fail
-      "effect-fenced failure must terminalize the exact failed source instead \
-       of replaying it on the next heartbeat"
-;;
-
-let preserving_terminal_classes =
-  [ "internal_opaque", KFR.Internal_opaque
-  ; "deterministic_request", KFR.Deterministic_request
-  ; "terminal_effect_runtime_failure", KFR.Terminal_effect_runtime_failure
+  [ ( "network transient"
+    , KFR.Retry_after_observed
+        { retry_class = KFR.Network_transient; retry_after = None } )
+  ; "rotate now", KFR.Rotate_now { rotate = KFR.Model_unavailable }
+  ; "context overflow", exhausted "context overflow" KFR.Context_overflow
+  ; "deterministic request", exhausted "deterministic request" KFR.Deterministic_request
+  ; "configuration mismatch", exhausted "configuration mismatch" KFR.Config_mismatch
+  ; "provider integration", exhausted "provider integration" KFR.Provider_integration
+  ; "effect fenced", exhausted "effect fenced" KFR.Provider_attempt_effect_fenced
+  ; "tool correction lost", exhausted "tool correction lost" KFR.Tool_correction_lost
   ]
+  |> List.iter (fun (label, route) ->
+    assert_no_queue_action label (failed_outcome route);
+    assert_no_queue_action
+      (label ^ " with deferred runtime")
+      (failed_outcome ~deferred_runtime_lane:deferred_lane route))
 ;;
 
-let test_other_terminal_classes_quarantine_source () =
-  List.iter
-    (fun (label, terminal) ->
-       let route =
-         KFR.Exhausted_visible_alive
-           { terminal
-           ; provenance = KFR.Masc_internal_error
-           ; detail = label
-           }
-       in
-       check
-         bool
-         (label ^ " terminal quarantines only the source")
-         true
-         (match
-            Loop.failed_source_disposition
-              (failure
-                 ~route
-                 ~source_disposition:Turn.Follow_failure_route
-                 overflow_error)
-          with
-          | Loop.Quarantine_source { detail } -> String.length detail > 0
-          | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail -> false))
-    preserving_terminal_classes
-;;
-
-let exhausted_configuration_classes =
-  [ "config_mismatch", KFR.Config_mismatch
-  ; "provider_integration", KFR.Provider_integration
+let test_nonterminal_outcomes_preserve_batch () =
+  let meta = test_meta () in
+  [ None
+  ; Some (Cycle.Checkpointed meta)
+  ; Some (Cycle.Input_required meta)
+  ; Some (Cycle.Cancelled meta)
+  ; Some (Cycle.Skipped meta)
   ]
-;;
-
-let test_exhausted_configuration_classes_quarantine_source () =
-  List.iter
-    (fun (label, terminal) ->
-       let route =
-         KFR.Exhausted_visible_alive
-           { terminal
-           ; provenance = KFR.Masc_internal_error
-           ; detail = label
-           }
-       in
-       check bool (label ^ " quarantines without stopping the Keeper") true
-         (match
-            Loop.failed_source_disposition
-              (failure
-                 ~route
-                 ~source_disposition:Turn.Follow_failure_route
-                 overflow_error)
-          with
-          | Loop.Quarantine_source _ -> true
-          | Loop.Preserve_for_deferred_runtime
-          | Loop.Defer_to_queue_tail -> false))
-    exhausted_configuration_classes
-;;
-
-let test_retryable_route_defers_to_queue_tail () =
-  let route =
-    KFR.Retry_after_observed
-      { retry_class = KFR.Network_transient; retry_after = None }
-  in
-  check bool "retryable route yields to independent work" true
-    (match
-       Loop.failed_source_disposition
-         (failure
-            ~route
-            ~source_disposition:Turn.Follow_failure_route
-            overflow_error)
-     with
-     | Loop.Defer_to_queue_tail -> true
-     | Loop.Preserve_for_deferred_runtime
-     | Loop.Quarantine_source _ -> false)
-;;
-
-let test_defer_pending_rotates_within_urgency_lane () =
-  let stimulus post_id : Keeper_event_queue.stimulus =
-    { post_id
-    ; urgency = Keeper_event_queue.Normal
-    ; arrived_at = 1.0
-    ; payload = Keeper_event_queue.Bootstrap
-    }
-  in
-  let queue =
-    [ stimulus "source-a"; stimulus "source-b"; stimulus "source-c" ]
-    |> List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty
-  in
-  let state =
-    Keeper_event_queue_state.with_pending queue Keeper_event_queue_state.empty
-  in
-  let selection =
-    match Keeper_event_queue_state.pending_selections state with
-    | selection :: _ -> selection
-    | [] -> fail "missing pending selection"
-  in
-  let deferred, incarnation =
-    match Keeper_event_queue_state.defer_pending ~selection state with
-    | Ok result -> result
-    | Error detail -> fail detail
-  in
-  check
-    (list string)
-    "transient source moves behind independent peers"
-    [ "source-b"; "source-c"; "source-a" ]
-    (deferred
-     |> Keeper_event_queue_state.pending
-     |> Keeper_event_queue.to_list
-     |> List.map (fun source -> source.Keeper_event_queue.post_id));
-  check bool "deferred source receives a new incarnation" true
-    (Int64.compare incarnation selection.admitted_revision > 0)
+  |> List.iter (fun outcome ->
+    match Loop.batch_disposition_of_cycle_outcome outcome with
+    | Loop.Batch_no_action -> ()
+    | Loop.Batch_ack_completed _ ->
+      fail "an unfinished turn incorrectly authorized Event Queue ACK")
 ;;
 
 let () =
   run
     "keeper_failed_selection_disposition"
-    [ ( "failed_source_disposition"
+    [ ( "failed turn preserves admitted input"
       , [ test_case
-            "overflow without successor terminalizes"
+            "every runtime failure route leaves the batch pending"
             `Quick
-            test_overflow_without_successor_terminalizes
+            test_every_failure_route_preserves_batch
         ; test_case
-            "overflow with deferred lane preserves"
+            "nonterminal outcomes leave the batch pending"
             `Quick
-            test_overflow_with_deferred_lane_preserves
-        ; test_case
-            "effect-fenced failure terminalizes the exact source"
-            `Quick
-            test_effect_fenced_failure_terminalizes_exact_source
-        ; test_case
-            "other terminal classes quarantine source"
-            `Quick
-            test_other_terminal_classes_quarantine_source
-        ; test_case
-            "exhausted configuration classes quarantine source"
-            `Quick
-            test_exhausted_configuration_classes_quarantine_source
-        ; test_case
-            "retryable route defers to queue tail"
-            `Quick
-            test_retryable_route_defers_to_queue_tail
-        ; test_case
-            "defer rotates within urgency lane"
-            `Quick
-            test_defer_pending_rotates_within_urgency_lane
+            test_nonterminal_outcomes_preserve_batch
         ] )
     ]
 ;;

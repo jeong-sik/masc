@@ -60,8 +60,119 @@ let test_the_extension_table_names_only_lexed_languages () =
     (lang "lib.rs");
   Alcotest.(check (option string)) ".py is python" (Some "python")
     (lang "tool.py");
+  Alcotest.(check (option string)) ".yaml" (Some "yaml") (lang "ci.yaml");
+  Alcotest.(check (option string)) ".yml" (Some "yaml") (lang "ci.yml");
+  Alcotest.(check (option string)) ".toml" (Some "toml")
+    (lang "repositories.toml");
+  Alcotest.(check (option string)) ".sql" (Some "sql") (lang "schema.sql");
+  (* The diff lexer was here before either of these answered: a patch opened
+     as a file read as prose while the same text inside a fence read as a
+     diff. *)
+  Alcotest.(check (option string)) ".patch is diff" (Some "diff")
+    (lang "fix.patch");
+  Alcotest.(check (option string)) ".diff is diff" (Some "diff")
+    (lang "fix.diff");
   Alcotest.(check (option string)) "unlexed .rb stays None" None (lang "app.rb");
   Alcotest.(check (option string)) "no extension" None (lang "Makefile")
+
+let spans language text =
+  Masc_tui_code_lexer.rows_of_source ~language:(Some language) text
+  |> List.concat
+  |> List.filter (fun (piece, _) -> piece <> "")
+
+let test_yaml_reads_a_key_a_value_and_a_comment () =
+  check seg "the key, the rest, the comment"
+    [ ("name", Masc_tui_code_lexer.kind_type)
+    ; (": masc ", Masc_tui_code_lexer.kind_code)
+    ; ("# why", Masc_tui_code_lexer.kind_comment)
+    ]
+    (spans "yaml" "name: masc # why")
+
+(* The line's first word is a key only where a colon closes it. Without this
+   every bare list item and every wrapped line would take the key colour, and
+   the column would stop meaning anything. *)
+let test_a_yaml_line_with_no_colon_holds_no_key () =
+  check seg "a list item is a value"
+    [ ("- just an item", Masc_tui_code_lexer.kind_code) ]
+    (spans "yaml" "- just an item")
+
+let test_a_yaml_key_survives_its_list_marker () =
+  check seg "the word after \"- \" is still a key"
+    [ ("- ", Masc_tui_code_lexer.kind_code)
+    ; ("name", Masc_tui_code_lexer.kind_type)
+    ; (": masc", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "yaml" "- name: masc")
+
+(* A digit inside a scalar belongs to the scalar. [actions/checkout@v4] is a
+   name; colouring its [4] picks one character out of a word and says it means
+   something on its own. The same boundary holds the three literal words. *)
+let test_a_digit_inside_a_scalar_is_not_a_value () =
+  check seg "the version is part of the name"
+    [ ("uses", Masc_tui_code_lexer.kind_type)
+    ; (": actions/checkout@v4", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "yaml" "uses: actions/checkout@v4");
+  check seg "a value standing on its own is still a value"
+    [ ("port", Masc_tui_code_lexer.kind_type)
+    ; (": ", Masc_tui_code_lexer.kind_code)
+    ; ("8935", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "yaml" "port: 8935")
+
+let test_a_literal_inside_a_scalar_is_not_a_literal () =
+  check seg "a word that contains one is not one"
+    (* One run: the delimiter and the word are both plain, and adjacent
+       characters of one kind are one segment. *)
+    [ ("mode", Masc_tui_code_lexer.kind_type)
+    ; (" = true-ish", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "toml" "mode = true-ish");
+  check seg "and one standing on its own still is"
+    [ ("mode", Masc_tui_code_lexer.kind_type)
+    ; (" = ", Masc_tui_code_lexer.kind_code)
+    ; ("true", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "toml" "mode = true")
+
+let test_toml_reads_a_key_a_string_and_a_comment () =
+  check seg "the key, the delimiter, the string, the comment"
+    [ ("name", Masc_tui_code_lexer.kind_type)
+    ; (" = ", Masc_tui_code_lexer.kind_code)
+    ; ("\"masc\"", Masc_tui_code_lexer.kind_string)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("# why", Masc_tui_code_lexer.kind_comment)
+    ]
+    (spans "toml" "name = \"masc\" # why")
+
+let test_a_toml_table_header_is_taken_whole () =
+  match Masc_tui_code_lexer.rows_of_source ~language:(Some "toml")
+          "[[repository]]\nname = 1" with
+  | header :: _ ->
+      check seg "the brackets belong to the name"
+        [ ("[[repository]]", Masc_tui_code_lexer.kind_keyword) ]
+        (List.filter (fun (piece, _) -> piece <> "") header)
+  | [] -> Alcotest.fail "the lexer answered no rows"
+
+let test_sql_reads_a_keyword_however_it_is_spelled () =
+  let kinds text = List.map snd (spans "sql" text) in
+  check Alcotest.(list string) "shouting does not change the shape"
+    (kinds "select a from t")
+    (kinds "SELECT a FROM t");
+  match spans "sql" "SELECT 1" with
+  | (word, kind) :: _ ->
+      check Alcotest.string "the verb" "SELECT" word;
+      check Alcotest.string "colours as a keyword"
+        Masc_tui_code_lexer.kind_keyword kind
+  | [] -> Alcotest.fail "the lexer answered nothing"
+
+let test_sql_double_quotes_name_rather_than_hold_text () =
+  check seg "a quoted name is an identifier, not a value"
+    [ ("select", Masc_tui_code_lexer.kind_keyword)
+    ; (" ", Masc_tui_code_lexer.kind_code)
+    ; ("\"user id\"", Masc_tui_code_lexer.kind_type)
+    ]
+    (spans "sql" "select \"user id\"")
 
 let test_c_like_reads_keyword_number_line_comment () =
   check seg "const keyword, number, // comment"
@@ -124,6 +235,28 @@ let () =
             test_python_reads_keyword_and_hash_comment
         ; Alcotest.test_case "triple-quoted string" `Quick
             test_python_reads_triple_quoted_string
+        ] )
+    ; ( "config"
+      , [ Alcotest.test_case "yaml reads a key, a value and a comment" `Quick
+            test_yaml_reads_a_key_a_value_and_a_comment
+        ; Alcotest.test_case "a yaml line with no colon holds no key" `Quick
+            test_a_yaml_line_with_no_colon_holds_no_key
+        ; Alcotest.test_case "a yaml key survives its list marker" `Quick
+            test_a_yaml_key_survives_its_list_marker
+        ; Alcotest.test_case "a digit inside a scalar is not a value" `Quick
+            test_a_digit_inside_a_scalar_is_not_a_value
+        ; Alcotest.test_case "a literal inside a scalar is not a literal" `Quick
+            test_a_literal_inside_a_scalar_is_not_a_literal
+        ; Alcotest.test_case "toml reads a key, a string and a comment" `Quick
+            test_toml_reads_a_key_a_string_and_a_comment
+        ; Alcotest.test_case "a toml table header is taken whole" `Quick
+            test_a_toml_table_header_is_taken_whole
+        ] )
+    ; ( "sql"
+      , [ Alcotest.test_case "a keyword however it is spelled" `Quick
+            test_sql_reads_a_keyword_however_it_is_spelled
+        ; Alcotest.test_case "double quotes name rather than hold text" `Quick
+            test_sql_double_quotes_name_rather_than_hold_text
         ] )
     ; ( "paths"
       , [ Alcotest.test_case "the extension table names only lexed languages"

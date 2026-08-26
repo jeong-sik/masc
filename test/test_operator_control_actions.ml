@@ -389,8 +389,7 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
     observed_assignee;
   let command extra_fields =
     `Assoc
-      ([ "schema", `String Operator_task_recovery_command.tool_command_schema
-       ; "task_id", `String "task-001"
+      ([ "task_id", `String "task-001"
        ; "expected_assignee", `String observed_assignee
        ; "expected_version", `Int observed_version
        ; "reason", `String "owner runtime cannot resume"
@@ -409,6 +408,20 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
   in
   Alcotest.(check bool) "unknown heuristic field rejected" true
     (Tool_result.is_failed invalid);
+  let retired_schema =
+    match
+      Operator_tool.dispatch
+        ctx
+        ~name:"masc_operator_task_recovery_resolve"
+        ~args:
+          (command
+             [ "schema", `String "workspace.task.operator_recovery.command.v1" ])
+    with
+    | Some result -> result
+    | None -> Alcotest.fail "operator task recovery dispatch missing"
+  in
+  Alcotest.(check bool) "retired schema field rejected" true
+    (Tool_result.is_failed retired_schema);
   let valid =
     match
       Operator_tool.dispatch
@@ -436,6 +449,34 @@ let test_operator_task_recovery_tool_is_strict_and_executes_exact_cas () =
   in
   Alcotest.(check string) "task recovered to todo" "todo"
     (Masc_domain.task_status_to_string task.task_status)
+
+let test_quarantine_tool_rejects_retired_schema_field () =
+  let module Command = Keeper_board_attention_quarantine_command in
+  let command extra_fields =
+    `Assoc
+      ([ "keeper_name", `String "keeper-a"
+       ; "partition_id", `String "partition-a"
+       ; "candidate_id", `String "candidate-a"
+       ; "expected_quarantine_id", `String "quarantine-a"
+       ; "decision", `String "acknowledge_and_requeue"
+       ]
+       @ extra_fields)
+  in
+  (match Command.parse_tool_command (command []) with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Command.input_error_to_string error));
+  match
+    Command.parse_tool_command
+      (command
+         [ ( "schema"
+           , `String "keeper.board_attention.quarantine.recovery.command.v1" ) ])
+  with
+  | Error (Command.Unsupported_fields [ "schema" ]) -> ()
+  | Error error ->
+    Alcotest.failf
+      "retired schema field returned the wrong error: %s"
+      (Command.input_error_to_string error)
+  | Ok _ -> Alcotest.fail "retired schema field was accepted"
 
 (* review_queue / deferred_queue / review_summary fields were emitted for
    a retired dashboard surface; the producers (split_review_items,
@@ -474,6 +515,10 @@ let () =
             "task recovery tool is strict and exact"
             `Quick
             test_operator_task_recovery_tool_is_strict_and_executes_exact_cas
+        ; Alcotest.test_case
+            "quarantine tool rejects retired schema field"
+            `Quick
+            test_quarantine_tool_rejects_retired_schema_field
         ] )
     ; ( "confirmation"
       , [ Alcotest.test_case

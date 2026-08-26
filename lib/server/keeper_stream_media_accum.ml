@@ -45,10 +45,19 @@ type block_state =
         encoded_bytes : int
       }
   | Invalid_block of invalid_reason
+  | Closed_block
+
+type stream_phase =
+  | Accepting_content
+  | Stop_reason_seen of Agent_core.Types.stop_reason
+  | Message_stopped
 
 type t = {
   mutable blocks_by_index : (int * block_state) list;
   mutable completed_rev : completed list;
+  mutable current_stream_scope : int option;
+  mutable stream_phase : stream_phase;
+  mutable runtime_attempt_seen : bool;
   (* Read once per turn. [Keeper_chat_media_store.max_wire_bytes] resolves an
      env var on every call, so reading it again at finalize could reject a
      payload the chunk path had already accepted, or keep one it had already
@@ -60,8 +69,30 @@ type t = {
 let create () =
   { blocks_by_index = [];
     completed_rev = [];
+    current_stream_scope = None;
+    stream_phase = Accepting_content;
+    runtime_attempt_seen = false;
     max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
   }
+
+let start_runtime_attempt t =
+  if t.runtime_attempt_seen
+  then (
+    t.blocks_by_index <- [];
+    t.current_stream_scope <- None;
+    t.stream_phase <- Accepting_content)
+  else t.runtime_attempt_seen <- true
+;;
+
+let enter_stream_scope t stream_scope =
+  match t.current_stream_scope with
+  | Some current when current = stream_scope -> ()
+  | None -> t.current_stream_scope <- Some stream_scope
+  | Some _ ->
+    t.blocks_by_index <- [];
+    t.current_stream_scope <- Some stream_scope;
+    t.stream_phase <- Accepting_content
+;;
 
 let record_oversize_drop t ~index ~media_type ~encoded_bytes ~max_wire_bytes =
   Log.Keeper.warn
@@ -78,14 +109,6 @@ let stream_block_for_index t index = List.assoc_opt index t.blocks_by_index
 
 let replace_block t index block =
   t.blocks_by_index <- (index, block) :: List.remove_assoc index t.blocks_by_index
-
-let remove_block t index =
-  t.blocks_by_index <- List.remove_assoc index t.blocks_by_index
-
-let has_any_tool_identity ~tool_id ~tool_name =
-  match tool_id, tool_name with
-  | None, None -> false
-  | _ -> true
 
 let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
   Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
@@ -111,7 +134,7 @@ let finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes =
     let data = String.concat "" (List.rev chunks) in
     t.completed_rev <-
       Persistable { index; media_type; source_type; data } :: t.completed_rev);
-  remove_block t index
+  replace_block t index Closed_block
 
 let finalize_open_media t =
   (* [MessageStop] terminalizes every still-open block at once. Content-block
@@ -127,18 +150,29 @@ let finalize_open_media t =
       match block with
       | Active_media { media_type; source_type; chunks; encoded_bytes } ->
           finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
-      | Invalid_block (Tool_block | Oversize) -> ())
-    blocks;
-  t.blocks_by_index <- []
+      | Invalid_block (Tool_block | Oversize)
+      | Closed_block -> ())
+    blocks
 
-let on_event t (evt : Agent_core.Types.sse_event) =
+let discard_current_scope t =
+  (* Completed media was already delivered live and remains reload evidence
+     even if a later event poisons the provider response. Only unfinished
+     occupancy is discarded. *)
+  t.blocks_by_index <- []
+;;
+
+let on_event ?(stream_scope = 0) t (evt : Agent_core.Types.sse_event) =
+  enter_stream_scope t stream_scope;
   match evt with
   | Agent_core.Types.ContentBlockStart { index; content_type; tool_id; tool_name }
-    when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name
-         || has_any_tool_identity ~tool_id ~tool_name ->
+    when t.stream_phase = Accepting_content
+         && stream_start_is_tool ~index ~content_type ~tool_id ~tool_name ->
       replace_block t index (Invalid_block Tool_block)
   | Agent_core.Types.ContentBlockDelta
       { index; delta = Agent_core.Types.MediaDelta { media_type; source_type; data } } ->
+      if t.stream_phase <> Accepting_content
+      then ()
+      else
       (match stream_block_for_index t index with
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type ->
@@ -159,7 +193,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
              media_type
              (Agent_core.Types.media_source_kind_to_string active.source_type)
              (Agent_core.Types.media_source_kind_to_string source_type)
-       | Some (Invalid_block _) ->
+       | Some (Invalid_block _ | Closed_block) ->
            ()
        | None ->
            (match
@@ -172,15 +206,47 @@ let on_event t (evt : Agent_core.Types.sse_event) =
                   ~max_wire_bytes;
                 replace_block t index (Invalid_block Oversize)))
   | Agent_core.Types.ContentBlockStop { index } -> (
+      if t.stream_phase = Message_stopped
+      then ()
+      else
       match stream_block_for_index t index with
       | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
       | Some (Invalid_block (Tool_block | Oversize)) ->
-          remove_block t index
+          ()
+      | Some Closed_block -> ()
       | None -> ())
+  | Agent_core.Types.MessageDelta { stop_reason; _ } ->
+    (match t.stream_phase, stop_reason with
+     | Accepting_content, None -> ()
+     | Accepting_content, Some stop_reason ->
+       finalize_open_media t;
+       t.stream_phase <- Stop_reason_seen stop_reason
+     | Stop_reason_seen _, None -> ()
+     | Stop_reason_seen recorded, Some replay when recorded = replay -> ()
+     | Stop_reason_seen _, Some _
+     | Message_stopped, None
+     | Message_stopped, Some _ -> discard_current_scope t)
   | Agent_core.Types.MessageStop ->
-      finalize_open_media t
-  | _ -> ()
+      (match t.stream_phase with
+       | Message_stopped -> ()
+       | Accepting_content | Stop_reason_seen _ ->
+         finalize_open_media t;
+         t.stream_phase <- Message_stopped)
+  | Agent_core.Types.SSEError _
+  | Agent_core.Types.NDJSONError _
+  | Agent_core.Types.SSEParseFailed _
+  | Agent_core.Types.NDJSONParseFailed _
+  | Agent_core.Types.SSEUnknownEventType _
+  | Agent_core.Types.SSEUnsupportedPart _
+  | Agent_core.Types.SSEUnsupportedResponse _ -> discard_current_scope t
+  | Agent_core.Types.StreamIncomplete _
+  | Agent_core.Types.MessageStart _
+  | Agent_core.Types.ContentBlockStart _
+  | Agent_core.Types.ContentBlockDelta _
+  | Agent_core.Types.Connected
+  | Agent_core.Types.Ping
+  | Agent_core.Types.Timeout _ -> ()
 
 (* Reload placeholder for an oversize drop: no payload to serve (src = None),
    but the reader sees what was generated, its type, and how large it was
@@ -201,7 +267,7 @@ let unavailable_attachment ~name ~media_type ~size ~size_bytes =
     }
 
 let wire_drop_placeholder_block
-    { media_type; encoded_bytes; max_wire_bytes } =
+    { media_type; encoded_bytes; max_wire_bytes; _ } =
   unavailable_attachment
     ~name:
       (Printf.sprintf

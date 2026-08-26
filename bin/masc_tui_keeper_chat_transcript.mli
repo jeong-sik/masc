@@ -49,6 +49,10 @@ type tool_activity = private
       (** Stable producer identity when the source carried one. [None] is kept
           for a trace step that did not carry an id; no positional id is
           invented. *)
+  ; execution_id : string option
+      (** Canonical physical-execution identity after result persistence.
+          Separate from provider [call_id], which may be blank or repeated
+          outside its source scope. *)
   ; tool_name : string
   ; args : string  (** Argument text accumulated or persisted by the source. *)
   ; subject : string option
@@ -97,11 +101,13 @@ type tool_projection = private
   }
 
 val make_tool_activity :
+  ?execution_id:string ->
   call_id:string option ->
   tool_name:string ->
   args:string ->
   outcome:tool_outcome ->
   duration:string option ->
+  unit ->
   tool_activity
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)
@@ -114,8 +120,9 @@ val project_tool_block : tool_projection_mode -> tool_block -> tool_projection
     states the exact number of hidden detail rows. Neither mode fabricates
     missing identity, duration, outcome, or omitted transcript steps. *)
 
-(** Lines the live reader could not read. Kept because a pane that drops what
-    it does not understand looks like a keeper that did nothing. *)
+(** Live stream diagnostics, including lines the reader could not read and
+    typed server protocol errors. Kept because dropping either makes a failed
+    tool look healthy. *)
 type unreadable =
   { count : int
   ; last_detail : string
@@ -143,9 +150,9 @@ val keeper_name : t -> string
 val request_id : t -> string
 
 val apply : t -> Masc_tui_keeper_chat_live.delta -> unit
-(** Fold one delta in. Deltas for an unknown call id are dropped: a tool row
-    with no name says less than no row, which is the same call the connector
-    trail makes. *)
+(** Fold one delta in. Tool deltas join only by their server-owned stream
+    occurrence. Provider ids are optional correlation data; an unknown
+    occurrence is reported unreadable rather than attached by position. *)
 
 val note_interrupt : t -> interrupt -> unit
 

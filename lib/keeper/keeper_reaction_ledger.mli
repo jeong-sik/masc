@@ -22,6 +22,7 @@ type stimulus_kind =
       (** Another Keeper cancelled a Task this Keeper authored. *)
   | Workspace_message
   | Delegate_completed
+  | Composition_completed
       (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =

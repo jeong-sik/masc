@@ -117,6 +117,8 @@ const KeeperChatTraceStepSchema = union([
     name: string(),
     tool_call_id: optional(string()),
     toolCallId: optional(string()),
+    execution_id: optional(string()),
+    executionId: optional(string()),
     status: optional(union([literal('pending'), literal('ok'), literal('err')])),
     dur: optional(string()),
     args: optional(unknown()),
@@ -285,8 +287,9 @@ export const KeeperChatHistoryMessageSchema = object({
   // ('dashboard' | 'discord' | 'slack' | 'agent') on every row of a
   // turn. Connector rows may also carry opaque conversation/message
   // coordinates so UI surfaces can group platform channels/threads.
-  // These fields are absent on legacy rows.
+  // Each identity is optional when its producer cannot prove it.
   tool_call_id: optional(string()),
+  execution_id: optional(string()),
   tool_call_name: optional(string()),
   source: optional(string()),
   surface: optional(SurfaceRefSchema),

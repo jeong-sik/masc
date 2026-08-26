@@ -1,10 +1,10 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Selects the earliest ready Event Layer stimulus per turn following
-    RFC-0020 §3 Rule 4. Payload families share one order except for explicit
-    owner-lane manual compaction, which preempts at a persisted turn boundary
-    without removing the current source. An unready input remains queued
-    without blocking later ready work in the same Keeper lane. *)
+    Admits every ready Event Layer stimulus from one durable snapshot. Payload
+    families share queue order except for explicit owner-lane manual
+    compaction, which preempts alone at a persisted turn boundary, and
+    Connector attention, which admits only the first ready conversation. An
+    unready input remains queued without blocking later ready work. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -64,8 +64,9 @@ val event_queue_intake_error_to_string : event_queue_intake_error -> string
 val event_queue_intake_error_reason_label : event_queue_intake_error -> string
 
 (** Only durable selection corruption/read failures count as a crashed cycle.
-    A transient Board read is an expected retry condition: it blocks dispatch
-    and retains the exact source without advancing Keeper failure state. *)
+    A transient Board read is an expected retry condition: it retains the exact
+    source without advancing Keeper failure state. Other admitted sources may
+    still dispatch in the same turn. *)
 val event_queue_intake_error_counts_as_cycle_failure :
   event_queue_intake_error -> bool
 
@@ -140,31 +141,27 @@ val reconcile_spent_selection
     the selection actionable rather than discarding a possibly live grant. *)
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
-     ~pending_board_events]
-    peeks at most one ready Event-Layer *selection* per turn (per RFC-0020
-    §3 Rule 4). A pending [Manual_compaction_requested] is the sole runtime
-    exception: it is selected ahead of data-plane stimuli so an in-flight
-    source checkpoint can yield, compact, and then resume from the unchanged
-    durable queue.
+     ~pending_board_events] reads one exact durable queue snapshot and admits
+    every ready selection in queue order. A pending
+    [Manual_compaction_requested] preempts and is admitted alone so an
+    in-flight source checkpoint can yield, compact, and resume from unchanged
+    durable input.
 
-    RFC-0377: when that selection is a [Connector_attention] stimulus, every
-    OTHER pending [Connector_attention] stimulus for the same conversation
-    (same {!Keeper_continuation_channel.same_conversation} channel) is
-    admitted into this same turn too, in arrival order — one turn sees the
-    whole backlog for that conversation instead of one message per turn.
-    [consumed_stimuli]/[consumed_selections] then hold every admitted
-    stimulus (primary first), not only the primary; [pending_selection]
-    stays the primary alone. Other conversations' stimuli, and every
-    non-[Connector_attention] payload, keep the pre-RFC-0377 single-stimulus
-    behavior.
+    RFC-0377's routing boundary remains: only the first ready
+    [Connector_attention] conversation is admitted, but all of its pending
+    members are included. Other connector conversations remain queued; every
+    ready non-connector source is included. [consumed_stimuli] and
+    [consumed_selections] carry the full batch, while [pending_selection] is
+    the first admitted selection for legacy primary-source diagnostics.
 
-    The selected observation(s) are merged with the [pending_board_events]
-    already accumulated by the caller, deduplicating by [post_id]. A
+    The selected observations are merged with the [pending_board_events]
+    already accumulated by the caller, deduplicating by [post_id] (the durable
+    queue admits at most one pending payload for that identity). A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
-    A transient Board read returns no consumed stimuli, keeps the exact
-    [pending_selection], and sets [event_queue_intake_error]; the heartbeat
-    loop must not dispatch or acknowledge that selection. *)
+    A transient Board read keeps that exact source pending and sets
+    [event_queue_intake_error]. It does not prevent other selections in the
+    same snapshot from being admitted and dispatched. *)
 val heartbeat_event_intake
   :  ctx:'a context
   -> meta_after_triage:keeper_meta

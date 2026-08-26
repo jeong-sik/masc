@@ -70,6 +70,14 @@ type named_run_result =
         [runtime_fallback_applied] / [runtime_outcome]. *)
   }
 
+type runtime_attempt =
+  { runtime_id : string
+  ; lane_attempt_index : int
+  ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  }
+(** Exact materialized candidate selected immediately before dispatch. Lane
+    assignment ids and later runtime-table lookups are not attempt authority. *)
+
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
@@ -119,6 +127,7 @@ val run_named :
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
+  ?on_runtime_attempt:(runtime_attempt -> unit) ->
   ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
   ?on_runtime_attempt_error:
     (runtime_id:string -> attempt:int -> Agent_core.Error.t -> unit) ->

@@ -69,15 +69,15 @@ let start ~base_path ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
   let* redirect_uri = redirect_uri () in
   let dir = identity_dir ~base_path in
-  let* configured_client_id = Store.load ~dir ~provider in
+  let* configured = Store.load ~dir ~provider in
   let* started =
     Result.map_error Session.start_error_to_string
-      (Session.start ~provider ~configured_client_id ~client_name ~redirect_uri
-         ~keeper ~pending ~now ~ttl_sec:login_window_sec ())
+      (Session.start ~provider ~configured ~client_name ~redirect_uri ~keeper
+         ~pending ~now ~ttl_sec:login_window_sec ())
   in
   let* () =
     if started.Session.registered_now
-    then Store.save ~dir ~provider ~client_id:started.Session.client_id
+    then Store.save ~dir ~provider started.Session.credentials
     else Ok ()
   in
   Ok

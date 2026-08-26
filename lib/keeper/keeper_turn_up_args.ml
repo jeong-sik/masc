@@ -215,7 +215,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
-    Error (tool_result_error (invalid_name_error name))
+    Error (tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error name))
   else
     match Keeper_identity.keeper_name_of_agent_alias name with
     (* One parse decides both facts. Asking "is it an alias?" separately forced
@@ -223,7 +223,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
        resulting message named the rejected input as its own replacement. *)
     | Some canonical_name ->
         Error
-          (tool_result_error
+          (tool_result_error ~class_:Tool_result.Policy_rejection
              (Printf.sprintf
                 "invalid keeper name: %S is a runtime agent identity; use the canonical keeper name %S"
                 name canonical_name))
@@ -239,7 +239,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     | Error e, _, _, _
     | _, Error e, _, _
     | _, _, Error e, _
-    | _, _, _, Error e -> Error (tool_result_error e)
+    | _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
     | Ok allowed_paths_opt, Ok mention_targets_opt,
       Ok runtime_id_opt,
       Ok
@@ -263,7 +263,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
         name
     with
     | Error error ->
-      Error (tool_result_error (keeper_toml_load_error_to_string error))
+      Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok profile_defaults ->
     (* An explicit profile must be valid. When neither the call nor keeper TOML states
        one, creation uses the local sandbox with playground-only writes. This is the
@@ -298,9 +298,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     match
       sandbox_profile_error, max_context_override_res, autonomous_wake_prompt_res
     with
-    | Some msg, _, _ -> Error (tool_result_error msg)
-    | None, Error msg, _ -> Error (tool_result_error msg)
-    | None, _, Error msg -> Error (tool_result_error msg)
+    | Some msg, _, _ -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    | None, Error msg, _ -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
+    | None, _, Error msg -> Error (tool_result_error ~class_:Tool_result.Policy_rejection msg)
     | None, Ok (max_context_override_present, max_context_override_opt),
       Ok (autonomous_wake_prompt_present, autonomous_wake_prompt_opt) ->
     Ok {

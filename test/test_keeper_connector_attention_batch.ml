@@ -61,7 +61,7 @@ let enqueue_exn ~base_path keeper_name source =
    payload for each branch under test. [Manual_compaction_failed] /
    [Manual_compaction_not_applied] / [Manual_compaction_applied] are not
    fixture-built here: [batch_disposition_of_cycle_outcome]'s arms for them
-   ignore their payload entirely (always Batch_quarantine / Batch_ack_completed
+   ignore their payload entirely (always Batch_no_action / Batch_ack_completed
    regardless of failure/receipt detail), and their payload types nest deep
    unrelated fixtures (checkpoint installation, post-install lifecycle) with
    no additional signal for what this suite is pinning. Exhaustiveness is the
@@ -204,6 +204,59 @@ let board_distractor_stimulus ~post_id ~arrived_at : Q.stimulus =
   }
 ;;
 
+let board_attention_stimulus ~label ~arrived_at : Q.stimulus =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"external-batch-author"
+        ~title:label
+        ~content:("content-" ^ label)
+        ~post_kind:Board.Human_post
+        ~visibility:Board.Internal
+        ()
+    with
+    | Ok post -> post
+    | Error error ->
+      failf "failed to create Board batch source: %s" (Board.show_board_error error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  { Q.post_id
+  ; urgency = Q.Normal
+  ; arrived_at
+  ; payload =
+      Q.Board_attention
+        { candidate_id = "candidate-" ^ label
+        ; signal =
+            { kind = Q.Post_created
+            ; author = "external-batch-author"
+            ; title = label
+            ; content = "content-" ^ label
+            ; hearth = None
+            ; updated_at = Some post.updated_at
+            }
+        }
+  }
+;;
+
+let scheduled_wake_stimulus ~occurrence ~arrived_at : Q.stimulus =
+  let occurrence_id = Printf.sprintf "occurrence-%d" occurrence in
+  { Q.post_id = occurrence_id
+  ; urgency = Q.Immediate
+  ; arrived_at
+  ; payload =
+      Q.Schedule_due
+        { occurrence_id
+        ; schedule_instance_id = "instance-batch"
+        ; schedule_id = "schedule-batch"
+        ; due_at = arrived_at
+        ; payload_digest = "digest-batch"
+        ; title = Some "batch schedule"
+        ; message = "scheduled batch work"
+        ; result_delivery = None
+        }
+  }
+;;
+
 let connector_event_ids_of_queue queue =
   Q.to_list queue
   |> List.filter_map (fun (s : Q.stimulus) ->
@@ -214,7 +267,7 @@ let connector_event_ids_of_queue queue =
        | Q.Manual_compaction_requested
        | Q.Completion_authority_rejected _
        | Q.Task_cancelled _ | Q.Workspace_message _
-       | Q.Delegate_completed _ -> None)
+       | Q.Delegate_completed _ | Q.Composition_completed _ -> None)
   |> List.sort String.compare
 ;;
 
@@ -227,9 +280,16 @@ let with_ctx keeper_name f =
   Eio.Switch.run
   @@ fun sw ->
   let base_path = Masc_test_deps.setup_test_workspace () in
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
   Keeper_registry.For_testing.clear ();
   Fun.protect
-    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ())
   @@ fun () ->
   let config = Workspace.default_config base_path in
   let meta = test_meta keeper_name in
@@ -246,6 +306,50 @@ let with_ctx keeper_name f =
     }
   in
   f ~base_path ~keeper_name ~meta ~ctx
+;;
+
+let test_one_intake_admits_every_ready_non_connector_in_queue_order () =
+  with_ctx "all-ready-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let board =
+      List.init 5 (fun index ->
+        board_attention_stimulus
+          ~label:(Printf.sprintf "board-%d" (index + 1))
+          ~arrived_at:(Float.of_int (index + 10)))
+    in
+    let schedules =
+      List.init 3 (fun index ->
+        scheduled_wake_stimulus
+          ~occurrence:(index + 1)
+          ~arrived_at:(Float.of_int (index + 1)))
+    in
+    let bootstrap : Q.stimulus =
+      { post_id = "bootstrap-batch"
+      ; urgency = Q.Low
+      ; arrived_at = 30.0
+      ; payload = Q.Bootstrap
+      }
+    in
+    let sources = schedules @ board @ [ bootstrap ] in
+    List.iter (enqueue_exn ~base_path keeper_name) sources;
+    let intake =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx
+        ~meta_after_triage:meta
+        ~pending_board_events:[]
+    in
+    check int "all nine ready sources are admitted in one turn" 9
+      intake.consumed_stimulus_count;
+    check
+      (list string)
+      "admission preserves durable urgency then arrival order"
+      (List.map (fun (source : Q.stimulus) -> source.post_id) sources)
+      (List.map (fun (source : Q.stimulus) -> source.post_id) intake.consumed_stimuli);
+    check int "five Board and three Schedule observations reach the turn" 8
+      (List.length intake.pending_board_events);
+    check int "intake alone never ACKs actionable sources" 9
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> Result.map Q.length
+       |> Result.value ~default:(-1)))
 ;;
 
 (* Adversarial review P1-2: the turn-completion/failure batch disposition
@@ -277,40 +381,24 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
    | _ ->
      fail
        "Completed + not-addressed route must drive Batch_ack_completed/Attention_ignored");
-  (match
-     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some
-          (failed_outcome
-             ~source_disposition:Keeper_unified_turn.Follow_failure_route
-             ~route:transient_retry_route
-             ~deferred_runtime_lane:None
-             meta))
-   with
-   | Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" } -> ()
-   | _ ->
-     fail
-       "a transient retry route with no deferred lane must drive \
-        Batch_defer \"transient_turn_failure\"");
-  (match
-     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-       (Some
-          (failed_outcome
-             ~source_disposition:Keeper_unified_turn.Follow_failure_route
-             ~route:(deterministic_route ~detail:"deterministic rejection")
-             ~deferred_runtime_lane:None
-             meta))
-   with
-   | Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" } -> ()
-   | _ ->
-     fail
-       "a deterministic-rejection route with no deferred lane must drive \
-        Batch_quarantine with the route's detail");
   List.iter
     (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
        match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
        | Keeper_heartbeat_loop.Batch_no_action -> ()
        | _ -> fail "a non-terminal or absent cycle outcome must drive Batch_no_action")
     [ None
+    ; Some
+        (failed_outcome
+           ~source_disposition:Keeper_unified_turn.Follow_failure_route
+           ~route:transient_retry_route
+           ~deferred_runtime_lane:None
+           meta)
+    ; Some
+        (failed_outcome
+           ~source_disposition:Keeper_unified_turn.Follow_failure_route
+           ~route:(deterministic_route ~detail:"deterministic rejection")
+           ~deferred_runtime_lane:None
+           meta)
     ; Some (Keeper_heartbeat_loop_cycle.Checkpointed meta)
     ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
     ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
@@ -398,11 +486,10 @@ let test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_qu
        |> List.sort String.compare))
 ;;
 
-(* RFC-0377 S3: "Non-Connector_attention payloads keep single-stimulus
-   behavior." A board signal sitting between two same-conversation
-   Connector_attention entries must not be admitted into the batch and must
-   not block the batch filter from finding the connector entry behind it. *)
-let test_batch_skips_a_non_connector_entry_between_matches () =
+(* A permanently unavailable Board source sitting between two
+   same-conversation Connector_attention entries must be retired without
+   blocking the connector batch or appearing as actionable turn input. *)
+let test_batch_retires_permanent_board_poison_between_connector_matches () =
   with_ctx "connector-batch-mixed" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
       connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"chan-A"
@@ -432,9 +519,9 @@ let test_batch_skips_a_non_connector_entry_between_matches () =
       | Ok queue -> queue
       | Error detail -> failf "queue reload failed: %s" detail
     in
-    check int "the board distractor is still durably queued, never consumed" 3
+    check int "permanently missing board source is acked; connectors stay pending" 2
       (Q.length queued);
-    check bool "the board distractor's own identity is unchanged" true
+    check bool "the permanently missing board source is no longer pending" false
       (List.exists
          (fun (s : Q.stimulus) -> String.equal s.Q.post_id "board-distractor")
          (Q.to_list queued)))
@@ -442,17 +529,13 @@ let test_batch_skips_a_non_connector_entry_between_matches () =
 
 (* RFC-0377 S5.2: batch admitted, then the turn fails with a transient
    provider failure. Unlike the earlier version of this test (which
-   assumed [Defer_to_queue_tail] and drove [defer_pending_result]
-   directly), the disposition here comes from a REAL
+   assumed [Defer_to_queue_tail] and mutated the queue), the disposition here
+   comes from a REAL
    [Keeper_heartbeat_loop_cycle.cycle_outcome] fixture through
    [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome] — the exact
-   function [keeper_heartbeat_loop.ml] now calls. A regression in that
-   function (e.g. reverting to primary-only, or a match-arm mistake) fails
-   this test even though nothing here re-implements the loop's own control
-   flow (adversarial review P1-2). The action must run over every entry in
-   [consumed_selections], not only the primary, or a companion is silently
-   stranded — acked by nobody, deferred by nobody, yet also never retried
-   because it no longer looks "new". *)
+   function [keeper_heartbeat_loop.ml] now calls. Provider/runtime failure is
+   not authority to rewrite any input row, so the whole batch must remain
+   byte-for-byte pending. *)
 let test_batch_turn_failure_leaves_every_member_queued () =
   with_ctx "connector-batch-failure" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
@@ -488,29 +571,9 @@ let test_batch_turn_failure_leaves_every_member_queued () =
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
          (Some failed_cycle_outcome)
      with
-     | Keeper_heartbeat_loop.Batch_defer { reason } ->
-       (* This is the loop's own application step (List.iter over
-          consumed_selections), reproduced here only because
-          defer_selection_to_queue_tail itself is a private closure inside
-          run_keepalive_turn — the DECISION under test already came from
-          the real function above. *)
-       List.iter
-         (fun (selection : Keeper_event_queue_state.pending_selection) ->
-            match
-              Keeper_registry_event_queue.defer_pending_result
-                ~base_path
-                keeper_name
-                ~selection
-            with
-            | Ok _ -> ()
-            | Error detail ->
-              failf "defer failed for %s: %s" selection.source.Q.post_id detail)
-         intake.consumed_selections;
-       check string "deferred for the expected reason" "transient_turn_failure" reason
-     | Keeper_heartbeat_loop.Batch_ack_completed _
-     | Keeper_heartbeat_loop.Batch_quarantine _
-     | Keeper_heartbeat_loop.Batch_no_action ->
-       fail "the transient-failure fixture must drive Batch_defer");
+     | Keeper_heartbeat_loop.Batch_no_action -> ()
+     | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+       fail "a failed turn must leave every admitted source pending");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> queue
@@ -578,8 +641,6 @@ let test_batch_completion_acks_every_member () =
            intake.consumed_selections
        in
        check bool "every batch member acks cleanly" true acked
-     | Keeper_heartbeat_loop.Batch_quarantine _
-     | Keeper_heartbeat_loop.Batch_defer _
      | Keeper_heartbeat_loop.Batch_no_action ->
        fail "a completed, addressed outcome must drive Batch_ack_completed");
     let queued =
@@ -591,23 +652,10 @@ let test_batch_completion_acks_every_member () =
       (Q.length queued))
 ;;
 
-(* The queue entry and the external-attention row are separate writes, and the
-   wake is edge-triggered: once a disposition terminalizes the entry, only a new
-   ambient message ever arms another stimulus for that row. So a disposition
-   that terminalizes must name a terminal event. Quarantine used to name none,
-   which left the row pending with nothing able to drain it. *)
+(* The queue entry and the external-attention row are separate writes. Only a
+   completed turn terminalizes the entry, so only completed dispositions may
+   settle the attention row. *)
 let test_every_terminalizing_disposition_settles_its_attention_rows () =
-  (match
-     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-       (Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" })
-   with
-   | Keeper_heartbeat_loop.Settle_quarantined { detail = "deterministic rejection" } ->
-     ()
-   | Keeper_heartbeat_loop.Settle_pending_in_queue ->
-     fail
-       "quarantine drops the queue entry, so leaving the row pending strands it \
-        forever"
-   | _ -> fail "quarantine must settle as Settle_quarantined carrying its detail");
   (match
      Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
        (Keeper_heartbeat_loop.Batch_ack_completed
@@ -622,38 +670,33 @@ let test_every_terminalizing_disposition_settles_its_attention_rows () =
    with
    | Keeper_heartbeat_loop.Settle_ignored -> ()
    | _ -> fail "a completed unaddressed turn must settle as Settle_ignored");
-  (* These two keep the entry queued, so the turn that drains it settles the
-     row. Settling here would retire a row that is still live. *)
-  List.iter
-    (fun disposition ->
-       match
-         Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
-           disposition
-       with
-       | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
-       | _ ->
-         fail
-           "a disposition that leaves the entry queued must not settle the row")
-    [ Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" }
-    ; Keeper_heartbeat_loop.Batch_no_action
-    ]
+  (match
+     Keeper_heartbeat_loop.connector_attention_settlement_of_disposition
+       Keeper_heartbeat_loop.Batch_no_action
+   with
+   | Keeper_heartbeat_loop.Settle_pending_in_queue -> ()
+   | _ -> fail "an unfinished turn must not settle a still-pending row")
 ;;
 
 let () =
   run
     "keeper_connector_attention_batch"
-    [ ( "RFC-0377 conversation-batched intake"
+    [ ( "all-ready Event Queue intake"
       , [ test_case
+            "admits all ready Board, Schedule, and Bootstrap sources in one turn"
+            `Quick
+            test_one_intake_admits_every_ready_non_connector_in_queue_order
+        ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \
              channels queued"
             `Quick
             test_batch_admits_same_conversation_in_arrival_order_leaves_other_channel_queued
         ; test_case
-            "skips a non-connector entry sitting between two matches"
+            "retires permanent Board poison between connector matches"
             `Quick
-            test_batch_skips_a_non_connector_entry_between_matches
+            test_batch_retires_permanent_board_poison_between_connector_matches
         ; test_case
-            "turn failure defers the whole batch: no partial ack"
+            "turn failure leaves the whole batch pending: no partial ack"
             `Quick
             test_batch_turn_failure_leaves_every_member_queued
         ; test_case

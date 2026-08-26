@@ -258,11 +258,143 @@ describe('SSEMessageSchema', () => {
         threadId: 'keeper-consumer:sangsu',
         runId: 'run-1',
         name: 'KEEPER_TOOL_RESULT_READY',
-        value: { tool_call_id: 'tool-use-7' },
+        value: {
+          toolStreamScope: 3,
+          toolCallBlockIndex: 7,
+          providerMessageId: 'provider-message-1',
+          toolCallId: 'tool-use-7',
+          executionId: 'exec-7',
+        },
         timestamp: 1_712_000_000,
       },
     })
     expect(r.success).toBe(true)
+  })
+
+  it('rejects tool-result readiness without canonical execution identity', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { toolStreamScope: 3, toolCallBlockIndex: 7 },
+        timestamp: 1_712_000_000,
+      },
+    })
+    expect(r.success).toBe(false)
+  })
+
+  const exactToolOccurrence = {
+    toolStreamScope: 3,
+    toolCallBlockIndex: 7,
+  }
+
+  const toolOperationEvent = (agUiEvent: Record<string, unknown>) => ({
+    type: 'keeper_chat_operation_event',
+    name: 'sangsu',
+    operation_id: 'kmsg-operation-1',
+    ag_ui_event: {
+      threadId: 'keeper-consumer:sangsu',
+      timestamp: 1_712_000_000,
+      ...agUiEvent,
+    },
+  })
+
+  it.each([
+    {
+      label: 'start',
+      event: { type: 'TOOL_CALL_START', ...exactToolOccurrence, toolCallName: 'Read' },
+    },
+    {
+      label: 'args',
+      event: { type: 'TOOL_CALL_ARGS', ...exactToolOccurrence, delta: '{}' },
+    },
+    {
+      label: 'end',
+      event: { type: 'TOOL_CALL_END', ...exactToolOccurrence },
+    },
+    {
+      label: 'result',
+      event: {
+        type: 'CUSTOM',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { ...exactToolOccurrence, executionId: 'exec-7' },
+      },
+    },
+  ])('accepts providerless $label with an exact stream occurrence', ({ event }) => {
+    expect(SSEMessageSchema.safeParse(toolOperationEvent(event)).success).toBe(true)
+  })
+
+  it.each([
+    { type: 'TOOL_CALL_START', toolCallName: 'Read' },
+    { type: 'TOOL_CALL_ARGS', delta: '{}' },
+    { type: 'TOOL_CALL_END' },
+    {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { executionId: 'exec-7' },
+    },
+  ])('rejects a tool event without its exact stream occurrence: %o', event => {
+    expect(SSEMessageSchema.safeParse(toolOperationEvent(event)).success).toBe(false)
+  })
+
+  it.each([
+    {
+      type: 'TOOL_CALL_START',
+      ...exactToolOccurrence,
+      toolStreamScope: -1,
+      toolCallName: 'Read',
+    },
+    {
+      type: 'TOOL_CALL_END',
+      ...exactToolOccurrence,
+      toolCallBlockIndex: 1.5,
+    },
+    {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...exactToolOccurrence, toolCallBlockIndex: -1, executionId: 'exec-7' },
+    },
+  ])('rejects a malformed tool stream occurrence: %o', event => {
+    expect(SSEMessageSchema.safeParse(toolOperationEvent(event)).success).toBe(false)
+  })
+
+  it.each([
+    {
+      type: 'TOOL_CALL_ARGS',
+      ...exactToolOccurrence,
+      providerMessageId: ' ',
+      delta: '{}',
+    },
+    {
+      type: 'TOOL_CALL_END',
+      ...exactToolOccurrence,
+      toolCallId: '',
+    },
+    {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...exactToolOccurrence, providerMessageId: '', executionId: 'exec-7' },
+    },
+  ])('rejects a blank optional tool correlation field: %o', event => {
+    expect(SSEMessageSchema.safeParse(toolOperationEvent(event)).success).toBe(false)
+  })
+
+  it('rejects legacy snake_case result identity fields', () => {
+    expect(SSEMessageSchema.safeParse(toolOperationEvent({
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: {
+        tool_stream_scope: 3,
+        tool_call_block_index: 7,
+        tool_call_id: 'tool-use-7',
+        execution_id: 'exec-7',
+      },
+    })).success).toBe(false)
   })
 
   // The three below reached main with a name in the contract and no field list.
@@ -284,6 +416,62 @@ describe('SSEMessageSchema', () => {
     },
   })
 
+  it('accepts the null runtime-attempt boundary event', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_RUNTIME_ATTEMPT_STARTED', null),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts an exact quarantined occurrence on a stream protocol error', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+        kind: 'tool_args_without_start',
+        reason: 'quarantined exact occurrence',
+        quarantined_occurrence: {
+          toolStreamScope: 3,
+          toolCallBlockIndex: 7,
+          providerMessageId: 'provider-message-1',
+        },
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it.each([
+    'tool_delta_invalid_kind',
+    'tool_attempt_superseded',
+    'tool_message_start_conflict',
+    'stream_event_after_terminal',
+  ])(
+    'accepts the %s typed quarantine kind',
+    kind => {
+      const r = SSEMessageSchema.safeParse(
+        customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+          kind,
+          reason: 'exact occurrence terminalized',
+          quarantined_occurrence: exactToolOccurrence,
+        }),
+      )
+      expect(r.success).toBe(true)
+    },
+  )
+
+  it.each([
+    { toolCallBlockIndex: 7 },
+    { toolStreamScope: 3, toolCallBlockIndex: -1 },
+    { toolStreamScope: 3, toolCallBlockIndex: 7, providerMessageId: ' ' },
+    { toolStreamScope: 3, toolCallBlockIndex: 7, toolCallId: 'not-allowed' },
+  ])('rejects a malformed quarantined occurrence: %o', quarantinedOccurrence => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_STREAM_PROTOCOL_ERROR', {
+        kind: 'tool_args_without_start',
+        quarantined_occurrence: quarantinedOccurrence,
+      }),
+    )
+    expect(r.success).toBe(false)
+  })
+
   it('accepts a tool approval request with the fields the server sends', () => {
     const r = SSEMessageSchema.safeParse(
       customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
@@ -291,9 +479,35 @@ describe('SSEMessageSchema', () => {
         tool_call_name: 'execute',
         args: '{"command":"ls"}',
         question: 'Run this command?',
+        because: 'process execution requires approval',
       }),
     )
     expect(r.success).toBe(true)
+  })
+
+  it('accepts an older tool approval request without because', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-old',
+        tool_call_name: 'execute',
+        args: '{}',
+        question: 'Run this command?',
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects a non-string tool approval reason', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-7',
+        tool_call_name: 'execute',
+        args: '{}',
+        question: 'Run this command?',
+        because: 42,
+      }),
+    )
+    expect(r.success).toBe(false)
   })
 
   it('accepts a settled tool approval', () => {

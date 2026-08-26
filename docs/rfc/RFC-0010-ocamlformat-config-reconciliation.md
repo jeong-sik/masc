@@ -41,7 +41,10 @@ decision. No migration accompanied it, and no one noticed for 4 months.
 
 ### 1.2 Why it stays invisible
 
-`.github/workflows/ocamlformat.yml` only checks files a PR changed:
+The formatter-only PR workflow has been retired while this RFC keeps
+`disable = true`. Installing ocamlformat or running Dune's `@fmt` alias would
+consume CI time without enforcing a formatting contract. A future migration
+that removes `disable` must restore one authoritative formatting check.
 
 ```bash
 files=$(git diff --name-only --diff-filter=AMR "$base...$head" -- '*.ml' '*.mli')

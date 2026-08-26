@@ -121,7 +121,7 @@ let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
   with
   | Error error ->
     Error
-      (tool_result_error
+      (tool_result_error ~class_:Tool_result.Runtime_failure
          (Keeper_owner_registry.command_error_to_string error))
   | Ok (Keeper_owner.Shutdown_reserved { in_flight = Some info; _ }) ->
     rollback ~operation_id;
@@ -148,7 +148,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
   match resume_operator_pause ctx old with
-  | Error message -> tool_result_error message
+  | Error message -> tool_result_error ~class_:Tool_result.Workflow_rejection message
   | Ok old ->
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
@@ -163,7 +163,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
         Error
           (Printf.sprintf "invalid sandbox_profile: %S (expected: local or docker)" raw)
   with
-  | Error msg -> tool_result_error msg
+  | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok sandbox_profile ->
   match
     match p.network_mode_opt with
@@ -175,7 +175,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
         Error
           (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
   with
-  | Error msg -> tool_result_error msg
+  | Error msg -> tool_result_error ~class_:Tool_result.Policy_rejection msg
   | Ok network_mode ->
   let autoboot_enabled =
     match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
@@ -247,7 +247,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
         ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
         p.name err;
-      tool_result_error err
+      tool_result_error ~class_:Tool_result.Policy_rejection err
   | Ok () ->
          let runtime_assignment_result =
            match p.runtime_id_opt with
@@ -275,7 +275,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
               "update_keeper failed runtime assignment for %s: %s"
               p.name
               err;
-            tool_result_error err
+            tool_result_error ~class_:Tool_result.Runtime_failure err
           | Ok () ->
             (match
                Keeper_shutdown_supersession.preflight
@@ -284,7 +284,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  ~actor:ctx.agent_name
              with
              | Error error ->
-               tool_result_error
+               tool_result_error ~class_:Tool_result.Runtime_failure
                  (Keeper_shutdown_supersession.error_to_string error)
              | Ok supersession ->
              (match
@@ -303,7 +303,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                      )
                    ]
                  ();
-               tool_result_error
+               tool_result_error ~class_:Tool_result.Runtime_failure
                  (Printf.sprintf "declarative keeper config write failed: %s" e)
               | Ok _ ->
             (match
@@ -335,10 +335,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
                  ();
-               tool_result_error
+               tool_result_error ~class_:Tool_result.Runtime_failure
                  (Keeper_owner_registry.command_error_to_string error)
              | Ok None ->
-               tool_result_error "Keeper owner metadata disappeared during update"
+               tool_result_error ~class_:Tool_result.Runtime_failure "Keeper owner metadata disappeared during update"
              | Ok (Some updated) ->
                (match
                   Keeper_shutdown_supersession.commit_after_metadata_update
@@ -346,7 +346,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     supersession
                 with
                 | Error error ->
-                  tool_result_error
+                  tool_result_error ~class_:Tool_result.Runtime_failure
                     (Keeper_shutdown_supersession.error_to_string error)
                 | Ok
                     ( Keeper_shutdown_supersession.No_shutdown_admission
@@ -363,7 +363,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     | Keeper_not_registered -> "keeper was not registered before restart"
                     | Keeper_joined _ -> "previous keeper lane joined"
                   in
-                  tool_result_error
+                  tool_result_error ~class_:Tool_result.Workflow_rejection
                     (Printf.sprintf
                        "keeper update launch conflicted after %s: %s"
                        stop_detail
@@ -377,7 +377,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   | Keepalive_launch_callback_failed _
                   | Keepalive_lane_ownership_lost
                   | Keepalive_fork_rejected _ ) as rejected ->
-                  tool_result_error
+                  tool_result_error ~class_:Tool_result.Runtime_failure
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
                        (start_keepalive_outcome_to_string rejected)))))))))

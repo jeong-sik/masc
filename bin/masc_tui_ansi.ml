@@ -334,15 +334,6 @@ module Terminal_text = struct
     Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
 end
 
-(** Status color *)
-let status_color status =
-  match status with
-  | "working" | "in_progress" -> Ansi.yellow
-  | "idle" | "online" -> Ansi.green
-  | "offline" -> Ansi.gray
-  | "error" -> Ansi.red
-  | _ -> Ansi.default_fg
-
 (** Task status icon *)
 let task_status_icon status =
   match status with
@@ -355,28 +346,34 @@ let task_status_icon status =
 
 (** Priority indicator *)
 let priority_indicator p =
-  if p <= 1 then Ansi.red ^ "!!!" ^ Ansi.reset
-  else if p <= 2 then Ansi.red ^ "!!" ^ Ansi.reset
-  else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
-  else ""
+  let glyph = Masc_tui_theme.Glyph.priority p in
+  if p <= 2 then Theme.bad () ^ glyph ^ Ansi.reset
+  else if p <= 3 then Theme.warn () ^ glyph ^ Ansi.reset
+  else glyph
 
-(** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
+(** Context ratio tone: healthy capacity recedes; only pressure and danger
+    claim an attention colour. All three resolve against the terminal palette. *)
 let ctx_color ratio =
-  if ratio >= 0.8 then Ansi.red
-  else if ratio >= 0.5 then Ansi.yellow
-  else Ansi.green
+  match Masc_tui_observation_layout.context_pressure ratio with
+  | Masc_tui_observation_layout.Danger -> Theme.bad ()
+  | Masc_tui_observation_layout.Pressure -> Theme.warn ()
+  | Masc_tui_observation_layout.Quiet -> Theme.muted ()
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =
   let width = Masc_tui_render_schedule.nonnegative_width width in
-  let filled = int_of_float (ratio *. float_of_int width) in
+  let visible_ratio =
+    Float.of_int (Masc_tui_observation_layout.percentage_tenths ratio) /. 1000.0
+  in
+  let filled = int_of_float (visible_ratio *. float_of_int width) in
   let filled = max 0 (min width filled) in
   let empty = width - filled in
   let color = ctx_color ratio in
+  let empty_color = Ansi.reset ^ Theme.recede () in
   Printf.sprintf "%s%s%s%s"
     color
     (String.make filled '#')
-    (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
+    (empty_color ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
 
 (* The framed family keeps the full border box. Modals (palette, help) and

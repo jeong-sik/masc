@@ -4,12 +4,15 @@
     from AGENT_CORE' closed {!Agent_core.Types.sse_event} sum. This module is the
     boundary adapter between those two domains.
 
-    Text deltas are additionally reconciled against the per-block accumulated
-    text (exact byte-length/prefix identity, never similarity): cumulative
-    snapshot chunks are forwarded as their unseen suffix only, and exact
-    retransmissions are dropped, so a duplicated provider chunk never renders
-    twice.  Dedup occurrences bump
-    [masc_keeper_stream_text_delta_dedup_total]. *)
+    Text deltas arriving here are already canonical: the Agent Core stream
+    state reduces explicitly typed [TextSnapshot] values to unseen suffixes and
+    suppresses exact snapshot replays before invoking this boundary. Ordinary
+    [TextDelta] values always append. This adapter projects each accepted delta
+    exactly once and never reinterprets it.
+
+    Exact tool quarantine is write-once per stream occurrence. The bridge keeps
+    the first typed quarantine kind for freeze checks; later content events at
+    that scope/index are suppressed and cannot overwrite the first failure. *)
 
 type state
 (** Per-stream correlation state for AGENT_CORE content block indices. *)
@@ -21,6 +24,22 @@ type translated_event = {
 (** Result of translating one typed AGENT_CORE stream event. *)
 
 val empty_state : unit -> state
+
+val start_runtime_attempt
+  :  previous_scope:Keeper_chat_events.runtime_attempt_scope_disposition
+  -> state
+  -> translated_event
+(** Reset unfinished text/thinking state at an exact resolved-runtime attempt
+    boundary. When [previous_scope] is [Abandon_previous_scope], terminalize
+    every tool occurrence in that unsealed scope as superseded. The durable tool
+    accumulator computes this disposition before advancing, so a sealed or
+    result-ready occurrence remains intact on both live and persisted surfaces. *)
+
+val fail_stream : state -> reason:string -> translated_event
+(** Quarantine every tool occurrence in the current provider scope when the
+    outer transport/cancellation boundary fails after the typed stream reader
+    can no longer emit another event. Idempotent after an earlier scope
+    failure. *)
 (** Reads the generated-media wire cap once, so every decision in this stream
     is made against one number even if an operator edits the env var while it
     runs. *)
@@ -33,6 +52,7 @@ val terminal_message_had_text : state -> bool
 val translate :
   redact_text:(string -> string) ->
   base_dir:string ->
+  stream_scope:int ->
   state ->
   Agent_core.Types.sse_event ->
   translated_event

@@ -115,7 +115,10 @@ let with_surface_post_receipt target result =
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 
-let of_tool_result (result : Tool_result.result) =
+let of_tool_result
+      ?(failure_effect_disposition = Tool_result.Effect_outcome_unknown)
+      (result : Tool_result.result)
+  =
   let raw_output = Tool_result.message result in
   let data = Some (Tool_result.data result) in
   match result with
@@ -141,7 +144,7 @@ let of_tool_result (result : Tool_result.result) =
     { raw_output
     ; data
     ; metadata = Tool_result.metadata result
-    ; failure_effect_disposition = Tool_result.Effect_outcome_unknown
+    ; failure_effect_disposition
     ; disposition = Tool_result.Failed class_
     ; deferred_kind = None
     ; terminal_effect_receipt = None

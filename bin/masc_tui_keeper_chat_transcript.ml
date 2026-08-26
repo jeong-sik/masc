@@ -31,6 +31,7 @@ type tool_outcome =
 
 type tool_activity =
   { call_id : string option
+  ; execution_id : string option
   ; tool_name : string
   ; args : string
   ; subject : string option
@@ -59,11 +60,15 @@ type tool_projection =
    and rendering below is immutable, so neither consumer has to infer an
    outcome from these two booleans. *)
 type live_tool_call =
-  { call_id : string
+  { local_id : int
+  ; occurrence : Live.tool_occurrence
+  ; call_id : string option
+  ; execution_id : string option
   ; tool_name : string
   ; args : string
   ; ended : bool
   ; result_ready : bool
+  ; failed : bool
   }
 
 (* [call_id] and [tool_name] are also fields of [tool_activity] above. OCaml
@@ -97,7 +102,7 @@ type unreadable =
 type trail_node =
   | Node_thinking of Buffer.t
   | Node_text of Buffer.t
-  | Node_tool of string
+  | Node_tool of int
 
 (* Tool calls are held newest-first so opening one is a prepend; [tool_calls]
    reverses on read. Appending an argument fragment walks the list, which a
@@ -114,6 +119,7 @@ type t =
   ; thinking_buffer : Buffer.t
   ; mutable reversed_tool_calls : live_tool_call list
   ; mutable reversed_trail : trail_node list
+  ; mutable next_tool_local_id : int
   ; mutable phase : phase
   ; mutable interrupt : interrupt
   ; mutable checkpoints : int
@@ -136,6 +142,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; thinking_buffer = Buffer.create 256
   ; reversed_tool_calls = []
   ; reversed_trail = []
+  ; next_tool_local_id = 0
   ; phase = Waiting
   ; interrupt = Not_requested
   ; checkpoints = 0
@@ -186,13 +193,16 @@ let subject_of ~tool_name ~args =
   if String.equal (String.trim args) "" then None
   else Masc.Keeper_chat_tool_trail.tool_subject ~name:tool_name ~args
 
-let make_tool_activity ~call_id ~tool_name ~args ~outcome ~duration =
-  let call_id =
-    match call_id with
-    | Some value when String.trim value <> "" -> Some value
-    | Some _ | None -> None
-  in
+let nonblank = function
+  | Some value when String.trim value <> "" -> Some value
+  | Some _ | None -> None
+
+let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
+    ~duration () =
+  let call_id = nonblank call_id in
+  let execution_id = nonblank execution_id in
   { call_id
+  ; execution_id
   ; tool_name
   ; args
   ; subject = subject_of ~tool_name ~args
@@ -201,13 +211,15 @@ let make_tool_activity ~call_id ~tool_name ~args ~outcome ~duration =
   }
 
 let activity_of_live_call (call : live_tool_call) =
-  make_tool_activity ~call_id:(Some call.call_id) ~tool_name:call.tool_name
+  make_tool_activity ?execution_id:call.execution_id
+    ~call_id:call.call_id ~tool_name:call.tool_name
     ~args:call.args
     ~outcome:
-      (if call.result_ready then Returned
+      (if call.failed then Failed
+       else if call.result_ready then Returned
        else if call.ended then Awaiting_result
        else Started)
-    ~duration:None
+    ~duration:None ()
 
 let tool_calls t =
   List.rev t.reversed_tool_calls |> List.map activity_of_live_call
@@ -411,9 +423,9 @@ type trail_item =
    updating. Blank stretches are dropped here so the pane never budgets a row
    for an empty heading. *)
 let trail t =
-  let call_of id =
+  let call_of local_id =
     List.find_opt
-      (fun (call : live_tool_call) -> String.equal call.call_id id)
+      (fun (call : live_tool_call) -> call.local_id = local_id)
       t.reversed_tool_calls
   in
   let flush_tools acc group =
@@ -427,8 +439,8 @@ let trail t =
   in
   let rec walk acc group = function
     | [] -> List.rev (flush_tools acc group)
-    | Node_tool id :: rest -> (
-        match call_of id with
+    | Node_tool local_id :: rest -> (
+        match call_of local_id with
         | Some call -> walk acc (call :: group) rest
         | None -> walk acc group rest)
     | Node_thinking buffer :: rest ->
@@ -520,8 +532,8 @@ let unreadable_text t =
   else
     Some
       (Printf.sprintf
-         "%d stream line(s) could not be read for the live view (last: %s); \
-          the recorded outcome is unaffected"
+         "%d live stream diagnostic(s) (last: %s); the recorded outcome is \
+          unaffected"
          t.unreadable_count t.last_unreadable)
 
 (* An age, not a duration budget: the row says how long this turn has been
@@ -560,19 +572,142 @@ let status_rows ~now t =
 (* Rewrite the one call [call_id] names, leaving the rest as they are. A
    fragment for an id that never opened is dropped rather than opening a
    nameless row -- same call the connector trail makes. *)
-let update_call t call_id f =
-  let found = ref false in
-  let updated =
+type call_update =
+  | Call_updated
+  | Call_missing
+  | Call_ambiguous
+  | Call_conflicting
+
+let update_local_call t local_id f =
+  t.reversed_tool_calls <-
     List.map
       (fun (call : live_tool_call) ->
-        if (not !found) && String.equal call.call_id call_id then begin
-          found := true;
-          f call
-        end
-        else call)
+        if call.local_id = local_id then f call else call)
       t.reversed_tool_calls
-  in
-  if !found then t.reversed_tool_calls <- updated
+;;
+
+let update_unique_call t ~call_id ~eligible f =
+  match
+    List.filter
+      (fun (call : live_tool_call) ->
+        Option.exists (String.equal call_id) call.call_id && eligible call)
+      t.reversed_tool_calls
+  with
+  | [ call ] ->
+      update_local_call t call.local_id f;
+      Call_updated
+  | [] -> Call_missing
+  | _ :: _ :: _ -> Call_ambiguous
+;;
+
+let note_unreadable t detail =
+  t.unreadable_count <- t.unreadable_count + 1;
+  t.last_unreadable <- detail
+;;
+
+let same_occurrence
+    (left : Live.tool_occurrence)
+    (right : Live.tool_occurrence) =
+  left.stream_scope = right.stream_scope && left.block_index = right.block_index
+;;
+
+let provider_correlation_conflicts left right =
+  match left, right with
+  | Some left, Some right -> not (String.equal left right)
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+let occurrence_correlation_conflicts left right =
+  provider_correlation_conflicts left.Live.provider_message_id
+    right.Live.provider_message_id
+;;
+
+let occurrence_label (occurrence : Live.tool_occurrence) =
+  Printf.sprintf "%d/%d" occurrence.stream_scope occurrence.block_index
+;;
+
+let update_occurrence t occurrence f =
+  match
+    List.find_opt
+      (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+      t.reversed_tool_calls
+  with
+  | None -> Call_missing
+  | Some call
+    when occurrence_correlation_conflicts call.occurrence occurrence
+         || provider_correlation_conflicts
+              call.call_id occurrence.tool_call_id ->
+    Call_conflicting
+  | Some call ->
+    update_local_call t call.local_id f;
+    Call_updated
+;;
+
+let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
+  match
+    List.find_opt
+      (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+      t.reversed_tool_calls
+  with
+  | None ->
+    note_unreadable t
+      (Printf.sprintf
+         "KEEPER_TOOL_RESULT_READY names no stream occurrence %s"
+         (occurrence_label occurrence))
+  | Some { failed = true; _ } ->
+    note_unreadable t
+      (Printf.sprintf
+         "KEEPER_TOOL_RESULT_READY targets quarantined stream occurrence %s"
+         (occurrence_label occurrence))
+  | Some call
+    when occurrence_correlation_conflicts call.occurrence occurrence
+         || provider_correlation_conflicts
+              call.call_id occurrence.tool_call_id ->
+    note_unreadable t
+      (Printf.sprintf
+         "KEEPER_TOOL_RESULT_READY provider correlation conflicts for stream occurrence %s"
+         (occurrence_label occurrence))
+  | Some { execution_id = Some recorded; _ }
+    when String.equal recorded execution_id ->
+    ()
+  | Some { execution_id = Some recorded; _ } ->
+    note_unreadable t
+      (Printf.sprintf
+         "KEEPER_TOOL_RESULT_READY conflicts for stream occurrence %s: %s != %s"
+         (occurrence_label occurrence) recorded execution_id)
+  | Some _ ->
+    (match
+       List.find_opt
+         (fun (call : live_tool_call) ->
+            Option.exists (String.equal execution_id) call.execution_id)
+         t.reversed_tool_calls
+     with
+     | Some owner ->
+       note_unreadable t
+         (Printf.sprintf
+            "KEEPER_TOOL_RESULT_READY execution %s already belongs to stream occurrence %s, not %s"
+            execution_id (occurrence_label owner.occurrence)
+            (occurrence_label occurrence))
+     | None ->
+       (match
+          update_occurrence t occurrence (fun call ->
+            { call with
+              result_ready = true
+            ; execution_id = Some execution_id
+            ; ended = true
+            })
+        with
+        | Call_updated -> ()
+        | Call_missing ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"
+        | Call_ambiguous ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence became ambiguous during update"
+        | Call_conflicting ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
+;;
 
 let apply t (delta : Live.delta) =
   match delta with
@@ -587,41 +722,130 @@ let apply t (delta : Live.delta) =
       (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
          only answers "why has it not started yet". *)
       t.admission <- Some (admission, queue_length)
+  | Live.Runtime_attempt_started ->
+      Buffer.clear t.text_buffer;
+      Buffer.clear t.thinking_buffer;
+      t.reversed_trail <-
+        List.filter
+          (function
+            | Node_tool _ -> true
+            | Node_text _ | Node_thinking _ -> false)
+          t.reversed_trail;
+      t.awaiting <- None;
+      (match t.phase with
+       | Waiting | Working -> t.phase <- Working
+       | Stream_ended | Stream_failed _ -> ())
   | Live.Text text ->
       Buffer.add_string t.text_buffer text;
       trail_text t text
   | Live.Thinking text ->
       Buffer.add_string t.thinking_buffer text;
       trail_thinking t text
-  | Live.Tool_started { call_id; tool_name } ->
-      t.reversed_tool_calls <-
-        { call_id
-        ; tool_name
-        ; args = ""
-        ; ended = false
-        ; result_ready = false
-        }
-        :: t.reversed_tool_calls;
-      t.reversed_trail <- Node_tool call_id :: t.reversed_trail
-  | Live.Tool_args { call_id; fragment } ->
-      update_call t call_id (fun call ->
-          let args =
-            match fragment with
-            | Live.Args_delta delta -> call.args ^ delta
-            | Live.Args_snapshot snapshot -> snapshot
-          in
-          { call with args })
-  | Live.Tool_ended { call_id } ->
-      update_call t call_id (fun call -> { call with ended = true })
-  | Live.Tool_result { call_id } ->
-      update_call t call_id (fun call -> { call with result_ready = true })
+  | Live.Tool_started { occurrence; tool_name } ->
+      (match
+         List.find_opt
+           (fun (call : live_tool_call) -> same_occurrence call.occurrence occurrence)
+           t.reversed_tool_calls
+       with
+       | Some call
+         when String.equal call.tool_name tool_name
+              && not
+                   (provider_correlation_conflicts
+                      call.call_id occurrence.tool_call_id)
+              && not
+                   (occurrence_correlation_conflicts
+                      call.occurrence occurrence) ->
+         ()
+       | Some _ ->
+         note_unreadable t
+           (Printf.sprintf
+              "TOOL_CALL_START conflicts with stream occurrence %s"
+              (occurrence_label occurrence))
+       | None ->
+         let local_id = t.next_tool_local_id in
+         t.next_tool_local_id <- local_id + 1;
+         t.reversed_tool_calls <-
+           { local_id
+           ; occurrence
+           ; call_id = occurrence.tool_call_id
+           ; execution_id = None
+           ; tool_name
+           ; args = ""
+           ; ended = false
+           ; result_ready = false
+           ; failed = false
+           }
+           :: t.reversed_tool_calls;
+         t.reversed_trail <- Node_tool local_id :: t.reversed_trail)
+  | Live.Tool_args { occurrence; fragment } ->
+      (match update_occurrence t occurrence (fun call ->
+         if call.ended
+         then call
+         else
+             let args =
+               match fragment with
+               | Live.Args_delta delta -> call.args ^ delta
+               | Live.Args_snapshot snapshot -> snapshot
+             in
+             { call with args }) with
+       | Call_updated -> ()
+       | Call_missing ->
+         note_unreadable t
+           (Printf.sprintf "TOOL_CALL_ARGS names no stream occurrence %s"
+              (occurrence_label occurrence))
+       | Call_ambiguous -> ()
+       | Call_conflicting ->
+         note_unreadable t
+           (Printf.sprintf
+              "TOOL_CALL_ARGS provider correlation conflicts for stream occurrence %s"
+              (occurrence_label occurrence)))
+  | Live.Tool_ended { occurrence } ->
+      (match update_occurrence t occurrence (fun call -> { call with ended = true }) with
+       | Call_updated -> ()
+       | Call_missing ->
+         note_unreadable t
+           (Printf.sprintf "TOOL_CALL_END names no stream occurrence %s"
+              (occurrence_label occurrence))
+       | Call_ambiguous -> ()
+       | Call_conflicting ->
+         note_unreadable t
+           (Printf.sprintf
+              "TOOL_CALL_END provider correlation conflicts for stream occurrence %s"
+              (occurrence_label occurrence)))
+  | Live.Tool_result { occurrence; execution_id } ->
+      apply_tool_result t ~occurrence ~execution_id
+  | Live.Stream_protocol_error { quarantined_occurrence; detail } ->
+      (match quarantined_occurrence with
+       | None -> note_unreadable t ("stream protocol: " ^ detail)
+       | Some occurrence ->
+         (match
+            update_occurrence t occurrence (fun call ->
+              { call with failed = true; ended = true })
+          with
+          | Call_updated -> note_unreadable t ("stream protocol: " ^ detail)
+          | Call_missing ->
+            note_unreadable t
+              (Printf.sprintf
+                 "stream protocol quarantine names no occurrence %s: %s"
+                 (occurrence_label occurrence) detail)
+          | Call_ambiguous -> ()
+          | Call_conflicting ->
+            note_unreadable t
+              (Printf.sprintf
+                 "stream protocol quarantine provider correlation conflicts for occurrence %s: %s"
+                 (occurrence_label occurrence) detail)))
   | Live.Approval_requested { call_id; tool_name; args; question; because } ->
       (* The arguments go on the call's own row, which the pane already draws;
          the prompt carries the question. *)
       (match args with
        | "" -> ()
        | args ->
-           update_call t call_id (fun call -> { call with args }));
+         (match
+            update_unique_call t ~call_id
+              ~eligible:(fun call -> not call.result_ready && not call.failed)
+              (fun call -> { call with args })
+          with
+          | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
       t.awaiting <- Some { call_id; tool_name; question; because }
   | Live.Approval_settled { call_id; outcome = _ } ->
       (* Cleared whatever the answer was, including none: the prompt is over
@@ -640,5 +864,4 @@ let apply t (delta : Live.delta) =
   | Live.Run_failed { message } -> t.phase <- Stream_failed message
   | Live.Run_finished -> t.phase <- Stream_ended
   | Live.Undecodable detail ->
-      t.unreadable_count <- t.unreadable_count + 1;
-      t.last_unreadable <- detail
+      note_unreadable t detail

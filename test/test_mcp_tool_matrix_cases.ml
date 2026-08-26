@@ -10,10 +10,41 @@ type init_mode =
   | Init_only
   | Init_joined
 
+(* Whether a tool that refused did so on purpose.
+
+   Every [Tool_result.error] carries a typed [tool_failure_class] -- it is a
+   required argument, so no refusal can omit it -- and the MCP envelope puts
+   it on the wire under [result._meta.failure_class]. Reading that is the
+   whole check.
+
+   It replaced a list of ~20 substrings ("not found", "missing", "invalid",
+   "must be", ...) matched against the rendered response. Two things were
+   wrong with that. A crash whose text happened to contain one of the words
+   passed as a graceful refusal, which is a false green in the one test whose
+   job is catching crashes. And every new tool's author had to guess which
+   words their rejection was allowed to use -- 2026-08-26 took main red
+   exactly that way, over the word "registered".
+
+   Exhaustive on purpose: a sixth failure class has to be called graceful or
+   not right here, and the compiler asks. A substring list could never ask. *)
+let is_graceful_refusal = function
+  | Tool_result.Dependency_unavailable
+  | Tool_result.Policy_rejection
+  | Tool_result.Workflow_rejection
+  | Tool_result.Operator_cancelled -> true
+  | Tool_result.Runtime_failure -> false
+
 type expectation =
   | Expect_success
-  | Expect_success_or_guard of string list
-  | Expect_guard of string list
+  | Expect_success_or_refusal
+      (** Called with default arguments, this tool may do the work or refuse
+          it. Either is a contract; falling over is not. *)
+  | Expect_refusal
+      (** Called this way the tool must refuse. Succeeding means the guard
+          this case exists to prove is not running. *)
+  | Expect_refusal_saying of string
+      (** One tool, one exact message. Used where the case proves a specific
+          validation fires, not merely that something refused. *)
 
 type fixture = {
   base_path : string;
@@ -84,16 +115,16 @@ let strict_success_names =
        masc_init, masc_auth_*, masc_handover_*, masc_verify_* *)
   ]
 
-let strict_guard_cases =
+let strict_message_cases =
   [
     (* The runner plumbs sw/clock (RFC-0182 Phase 5 PR-A.2), so the dispatch
        no longer stops at the "requires Eio context" gate: the deliberately
        invalid target name ("bad keeper!") must be rejected by argument
        validation. *)
-    ("masc_keeper_delegate", [ "keeper_name must match" ]);
+    ("masc_keeper_delegate", "keeper_name must match");
   ]
 
-let endpoint_unavailable_guard_names =
+let must_refuse_names =
   [
     "masc_approve";
     "masc_branch";
@@ -101,13 +132,6 @@ let endpoint_unavailable_guard_names =
     "masc_pending_interrupts";
     "masc_reject";
     "masc_operator_snapshot";
-  ]
-
-let endpoint_unavailable_guard_fragments =
-  [
-    "keeper-internal";
-    "unavailable on this MCP endpoint";
-    "not available on this MCP endpoint";
   ]
 
 let generic_matrix_excluded_names =
@@ -808,105 +832,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
          (field, field_value fixture ~tool_name:name field (property_schema schema field)))
        fields)
 
-let provider_guard_fragments =
-  [
-    "api key";
-    "not configured";
-    "runtime unavailable";
-    "provider";
-    "unsupported";
-    "unavailable";
-    "connection refused";
-    "failed to connect";
-    "no runtime";
-    "runtime not initialized";
-    "spawn error";
-    "no such file";
-  ]
-
-let state_guard_fragments =
-  [
-    "not found";
-    "missing";
-    "required";
-    "invalid";
-    "must be";
-    "bind required";
-    "workspace not initialized";
-    "already exists";
-    "no active";
-    "unknown";
-    "not a member";
-    "not a registered keeper";
-    "no document matching";
-  ]
-
-let git_guard_fragments =
-  [
-    "not a git repository";
-    "worktree";
-    "origin/";
-    "file not found";
-    "allowlist";
-    "restricted";
-    "blocked";
-    "path traversal";
-  ]
-
-let web_search_guard_fragments =
-  [
-    "curl exit code";
-    "curl signal";
-    "curl stopped";
-    "search endpoint returned no http status";
-    "search endpoint returned http";
-    "search endpoint returned a non-rss payload";
-    (* A credential-less environment (CI runner) has an empty provider
-       chain; the tool answers with the operator-facing remedy instead
-       of a hit list. Referenced from the .mli so the expectation
-       cannot drift from the message the lib actually renders. *)
-    Masc.Tool_misc_web_search.no_provider_configured_message;
-  ]
-
-let guard_fragments_for_name name =
-  if String.equal name "masc_web_search" then
-    web_search_guard_fragments
-  else if
-    string_starts_with ~prefix:"keeper_" name
-    (* analyze_image is a keeper shard runtime tool (catalog
-       [keeper_shard_read]) without the [keeper_] name prefix; the MCP
-       endpoint answers it with the keeper-internal refusal. *)
-    || String.equal name "analyze_image"
-  then
-    endpoint_unavailable_guard_fragments @ state_guard_fragments
-  else if
-    string_starts_with ~prefix:"tool_" name
-  then
-    endpoint_unavailable_guard_fragments @ state_guard_fragments @ git_guard_fragments
-  else if
-    List.exists
-      (fun prefix -> string_starts_with ~prefix name)
-      [
-        "masc_handover_";
-        "masc_keeper_";
-        "masc_local_runtime_";
-        "masc_relay_";
-        "masc_repo_synthesis_";
-        "masc_runtime_";
-        (* masc_spawn removed in RFC-0182 *)
-        "masc_voice_";
-      ]
-  then
-    provider_guard_fragments @ state_guard_fragments
-  else if
-    List.exists
-      (fun prefix -> string_starts_with ~prefix name)
-      [ "retired_code_surface_"; "retired_worktree_surface_" ]
-  then
-    git_guard_fragments @ state_guard_fragments
-  else
-    state_guard_fragments @ git_guard_fragments
-
 let case_for_name name =
   let init_mode =
     match name with
@@ -915,15 +840,15 @@ let case_for_name name =
   in
   let prepare fixture = prepare_for_name fixture name in
   let expectation =
-    match List.assoc_opt name strict_guard_cases with
-    | Some fragments -> Expect_guard fragments
+    match List.assoc_opt name strict_message_cases with
+    | Some message -> Expect_refusal_saying message
     | None ->
         if List.mem name strict_success_names then
           Expect_success
-        else if List.mem name endpoint_unavailable_guard_names then
-          Expect_guard endpoint_unavailable_guard_fragments
+        else if List.mem name must_refuse_names then
+          Expect_refusal
         else if List.mem name all_known_tool_names then
-          Expect_success_or_guard (guard_fragments_for_name name)
+          Expect_success_or_refusal
         else
           failwith ("missing contract for " ^ name)
   in
@@ -976,21 +901,51 @@ let response_is_error = function
       | Some _ -> true)
   | _ -> true
 
-let fatal_fragments =
+(* Host-level failures, which never reach a tool and so never carry a class:
+   the dispatcher did not find the tool, or the call timed out above it. These
+   stay textual because there is no typed value to read -- the tool never ran.
+   Everything a tool itself decides is read from [failure_class] below. *)
+let host_failure_fragments =
   [
     "tool timed out after";
-    "internal error";
     "dispatch_v2 handler error";
     "unknown tool";
     "tools/call timeout";
   ]
 
+(* [result._meta.failure_class], parsed back into the variant the tool set.
+   [None] means the response carried no class: either it succeeded, or the
+   envelope shape changed under us. The caller distinguishes those. *)
+let response_failure_class response =
+  let meta_field fields name =
+    match List.assoc_opt name fields with Some value -> Some value | None -> None
+  in
+  match response with
+  | `Assoc fields -> (
+      match meta_field fields "result" with
+      | Some (`Assoc result_fields) -> (
+          match meta_field result_fields "_meta" with
+          | Some (`Assoc meta_fields) -> (
+              match meta_field meta_fields "failure_class" with
+              | Some (`String raw) -> Tool_result.tool_failure_class_of_string raw
+              | Some _ | None -> None)
+          | Some _ | None -> None)
+      | Some _ | None -> None)
+  | _ -> None
+
+let refusal_class_report = function
+  | None -> "no failure_class on the response"
+  | Some class_ -> Tool_result.tool_failure_class_to_string class_
+
 let evaluate_expectation ~name expectation response =
   let text = response_text response in
   let is_error = response_is_error response in
-  if contains_any text fatal_fragments then
-    Error
-      (Printf.sprintf "%s hit fatal tool-host failure: %s" name text)
+  let failure_class = response_failure_class response in
+  let refused_gracefully =
+    match failure_class with Some class_ -> is_graceful_refusal class_ | None -> false
+  in
+  if contains_any text host_failure_fragments then
+    Error (Printf.sprintf "%s hit fatal tool-host failure: %s" name text)
   else
     match expectation with
     | Expect_success ->
@@ -998,22 +953,34 @@ let evaluate_expectation ~name expectation response =
           Error (Printf.sprintf "%s expected success but got error: %s" name text)
         else
           Ok ()
-    | Expect_guard fragments ->
-        if is_error && contains_any text fragments then
-          Ok ()
-        else if is_error then
-          Error
-            (Printf.sprintf "%s expected guard %s but got: %s" name
-               (String.concat ", " fragments) text)
-        else
-          Error (Printf.sprintf "%s expected guard but succeeded" name)
-    | Expect_success_or_guard fragments ->
-        if (not is_error) || contains_any text fragments then
+    | Expect_refusal ->
+        if not is_error then
+          Error (Printf.sprintf "%s expected a refusal but succeeded" name)
+        else if refused_gracefully then
           Ok ()
         else
           Error
-            (Printf.sprintf "%s expected success or guard %s but got: %s" name
-               (String.concat ", " fragments) text)
+            (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+               name (refusal_class_report failure_class) text)
+    | Expect_refusal_saying expected ->
+        if not is_error then
+          Error (Printf.sprintf "%s expected a refusal but succeeded" name)
+        else if not refused_gracefully then
+          Error
+            (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+               name (refusal_class_report failure_class) text)
+        else if contains_any text [ expected ] then
+          Ok ()
+        else
+          Error
+            (Printf.sprintf "%s refused as expected but did not say %S: %s" name expected text)
+    | Expect_success_or_refusal ->
+        if (not is_error) || refused_gracefully then
+          Ok ()
+        else
+          Error
+            (Printf.sprintf "%s neither succeeded nor refused -- %s: %s" name
+               (refusal_class_report failure_class) text)
 
 let call_tool_json fixture (schema : Masc_domain.tool_schema) arguments =
   let request =

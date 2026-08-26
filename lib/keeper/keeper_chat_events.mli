@@ -15,6 +15,12 @@ type stream_protocol_error_kind =
   | Tool_start_missing_identity
   | Tool_args_without_start
   | Tool_stop_without_start
+  | Tool_replay_mismatch
+  | Tool_delta_invalid_kind
+  | Tool_attempt_superseded
+  | Tool_message_start_conflict
+  | Stream_event_after_terminal
+  | Tool_occurrence_mapping_invalid
   | Media_delta_invalid_block
   | Media_source_unsupported
   | Media_decode_failed
@@ -29,8 +35,28 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
 
+type runtime_attempt_scope_disposition =
+  | Preserve_previous_scope
+  | Abandon_previous_scope
+(** Pre-advance authority for a runtime fallback boundary. The durable stream
+    accumulator decides whether the prior scope was sealed; worker transport
+    and live projection carry this closed value without recomputing it. *)
+
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+(** Server-owned streamed tool occurrence. [stream_scope]/[block_index] is the
+    live row authority. Provider message/call ids are optional correlation
+    data and may be blank or reused. *)
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
+  quarantined_occurrence : tool_stream_occurrence option;
+  (** Exact live row this error invalidated, when one was actually quarantined.
+      Diagnostics that did not invalidate a tool row keep [None]. Consumers
+      must not select a row from [tool_call_id] or [index]. *)
   index : int option;
   tool_call_id : string option;
   event_type : string option;
@@ -64,6 +90,10 @@ type keeper_chat_event =
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected
+  | Agent_core_runtime_attempt_started
+      (** Exact resolved-runtime attempt boundary. Readers discard unfinished
+          text/thinking from the prior attempt while retaining finalized and
+          quarantined tool evidence. *)
   | Agent_core_stream_message_start of
       { provider_message_id : string
       ; model : string
@@ -93,10 +123,25 @@ type keeper_chat_event =
               ([/api/v1/media/<token>]), replacing the pre-RFC byte count. *)
       }
   | Agent_core_stream_protocol_error of stream_protocol_error
-  | Tool_call_start of { tool_call_id : string; tool_call_name : string }
-  | Tool_call_args of { tool_call_id : string; delta : string }
-  | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
-  | Tool_call_end of { tool_call_id : string }
+  | Tool_call_start of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; tool_call_name : string
+      }
+  | Tool_call_args of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; delta : string
+      }
+  | Tool_call_args_snapshot of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; snapshot : string
+      }
+  | Tool_call_end of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      }
       (** Provider argument streaming ended. This is not execution completion. *)
   | Tool_approval_requested of
       { tool_call_id : string
@@ -118,8 +163,15 @@ type keeper_chat_event =
       (** How the wait ended: the operator's answer, or that nobody gave one.
           Sent so a pane showing the prompt stops showing it, including on the
           paths where no answer arrived. *)
-  | Tool_result_ready of { tool_call_id : string }
-      (** The exact tool result is durably readable from the tool-call store. *)
+  | Tool_result_ready of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; execution_id : Ids.Execution_id.t
+      }
+      (** The exact tool result is durably readable from the tool-call store.
+          [occurrence] is the streamed row authority, [tool_call_id] remains
+          optional provider correlation data, and
+          [execution_id] is the canonical cross-store join key. *)
   | Link_block of
       { url : string
       ; title : string
@@ -162,5 +214,7 @@ val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
     so "not reported" stays distinguishable from 0. *)
 val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
+val stream_protocol_error_kind_of_string :
+  string -> stream_protocol_error_kind option
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t

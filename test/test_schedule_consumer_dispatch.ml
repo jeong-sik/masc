@@ -184,7 +184,6 @@ let dashboard_schedule_row_exn dashboard ~schedule_id =
 let board_post_payload =
   `Assoc
     [ "kind", `String "masc.board_post"
-    ; "schema_version", `Int 1
     ; ( "body"
       , `Assoc
           [ "title", `String "Scheduled check-in"
@@ -200,7 +199,6 @@ let board_post_payload =
 let keeper_wake_payload_for keeper_name =
   `Assoc
     [ "kind", `String "masc.keeper_wake"
-    ; "schema_version", `Int 1
     ; ( "body"
       , `Assoc
           [ "keeper_name", `String keeper_name
@@ -226,7 +224,6 @@ let keeper_wake_payload_with_result_delivery channel =
 let unsupported_payload =
   `Assoc
     [ "kind", `String "legacy.unsupported_scheduler_payload"
-    ; "schema_version", `Int 1
     ; "body", `Assoc [ "message", `String "This payload is not in the schedule consumer catalog." ]
     ]
 ;;
@@ -394,7 +391,6 @@ let create_invalid_keeper_wake_schedule config =
   let payload =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
-      ; "schema_version", `Int 1
       ; ( "body"
         , `Assoc
             [ "keeper_name", `String "../bad"
@@ -1596,7 +1592,6 @@ let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   let stale_payload_json =
     `Assoc
       [ "kind", `String "masc.keeper_wake"
-      ; "schema_version", `Int 1
       ; ( "body"
         , `Assoc
             [ "keeper_name", `String keeper_name

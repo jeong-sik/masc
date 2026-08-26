@@ -75,6 +75,31 @@ value = {}
 |}
 ;;
 
+let composition_document_with_model_invocation value =
+  Printf.sprintf
+    {|---
+name: manual-clock
+description: Read the clock only when a task explicitly names this skill.
+disable-model-invocation: %s
+---
+
+```toml composition
+[[compositions]]
+name = "manual-clock"
+description = "Read the clock only when a task explicitly names this skill."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+    value
+;;
+
 let parsed ~directory document =
   match Skill_catalog.parse_skill ~directory document with
   | Ok skill -> skill
@@ -99,6 +124,83 @@ let contains ~needle haystack =
     else probe (index + 1)
   in
   probe 0
+;;
+
+let documented_composition_document =
+  {|---
+name: how-to-write-a-skill
+description: Show how a composition skill declares its plan.
+---
+
+# Writing a composition skill
+
+A composition skill carries exactly one fence. The example below is escaped the
+CommonMark way, with a longer outer fence, so it is documentation and not a
+declaration:
+
+````markdown
+```toml composition
+[[compositions]]
+name = "example-plan"
+description = "An example, not a declaration."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+````
+
+Nothing above is declared by this file.
+|}
+;;
+
+let tilde_documented_composition_document =
+  {|---
+name: how-to-write-a-skill
+description: Show how a composition skill declares its plan.
+---
+
+~~~markdown
+```toml composition
+[[compositions]]
+name = "example-plan"
+description = "An example, not a declaration."
+execution = "inline"
+```
+~~~
+|}
+;;
+
+let fenced_prose_then_composition_document =
+  {|---
+name: time-memory-query
+description: Feed the exact clock result into memory search.
+---
+
+Check the runtime first:
+
+```sh
+masc keeper status
+```
+
+```toml composition
+[[compositions]]
+name = "time-memory-query"
+description = "Feed the exact clock result into memory search."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
 ;;
 
 let test_instruction_skill_parses () =
@@ -152,7 +254,21 @@ let test_composition_skill_materializes_entry () =
    that wrote it never ran this file. *)
 let test_directory_name_mismatch_is_runtime_compatible () =
   let skill = parsed ~directory:"another-name" instruction_document in
-  check string "the directory is what a task can name" "another-name" skill.name
+  check string "the directory is what a task can name" "another-name" skill.name;
+  match skill.conformance with
+  | Agent_core.Skill_document.Conformant -> fail "name mismatch lost its diagnostic"
+  | Runtime_compatible diagnostics ->
+    check
+      bool
+      "turn catalog retains the mismatch diagnostic"
+      true
+      (List.exists
+         (function
+           | Agent_core.Skill_document.Name_mismatch
+               { declared = "release-checklist"; directory = "another-name" } ->
+             true
+           | _ -> false)
+         diagnostics)
 ;;
 
 let test_missing_required_frontmatter_rejected () =
@@ -165,6 +281,52 @@ let test_missing_required_frontmatter_rejected () =
   | Skill_catalog.Definition_rejected { diagnostics; directory = _ } ->
     check bool "has decoder diagnostic" true (diagnostics <> [])
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
+;;
+
+(* A skill that documents the composition grammar must stay a document. Before
+   this was enforced, the inner fence of an escaped example was read as a
+   declaration — and since [of_documents] fails the whole catalog on the first
+   bad file, one such skill took every keeper turn down. *)
+let test_escaped_example_stays_an_instruction () =
+  let skill = parsed ~directory:"how-to-write-a-skill" documented_composition_document in
+  check
+    string
+    "surface"
+    "instruction"
+    (Skill_catalog.surface_to_string skill.Skill_catalog.surface);
+  check
+    bool
+    "body keeps the example verbatim"
+    true
+    (contains ~needle:"name = \"example-plan\"" skill.Skill_catalog.body)
+;;
+
+let test_tilde_fence_also_escapes_an_example () =
+  let skill =
+    parsed ~directory:"how-to-write-a-skill" tilde_documented_composition_document
+  in
+  check
+    string
+    "surface"
+    "instruction"
+    (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
+;;
+
+(* The other direction: an ordinary fence before the declaration must not
+   swallow it. Skipping enclosed fences is only correct if it ends at the
+   closing run. *)
+let test_ordinary_fence_does_not_hide_a_declaration () =
+  let skill =
+    parsed ~directory:"time-memory-query" fenced_prose_then_composition_document
+  in
+  match skill.Skill_catalog.surface with
+  | Skill_catalog.Instruction -> fail "the declaration after a shell fence was lost"
+  | Skill_catalog.Composition entry ->
+    check
+      string
+      "tool name"
+      "keeper_compose_time-memory-query"
+      (Catalog.tool_name entry)
 ;;
 
 let test_unterminated_block_rejected () =
@@ -345,6 +507,57 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let test_disable_model_invocation_controls_dedicated_tool () =
+  let disabled =
+    skill_catalog_of
+      [ "manual-clock", composition_document_with_model_invocation "true" ]
+  in
+  (match Skill_catalog.find disabled "manual-clock" with
+   | Some skill ->
+     check
+       string
+       "disabled composition remains task-readable"
+       "instruction"
+       (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
+   | None -> fail "disabled composition disappeared from the task skill catalog");
+  check
+    int
+    "disabled composition has no dedicated entry"
+    0
+    (List.length (Skill_catalog.composition_entries disabled));
+  let disabled_surface =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~identity_tool_names:[]
+      ~skill_catalog:disabled
+      ~model_visible_descriptors:[]
+  in
+  check
+    bool
+    "generic task-routed reader remains"
+    true
+    (List.mem Catalog.skill_tool_name disabled_surface);
+  check
+    bool
+    "dedicated composition tool is absent"
+    false
+    (List.mem "keeper_compose_manual-clock" disabled_surface);
+  let enabled =
+    skill_catalog_of
+      [ "manual-clock", composition_document_with_model_invocation "false" ]
+  in
+  let enabled_surface =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~identity_tool_names:[]
+      ~skill_catalog:enabled
+      ~model_visible_descriptors:[]
+  in
+  check
+    bool
+    "boolean false preserves dedicated composition tool"
+    true
+    (List.mem "keeper_compose_manual-clock" enabled_surface)
+;;
+
 let test_composition_skill_joins_projection () =
   let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
   let expected_instruction =
@@ -415,6 +628,18 @@ let () =
             `Quick
             test_multiple_blocks_rejected
         ; test_case
+            "an example escaped by a longer outer fence stays an instruction"
+            `Quick
+            test_escaped_example_stays_an_instruction
+        ; test_case
+            "a tilde outer fence escapes an example too"
+            `Quick
+            test_tilde_fence_also_escapes_an_example
+        ; test_case
+            "an ordinary fence does not hide a later declaration"
+            `Quick
+            test_ordinary_fence_does_not_hide_a_declaration
+        ; test_case
             "composition name must equal the skill name"
             `Quick
             test_composition_name_must_match_skill
@@ -426,6 +651,10 @@ let () =
             "loader scans the skills directory"
             `Quick
             test_loader_scans_the_skills_directory
+        ; test_case
+            "disable-model-invocation controls the dedicated tool"
+            `Quick
+            test_disable_model_invocation_controls_dedicated_tool
         ; test_case
             "composition skill joins the model projection"
             `Quick

@@ -191,7 +191,11 @@ let stage_collect ?raw_trace_run ?clock ~turn ~provider_config agent response =
            ~turn
            ~hook_name:"after_turn"
            agent.options.hooks.after_turn
-           (Hooks.AfterTurn { turn; response })
+           (Hooks.AfterTurn
+              { turn
+              ; response
+              ; tool_source_map = Some admission.Agent_tools.tool_source_map
+              })
        in
        let* () =
          match after_decision with

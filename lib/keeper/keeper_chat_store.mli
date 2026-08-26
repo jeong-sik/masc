@@ -7,8 +7,9 @@
     {v {"id":"msg-...","role":"user","content":"hello","ts":1774000000.0} v}
 
     Tool-call lines persisted between a turn's user and assistant lines
-    additionally carry [tool_call_id] / [tool_call_name]; every line of
-    a turn may carry the originating connector as a typed [surface].
+    additionally carry provider [tool_call_id], canonical [execution_id], and
+    [tool_call_name] when each identity is available; every line of a turn may
+    carry the originating connector as a typed [surface].
     Connector rows may also carry [conversation_id] /
     [external_message_id], opaque route
     coordinates used by dashboards to group platform channels/threads
@@ -31,6 +32,10 @@ type attachment = {
     argument JSON; empty arguments are persisted as ["{}"]. *)
 type tool_call = {
   call_id : string;
+  execution_id : Ids.Execution_id.t option;
+      (** Canonical execution identity after the tool-call log commit. [None]
+          when the producer cannot prove an exact join, including malformed or
+          ambiguous provider streams. Distinct from provider [call_id]. *)
   call_name : string;
   args : string;
 }
@@ -149,6 +154,7 @@ type chat_message = {
   ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
+  execution_id : Ids.Execution_id.t option;
   tool_call_name : string option;
   surface : Surface_ref.t option;
       (** The typed surface (RFC-0232 §3.6).  [None] on rows written
@@ -324,7 +330,9 @@ val append_assistant_message_result :
 (** Idempotent terminal assistant append. The per-Keeper lookup and append are
     serialized, so callback re-entry and restart recovery converge on one row
     for the exact typed delivery slot. A malformed persisted provenance row is
-    an explicit [Error], never treated as absence. *)
+    an explicit [Error], never treated as absence. Duplicate provenance/tool
+    ordinals quarantine their whole delivery key, and one canonical
+    [execution_id] cannot authorize a different delivery or tool ordinal. *)
 val append_assistant_message_once :
   base_dir:string ->
   keeper_name:string ->
@@ -342,7 +350,9 @@ val append_assistant_message_once :
 
 (** Idempotently append the ordered tool-call rows for a durable request that
     has no assistant message. This is the only valid representation of a
-    tool-only continuation; callers must not write an empty assistant row. *)
+    tool-only continuation; callers must not write an empty assistant row.
+    The same delivery-key quarantine and canonical [execution_id] uniqueness
+    checks as {!append_assistant_message_once} apply. *)
 val append_tool_calls_once :
   base_dir:string ->
   keeper_name:string ->

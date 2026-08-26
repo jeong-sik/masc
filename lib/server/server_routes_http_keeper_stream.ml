@@ -857,6 +857,7 @@ let execute_keeper_stream_tool_streaming
       ~clock
       ?auth_token:_
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ~admission_token
@@ -888,6 +889,7 @@ let execute_keeper_stream_tool_streaming
           ~admission_token
           ~on_text_delta
           ?on_event
+          ?on_tool_stream_observation
           ?on_tool_result_ready
           ?approval_gate
           keeper_ctx
@@ -1206,7 +1208,9 @@ let keeper_request_terminal_status_is_routine = function
 ;;
 
 type keeper_stream_worker_event =
-  | Stream_event of Agent_core.Types.sse_event
+  | Stream_runtime_attempt_started of
+      Keeper_chat_events.runtime_attempt_scope_disposition
+  | Stream_event of int * Agent_core.Types.sse_event
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
   | Stream_terminal of
@@ -1393,7 +1397,7 @@ let process_single_turn ~user_row_origin ~submission
       Atomic.set client_disconnected true;
       let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
       ()
-    | (Stream_event _ | Stream_chat_event _) as event ->
+    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_chat_event _) as event ->
         if !closed
         then observe_stream_event_cutoff "writer_closed"
         else if Atomic.get terminal_pushed
@@ -1539,14 +1543,95 @@ let process_single_turn ~user_row_origin ~submission
      hold no tool rows and a reload loses the tool timeline the live stream
      showed. *)
   let worker_tool_accum = Keeper_stream_tool_accum.create () in
-  let on_event evt =
-    Keeper_stream_media_accum.on_event worker_media_accum evt;
-    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
-    push_worker_event (Stream_event evt)
-  in
-  let on_tool_result_ready ~tool_call_id =
+  let publish_tool_stream_protocol_error ?quarantined_occurrence kind detail =
     push_worker_event
-      (Stream_chat_event (Keeper_chat_events.Tool_result_ready { tool_call_id }))
+      (Stream_chat_event
+         (Keeper_chat_events.Agent_core_stream_protocol_error
+            { kind
+            ; quarantined_occurrence
+            ; index = None
+            ; tool_call_id = None
+            ; event_type = None
+            ; reason = Some detail
+            ; raw_bytes = None
+            }))
+  in
+  let on_event evt =
+    Keeper_stream_tool_accum.on_event worker_tool_accum evt;
+    let stream_scope =
+      Keeper_stream_tool_accum.current_stream_scope worker_tool_accum
+    in
+    Keeper_stream_media_accum.on_event ~stream_scope worker_media_accum evt;
+    push_worker_event (Stream_event (stream_scope, evt));
+    (* The live bridge consumes the same raw event next and is the sole SSE
+       protocol-error producer. Drain the durable collector's matching audit
+       records without publishing a duplicate assistant diagnostic. *)
+    let _drained_protocol_errors =
+      Keeper_stream_tool_accum.take_protocol_errors worker_tool_accum
+    in
+    ()
+  in
+  let on_tool_stream_observation observation =
+    let result =
+      match observation with
+      | Keeper_hooks_agent_core.Runtime_attempt_started _ ->
+        Keeper_stream_media_accum.start_runtime_attempt worker_media_accum;
+        let previous_scope =
+          Keeper_stream_tool_accum.start_runtime_attempt worker_tool_accum
+        in
+        push_worker_event (Stream_runtime_attempt_started previous_scope);
+        Ok ()
+      | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
+        Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
+          ~tool_source_map
+      | Keeper_hooks_agent_core.Turn_closed_without_sources { turn } ->
+        Keeper_stream_tool_accum.close_turn_without_sources worker_tool_accum ~turn
+    in
+    match result with
+    | Ok () -> ()
+    | Error detail ->
+      Log.Keeper.warn ~keeper_name:payload.name
+        "keeper chat tool stream occurrence mapping was rejected: %s"
+        detail;
+      publish_tool_stream_protocol_error
+        Keeper_chat_events.Tool_occurrence_mapping_invalid
+        detail;
+      (* [Turn_collected] is the final exact pre-execution authority. A bad
+         mapping must fail the AfterTurn hook before stage_output can dispatch
+         a side effect; warning-only would execute an occurrence the stream
+         cannot identify. Official-client [Turn_closed_without_sources] runs
+         after its own tool loop, but a contradictory close is still a turn
+         protocol failure rather than a state to normalize. *)
+      failwith ("tool stream occurrence mapping rejected: " ^ detail)
+  in
+  let on_tool_result_ready ~tool_call_id ~turn ~planned_index ~execution_id =
+    match
+      Keeper_stream_tool_accum.record_execution_id worker_tool_accum
+        ~tool_call_id ~turn ~planned_index ~execution_id
+    with
+    | Ok occurrence ->
+      let tool_call_id =
+        if String.trim tool_call_id = "" then None else Some tool_call_id
+      in
+      push_worker_event
+        (Stream_chat_event
+           (Keeper_chat_events.Tool_result_ready
+              { occurrence; tool_call_id; execution_id }))
+    | Error detail ->
+      (* The runtime-aware wrapper invokes this callback only for the exact
+         Agent Core candidate attempt whose pre-execution sidecar can satisfy
+         the coordinate contract. Official-client attempts remain explicitly
+         delivery-only. Once an Agent Core tool log committed, a failed
+         occurrence join must abort the turn; publishing a diagnostic and
+         returning would let chat persistence claim terminal success without
+         its canonical execution. *)
+      Log.Keeper.warn ~keeper_name:payload.name
+        "keeper chat tool execution identity was not joined: %s"
+        detail;
+      publish_tool_stream_protocol_error
+        Keeper_chat_events.Tool_occurrence_mapping_invalid
+        detail;
+      failwith ("tool execution occurrence join rejected: " ^ detail)
   in
   (* A gate only for turns an operator started here: this request is open,
      someone is reading it, and the answer has somewhere to come back to. An
@@ -1583,9 +1668,11 @@ let process_single_turn ~user_row_origin ~submission
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ChatTransportFailures)
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
-      ();
+    ();
     let content = persisted_error_reply err in
-    let tool_calls = Keeper_stream_tool_accum.to_tool_calls worker_tool_accum in
+    let tool_calls =
+      Keeper_stream_tool_accum.to_tool_calls_for_failure worker_tool_accum
+    in
     let persisted =
       append_queued_transport_failure_once ~tool_calls ?blocks ?turn_ref content
     in
@@ -1667,6 +1754,7 @@ let process_single_turn ~user_row_origin ~submission
                 ~clock
                 ?auth_token
                 state ~agent_name ~message:direct_message ~on_event
+                ~on_tool_stream_observation
                 ~on_tool_result_ready
                 ~approval_gate
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
@@ -1684,8 +1772,9 @@ let process_single_turn ~user_row_origin ~submission
                  events. Retrying here can duplicate provider/tool effects,
                  while the outer transcript has already consumed its
                  accumulator. Terminalize the original streaming attempt;
-                 [persist_failure_reply] retains the calls and media it
-                 actually emitted. *)
+                 [persist_failure_reply] retains sealed call evidence and media
+                 already completed, while quarantining the failed unsealed
+                 provider scope. *)
               Error (Printexc.to_string exn))
         in
         match dispatch_result with
@@ -2096,13 +2185,29 @@ let process_single_turn ~user_row_origin ~submission
                   | `Worker_event of keeper_stream_worker_event
                   ])))
   in
+  let quarantine_failed_stream bridge_state reason =
+    if not (Keeper_stream_tool_accum.current_scope_is_sealed worker_tool_accum)
+    then (
+      let failed =
+        Keeper_chat_agent_core_stream_bridge.fail_stream bridge_state
+          ~reason:(redact_text reason)
+      in
+      List.iter (Keeper_chat_events.publish events) failed.chat_events)
+  in
   let rec consume_worker_events bridge_state =
     match next_worker_projection () with
     | `Client_disconnected -> None
-    | `Worker_event (Stream_event evt) ->
+    | `Worker_event (Stream_event (stream_scope, evt)) ->
         let translated =
           translate_agent_core_stream_event ~redact_text
-            ~base_dir:base_path bridge_state evt
+            ~base_dir:base_path ~stream_scope bridge_state evt
+        in
+        List.iter (Keeper_chat_events.publish events) translated.chat_events;
+        consume_worker_events translated.bridge_state
+    | `Worker_event (Stream_runtime_attempt_started previous_scope) ->
+        let translated =
+          Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+            ~previous_scope bridge_state
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
@@ -2118,6 +2223,7 @@ let process_single_turn ~user_row_origin ~submission
         ; queued_outcome
         }) ->
         let message = redact_text message in
+        quarantine_failed_stream bridge_state message;
         publish_terminal ~status:(Request_stream Stream_cancelled) ~message ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Run_finished { run_id });
@@ -2144,6 +2250,7 @@ let process_single_turn ~user_row_origin ~submission
         ; queued_outcome
         }) ->
         let err = redact_text err in
+        quarantine_failed_stream bridge_state err;
         publish_terminal ~status:(Request_stream status) ~message:err ();
         Keeper_chat_events.publish events Text_message_end;
         Keeper_chat_events.publish events (Event_error { message = err });

@@ -55,6 +55,12 @@ type operation_reconciliation =
     }
   | Operation_cancelled
 
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  }
+
 type stream_error =
   | Malformed_event of string
   | Request_id_mismatch of {
@@ -72,6 +78,25 @@ type stream_error =
     }
   | Unknown_event_type of string
   | Unknown_custom_event of string
+  | Tool_event_without_start of
+      { event_type : string
+      ; occurrence : tool_occurrence
+      }
+  | Tool_result_without_start of tool_occurrence
+  | Quarantined_tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+  | Conflicting_tool_result of {
+      occurrence : tool_occurrence;
+      recorded_execution_id : string;
+      received_execution_id : string;
+    }
+  | Reused_tool_execution_id of {
+      execution_id : string;
+      recorded_occurrence : tool_occurrence;
+      received_occurrence : tool_occurrence;
+    }
   | Duplicate_run_start
   | Missing_run_start of string
   | Missing_acceptance
@@ -115,6 +140,26 @@ type sse_line =
 
 val classify_sse_line : string -> sse_line
 
+(** Canonical server CUSTOM event name inventories shared with the byte-stream
+    live decoder. [current_custom_names] excludes the pre-run acceptance and
+    terminal reply-details events; [known_custom_names] includes them. *)
+val current_custom_names : string list
+val known_custom_names : string list
+
+(** Decode the acceptance payload for both the strict whole-stream reader
+    and the incremental live reader. [expected_request_id] additionally binds
+    the strict response to the request that opened it. *)
+val decode_acceptance
+  :  ?expected_request_id:string
+  -> Yojson.Safe.t
+  -> (acceptance, stream_error) result
+
+(** Validate payload rules shared by strict and live CUSTOM-event decoders. *)
+val validate_custom_value
+  :  name:string
+  -> Yojson.Safe.t
+  -> (unit, stream_error) result
+
 val create_request :
   ?attachments:attachment list ->
   keeper_name:string ->
@@ -152,4 +197,3 @@ val reader_unauthenticated : error -> bool
     one the server rejected what it was given. Every other failure keeps the
     server's own words. *)
 val reconciliation_failure_detail : credential_sent:bool -> error -> string
-

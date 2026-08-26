@@ -257,6 +257,47 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('keeps canonical persisted trace over a stale local trace', () => {
+    const provenance = operationDeliveryProvenance('kmsg-canonical-trace', 'terminal_assistant')
+    appendThreadEntry('echo', entry({
+      id: 'assistant-local-stale',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: provenance,
+      delivery: 'delivered',
+      streamState: null,
+      traceSteps: [{
+        kind: 'tool',
+        name: 'Read',
+        toolCallId: 'provider-reused',
+        toolOccurrenceId: 'tool-delivery-local-0',
+        status: 'ok',
+      }],
+    }))
+
+    const canonicalTrace: ChatTraceStep[] = [{
+      kind: 'tool',
+      name: 'Read',
+      executionId: 'exec-canonical',
+      status: 'ok',
+    }]
+    mergeServerHistoryEntries('echo', [entry({
+      id: 'assistant-history-canonical',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: provenance,
+      delivery: 'history',
+      streamState: null,
+      traceSteps: canonicalTrace,
+    })])
+
+    const [assistant] = keeperThreads.value.echo ?? []
+    expect(assistant?.id).toBe('assistant-history-canonical')
+    expect(assistant?.traceSteps).toEqual(canonicalTrace)
+  })
+
   it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {
     // Two local optimistic assistants with the SAME reply text but distinct
     // thinking traces and distinct provenance. Each history row must inherit
@@ -353,8 +394,8 @@ describe('thread history merge & persistence', () => {
     // instead of leaving a second "턴 타임라인" behind.
     const R = 'kmsg_turn_1'
     const traceSteps: ChatTraceStep[] = [
-      { kind: 'tool', name: 'read_file', toolCallId: 'call-1', status: 'ok' },
-      { kind: 'tool', name: 'write_file', toolCallId: 'call-2', status: 'ok' },
+      { kind: 'tool', name: 'read_file', toolCallId: 'call-1', executionId: 'exec-call-1', status: 'ok' },
+      { kind: 'tool', name: 'write_file', toolCallId: 'call-2', executionId: 'exec-call-2', status: 'ok' },
     ]
     appendThreadEntry('echo', entry({
       id: `pending-user-${R}`,
@@ -374,6 +415,9 @@ describe('thread history merge & persistence', () => {
       rawText: '{"path":"a"}',
       delivery: 'delivered',
       timestamp: '2026-06-10T00:00:02.000Z',
+      toolCallId: 'call-1',
+      executionId: 'exec-call-1',
+      deliveryProvenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-1', ordinal: 0 } },
     }))
     appendThreadEntry('echo', entry({
       id: 'tool-call-2',
@@ -384,6 +428,9 @@ describe('thread history merge & persistence', () => {
       rawText: '{"path":"b"}',
       delivery: 'delivered',
       timestamp: '2026-06-10T00:00:03.000Z',
+      toolCallId: 'call-2',
+      executionId: 'exec-call-2',
+      deliveryProvenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-2', ordinal: 1 } },
     }))
     appendThreadEntry('echo', entry({
       id: `pending-assistant-${R}`,
@@ -398,8 +445,8 @@ describe('thread history merge & persistence', () => {
 
     const history = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: '질문', ts: 1_780_000_001, delivery_provenance: operationDeliveryProvenance(R, 'accepted_user'), delivery_provenance_status: 'valid' },
-      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'call-1', ordinal: 0 } }, delivery_provenance_status: 'valid' },
-      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'call-2', ordinal: 1 } }, delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', execution_id: 'exec-call-1', tool_call_name: 'read_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-1', ordinal: 0 } }, delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', execution_id: 'exec-call-2', tool_call_name: 'write_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'exec-call-2', ordinal: 1 } }, delivery_provenance_status: 'valid' },
       { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_provenance: operationDeliveryProvenance(R, 'terminal_assistant'), delivery_provenance_status: 'valid' },
     ])
     mergeServerHistoryEntries('echo', history)
@@ -422,8 +469,10 @@ describe('thread history merge & persistence', () => {
     expect(users[0]?.deliveryProvenance).toEqual(
       operationDeliveryProvenance(R, 'accepted_user'),
     )
-    // Tool rows stay single (dedup by the tool-<tool_call_id> id shape).
-    expect(thread.filter(e => e.role === 'tool')).toHaveLength(2)
+    // Tool rows stay single by exact delivery provenance.
+    const tools = thread.filter(e => e.role === 'tool')
+    expect(tools).toHaveLength(2)
+    expect(tools.map(tool => tool.executionId)).toEqual(['exec-call-1', 'exec-call-2'])
   })
 
   it('never merges a local entry that carries no provenance', () => {
@@ -778,7 +827,8 @@ describe('thread history merge & persistence', () => {
               {
                 kind: 'tool',
                 name: 'keeper_tasks_list',
-                tool_call_id: 'exec-1',
+                tool_call_id: 'provider-1',
+                execution_id: 'exec-1',
                 status: 'ok',
                 args: {},
                 result: { ok: true },
@@ -797,7 +847,8 @@ describe('thread history merge & persistence', () => {
       {
         kind: 'tool',
         name: 'keeper_tasks_list',
-        toolCallId: 'exec-1',
+        toolCallId: 'provider-1',
+        executionId: 'exec-1',
         status: 'ok',
         args: '{}',
         result: '{\n  "ok": true\n}',
@@ -808,10 +859,11 @@ describe('thread history merge & persistence', () => {
     expect(entries[0]?.turnRef).toBe('trace-ui#12')
   })
 
-  it('maps persisted tool rows to the live tool-entry convention', () => {
+  it('keeps the server row id and explicit tool identities', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'run checks', ts: 1_780_000_000 },
       {
+        id: 'tool-row-1',
         role: 'tool',
         content: '{"path":"x"}',
         ts: 1_780_000_000,
@@ -823,9 +875,8 @@ describe('thread history merge & persistence', () => {
     ])
     expect(entries.map(e => e.role)).toEqual(['user', 'tool', 'assistant'])
     const tool = entries[1]
-    // Same id/shape as the live TOOL_CALL_* path so replaceThread dedups
-    // a rehydrated row against a still-mounted live entry.
-    expect(tool?.id).toBe('tool-toolu_1')
+    expect(tool?.id).toBe('tool-row-1')
+    expect(tool?.toolCallId).toBe('toolu_1')
     expect(tool?.source).toBe('tool_result')
     expect(tool?.label).toBe('Read')
     // Argument JSON must come through verbatim, not reply-formatted.
@@ -836,6 +887,7 @@ describe('thread history merge & persistence', () => {
   it('preserves opaque persisted tool identity at the live stream convention', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       {
+        id: 'opaque-row',
         role: 'tool',
         content: '{}',
         ts: 1_780_000_000,
@@ -844,8 +896,105 @@ describe('thread history merge & persistence', () => {
       },
     ])
     expect(entries).toHaveLength(1)
-    expect(entries[0]?.id).toBe('tool- toolu_trimmed ')
+    expect(entries[0]?.id).toBe('opaque-row')
+    expect(entries[0]?.toolCallId).toBe(' toolu_trimmed ')
     expect(entries[0]?.label).toBe('Read')
+  })
+
+  it('keeps canonical and delivery-only rows without provider ids', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-providerless' }
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'canonical-providerless',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        execution_id: 'exec-providerless',
+        tool_call_name: 'Read',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: {
+            kind: 'tool_call',
+            execution_id: 'exec-providerless',
+            ordinal: 0,
+          },
+        },
+      },
+      {
+        id: 'delivery-providerless',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_001,
+        tool_call_name: 'Write',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: { kind: 'tool_delivery', ordinal: 1 },
+        },
+      },
+    ])
+    expect(entries.map(entry => entry.id)).toEqual([
+      'canonical-providerless',
+      'delivery-providerless',
+    ])
+    expect(entries.map(entry => entry.toolCallId)).toEqual([null, null])
+    expect(entries.map(entry => entry.executionId)).toEqual([
+      'exec-providerless',
+      null,
+    ])
+  })
+
+  it('keeps reused provider ids as separate server rows', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'tool-row-first',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        tool_call_id: 'reused-provider',
+        execution_id: 'exec-first',
+        tool_call_name: 'Read',
+      },
+      {
+        id: 'tool-row-second',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_001,
+        tool_call_id: 'reused-provider',
+        execution_id: 'exec-second',
+        tool_call_name: 'Write',
+      },
+    ])
+    expect(entries.map(entry => entry.id)).toEqual([
+      'tool-row-first',
+      'tool-row-second',
+    ])
+    expect(entries.map(entry => entry.executionId)).toEqual([
+      'exec-first',
+      'exec-second',
+    ])
+  })
+
+  it('rejects cross-field execution identity conflicts', () => {
+    const key = { kind: 'operation' as const, operation_id: 'kmsg-conflict' }
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        id: 'tool-conflict',
+        role: 'tool',
+        content: '{}',
+        ts: 1_780_000_000,
+        execution_id: 'exec-row',
+        tool_call_name: 'Read',
+        delivery_provenance: {
+          delivery_key: key,
+          transcript_slot: {
+            kind: 'tool_call',
+            execution_id: 'exec-slot',
+            ordinal: 0,
+          },
+        },
+      },
+    ])
+    expect(entries).toHaveLength(0)
   })
 
   it('decodes persisted attachments so uploads survive a reload', () => {
@@ -1057,23 +1206,31 @@ describe('thread history merge & persistence', () => {
   })
 
   it('dedups a rehydrated tool row against the live tool entry', () => {
+    const provenance = {
+      delivery_key: { kind: 'operation' as const, operation_id: 'kmsg-toolu-3' },
+      transcript_slot: { kind: 'tool_delivery' as const, ordinal: 0 },
+    }
     appendThreadEntry('echo', entry({
-      id: 'tool-toolu_3',
+      id: 'tool-delivery-reply-1-0',
       role: 'tool',
       source: 'tool_result',
       text: '{"q":1}',
       rawText: '{"q":1}',
       delivery: 'delivered',
+      toolCallId: 'toolu_3',
+      deliveryProvenance: provenance,
     }))
 
     mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'query', ts: 1_780_000_000 },
       {
+        id: 'history-toolu-3',
         role: 'tool',
         content: '{"q":1}',
         ts: 1_780_000_000,
         tool_call_id: 'toolu_3',
         tool_call_name: 'masc_status',
+        delivery_provenance: provenance,
       },
       { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
     ]))
@@ -1084,8 +1241,12 @@ describe('thread history merge & persistence', () => {
   })
 
   it('dedups a streaming live tool row when matching history arrives', () => {
+    const provenance = {
+      delivery_key: { kind: 'operation' as const, operation_id: 'kmsg-streaming' },
+      transcript_slot: { kind: 'tool_delivery' as const, ordinal: 0 },
+    }
     appendThreadEntry('echo', entry({
-      id: 'tool-toolu_streaming',
+      id: 'tool-delivery-reply-1-0',
       role: 'tool',
       source: 'tool_result',
       label: 'Read',
@@ -1093,23 +1254,27 @@ describe('thread history merge & persistence', () => {
       rawText: '{"path":"x"}',
       delivery: 'streaming',
       streamState: 'streaming',
+      toolCallId: 'toolu_streaming',
+      deliveryProvenance: provenance,
     }))
 
     mergeServerHistoryEntries('echo', chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'query', ts: 1_780_000_000 },
       {
+        id: 'history-toolu-streaming',
         role: 'tool',
         content: '{"path":"x"}',
         ts: 1_780_000_000,
         tool_call_id: 'toolu_streaming',
         tool_call_name: 'Read',
+        delivery_provenance: provenance,
       },
       { role: 'assistant', content: 'answer', ts: 1_780_000_000 },
     ]))
 
     const tools = (keeperThreads.value.echo ?? []).filter(e => e.role === 'tool')
     expect(tools).toHaveLength(1)
-    expect(tools[0]?.id).toBe('tool-toolu_streaming')
+    expect(tools[0]?.id).toBe('history-toolu-streaming')
     expect(tools[0]?.delivery).toBe('history')
     expect(tools[0]?.streamState).toBeNull()
   })
@@ -1137,14 +1302,16 @@ describe('thread history merge & persistence', () => {
     appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
     appendAssistantToolTraceStep('echo', 'reply-1', {
       toolCallId: 'tc-1',
+      toolOccurrenceId: 'tool-delivery-reply-1-0',
       name: 'lookup',
       ts: '2026-06-25T00:00:00.000Z',
       agentCoreBlockIndex: 5,
     })
-    appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tc-1', '{"a":1}')
-    markAssistantToolTraceEnded('echo', 'reply-1', 'tc-1')
+    appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tool-delivery-reply-1-0', '{"a":1}')
+    markAssistantToolTraceEnded('echo', 'reply-1', 'tool-delivery-reply-1-0')
     appendAssistantToolTraceStep('echo', 'reply-1', {
       toolCallId: 'tc-1',
+      toolOccurrenceId: 'tool-delivery-reply-1-0',
       name: 'lookup-again',
       ts: '2026-06-25T00:00:01.000Z',
       agentCoreBlockIndex: 6,
@@ -1156,6 +1323,7 @@ describe('thread history merge & persistence', () => {
         kind: 'tool',
         name: 'lookup',
         toolCallId: 'tc-1',
+        toolOccurrenceId: 'tool-delivery-reply-1-0',
         status: 'ok',
         args: '{"a":1}',
         ts: '2026-06-25T00:00:00.000Z',

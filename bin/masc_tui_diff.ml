@@ -55,6 +55,57 @@ let counts rows =
       | Context _ -> (removed, added))
     (0, 0) rows
 
+let rec take count rows =
+  match count, rows with
+  | count, _ when count <= 0 -> []
+  | _, [] -> []
+  | count, row :: rest -> row :: take (count - 1) rest
+
+let take_last count rows = rows |> List.rev |> take count |> List.rev
+
+let leading_context rows =
+  let rec walk reversed = function
+    | (Context _ as row) :: rest -> walk (row :: reversed) rest
+    | rest -> List.rev reversed, rest
+  in
+  walk [] rows
+
+(* [rows] has the shape produced above: context, then every removal/addition,
+   then context. Split that shape rather than discovering changes again from
+   rendered [+-] prefixes, which would make a line of source that starts with
+   one indistinguishable from a diff marker. *)
+let split_around_change rows =
+  let before, after_before = leading_context rows in
+  let after_reversed, changed_reversed =
+    leading_context (List.rev after_before)
+  in
+  before, List.rev changed_reversed, List.rev after_reversed
+
+let preview ~context ~max_rows rows =
+  let total = List.length rows in
+  if context < 0 || max_rows <= 0 then [], total
+  else
+    let before, changed, after = split_around_change rows in
+    let changed_count = List.length changed in
+    let shown =
+      if changed_count >= max_rows then take max_rows changed
+      else
+        let remaining = max_rows - changed_count in
+        let before_cap = take_last context before in
+        let after_cap = take context after in
+        let before_first = min (List.length before_cap) ((remaining + 1) / 2) in
+        let after_first = min (List.length after_cap) (remaining - before_first) in
+        let unused = remaining - before_first - after_first in
+        let before_extra = min (List.length before_cap - before_first) unused in
+        let after_extra =
+          min (List.length after_cap - after_first) (unused - before_extra)
+        in
+        let before_count = before_first + before_extra in
+        let after_count = after_first + after_extra in
+        take_last before_count before_cap @ changed @ take after_count after_cap
+    in
+    shown, max 0 (total - List.length shown)
+
 (* A line-number cell.
 
    An added line has no number on the old side and a removed line none on the

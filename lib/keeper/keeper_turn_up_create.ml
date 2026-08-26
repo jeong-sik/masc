@@ -65,7 +65,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ();
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
           p.name err;
-        tool_result_error err
+        tool_result_error ~class_:Tool_result.Policy_rejection err
     | Ok () ->
             let proactive_enabled =
                 Option.value
@@ -87,7 +87,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     "create_keeper failed: generated invalid trace_id for name=%s: %s"
                     p.name err;
                   Progress.stop_tracking task_id;
-                  tool_result_error "internal keeper trace_id generation failed"
+                  tool_result_error ~class_:Tool_result.Runtime_failure "internal keeper trace_id generation failed"
               | Ok trace_id_t ->
                   (match
                      Keeper_shutdown_intake_fence.run_durable_intake_observing
@@ -245,7 +245,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
           p.name detail;
         Progress.stop_tracking task_id;
-        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
+        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "initial checkpoint save failed: %s" detail)
       | Ok _ ->
       let runtime_assignment_result =
         match p.runtime_id_opt with
@@ -269,7 +269,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            p.name
            e;
          Progress.stop_tracking task_id;
-         tool_result_error e
+         tool_result_error ~class_:Tool_result.Runtime_failure e
        | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
@@ -288,7 +288,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            p.name
            e;
          Progress.stop_tracking task_id;
-         tool_result_error
+         tool_result_error ~class_:Tool_result.Runtime_failure
            (Printf.sprintf "declarative keeper config write failed: %s" e)
        | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
@@ -301,7 +301,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name
           e;
         Progress.stop_tracking task_id;
-        tool_result_error e
+        tool_result_error ~class_:Tool_result.Runtime_failure e
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
@@ -332,7 +332,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->
            Progress.stop_tracking task_id;
-           tool_result_error
+           tool_result_error ~class_:Tool_result.Runtime_failure
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected))))))

@@ -41,7 +41,6 @@ type recurrence =
 
 type payload =
   { kind : string
-  ; schema_version : int
   ; body : Yojson.Safe.t
   }
 
@@ -516,24 +515,23 @@ let actor_of_yojson = function
 ;;
 
 let payload_to_yojson payload =
-  `Assoc
-    [ "kind", `String payload.kind
-    ; "schema_version", `Int payload.schema_version
-    ; "body", payload.body
-    ]
+  `Assoc [ "kind", `String payload.kind; "body", payload.body ]
 ;;
 
 let payload_of_yojson = function
   | `Assoc fields ->
+    let* () =
+      Json_util.reject_unknown_fields
+        ~surface:"schedule payload"
+        ~allowed:[ "kind"; "body" ]
+        fields
+    in
     let* kind = string_field "kind" fields in
     let* kind = nonempty "payload.kind" kind in
-    let* schema_version = int_field "schema_version" fields in
-    if schema_version <= 0 then Error "payload.schema_version must be positive"
-    else (
-      let* body = assoc_field "body" fields in
-      match body with
-      | `Assoc _ -> Ok { kind; schema_version; body }
-      | _ -> Error "payload.body must be a JSON object")
+    let* body = assoc_field "body" fields in
+    (match body with
+     | `Assoc _ -> Ok { kind; body }
+     | _ -> Error "payload.body must be a JSON object")
   | _ -> Error "payload must be a JSON object"
 ;;
 

@@ -685,10 +685,12 @@ let test_failed_tool_observer_releases_next_completion () =
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
    [post_tool_use] already records that one. *)
-let rejected_rows_for ~stage =
+let rejected_rows_for ?on_tool_result_ready ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
-    ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Masc.Keeper_tool_call_log.reset_for_testing ())
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -700,7 +702,7 @@ let rejected_rows_for ~stage =
          Masc.Keeper_hooks_agent_core.make_hooks
            ~config ~meta_ref ~turn_ctx_cell 
            ~trace_id:"rejection-trace" ~keeper_turn_id:1
-           ~on_after_turn_ordinal:ignore ()
+           ~on_after_turn_ordinal:ignore ?on_tool_result_ready ()
        in
        let hook =
          match hooks.Agent_core.Hooks.post_tool_use_failure with
@@ -734,7 +736,9 @@ let rejected_rows_for ~stage =
 ;;
 
 let test_a_rejected_call_leaves_a_row () =
-  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution in
+  let rows =
+    rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution ()
+  in
   check int "exactly one row" 1 (List.length rows);
   match rows with
   | [ row ] ->
@@ -758,8 +762,37 @@ let test_a_rejected_call_leaves_a_row () =
 ;;
 
 let test_an_executed_failure_is_not_written_twice () =
-  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution in
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution () in
   check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
+;;
+
+let test_validation_rejection_notifies_after_exact_log_commit () =
+  let observed = ref None in
+  let rows =
+    rejected_rows_for
+      ~stage:Agent_core.Hooks.Validation_before_execution
+      ~on_tool_result_ready:
+        (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
+           observed :=
+             Some
+               ( tool_call_id
+               , turn
+               , planned_index
+               , Ids.Execution_id.to_string execution_id ))
+      ()
+  in
+  match rows, !observed with
+  | [ row ], Some (tool_call_id, turn, planned_index, execution_id) ->
+    check string "callback provider id" "call-1" tool_call_id;
+    check int "callback turn" 1 turn;
+    check int "callback planned index" 0 planned_index;
+    check (option string) "callback id equals committed log id"
+      (Some execution_id)
+      (Safe_ops.json_string_opt "execution_id" row)
+  | rows, _ ->
+    failf
+      "expected one committed validation row and one callback, got rows=%d"
+      (List.length rows)
 ;;
 
 let test_production_post_tool_hook_cancellation_releases_next_completion () =
@@ -1046,6 +1079,10 @@ let () =
             "an executed failure is not written twice"
             `Quick
             test_an_executed_failure_is_not_written_twice
+        ; test_case
+            "validation callback follows exact log commit"
+            `Quick
+            test_validation_rejection_notifies_after_exact_log_commit
         ] )
     ]
 ;;

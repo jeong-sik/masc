@@ -541,7 +541,7 @@ let test_terminal_host_stop_runs_completion_hooks_in_order () =
       after_turn =
         Some
           (function
-            | Agent_core.Hooks.AfterTurn { turn; response } ->
+            | Agent_core.Hooks.AfterTurn { turn; response; _ } ->
               observed := Printf.sprintf "after:%d:%s" turn response.id :: !observed;
               Continue
             | _ -> fail "after_turn received the wrong event")

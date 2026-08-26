@@ -1,0 +1,21 @@
+# Linear's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be registered by hand come from the two well-known documents
+# it serves, so none of that can go stale here.
+#
+# Measured 2026-08-26: two-hop discovery answers, the token endpoint accepts a
+# client that authenticates with nothing, S256 is offered, and an MCP
+# initialize is refused with 401 rather than 404. Scopes offered: read, write.
+
+id = "linear"
+label = "Linear"
+mcp_url = "https://mcp.linear.app/mcp"
+
+access_token_env = "LINEAR_ACCESS_TOKEN"
+expires_at_env = "LINEAR_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.linear/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

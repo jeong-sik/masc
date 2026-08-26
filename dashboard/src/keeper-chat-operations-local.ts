@@ -126,6 +126,8 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     if (name === undefined) return null
     const step: ChatTraceStep = { kind, name }
     const toolCallId = stringValue(raw.toolCallId)
+    const executionId = stringValue(raw.executionId)
+    const toolOccurrenceId = stringValue(raw.toolOccurrenceId)
     const status = parseMember(TRACE_TOOL_STATUSES, raw.status)
     const dur = stringValue(raw.dur)
     const args = stringValue(raw.args)
@@ -133,6 +135,8 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
     const ts = stringValue(raw.ts)
     const agentCoreBlockIndex = numberValue(raw.agentCoreBlockIndex)
     if (toolCallId !== undefined) step.toolCallId = toolCallId
+    if (executionId !== undefined) step.executionId = executionId
+    if (toolOccurrenceId !== undefined) step.toolOccurrenceId = toolOccurrenceId
     if (status !== undefined) step.status = status
     if (dur !== undefined) step.dur = dur
     if (args !== undefined) step.args = args

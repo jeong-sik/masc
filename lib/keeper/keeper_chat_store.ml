@@ -59,6 +59,7 @@ type attachment = {
 
 type tool_call = {
   call_id : string;
+  execution_id : Ids.Execution_id.t option;
   call_name : string;
   args : string;
 }
@@ -192,6 +193,7 @@ type chat_message = {
   ts : float;
   attachments : attachment list option;
   tool_call_id : string option;
+  execution_id : Ids.Execution_id.t option;
   tool_call_name : string option;
   surface : Surface_ref.t option;
       (* RFC-0232 P5: the typed surface, persisted as a structured
@@ -302,10 +304,20 @@ let redact_trace_step redaction = function
       ; ts = redact_string_opt redaction ts
       }
   | Keeper_chat_blocks.Trace_tool
-      { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
+      { name
+      ; tool_call_id
+      ; execution_id
+      ; status
+      ; dur
+      ; args
+      ; result
+      ; ts
+      ; agent_core_block_index
+      } ->
     Keeper_chat_blocks.Trace_tool
       { name = redact_string redaction name
       ; tool_call_id = redact_string_opt redaction tool_call_id
+      ; execution_id
       ; status
       ; dur = redact_string_opt redaction dur
       ; args = Option.map (redact_trace_json redaction) args
@@ -518,7 +530,7 @@ let mint_message_id ~ts =
   Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
 
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
-    ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
+    ?execution_id ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
     ?stream_lifecycle ?provenance ()
@@ -592,6 +604,8 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ mention_fields
     @ kind_field
     @ Json_util.string_field_if_present "tool_call_id" tool_call_id
+    @ Json_util.string_field_if_present "execution_id"
+        (Option.map Ids.Execution_id.to_string execution_id)
     @ Json_util.string_field_if_present "tool_call_name" tool_call_name
     @ surface_field
     @ Json_util.string_field_if_present "conversation_id" conversation_id
@@ -609,12 +623,75 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
   in
   Yojson.Safe.to_string (`Assoc all_fields)
 
-(* The append-once reader. It answers "does this exact delivery already have
-   a row?", so an undecodable row cannot be skipped: skipping one would
-   answer "no" for a delivery that is in fact present and append a duplicate.
-   Hence [Error] here fails the whole transaction, unlike the row reader in
-   [parse_line], which only needs to render. Both decode the pair through
-   [delivery_provenance_of_fields]; only the failure policy differs. *)
+(* The append-once reader answers "does this exact delivery already have a
+   row?". A structurally decodable provenance whose execution identity is
+   inconsistent is quarantined by its exact delivery key: a replay of that
+   delivery fails closed, while unrelated future operations in the same JSONL
+   remain writable. Fully undecodable provenance still fails the scan because
+   no key can prove its blast radius. The rendering reader below can instead
+   drop an invalid row because it never authorizes an append. *)
+let execution_id_of_fields fields =
+  match List.assoc_opt "execution_id" fields with
+  | None -> Ok None
+  | Some (`String raw) when String.trim raw <> "" ->
+    Ok (Some (Ids.Execution_id.of_string raw))
+  | Some (`String _) -> Error "row execution_id must not be blank"
+  | Some _ -> Error "row execution_id must be a string"
+;;
+
+let validate_delivery_execution_identity ~execution_id
+    (provenance : Keeper_chat_delivery_identity.delivery_provenance option) =
+  match provenance with
+  | None -> Ok ()
+  | Some { transcript_slot; _ } -> (
+      match transcript_slot, execution_id with
+      | Keeper_chat_delivery_identity.Tool_call { execution_id = slot_id; _ },
+        Some row_id
+        when Ids.Execution_id.equal slot_id row_id ->
+          Ok ()
+      | Keeper_chat_delivery_identity.Tool_call _, Some _ ->
+          Error "tool_call transcript slot conflicts with row execution_id"
+      | Keeper_chat_delivery_identity.Tool_call _, None ->
+          Error "tool_call transcript slot requires the same row execution_id"
+      | Keeper_chat_delivery_identity.Tool_delivery _, None -> Ok ()
+      | Keeper_chat_delivery_identity.Tool_delivery _, Some _ ->
+          Error "tool_delivery transcript slot forbids row execution_id"
+      | ( Keeper_chat_delivery_identity.Accepted_user
+        | Keeper_chat_delivery_identity.Terminal_assistant ),
+        None ->
+          Ok ()
+      | ( Keeper_chat_delivery_identity.Accepted_user
+        | Keeper_chat_delivery_identity.Terminal_assistant ),
+        Some _ ->
+          Error "non-tool transcript slot forbids row execution_id")
+;;
+
+let validate_delivery_role ~role_label
+    (provenance : Keeper_chat_delivery_identity.delivery_provenance) =
+  match provenance.transcript_slot, role_label with
+  | Keeper_chat_delivery_identity.Accepted_user, "user"
+  | Keeper_chat_delivery_identity.Terminal_assistant, "assistant"
+  | ( Keeper_chat_delivery_identity.Tool_call _
+    | Keeper_chat_delivery_identity.Tool_delivery _ ),
+    "tool" ->
+    Ok ()
+  | Keeper_chat_delivery_identity.Accepted_user, _ ->
+    Error "accepted_user transcript slot requires a user row"
+  | Keeper_chat_delivery_identity.Terminal_assistant, _ ->
+    Error "terminal_assistant transcript slot requires an assistant row"
+  | ( Keeper_chat_delivery_identity.Tool_call _
+    | Keeper_chat_delivery_identity.Tool_delivery _ ),
+    _ ->
+    Error "tool transcript slot requires a tool row"
+;;
+
+type scanned_provenance =
+  | No_provenance
+  | Valid_provenance of
+      Keeper_chat_delivery_identity.delivery_provenance * string
+  | Poisoned_delivery_key of
+      Keeper_chat_delivery_identity.delivery_key * string
+
 let provenance_of_line ~line_number line =
   let fail detail =
     Error
@@ -630,12 +707,40 @@ let provenance_of_line ~line_number line =
          Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
        with
        | Error detail -> fail detail
-       | Ok None -> Ok None
+       | Ok None -> Ok No_provenance
        | Ok (Some provenance) ->
-         (match List.assoc_opt "id" fields with
-          | Some (`String row_id) when not (String.equal (String.trim row_id) "") ->
-            Ok (Some (provenance, row_id))
-          | _ -> fail "provenance row requires a nonblank id"))
+         let role_label =
+           match List.assoc_opt "role" fields with
+           | Some (`String value) -> value
+           | Some _ | None -> ""
+         in
+         (match validate_delivery_role ~role_label provenance with
+          | Error detail ->
+            Ok
+              (Poisoned_delivery_key
+                 (provenance.delivery_key, detail))
+          | Ok () ->
+            (match execution_id_of_fields fields with
+             | Error detail ->
+               Ok
+                 (Poisoned_delivery_key
+                    (provenance.delivery_key, detail))
+             | Ok execution_id ->
+               (match
+                  validate_delivery_execution_identity
+                    ~execution_id
+                    (Some provenance)
+                with
+                | Error detail ->
+                  Ok
+                    (Poisoned_delivery_key
+                       (provenance.delivery_key, detail))
+                | Ok () ->
+                  (match List.assoc_opt "id" fields with
+                   | Some (`String row_id)
+                     when not (String.equal (String.trim row_id) "") ->
+                     Ok (Valid_provenance (provenance, row_id))
+                   | _ -> fail "provenance row requires a nonblank id")))))
     | _ -> fail "row must be a JSON object"
   with
   | Yojson.Json_error detail -> fail detail
@@ -650,17 +755,138 @@ end
 
 module Provenance_index = Hashtbl.Make (Provenance_key)
 
+module Delivery_key = struct
+  type t = Keeper_chat_delivery_identity.delivery_key
+
+  let equal = Keeper_chat_delivery_identity.delivery_key_equal
+  let hash = Hashtbl.hash
+end
+
+module Poisoned_delivery_keys = Hashtbl.Make (Delivery_key)
+
+module Tool_ordinal = struct
+  type t = Keeper_chat_delivery_identity.delivery_key * int
+
+  let equal (left_key, left_ordinal) (right_key, right_ordinal) =
+    Keeper_chat_delivery_identity.delivery_key_equal left_key right_key
+    && Int.equal left_ordinal right_ordinal
+  ;;
+
+  let hash = Hashtbl.hash
+end
+
+module Tool_ordinal_index = Hashtbl.Make (Tool_ordinal)
+
+module Execution_id_key = struct
+  type t = Ids.Execution_id.t
+
+  let equal = Ids.Execution_id.equal
+  let hash = Hashtbl.hash
+end
+
+module Execution_index = Hashtbl.Make (Execution_id_key)
+
 type indexed_provenance =
   | Unique_provenance of string
   | Duplicate_provenance
 
+type indexed_tool_ordinal =
+  | Unique_tool_ordinal of
+      Keeper_chat_delivery_identity.transcript_slot * string
+  | Duplicate_tool_ordinal
+
+type execution_owner =
+  { delivery_key : Keeper_chat_delivery_identity.delivery_key
+  ; ordinal : int
+  }
+
+type indexed_execution =
+  | Unique_execution of execution_owner
+  | Reused_execution
+
+type provenance_index =
+  { valid : indexed_provenance Provenance_index.t
+  ; poisoned_delivery_keys : string Poisoned_delivery_keys.t
+  ; tool_ordinals : indexed_tool_ordinal Tool_ordinal_index.t
+  ; executions : indexed_execution Execution_index.t
+  }
+
+let poison_delivery_key index delivery_key detail =
+  Poisoned_delivery_keys.replace index.poisoned_delivery_keys delivery_key detail
+;;
+
+let execution_owner_matches owner ~delivery_key ~ordinal =
+  Keeper_chat_delivery_identity.delivery_key_equal owner.delivery_key delivery_key
+  && Int.equal owner.ordinal ordinal
+;;
+
+let register_execution_identity index ~delivery_key ~ordinal execution_id =
+  match Execution_index.find_opt index.executions execution_id with
+  | None ->
+    Execution_index.add index.executions execution_id
+      (Unique_execution { delivery_key; ordinal })
+  | Some (Unique_execution owner)
+    when execution_owner_matches owner ~delivery_key ~ordinal ->
+    ()
+  | Some (Unique_execution owner) ->
+    let detail =
+      "canonical Keeper execution_id is reused by a different delivery or tool ordinal"
+    in
+    poison_delivery_key index owner.delivery_key detail;
+    poison_delivery_key index delivery_key detail;
+    Execution_index.replace index.executions execution_id Reused_execution
+  | Some Reused_execution ->
+    poison_delivery_key index delivery_key
+      "canonical Keeper execution_id is already reused by multiple deliveries or tool ordinals"
+;;
+
 let provenance_index_of_existing existing =
-  let index = Provenance_index.create 16 in
+  let index =
+    { valid = Provenance_index.create 16
+    ; poisoned_delivery_keys = Poisoned_delivery_keys.create 16
+    ; tool_ordinals = Tool_ordinal_index.create 16
+    ; executions = Execution_index.create 16
+    }
+  in
   let add_provenance (provenance, row_id) =
-    match Provenance_index.find_opt index provenance with
-    | None -> Provenance_index.add index provenance (Unique_provenance row_id)
-    | Some (Unique_provenance _ | Duplicate_provenance) ->
-      Provenance_index.replace index provenance Duplicate_provenance
+    (match Provenance_index.find_opt index.valid provenance with
+     | None ->
+       Provenance_index.add index.valid provenance (Unique_provenance row_id)
+     | Some (Unique_provenance _ | Duplicate_provenance) ->
+       Provenance_index.replace index.valid provenance Duplicate_provenance;
+       poison_delivery_key index provenance.delivery_key
+         "duplicate Keeper chat delivery provenance rows");
+    let ordinal =
+      match provenance.Keeper_chat_delivery_identity.transcript_slot with
+      | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
+      | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
+      | Keeper_chat_delivery_identity.Accepted_user
+      | Keeper_chat_delivery_identity.Terminal_assistant -> None
+    in
+    Option.iter
+      (fun ordinal ->
+         let key = provenance.delivery_key, ordinal in
+         match Tool_ordinal_index.find_opt index.tool_ordinals key with
+         | None ->
+           Tool_ordinal_index.add
+             index.tool_ordinals
+             key
+             (Unique_tool_ordinal (provenance.transcript_slot, row_id))
+         | Some (Unique_tool_ordinal _ | Duplicate_tool_ordinal) ->
+           Tool_ordinal_index.replace
+             index.tool_ordinals
+             key
+             Duplicate_tool_ordinal;
+           poison_delivery_key index provenance.delivery_key
+             "duplicate Keeper chat tool ordinal rows")
+      ordinal;
+    match provenance.transcript_slot with
+    | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
+      register_execution_identity index ~delivery_key:provenance.delivery_key
+        ~ordinal execution_id
+    | Keeper_chat_delivery_identity.Accepted_user
+    | Keeper_chat_delivery_identity.Tool_delivery _
+    | Keeper_chat_delivery_identity.Terminal_assistant -> ()
   in
   existing
   |> String.split_on_char '\n'
@@ -673,18 +899,84 @@ let provenance_index_of_existing existing =
           then Ok ()
           else
             let* provenance = provenance_of_line ~line_number line in
-            Option.iter add_provenance provenance;
+            (match provenance with
+             | No_provenance -> ()
+             | Valid_provenance (provenance, row_id) ->
+               add_provenance (provenance, row_id)
+             | Poisoned_delivery_key (delivery_key, detail) ->
+               Poisoned_delivery_keys.replace
+                 index.poisoned_delivery_keys
+                 delivery_key
+                 detail);
             Ok ())
        (Ok ())
   |> Result.map (fun () -> index)
 ;;
 
 let find_indexed_provenance index ~provenance =
-  match Provenance_index.find_opt index provenance with
-  | None -> Ok None
-  | Some (Unique_provenance row_id) -> Ok (Some row_id)
-  | Some Duplicate_provenance ->
-    Error "duplicate Keeper chat delivery provenance rows"
+  match
+    Poisoned_delivery_keys.find_opt
+      index.poisoned_delivery_keys
+      provenance.Keeper_chat_delivery_identity.delivery_key
+  with
+  | Some detail ->
+    Error
+      (Printf.sprintf
+         "Keeper chat delivery key has quarantined invalid provenance: %s"
+         detail)
+  | None ->
+    let execution_identity_available =
+      match provenance.Keeper_chat_delivery_identity.transcript_slot with
+      | Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal } ->
+        (match Execution_index.find_opt index.executions execution_id with
+         | None -> Ok ()
+         | Some (Unique_execution owner)
+           when execution_owner_matches owner
+                  ~delivery_key:provenance.delivery_key
+                  ~ordinal ->
+           Ok ()
+         | Some (Unique_execution _) ->
+           Error
+             "canonical Keeper execution_id belongs to a different delivery or tool ordinal"
+         | Some Reused_execution ->
+           Error
+             "canonical Keeper execution_id is reused by multiple deliveries or tool ordinals")
+      | Keeper_chat_delivery_identity.Accepted_user
+      | Keeper_chat_delivery_identity.Tool_delivery _
+      | Keeper_chat_delivery_identity.Terminal_assistant -> Ok ()
+    in
+    let ( let* ) = Result.bind in
+    let* () = execution_identity_available in
+    let ordinal =
+      match provenance.Keeper_chat_delivery_identity.transcript_slot with
+      | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
+      | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
+      | Keeper_chat_delivery_identity.Accepted_user
+      | Keeper_chat_delivery_identity.Terminal_assistant -> None
+    in
+    (match
+       Option.bind ordinal (fun ordinal ->
+         Tool_ordinal_index.find_opt
+           index.tool_ordinals
+           (provenance.delivery_key, ordinal))
+     with
+     | Some (Unique_tool_ordinal (existing_slot, row_id)) ->
+       if
+         Keeper_chat_delivery_identity.transcript_slot_equal
+           existing_slot
+           provenance.transcript_slot
+       then Ok (Some row_id)
+       else
+         Error
+           "Keeper chat tool ordinal is occupied by a conflicting execution identity"
+     | Some Duplicate_tool_ordinal ->
+       Error "duplicate Keeper chat tool ordinal rows"
+     | None ->
+       (match Provenance_index.find_opt index.valid provenance with
+        | None -> Ok None
+        | Some (Unique_provenance row_id) -> Ok (Some row_id)
+        | Some Duplicate_provenance ->
+          Error "duplicate Keeper chat delivery provenance rows"))
 ;;
 
 let find_provenance existing ~provenance =
@@ -763,14 +1055,17 @@ let normalize_tool_args args =
    {!Tool_invocation_ref} states the rule directly: correlation identity is
    never inferred from names, arguments, timestamps, or hashes.
 
-   "Where does this turn's reply go?" is a delivery address. It has to
-   resolve — [Ids.Execution_id.of_string] takes a string — and position is a
-   legitimate answer because the slot is this store's own. *)
+   "Where does this turn's reply go?" is a delivery address. Its position is
+   total because the slot is this store's own, but it must not masquerade as
+   an execution identity. *)
 let provider_tool_call_id call_id =
   if String.trim call_id = "" then None else Some call_id
 
-let delivery_slot_id ~position call_id =
-  if String.trim call_id = "" then Printf.sprintf "tc-%d" position else call_id
+let tool_transcript_slot ~ordinal (call : tool_call) =
+  match call.execution_id with
+  | Some execution_id ->
+    Keeper_chat_delivery_identity.Tool_call { execution_id; ordinal }
+  | None -> Keeper_chat_delivery_identity.Tool_delivery { ordinal }
 
 (* RFC-0232 §3.3: the append IS the parse boundary.  Mentions are
    derived from the content that is actually persisted (post-redaction),
@@ -823,6 +1118,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
             ~content:(normalize_tool_args tc.args)
             ~ts
             ?tool_call_id:(provider_tool_call_id tc.call_id)
+            ?execution_id:tc.execution_id
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -891,6 +1187,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
              ~content:(normalize_tool_args tc.args)
              ~ts
              ?tool_call_id:(provider_tool_call_id tc.call_id)
+             ?execution_id:tc.execution_id
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -925,6 +1222,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
              ~content:(normalize_tool_args tc.args)
              ~ts
              ?tool_call_id:(provider_tool_call_id tc.call_id)
+             ?execution_id:tc.execution_id
              ~tool_call_name:tc.call_name
              ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -970,6 +1268,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
             ~content:(normalize_tool_args tc.args)
             ~ts
             ?tool_call_id:(provider_tool_call_id tc.call_id)
+            ?execution_id:tc.execution_id
             ~tool_call_name:tc.call_name
             ?surface ?conversation_id ?turn_ref ())
         tool_calls
@@ -1000,10 +1299,74 @@ type append_once_line =
   ; line : string
   }
 
+let transcript_slot_ordinal = function
+  | Keeper_chat_delivery_identity.Tool_call { ordinal; _ }
+  | Keeper_chat_delivery_identity.Tool_delivery { ordinal } -> Some ordinal
+  | Keeper_chat_delivery_identity.Accepted_user
+  | Keeper_chat_delivery_identity.Terminal_assistant -> None
+;;
+
+let validate_append_once_lines lines =
+  let rec loop seen_slots seen_ordinals seen_executions = function
+    | [] -> Ok ()
+    | { transcript_slot; _ } :: rest ->
+      let ( let* ) = Result.bind in
+      let* () =
+        if
+          List.exists
+            (Keeper_chat_delivery_identity.transcript_slot_equal transcript_slot)
+            seen_slots
+        then Error "append-once batch repeats a delivery provenance slot"
+        else Ok ()
+      in
+      let ordinal = transcript_slot_ordinal transcript_slot in
+      let* () =
+        match ordinal with
+        | Some ordinal when List.mem ordinal seen_ordinals ->
+          Error "append-once batch repeats a tool ordinal"
+        | Some _ | None -> Ok ()
+      in
+      let execution_id =
+        match transcript_slot with
+        | Keeper_chat_delivery_identity.Tool_call { execution_id; _ } ->
+          Some execution_id
+        | Keeper_chat_delivery_identity.Accepted_user
+        | Keeper_chat_delivery_identity.Tool_delivery _
+        | Keeper_chat_delivery_identity.Terminal_assistant -> None
+      in
+      let* () =
+        match execution_id with
+        | Some execution_id
+          when String.equal
+                 (String.trim (Ids.Execution_id.to_string execution_id))
+                 "" ->
+          Error "append-once batch contains a blank canonical execution_id"
+        | Some execution_id
+          when List.exists (Ids.Execution_id.equal execution_id) seen_executions ->
+          Error
+            "append-once batch reuses a canonical execution_id for multiple tool ordinals"
+        | Some _ | None -> Ok ()
+      in
+      loop
+        (transcript_slot :: seen_slots)
+        (Option.fold ~none:seen_ordinals
+           ~some:(fun ordinal -> ordinal :: seen_ordinals)
+           ordinal)
+        (Option.fold ~none:seen_executions
+           ~some:(fun execution_id -> execution_id :: seen_executions)
+           execution_id)
+        rest
+  in
+  loop [] [] [] lines
+;;
+
 let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
       ~result_slot lines =
-  match
-    Fs_compat.update_private_file_durable_locked_result path (fun existing ->
+  match validate_append_once_lines lines with
+  | Error detail -> Error detail
+  | Ok () ->
+    (match
+       Fs_compat.update_private_file_durable_locked_result path (fun existing ->
       let inspect index =
         let rec loop found additions = function
           | [] -> Ok (found, List.rev additions)
@@ -1063,34 +1426,30 @@ let append_lines_once ?(reject_partial_after_result = false) path ~delivery_key
              |> String.concat ""
            in
            (if additions = [] then None else Some payload), Ok result))
-  with
-  | Private_file_succeeded result -> result
-  | Private_file_succeeded_with_cleanup_failure
+     with
+     | Private_file_succeeded result -> result
+     | Private_file_succeeded_with_cleanup_failure
       { value = result; cleanup_failure } ->
-    Log.Keeper.error
-      "keeper_chat_store: provenance batch update succeeded with descriptor settlement failure path=%s: %s"
-      path
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    result
-  | Private_file_failed error ->
-    Error (Fs_compat.durable_append_error_to_string error)
-  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    Error
-      (Printf.sprintf
-         "%s; descriptor settlement failed: %s"
-         (Fs_compat.durable_append_error_to_string error)
-         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+       Log.Keeper.error
+         "keeper_chat_store: provenance batch update succeeded with descriptor settlement failure path=%s: %s"
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       result
+     | Private_file_failed error ->
+       Error (Fs_compat.durable_append_error_to_string error)
+     | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+       Error
+         (Printf.sprintf
+            "%s; descriptor settlement failed: %s"
+            (Fs_compat.durable_append_error_to_string error)
+            (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)))
 ;;
 
 let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
       tool_calls =
   List.mapi
     (fun ordinal tc ->
-       let call_id = delivery_slot_id ~position:ordinal tc.call_id in
-       let transcript_slot =
-         Keeper_chat_delivery_identity.Tool_call
-           { execution_id = Ids.Execution_id.of_string call_id; ordinal }
-       in
+       let transcript_slot = tool_transcript_slot ~ordinal tc in
        let row_id = mint_message_id ~ts in
        { transcript_slot
        ; row_id
@@ -1100,7 +1459,8 @@ let tool_call_append_lines ~ts ~surface ~conversation_id ~turn_ref ~delivery_key
              ~content:(normalize_tool_args tc.args)
              ~ts
              ~message_id:row_id
-             ~tool_call_id:call_id
+             ?tool_call_id:(provider_tool_call_id tc.call_id)
+             ?execution_id:tc.execution_id
              ~tool_call_name:tc.call_name
              ?surface
              ?conversation_id
@@ -1136,16 +1496,7 @@ let append_tool_calls_once
           tool_calls
       in
       let ordinal = List.length tool_calls - 1 in
-      let result_slot =
-        Keeper_chat_delivery_identity.Tool_call
-          { execution_id =
-              Ids.Execution_id.of_string
-                (delivery_slot_id
-                   ~position:ordinal
-                   (List.nth tool_calls ordinal).call_id)
-          ; ordinal
-          }
-      in
+      let result_slot = tool_transcript_slot ~ordinal (List.nth tool_calls ordinal) in
       append_lines_once path ~delivery_key ~result_slot lines
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1350,6 +1701,16 @@ let parse_line ~file_path (line : string) : chat_message option =
       | _ -> None
     in
     let tool_call_id = opt_string "tool_call_id" in
+    let execution_id_result =
+      match json with
+      | `Assoc fields -> execution_id_of_fields fields
+      | _ -> Ok None
+    in
+    let execution_id =
+      match execution_id_result with
+      | Ok execution_id -> execution_id
+      | Error _ -> None
+    in
     let tool_call_name = opt_string "tool_call_name" in
     let surface =
       match Json_util.assoc_member_opt "surface" json with
@@ -1567,12 +1928,57 @@ let parse_line ~file_path (line : string) : chat_message option =
               None)
       | _ -> None
     in
+    let delivery_execution_identity_valid =
+      match delivery_provenance with
+      | Some provenance ->
+        (match validate_delivery_role ~role_label provenance with
+         | Error detail ->
+           report_persistence_read_drop
+             ~reason:Read_drop_reason.Invalid_payload
+             ~path:file_path
+             ~detail:(Printf.sprintf "invalid delivery row role: %s" detail);
+           false
+         | Ok () ->
+           (match execution_id_result with
+            | Error detail ->
+              report_persistence_read_drop
+                ~reason:Read_drop_reason.Invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "invalid execution identity: %s" detail);
+              false
+            | Ok execution_id ->
+              (match
+                 validate_delivery_execution_identity
+                   ~execution_id
+                   delivery_provenance
+               with
+               | Ok () -> true
+               | Error detail ->
+                 report_persistence_read_drop
+                   ~reason:Read_drop_reason.Invalid_payload
+                   ~path:file_path
+                   ~detail:
+                     (Printf.sprintf
+                        "invalid delivery execution identity: %s"
+                        detail);
+                 false)))
+      | None ->
+        (match execution_id_result with
+         | Ok _ -> true
+         | Error detail ->
+          report_persistence_read_drop
+            ~reason:Read_drop_reason.Invalid_payload
+            ~path:file_path
+            ~detail:(Printf.sprintf "invalid execution identity: %s" detail);
+          false)
+    in
     let has_structured_payload =
       Option.is_some audio
       || Option.exists (fun values -> values <> []) attachments
       || Option.exists (fun values -> values <> []) blocks
     in
-    if role_label = "" || (content = "" && not has_structured_payload) then (
+    if not delivery_execution_identity_valid then None
+    else if role_label = "" || (content = "" && not has_structured_payload) then (
       report_persistence_read_drop
         ~reason:Read_drop_reason.Invalid_payload
         ~path:file_path
@@ -1613,7 +2019,7 @@ let parse_line ~file_path (line : string) : chat_message option =
                None
            | Some id, Some ts ->
                Some
-                 { id; role; content; ts; attachments; tool_call_id;
+                 { id; role; content; ts; attachments; tool_call_id; execution_id;
                    tool_call_name; surface; conversation_id;
                    external_message_id; workspace_id; speaker; audio; blocks;
                    mentions; kind; turn_ref; stream_lifecycle;
@@ -1949,6 +2355,8 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  | Row_kind.Transport_failure ->
                      [ ("kind", `String (Row_kind.to_label m.kind)) ])
               @ Json_util.string_field_if_present "tool_call_id" m.tool_call_id
+              @ Json_util.string_field_if_present "execution_id"
+                  (Option.map Ids.Execution_id.to_string m.execution_id)
               @ Json_util.string_field_if_present "tool_call_name" m.tool_call_name
               @ (match m.surface with
                  | None -> []

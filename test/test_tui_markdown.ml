@@ -20,6 +20,8 @@ let tagged : Markdown.palette =
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = ("<th>", "</th>")
   ; table_gutter = " | "
+  ; table_rule_gutter = "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
+  ; table_frame = false
   ; code_keyword = ("<k>", "</k>")
   ; code_string = ("<s>", "</s>")
   ; code_comment = ("<m>", "</m>")
@@ -37,6 +39,16 @@ let check_rows label expected actual =
 
 let horizontal cells =
   String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80"))
+
+(* The rule row as the renderer draws it: the columns' dashes joined at the
+   boundary rather than by the gutter running through them. Spelled here
+   independently of the palette so a change to the joiner fails a test rather
+   than agreeing with itself. *)
+let rule_row widths =
+  "<r>"
+  ^ String.concat "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
+      (List.map horizontal widths)
+  ^ "</r>"
 
 let tagged_fence ?(width = 40) language body =
   let stem = "\xe2\x94\x8c\xe2\x94\x80 " ^ language ^ " " in
@@ -154,13 +166,53 @@ let test_a_heading_carries_its_level () =
 let test_a_table_becomes_columns () =
   check_rows "header, rule, and body"
     [ "<th>kind  | count</th>"
-    ; "<r>\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80 | \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80</r>"
+    ; rule_row [ 5; 5 ]
     ; "bug   |     3"
     ; "spike |    12"
     ]
     (render ~width:40
        "| kind | count |\n| --- | ----: |\n| bug | 3 |\n| spike | 12 |")
 ;;
+
+(* The rule has to measure the same cells as the gutter it stands in for, or
+   the one row whose job is to say where the columns divide draws the divide
+   somewhere else. *)
+let test_the_rule_joint_measures_the_gutter () =
+  List.iter
+    (fun (name, (palette : Markdown.palette)) ->
+       Alcotest.(check int)
+         (name ^ ": the rule lines up with the rows it divides")
+         (Masc_tui_message_layout.display_width palette.table_gutter)
+         (Masc_tui_message_layout.display_width palette.table_rule_gutter))
+    [ ("tagged", tagged); ("plain", Markdown.plain_palette) ]
+
+(* The box is paid for out of the columns, not out of the pane. A table that
+   drew its own width plus a border would run past the frame it sits in. *)
+let test_a_framed_table_stays_inside_its_width () =
+  let framed = { Markdown.plain_palette with table_frame = true } in
+  let rows =
+    render ~width:20 ~palette:framed "| id | what |\n| -- | ---- |\n| a1 | b |"
+  in
+  (* Columns are sized to what they hold and only shrink when that overruns
+     the pane, so the table is 20 cells wide only when it needs to be. What
+     the box does have to hold is that every row measures the same: a border
+     that disagreed with the row under it would not close. *)
+  let width_of = Masc_tui_message_layout.display_width in
+  (match rows with
+   | first :: rest ->
+       List.iteri
+         (fun index row ->
+            Alcotest.(check int)
+              (Printf.sprintf "row %d is as wide as the border above it" (index + 1))
+              (width_of first) (width_of row))
+         rest;
+       Alcotest.(check bool) "and none of them overruns the pane" true
+         (width_of first <= 20)
+   | [] -> Alcotest.fail "the renderer answered no rows");
+  (* Asserted rather than assumed: without a border row the width check above
+     would be measuring the table this palette drew before the box existed. *)
+  Alcotest.(check int)
+    "top, header, separator, the one body row, bottom" 5 (List.length rows)
 
 let test_a_table_needs_its_delimiter_row () =
   (* An OCaml match arm pasted outside a fence is not a table. *)
@@ -173,7 +225,7 @@ let test_a_table_column_gives_up_cells_to_fit () =
      that costs nothing to keep. *)
   check_rows "the wide column is the one that loses"
     [ "<th>id | what           </th>"
-    ; "<r>\xe2\x94\x80\xe2\x94\x80 | \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80</r>"
+    ; rule_row [ 2; 15 ]
     ; "a1 | a very long ce~"
     ]
     (render ~width:20 "| id | what |\n| -- | ---- |\n| a1 | a very long cell |")
@@ -491,6 +543,10 @@ let () =
             test_a_heading_carries_its_level
         ; Alcotest.test_case "a table becomes columns" `Quick
             test_a_table_becomes_columns
+        ; Alcotest.test_case "the rule joint measures the gutter" `Quick
+            test_the_rule_joint_measures_the_gutter
+        ; Alcotest.test_case "a framed table stays inside its width" `Quick
+            test_a_framed_table_stays_inside_its_width
         ; Alcotest.test_case "a table needs its delimiter row" `Quick
             test_a_table_needs_its_delimiter_row
         ; Alcotest.test_case "a table column gives up cells to fit" `Quick

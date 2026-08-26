@@ -5,6 +5,7 @@ import {
   operationDeliveryProvenance,
   sameDeliveryProvenance,
   toolCallDeliveryProvenance,
+  toolDeliveryProvenance,
 } from './keeper-delivery-provenance'
 import {
   decodeKeeperChatDeliveryProvenance,
@@ -15,10 +16,14 @@ describe('keeper chat delivery provenance', () => {
   it.each([
     [{ kind: 'operation', operation_id: 'kmsg-1' }, { kind: 'accepted_user' }],
     [{ kind: 'fusion_run', request_id: 'fusion-1' }, { kind: 'terminal_assistant' }],
-    [{ kind: 'continuation', intent_id: 'intent-1' }, {
+    [{ kind: 'workspace_message', request_id: 'workspace-message-1' }, {
       kind: 'tool_call',
-      execution_id: 'call-1',
+      execution_id: 'exec-1',
       ordinal: 0,
+    }],
+    [{ kind: 'operation', operation_id: 'kmsg-2' }, {
+      kind: 'tool_delivery',
+      ordinal: 1,
     }],
   ])('decodes every backend delivery-key variant with its transcript slot', (deliveryKey, slot) => {
     const decoded = decodeKeeperChatDeliveryProvenance(deliveryKey, slot)
@@ -37,6 +42,11 @@ describe('keeper chat delivery provenance', () => {
     [{ kind: 'operation', operation_id: 'kmsg-1' }, {
       kind: 'tool_call',
       execution_id: ' ',
+      ordinal: 0,
+    }],
+    [{ kind: 'operation', operation_id: 'kmsg-1' }, {
+      kind: 'tool_delivery',
+      execution_id: 'provider-call',
       ordinal: 0,
     }],
   ])('rejects provenance that is outside the backend contract', (deliveryKey, slot) => {
@@ -67,10 +77,21 @@ describe('keeper chat delivery provenance', () => {
 
   it('derives a tool slot without changing the parent delivery key', () => {
     const parent = operationDeliveryProvenance('kmsg-1', 'terminal_assistant')
-    expect(toolCallDeliveryProvenance(parent, 'call-2', 1)).toEqual({
+    expect(toolCallDeliveryProvenance(parent, 'exec-2', 1)).toEqual({
       delivery_key: parent.delivery_key,
-      transcript_slot: { kind: 'tool_call', execution_id: 'call-2', ordinal: 1 },
+      transcript_slot: { kind: 'tool_call', execution_id: 'exec-2', ordinal: 1 },
     })
+  })
+
+  it('keeps a pre-result tool slot delivery-only and ordinal-specific', () => {
+    const parent = operationDeliveryProvenance('kmsg-1', 'terminal_assistant')
+    const first = toolDeliveryProvenance(parent, 0)
+    const second = toolDeliveryProvenance(parent, 1)
+    expect(first).toEqual({
+      delivery_key: parent.delivery_key,
+      transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
+    })
+    expect(first && second && sameDeliveryProvenance(first, second)).toBe(false)
   })
 
   it('normalizes status history through the same closed decoder', () => {

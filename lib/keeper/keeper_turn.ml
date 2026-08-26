@@ -220,7 +220,7 @@ let turn_resources_error ~surface failure =
   let detail =
     Keeper_publication_recovery_scope.failure_to_string failure
   in
-  tool_result_error_data
+  tool_result_error_data ~class_:Tool_result.Dependency_unavailable
     ~tool_name:(invocation_tool_name surface)
     (`Assoc
        [ "error", `String "keeper_turn_resources_unavailable"
@@ -364,6 +364,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -417,7 +418,9 @@ let run_keeper_invocation_turn_admitted_inner
     match ensure_keeper_exists
       ~ctx ~name
     with
-    | Error e -> tool_result_error ("" ^ e)
+    (* The named keeper does not exist. That is the caller naming something
+       absent, not this turn falling over. *)
+    | Error e -> tool_result_error ~class_:Tool_result.Workflow_rejection e
     | Ok meta0 ->
       (match
          Keeper_publication_recovery_scope.resolve_turn_resources
@@ -432,14 +435,14 @@ let run_keeper_invocation_turn_admitted_inner
            ~base_path:ctx.config.base_path
            ~keeper_name:entry.meta.name
        with
-       | Error err -> tool_result_error (Agent_core.Error.to_string err)
+       | Error err -> tool_result_error ~class_:Tool_result.Runtime_failure (Agent_core.Error.to_string err)
        | Ok profile_defaults ->
       (match
          Keeper_meta_contract.effective_meta_of_profile_defaults
            profile_defaults
            entry.meta
        with
-       | Error error -> tool_result_error error
+       | Error error -> tool_result_error ~class_:Tool_result.Runtime_failure error
        | Ok meta ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a keeper whose
          runtime cannot take an image on its own,
@@ -478,7 +481,7 @@ let run_keeper_invocation_turn_admitted_inner
       match resolve_turn_runtime_id meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;
-        tool_result_error ("" ^ e)
+        tool_result_error ~class_:Tool_result.Runtime_failure ("" ^ e)
       | Ok turn_runtime_id ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
@@ -501,7 +504,7 @@ let run_keeper_invocation_turn_admitted_inner
        with
 	         | Error error ->
 	           Progress.stop_tracking turn_task_id;
-	           tool_result_error (Agent_core.Error.to_string error)
+	           tool_result_error ~class_:Tool_result.Runtime_failure (Agent_core.Error.to_string error)
 	         | Ok initial_execution ->
             let base_dir =
               let root = session_base_dir ctx.config in
@@ -738,6 +741,7 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ~runtime_id
 			                                ~world_observation
 		                                ?on_event
+		                                ?on_tool_stream_observation
 		                                ?on_tool_result_ready
 		                                ?approval_gate
 		                                ~trajectory_acc
@@ -762,7 +766,7 @@ let run_keeper_invocation_turn_admitted_inner
                  ~label:"trajectory finalize (agent_run error)" exn);
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
-              tool_result_error user_message
+              tool_result_error ~class_:Tool_result.Runtime_failure user_message
             | Ok (result, _) ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
@@ -883,6 +887,7 @@ let run_keeper_invocation_turn_admitted_inner
 let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -923,6 +928,7 @@ let run_keeper_invocation_turn_admitted
     run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -944,6 +950,7 @@ let handle_keeper_msg_admitted
       ~admission_token:_
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -957,6 +964,7 @@ let handle_keeper_msg_admitted
   run_keeper_invocation_turn_admitted
     ?on_text_delta
     ?on_event
+    ?on_tool_stream_observation
     ?on_tool_result_ready
     ?approval_gate
     ?event_bus

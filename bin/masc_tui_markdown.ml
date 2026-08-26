@@ -18,6 +18,17 @@ type palette = {
   quote_gutter : string;
   table_header : span;
   table_gutter : string;
+  (* What joins the rule row between columns. The gutter itself used to run
+     through it, which drew the rule as separate dashes with a bar standing in
+     the gap -- the one row whose job is to say where the columns divide was
+     the row that broke there. It has to measure the same cells as the gutter
+     or the rule stops lining up with the rows it belongs to. *)
+  table_rule_gutter : string;
+  (* Draw the outer box. Off unless the reader asked: every row gains an edge
+     on each side and the block a top and a bottom, so the columns have four
+     fewer cells to share. On a narrow pane that is a column of content spent
+     saying where the content ends. *)
+  table_frame : bool;
   (* Styles for fenced code that names a language this module lexes. A fence
      without a language, or one naming a language it does not, keeps the
      single [code] span: colouring a grammar nobody parsed is decoration
@@ -48,6 +59,8 @@ let plain_palette =
   ; quote_gutter = "> "
   ; table_header = ("", "")
   ; table_gutter = " | "
+  ; table_rule_gutter = "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
+  ; table_frame = false
   ; code_keyword = ("", "")
   ; code_string = ("", "")
   ; code_comment = ("", "")
@@ -327,6 +340,16 @@ let fence_marker line =
   else if starts_at trimmed 0 "~~~" then Some "~~~"
   else None
 
+let non_colliding_fence_marker lines =
+  let collides marker =
+    List.exists
+      (fun line -> Option.exists (String.equal marker) (fence_marker line))
+      lines
+  in
+  if not (collides "```") then Some "```"
+  else if not (collides "~~~") then Some "~~~"
+  else None
+
 let is_rule line =
   let trimmed = String.trim line in
   let distinct char =
@@ -596,7 +619,14 @@ let table_block palette ~width ~alignments ~header ~body =
   in
   let header = styled header in
   let body = List.map styled body in
-  let widths = column_widths ~width ~gutter_cells ~columns (header :: body) in
+  (* The frame is paid for out of the columns, not out of the pane: a table
+     that drew its own width plus a border would run past the frame it sits
+     in, the way the origin margin would have. *)
+  let frame_cells = if palette.table_frame then 4 else 0 in
+  let widths =
+    column_widths ~width:(max 1 (width - frame_cells)) ~gutter_cells ~columns
+      (header :: body)
+  in
   let draw row =
     List.mapi
       (fun index cell ->
@@ -615,13 +645,33 @@ let table_block palette ~width ~alignments ~header ~body =
   in
   let opening, closing = palette.table_header in
   let rule_opening, rule_closing = palette.rule in
+  let dashes cells = String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80")) in
   let rule =
-    List.map (fun cells -> String.concat "" (List.init cells (fun _ -> "\xe2\x94\x80"))) widths
-    |> String.concat gutter
+    List.map dashes widths |> String.concat palette.table_rule_gutter
   in
-  (opening ^ draw header ^ closing)
-  :: (rule_opening ^ rule ^ rule_closing)
-  :: List.map draw body
+  if not palette.table_frame then
+    (opening ^ draw header ^ closing)
+    :: (rule_opening ^ rule ^ rule_closing)
+    :: List.map draw body
+  else
+    (* The box. Each segment spans its column plus the space on either side,
+       so a junction lands exactly where the gutter's bar does and the border
+       measures the same cells as the row above it. *)
+    let border ~left ~joint ~right =
+      rule_opening
+      ^ left
+      ^ (List.map (fun cells -> dashes (cells + 2)) widths
+        |> String.concat joint)
+      ^ right ^ rule_closing
+    in
+    let edged row = rule_opening ^ "\xe2\x94\x82" ^ rule_closing ^ " " ^ row
+      ^ " " ^ rule_opening ^ "\xe2\x94\x82" ^ rule_closing in
+    border ~left:"\xe2\x94\x8c" ~joint:"\xe2\x94\xac" ~right:"\xe2\x94\x90"
+    :: edged (opening ^ draw header ^ closing)
+    :: border ~left:"\xe2\x94\x9c" ~joint:"\xe2\x94\xbc" ~right:"\xe2\x94\xa4"
+    :: (List.map (fun row -> edged (draw row)) body
+       @ [ border ~left:"\xe2\x94\x94" ~joint:"\xe2\x94\xb4"
+             ~right:"\xe2\x94\x98" ])
 
 (* The table starting at [line], if one starts there: its delimiter row, the
    body rows that follow it, and what is left of the source. *)

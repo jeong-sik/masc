@@ -35,7 +35,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name)
   then
-    tool_result_error (invalid_name_error requested_name)
+    tool_result_error ~class_:Tool_result.Policy_rejection (invalid_name_error requested_name)
   else
     match Keeper_registry.get ~base_path:ctx.config.base_path requested_name with
     | None ->
@@ -45,7 +45,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown inventory failed: keeper=%s error=%s"
            requested_name
            detail;
-         tool_result_error detail
+         tool_result_error ~class_:Tool_result.Runtime_failure detail
        | Ok (Some operation) ->
          Log.Keeper.info
            "Keeper shutdown operation observed: keeper=%s operation=%s"
@@ -54,7 +54,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
          tool_result_ok_data (operation_json ~accepted:false operation)
        | Ok None ->
          (match Keeper_meta_store.read_meta_resolved ctx.config requested_name with
-          | Error detail -> tool_result_error detail
+          | Error detail -> tool_result_error ~class_:Tool_result.Runtime_failure detail
           | Ok None ->
             Log.Keeper.info "Keeper shutdown found already absent: keeper=%s" requested_name;
             tool_result_ok_data
@@ -66,7 +66,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
             Log.Keeper.error
               "Keeper shutdown refused metadata-only identity: keeper=%s"
               requested_name;
-            tool_result_error
+            tool_result_error ~class_:Tool_result.Workflow_rejection
               "Keeper metadata exists without a live lane; refusing untracked cleanup"))
     | Some entry ->
       let request : Keeper_shutdown_prepare_join.request =
@@ -91,7 +91,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown submission failed: keeper=%s error=%s"
            requested_name
            (Keeper_shutdown_runtime.submit_error_to_string error);
-         tool_result_error (Keeper_shutdown_runtime.submit_error_to_string error)
+         tool_result_error ~class_:Tool_result.Runtime_failure (Keeper_shutdown_runtime.submit_error_to_string error)
        | Ok operation ->
          Log.Keeper.info
            "Keeper shutdown operation accepted: keeper=%s operation=%s"

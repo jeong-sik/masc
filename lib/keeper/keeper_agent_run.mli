@@ -204,7 +204,9 @@ val run_turn
   -> ?history_assistant_source:string
   -> ?temperature:float
   -> ?on_event:(Agent_core.Types.sse_event -> unit)
-  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
+  -> ?on_tool_stream_observation:
+       (Keeper_hooks_agent_core.tool_stream_observation -> unit)
+  -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
   -> ?approval_gate:Keeper_tool_approval_gate.t
   -> ?trajectory_acc:Trajectory.accumulator
   -> ?degraded_retry_applied:bool

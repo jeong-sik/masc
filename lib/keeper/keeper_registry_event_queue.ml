@@ -352,7 +352,8 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
-  | Keeper_event_queue.Delegate_completed _ ->
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ ->
     None
 ;;
 
@@ -666,14 +667,13 @@ let select_when_result ~base_path name ~ready =
       ~ready
 ;;
 
-let connector_attention_conversation_batch_result ~base_path name ~primary =
+let pending_selections_result ~base_path name =
   match Keeper_registry.get ~base_path name with
   | None -> Error (Printf.sprintf "keeper not registered: %s" name)
   | Some _ ->
-    Keeper_event_queue_persistence.connector_attention_conversation_batch_result
+    Keeper_event_queue_persistence.pending_selections_result
       ~base_path
       ~keeper_name:name
-      ~primary
 ;;
 
 let validate_pending_selection_result ~base_path name ~selection =

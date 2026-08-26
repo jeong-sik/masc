@@ -557,6 +557,9 @@ function ToolApprovalCards({ keeperName }: { keeperName: string }): VNode | null
             <span class="mono">${approval.toolName}</span>
           </div>
           <div class="tool-approval-card-q">${approval.question}</div>
+          ${approval.because
+            ? html`<div class="tool-approval-card-because">보류 사유 · ${approval.because}</div>`
+            : null}
           ${approval.args && approval.args !== '{}'
             ? html`<pre class="tool-approval-card-args">${approval.args}</pre>`
             : null}

@@ -915,6 +915,8 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               ~turn:0
               ~keeper_turn_id:1
               ();
+            let callback_saw_committed_row = ref true in
+            let ready_callbacks : (string * int * int * string) list ref = ref [] in
             let hooks =
               Masc.Keeper_hooks_agent_core.make_hooks
                 ~config
@@ -923,6 +925,25 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~trace_id
                 ~keeper_turn_id:1
                 ~on_after_turn_ordinal:ignore
+                ~on_tool_result_ready:
+                  (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
+                     let execution_id = Ids.Execution_id.to_string execution_id in
+                     let committed =
+                       Masc.Keeper_tool_call_log.read_recent
+                         ~keeper_name:meta.name
+                         ~n:8
+                         ()
+                       |> List.exists (function
+                         | `Assoc fields ->
+                           (match List.assoc_opt "execution_id" fields with
+                            | Some (`String stored) -> String.equal stored execution_id
+                            | _ -> false)
+                         | _ -> false)
+                     in
+                     if not committed then callback_saw_committed_row := false;
+                     ready_callbacks :=
+                       (tool_call_id, turn, planned_index, execution_id)
+                       :: !ready_callbacks)
                 ()
             in
             let event_bus = Agent_core.Event_bus.create () in
@@ -1094,6 +1115,29 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                    | None -> fail "durable Keeper tool row has no execution_id")
                 log_rows
             in
+            let ready_callbacks = List.rev !ready_callbacks in
+            check bool
+              "result-ready callbacks observe their committed rows"
+              true
+              !callback_saw_committed_row;
+            check int
+              "one result-ready callback per execution"
+              2
+              (List.length ready_callbacks);
+            List.iter
+              (fun (tool_call_id, turn, planned_index, _) ->
+                 check string "callback preserves opaque provider id" "" tool_call_id;
+                 check int "callback preserves Agent Core turn" 0 turn;
+                 check int "callback preserves planned index" 0 planned_index)
+              ready_callbacks;
+            let callback_execution_ids =
+              List.map (fun (_, _, _, execution_id) -> execution_id) ready_callbacks
+            in
+            check
+              (list string)
+              "callback and durable-log joins agree"
+              (List.sort String.compare log_execution_ids)
+              (List.sort String.compare callback_execution_ids);
             check
               (list string)
               "event and durable-log joins agree"
@@ -5432,6 +5476,93 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             | _ -> fail "correction-capable failures poisoned terminal state"))
 ;;
 
+let test_stale_spawn_handles_remain_correction_capable () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    ~bind_eio_context:true
+    "stale-spawn-handle-correction"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let registry =
+         Spawn_registry.create ~run:"current-turn" ~output_limit_bytes:(1 lsl 16)
+         |> function
+         | Some registry -> registry
+         | None -> fail "valid spawn registry was rejected"
+       in
+       Spawn_turn_registry.with_turn_registry (Some registry) @@ fun () ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~tool_approval:None
+                  ~pre_tool_rejects:(ref [])
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:1
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let call name input =
+              let tool =
+                projected
+                |> List.find_opt
+                     (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                        String.equal tool.name name)
+                |> function
+                | Some tool -> tool
+                | None -> failf "%s was not projected" name
+              in
+              tool.call ~call_id:("stale-" ^ name) input
+            in
+            let stale_handle = "previous-turn-1" in
+            let cases =
+              [ ( "keeper_spawn_read"
+                , `Assoc [ "handle", `String stale_handle ] )
+              ; ( "keeper_spawn_wait"
+                , `Assoc
+                    [ "handle", `String stale_handle
+                    ; "until", `String "exit"
+                    ; "timeout_sec", `Float 1.
+                    ] )
+              ; ( "keeper_spawn_stop"
+                , `Assoc [ "handle", `String stale_handle ] )
+              ]
+            in
+            List.iter
+              (fun (name, input) ->
+                 let result = call name input in
+                 check bool (name ^ " reports the stale handle") false result.success;
+                 check
+                   (option string)
+                   (name ^ " keeps the provider loop correction-capable")
+                   None
+                   (Option.map (fun _ -> "abort") result.abort_turn))
+              cases;
+            match bundle.terminal_effect_state () with
+            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+            | _ -> fail "stale handle lookup poisoned terminal state"))
+;;
+
 let test_composition_action_commit_advances_revision_before_refresh_event () =
   with_exec_fixture "composition-action-commit-refresh"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -6714,6 +6845,8 @@ let () =
         test_direct_execute_post_effect_artifact_failure_closes_official_client_loop;
       test_case "direct pre-effect and read-only failures remain correction-capable" `Quick
         test_direct_pre_effect_and_readonly_failures_remain_correction_capable;
+      test_case "stale spawn handles remain correction-capable" `Quick
+        test_stale_spawn_handles_remain_correction_capable;
       test_case "composition action commit refreshes dashboard evidence" `Quick
         test_composition_action_commit_advances_revision_before_refresh_event;
       test_case "composition telemetry outage preserves execution" `Quick

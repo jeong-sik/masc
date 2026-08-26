@@ -1,5 +1,6 @@
 export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_CONNECTED',
+  'KEEPER_RUNTIME_ATTEMPT_STARTED',
   'KEEPER_STREAM_MESSAGE_START',
   'KEEPER_STREAM_MESSAGE_DELTA',
   'KEEPER_STREAM_MESSAGE_STOP',
@@ -52,6 +53,12 @@ export type KeeperStreamProtocolErrorKind =
   | 'tool_start_missing_identity'
   | 'tool_args_without_start'
   | 'tool_stop_without_start'
+  | 'tool_replay_mismatch'
+  | 'tool_delta_invalid_kind'
+  | 'tool_attempt_superseded'
+  | 'tool_message_start_conflict'
+  | 'stream_event_after_terminal'
+  | 'tool_occurrence_mapping_invalid'
   | 'media_delta_invalid_block'
   | 'media_source_unsupported'
   | 'media_decode_failed'
@@ -73,8 +80,22 @@ export type KeeperTurnOutcome =
   | 'external_effect_pending'
   | 'no_visible_reply'
 
+type KeeperToolStreamOccurrence = {
+  toolStreamScope: number
+  toolCallBlockIndex: number
+  providerMessageId?: string
+  toolCallId?: string
+}
+
+type KeeperQuarantinedToolOccurrence = {
+  toolStreamScope: number
+  toolCallBlockIndex: number
+  providerMessageId?: string
+}
+
 type KeeperChatCustomEvent =
   | { type: 'CUSTOM'; name: 'KEEPER_CONNECTED'; value: null }
+  | { type: 'CUSTOM'; name: 'KEEPER_RUNTIME_ATTEMPT_STARTED'; value: null }
   // #29650 added these two to the name list above and to the SSE field table,
   // but not here, so a decoded frame could not be handed to a handler that
   // takes a KeeperChatStreamEvent. The fields match sse.ts's allowedFields.
@@ -86,6 +107,7 @@ type KeeperChatCustomEvent =
         tool_call_name: string
         args: string
         question: string
+        because?: string
       }
     }
   | {
@@ -121,7 +143,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_TOOL_RESULT_READY'
-      value: { tool_call_id: string }
+      value: KeeperToolStreamOccurrence & { executionId: string }
     }
   | {
       type: 'CUSTOM'
@@ -164,6 +186,7 @@ type KeeperChatCustomEvent =
         event_type?: string
         reason?: string
         raw_bytes?: number
+        quarantined_occurrence?: KeeperQuarantinedToolOccurrence
       }
     }
   | {
@@ -202,8 +225,8 @@ export type KeeperChatStreamEvent = KeeperChatStreamEventBase & (
   | { type: 'TEXT_MESSAGE_START'; messageId?: string; role?: 'assistant' | 'user' }
   | { type: 'TEXT_MESSAGE_CONTENT'; messageId?: string; delta?: string }
   | { type: 'TEXT_MESSAGE_END'; messageId?: string }
-  | { type: 'TOOL_CALL_START'; toolCallId?: string; toolCallName?: string }
-  | { type: 'TOOL_CALL_ARGS'; toolCallId?: string; delta?: string; snapshot?: string }
-  | { type: 'TOOL_CALL_END'; toolCallId?: string }
+  | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_START'; toolCallName?: string })
+  | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_ARGS'; delta?: string; snapshot?: string })
+  | (KeeperToolStreamOccurrence & { type: 'TOOL_CALL_END' })
   | KeeperChatCustomEvent
 )

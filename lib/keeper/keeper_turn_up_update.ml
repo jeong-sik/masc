@@ -338,44 +338,51 @@ let update_keeper ?(preserve_prompt_defaults = false)
              | Ok None ->
                tool_result_error ~class_:Tool_result.Runtime_failure "Keeper owner metadata disappeared during update"
              | Ok (Some updated) ->
-               (match
-                  Keeper_shutdown_supersession.commit_after_metadata_update
-                    ~config:ctx.config
-                    supersession
-                with
-                | Error error ->
-                  tool_result_error ~class_:Tool_result.Runtime_failure
-                    (Keeper_shutdown_supersession.error_to_string error)
-                | Ok
-                    ( Keeper_shutdown_supersession.No_shutdown_admission
-                    | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
-               (match swap_keepalive_lane_fenced ctx updated with
-                | Error rejection -> rejection
-                | Ok (stop_outcome, launch_outcome) ->
-               (match launch_outcome with
-                | Keepalive_started _ ->
-                  tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
-                | Keepalive_already_registered entry ->
-                  let stop_detail =
-                    match stop_outcome with
-                    | Keeper_not_registered -> "keeper was not registered before restart"
-                    | Keeper_joined _ -> "previous keeper lane joined"
-                  in
-                  tool_result_error ~class_:Tool_result.Workflow_rejection
-                    (Printf.sprintf
-                       "keeper update launch conflicted after %s: %s"
-                       stop_detail
-                       (start_keepalive_outcome_to_string
-                          (Keepalive_already_registered entry)))
-                | ( Keepalive_lifecycle_denied _
-                  | Keepalive_identity_unrepairable
-                  | Keepalive_registration_rejected _
-                  | Keepalive_fiber_start_rejected _
-                  | Keepalive_memory_lane_not_ready _
-                  | Keepalive_launch_callback_failed _
-                  | Keepalive_lane_ownership_lost
-                  | Keepalive_fork_rejected _ ) as rejected ->
-                  tool_result_error ~class_:Tool_result.Runtime_failure
-                    (Printf.sprintf
-                       "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))))))
+               (* Metadata is already durable.  A cancelled HTTP/MCP caller
+                  must not interrupt the matching shutdown supersession,
+                  temporary admission-fence rollback, or lane restart.  The
+                  protected region still re-delivers cancellation after the
+                  lifecycle transaction has reached a consistent boundary. *)
+               Eio.Cancel.protect (fun () ->
+                 match
+                   Keeper_shutdown_supersession.commit_after_metadata_update
+                     ~config:ctx.config
+                     supersession
+                 with
+                 | Error error ->
+                   tool_result_error ~class_:Tool_result.Runtime_failure
+                     (Keeper_shutdown_supersession.error_to_string error)
+                 | Ok
+                     ( Keeper_shutdown_supersession.No_shutdown_admission
+                     | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+                   (match swap_keepalive_lane_fenced ctx updated with
+                    | Error rejection -> rejection
+                    | Ok (stop_outcome, launch_outcome) ->
+                      (match launch_outcome with
+                       | Keepalive_started _ ->
+                         tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
+                       | Keepalive_already_registered entry ->
+                         let stop_detail =
+                           match stop_outcome with
+                           | Keeper_not_registered ->
+                             "keeper was not registered before restart"
+                           | Keeper_joined _ -> "previous keeper lane joined"
+                         in
+                         tool_result_error ~class_:Tool_result.Workflow_rejection
+                           (Printf.sprintf
+                              "keeper update launch conflicted after %s: %s"
+                              stop_detail
+                              (start_keepalive_outcome_to_string
+                                 (Keepalive_already_registered entry)))
+                       | ( Keepalive_lifecycle_denied _
+                         | Keepalive_identity_unrepairable
+                         | Keepalive_registration_rejected _
+                         | Keepalive_fiber_start_rejected _
+                         | Keepalive_memory_lane_not_ready _
+                         | Keepalive_launch_callback_failed _
+                         | Keepalive_lane_ownership_lost
+                         | Keepalive_fork_rejected _ ) as rejected ->
+                         tool_result_error ~class_:Tool_result.Runtime_failure
+                           (Printf.sprintf
+                              "keeper metadata was updated but lane restart failed: %s"
+                              (start_keepalive_outcome_to_string rejected)))))))))

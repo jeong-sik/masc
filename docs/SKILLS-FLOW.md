@@ -69,11 +69,11 @@ fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클
 `disable-model-invocation`은 둘 다 명시적으로 거부한다. composition 선언을 남겨 놓고
 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
 
-**실패와 편차는 다르다**: strict validator인 `of_documents`는 첫 파싱 실패를 `Error`로
-돌려준다. 실제 turn loader는 `partition_documents`로 잘못된 문서만 표면에서 제외하고
-나머지 스킬을 계속 제공한다. 그 이름을 task가 지명하면 admission에서 typed missing으로
-막힌다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/plan 오류·중복
-스킬은 해당 문서의 rejection이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
+**실패와 편차는 다르다**: 카탈로그 조립의 유일한 진입점인
+`partition_documents`는 잘못된 문서만 표면에서 제외하고 모든 rejection을 별도로
+돌려준다. 그 이름을 task가 지명하면 admission에서 typed missing으로 막힌다. 구조 오류·
+사용 가능한 runtime 이름 부재·`description` 누락·fence/plan 오류·중복 스킬은 해당
+문서의 rejection이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
 `Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
 디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
 
@@ -96,7 +96,7 @@ sequenceDiagram
   Turn->>Setup: prepare_agent_setup
   Setup->>Snap: refresh configured sources
   Snap-->>Setup: effective_entries + exact source_text
-  Setup->>Cat: of_documents
+  Setup->>Cat: partition_documents
   Setup->>Setup: validate_held_task_skill_admission
   Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_composition_entries
@@ -167,31 +167,10 @@ flowchart TD
   `record_kind=composition_run` 종결 행을 남기며, async는 durable broker settlement가
   확정된 뒤에만 기록한다. 따라서 async 접수 성공을 실행 성공으로 세지 않는다.
 
-## 4. 상태: 무엇이 코드에 남았고 무엇이 파일로 갔나
-
-RFC-skills-as-tools의 하드컷 목표는 "즉석 합성 문법 제거 + `tool-compositions.toml`
-삭제". 실제 상태:
-
-| 항목 | 상태 | 근거 |
-|------|------|------|
-| `tool-compositions.toml` 로더·경로 | **삭제됨** | `keeper_tool_composition_catalog.mli:3` "the standalone tool-compositions.toml path is gone". 남은 언급은 주석의 "예전엔 여기서 왔다" 설명뿐 |
-| 합성 정의 (OCaml 리터럴) | **없음** | 정의는 SKILL.md fence. 코드엔 파서만 |
-| 도구 help 텍스트 (`[help]`) | **부분 이전** | `tool_help_registry.ml`이 `config/tools/<name>.toml`의 `[help]`에서 읽되, `[help]` 를 실제로 가진 도구는 5개뿐. 나머지는 OCaml derived |
-| `keeper_composition_status` · `_cancel` 설명·스키마 | **TOML 이전** | 둘 다 `{request_id: string}` 하나라 `keeper_skill` 처럼 스키마+설명을 함께 `config/tools/*.toml` 로 뺐다(반쪽 아님). 이 파일 model-prose 177B→0 |
-| `keeper_plan_execute` 설명 | **설계상 in-code** | `input` 이 typed object 라 템플릿 문법이 설명 문자열 말고는 실릴 데가 없다(주석 명시). 스키마가 코드에 남는 이상 설명만 빼면 정의가 두 군데로 갈라져 안 옮긴다 — 래칫이 debt 로 추적 |
-| `config/tools/<name>.help.md` (RFC 2.4) | **미채택 — 대체됨** | RFC 2.4가 계획한 md 파일 대신 TOML `[help]` 경로로 갔다. 핵심(산문이 OCaml 밖)은 달성. md 파일은 리팩터가 아니라 형식 취향의 문제라 남겨둠 |
-| 합성 스킬 이름 (OCaml 하드코딩) | **없음** | `keeper_compose_mission-snapshot`은 주석의 예시 한 곳뿐(`keeper_tool_composition_surface.ml:110`). 실제 이름은 파일에서 |
-
-즉 "스킬화 안 된 합성"이나 "코드에 박힌 합성 정의"는 없다. compose 형제 도구 중
-`status`·`cancel` 은 스키마+설명을 함께 TOML 로 뺐고, 남은 model-prose 는 둘이다:
-도구 help 는 md 가 아니라 TOML `[help]`에 살고(5개 도구만 채움), `keeper_plan_execute`
-설명은 typed object 스키마 때문에 설계상 in-code 다(주석이 그 이유를 밝힌다). 이 둘은
-model-prose 래칫이 debt 로 추적한다.
-
-## 5. 라이브 배치
+## 4. 라이브 배치
 
 파일은 공유 경로 `<base>/.masc/skills/<name>/SKILL.md`에 산다(현재 6개:
 background-snapshot, ci-red-attribution, mission-snapshot, tui-pty-scenario,
 turn-opening, work-intake). 서버는 발행 스냅샷을 `masc.skill-snapshot/v1`으로 투영하며,
 새 배치 후에는 `/health`의 `binary_commit`이 실행 중 바이너리를 가리킨다(런타임 파일
-플립은 실행 중 바이너리 기준으로 판단 — `docs/SKILLS.md §6`).
+플립은 실행 중 바이너리 기준으로 판단한다.

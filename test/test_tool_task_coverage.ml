@@ -1266,6 +1266,47 @@ let () = test "keeper_reconciliation_ignores_prefix_matched_agent"
   in
   assert (Option.is_none reconciled.current_task_id))
 
+let () = test "keeper_reconciliation_accepts_short_keeper_identity"
+    (fun () ->
+  let ctx = make_test_ctx_with_agent "codex-mcp-client" in
+  let keeper_name = "omega" in
+  let keeper_agent_name = "keeper-omega-agent" in
+  register_test_keeper ctx ~keeper_name ~agent_name:keeper_agent_name;
+  let _ =
+    Task.Tool.handle_add_task
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      ctx
+      (`Assoc [ "title", `String "Short keeper identity owner" ])
+  in
+  (match
+     Workspace.claim_task_r
+       ctx.config
+       ~agent_name:keeper_name
+       ~task_id:"task-001"
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> failwith (Masc_domain.masc_error_to_string err));
+  let meta =
+    match Keeper_registry.get ~base_path:ctx.config.base_path keeper_name with
+    | Some entry -> entry.meta
+    | None -> failwith "registered keeper is missing"
+  in
+  match
+    Keeper_current_task_reconcile.owned_active_tasks_for_meta
+      ~config:ctx.config
+      ~meta
+  with
+  | Ok [ { task_id; _ } ] ->
+    assert (String.equal (Keeper_id.Task_id.to_string task_id) "task-001")
+  | Ok tasks ->
+    failwith
+      (Printf.sprintf
+         "short keeper identity resolved %d owned tasks instead of one"
+         (List.length tasks))
+  | Error detail -> failwith detail)
+
 let () = test "handle_transition_expected_version_mismatch_does_not_retry_without_cas"
     (fun () ->
   let ctx = make_test_ctx () in

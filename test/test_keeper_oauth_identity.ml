@@ -376,6 +376,49 @@ let test_a_refusal_keeps_the_providers_reason () =
         (Keeper_oauth_flow.exchange_error_to_string other)
   | Ok _ -> Alcotest.fail "a 400 was read as success"
 
+let test_a_refusal_inside_a_200_is_still_a_refusal () =
+  (* Measured 2026-08-27: Slack's token endpoint answers a rejected code with
+     HTTP 200 and {"ok":false,"error":"invalid_code"}. Reading the status
+     alone files that under "the answer cannot be read", which sends an
+     operator looking for a parsing bug instead of at the reason the server
+     gave them. *)
+  let provider = load_or_fail atlassian_toml in
+  let pending = begin_for provider in
+  let result, _ =
+    complete_with provider pending ~state:pending.Keeper_oauth_flow.state
+      ~answer:(Ok (200, {|{"ok":false,"error":"invalid_code"}|}))
+  in
+  match result with
+  | Error (Keeper_oauth_flow.Provider_rejected { status; body }) ->
+      Alcotest.(check int) "the status it actually sent" 200 status;
+      Alcotest.(check bool) "the reason survives" true
+        (Str.string_match (Str.regexp ".*invalid_code") body 0)
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_flow.exchange_error_to_string other)
+  | Ok _ -> Alcotest.fail "a refusal was read as success"
+
+let test_an_empty_error_member_is_not_a_refusal () =
+  (* The member has to say something. An empty one is a provider filling in
+     a field, not refusing, and reading it as a refusal would throw away a
+     token that was issued. *)
+  let provider = load_or_fail atlassian_toml in
+  let pending = begin_for provider in
+  let result, _ =
+    complete_with provider pending ~state:pending.Keeper_oauth_flow.state
+      ~answer:
+        (Ok
+           ( 200,
+             {|{"access_token":"at-1","refresh_token":"rt-1","expires_in":3600,"error":""}|}
+           ))
+  in
+  match result with
+  | Ok tokens -> check str "the token came through" "at-1"
+                   tokens.Keeper_oauth_flow.access_token
+  | Error other ->
+      Alcotest.failf "a usable answer was refused: %s"
+        (Keeper_oauth_flow.exchange_error_to_string other)
+
 let test_an_answer_without_expiry_is_not_guessed () =
   let provider = load_or_fail atlassian_toml in
   let pending = begin_for provider in
@@ -1093,6 +1136,10 @@ let () =
             test_a_missing_refresh_token_is_named;
           Alcotest.test_case "keeps the provider's reason" `Quick
             test_a_refusal_keeps_the_providers_reason;
+          Alcotest.test_case "a refusal inside a 200 is still a refusal" `Quick
+            test_a_refusal_inside_a_200_is_still_a_refusal;
+          Alcotest.test_case "an empty error member is not a refusal" `Quick
+            test_an_empty_error_member_is_not_a_refusal;
           Alcotest.test_case "does not invent an expiry" `Quick
             test_an_answer_without_expiry_is_not_guessed;
           Alcotest.test_case "refresh asks for a refresh grant" `Quick

@@ -63,7 +63,13 @@ type exchange_error =
   | Transport of string  (** the request did not complete *)
   | Provider_rejected of { status : int; body : string }
       (** the provider answered, and said no. The body is kept because
-          providers put the reason there and an operator needs to read it. *)
+          providers put the reason there and an operator needs to read it.
+
+          Recognised by the RFC 6749 5.2 ["error"] member rather than by the
+          status alone: Slack's token endpoint refuses a code with 200 and
+          an error member, and reading the status would file that under
+          [Malformed_response] -- a parsing bug to go looking for instead of
+          a reason the server already gave. *)
   | Malformed_response of string
       (** the provider answered with something this cannot read *)
   | State_mismatch

@@ -155,6 +155,22 @@ let with_client_secret client_secret parameters =
   | None -> parameters
   | Some secret -> parameters @ [ "client_secret", secret ]
 
+(* RFC 6749 5.2 puts a refusal in an "error" member and asks for a 4xx to
+   carry it. Not every server sends the status: Slack's token endpoint
+   answers a rejected code with 200 and {"ok":false,"error":"invalid_code"}.
+   Reading the status alone turns that into "the answer cannot be read",
+   which sends an operator looking for a parsing bug instead of at the
+   reason the server gave them. The member is what says no; the status only
+   says so when it does. *)
+let refusal body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> None
+  | `Assoc pairs ->
+    (match List.assoc_opt "error" pairs with
+     | Some (`String reason) when String.trim reason <> "" -> Some reason
+     | Some _ | None -> None)
+  | _ -> None
+
 let exchange ~post ~discovered ~now parameters =
   match
     post ~url:discovered.Keeper_oauth_discovery.token_url ~headers:form_headers
@@ -162,7 +178,9 @@ let exchange ~post ~discovered ~now parameters =
   with
   | Error detail -> Error (Transport detail)
   | Ok (status, body) when status >= 200 && status < 300 ->
-    tokens_of_response ~now body
+    (match refusal body with
+     | Some _ -> Error (Provider_rejected { status; body })
+     | None -> tokens_of_response ~now body)
   | Ok (status, body) -> Error (Provider_rejected { status; body })
 
 let complete

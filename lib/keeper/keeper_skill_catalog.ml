@@ -165,24 +165,11 @@ let parse_skill ~directory content =
     let { Agent_core.Skill_document.name
         ; description
         ; body
-        ; allowed_tools
         ; extensions
         ; _
         }
       = document
     in
-    (* [allowed-tools] is read and not acted on. Agent Skills calls it an
-       experimental pre-approval hint; MASC's approval policy is what decides,
-       and projecting this field as though it were a permission contract is
-       the thing that was false. That projection is gone.
-
-       Refusing the document is a different claim, and a wider one: it says a
-       skill carrying the field cannot be loaded at all. The field is standard
-       in the ecosystem -- 122 of the skills on this machine declare it -- so
-       the refusal reaches skills nobody wrote for MASC, and one of them
-       failing takes the whole catalog with it. A field this does not act on
-       is not a lie; showing it as policy was. *)
-    ignore (allowed_tools : string option);
     (match reject_invocation_policy ~skill:name extensions with
      | Error _ as error -> error
      | Ok () ->

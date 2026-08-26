@@ -243,15 +243,17 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
 | 1 | 병합 (#30177) | 이 RFC |
 | 2 | 병합 (#30183) | `Keeper_skill_catalog`: fenced composition 감지 + 카탈로그 조립 |
 | 2b | 병합 (#30189, 병렬 세션) | `Skill_definition` 파서 + `task.skills` 라우팅 + current-task 한 줄 |
-| 3 | 진행 | 파싱 SSOT 통합: 카탈로그가 `Skill_definition` 에 위임 + 이 RFC 정합 |
-| 4 | 예정 | 스킬 디렉토리 스캔 + 합성 스킬 → make_tools 배선 + projection 기대 목록 |
-| 5 | 예정 | `Json_template.Param` + `[[compositions.params]]` + input schema 생성 |
-| 6 | 진행 | `tool-compositions.toml` 경로·로더 삭제 (라이브 파일 이전은 9와 함께) |
-| 7 | 예정 | `config/tools/<name>.help.md` + registry 서빙 전환 |
-| 8 | 예정 | `/api/v1/skills` + Skills 패널 + 합성 run 뷰 |
-| 9 | 예정 | 라이브 `<base_path>/.masc/skills/` 배치, keeper 재기동, 사용 실측·스크린샷 |
+| 3 | 병합 (#30205) | 파싱 SSOT 통합: 카탈로그가 한 파서에 위임 |
+| 4 | 병합 (#30208) | 스킬 디렉토리 스캔 + 합성 스킬 → make_tools 배선 |
+| 5 | 병합 (#30215) | `[[compositions.params]]` + input schema 생성 |
+| 6 | 병합 (#30220) | `tool-compositions.toml` 경로·로더 삭제 (하드컷) |
+| 7 | 대체 | 도구 도움말은 md 파일 대신 `config/tools/<name>.toml` `[help]` 로 externalize (§2.4 개정). 산문이 OCaml 밖이라는 목표는 달성 — md 파일 형식은 미채택 |
+| 8 | 병합 (#30236 API, #30727 스냅샷, #30777 패널) | `/api/v1/skills` + Monitor › Skills 패널 (종류·도구·사용 횟수) |
+| 9 | 병합 | 라이브 `<base_path>/.masc/skills/` 배치 (6개 스킬), keeper 재기동, 하루 수백 회 `keeper_compose_*`/`keeper_skill` 호출 |
 
-4→5→6 은 순서 의존, 7·8 은 독립.
+후속: task 가 지명한 스킬의 프롬프트 주입은 보유한 모든 task 로 확장됨 (task-364, #30774) —
+current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission 에 실린다.
+2차(소스 정책·불변 스냅샷·영수증)는 #30680/#30691/#30697/#30727/#30732/#30745/#30752 로 진행.
 
 ## 5. 수용 기준
 

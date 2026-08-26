@@ -10,6 +10,16 @@ Use this when the next step depends on a choice that is not yours to make. \
 Do not use it to confirm work you could verify yourself, and do not use it \
 to ask whether you may run a tool -- that is what the approval gate is for.
 
+The opposite mistake is the expensive one. A question costs one person one \
+minute. A wrong silent guess in an unattended run burns hours before anyone \
+sees it went wrong, and the work it produced has to be thrown away. When you \
+are weighing whether the choice is really yours, that asymmetry is the answer.
+
+The result tells you how many of your questions are still open. Several at \
+once is not an error, but a human reading a list answers the top one and \
+leaves the rest -- so ask what actually blocks your next step, not everything \
+you are curious about.
+
 Put the reason in `context`. A reader who cannot see why you are asking \
 cannot tell a decision that matters from one that does not.
 

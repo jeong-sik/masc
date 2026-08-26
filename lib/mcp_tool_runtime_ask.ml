@@ -111,6 +111,16 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
          detail)
   in
   let base_path = ctx.config.base_path in
+  (* A question belongs to the Keeper that asked it, and every surface that
+     renders one resolves the Keeper first. A caller that is not a registered
+     Keeper could still write to the log, but nothing could ever read the row
+     back -- it would be a question with no owner, costing an operator's
+     attention for an answer that reaches nobody. Refuse at the write. *)
+  if not (Keeper_registry.is_registered ~base_path keeper_name) then
+    reject
+      (Printf.sprintf "%s is not a registered keeper, so a question from it could not be read back"
+         keeper_name)
+  else
   match list_field "questions" ctx.arguments with
   | Error detail -> reject detail
   | Ok [] -> reject "at least one question is required"
@@ -143,14 +153,28 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
                     (Tool_result.error ~failure_class:Tool_result.Runtime_failure ~tool_name
                        ~start_time detail)
               | Ok () ->
+                  (* The reply says how many of this Keeper's questions are now
+                     open. A Keeper that cannot see its own queue growing asks
+                     again instead of waiting, and a human reading a list of
+                     five answers the top one. *)
+                  let open_count =
+                    Keeper_ask_store.open_ask_count ~base_path ~keeper_name
+                  in
                   (* Recording a question spends an operator's attention
                      later, so the act is logged where it happens rather than
                      inferred from the store's file changing. *)
-                  Log.Keeper.info "keeper_ask: keeper=%s ask_id=%s questions=%d"
-                    keeper_name a.ask_id (List.length a.questions);
+                  Log.Keeper.info
+                    "keeper_ask: keeper=%s ask_id=%s questions=%d open=%d" keeper_name
+                    a.ask_id (List.length a.questions) open_count;
+                  let body =
+                    match ask_json a with
+                    | `Assoc fields ->
+                        `Assoc (fields @ [ ("open_count", `Int open_count) ])
+                    | other -> other
+                  in
                   Some
                     (Tool_result.ok ~tool_name ~start_time
-                       (Yojson.Safe.to_string (ask_json a))))))
+                       (Yojson.Safe.to_string body)))))
 
 (* masc_ask_status: what the Keeper asked and what came back.
 

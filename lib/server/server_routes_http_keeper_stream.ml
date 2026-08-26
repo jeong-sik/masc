@@ -2974,43 +2974,67 @@ let ask_row_is_open = function
   | Keeper_ask.Open -> true
   | Keeper_ask.Answered_by _ | Keeper_ask.Withdrawn_because _ -> false
 
+let ask_row_json ~keeper_name (ask_id, ((a : Keeper_ask.ask), resolution)) =
+  `Assoc
+    [
+      ("keeper", `String keeper_name);
+      ("ask_id", `String ask_id);
+      ("asked_at", `Float a.asked_at);
+      ("context", match a.context with None -> `Null | Some text -> `String text);
+      ("questions", `List (List.map ask_question_json a.questions));
+      ("resolution", ask_resolution_json resolution);
+    ]
+
 let handle_keeper_asks_list state request reqd =
   let base_path = (Mcp_server.workspace_config state).base_path in
+  let include_resolved =
+    Server_utils.bool_query_param request "include_resolved" ~default:false
+  in
+  let rows_for keeper_name =
+    Keeper_ask_store.rows ~base_path ~keeper_name
+    |> List.filter (fun (_, (_, resolution)) ->
+           include_resolved || ask_row_is_open resolution)
+    |> List.map (ask_row_json ~keeper_name)
+  in
   match Server_utils.query_param request "name" with
-  | None ->
-      respond_json_value_with_cors ~status:`Bad_request request reqd
-        (keeper_chat_stream_error_json "name (query parameter) is required")
   | Some keeper_name ->
       if not (Keeper_registry.is_registered ~base_path keeper_name) then
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else
-        let include_resolved =
-          Server_utils.bool_query_param request "include_resolved" ~default:false
-        in
-        let rows =
-          List.filter
-            (fun (_, (_, resolution)) -> include_resolved || ask_row_is_open resolution)
-            (Keeper_ask_store.rows ~base_path ~keeper_name)
-        in
+        let rows = rows_for keeper_name in
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
             [
+              ("scope", `String "keeper");
               ("keeper", `String keeper_name);
               ("open_count", `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name));
               ("returned", `Int (List.length rows));
-              ( "asks",
-                `List
-                  (List.map
-                     (fun (ask_id, ((a : Keeper_ask.ask), resolution)) ->
-                       `Assoc
-                         [
-                           ("ask_id", `String ask_id);
-                           ("asked_at", `Float a.asked_at);
-                           ( "context",
-                             match a.context with None -> `Null | Some text -> `String text );
-                           ("questions", `List (List.map ask_question_json a.questions));
-                           ("resolution", ask_resolution_json resolution);
-                         ])
-                     rows) );
+              ("asks", `List rows);
             ])
+  | None ->
+      (* Fleet-wide. A surface showing questions shows them for everyone at
+         once: an operator does not know which Keeper is stuck before looking,
+         and asking them to pick a name first is asking them to guess. *)
+      let keepers =
+        List.map
+          (fun (entry : Keeper_registry_types.registry_entry) -> entry.name)
+          (Keeper_registry.all ~base_path ())
+      in
+      let rows = List.concat_map rows_for keepers in
+      let open_total =
+        List.fold_left
+          (fun total keeper_name ->
+            total + Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
+          0 keepers
+      in
+      respond_json_value_with_cors ~status:`OK request reqd
+        (`Assoc
+          [
+            ("scope", `String "fleet");
+            ("keeper", `Null);
+            ("keeper_count", `Int (List.length keepers));
+            ("open_count", `Int open_total);
+            ("returned", `Int (List.length rows));
+            ("asks", `List rows);
+          ])

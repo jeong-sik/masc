@@ -105,7 +105,7 @@ let instruction_document =
   "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
 ;;
 
-let skill_catalog () =
+let skill_snapshot_and_catalog () =
   let source_config =
     match
       Skill_source_config.parse_text
@@ -148,7 +148,7 @@ let skill_catalog () =
     | Error _ -> fail "bundle Skill snapshot was rejected"
   in
   match Keeper_skill_catalog.of_snapshot snapshot with
-  | catalog, [] -> catalog
+  | catalog, [] -> snapshot, catalog
   | _, _ :: _ -> fail "bundle Skill snapshot projection was rejected"
 ;;
 
@@ -179,6 +179,28 @@ let contains ~needle haystack =
   n = 0 || scan 0
 ;;
 
+let snapshot_reference snapshot name =
+  match Skill_catalog_snapshot.find_effective_by_name snapshot name with
+  | Some entry -> Skill_catalog_snapshot.entry_reference entry
+  | None -> failf "exact snapshot reference %s missing" name
+;;
+
+let assert_exact_activation snapshot expected
+      (activation : Keeper_skill_activation_ledger.activation)
+  =
+  let observed =
+    Skill_reference.make
+      ~identity:activation.identity
+      ~content_revision:activation.content_revision
+  in
+  check bool "exact identity and content revision" true
+    (Skill_reference.equal expected observed);
+  check bool "exact frozen snapshot revision" true
+    (Skill_catalog_snapshot.equal_snapshot_revision
+       (Skill_catalog_snapshot.snapshot_revision snapshot)
+       activation.snapshot_revision)
+;;
+
 let with_bundle_tools ?(record_activations = true) f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
@@ -192,6 +214,7 @@ let with_bundle_tools ?(record_activations = true) f =
     (fun () ->
        let config = Workspace.default_config dir in
        let meta = make_meta ~name:"bundle-classifiable" () in
+       let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
        let trace_id = meta.runtime.trace_id in
        let session_dir =
          Keeper_fs.keeper_session_dir
@@ -201,12 +224,7 @@ let with_bundle_tools ?(record_activations = true) f =
        Unix.mkdir session_dir 0o700;
        let reference = instruction_reference () in
        let snapshot_revision =
-         match
-           Skill_catalog_snapshot.snapshot_revision_of_string
-             (String.make 64 'a')
-         with
-         | Ok revision -> revision
-         | Error _ -> fail "invalid activation snapshot revision"
+         Skill_catalog_snapshot.snapshot_revision skill_snapshot
        in
        let skill_activation_context =
          match
@@ -241,17 +259,18 @@ let with_bundle_tools ?(record_activations = true) f =
            ~meta
            ~publication_recovery
            ~ctx_snapshot
-           ~skill_catalog:(skill_catalog ())
+           ~skill_catalog
           ~task_instruction_skills:
              [ reference, "what the gate reads", "body" ]
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
            ()
        in
-       Fun.protect ~finally:bundle.cleanup (fun () -> f config meta bundle.tools))
+       Fun.protect ~finally:bundle.cleanup (fun () ->
+         f config meta skill_snapshot bundle.tools))
 ;;
 
-let with_bundle f = with_bundle_tools (fun _config _meta tools ->
+let with_bundle f = with_bundle_tools (fun _config _meta _snapshot tools ->
   f (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
 ;;
 
@@ -285,8 +304,8 @@ let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
   | Error error, None -> fail error.Agent_core.Types.message
 ;;
 
-let test_composition_activation_is_durable ?expected_failure tool_name =
-  with_bundle_tools (fun config meta tools ->
+let test_composition_activation_is_durable ?expected_failure ~skill_name tool_name =
+  with_bundle_tools (fun config meta snapshot tools ->
     let tool =
       match
         List.find_opt
@@ -310,6 +329,10 @@ let test_composition_activation_is_durable ?expected_failure tool_name =
     in
     match Keeper_skill_activation_ledger.activations ledger with
     | [ activation ] ->
+      assert_exact_activation
+        snapshot
+        (snapshot_reference snapshot skill_name)
+        activation;
       (match activation.origin with
        | Keeper_skill_activation_ledger.Session_composition
            { tool_name = observed } ->
@@ -323,12 +346,15 @@ let test_composition_activation_is_durable ?expected_failure tool_name =
 ;;
 
 let test_inline_composition_activation_is_durable () =
-  test_composition_activation_is_durable "keeper_compose_gate-inline"
+  test_composition_activation_is_durable
+    ~skill_name:"gate-inline"
+    "keeper_compose_gate-inline"
 ;;
 
 let test_async_composition_activation_is_durable () =
   test_composition_activation_is_durable
     ~expected_failure:"background_switch_unavailable"
+    ~skill_name:"gate-async"
     "keeper_compose_gate-async"
 ;;
 
@@ -360,14 +386,14 @@ let test_skill_bundle_without_activation_context_is_rejected () =
        "Skill-bearing Keeper bundle requires a frozen activation context")
     (fun () ->
        with_bundle_tools ~record_activations:false
-         (fun _config _meta _tools -> ()))
+         (fun _config _meta _snapshot _tools -> ()))
 ;;
 
 (* The point of the tool is that a body reaches the keeper. A tool that is on
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun config meta tools ->
+  with_bundle_tools (fun config meta snapshot tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -393,8 +419,12 @@ let test_the_skill_tool_serves_the_body () =
         | Error error ->
           fail (Keeper_skill_activation_ledger.store_error_to_string error)
       in
-      check int "body read has one durable activation" 1
-        (List.length (Keeper_skill_activation_ledger.activations ledger));
+      (match Keeper_skill_activation_ledger.activations ledger with
+       | [ activation ] ->
+         assert_exact_activation snapshot reference activation
+       | activations ->
+         failf "expected one instruction activation, got %d"
+           (List.length activations));
       let stale =
         Skill_reference.make
           ~identity:reference.identity

@@ -124,7 +124,6 @@ type resolved_source =
   ; resolution : resolution
   }
 
-val parse_doc : Keeper_toml_loader.toml_doc -> (t, diagnostic list) result
 val parse_text : string -> (t, diagnostic list) result
 val validate_text : string -> (unit, diagnostic list) result
 val to_yojson : t -> Yojson.Safe.t
@@ -141,9 +140,6 @@ val source_id_of_string : string -> (source_id, string) result
 val top_level_namespace : string
 val anchor_to_string : anchor -> string
 val access_to_string : access -> string
-val activation_lifetime_to_string : activation_lifetime -> string
-val precedence_to_string : precedence -> string
-val value_kind_to_string : value_kind -> string
 val path_rejection_to_string : path_rejection -> string
 val anchor_rejection_to_string : anchor_rejection -> string
 val diagnostic_to_string : diagnostic -> string

@@ -41,8 +41,15 @@ description: Walk the release checklist before shipping.
 
 ### 지시 스킬 (instruction)
 
-task 가 스킬을 지정하면 current-task 블록에 이름과 경로 한 줄이 실리고, keeper 가
-필요할 때 본문을 연다. 지정이 없는 task 의 프롬프트는 바이트 하나 변하지 않는다.
+task 가 스킬을 지정하면 current-task 블록에 이름 한 줄이 실리고, keeper 가
+`keeper_skill` 도구로 본문을 연다. 지정이 없는 task 의 프롬프트는 바이트 하나 변하지 않는다.
+
+keeper 가 task 를 둘 이상 들고 있으면(Claimed/InProgress) current task 는 reconcile 이
+고른 하나이고, 두 번째 task 를 claim 해도 바뀌지 않는다. 그래서 나머지 보유 task 가
+지명한 스킬은 `Skills Named by Tasks You Hold` 블록에 task 별로 한 줄씩 따로 실린다
+(직접 메시지 턴도 같다). 턴 admission 도 같은 집합을 검사한다: 보유 task 가 카탈로그에
+없는 스킬을 지명하거나, 지시 스킬을 지명했는데 `Read` 가 없으면 turn 은 typed config
+error 로 거부된다.
 
 ### 합성 스킬 (composition) — Skill as a Tool
 

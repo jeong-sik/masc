@@ -56,6 +56,13 @@ val effective_autonomous_wake_prompt :
 
 val format_current_task : Masc_domain.task -> string
 
+val format_held_task_skills
+  :  Keeper_world_observation_inputs.held_task_skills list
+  -> string option
+(** One line per other held task that names skills, under its own heading;
+    [None] when there is none. The current task's block carries its own
+    skills, so this covers a keeper holding several tasks (task-364). *)
+
 val format_current_task_observation
   :  Keeper_world_observation_inputs.current_task_observation
   -> string option

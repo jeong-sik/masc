@@ -24,15 +24,65 @@ type current_task_observation =
 type claimable_task_identity =
   { task_id : Keeper_id.Task_id.t }
 
+type held_task_skills =
+  { held_task_id : string
+  ; held_skills : string list
+  }
+
 type backlog_snapshot =
   { unclaimed_count : int
   ; claimable_tasks : claimable_task_identity list
   ; failed_count : int
   ; revision : int option
+  ; held_task_skills : held_task_skills list
   }
 
 let empty_backlog_snapshot =
-  { unclaimed_count = 0; claimable_tasks = []; failed_count = 0; revision = None }
+  { unclaimed_count = 0
+  ; claimable_tasks = []
+  ; failed_count = 0
+  ; revision = None
+  ; held_task_skills = []
+  }
+;;
+
+(* Every task this keeper holds (Claimed or InProgress, same actor identity as
+   a transition would use) that names at least one skill, in backlog order.
+   The current task is left out: its own block already carries its skills.
+
+   This is why the projection exists at all. A keeper's current_task_id is
+   reconciled from ownership and, once bound, stays on the task it already
+   names — so a keeper holding task A that claims task B keeps A current, and
+   B's skills never reached the prompt through the current-task block
+   (task-364). Reading the skills off every held task makes the line
+   independent of which task the reconciler picked. *)
+let held_task_skills_of_tasks
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      (tasks : Masc_domain.task list)
+  : held_task_skills list
+  =
+  let current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id in
+  List.filter_map
+    (fun (task : Masc_domain.task) ->
+       let held =
+         match task.task_status with
+         | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
+           Workspace_task_classify.same_task_actor config assignee meta.agent_name
+         | Masc_domain.Todo
+         | Masc_domain.AwaitingVerification _
+         | Masc_domain.Done _
+         | Masc_domain.Cancelled _ -> false
+       in
+       let is_current =
+         match current_task_id with
+         | Some id -> String.equal id task.id
+         | None -> false
+       in
+       if held && (not is_current) && task.skills <> []
+       then Some { held_task_id = task.id; held_skills = task.skills }
+       else None)
+    tasks
 ;;
 
 let rec tasks_with_identities = function
@@ -147,6 +197,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
        ; claimable_tasks
        ; failed_count = failed
        ; revision = Some backlog.version
+       ; held_task_skills = held_task_skills_of_tasks ~config ~meta backlog.tasks
        })
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -160,6 +211,43 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
       ();
     Log.Keeper.warn "read_backlog_snapshot failed: %s" (Printexc.to_string ex);
     raise ex
+;;
+
+(** The direct-message lane builds its prompt before it observes the world, so
+    it reads the held-task skills on their own. A backlog that cannot be read
+    or only recovers yields no lines: the skills line is context, and the fact
+    that the backlog is degraded reaches the prompt through the current-task
+    observation. *)
+let read_held_task_skills ~(config : Workspace.config) ~(meta : keeper_meta)
+  : held_task_skills list
+  =
+  try
+    match Workspace.read_backlog_observation_with_source_r config with
+    | Error message ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ObservationQueryFailures)
+        ~labels:
+          [ ( "operation"
+            , Runtime_observation_query_operation.(to_label Read_held_task_skills) )
+          ]
+        ();
+      Log.Keeper.warn "read_held_task_skills: backlog read failed: %s" message;
+      []
+    | Ok { Workspace.recovered_from = Some _; _ } -> []
+    | Ok { Workspace.observed_backlog = backlog; recovered_from = None } ->
+      held_task_skills_of_tasks ~config ~meta backlog.tasks
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | ex ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ObservationQueryFailures)
+      ~labels:
+        [ ( "operation"
+          , Runtime_observation_query_operation.(to_label Read_held_task_skills) )
+        ]
+      ();
+    Log.Keeper.warn "read_held_task_skills failed: %s" (Printexc.to_string ex);
+    []
 ;;
 
 (** Resolve the keeper's claimed task to a source-preserving observation. *)

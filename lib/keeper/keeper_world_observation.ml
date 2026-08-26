@@ -144,6 +144,7 @@ type world_observation =
   ; active_goals : string list
   ; unclaimed_task_count : int
   ; claimable_tasks : Inputs.claimable_task_identity list
+  ; held_task_skills : Inputs.held_task_skills list
   ; failed_task_count : int
   ; scheduled_automation : scheduled_automation_observation
   ; backlog_revision : int option
@@ -1218,6 +1219,7 @@ let observe
   ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
   ; claimable_tasks
+  ; held_task_skills = backlog_snapshot.held_task_skills
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision
@@ -1256,6 +1258,7 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; active_goals = open_goal_ids ~config
   ; unclaimed_task_count
   ; claimable_tasks
+  ; held_task_skills = backlog_snapshot.held_task_skills
   ; failed_task_count
   ; scheduled_automation
   ; backlog_revision

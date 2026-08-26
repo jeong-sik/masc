@@ -45,21 +45,31 @@ let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
 
 let direct_turn_task_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+      ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
   : string
   =
-  match Keeper_unified_prompt.format_current_task_observation current_task with
-  | Some rendered -> rendered
-  | None -> ""
+  let current =
+    match Keeper_unified_prompt.format_current_task_observation current_task with
+    | Some rendered -> rendered
+    | None -> ""
+  in
+  let held =
+    match Keeper_unified_prompt.format_held_task_skills held_task_skills with
+    | Some rendered -> rendered
+    | None -> ""
+  in
+  current ^ held
 
 let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+      ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
       ~(telemetry_feedback_text : string)
       ~(turn_instructions_text : string)
   : string
   =
-  [ direct_turn_task_context ~current_task
+  [ direct_turn_task_context ~current_task ~held_task_skills
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
@@ -514,6 +524,11 @@ let run_keeper_invocation_turn_admitted_inner
                 ~config:ctx.config
                 ~meta
             in
+            let held_task_skills =
+              Keeper_world_observation_inputs.read_held_task_skills
+                ~config:ctx.config
+                ~meta
+            in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -570,6 +585,7 @@ let run_keeper_invocation_turn_admitted_inner
               let dynamic_context =
                 direct_turn_dynamic_context
                   ~current_task
+                  ~held_task_skills
                   ~recent_direct_conversation_text
                   ~worktree_text
                   ~telemetry_feedback_text

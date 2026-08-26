@@ -23,12 +23,39 @@ type current_task_observation =
 type claimable_task_identity =
   { task_id : Keeper_id.Task_id.t }
 
+(** One task this keeper holds that names skills. [held_task_id] is the task
+    id; [held_skills] the skill directory names it declares, in declaration
+    order. The current task is never listed here: its own block carries its
+    skills. *)
+type held_task_skills =
+  { held_task_id : string
+  ; held_skills : string list
+  }
+
 type backlog_snapshot =
   { unclaimed_count : int
   ; claimable_tasks : claimable_task_identity list
   ; failed_count : int
   ; revision : int option
+  ; held_task_skills : held_task_skills list
+        (** Skills named by the other tasks this keeper holds (Claimed or
+            InProgress), read off the same backlog as the counts. *)
   }
+
+val held_task_skills_of_tasks
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> Masc_domain.task list
+  -> held_task_skills list
+(** Pure projection over an already-read task list: the tasks held by
+    [meta] (same actor identity a transition uses) that name a skill, minus
+    [meta.current_task_id]. The tool surface uses it on the tasks it already
+    reads; the observation uses it on the backlog it already reads. *)
+
+val read_held_task_skills : config:Workspace.config -> meta:keeper_meta -> held_task_skills list
+(** {!held_task_skills_of_tasks} over one primary backlog read, for the lane
+    that builds its prompt without a world observation. A failed or recovered
+    read yields [] and counts an observation failure. *)
 
 val read_backlog_snapshot : config:Workspace.config -> meta:keeper_meta -> backlog_snapshot
 (** One source-preserving primary backlog read. [claimable_tasks] and its count,

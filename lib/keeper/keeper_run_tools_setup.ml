@@ -165,12 +165,11 @@ let load_skill_catalog ~base_path =
            |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
              entry.directory, entry.source_text)
          in
-         match Keeper_skill_catalog.of_documents documents with
-         | Ok catalog -> Ok catalog
-         | Error error ->
-           Error
-             (skill_catalog_config_error
-                (Keeper_skill_catalog.error_to_string error))))
+         (* Documents the catalog could not read come back beside it instead
+            of failing the load. They are named at the call site, where the
+            Keeper is known; leaving them out is what keeps one unreadable
+            file from stopping every turn on the workspace. *)
+         Ok (Keeper_skill_catalog.of_documents documents)))
 ;;
 
 let expected_model_tool_names ~skill_catalog ~identity_tool_names
@@ -357,7 +356,27 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
+  let* skill_catalog, skill_rejections =
+    load_skill_catalog ~base_path:config.base_path
+  in
+  (* Said once per turn that starts with one. A document left out is a skill
+     the Keeper does not have, and silence about that is how it becomes a
+     mystery later. *)
+  List.iter
+    (fun (rejection : Keeper_skill_catalog.rejection) ->
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "skill_left_out_of_catalog"
+             ; "directory", `String rejection.directory
+             ; ( "problem"
+               , `String (Keeper_skill_catalog.error_to_string rejection.error) )
+             ])
+        "skill left out of the catalog")
+    skill_rejections;
   let* () = validate_held_task_skill_admission ~config ~meta ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta

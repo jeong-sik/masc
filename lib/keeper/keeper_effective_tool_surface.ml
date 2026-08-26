@@ -223,7 +223,10 @@ let resolve ~config ~keeper_name =
           unavailable
             keeper_name
             ("skill_catalog_unreadable", Agent_core.Error.to_string error)
-        | Ok skill_catalog ->
+        (* This surface projects what the Keeper can call. A document left
+           out of the catalog is named where the turn is prepared, which is
+           the place that can say which Keeper it happened to. *)
+        | Ok (skill_catalog, _rejections) ->
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->

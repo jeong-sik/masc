@@ -44,10 +44,7 @@ let skill_catalog_with_description description =
       ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
       ]
   with
-  | Ok catalog -> catalog
-  | Error error ->
-    failf "fixture catalog rejected: %s"
-      (Keeper_skill_catalog.error_to_string error)
+  | catalog, _rejections -> catalog
 ;;
 
 let skill_catalog () =

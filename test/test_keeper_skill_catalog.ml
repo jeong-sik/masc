@@ -383,15 +383,10 @@ let test_composition_name_must_match_skill () =
 
 let test_of_documents_sorts_and_rejects_duplicates () =
   let catalog =
-    match
-      Skill_catalog.of_documents
+    fst (Skill_catalog.of_documents
         [ "time-memory-query", composition_document
         ; "release-checklist", instruction_document
-        ]
-    with
-    | Ok catalog -> catalog
-    | Error error ->
-      fail ("valid catalog was rejected: " ^ Skill_catalog.error_to_string error)
+        ])
   in
   (match Skill_catalog.skills catalog with
    | [ first; second ] ->
@@ -424,10 +419,18 @@ let test_of_documents_sorts_and_rejects_duplicates () =
       ; "release-checklist", instruction_document
       ]
   with
-  | Ok _ -> fail "duplicate skill directories were accepted"
-  | Error (Skill_catalog.Duplicate_skill { name }) ->
-    check string "duplicate name" "release-checklist" name
-  | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
+  (* The first source that named it wins, which is the precedence the snapshot
+     publishes. The later one is named in the rejections rather than replacing
+     it silently or taking the catalog down with it. *)
+  | catalog, [ { Skill_catalog.error = Skill_catalog.Duplicate_skill { name }; _ } ]
+    ->
+    check string "duplicate name" "release-checklist" name;
+    check int "one copy is in the catalog" 1
+      (List.length (Skill_catalog.skills catalog))
+  | _, rejections ->
+    failf
+      "expected one duplicate rejection, got %d"
+      (List.length rejections)
 ;;
 
 let write_file path content =
@@ -456,7 +459,7 @@ let test_loader_scans_the_skills_directory () =
     ~finally:(fun () -> remove_tree base_path)
     (fun () ->
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _rejections) ->
           check
             int
             "missing skills dir loads an empty catalog"
@@ -472,7 +475,7 @@ let test_loader_scans_the_skills_directory () =
        Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
        write_file (Filename.concat skills_dir "README.md") "not a skill\n";
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _rejections) ->
           (match Skill_catalog.skills catalog with
            | [ skill ] ->
              check
@@ -494,7 +497,7 @@ let test_loader_scans_the_skills_directory () =
          (Filename.concat agent_skill_dir "SKILL.md")
          "---\nname: agent-review\ndescription: Review through the configured Agent Skills source.\n---\n\n# Agent review\n";
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _rejections) ->
           check
             (list string)
             "turn consumes the configured multi-source snapshot"
@@ -517,10 +520,7 @@ let test_loader_scans_the_skills_directory () =
 ;;
 
 let skill_catalog_of documents =
-  match Skill_catalog.of_documents documents with
-  | Ok catalog -> catalog
-  | Error error ->
-    fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
+  fst (Skill_catalog.of_documents documents)
 ;;
 
 let test_invocation_policy_fields_are_rejected () =
@@ -564,6 +564,43 @@ allowed-tools: Read Bash(git:*)
   | Error error ->
     fail ("allowed-tools returned the wrong error: " ^ Skill_catalog.error_to_string error)
   | Ok _ -> fail "allowed-tools was silently accepted without approval semantics"
+;;
+
+(* One document the catalog cannot read is left out and named; the rest load.
+
+   This is the failure the whole-catalog result used to produce. The sources
+   are declared read-write, so a Keeper can put an unreadable file in one --
+   and then every turn on the workspace stops, including the turn that would
+   remove it. On 2026-08-26 that took seven Keepers down and was cleared by
+   hand.
+
+   Both halves are checked. Only counting the survivors would pass on a
+   catalog that swallowed the rejection, and swallowing it is the other way
+   this goes wrong. *)
+let test_one_unreadable_document_leaves_the_others_loaded () =
+  let unreadable =
+    {|---
+name: not-a-policy
+description: Declares a switch MASC does not honour.
+disable-model-invocation: true
+---
+
+# Body
+|}
+  in
+  let catalog, rejections =
+    Skill_catalog.of_documents
+      [ "release-checklist", instruction_document; "not-a-policy", unreadable ]
+  in
+  check int "the readable one loaded" 1 (List.length (Skill_catalog.skills catalog));
+  check bool "and is findable by name" true
+    (Option.is_some (Skill_catalog.find catalog "release-checklist"));
+  match rejections with
+  | [ rejection ] ->
+    check string "the rejection names the directory" "not-a-policy"
+      rejection.Skill_catalog.directory
+  | rejections ->
+    failf "expected one rejection, got %d" (List.length rejections)
 ;;
 
 let test_composition_skill_joins_projection () =
@@ -667,6 +704,10 @@ let () =
             "allowed-tools is rejected"
             `Quick
             test_allowed_tools_is_rejected
+        ; test_case
+            "one unreadable document leaves the others loaded"
+            `Quick
+            test_one_unreadable_document_leaves_the_others_loaded
         ; test_case
             "composition skill joins the model projection"
             `Quick

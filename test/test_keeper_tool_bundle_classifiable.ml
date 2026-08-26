@@ -92,8 +92,7 @@ value = {}
 ;;
 
 let skill_catalog () =
-  match
-    Keeper_skill_catalog.of_documents
+  fst (Keeper_skill_catalog.of_documents
       [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
       ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
       ; ( "gate-instruction"
@@ -101,12 +100,7 @@ let skill_catalog () =
              third shape the policy has to place, and it reaches the bundle
              the same way the composition ones do. *)
         , "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n" )
-      ]
-  with
-  | Ok catalog -> catalog
-  | Error e ->
-    failf "the gate's own skill fixtures must parse: %s"
-      (Keeper_skill_catalog.error_to_string e)
+      ])
 ;;
 
 let contains ~needle haystack =

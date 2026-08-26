@@ -68,7 +68,24 @@ val parse_skill : directory:string -> string -> (skill, error) result
     composition block must declare exactly one composition and its [name]
     must equal the skill name. *)
 
-val of_documents : (string * string) list -> (t, error) result
+type rejection =
+  { directory : string
+  ; error : error
+  }
+
+val of_documents : (string * string) list -> t * rejection list
+(** The catalog these documents make, and the documents that did not make it.
+
+    A document this cannot read is left out and named rather than taking the
+    catalog with it. Failing the whole load protected against a turn believing
+    it has a skill it does not have; leaving the document out protects against
+    that too, since the skill is simply absent. What it cost was every turn on
+    the workspace -- including the turn that would remove the document, which
+    is reachable because the sources are declared read-write.
+
+    The rejections come back beside the catalog rather than inside it: a caller
+    has to hold them to get the skills. Dropping them on the floor is the
+    failure this must not become. *)
 (** Build the catalog from [(directory, content)] pairs. The first failing
     document fails the whole catalog — a broken skill file is a boot error,
     never a silently missing skill. Skills are ordered by name so prompt

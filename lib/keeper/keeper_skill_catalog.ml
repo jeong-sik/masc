@@ -83,8 +83,11 @@ let closes_fence ~fence_char ~length trimmed =
    wraps the example in a longer outer fence, the CommonMark way, and the inner
    ```toml composition must then be read as text. Without this state the scanner
    matched that example, promoted a documentation skill to a composition (or
-   failed it on the name), and — because [of_documents] fails the whole catalog
-   on the first bad file — took every keeper turn down with it. *)
+   failed it on the name), and took every keeper turn down with it: at the time
+   [of_documents] failed the whole catalog on the first bad file. It no longer
+   does -- a document it cannot read is left out and named -- but reading the
+   grammar correctly is still what keeps a documentation skill in the catalog
+   rather than in the rejections. *)
 type fence_scan =
   | Outside
   | Reading_composition of string list
@@ -187,22 +190,53 @@ let parse_skill ~directory content =
 
 let empty = []
 
+type rejection =
+  { directory : string
+  ; error : error
+  }
+
+(* A document this cannot read is left out and named, rather than taking the
+   catalog with it.
+
+   Failing the whole load was the safer-looking half of a trade whose other
+   half was not paid for. What it protected against is a turn believing it has
+   a skill it does not have -- and leaving the document out protects against
+   that too, since the skill is simply absent. What it cost was every turn on
+   the workspace, including the turn that would remove the document.
+
+   The sources are declared read-write, so this is reachable: on 2026-08-26 one
+   probe file carrying an unsupported field stopped seven Keepers at once, and
+   none of them could clear it, because clearing it needs a turn. It was
+   removed by hand.
+
+   The rejections come back beside the catalog rather than inside it, so a
+   caller has to look at them to get the skills. Dropping them silently is the
+   failure this is not allowed to become. *)
 let of_documents documents =
-  let rec build parsed = function
+  let rec build parsed rejected = function
     | [] ->
-      Ok
-        (List.sort
-           (fun left right -> String.compare left.name right.name)
-           (List.rev parsed))
+      ( List.sort
+          (fun left right -> String.compare left.name right.name)
+          (List.rev parsed)
+      , List.rev rejected )
     | (directory, content) :: rest ->
       (match parse_skill ~directory content with
-       | Error _ as error -> error
+       | Error error ->
+         build parsed ({ directory; error } :: rejected) rest
        | Ok skill ->
          if List.exists (fun known -> String.equal known.name skill.name) parsed
-         then Error (Duplicate_skill { name = skill.name })
-         else build (skill :: parsed) rest)
+         then
+           (* The first source that named it wins, which is the precedence the
+              snapshot already published. The later one is named here rather
+              than replacing it silently. *)
+           build
+             parsed
+             ({ directory; error = Duplicate_skill { name = skill.name } }
+              :: rejected)
+             rest
+         else build (skill :: parsed) rejected rest)
   in
-  build [] documents
+  build [] [] documents
 ;;
 
 let skills catalog = catalog

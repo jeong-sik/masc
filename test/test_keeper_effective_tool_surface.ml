@@ -237,6 +237,7 @@ let test_external_composition_preserves_snapshot_provenance () =
                { provenance = Some provenance } -> Some provenance
            | Composition_skill { provenance = None }
            | Descriptor _
+           | Instruction_skill
            | Composition_plan
            | Composition_control -> None)
         surface.tools

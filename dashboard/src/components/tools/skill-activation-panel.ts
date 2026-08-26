@@ -137,13 +137,17 @@ export function SkillActivationPanel(props: SkillActivationPanelProps) {
           ? html`<div class="text-xs text-[var(--color-fg-muted)]">Loading exact Skill receipts…</div>`
           : error
             ? html`<div class="text-xs text-[var(--color-status-bad)]">${error}</div>`
-            : !effectiveSurface && !activations
+            : !effectiveSurface
               ? html`<div class="text-xs text-[var(--color-status-bad)]">
-                  Server response omitted Keeper Skill receipts
+                  Server response omitted effective_keeper_surface
+                </div>`
+            : !activations
+              ? html`<div class="text-xs text-[var(--color-status-bad)]">
+                  Server response omitted skill_activations
                 </div>`
             : html`
-                ${effectiveSurface ? html`<${SurfaceReceipt} surface=${effectiveSurface} />` : null}
-                ${activations ? html`<${ActivationReceipt} projection=${activations} />` : null}
+                <${SurfaceReceipt} surface=${effectiveSurface} />
+                <${ActivationReceipt} projection=${activations} />
               `}
     </div>
   `

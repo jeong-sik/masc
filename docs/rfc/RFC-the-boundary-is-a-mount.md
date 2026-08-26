@@ -39,28 +39,66 @@ The first occurrence, that morning, was repaired by returning the tree and
 leaving `origin` alone. That is why there was a second: the cause was never
 the tree.
 
-**1.1 Five links, each one checkable.**
+**1.1 Two links did it, and a third pathway exists beside them.**
+
+An earlier draft of this section drew one five-link chain and put the incident
+at the end of it. Re-reading the trace does not support that. The chain that
+ran is shorter, and the extra links describe a real but separate way in.
+
+What the incident actually used, from
+`.masc/trajectories/rondo/trace-1787654792361-00006.jsonl`:
+
+```
+[2026-08-26T03:42:42Z]  cwd='.'   sandbox_root=.../playground/rondo/
+/bin/bash -c  git -C /Users/dancer/me checkout -q main && git ...
+```
 
 ```
 1. default_sandbox_profile = Local          lib/config/keeper_sandbox_config.ml:26
-     -> no container
+     -> no container, so nothing outside the process holds it
 2. "Positional argv is opaque application    lib/exec_policy/exec_policy.mli:43-47
     data and is never classified ...
     Runtime sandbox containment remains
     authoritative for the process itself"
-     -> with no containment, nothing holds argv
-3. cwd = base_path = ~/me                    11 sites, 4 keeper runtimes
-     keeper_codex_runtime.ml:693,872
-     keeper_claude_code_runtime.ml:487
-     keeper_antigravity_runtime.ml:521
-     keeper_capability_probe.ml:399,416,452,575,596
-4. "Execute path arguments resolve           the runtime contract, told to the
-    against cwd"                             keeper on every turn
-5. the keeper runs git; it lands in ~/me/.git
+     -> the absolute path in `git -C` is argv, and argv is not classified
 ```
 
-Nothing in the chain is a bug. Each step is the documented behaviour of the
-step above it.
+**The keeper's cwd was correct.** It was `.`, resolving inside its own
+playground, and the contract it received named that playground as
+`sandbox_root`. It did not walk out; it named a path that was never checked,
+because the component that was supposed to hold it was switched off.
+
+Neither link is a bug on its own. Not classifying argv is the documented and
+correct choice -- a flag-shape matcher would be guessing. The design says
+containment answers for the process, and on the `Local` profile there is no
+containment to answer.
+
+**1.1.1 The cwd pathway is real, and it is not this.**
+
+Eleven spawn sites across four keeper runtimes pass `base_path` as cwd:
+
+```
+keeper_codex_runtime.ml:693,872        keeper_claude_code_runtime.ml:487
+keeper_antigravity_runtime.ml:521      keeper_capability_probe.ml:399,416,452,575,596
+```
+
+Measured over every recorded tool call (35,431 with a cwd):
+
+| cwd | calls | share |
+|---|---:|---:|
+| relative, resolves inside the playground | 34,229 | 96.6% |
+| absolute, still inside the playground | 1,107 | 3.1% |
+| absolute, elsewhere | 59 | 0.2% |
+| **exactly `base_path`** | **36** | **0.1%** |
+
+Those 36 are real and worth closing. They are not what happened here: the last
+one is `2026-08-26T01:11:47Z`, and the window the incident falls in
+(`02:00`-`04:00`) contains **none**.
+
+Keeping the two apart matters for what this RFC proposes. A fix aimed at cwd --
+the `keeper_cwd` type in 3.4 -- closes the 36 and leaves `git -C` untouched.
+Only the mount closes both, because inside a container the path the keeper
+named does not exist.
 
 **1.2 The keeper did not break a rule. It stood where the rules put it.**
 
@@ -193,6 +231,11 @@ not compile. This is what stops the next runtime from re-introducing the
 default, the way `masc_tui_frame` stopped the next caller from re-deriving
 `cols - 4`.
 
+What it does not do is close the incident in 1.1. That one named an absolute
+path in argv from a cwd that was already correct, and a type on cwd has nothing
+to say about argv. This section closes the 36 calls counted in 1.1.1 and no
+more. Both are worth closing; only 3.1 closes both.
+
 ## 4. Order matters, and the tempting order is wrong
 
 Removing `allowed_paths` first is a regression. It is the only enforcement on
@@ -234,6 +277,8 @@ that can be taken earlier.
 | default profile is `Local` | `keeper_sandbox_config.ml:26` |
 | argv is not classified | `exec_policy.mli:43-47` |
 | cwd is `base_path` | `rg 'cwd = base_path\|~cwd:.*base_path'`, 11 sites |
+| the incident used argv, not cwd | `.masc/trajectories/rondo/trace-1787654792361-00006.jsonl` -- `cwd='.'`, `sandbox_root` is the playground |
+| 36 calls stand at `base_path` | every recorded tool call with a cwd (35,431); last one `2026-08-26T01:11:47Z`, none in the incident window |
 | the contract says both | `.masc/trajectories/rw-e0-r3-20260818-research/trace-*.jsonl` |
 | `allowed_paths` is enforced for reads | `keeper_sandbox_containment.ml`, callers at `keeper_workspace_read_ops.ml:52`, `keeper_tool_filesystem_runtime.ml:364` |
 | 1,214 lines / 426 sites | `wc -l`, `rg -c` |

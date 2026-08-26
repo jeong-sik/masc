@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+## [0.25.0] - 2026-08-25
+
+- **The terminal UI is where you drive Keepers now.** 104 of the 188 features
+  in this release are `feat(tui)`, and they arrive in two arcs. The first made
+  it an operator surface: approvals you can answer (#29466), a Keeper chat that
+  survives a restart (#29317, #29619), Board posts and votes written from the
+  terminal (#29747, #29787), goal phases changed from Planning (#29765),
+  scheduled automation listed and cancelled (#29814), and a subscription to the
+  runtime event feed in place of polling (#29857). The second made it a code
+  surface: a Code browser that lexes the file it opens (#30414), `H` for the
+  commits that touched it (#30489), `d` for its working-tree diff (#30527), `m`
+  for the notes anchored to it (#30530), `c` for the edits a Keeper recorded
+  (#30548), `/` to search its lines (#30574), and `K`/`D` to ask the language
+  server where a name comes from with `B` to walk back out (#30565, #30578).
+  Twenty surfaces rotate on `Tab`; `docs/TUI-GUIDE.md` is the key-by-key
+  reference.
+- **`masc-tui` ships with a release** (#30566): the terminal UI was reachable
+  only from a source checkout, which no issue or roadmap line had ever decided
+  — the release workflow simply never caught up with it. It is built, smoked,
+  and packaged as `masc-tui-<arch>`, and `install.sh` puts it beside `masc` and
+  prints the command that starts it. The runner cannot boot a program that
+  requires a TTY, so the smoke calls `--help`, which returns before that check
+  and still proves the shipped file resolves its dynamic libraries.
+- **A language server both a Keeper and an operator can ask** (#30494, #30539,
+  #30560, #30571): one server per workspace answering three questions, exposed
+  over REST on the workspace axes, reachable from a Keeper's tools and from the
+  TUI's Code pane. References answer across files once the server can.
+- **A Keeper's tool surface is declared per Keeper** (RFC-0389 #29986,
+  RFC-0390 #30119): `keeper.tools` in the TOML selects the bundle, and a Keeper
+  with no declaration keeps exactly the surface it had before the feature —
+  pinned by a golden that counts tools and schema bytes.
+- **A Claude Code Keeper sees the image** (#30567) rather than a reading of it:
+  the stream-json user message always carries a content-block array now.
+- **The `classic` preset starts** (#30580): its four prompts lived in
+  `keepers/<name>/AGENT.md`, and nothing has read that filename since the
+  prompt moved into `keeper.instructions`. Every Keeper the preset seeded was
+  rejected at load. The prompts are in the TOMLs, and a test reads every preset
+  so the next one cannot rot the same way.
+- **The front-door docs describe what is there.** Both READMEs are rewritten
+  around the three ways in — MCP, dashboard, terminal UI — with the dashboard
+  screen inventory recaptured against this release and terminal surfaces added
+  (#30558). `docs/KEEPER-USER-MANUAL.md` and its Korean twin are rewritten from
+  a running fleet: which TOML fields Keepers actually set, what the Gate's
+  three layers are, and why a runtime lane wants more than one candidate
+  (#30585). Twenty documents whose subject no longer exists are deleted.
+
 - **iMessage runs inside the server** (#24497): the Python sidecar under
   `sidecars/imessage-bot/` is deleted. The server now reads Messages.app's
   SQLite store and replies through `osascript` on its own poll fiber, the

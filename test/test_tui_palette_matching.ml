@@ -90,6 +90,90 @@ let test_the_palette_lists_tasks_and_posts () =
        (palette_entries state))
 ;;
 
+let check_names = Alcotest.(check (list string))
+
+let test_the_cursor_lines_names_are_the_candidates () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  state.code_file <-
+    Some
+      ( "lib/a.ml",
+        [ [ ("let ", Masc_tui_code_lexer.kind_keyword);
+            ("x = x + ", Masc_tui_code_lexer.kind_code);
+            ("1", Masc_tui_code_lexer.kind_number) ];
+          [ ("(* x *)", Masc_tui_code_lexer.kind_comment) ];
+          [ ("Foo.bar x'", Masc_tui_code_lexer.kind_code) ] ] );
+  state.code_file_cursor <- 0;
+  check_names "a keyword and a number offer no name, x appears once"
+    [ "x" ]
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 1;
+  check_names "a comment offers no name" []
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 2;
+  check_names "module path splits, primes stay, reading order holds"
+    [ "Foo"; "bar"; "x'" ]
+    (code_cursor_line_symbols state);
+  state.code_file_cursor <- 99;
+  check_names "a cursor past the file names nothing" []
+    (code_cursor_line_symbols state);
+  (* The candidates ride the palette only with the file focused on Code. *)
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.code_file_cursor <- 0;
+  check_bool "the palette carries the def candidate" true
+    (List.exists
+       (function
+         | _, Palette_lsp ("definition", "x") -> true
+         | _ -> false)
+       (palette_entries state));
+  state.code_focus_file <- Left_pane;
+  check_bool "an unfocused file offers no candidate" false
+    (List.exists
+       (function _, Palette_lsp _ -> true | _ -> false)
+       (palette_entries state))
+;;
+
+let test_a_label_starting_with_the_query_leads () =
+  let state =
+    create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  (* Two posts mention "def" inside a word; the cursor line names one thing. *)
+  let post id title =
+    { bp_id = id
+    ; bp_author = "alpha"
+    ; bp_title = title
+    ; bp_body = ""
+    ; bp_votes = 0
+    ; bp_comment_count = 0
+    ; bp_created_at = "2026-08-26T00:00:00Z"
+    ; bp_hearth = None
+    ; bp_kind = None
+    }
+  in
+  state.board_posts <-
+    [ post "p-1" "deferred wakeup evidence"; post "p-2" "head 7def9c review" ];
+  state.code_file <-
+    Some ("lib/a.ml", [ [ ("open ", Masc_tui_code_lexer.kind_keyword);
+                          ("Hook_common", Masc_tui_code_lexer.kind_code) ] ]);
+  state.code_file_cursor <- 0;
+  state.view <- Code;
+  state.code_focus_file <- Right_pane;
+  state.palette_query <- "def ";
+  let labels = List.map fst (palette_matches state) in
+  check_names "the prefix hit leads, the substring hits follow in entry order"
+    [ "def Hook_common"; "post deferred wakeup evidence"; "post head 7def9c review" ]
+    labels;
+  state.palette_query <- "hover ";
+  check_names "hover pre-fill lists only the cursor line's hover entry"
+    [ "hover Hook_common" ]
+    (List.map fst (palette_matches state));
+  state.palette_query <- "";
+  check_bool "an empty query keeps every entry" true
+    (List.length (palette_matches state) = List.length (palette_entries state))
+;;
+
 let () =
   Alcotest.run
     "masc-tui-palette-matching"
@@ -100,10 +184,14 @@ let () =
             test_subsequence_takes_the_characters_in_order
         ; Alcotest.test_case "the caller owns the needle case" `Quick
             test_the_caller_owns_the_needle_case
+        ; Alcotest.test_case "a label starting with the query leads" `Quick
+            test_a_label_starting_with_the_query_leads
         ] )
     ; ( "sources"
       , [ Alcotest.test_case "the palette lists tasks and posts" `Quick
             test_the_palette_lists_tasks_and_posts
+        ; Alcotest.test_case "the cursor line's names are the candidates"
+            `Quick test_the_cursor_lines_names_are_the_candidates
         ] )
     ]
 ;;

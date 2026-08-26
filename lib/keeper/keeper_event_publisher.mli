@@ -70,3 +70,17 @@ val publish_runtime_execution_built :
   effective_budget:int ->
   temperature:float ->
   unit
+(** See the .ml docstring. Wire name: [masc.keeper.native_posture_degraded]
+    is the analogue for posture admission below. *)
+
+val publish_native_posture_degraded :
+  keeper_name:string ->
+  client_label:string ->
+  declared:string ->
+  effective:string ->
+  reason:string ->
+  unit
+(** Typed record that a declared [keeper.tools.native] posture was degraded
+    to a safer effective posture at lane admission instead of failing the
+    turn (RFC-0390 admission review). Wire name:
+    [masc.keeper.native_posture_degraded]. *)

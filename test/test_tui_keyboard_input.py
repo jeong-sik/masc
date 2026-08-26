@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 import errno
 import fcntl
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -11,7 +12,6 @@ from pathlib import Path
 import re
 import select
 import signal
-import socket
 import struct
 import zlib
 import subprocess
@@ -59,6 +59,12 @@ FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
+# A lexed OCaml keyword, whichever colour the theme dresses it in. Pinning the
+# code -- yellow, once -- meant #30723's palette change failed four scenarios
+# with a timeout that named a colour instead of the thing under test: that the
+# file arrived lexed rather than printed.
+LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
+
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
@@ -127,23 +133,23 @@ class GatedHttpResponse:
 def test_http_endpoint(
     fixtures: HttpFixtures | None,
     requests: HttpRequests | None,
-) -> Iterator[tuple[int, Callable[[], None]]]:
-    if fixtures is None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
-            stalled_endpoint.bind(("127.0.0.1", 0))
-            stalled_endpoint.listen(1)
+) -> Iterator[tuple[int, Callable[[], None], Callable[[str], None]]]:
+    fixtures = {} if fixtures is None else fixtures
+    workspace_base_path: str | None = None
 
-            def start_endpoint() -> None:
-                pass
-
-            yield int(stalled_endpoint.getsockname()[1]), start_endpoint
-        return
+    def set_workspace_base_path(base_path: str) -> None:
+        nonlocal workspace_base_path
+        workspace_base_path = base_path
 
     class FixtureHandler(BaseHTTPRequestHandler):
         def respond(self) -> None:
             fixture = fixtures.get(
                 self.path,
-                (503, {"error": "fixture endpoint unavailable"}),
+                (200, {})
+                if self.path == "/health"
+                else fleet_safety_fixture()
+                if self.path == "/health?full=1"
+                else (503, {"error": "fixture endpoint unavailable"}),
             )
             resolved = fixture() if callable(fixture) else fixture
             extra_headers: tuple[tuple[str, str], ...] = ()
@@ -154,6 +160,23 @@ def test_http_endpoint(
                 extra_headers = resolved.headers
             else:
                 status, payload = resolved
+                if (
+                    self.path in ("/health", "/health?full=1")
+                    and status == 200
+                    and isinstance(payload, dict)
+                    and workspace_base_path is not None
+                ):
+                    payload = dict(payload)
+                    paths = dict(payload.get("paths", {}))
+                    paths.update(
+                        {
+                            "effective_base_path": workspace_base_path,
+                            "effective_masc_root": os.path.join(
+                                workspace_base_path, ".masc"
+                            ),
+                        }
+                    )
+                    payload["paths"] = paths
                 body = json.dumps(payload).encode()
                 content_type = "application/json"
             self.send_response(status)
@@ -189,7 +212,11 @@ def test_http_endpoint(
             thread.start()
 
         try:
-            yield int(server.server_address[1]), start_endpoint
+            yield (
+                int(server.server_address[1]),
+                start_endpoint,
+                set_workspace_base_path,
+            )
         finally:
             if thread is not None:
                 server.shutdown()
@@ -876,6 +903,52 @@ def fleet_safety_fixture() -> HttpResponse:
     return (200, {"keeper_fleet_safety": {"status": "ok"}})
 
 
+def with_workspace_identity(
+    fixtures: HttpFixtures | None, base_path: str
+) -> HttpFixtures:
+    """Answer /health?full=1 with the workspace the harness actually chose.
+
+    The TUI canonicalises its own base path against the one this reports and
+    refuses local Keeper/context/metrics reads when they differ. A fixture
+    that names no path leaves every scenario reading an unproven workspace,
+    which is not the state any of them mean to describe.
+
+    Scenario-owned health fixtures keep their fields; only the paths block is
+    filled in. A raw or callable response is left alone -- a scenario that
+    writes its own health body owns what it says.
+    """
+    # In place, not a copy: a scenario keeps the dict it handed over and swaps
+    # a response into it mid-run (a lane read that starts failing, a board list
+    # that arrives late). A copy leaves the server reading the original, and
+    # nine scenarios waited out their timeouts for a response that had already
+    # been written somewhere the server could not see.
+    merged: dict[str, HttpFixture] = fixtures if fixtures is not None else {}
+    paths = {
+        "cwd": base_path,
+        "effective_base_path": base_path,
+        "effective_masc_root": os.path.join(base_path, ".masc"),
+        "effective_has_masc_dir": True,
+    }
+    # The identity probe reads the compact /health; the fleet reading reads
+    # /health?full=1. Both carry the paths block, and a scenario may declare
+    # either, so both keys are filled.
+    for key in ("/health", "/health?full=1"):
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = (200, {"paths": paths})
+            continue
+        if isinstance(existing, tuple):
+            status, payload = existing
+            if isinstance(payload, dict):
+                body = dict(cast(dict[str, object], payload))
+                body["paths"] = {
+                    **cast(dict[str, object], body.get("paths", {})),
+                    **paths,
+                }
+                merged[key] = (status, body)
+    return merged
+
+
 def overview_event_http_fixtures() -> HttpFixtures:
     return {
         "/health?full=1": fleet_safety_fixture(),
@@ -905,7 +978,6 @@ def overview_event_http_fixtures() -> HttpFixtures:
                 "goals": [],
                 "rollup": {
                     "active_count": 0,
-                    "paused_count": 0,
                     "verifying_count": 0,
                     "done_count": 0,
                     "dropped_count": 0,
@@ -988,7 +1060,6 @@ def planning_snapshot(goals: list[dict[str, object]]) -> HttpResponse:
             "goals": goals,
             "rollup": {
                 "active_count": len(goals),
-                "paused_count": 0,
                 "verifying_count": 0,
                 "done_count": 0,
                 "dropped_count": 0,
@@ -1283,12 +1354,16 @@ def run_terminal_scenario(
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
-        with test_http_endpoint(http_fixtures, http_requests) as (
-            server_port,
-            start_http_endpoint,
-        ):
-            with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+        with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
+            with test_http_endpoint(
+                with_workspace_identity(http_fixtures, base_path), http_requests
+            ) as (
+                server_port,
+                start_http_endpoint,
+                set_workspace_base_path,
+            ):
                 seed_workspace(base_path)
+                set_workspace_base_path(base_path)
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -1309,6 +1384,7 @@ def run_terminal_scenario(
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
+                        "MASC_BASE_PATH_INPUT": base_path,
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
@@ -1474,7 +1550,7 @@ def navigate_with_arrows_and_quit(
     # That the letters became draft text is the claim above. Leave the pane,
     # then move to Overview where system events are visible.
     send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
-    tab_until(process, master_fd, output, b"MASC Overview")
+    send_and_wait(process, master_fd, output, b"\x1b", b"MASC Overview")
     send_and_wait(
         process,
         master_fd,
@@ -3605,6 +3681,14 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         # instead would stop pumping the terminal, and a TUI whose output
         # nobody reads blocks before it ever posts.
         sending = send_and_wait(process, master_fd, output, b"\r", b"(sending ")
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"ACTIVE TURN",
+            start=0,
+            timeout=5.0,
+        )
         footer_while_sending = frame_row_of(sending, b"  Enter:")
 
         send_and_wait(
@@ -3825,6 +3909,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "role": "assistant",
                 "content": "",
                 "ts": 1787348490.3,
+                "turn_ref": "trace-1787333555531-00020#54",
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00020#54"},
                 # The server writes null, not "", when the turn said nothing.
                 # (content is set above; the marker is what the decoder keys on.)
@@ -3855,6 +3940,7 @@ def autonomous_turn_history_fixture() -> HttpResponse:
                 "role": "assistant",
                 "content": "",
                 "ts": 1787348491.3,
+                "turn_ref": "trace-1787333555531-00021#55",
                 "autonomous_turn": {"turn_id": "trace-1787333555531-00021#55"},
                 "blocks": [],
             },
@@ -3929,13 +4015,15 @@ def autonomous_turn_history_interaction() -> Interaction:
             timeout=5.0,
         )
         pane = bytes(output[pane_start:])
+        plain_pane = CSI_RE.sub(b"", pane)
         for needle, what in (
             (b"2 reasoning steps, content withheld", "the withheld reasoning count"),
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
-            ("\u00b7 auto".encode(), "the autonomous origin badge"),
+            ("TURN \u00b7 THINKING".encode(), "the turn start"),
+            ("\u21b3 TOOLS".encode(), "the nested tool block"),
         ):
-            if needle not in pane:
+            if needle not in plain_pane:
                 raise AssertionError(
                     f"Autonomous turn history did not draw {what}: {pane!r}"
                 )
@@ -3968,19 +4056,45 @@ def memory_journal_timeline_interaction() -> Interaction:
             process,
             master_fd,
             output,
-            b"Librarian committed current memory revision 9",
+            b"superseded by provider grouping",
             start=start,
             timeout=5.0,
         )
-        visible = bytes(output[start:])
+        last_row_end = output.find(b"superseded by provider grouping", start) + len(
+            b"superseded by provider grouping"
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            FRAME_END,
+            start=last_row_end,
+            timeout=3.0,
+        )
+        frame_end = output.find(FRAME_END, last_row_end) + len(FRAME_END)
+        visible = bytes(output[start:frame_end])
         for needle in (
-            b"ADDED (now in current memory) [fact] the Runtime probe shares one provider endpoint",
-            b"REMOVED (no longer in current memory) [constraint] probe every model separately",
+            b"[fact] the Runtime probe shares",
+            b"one provider endpoint",
+            b"[constraint] probe",
+            b"every model separately",
             b"drop memory-old-probe-rule",
             b"superseded by provider grouping",
         ):
             if needle not in visible:
                 raise AssertionError(f"Memory timeline did not draw {needle!r}: {visible!r}")
+
+        # The changed facts ride a ```diff fence, which is what colours the two
+        # directions and keeps a leading + out of markdown's list grammar. The
+        # renderer used to escape that + instead, and nothing consumed the
+        # escape, so every changed fact reached the pane behind a literal
+        # backslash. Asserted on the drawn bytes because that is where it
+        # showed: the decoder was honest the whole time.
+        for escaped in (b"\\+ ", b"\\- "):
+            if escaped in visible:
+                raise AssertionError(
+                    f"Memory timeline drew an unconsumed escape {escaped!r}: {visible!r}"
+                )
 
         send_and_wait(process, master_fd, output, b"/memory", composer_showing(b"/memory"))
         hidden = send_and_wait(process, master_fd, output, b"\r", b"memory:off")
@@ -4006,6 +4120,27 @@ def memory_journal_timeline_interaction() -> Interaction:
 
 
 def context_inspector_fixtures() -> HttpFixtures:
+    prompt_texts = {
+        "keeper_instructions": "Keeper instruction text",
+        "dynamic_context": "exact dynamic context from the turn",
+        "memory_os_recall": "remember the operator preference",
+    }
+    assembled_prompt = "\n".join(prompt_texts.values())
+
+    def prompt_record(block_id: str) -> dict[str, object]:
+        text = prompt_texts[block_id]
+        return {
+            "block": block_id,
+            "bytes": len(text.encode()),
+            "digest": hashlib.sha256(text.encode()).hexdigest(),
+        }
+
+    def input_prompt_component(block_id: str) -> dict[str, object]:
+        return {
+            "component": f"prompt.{block_id}",
+            "bytes": len(prompt_texts[block_id].encode()),
+        }
+
     fixtures = keeper_runtime_http_fixtures()
     fixtures["/api/v1/keepers/alpha/chat/history"] = (200, [])
     fixtures["/api/v1/keepers/alpha/memory-journal?limit=20"] = (
@@ -4026,26 +4161,14 @@ def context_inspector_fixtures() -> HttpFixtures:
                         "absolute_turn": 42,
                         "turn_ref": "trace-context#42",
                         "blocks": [
-                            {
-                                "block": "keeper_instructions",
-                                "bytes": 24,
-                                "digest": "a" * 64,
-                            },
-                            {
-                                "block": "dynamic_context",
-                                "bytes": 36,
-                                "digest": "b" * 64,
-                            },
-                            {
-                                "block": "memory_os_recall",
-                                "bytes": 31,
-                                "digest": "c" * 64,
-                            },
+                            prompt_record("keeper_instructions"),
+                            prompt_record("dynamic_context"),
+                            prompt_record("memory_os_recall"),
                         ],
                         "input_components": [
-                            {"component": "prompt.keeper_instructions", "bytes": 24},
-                            {"component": "prompt.dynamic_context", "bytes": 36},
-                            {"component": "prompt.memory_os_recall", "bytes": 31},
+                            input_prompt_component("keeper_instructions"),
+                            input_prompt_component("dynamic_context"),
+                            input_prompt_component("memory_os_recall"),
                             {"component": "tool_schemas", "bytes": 2048},
                             {"component": "message_user", "bytes": 512},
                             {"component": "message_assistant_text", "bytes": 768},
@@ -4081,22 +4204,22 @@ def context_inspector_fixtures() -> HttpFixtures:
             "blocks": [
                 {
                     "id": "keeper_instructions",
-                    "bytes": 24,
-                    "text": "Keeper instruction text",
+                    "bytes": len(prompt_texts["keeper_instructions"].encode()),
+                    "text": prompt_texts["keeper_instructions"],
                 },
                 {
                     "id": "dynamic_context",
-                    "bytes": 36,
-                    "text": "exact dynamic context from the turn",
+                    "bytes": len(prompt_texts["dynamic_context"].encode()),
+                    "text": prompt_texts["dynamic_context"],
                 },
                 {
                     "id": "memory_os_recall",
-                    "bytes": 31,
-                    "text": "remember the operator preference",
+                    "bytes": len(prompt_texts["memory_os_recall"].encode()),
+                    "text": prompt_texts["memory_os_recall"],
                 },
             ],
-            "assembled": "Keeper instruction text\nexact dynamic context from the turn\nremember the operator preference",
-            "assembled_bytes": 93,
+            "assembled": assembled_prompt,
+            "assembled_bytes": len(assembled_prompt.encode()),
         },
     )
     return fixtures
@@ -4159,6 +4282,36 @@ def context_inspector_interaction() -> Interaction:
             raise AssertionError(f"Exact block view retained the list disclosure: {exact!r}")
 
         send_and_wait(process, master_fd, output, b"\x1b", b"Exact turn-added prompt text")
+        input_map = send_and_wait(
+            process, master_fd, output, b"3", b"Provider request map"
+        )
+        input_map_plain = CSI_RE.sub(b"", input_map)
+        for needle in (
+            b"What reached the provider, and why",
+            b"included by turn prompt assembly",
+            b"verified exact text",
+            b"included by effective tool surface",
+            b"schema bytes only",
+            b"content not retained",
+        ):
+            if needle not in input_map_plain:
+                raise AssertionError(
+                    f"Provider request map omitted {needle!r}: {input_map!r}"
+                )
+
+        send_and_wait(process, master_fd, output, b"j", b"included by")
+        send_and_wait(process, master_fd, output, b"j", b"Memory recall")
+        map_exact = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"remember the operator preference",
+        )
+        if b"included by turn prompt assembly" not in CSI_RE.sub(b"", map_exact):
+            raise AssertionError(f"Input map exact view lost provenance: {map_exact!r}")
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"Provider request map")
         send_and_wait(
             process,
             master_fd,
@@ -4193,7 +4346,7 @@ def chat_visibility_modes_interaction() -> Interaction:
             master_fd,
             output,
             b"m",
-            "\u2717 Ran 2 tools".encode(),
+            "\u2717 Tools 2".encode(),
         )
         wait_for_output(
             process,
@@ -4206,6 +4359,10 @@ def chat_visibility_modes_interaction() -> Interaction:
         initial += bytes(output[pane_start:])
         if b"2 reasoning steps, content withheld" in initial:
             raise AssertionError(f"hidden reasoning was still drawn: {initial!r}")
+        if "TURN · TOOLS".encode() not in CSI_RE.sub(b"", initial):
+            raise AssertionError(
+                f"the first visible block did not start its turn: {initial!r}"
+            )
 
         folded = send_and_wait(
             process, master_fd, output, b"\x12", b"reasoning:folded"
@@ -4391,13 +4548,18 @@ def message_origin_badge_interaction(
     )
     update_end = output.find(FRAME_END, keeper_end) + len(FRAME_END)
     frame = bytes(output[pane_start:update_end])
-    for needle, description in (
-        (b"\x1b[36m\x1b[7m vincent", "cyan operator origin badge"),
-        (b"\x1b[34m\x1b[7m alpha", "blue Keeper origin badge"),
-        (b"\x1b[36m\xe2\x94\x82\x1b[0m \x1b[0moperator-body-neutral", "gutter-marked operator body"),
-        (b"\x1b[34m\xe2\x94\x82\x1b[0m \x1b[0mkeeper-body-neutral", "gutter-marked Keeper body"),
+    plain_frame = CSI_RE.sub(b"", frame)
+    for pattern, description in (
+        (
+            b"\xe2\x96\xb6\\s+(?:TURN \xc2\xb7 )?vincent {2}operator-body-neutral",
+            "operator mark, origin, and separated body",
+        ),
+        (
+            b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
+            "Keeper mark, origin, and separated body",
+        ),
     ):
-        if needle not in frame:
+        if re.search(pattern, plain_frame) is None:
             raise AssertionError(f"chat frame omitted {description}: {frame!r}")
     for forbidden, description in (
         (b"\x1b[36m  operator-body-neutral", "operator body cyan wash"),
@@ -4497,12 +4659,21 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
 
         beta_start = len(output)
-        # iTerm reports Ctrl-G as CSI-u after keyboard disambiguation is on.
+        # The visible roster is an input pane: Left focuses it, Down moves its
+        # cursor, and Enter opens that Keeper without changing the draft.
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"Enter:open")
         send_and_wait(
             process,
             master_fd,
             output,
-            b"\x1b[103;5u",
+            b"\x1b[B",
+            b"\x1b[7m \xc2\xb7 beta",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
         )
         wait_for_output(
@@ -4766,6 +4937,7 @@ def repositories_fixture() -> tuple[int, dict[str, object]]:
             "repositories": [
                 {"id": "masc", "name": "masc",
                  "codebase": "github.com_jeong-sik_masc",
+                 "url": "git@github.com:jeong-sik/masc.git",
                  "local_path": "workspace/masc", "default_branch": "main",
                  "status": "ready", "keepers": ["alpha"], "auto_sync": True},
             ],
@@ -4827,17 +4999,32 @@ def repositories_enter_interaction(requests: HttpRequests) -> Interaction:
             raise AssertionError(
                 f"the note anchor mark is missing from the gutter: {back!r}"
             )
-        # c: which keeper wrote which lines, through what, and when.
-        activity = send_and_wait(
-            process, master_fd, output, b"c", b"Edit (turn 7)"
-        )
-        activity_plain = CSI_RE.sub(b"", activity).decode("utf-8")
-        for needle in ("activity: note.ml", "L1", "alpha"):
-            if needle not in activity_plain:
+        # H over the repo-scoped file: the commits and the recorded keeper
+        # edits arrive woven into one timeline, newest first.
+        history = send_and_wait(process, master_fd, output, b"H", b"Edit (turn 7)")
+        history_plain = CSI_RE.sub(b"", history).decode("utf-8")
+        for needle in ("history: note.ml", "seed the file", "L2", "alpha"):
+            if needle not in history_plain:
                 raise AssertionError(
-                    f"the activity view missed {needle!r}: {activity_plain!r}"
+                    f"the history missed {needle!r}: {history_plain!r}"
                 )
-        send_and_wait(process, master_fd, output, b"\x1b", b"let")
+        # Enter on the top row (the newer commit): its subject's (#N) plus
+        # the registered remote become the PR link.
+        send_and_wait(
+            process, master_fd, output, b"\r",
+            b"github.com/jeong-sik/masc/pull/1256",
+        )
+        # j scrolls the edit row to the top; Enter on it closes the history
+        # and jumps the cursor (the reverse gutter) to the lines it wrote.
+        jumped = send_and_wait(
+            process, master_fd, output, b"j\r", b"\x1b[7m   2\x1b[0m"
+        )
+        # The loaded history now decorates the gutter too: the edit's line
+        # carries the recorded-edit mark.
+        if "\u00b7".encode() not in jumped:
+            raise AssertionError(
+                f"the recorded-edit mark is missing from the gutter: {jumped!r}"
+            )
         os.write(master_fd, b"q")
 
     return interact
@@ -4852,7 +5039,7 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         "task_id": task_id,
         "task_title": f"finish {task_id}",
         "request_kind": "completion",
-        "request_summary": f"prove {task_id} is done",
+        "request_summary": "" if task_id == "task-901" else f"prove {task_id} is done",
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
         "required_artifacts": ["diff"],
@@ -4913,10 +5100,11 @@ def note_editor_script() -> Iterator[str]:
 
 
 def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
-    """`a` arms and only the second `a` sends the approve; `x` collects a
-    reason through $EDITOR and sends the reject. Both assertions read the
-    recorded POST bodies -- the wire, not the paint -- and the frame between
-    the two presses proves the first one sent nothing.
+    """Enter explains what the request asks for and which evidence exists.
+    Then `a` arms and only the second `a` sends the approve; `x` collects a
+    reason through $EDITOR and sends the reject. The verdict assertions read
+    the recorded POST bodies -- the wire, not the paint -- and the frame
+    between the two presses proves the first one sent nothing.
     """
 
     def verdict_bodies() -> list[bytes]:
@@ -4937,6 +5125,30 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         wait_for_output(
             process, master_fd, output, b"task-901", start=0, timeout=3.0
         )
+        detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"HOW TO READ THIS",
+        )
+        detail_plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"vr-task-901",
+            b"finish task-901",
+            b"completion",
+            b"No request summary was recorded",
+            b"review the diff",
+            b"REQUIRED ARTIFACTS (1)",
+            b"SUBMITTED EVIDENCE (1)",
+            b"diff",
+            b"left/Esc:list",
+        ):
+            if needle not in detail_plain:
+                raise AssertionError(
+                    f"Verification detail omitted {needle!r}: {detail_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"task-901")
         send_and_wait(
             process,
             master_fd,
@@ -4953,6 +5165,11 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         approve_payload = json.loads(approve_body)
         if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
             raise AssertionError(f"approve body: {approve_payload!r}")
+        # Let the approve completion and its queue reload settle before the
+        # editor temporarily gives up the alternate screen. Otherwise the
+        # redraw from that reload can race the terminal handoff and leave the
+        # editor wait with no frame to drain.
+        drain_until_quiet(process, master_fd, output)
         # Reject on the same row: the $EDITOR stub saves the reason form, so
         # the second verdict body carries it.
         read_available(master_fd, output)
@@ -5223,7 +5440,46 @@ def file_changes_alpha_response() -> tuple[int, dict[str, object]]:
                         "after": "let a = 2",
                     },
                     "succeeded": True,
-                }
+                },
+                # A second row, so the arrow keys have somewhere to go. With
+                # one row the marked row and the window's top row are the same
+                # index whether or not the code keeps them apart.
+                {
+                    "at": 1787600100.0,
+                    "keeper": "alpha",
+                    "turn": 9,
+                    "task_id": "task-9",
+                    "location": {
+                        "kind": "repo",
+                        "repo_id": "masc",
+                        "path": "lib/second.ml",
+                    },
+                    "change": {
+                        "kind": "edit",
+                        "before": "let b = 1",
+                        "after": "let b = 2\nlet c = 3",
+                    },
+                    "succeeded": True,
+                },
+                {
+                    "at": 1787600200.0,
+                    "keeper": "alpha",
+                    "turn": 11,
+                    "task_id": "task-11",
+                    "location": {
+                        "kind": "repo",
+                        "repo_id": "masc",
+                        "path": "lib/long.ml",
+                    },
+                    "change": {
+                        "kind": "edit",
+                        "before": "let x = 0",
+                        # Taller than the diff view, so the view has somewhere
+                        # to scroll and says how far it scrolled.
+                        "after": "\n".join(f"let x{n} = {n}" for n in range(40)),
+                    },
+                    "succeeded": True,
+                },
             ],
             "over_budget": 0,
             "malformed": 0,
@@ -5244,17 +5500,94 @@ def file_changes_beta_response() -> tuple[int, dict[str, object]]:
         "before": "let beta = false",
         "after": "let beta = true",
     }
+    payload["changes"] = [change]
     return status, payload
 
 
 def changes_keeper_and_arrow_detail_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
-    _slave_fd: int,
+    slave_fd: int,
     output: bytearray,
     _base_path: str,
 ) -> None:
     tab_until(process, master_fd, output, b"masc:lib/example.ml")
+    # The cursor row's diff previews under the list without Enter -- the
+    # recorded before/after pair, rendered locally.
+    wait_for_output(
+        process, master_fd, output, b"preview masc:lib/example.ml",
+        start=0, timeout=3.0,
+    )
+    preview_plain = CSI_RE.sub(b"", bytes(output)).decode("utf-8")
+    for needle in ("-1 +1", "let a = 1", "let a = 2"):
+        if needle not in preview_plain:
+            raise AssertionError(
+                f"the preview missed {needle!r}: {preview_plain[-600:]!r}"
+            )
+    # Down moves the marked row, not just the window. The mark used to be the
+    # window's top row, so on a list that fits the screen it could not move at
+    # all and Enter opened the first change whatever the operator pressed.
+    second = send_and_wait(
+        process, master_fd, output, b"\x1b[B", b"preview masc:lib/second.ml"
+    )
+    second_plain = CSI_RE.sub(b"", second).decode("utf-8")
+    for needle in ("-1 +2", "let b = 1", "let c = 3"):
+        if needle not in second_plain:
+            raise AssertionError(
+                f"down did not move the mark to the second change ({needle!r} "
+                f"missing): {second_plain[-600:]!r}"
+            )
+    second_diff = send_and_wait(
+        process, master_fd, output, b"\x1b[C", b"turn 9  task task-9  applied"
+    )
+    second_diff_plain = CSI_RE.sub(b"", second_diff).decode("utf-8")
+    for needle in ("MASC Change", "masc:lib/second.ml", "let c = 3"):
+        if needle not in second_diff_plain:
+            raise AssertionError(
+                f"right opened a diff that is not the marked row ({needle!r} "
+                f"missing): {second_diff_plain!r}"
+            )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    # An open diff scrolls to its end and stops there. The keypress steps
+    # without a bound -- the rows are the drawing's -- so the frame reports
+    # what it could use and the loop stores that. Without the report the
+    # stored value kept climbing, and coming back up took one press per step
+    # taken past the end.
+    send_and_wait(
+        process, master_fd, output, b"\x1b[B", b"preview masc:lib/long.ml"
+    )
+    tall = send_and_wait(
+        process, master_fd, output, b"\x1b[C", b"turn 11  task task-11  applied"
+    )
+    if b"scroll 0]" not in CSI_RE.sub(b"", tall):
+        raise AssertionError(
+            f"the tall diff did not open at the top: {CSI_RE.sub(b'', tall)!r}"
+        )
+    mark = len(output)
+    os.write(master_fd, b"j" * 60)
+    wait_for_terminal_input_consumed(slave_fd)
+    drain_until_quiet(process, master_fd, output)
+    settled = CSI_RE.sub(b"", bytes(output[mark:])).decode("utf-8")
+    at_end = re.findall(r"scroll (\d+)\]", settled)
+    if not at_end:
+        raise AssertionError(
+            f"the tall diff drew no scroll indicator: {settled[-800:]!r}"
+        )
+    bottom = int(at_end[-1])
+    if bottom == 0:
+        raise AssertionError(
+            f"the tall diff did not scroll at all: {settled[-800:]!r}"
+        )
+    send_and_wait(
+        process, master_fd, output, b"k", f"scroll {bottom - 1}]".encode("ascii")
+    )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"Turn")
+    send_and_wait(
+        process, master_fd, output, b"\x1b[A", b"preview masc:lib/second.ml"
+    )
+    send_and_wait(
+        process, master_fd, output, b"\x1b[A", b"preview masc:lib/example.ml"
+    )
     beta = send_and_wait(process, master_fd, output, b"]", b"masc:lib/beta.ml")
     if b"MASC Changes beta" not in CSI_RE.sub(b"", beta):
         raise AssertionError(f"Changes did not switch to beta: {beta!r}")
@@ -5271,7 +5604,7 @@ def changes_keeper_and_arrow_detail_interaction(
     # own workspace (?keeper=alpha), so the header names whose tree it is
     # and the bytes arrive lexed.
     code = send_and_wait(
-        process, master_fd, output, b"v", b"\x1b[33mlet\x1b[0m"
+        process, master_fd, output, b"v", LEXED_LET
     )
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "alpha ▸ repos/masc/lib" not in code_plain:
@@ -5335,7 +5668,10 @@ def enter_outside_changes_interaction(
             "returning to Changes did not draw the list columns; Enter on "
             f"Lanes armed a view it does not own: {back_plain!r}"
         )
-    if "-1 +1" in back_plain:
+    # What says a diff is open is the diff view's own frame, not a pair of
+    # counts: the marked row previews its diff under the list now, so "-1 +1"
+    # is what an unopened list looks like.
+    if "esc closes" in back_plain:
         raise AssertionError(
             "returning to Changes drew a diff nobody opened; Enter on Lanes "
             f"reached the Changes handler: {back_plain!r}"
@@ -5345,8 +5681,8 @@ def enter_outside_changes_interaction(
 
 
 
-WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/tree?depth=0&limit=200"
-WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=500"
+WORKSPACE_TREE_ROOT_PATH = "/api/v1/workspace/children?path=&limit=2000"
+WORKSPACE_CHILDREN_LIB_PATH = "/api/v1/workspace/children?path=lib&limit=2000"
 WORKSPACE_FILE_AML_PATH = "/api/v1/workspace/file?path=lib/a.ml"
 
 
@@ -5371,7 +5707,8 @@ def code_lane_fixtures() -> HttpFixtures:
              "hueIndex": None},
         ],
     )
-    file_response = (200, {"ok": True, "content": "let x = 1\n(* hi *)\n"})
+    file_response = (
+        200, {"ok": True, "content": "let x = 1\n(* hi *)\nlet y = x\n"})
     fixtures[WORKSPACE_FILE_AML_PATH] = file_response
     # uri's Query_value encoding may or may not spell the slash; serve both.
     fixtures["/api/v1/workspace/file?path=lib%2Fa.ml"] = file_response
@@ -5380,9 +5717,9 @@ def code_lane_fixtures() -> HttpFixtures:
         {
             "ok": True,
             "commits": [
-                {"hash": "abc1234", "date": "2026-08-25",
+                {"hash": "abc1234", "timestamp_ms": 1787000000000,
                  "author": "keeper-alpha", "subject": "feat: add x"},
-                {"hash": "def5678", "date": "2026-08-24",
+                {"hash": "def5678", "timestamp_ms": 1786900000000,
                  "author": "vincent", "subject": "chore: seed the file"},
             ],
         },
@@ -5396,8 +5733,11 @@ def code_lane_fixtures() -> HttpFixtures:
             "unified": [
                 {"kind": "delete", "oldLine": 1, "newLine": None,
                  "text": "let a = 1"},
+                # The added row is the working tree's line 1, so its text
+                # agrees with the file fixture -- the renderer now resolves
+                # it back to the lexed row by that number.
                 {"kind": "add", "oldLine": None, "newLine": 1,
-                 "text": "let a = 2"},
+                 "text": "let x = 1"},
             ],
         },
     )
@@ -5414,6 +5754,13 @@ def code_lane_fixtures() -> HttpFixtures:
              "character": 1},
         ]}},
     )
+    y_definition_response = (
+        200,
+        {"ok": True, "data": {"kind": "locations", "locations": [
+            {"path": "lib/a.ml", "inside_workspace": True, "line": 1,
+             "character": 5},
+        ]}},
+    )
     for enc in ("lib/a.ml", "lib%2Fa.ml"):
         fixtures[
             f"/api/v1/lsp/question?question=hover&path={enc}&line=1&symbol=x"
@@ -5421,6 +5768,9 @@ def code_lane_fixtures() -> HttpFixtures:
         fixtures[
             f"/api/v1/lsp/question?question=definition&path={enc}&line=1&symbol=x"
         ] = definition_response
+        fixtures[
+            f"/api/v1/lsp/question?question=definition&path={enc}&line=3&symbol=y"
+        ] = y_definition_response
     return fixtures
 
 
@@ -5440,22 +5790,36 @@ def code_lane_interaction(
         if needle not in plain:
             raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
     send_and_wait(process, master_fd, output, b"\r", b"a.ml")
-    opened = send_and_wait(
-        process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
-    )
+    # Which colour a keyword wears belongs to the theme, and the theme moves:
+    # #30723 turned it bright magenta and this waited out its timeout on the
+    # old yellow. What this scenario is about is that the file arrived lexed,
+    # so it asks for a style around the span and not for a particular one.
+    opened = send_and_wait(process, master_fd, output, b"\r", LEXED_LET)
     if re.search(rb"\x1b\[7m\s+1\x1b\[0m", opened) is None:
         raise AssertionError(
             f"the cursor line's gutter is not highlighted: {opened!r}"
         )
-    if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
+    if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
-    # l pans the open file sideways by one cell: the keyword span is cut
-    # mid-word but its colour still opens the remainder, and the title says
-    # the view is shifted. h pans back and the full keyword returns.
-    panned = send_and_wait(process, master_fd, output, b"ll", b"(col 3)")
-    if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
+    # Shift-Right pans the open file sideways by one cell: lowercase h/l now
+    # choose the split pane. The keyword span is cut mid-word but its colour
+    # still opens the remainder, and the title says the view is shifted.
+    panned = send_and_wait(
+        process, master_fd, output, b"\x1b[1;2C\x1b[1;2C", b"(col 3)"
+    )
+    cut_under_style = re.compile(
+        rb"\x1b\[[0-9;]*m" + re.escape(b"t") + rb"\x1b\[0m x = "
+        rb"\x1b\[[0-9;]*m" + re.escape(b"1") + rb"\x1b\[0m"
+    )
+    if cut_under_style.search(panned) is None:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
-    send_and_wait(process, master_fd, output, b"hh", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[1;2D\x1b[1;2D",
+        LEXED_LET,
+    )
     # With the file focused, "/" searches its lines: typing jumps the line
     # cursor (the reverse gutter) to the match, and Enter keeps the query.
     searched = send_and_wait(process, master_fd, output, b"/hi", b"/hi")
@@ -5472,21 +5836,32 @@ def code_lane_interaction(
     )
     # d swaps the content for the working tree's diff against HEAD; Esc
     # swaps back to the lexed content.
-    diff_frame = send_and_wait(process, master_fd, output, b"d", b"let a = 2")
+    # The added row now arrives lexed, so the wait needle is the keyword
+    # span rather than the plain text the styles split apart.
+    diff_frame = send_and_wait(
+        process, master_fd, output, b"d", LEXED_LET
+    )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
-    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1"):
+    for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
         if needle not in diff_plain:
             raise AssertionError(
                 f"the diff view missed {needle!r}: {diff_plain!r}"
             )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    # The added row is the working tree's own line, so it carries the
+    # lexer's colours (the keyword span) inside the diff band.
+    if LEXED_LET.search(diff_frame) is None:
+        raise AssertionError(
+            f"the added diff row lost the lexer's colours: {diff_frame!r}"
+        )
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).
     # The needle is a commit hash so the wait crosses the "(loading
     # history)" frame and lands on the fetched listing.
     history = send_and_wait(process, master_fd, output, b"H", b"abc1234")
     history_plain = CSI_RE.sub(b"", history).decode("utf-8")
-    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent"):
+    for needle in ("history: lib/a.ml", "feat: add x", "def5678", "vincent",
+                   "keeper edits not shown"):
         if needle not in history_plain:
             raise AssertionError(
                 f"history missed {needle!r}: {history_plain!r}"
@@ -5495,21 +5870,17 @@ def code_lane_interaction(
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # The search above left the cursor on line 2; the lsp fixtures answer
     # about line 1, so put the cursor back where the question is.
     send_and_wait(process, master_fd, output, b"k", b"\x1b[7m   1\x1b[0m")
-    # K pre-fills the palette with the hover command; the argument is the
-    # symbol, and the answer lands beside the title.
-    prefilled = send_and_wait(process, master_fd, output, b"K", b"hover ")
-    if b"MASC Palette" not in CSI_RE.sub(b"", prefilled) and \
-            b"hover " not in CSI_RE.sub(b"", prefilled):
-        raise AssertionError(f"K did not open the palette: {prefilled!r}")
-    send_and_wait(process, master_fd, output, b"x\r", b"x: int")
-    # D asks for the definition; the answer is inside the same file, so the
-    # cursor (the reverse gutter) moves to its line.
-    send_and_wait(process, master_fd, output, b"D", b"def ")
-    landed = send_and_wait(process, master_fd, output, b"x\r", b"x: lib/a.ml:2")
+    # The cursor line holds one name (let is a keyword, 1 a number), so K
+    # asks about it at once -- no palette between the keypress and the
+    # answer beside the title.
+    send_and_wait(process, master_fd, output, b"K", b"x: int")
+    # D likewise jumps straight to the definition; the answer is inside the
+    # same file, so the cursor (the reverse gutter) moves to its line.
+    landed = send_and_wait(process, master_fd, output, b"D", b"x: lib/a.ml:2")
     if re.search(rb"\x1b\[7m\s+2\x1b\[0m", landed) is None:
         raise AssertionError(
             f"the definition jump did not move the cursor gutter: {landed!r}"
@@ -5523,6 +5894,26 @@ def code_lane_interaction(
     if re.search(rb"\x1b\[7m\s+2\x1b\[0m", returned) is not None:
         raise AssertionError(
             f"B left the cursor on the jumped-to line: {returned!r}"
+        )
+    # A line with several names (let y = x) opens the palette with each as
+    # an entry instead of guessing one.
+    send_and_wait(
+        process, master_fd, output, b"jj",
+        re.compile(rb"\x1b\[7m\s+3\x1b\[0m"),
+    )
+    choices = send_and_wait(process, master_fd, output, b"D", b"def y")
+    if "def x" not in CSI_RE.sub(b"", choices).decode("utf-8"):
+        raise AssertionError(
+            f"the candidate list missed the second name: {choices!r}"
+        )
+    # Enter alone runs the highlighted candidate (def y): the answer names
+    # the location and the cursor jumps to it.
+    picked = send_and_wait(
+        process, master_fd, output, b"\r", b"y: lib/a.ml:1"
+    )
+    if re.search(rb"\x1b\[7m\s+1\x1b\[0m", picked) is None:
+        raise AssertionError(
+            f"the candidate jump did not move the cursor gutter: {picked!r}"
         )
     os.write(master_fd, b"q")
 
@@ -6681,8 +7072,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     code_file = (200, {"ok": True, "content": "let a = 2\n"})
     for children_path in (
-        "/api/v1/workspace/children?path=repos/masc/lib&limit=500&keeper=alpha",
-        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=500&keeper=alpha",
+        "/api/v1/workspace/children?path=repos/masc/lib&limit=2000&keeper=alpha",
+        "/api/v1/workspace/children?path=repos%2Fmasc%2Flib&limit=2000&keeper=alpha",
     ):
         changes_navigation_fixtures[children_path] = code_children
     for file_path in (
@@ -6753,7 +7144,7 @@ def run_keyboard_regression(executable: str) -> None:
     )
     repositories_fixtures = keeper_runtime_http_fixtures()
     repositories_fixtures[REPOSITORIES_PATH] = repositories_fixture()
-    repositories_fixtures["/api/v1/workspace/tree?depth=0&limit=200&repo_id=masc"] = (
+    repositories_fixtures["/api/v1/workspace/children?path=&limit=2000&repo_id=masc"] = (
         200,
         [
             {"path": "src", "label": "src", "depth": 0, "parent": "",
@@ -6786,11 +7177,20 @@ def run_keyboard_regression(executable: str) -> None:
         "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = notes_response
     repositories_fixtures[
+        "/api/v1/git/log?path=note.ml&limit=50&repo_id=masc"
+    ] = (
+        200,
+        {"ok": True, "commits": [
+            {"hash": "abc1234", "timestamp_ms": 1787650000000,
+             "author": "keeper", "subject": "docs: seed the file (#1256)"},
+        ]},
+    )
+    repositories_fixtures[
         "/api/v1/ide/regions?codebase=github.com_jeong-sik_masc&file_path=note.ml"
     ] = (
         200,
         {"ok": True, "data": [
-            {"file_path": "note.ml", "line_start": 1, "line_end": 1,
+            {"file_path": "note.ml", "line_start": 2, "line_end": 2,
              "keeper_id": "alpha",
              "source": {"type": "tool_call", "tool_name": "Edit", "turn": 7},
              "timestamp_ms": 1787600000000},

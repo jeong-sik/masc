@@ -1019,6 +1019,12 @@ let test_native_none_needs_client_support () =
        ~approval_mode:Keeper_tool_approval_mode.Auto
        ~none_supported:false
        ~client_label:"Codex");
+  expect_admit "Antigravity none is refused" false
+    (Host.admit_native_posture
+       ~posture:Runtime_native_tools.Native_none
+       ~approval_mode:Keeper_tool_approval_mode.Auto
+       ~none_supported:false
+       ~client_label:"Antigravity");
   expect_admit "none is admitted where the client supports it" true
     (Host.admit_native_posture
        ~posture:Runtime_native_tools.Native_none
@@ -1034,6 +1040,163 @@ let test_native_read_is_effect_free_and_admitted () =
        ~approval_mode:Keeper_tool_approval_mode.Auto
        ~none_supported:false
        ~client_label:"Codex")
+;;
+
+(* RFC-0390 admission review (P0): an admission refusal must not kill the
+   turn. resolve_native_posture degrades to the safest weaker posture and
+   records the downgrade as a typed event. The pure predicate above still
+   refuses — the policy below keeps the runtime call alive. *)
+let test_resolve_degrades_instead_of_failing_the_turn () =
+  let run = Host.resolve_native_posture in
+  let posture_of = function
+    | Ok p -> Runtime_native_tools.to_string p
+    | Error detail ->
+      failf "runtime call must not die: %s"
+        (Agent_core.Error.to_string detail)
+  in
+  (* No profile declared: the runtime default posture stands, admission is
+     trivially satisfied, no degradation, no event. *)
+  check string "undeclared default stays" "none"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-undeclared"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.claude_code_default
+          ~none_supported:true));
+  (* full under the shared Auto default degrades to read, turn lives. *)
+  check string "full under Auto degrades to read" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  (* none on a client without a disable switch degrades to read. *)
+  check string "none on Codex degrades to read" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-none-codex"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_none
+          ~none_supported:false));
+  (* Yolo + full is admitted as declared — but the shared registry resolves
+     Auto for unknown keepers, so drive the honored path through read,
+     which needs no approval stance. *)
+  check string "read is admitted untouched" "read"
+    (posture_of
+       (run
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-read-codex"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_read
+          ~none_supported:false))
+;;
+
+(* #30408 review: the two refusal branches have different lifetimes, so
+   their reporting cadence must differ. [full] under a non-yolo approval
+   mode is turn state — publish every affected turn. [none] on a client
+   without a disable switch is a static profile-vs-assignment
+   contradiction — publish once per process per (keeper, client) pair,
+   then go quiet until a resolution honors the declaration. *)
+let test_static_contradiction_reports_once_until_rearmed () =
+  (* The Event_bus needs a running Eio scheduler; the heartbeat
+     integration tests wrap bus setup in Eio_main.run the same way. *)
+  Eio_main.run @@ fun _env ->
+  (* One persistent subscription for the whole case: events published
+     between drains queue in its buffer instead of being lost with no
+     subscriber attached. *)
+  let bus = Agent_core.Event_bus.create () in
+  Event_bus_slots.set_masc bus;
+  let subscription =
+    Masc.Runtime_event_bus.subscribe
+      ~capacity:32
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+      ~purpose:"rfc0390-static-contradiction-test"
+      bus
+  in
+  let drained_native_posture_events () =
+    (* Publish routes through a fiber-owned queue; yield once so the
+       pending deliveries reach the subscriber before the drain. *)
+    Eio.Fiber.yield ();
+    List.filter_map
+      (fun (event : Agent_core.Event_bus.event) ->
+        match event.Agent_core.Event_bus.payload with
+        | Agent_core.Event_bus.Custom
+            ("masc.keeper.native_posture_degraded", payload) -> Some payload
+        | _ -> None)
+      (Masc.Runtime_event_bus.drain subscription)
+  in
+  let posture_of = function
+    | Ok p -> Runtime_native_tools.to_string p
+    | Error detail ->
+      failf "runtime call must not die: %s"
+        (Agent_core.Error.to_string detail)
+  in
+  (* All resolutions share one bus; the helper drains whatever arrived
+     since the last drain. [full] must publish on BOTH turns (turn
+     state); [none] exactly once across its four turns, and a previously
+     gated pair must publish again after an honoring resolution re-arms
+     the gate. *)
+  (* [full] under Auto: per-turn publication, two turns -> two events. *)
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto-per-turn"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-full-auto-per-turn"
+          ~client_label:"Claude Code"
+          ~default:Runtime_native_tools.Native_full
+          ~none_supported:true));
+  check int "full under Auto publishes per turn" 2
+    (List.length (drained_native_posture_events ()));
+  (* [none] on Codex: static contradiction, four turns -> one event. *)
+  for _ = 1 to 4 do
+    ignore
+      (posture_of
+         (Host.resolve_native_posture
+            ~base_path:"/nonexistent-rfc0390-base"
+            ~keeper_name:"rfc0390-none-codex-static"
+            ~client_label:"Codex"
+            ~default:Runtime_native_tools.Native_none
+            ~none_supported:false))
+  done;
+  check int "static none contradiction publishes once" 1
+    (List.length (drained_native_posture_events ()));
+  (* A honoring resolution for the same pair re-arms the gate. *)
+  ignore
+    (posture_of
+       (Host.resolve_native_posture
+          ~base_path:"/nonexistent-rfc0390-base"
+          ~keeper_name:"rfc0390-none-codex-static"
+          ~client_label:"Codex"
+          ~default:Runtime_native_tools.Native_read
+          ~none_supported:false));
+  check int "honoring resolution publishes nothing" 0
+    (List.length (drained_native_posture_events ()));
+  for _ = 1 to 2 do
+    ignore
+      (posture_of
+         (Host.resolve_native_posture
+            ~base_path:"/nonexistent-rfc0390-base"
+            ~keeper_name:"rfc0390-none-codex-static"
+            ~client_label:"Codex"
+            ~default:Runtime_native_tools.Native_none
+            ~none_supported:false))
+  done;
+  check int "re-armed static contradiction publishes once again" 1
+    (List.length (drained_native_posture_events ()));
+  Masc.Runtime_event_bus.unsubscribe bus subscription
+;;
 ;;
 
 let () = Random.self_init ()
@@ -1084,7 +1247,7 @@ let approval_tool ~active ?tool_approval ~executions () =
         Some
           (fun _ ->
             Agent_core.Hooks.ElicitToolApproval
-              { question = "run the effect?" })
+              { question = "run the effect?"; because = "policy: effectful tool" })
     }
   in
   one_dynamic_tool ~hooks ?tool_approval ~active (fun _input ->
@@ -1305,6 +1468,14 @@ let () =
             "read is admitted under Auto"
             `Quick
             test_native_read_is_effect_free_and_admitted
+        ; test_case
+            "resolve degrades instead of failing the turn"
+            `Quick
+            test_resolve_degrades_instead_of_failing_the_turn
+        ; test_case
+            "static contradiction reports once until re-armed"
+            `Quick
+            test_static_contradiction_reports_once_until_rearmed
         ] )
     ; ( "reasoning effort"
       , [ test_case

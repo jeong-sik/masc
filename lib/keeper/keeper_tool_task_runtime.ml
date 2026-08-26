@@ -279,6 +279,70 @@ let parse_keeper_task_done_evidence_refs args =
   | _ -> Error "keeper_task_done arguments must be an object."
 ;;
 
+(* task-540: total-size pre-check on artifact: evidence at the
+   keeper_task_done boundary. Oversized artifacts snapshot as truncated
+   prefixes the completion authority cannot act on, and four tasks stalled
+   8-16h in evaluator_unavailable before anyone saw why. Refusing here names
+   the byte count and the note: escape hatch while the caller can still fix
+   the call. Unmeasurable references (missing file, unreadable, non-artifact)
+   pass through untouched: the snapshot layer reports those as typed
+   unreadable reasons at review time, and restating that taxonomy here would
+   drift. *)
+let evidence_artifact_total_bytes ~(config : Workspace.config)
+      ~(meta : keeper_meta) evidence_refs
+  =
+  (* [artifact_reference_size] itself resolves the project root from
+     [base_path], so no separate normalization is needed here. *)
+  List.filter_map
+    (fun reference ->
+       Workspace_verification_store.artifact_reference_size
+         ~base_path:config.base_path
+         ~worker:meta.agent_name
+         reference)
+    evidence_refs
+  |> List.fold_left ( + ) 0
+;;
+
+let evidence_total_bytes_limit_default = 50 * 1024
+let evidence_total_bytes_limit_env_key = "MASC_EVIDENCE_TOTAL_BYTES_LIMIT"
+
+(* Test seam: force the limit without touching the process environment,
+   because Alcotest cases run in one process and a leaked [putenv] would
+   bleed into every other case. *)
+let evidence_total_bytes_limit_override : int option Atomic.t = Atomic.make None
+;;
+
+let with_evidence_total_bytes_limit limit f =
+  let previous = Atomic.get evidence_total_bytes_limit_override in
+  Atomic.set evidence_total_bytes_limit_override (Some limit);
+  Fun.protect
+    ~finally:(fun () -> Atomic.set evidence_total_bytes_limit_override previous)
+    f
+;;
+
+(* Fail-open on unset/invalid: the snapshot cap still bounds what reaches the
+   reviewer, so an unparseable limit degrades to the default, not to
+   "reject work". *)
+let evidence_total_bytes_limit () =
+  match Atomic.get evidence_total_bytes_limit_override with
+  | Some limit -> limit
+  | None -> (
+    match Sys.getenv_opt evidence_total_bytes_limit_env_key with
+    | None -> evidence_total_bytes_limit_default
+    | Some raw -> (
+      match int_of_string_opt (String.trim raw) with
+      | Some limit when limit > 0 -> limit
+      | _ -> evidence_total_bytes_limit_default))
+;;
+
+let evidence_total_size_rejection ~total ~limit =
+  Printf.sprintf
+    "artifact total size %d bytes exceeds limit %d bytes — use note: for \
+     large files. Submit a small excerpt or summary as an artifact: and the \
+     pointer (path, URL, board post) as note:."
+    total limit
+;;
+
 let handle_keeper_task_tool_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -810,7 +874,22 @@ let handle_keeper_task_tool_with_outcome
                (Keeper_tool_outcome.Error
                   { reason = "keeper_task_done rejected: evidence_refs required" })
              message)
-      | Ok evidence_refs ->
+      | Ok evidence_refs ->(
+      (* task-540: refuse oversized artifact: evidence here, before the
+         transition, so the caller learns the byte count and the note: escape
+         hatch while it can still fix the call — instead of the completion
+         authority later staring at a truncated prefix. *)
+      let total = evidence_artifact_total_bytes ~config ~meta evidence_refs in
+      let limit = evidence_total_bytes_limit () in
+      if total > limit then
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Workflow_rejection
+          (workflow_rejection_error_json
+             ~typed_outcome:
+               (Keeper_tool_outcome.Error
+                  { reason = "keeper_task_done rejected: evidence too large" })
+             (evidence_total_size_rejection ~total ~limit))
+      else (
       (* A Keeper submits evidence; only the completion authority can issue the
          terminal verdict. *)
       let action = "submit_for_verification" in
@@ -858,7 +937,7 @@ let handle_keeper_task_tool_with_outcome
       | Tool_result.Deferred { metadata; _ } ->
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
-        Keeper_tool_execution.failure ~class_ payload)
+        Keeper_tool_execution.failure ~class_ payload)))
 ;;
 
 let handle_keeper_task_tool ~config ~meta ~name ~args =

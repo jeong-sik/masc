@@ -504,7 +504,9 @@ let translate ~redact_text ~base_dir bridge_state
       let block_start =
         content_block_start_event ~index ~content_type ~tool_id ~tool_name
       in
-      if has_any_tool_identity ~tool_id ~tool_name then
+      if String.equal content_type Runtime_native_tools.stream_content_type
+      then { bridge_state; chat_events = [ block_start ] }
+      else if has_any_tool_identity ~tool_id ~tool_name then
         { bridge_state =
             invalidate_block bridge_state index
               ~failed_tool_call_id:(Option.bind tool_id (fun id ->

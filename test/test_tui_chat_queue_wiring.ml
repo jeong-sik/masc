@@ -61,7 +61,7 @@ let test_live_transcripts_are_kept_per_keeper () =
   in
   let entry keeper_name started_at =
     let sent_request =
-      Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name)
+      Keeper_chat.create_request ~keeper_name ~message:("hello " ^ keeper_name) ()
     in
     let live =
       Keeper_chat_transcript.create
@@ -107,15 +107,32 @@ let test_message_scroll_accepts_the_rendered_clamp () =
    Every combination is listed rather than described, because the rule is
    about which of eight cases produce which string. *)
 let test_the_header_names_only_unusual_modes () =
-  let summary memory_visible reasoning tools =
-    Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools
-      ~origin:Masc_tui_message_layout.Origin_row
+  let summary ?(origin = Masc_tui_message_layout.Origin_inline) memory_visible
+      reasoning tools =
+    Tui_types.chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin
   in
   let full = Tui_types.Reasoning_full and folded = Tui_types.Reasoning_folded in
   let hidden = Tui_types.Reasoning_hidden in
   let tools_full = Tui_types.Tools_full and compact = Tui_types.Tools_compact in
+  (* The header says nothing for the state the TUI actually starts in, so the
+     default has to be read rather than restated here. *)
+  let started =
+    Tui_types.create_state ~workspace:"test" ~port:8935 ~refresh_interval:2.0 ()
+  in
+  check
+    bool
+    "the pane starts with the origin in the margin"
+    true
+    (started.Tui_types.msg_origin_display
+     = Masc_tui_message_layout.Origin_inline);
   check string "everything at its default says nothing" ""
-    (summary true hidden compact);
+    (summary ~origin:started.Tui_types.msg_origin_display true hidden compact);
+  (* The inline margin is the default, so going back to the roomier row layout
+     is what the header has to name. *)
+  check string "the roomier row layout is named" "clock:row"
+    (summary ~origin:Masc_tui_message_layout.Origin_row true hidden compact);
+  check string "dropping the clock is named" "clock:off"
+    (summary ~origin:Masc_tui_message_layout.Origin_bare true hidden compact);
   check string "full reasoning alone" "reasoning:full"
     (summary true full compact);
   check string "folded reasoning alone" "reasoning:folded"

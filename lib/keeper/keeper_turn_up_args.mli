@@ -26,6 +26,10 @@ type parsed_args =
   ; proactive_enabled_opt : bool option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
+  ; tool_groups_opt : string list option
+  ; tool_groups_present : bool
+  ; native_tool_posture_opt : Runtime_native_tools.posture option
+  ; native_tool_posture_present : bool
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option

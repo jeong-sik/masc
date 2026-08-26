@@ -336,6 +336,7 @@ let handle_keeper_tool_approvals_list _state request reqd =
                     ; ("tool", `String p.tool_name)
                     ; ("args", `String p.args)
                     ; ("question", `String p.question)
+                    ; ("because", `String p.because)
                     ; ("asked_at", `Float p.asked_at)
                     ; ("timeout_sec", `Float p.timeout_sec)
                     ])

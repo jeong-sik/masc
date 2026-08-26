@@ -62,7 +62,11 @@ let cleanup presenter ~write ~flush =
   try
     write
       ((if presenter.synchronized_output then end_synchronized_output else "")
-       ^ reset_style ^ show_cursor ^ enable_autowrap ^ leave_alternate_screen);
+       ^ reset_style ^ show_cursor ^ enable_autowrap ^ leave_alternate_screen
+       (* Started at probe time so a theme switch would be reported. Left on,
+          the terminal keeps reporting to whatever runs next, which receives
+          [CSI ? 997 ; n n] as typed input it never asked for. *)
+       ^ Masc_tui_terminal_palette.theme_mode_unsubscribe);
     flush ()
   with _ -> ()
 

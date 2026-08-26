@@ -548,7 +548,12 @@ let assemble_hooks
                      ~config
                      ~keeper:meta.name
                      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                     ~absolute_turn:turn
+                     (* [turn] is the cumulative AGENT_CORE provider round.
+                        The TurnRecord join key uses the admitted keeper turn,
+                        which is stable across every provider round in this
+                        run. Stamping the provider round here made one request
+                        read as #721 in last-prompt and #13 in turn-records. *)
+                     ~absolute_turn:keeper_turn_id
                      ~blocks:recorded_blocks_for_receipt
                      ~assembled:ctx);
                 if consumed_operator_note
@@ -556,7 +561,7 @@ let assemble_hooks
                   Keeper_operator_note.mark_consumed
                     ~config
                     ~keeper:meta.name
-                    ~absolute_turn:turn;
+                    ~absolute_turn:keeper_turn_id;
                 (* AGENT_CORE treats [None] in AdjustParams as "keep the base
                    config", so strict choices must be explicitly relaxed.
                    Tools remain available, but the model may finish without

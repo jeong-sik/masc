@@ -219,6 +219,68 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
      :: (descriptor_names @ composition_names @ control_names))
 ;;
 
+let validate_current_task_skill_admission
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~skill_catalog
+  =
+  match meta.current_task_id with
+  | None -> Ok ()
+  | Some current_task_id ->
+    let task_id = Keeper_id.Task_id.to_string current_task_id in
+    (match
+       Workspace.get_tasks_safe config
+       |> List.find_opt (fun (task : Masc_domain.task) ->
+         String.equal task.id task_id)
+     with
+     | None ->
+       Error
+         (skill_catalog_config_error
+            (Printf.sprintf
+               "current task %S is missing while resolving declared skills"
+               task_id))
+     | Some task ->
+       let rec instruction_skills acc = function
+         | [] -> Ok (List.rev acc)
+         | name :: rest ->
+           (match Keeper_skill_catalog.find skill_catalog name with
+            | None ->
+              Error
+                (skill_catalog_config_error
+                   (Printf.sprintf
+                      "current task %s declares missing skill %S"
+                      task_id
+                      name))
+            | Some skill ->
+              (match skill.surface with
+               | Keeper_skill_catalog.Instruction ->
+                 instruction_skills (name :: acc) rest
+               | Keeper_skill_catalog.Composition _ ->
+                 instruction_skills acc rest))
+       in
+       (match instruction_skills [] task.skills with
+        | Error _ as error -> error
+        | Ok [] -> Ok ()
+        | Ok names ->
+          let surface =
+            Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
+          in
+          let has_read =
+            Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
+            |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+            |> List.mem "Read"
+          in
+          if has_read
+          then Ok ()
+          else
+            Error
+              (skill_catalog_config_error
+                 (Printf.sprintf
+                    "current task %s instruction skills [%s] require the model-visible Read tool"
+                    task_id
+                    (String.concat ", " names)))))
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -266,6 +328,7 @@ let prepare_agent_setup
   in
   let agent_name = meta.agent_name in
   let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
+  let* () = validate_current_task_skill_admission ~config ~meta ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []

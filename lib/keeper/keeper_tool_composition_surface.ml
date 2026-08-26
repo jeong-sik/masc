@@ -159,6 +159,70 @@ let request_id_of_validated_input = function
   | _ -> None
 ;;
 
+let entry_description (entry : Catalog.entry) =
+  Option.value
+    ~default:
+      (match entry.execution with
+       | Catalog.Inline ->
+         "Execute the validated Keeper composition " ^ entry.name ^ "."
+       | Catalog.Async ->
+         "Start the validated read-only Keeper composition "
+         ^ entry.name
+         ^ " and return its durable request id.")
+    entry.description
+;;
+
+let status_description =
+  "Read the exact durable status and structured result of one async Keeper composition request."
+;;
+
+let cancel_description =
+  "Request cancellation of one async Keeper composition by its exact durable request id."
+;;
+
+let schema_tool ~name ~description ~input_schema =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~name
+    ~description
+    ~input_schema
+    (fun _ _ -> invalid_arg "schema-only Keeper tool cannot execute")
+;;
+
+let schema_tools ?(skill_composition_entries = []) () =
+  let composition_tools =
+    List.map
+      (fun (entry : Catalog.entry) ->
+         schema_tool
+           ~name:(Catalog.tool_name entry)
+           ~description:(entry_description entry)
+           ~input_schema:(Catalog.input_schema_of_params entry.params))
+      skill_composition_entries
+  in
+  let plan_execute_tool =
+    schema_tool
+      ~name:plan_execute_tool_name
+      ~description:plan_execute_description
+      ~input_schema:plan_execute_input_schema
+  in
+  if
+    List.exists
+      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+      skill_composition_entries
+  then
+    composition_tools
+    @ [ plan_execute_tool
+      ; schema_tool
+          ~name:Catalog.status_tool_name
+          ~description:status_description
+          ~input_schema:request_id_input_schema
+      ; schema_tool
+          ~name:Catalog.cancel_tool_name
+          ~description:cancel_description
+          ~input_schema:request_id_input_schema
+      ]
+  else composition_tools @ [ plan_execute_tool ]
+;;
+
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
   `Assoc
     [ "planned_index", `Int schedule.planned_index
@@ -864,7 +928,92 @@ let make_request_control_tool
              "validated composition request input lost request_id"))
 ;;
 
+(* An instruction skill is text the keeper is meant to have read before it
+   acts. The prompt used to hand over a path and ask for a [Read], which put
+   three things in the model's hands: whether to open it, whether the path
+   resolved, and whether anyone could tell afterwards. It answered badly on
+   all three -- .masc/skills sits beside the sandbox root, not inside it, so
+   every attempt failed, and over seven days only three of 14,582 [Read]
+   calls even tried.
+
+   The body comes through a tool instead. Progressive disclosure is kept --
+   names and descriptions ride the tool description, the body arrives only
+   when asked for -- but the harness serves it from the catalog it already
+   parsed, so no path is resolved and the call is on the record. *)
+(* Declared in [config/tools/keeper_skill.toml] with every other tool rather
+   than built here. Which skills are readable is workspace state and is
+   appended below; the argument's shape and the sentence saying when to reach
+   for the tool are not, and the model-prose ratchet is what says so. *)
+let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
+let skill_name_input_schema = skill_tool_schema.input_schema
+
+let skill_name_of_validated_input input =
+  match input with
+  | `Assoc fields ->
+    (match List.assoc_opt "name" fields with
+     | Some (`String name) -> Some name
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
+  let name = Catalog.skill_tool_name in
+  let listed =
+    instruction_skills
+    |> List.map (fun (skill_name, description, _body) ->
+         Printf.sprintf "%s: %s" skill_name description)
+    |> String.concat "
+"
+  in
+  let description =
+    skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
+  in
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+    ~base_path:config.base_path
+    ~name
+    ~description
+    ~input_schema:skill_name_input_schema
+    (fun _execution_env input ->
+      let start_time = Time_compat.now () in
+      match
+        Tool_input_validation.validate_args ~schema:skill_name_input_schema ~name
+          ~args:input ()
+      with
+      | Error rejection -> rejection
+      | Ok _ ->
+        (match skill_name_of_validated_input input with
+         | None ->
+           Tool_result.runtime_err ~tool_name:name ~start_time
+             "validated skill input lost name"
+         | Some asked ->
+           (match
+              List.find_opt
+                (fun (skill_name, _, _) -> String.equal skill_name asked)
+                instruction_skills
+            with
+            | Some (_, _, body) ->
+              Tool_result.make_ok ~tool_name:name ~start_time
+                ~data:(`Assoc [ "name", `String asked; "body", `String body ])
+                ()
+            | (* A name the catalog does not carry is the caller's error and
+                 says so with the names it does carry, rather than an empty
+                 body the model would read as "this skill says nothing". *)
+              None ->
+              Tool_result.make_err ~tool_name:name
+                ~class_:Tool_result.Workflow_rejection ~start_time
+                (Printf.sprintf
+                   "no instruction skill named %S; this keeper carries: %s"
+                   asked
+                   (match instruction_skills with
+                    | [] -> "(none)"
+                    | skills ->
+                      String.concat ", "
+                        (List.map (fun (n, _, _) -> n) skills))))))
+;;
+
 let make_tools
+      ?(instruction_skills = [])
       ?(skill_composition_entries = [])
       ~(config : Workspace.config)
       ~meta
@@ -926,17 +1075,7 @@ let make_tools
       ~base_path:config.base_path
       ?on_externalization_error:tool_externalization_error
       ~name:tool_name
-      ~description:
-        (Option.value
-           ~default:
-             (match entry.execution with
-              | Catalog.Inline ->
-                "Execute the validated Keeper composition " ^ entry.name ^ "."
-              | Catalog.Async ->
-                "Start the validated read-only Keeper composition "
-                ^ entry.name
-                ^ " and return its durable request id.")
-           entry.description)
+      ~description:(entry_description entry)
       ~input_schema:(Catalog.input_schema_of_params entry.params)
       (fun execution_env input ->
         let start_time = Time_compat.now () in
@@ -1311,6 +1450,15 @@ let make_tools
       declared_entries
   in
   let composition_tools = composition_tools @ [ plan_execute_tool ] in
+  (* A keeper with no instruction skills gets no tool: an empty [Available]
+     list would ask the model to reach for something that answers nothing. *)
+  let composition_tools =
+    match instruction_skills with
+    | [] -> composition_tools
+    | skills ->
+      composition_tools
+      @ [ make_instruction_skill_tool ~config ~instruction_skills:skills ]
+  in
   if not has_async
   then composition_tools
   else
@@ -1318,8 +1466,7 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.status_tool_name
-        ~description:
-          "Read the exact durable status and structured result of one async Keeper composition request."
+        ~description:status_description
         ~descriptor:
           (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
         ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
@@ -1328,8 +1475,7 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.cancel_tool_name
-        ~description:
-          "Request cancellation of one async Keeper composition by its exact durable request id."
+        ~description:cancel_description
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
     in

@@ -69,6 +69,38 @@ let test_the_window_follows_the_cursor () =
   check int "a visible cursor moves nothing" 3
     (Masc_tui_scroll.ensure_visible ~cursor:5 ~height:5 3)
 
+
+(* Changes draws a preview under its list. The list keeps five rows and the
+   preview takes up to half of what is left, so on a twenty-row body the list
+   draws ten. The keypress used to move against the full twenty: with fifteen
+   changes the bound came out max 0 (15 - 20) = 0 and the cursor could not
+   leave the first row at all. *)
+let test_a_preview_leaves_the_list_its_keep () =
+  check int "half of twenty, list keeps five" 10
+    (Masc_tui_scroll.preview_height ~total:20 ~keep:5);
+  check int "the list draws the other half" 10
+    (Masc_tui_scroll.body_height ~total:20 ~keep:5);
+  check int "a body too short for the keep gives no preview" 0
+    (Masc_tui_scroll.preview_height ~total:5 ~keep:5);
+  check int "and the list keeps all of it" 5
+    (Masc_tui_scroll.body_height ~total:5 ~keep:5);
+  check int "one row is still a list" 1
+    (Masc_tui_scroll.body_height ~total:1 ~keep:5)
+
+let test_the_bound_follows_the_shortened_list () =
+  let height = Masc_tui_scroll.body_height ~total:20 ~keep:5 in
+  check int "fifteen rows in a ten-row list can scroll five" 5
+    (Masc_tui_scroll.maximum ~count:15 ~height);
+  (* The same fifteen rows against the unshortened body: this is the number
+     the keypress used, and it is why the last five were unreachable. *)
+  check int "against the full body the bound was zero" 0
+    (Masc_tui_scroll.maximum ~count:15 ~height:20);
+  let rec press n scroll =
+    if n = 0 then scroll
+    else press (n - 1) (Masc_tui_scroll.down ~count:15 ~height scroll)
+  in
+  check int "pressing down ten times reaches the last window" 5 (press 10 0)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -82,6 +114,12 @@ let () =
             test_moving_stays_inside_the_bound
         ; Alcotest.test_case "a stale scroll moves from where the reader is"
             `Quick test_a_stale_scroll_moves_from_where_the_reader_is
+        ] )
+    ; ( "preview"
+      , [ Alcotest.test_case "a preview leaves the list its keep" `Quick
+            test_a_preview_leaves_the_list_its_keep
+        ; Alcotest.test_case "the bound follows the shortened list" `Quick
+            test_the_bound_follows_the_shortened_list
         ] )
     ; ( "cursor"
       , [ Alcotest.test_case "the cursor stays inside the list" `Quick

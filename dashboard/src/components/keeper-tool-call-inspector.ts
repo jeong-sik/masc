@@ -777,6 +777,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
       ${expanded.value ? html`
         <div class="px-3 pb-3 space-y-2 v2-monitoring-panel">
+          ${entry.definition_source ? html`
+            <div class="text-3xs text-[var(--color-fg-muted)]">defined in: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.definition_source}</span></div>
+          ` : null}
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}

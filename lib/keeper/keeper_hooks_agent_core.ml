@@ -495,20 +495,13 @@ let make_hooks
            outcome=%s out_len=%d failed_params=%s error_preview=%s"
           (!meta_ref).name
           tool_name
-          (* Which shipped definition this name resolved to. A tool that
+          (* Which file this name's definition was read from. A tool that
              behaved unexpectedly is one an operator wants to open, and the
-             record did not say where to look. [-] is a tool with no shipped
-             TOML — a built-in or a composition — which is itself the answer. *)
-          (match Tool_help_registry.definition_source tool_name with
+             record did not say where to look. [-] is a built-in, which ships
+             no file — itself the answer. *)
+          (match Keeper_tool_definition_source.resolve tool_name with
            | Some rel -> rel
-           | None ->
-             (* A composition tool ships no TOML: its definition is the
-                SKILL.md the catalog read to create it. *)
-             (match
-                Keeper_tool_composition_catalog.skill_source_of_tool_name tool_name
-              with
-              | Some rel -> rel
-              | None -> "-"))
+           | None -> "-")
           input_keys
           input_shape
           outcome_s

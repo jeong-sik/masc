@@ -883,9 +883,23 @@ let run_keeper_invocation_turn_admitted
     ~base_path
     ~wake:Keeper_registry.Chat_request
     name;
+  (* [mark_turn_started] above has no counterpart unless this runs. Since
+     #15932 put the turn body inside [turn_sw], a cancelled turn cancels this
+     too, and [mark_turn_finished] is a registry file write: an Eio call made
+     under a cancelled context raises before writing. Skipping it leaves
+     [current_turn_observation] set, so the keeper reads as mid-turn after its
+     turn ended, and [last_completed_turn] never freezes.
+
+     The write takes the keeper key lock, which raises [Flock_timeout] rather
+     than waiting forever, so [protect] cannot park the caller.
+
+     [Cancelled] is logged like any other failure. Swallowing it silently is
+     what let the same shape lose sandbox containers unnoticed (#30590). *)
   let finish () =
-    try Keeper_registry.mark_turn_finished ~base_path name with
-    | Eio.Cancel.Cancelled _ -> ()
+    try
+      Eio.Cancel.protect (fun () ->
+        Keeper_registry.mark_turn_finished ~base_path name)
+    with
     | exn ->
       log_keeper_exn ~label:"mark_turn_finished in chat turn cleanup" exn
   in

@@ -25,6 +25,8 @@ let tagged : Markdown.palette =
   ; code_comment = ("<m>", "</m>")
   ; code_number = ("<n>", "</n>")
   ; code_type = ("<t>", "</t>")
+  ; code_diff_added = ("<+>", "</+>")
+  ; code_diff_removed = ("<->", "</->")
   }
 
 let render ?(width = 40) ?(palette = tagged) text =
@@ -222,6 +224,32 @@ let test_fenced_code_keeps_its_line_breaks () =
 (* The tag decides: the same body, untagged, stays the single code span --
 (* colouring a grammar nobody lexed is decoration pretending to be
    syntax. *) *)
+(* A [diff] tag colours by line rather than by token: the first cell decides
+   the whole line. This is what the Memory journal's change rides, and what a
+   keeper's pasted patch rides, so both read as arriving and leaving instead of
+   one wall of code. *)
+let test_diff_fence_colours_each_line_by_its_first_cell () =
+  check_rows "diff"
+    (tagged_fence "diff"
+       [ "\xe2\x94\x82 <m>@@ -1,2 +1,2 @@</m>"
+       ; "\xe2\x94\x82 <->- [constraint] use the old endpoint</->"
+       ; "\xe2\x94\x82 <+>+ [fact] the probe uses HTTP/2</+>"
+       ; "\xe2\x94\x82 <c> unchanged</c>"
+       ])
+    (render
+       "```diff\n@@ -1,2 +1,2 @@\n- [constraint] use the old endpoint\n+ [fact] the probe uses HTTP/2\n unchanged\n```")
+
+(* A file header is not the change under it. Left plain, a green [+++] does not
+   sit directly above the first added line reading as part of it. *)
+let test_diff_fence_leaves_file_headers_plain () =
+  check_rows "diff headers"
+    (tagged_fence "diff"
+       [ "\xe2\x94\x82 <c>--- a/one.ml</c>"
+       ; "\xe2\x94\x82 <c>+++ b/one.ml</c>"
+       ; "\xe2\x94\x82 <+>+added</+>"
+       ])
+    (render "```diff\n--- a/one.ml\n+++ b/one.ml\n+added\n```")
+
 let test_untagged_fence_stays_single_span () =
   check_rows "no tag, no colour" [ "<c>\xe2\x94\x82 let x = 1</c>" ]
     (render "```\nlet x = 1\n```")
@@ -496,6 +524,10 @@ let () =
     ; ( "fenced highlighting"
       , [ Alcotest.test_case "no tag means no colour" `Quick
             test_untagged_fence_stays_single_span
+        ; Alcotest.test_case "a diff colours by line" `Quick
+            test_diff_fence_colours_each_line_by_its_first_cell
+        ; Alcotest.test_case "a diff leaves file headers plain" `Quick
+            test_diff_fence_leaves_file_headers_plain
         ; Alcotest.test_case "an unknown language means no colour" `Quick
             test_unknown_language_stays_single_span
         ; Alcotest.test_case "ocaml strings and constructors" `Quick

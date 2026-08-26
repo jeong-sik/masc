@@ -69,6 +69,8 @@ type raw_trace_stage =
   | Assistant_block
   | Tool_start
   | Tool_finish
+  | Native_tool_start
+  | Native_tool_finish
   | Run_finish
 
 val observe_raw_trace
@@ -104,6 +106,15 @@ val finish_raw_success
 (** Complete one official-client RAW run. Observation failure cannot replace
     the authoritative runtime result; a trace reference is returned only when
     every assistant block and the terminal record were persisted. *)
+
+val record_raw_native_tool
+  :  keeper_name:string
+  -> raw_trace_run:Agent_core.Raw_trace.active_run option
+  -> phase:[ `Started | `Finished ]
+  -> Runtime_native_tools.observation
+  -> unit
+(** Best-effort durable observation of an official client's built-in tool.
+    It is deliberately separate from MASC tool execution and approval rows. *)
 
 val resolve_reasoning_effort :
   enable_thinking:bool option ->
@@ -265,8 +276,8 @@ val admit_native_posture :
     unless the keeper's approval stance is [Yolo]: built-in calls run inside
     the vendor process and never reach [ElicitToolApproval], so full native
     effects are admitted only where every MASC call would also run unasked.
-    The Yolo stance is in-memory by design — after a restart a [full] keeper
-    is refused loudly until an operator re-arms it. *)
+    This is the typed predicate only — see {!resolve_native_posture} for
+    what a refusal does to the turn. *)
 
 val resolve_native_posture :
   base_path:string ->
@@ -278,4 +289,21 @@ val resolve_native_posture :
 (** Read the keeper's declared posture from its profile TOML (cached loader),
     fall back to [default] when the profile declares nothing, then apply
     {!admit_native_posture} against the keeper's current approval stance.
-    A profile that fails to load is a config error, not a silent default. *)
+    A profile that fails to load is a config error, not a silent default.
+    An admission refusal does not fail this call: the posture degrades to
+    the safest weaker one ([full] -> [read]; [none] -> [read] where the
+    client cannot disable built-ins) and the downgrade is published as a
+    typed event ([masc.keeper.native_posture_degraded]) — the turn keeps
+    running, the record says what was declared and why it was not honored.
+
+    Reporting cadence differs by branch (#30408 review): the [full] ->
+    [read] degradation is turn state (the approval mode lives in process
+    memory and can flip), so it emits one event per affected turn. The
+    [none]-on-a-client-without-a-disable-switch case is a static
+    profile-vs-assignment contradiction, so it emits once per process per
+    (keeper, client) pair at the first offending resolution and then goes
+    quiet until a resolution honors the declaration (which re-arms the
+    gate). The effective posture returned is unchanged in both branches.
+    The approval stance is in-memory by design; after a restart that means
+    a [full] keeper runs degraded-to-[read] turns, each one recorded,
+    until an operator re-arms [Yolo]. *)

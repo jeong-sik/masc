@@ -122,7 +122,7 @@ The other proposed metric, `domains_without_bug_model`, remains worth tracking. 
 
 Phase 1 spent care framing the 21 specs as *candidates* and refused to call them violations. Phase 2 confirms the framing was correct: zero of 21 are actual violations. Had Phase 1 over-claimed ("21 weak Bug Models"), Phase 2 would now be a full retraction.
 
-The discipline mirrors the OAS chain: Phase 1 there flagged Layer C as `NEEDS SWEEP` (count 200+ raw references); Phase 2 refined the verdict to PASS via C1–C4 taxonomy. **In both audits the second phase narrows or zeroes out an over-broad first-phase signal.** This is a property of survey-style audits — wide net first, structural classification second, fixes only after the classification stabilizes.
+The discipline mirrors the agent_core chain: Phase 1 there flagged Layer C as `NEEDS SWEEP` (count 200+ raw references); Phase 2 refined the verdict to PASS via C1–C4 taxonomy. **In both audits the second phase narrows or zeroes out an over-broad first-phase signal.** This is a property of survey-style audits — wide net first, structural classification second, fixes only after the classification stabilizes.
 
 For future audits in this style, expect the second pass to delete more than it adds.
 

@@ -335,7 +335,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
           sets reasoning_effort. Every enable_thinking=true turn is then rejected
           as Enable_not_encodable — measured 25/25 on the acceptance harness,
           0/25 after the first five models dropped the declaration. Deployed
-          config has carried none since 2026-08-04; the audit is oas#2716
+          config has carried none since 2026-08-04; the audit is dated 2026-07-20
           (2026-07-20).
 
           This is a property of the endpoint, not of individual models, and

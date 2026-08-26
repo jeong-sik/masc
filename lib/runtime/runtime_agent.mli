@@ -187,6 +187,7 @@ val provider_label : Llm_provider.Provider_config.t -> string
 val runtime_observation_for_terminal_config :
   total_duration_ms:float ->
   ?error:string ->
+  ?usage_scope:Runtime_usage_scope.t ->
   config ->
   Runtime_observation.runtime_observation
 
@@ -271,7 +272,7 @@ module For_testing : sig
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
   (** Fail closed when a streaming deadline (inter-line idle or first-event,
-      RFC-OAS-037) is configured but no clock resolves. *)
+      RFC-AC-037) is configured but no clock resolves. *)
   val decide_clock_for_idle :
     stream_idle_timeout_s:float option ->
     first_event_timeout_s:float option ->
@@ -344,11 +345,15 @@ module For_testing : sig
     'result
 
   val runtime_observation_for_completed_config :
-    total_duration_ms:float -> config -> Runtime_observation.runtime_observation
+    total_duration_ms:float ->
+    usage_scope:Runtime_usage_scope.t ->
+    config ->
+    Runtime_observation.runtime_observation
 
   val runtime_observation_for_terminal_config :
     total_duration_ms:float ->
     ?error:string ->
+    ?usage_scope:Runtime_usage_scope.t ->
     config ->
     Runtime_observation.runtime_observation
 end
@@ -435,4 +440,3 @@ val run_with_masc_tools :
   (run_result, Agent_core.Error.t) result
 (** Variant of {!run} that projects the supplied MASC schemas into exact inline
     [Agent_core.Tool.t] values through [dispatch]. *)
-

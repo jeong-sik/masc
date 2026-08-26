@@ -18,6 +18,15 @@ val running_under_test_executable : unit -> bool
 val cache_resolved_base_path : string -> unit
 val resolve_masc_base_path : string -> string
 val resolve_server_default_base_path : string -> string
+val is_temp_scratch_dir : string -> bool
+(** [is_temp_scratch_dir p] is true when [p] is (or is under) a scratch/temp
+    directory such as the OS temp dir, [/tmp], [/var/tmp] or [/dev/shm]. *)
+val resolved_base_escapes_temp_request : string -> string -> bool
+(** [resolved_base_escapes_temp_request requested resolved] is true when
+    [requested] is a scratch/temp directory but [resolved] is not — i.e. a
+    temp-dir base request resolved outside temp. task-351 guard: such a
+    resolution must never be honoured, or a test harness can rewrite a live
+    workspace (2026-08-25 04:38:30Z incident). *)
 val env_opt : string -> string option
 val sanitize_namespace_segment : string -> string
 (** A bounded filesystem path segment for a logical name.

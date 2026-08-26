@@ -1,4 +1,5 @@
 module Transcript = Masc_tui_keeper_chat_transcript
+module Delivery_identity = Keeper_chat_delivery_identity
 
 (* The surface vocabulary, mirrored from [Surface_ref.t]. This library decodes
    the chat history and nothing else — it carries no [masc] dependency, so it
@@ -44,6 +45,7 @@ let tool_rows block =
    where the row came in from, which is the fact the label exists to carry. *)
 type row =
   { at : float
+  ; turn_id : string option
   ; kind : kind
   ; text : string
   }
@@ -109,6 +111,7 @@ type parsed =
   | Utterance of row
   | Tool_call of
       { at : float
+      ; turn_id : string option
       ; call_id : string option
       ; tool_name : string
       ; args : string
@@ -128,6 +131,22 @@ let bool_field_opt fields name =
   match List.assoc_opt name fields with
   | Some (`Bool value) -> Some value
   | Some _ | None -> None
+
+(* The transcript carries an exact operation key for direct turns and a
+   [turn_ref] for autonomous turns. Keep whichever authority the producer
+   supplied; timestamps and row adjacency are not turn identity. *)
+let turn_id_of_fields fields =
+  match Delivery_identity.delivery_provenance_of_fields fields with
+  | Ok (Some provenance) ->
+      let request_id =
+        match provenance.Delivery_identity.delivery_key with
+        | Delivery_identity.Operation request_id
+        | Delivery_identity.Fusion_run request_id
+        | Delivery_identity.Workspace_message request_id ->
+            request_id
+      in
+      Some (Delivery_identity.Request_id.to_string request_id)
+  | Ok None | Error _ -> string_field fields "turn_ref"
 
 let list_field (fields : (string * Yojson.Safe.t) list) name =
   match List.assoc_opt name fields with
@@ -175,14 +194,8 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
          int_field change "retained"
        with
        | Some added, Some removed, Some retained ->
-           let added_lines =
-             List.map (memory_fact_line "+ ADDED (now in current memory)") added
-           in
-           let removed_lines =
-             List.map
-               (memory_fact_line "- REMOVED (no longer in current memory)")
-               removed
-           in
+           let added_lines = List.map (memory_fact_line "+") added in
+           let removed_lines = List.map (memory_fact_line "-") removed in
            let dropped_lines =
              match list_field fields "dropped" with
              | None -> Some []
@@ -197,9 +210,17 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
            else
              Option.map
                (fun dropped_lines ->
+                  (* One header line, then the change as a diff fence. The
+                     per-fact wording used to repeat "now in current memory" on
+                     every line; the header says once what the state is now,
+                     and inside the fence a [+] or [-] says which way each fact
+                     went. The fence also takes these lines out of markdown's
+                     list grammar -- the reason the renderer used to escape a
+                     leading [+], an escape nothing ever consumed, so readers
+                     saw a literal backslash. *)
                   let summary =
                     Printf.sprintf
-                      "%s committed current memory revision %d\nDELTA: %d added (now present) \xc2\xb7 %d removed (now absent) \xc2\xb7 %d retained from previous"
+                      "%s committed current memory revision %d \xc2\xb7 now %d added, %d removed, %d retained"
                       (memory_source_label fields)
                       revision
                       (List.length added)
@@ -207,13 +228,19 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                       retained
                   in
                   { at
+                  ; turn_id = None
                   ; kind = Memory_activity
                   ; text =
-                      String.concat "\n"
-                        (summary
-                         :: (List.filter_map Fun.id added_lines
-                             @ List.filter_map Fun.id removed_lines
-                             @ dropped_lines))
+                      (let change_lines =
+                         List.filter_map Fun.id added_lines
+                         @ List.filter_map Fun.id removed_lines
+                         @ dropped_lines
+                       in
+                       String.concat "\n"
+                         (match change_lines with
+                          | [] -> [ summary ]
+                          | lines ->
+                            (summary :: "```diff" :: lines) @ [ "```" ]))
                   })
                dropped_lines
        | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)
@@ -233,6 +260,7 @@ let memory_failed_row (fields : (string * Yojson.Safe.t) list) =
   | Some at, Some kind, Some detail, Some snapshot_present, Some cadence_deferred ->
       Some
         { at
+        ; turn_id = None
         ; kind = Memory_activity
         ; text =
             Printf.sprintf
@@ -255,6 +283,7 @@ let memory_row_of_json = function
            Option.map
              (fun error ->
                 { at = 0.0
+                ; turn_id = None
                 ; kind = Memory_activity
                 ; text = "Memory journal unreadable: " ^ error
                 })
@@ -406,7 +435,7 @@ let plural count noun =
    rides the reasoning block and an omitted count the tool block -- omitted
    steps are steps the turn took, so a block that has nothing but that count
    is still a block of steps. *)
-let rows_of_trace at summary =
+let rows_of_trace ~turn_id at summary =
   let omitted_note =
     if summary.omitted = 0 then []
     else
@@ -431,14 +460,16 @@ let rows_of_trace at summary =
       (* No reasoning and no calls: the omitted count is the only thing the
          block said, and remains a typed transcript omission rather than a
          synthetic tool call. *)
-      [ Utterance { at; kind = Tool_calls tool_block; text = "" } ]
+      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" } ]
   | reasoning, [], _ ->
-      [ Utterance { at; kind = Reasoning (reasoning @ omitted_note); text = "" } ]
+      [ Utterance
+          { at; turn_id; kind = Reasoning (reasoning @ omitted_note); text = "" }
+      ]
   | [], _ :: _, _ ->
-      [ Utterance { at; kind = Tool_calls tool_block; text = "" } ]
+      [ Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" } ]
   | reasoning, _ :: _, _ ->
-      [ Utterance { at; kind = Reasoning reasoning; text = "" }
-      ; Utterance { at; kind = Tool_calls tool_block; text = "" }
+      [ Utterance { at; turn_id; kind = Reasoning reasoning; text = "" }
+      ; Utterance { at; turn_id; kind = Tool_calls tool_block; text = "" }
       ]
 
 (* Annotated rather than inferred: an inferred parameter widens to an open
@@ -449,6 +480,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
   | `Assoc fields -> (
       let at = Option.value ~default:0.0 (float_field fields "ts") in
       let content = Option.value ~default:"" (string_field fields "content") in
+      let turn_id = turn_id_of_fields fields in
       match string_field fields "role" with
       | Some "user" ->
           (* [speaker_name] and [surface] are what the server already sends;
@@ -466,7 +498,11 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
             | Some json -> surface_of_json json
           in
           [ Utterance
-              { at; kind = Addressed_to_keeper { speaker; surface }; text = content }
+              { at
+              ; turn_id
+              ; kind = Addressed_to_keeper { speaker; surface }
+              ; text = content
+              }
           ]
       | Some "assistant" -> (
           match string_field fields "kind" with
@@ -484,7 +520,9 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                 | Some _ | None -> None
               in
               [ Utterance
-                  { at; kind = Delivery_failed { origin_request_id }
+                  { at
+                  ; turn_id
+                  ; kind = Delivery_failed { origin_request_id }
                   ; text = content }
               ]
           | Some _ | None ->
@@ -507,7 +545,8 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                 | Some _ | None -> false
               in
               let trace_rows =
-                if autonomous then rows_of_trace at (trace_summary_of fields)
+                if autonomous then
+                  rows_of_trace ~turn_id at (trace_summary_of fields)
                 else []
               in
               let said =
@@ -515,6 +554,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                 else
                   [ Utterance
                       { at
+                      ; turn_id
                       ; kind = if autonomous then Autonomous_reply else Said_by_keeper
                       ; text = content
                       }
@@ -529,6 +569,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
           | Some tool_name ->
               [ Tool_call
                   { at
+                  ; turn_id
                   ; call_id = string_field fields "tool_call_id"
                   ; tool_name
                   ; args = content
@@ -546,21 +587,29 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, _, _, _) :: _ as calls ->
+    | (at, turn_id, _, _, _) :: _ as calls ->
         let activities =
           List.map
-            (fun (_, call_id, tool_name, args) ->
+            (fun (_, _, call_id, tool_name, args) ->
               Transcript.make_tool_activity ~call_id ~tool_name ~args
                 ~outcome:Transcript.Returned ~duration:None)
             calls
         in
-        { at; kind = Tool_calls (Transcript.tool_block activities); text = "" }
+        { at
+        ; turn_id
+        ; kind = Tool_calls (Transcript.tool_block activities)
+        ; text = ""
+        }
         :: acc
   in
   let rec loop pending acc = function
     | [] -> List.rev (flush pending acc)
-    | Tool_call { at; call_id; tool_name; args } :: rest ->
-        loop ((at, call_id, tool_name, args) :: pending) acc rest
+    | Tool_call { at; turn_id; call_id; tool_name; args } :: rest ->
+        let next = (at, turn_id, call_id, tool_name, args) in
+        (match pending with
+         | (_, pending_turn, _, _, _) :: _ when pending_turn <> turn_id ->
+             loop [ next ] (flush pending acc) rest
+         | _ -> loop (next :: pending) acc rest)
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest
   in
   loop [] [] parsed_rows

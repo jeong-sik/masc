@@ -1,6 +1,6 @@
 # Provider Catalog
 
-OAS supports an external provider catalog for adding or overriding provider
+agent_core supports an external provider catalog for adding or overriding provider
 connection metadata without changing SDK code. This is the provider-side
 companion to `Capability_manifest`: capabilities describe what a model can do,
 while the provider catalog describes how a runtime connects to that model.
@@ -8,7 +8,7 @@ while the provider catalog describes how a runtime connects to that model.
 The catalog is intentionally coordinator-neutral. It must not contain
 downstream orchestration concepts such as domain roles, workflow queues,
 operator-facing UI, or product-specific routing policies. Coordinators may
-project their own configuration into this catalog shape, but OAS only consumes
+project their own configuration into this catalog shape, but agent_core only consumes
 generic provider/runtime facts.
 
 ## Loading
@@ -18,7 +18,7 @@ bootstrap:
 
 ```ocaml
 let catalog =
-  match Provider_catalog.load_file "/home/app/.config/oas/providers.json" with
+  match Provider_catalog.load_file "/home/app/.config/agent_core/providers.json" with
   | Ok catalog -> catalog
   | Error message -> failwith message
 in
@@ -28,16 +28,16 @@ Provider_catalog.set_global catalog
 Resolution order:
 
 1. Explicit overlay installed with `Provider_catalog.set_global`
-2. Embedded OAS `models.toml` provider rows
+2. Embedded agent_core `models.toml` provider rows
 
-The OAS-owned `models.toml` also carries shareable provider identity rows under
-`[[providers]]`. Those rows are data, not OCaml vendor branches: OAS embeds that
+The agent_core-owned `models.toml` also carries shareable provider identity rows under
+`[[providers]]`. Those rows are data, not OCaml vendor branches: agent_core embeds that
 file at build time and uses it to register default provider entries. A selected
-provider id is carried separately from its endpoint in `Provider_config`; OAS
+provider id is carried separately from its endpoint in `Provider_config`; agent_core
 never reverse-matches a URL, request path, or model id to choose a provider.
 Linked applications need no catalog file beside their executable.
 
-OAS never discovers a provider or model catalog from the process environment.
+agent_core never discovers a provider or model catalog from the process environment.
 File selection, reload policy, and parse-error handling belong to the embedding
 application. A caller that needs a custom file loads it explicitly with
 `Provider_catalog.load_file` and installs it with `Provider_catalog.set_global`.
@@ -141,7 +141,7 @@ Auth modes:
 
 Catalog entries describe HTTP execution only. A caller that owns a managed,
 OAuth, or subprocess transport must inject that typed transport explicitly;
-the catalog does not claim an execution mode that OAS cannot perform.
+the catalog does not claim an execution mode that agent_core cannot perform.
 
 The JSON parser is fail-closed: root, provider, `auth`, and `capabilities`
 objects reject duplicate or unknown fields; scalar and list values must have

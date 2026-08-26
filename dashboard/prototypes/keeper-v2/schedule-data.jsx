@@ -123,7 +123,7 @@ const SCHEDULES = [
     payload: { kind: 'keeper.start', schema_version: 1, body: { ns: 'core/scheduler', note: 'compact-lock 재현 잡' } },
     summary: 'compact-lock 재현 잡 기동 — runtime 연결 실패',
     grant: { by: 'operator', at: '10:41' },
-    exec: { status: 'Execution_failed', started: '11:00', finished: '11:00', error: 'runtime oas·tokyo-2 연결 거부 (fallback 소진)' },
+    exec: { status: 'Execution_failed', started: '11:00', finished: '11:00', error: 'runtime agent-core·tokyo-2 연결 거부 (fallback 소진)' },
   },
   {
     schedule_id: 'sch_55d1', status: 'Rejected', source: 'Automated_request',

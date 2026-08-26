@@ -427,6 +427,86 @@ let test_config_seed_skips_each_existing_file_without_force () =
     {|seed_raw_if_missing "agent-core-models.toml"|};
 ;;
 
+(* What follows [instructions =] in a keeper TOML, with the TOML string
+   delimiters and surrounding whitespace taken off. Empty means the key is
+   there but says nothing, which the loader treats the same as absent. *)
+let instructions_body toml =
+  let key = "instructions" in
+  let rec find i =
+    if i + String.length key > String.length toml then None
+    else if String.sub toml i (String.length key) = key then Some (i + String.length key)
+    else find (i + 1)
+  in
+  match find 0 with
+  | None -> None
+  | Some after_key ->
+    let rest = String.sub toml after_key (String.length toml - after_key) in
+    let rest = String.trim rest in
+    let rest =
+      if String.length rest > 0 && rest.[0] = '=' then
+        String.trim (String.sub rest 1 (String.length rest - 1))
+      else rest
+    in
+    let strip prefix s =
+      let n = String.length prefix in
+      if String.length s >= n && String.sub s 0 n = prefix then
+        String.sub s n (String.length s - n)
+      else s
+    in
+    Some (String.trim (strip "\"" (strip "\"\"\"" rest)))
+;;
+
+(* Every preset keeper TOML has to carry its own prompt.
+
+   The classic preset kept its prompts in keepers/<name>/AGENT.md until #29593
+   removed the only reader of that file. The TOMLs then had no
+   keeper.instructions, which lib/keeper/keeper_types_profile.ml rejects at
+   load, so `quickstart.sh --team classic` seeded four Keepers that could not
+   start -- and nothing noticed, because no test read a preset TOML.
+
+   The manifest check rides along: that list is what install.sh --team fetches,
+   so a name in it with no file behind it is a broken install. *)
+let test_presets_carry_their_own_instructions () =
+  let root = source_root () in
+  let presets_dir = Filename.concat root "presets" in
+  let presets =
+    Sys.readdir presets_dir
+    |> Array.to_list
+    |> List.filter (fun name -> Sys.is_directory (Filename.concat presets_dir name))
+    |> List.sort String.compare
+  in
+  if presets = [] then failf "no presets found under %s" presets_dir;
+  List.iter
+    (fun preset ->
+      let preset_dir = Filename.concat presets_dir preset in
+      let manifest_path = Filename.concat preset_dir "manifest.txt" in
+      if not (Sys.file_exists manifest_path) then
+        failf "preset %s has no manifest.txt" preset;
+      let entries =
+        read_file manifest_path
+        |> String.split_on_char '\n'
+        |> List.map String.trim
+        |> List.filter (fun line -> line <> "")
+      in
+      if entries = [] then failf "preset %s ships an empty manifest" preset;
+      let keeper_tomls = ref 0 in
+      List.iter
+        (fun rel ->
+          let path = Filename.concat preset_dir rel in
+          if not (Sys.file_exists path) then
+            failf "preset %s manifest lists a missing file: %s" preset rel;
+          if Filename.check_suffix rel ".toml" then begin
+            incr keeper_tomls;
+            match instructions_body (read_file path) with
+            | None -> failf "preset %s/%s sets no keeper.instructions" preset rel
+            | Some "" -> failf "preset %s/%s has an empty keeper.instructions" preset rel
+            | Some _ -> ()
+          end)
+        entries;
+      if !keeper_tomls = 0 then failf "preset %s ships no keeper TOML" preset)
+    presets
+;;
+
 let test_release_requires_advertised_binary_assets () =
   let workflow = release_workflow () in
   assert_contains
@@ -1435,6 +1515,10 @@ let () =
             "release checksums include team presets"
             `Quick
             test_release_checksums_include_team_presets
+        ; test_case
+            "presets carry their own instructions"
+            `Quick
+            test_presets_carry_their_own_instructions
         ] )
     ]
 ;;

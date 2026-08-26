@@ -32,3 +32,17 @@ val cursor_up : count:int -> int -> int
 
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
+
+(** A surface that draws a preview under its list splits the rows it has. The
+    split belongs here for the same reason the bound does: the keypress and
+    the frame have to work it out the same way. A renderer that shrank its
+    own list while the key handler kept moving against the full height is
+    what this module was written to stop, and Changes reintroduced it -- the
+    list drew ten rows and the keypress stopped at the bound for twenty, so
+    the rows past that could not be reached. *)
+
+val preview_height : total:int -> keep:int -> int
+(** The preview's rows out of [total], leaving the list at least [keep]. *)
+
+val body_height : total:int -> keep:int -> int
+(** The list's rows out of [total] once the preview has taken its share. *)

@@ -7,13 +7,13 @@ status: Draft
 
 - Status: Draft
 - Date: 2026-07-15
-- Related: masc#24528 (provider_id stamping fix, merged), agent_core RFC-OAS-036 / agent_core#2604
-  (D1 overlay + alias-canonicalized lookup, implemented), agent_core RFC-OAS-034
+- Related: masc#24528 (provider_id stamping fix, merged), agent_core RFC-AC-036 / agent_core#2604
+  (D1 overlay + alias-canonicalized lookup, implemented), agent_core RFC-AC-034
   (endpoint/capability boundary), masc `codex/catalog-ssot-purge-20260714`
   (`6921f46c98`, vendored-catalog purge, unlanded), RFC-0206 §2.1 (no silent
   fallback)
 
-> 2026-07-15 update: D1 is implemented on the agent_core side as RFC-OAS-036
+> 2026-07-15 update: D1 is implemented on the agent_core side as RFC-AC-036
 > (`Model_catalog.merge` / `set_global_overlay`, agent_core#2604). That PR also
 > canonicalizes `lookup_for_provider` through the catalog's own `[[providers]]`
 > alias data, which makes **D3 optional**: a deployment alias can be declared
@@ -51,7 +51,7 @@ ownership. Two defects compounded:
      fork silently masks every subsequent upstream update. Resolution order
      (config root before embedded) makes the least-maintained copy win.
    - Deployment provider aliases (`runpod_mtp`, `kimi_code`) cannot appear in
-     the upstream catalog by design (RFC-OAS-034 §2 rule 1: capability
+     the upstream catalog by design (RFC-AC-034 §2 rule 1: capability
      namespaces are serving contracts, not hosting aliases), so personal rows
      leaked upstream (`provider_name = "runpod_rtxa6000"`) — the boundary
      violated in the opposite direction.
@@ -110,7 +110,7 @@ capabilities in neither the catalog nor runtime.toml.
 
 ```toml
 [providers.runpod_mtp]
-capability-namespace = "vllm-qwen3-mtp"   # RFC-OAS-034 serving contract
+capability-namespace = "vllm-qwen3-mtp"   # RFC-AC-034 serving contract
 ```
 
 When present, materialization stamps `provider_id` with the declared
@@ -154,7 +154,7 @@ capabilities) is unchanged; only the blast radius shrinks.
 - **Keep the full-fork deployment catalog** (today's workaround): every
   upstream change re-rots the fork; three row-encoding generations in the
   previous fork show how this ends.
-- **Add alias rows upstream**: violates RFC-OAS-034 §2 rule 1 and reverts
+- **Add alias rows upstream**: violates RFC-AC-034 §2 rule 1 and reverts
   agent_core#2432; pollutes a shared catalog with per-deployment hosting names
   (`runpod_rtxa6000` is already there and should migrate out via D1/D3).
 - **Re-enable bare-row fallback for declared providers**: reintroduces the

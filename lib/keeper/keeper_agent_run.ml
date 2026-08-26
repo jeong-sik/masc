@@ -1354,12 +1354,14 @@ let run_turn
             ; cache_creation_input_tokens =
                 Some result.usage.cache_creation_input_tokens
             ; cache_read_input_tokens = Some result.usage.cache_read_input_tokens
+            ; scope = result.usage_scope
             }
           | Ok _ | Error _ ->
             { input_tokens = None
             ; output_tokens = None
             ; cache_creation_input_tokens = None
             ; cache_read_input_tokens = None
+            ; scope = Runtime_usage_scope.Usage_scope_unavailable
             }
         in
         let request_latency_ms : int option =

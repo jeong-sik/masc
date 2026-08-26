@@ -1,6 +1,6 @@
 # Multi-Endpoint LLM Setup
 
-OAS supports multiple explicitly declared endpoints with round-robin load
+agent_core supports multiple explicitly declared endpoints with round-robin load
 balancing across declarations that pass their protocol-specific probes.
 
 ## Quick Start
@@ -34,11 +34,11 @@ llama-server -m qwen3.5-9b.gguf  --port 8087 &
 
 ## Explicit Discovery
 
-OAS does not scan ports or infer a provider protocol from a URL. The embedding
+agent_core does not scan ports or infer a provider protocol from a URL. The embedding
 application declares every endpoint's closed protocol variant and catalog
 capabilities, then asks the registry to probe those declarations.
 
-A typical embedding application would call this at server startup. Standalone OAS users call it explicitly:
+A typical embedding application would call this at server startup. Standalone agent_core users call it explicitly:
 
 ```ocaml
 Eio.Switch.run @@ fun sw ->
@@ -79,7 +79,7 @@ OpenAI-compatible declarations use these probes:
 - `GET /props` — total slots and context
 - `GET /slots` — per-slot busy/idle status
 
-Ollama-native declarations use `GET /api/tags` for model inventory. OAS does
+Ollama-native declarations use `GET /api/tags` for model inventory. agent_core does
 not call `/api/show` and does not inspect chat templates.
 
 An OpenAI-compatible declaration is active only when it is reachable and its

@@ -26,6 +26,9 @@ type palette = {
   code_string : span;
   code_comment : span;
   code_number : span;
+  code_diff_added : span;
+      (** A ["```diff"] fence's added line. Whole-line, not token-shaped. *)
+  code_diff_removed : span;  (** The same fence's removed line. *)
   code_type : span;
 }
 
@@ -49,6 +52,8 @@ let plain_palette =
   ; code_string = ("", "")
   ; code_comment = ("", "")
   ; code_number = ("", "")
+  ; code_diff_added = ("", "")
+  ; code_diff_removed = ("", "")
   ; code_type = ("", "")
   }
 
@@ -73,6 +78,8 @@ let kind_code_string = Masc_tui_code_lexer.kind_string
 let kind_code_comment = Masc_tui_code_lexer.kind_comment
 let kind_code_number = Masc_tui_code_lexer.kind_number
 let kind_code_type = Masc_tui_code_lexer.kind_type
+let kind_code_diff_added = Masc_tui_code_lexer.kind_diff_added
+let kind_code_diff_removed = Masc_tui_code_lexer.kind_diff_removed
 
 let starts_at text index marker =
   let length = String.length marker in
@@ -218,6 +225,8 @@ let span_of_palette palette kind =
   else if String.equal kind kind_code_comment then palette.code_comment
   else if String.equal kind kind_code_number then palette.code_number
   else if String.equal kind kind_code_type then palette.code_type
+  else if String.equal kind kind_code_diff_added then palette.code_diff_added
+  else if String.equal kind kind_code_diff_removed then palette.code_diff_removed
   else ("", "")
 
 type token = {

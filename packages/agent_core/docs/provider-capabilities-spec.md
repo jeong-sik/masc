@@ -5,7 +5,7 @@ to make correct runtime decisions.
 
 Historical baseline from the March 2026 capability survey. Structured
 output notes in this document were revalidated against official provider
-docs and the current OAS serializers on 2026-04-21. GLM/Ollama thinking
+docs and the current agent_core serializers on 2026-04-21. GLM/Ollama thinking
 wire notes were revalidated against official docs and a live Ollama Cloud
 smoke on 2026-06-29.
 
@@ -28,11 +28,11 @@ type capabilities = {
 8 boolean fields. No numeric limits. `supports_reasoning` conflates
 4 distinct mechanisms. `supports_multimodal_inputs` conflates 3 modalities.
 
-Current OAS code has already added many of the proposed fields in
+Current agent_core code has already added many of the proposed fields in
 `lib/llm_provider/capabilities.ml`. This document is still useful as a
 design note, but the structured output section below is the authoritative
 reference for the difference between official provider support and current
-OAS wiring.
+agent_core wiring.
 
 ## Proposed: 3-Tier Capability Model
 
@@ -94,7 +94,7 @@ Consider adding:
 Use two layers when discussing structured output support:
 
 - Official provider capability: what the provider's documented API can do.
-- Current OAS wiring: what the current serializer path actually sends on
+- Current agent_core wiring: what the current serializer path actually sends on
   the wire today.
 
 Semantic contract:
@@ -115,17 +115,17 @@ The two flags are related but not interchangeable:
 - Generic OpenAI-compatible servers must be treated as host-specific. Do
   not infer native schema support from wire compatibility alone.
 
-### Structured Output: Official Support vs Current OAS Wiring
+### Structured Output: Official Support vs Current agent_core Wiring
 
-| Provider | Official API surface | Guarantee level | Current OAS wiring | Note / risk |
+| Provider | Official API surface | Guarantee level | Current agent_core wiring | Note / risk |
 |----------|----------------------|-----------------|--------------------|-------------|
-| OpenAI | `response_format: {type: "json_schema", ...}` plus JSON mode `json_object` | Native schema guarantee + JSON mode | `backend_openai.ml` emits `json_schema` for `JsonSchema _` and `json_object` for `JsonMode` | OAS accepts native schema when both the model capability and concrete endpoint declaration pass `Provider_config.validate_output_schema_request`. |
-| Gemini | `generationConfig.responseMimeType = "application/json"` plus `responseJsonSchema` / `responseSchema` | Native schema guarantee + JSON mode | `backend_gemini.ml` emits `responseMimeType` plus `responseJsonSchema` for `JsonSchema _`; `JsonMode` keeps `responseMimeType` only | OAS uses `responseJsonSchema`; other documented field names remain provider aliases. |
+| OpenAI | `response_format: {type: "json_schema", ...}` plus JSON mode `json_object` | Native schema guarantee + JSON mode | `backend_openai.ml` emits `json_schema` for `JsonSchema _` and `json_object` for `JsonMode` | agent_core accepts native schema when both the model capability and concrete endpoint declaration pass `Provider_config.validate_output_schema_request`. |
+| Gemini | `generationConfig.responseMimeType = "application/json"` plus `responseJsonSchema` / `responseSchema` | Native schema guarantee + JSON mode | `backend_gemini.ml` emits `responseMimeType` plus `responseJsonSchema` for `JsonSchema _`; `JsonMode` keeps `responseMimeType` only | agent_core uses `responseJsonSchema`; other documented field names remain provider aliases. |
 | Anthropic | `output_config.format` for JSON outputs; strict tool use is separate | Native schema guarantee for JSON outputs; strict tool use validates tool names and inputs, not assistant text shape | `backend_anthropic.ml` emits `output_config.format`; `lib/structured.ml` direct extraction uses native schema output | Strict tool use remains separate; do not describe Anthropic structured output as "tool-use only". |
 | Ollama | `/api/chat` `format` accepts `"json"` or a JSON schema | JSON mode or native schema guarantee, depending on `format` | `backend_ollama.ml` emits `/api/chat format` as `"json"` or a JSON schema | Native schema still depends on the target Ollama server honoring `format`. |
-| DashScope (Qwen) | `response_format: {type: "json_schema", "json_schema": {...}}` plus JSON mode `json_object` on the OpenAI-compatible endpoint (`dashscope-intl.aliyuncs.com/compatible-mode/v1`) | Native schema guarantee + JSON mode for Qwen3 series and newer models | OAS forwards `response_format = JsonSchema _` via `backend_openai.ml`; `validate_output_schema_request` accepts `DashScope` kind unconditionally without per-model capability check | All Qwen3 / qwen-max / qwen-turbo models support this on the OpenAI-compat endpoint. Ref: DashScope structured output guide — checked 2026-05-05. |
-| GLM | `response_format = {"type":"json_object"}` plus prompt/schema-in-text guidance | JSON mode only in the current official docs | OAS keeps GLM on the OpenAI-style `json_object` path and rejects `response_format = JsonSchema _` up front | Keep caller-side validation; do not treat this as provider-native schema enforcement. |
-| Generic OpenAI-compatible / llama.cpp | Varies by server, release, and host integration | Host-specific; do not assume schema support | OAS rejects native schema by default for generic OpenAI-compatible hosts; verified provider/runtime catalog entries may declare endpoint support explicitly | OpenAI-compatible wire shape is not enough evidence for native schema support. |
+| DashScope (Qwen) | `response_format: {type: "json_schema", "json_schema": {...}}` plus JSON mode `json_object` on the OpenAI-compatible endpoint (`dashscope-intl.aliyuncs.com/compatible-mode/v1`) | Native schema guarantee + JSON mode for Qwen3 series and newer models | agent_core forwards `response_format = JsonSchema _` via `backend_openai.ml`; `validate_output_schema_request` accepts `DashScope` kind unconditionally without per-model capability check | All Qwen3 / qwen-max / qwen-turbo models support this on the OpenAI-compat endpoint. Ref: DashScope structured output guide — checked 2026-05-05. |
+| GLM | `response_format = {"type":"json_object"}` plus prompt/schema-in-text guidance | JSON mode only in the current official docs | agent_core keeps GLM on the OpenAI-style `json_object` path and rejects `response_format = JsonSchema _` up front | Keep caller-side validation; do not treat this as provider-native schema enforcement. |
+| Generic OpenAI-compatible / llama.cpp | Varies by server, release, and host integration | Host-specific; do not assume schema support | agent_core rejects native schema by default for generic OpenAI-compatible hosts; verified provider/runtime catalog entries may declare endpoint support explicitly | OpenAI-compatible wire shape is not enough evidence for native schema support. |
 
 ## Thinking Taxonomy
 
@@ -158,7 +158,7 @@ different provider contracts.
 |---------|-----------------|-----------------------------|-----------------------------|-------------------------|
 | Z.AI standard API / OpenAI-compatible `api.z.ai/api/paas/v4` | `thinking: {type, clear_thinking}`; GLM-5.2/5.1/5/4.7 thinking defaults on, disable with `type=disabled` | Preserved Thinking is off by default on the standard API; enable by sending `clear_thinking=false` and replay unmodified `reasoning_content` in the original sequence | Chat/stream deltas use `reasoning_content` for the thinking side channel | `tool_choice` only supports `auto`; streaming tool calls use Z.AI `tool_stream=true`; structured output docs describe JSON mode `response_format={"type":"json_object"}` plus caller-side/schema validation |
 | Z.AI Coding Plan endpoint | Same GLM `thinking` object | Preserved Thinking is enabled by default according to Z.AI docs | Same Z.AI `reasoning_content` channel | Treat endpoint defaults as provider/endpoint config, not model-family inference |
-| Ollama native `/api/chat` or `/api/generate`, including Ollama Cloud `https://ollama.com/api/chat` GLM models | `think` bool/level on the request; OAS records this as `ollama_think` | No Z.AI `clear_thinking` contract and no `reasoning_content` replay field | Native response uses `message.thinking` separate from `message.content`; streaming interleaves thinking chunks before answer chunks | Do not send Z.AI `thinking`, `clear_thinking`, `tool_stream`, or historical `reasoning_content` fields to native Ollama |
+| Ollama native `/api/chat` or `/api/generate`, including Ollama Cloud `https://ollama.com/api/chat` GLM models | `think` bool/level on the request; agent_core records this as `ollama_think` | No Z.AI `clear_thinking` contract and no `reasoning_content` replay field | Native response uses `message.thinking` separate from `message.content`; streaming interleaves thinking chunks before answer chunks | Do not send Z.AI `thinking`, `clear_thinking`, `tool_stream`, or historical `reasoning_content` fields to native Ollama |
 
 GLM-5.2's model page is a capability overview: 1M context, 128K output,
 thinking mode, streaming output, function calling, context caching,
@@ -183,7 +183,7 @@ as the union. Audio/video can be added later.
 ## Model Capability Matrix (reference)
 
 Structured column note: values below describe official provider capability,
-not necessarily current OAS serializer wiring. See the table above for the
+not necessarily current agent_core serializer wiring. See the table above for the
 runtime distinction.
 
 | Model | ctx | out | tools | parallel | thinking | structured | vision | cache |

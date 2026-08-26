@@ -16,6 +16,12 @@ let kind_comment = "code_comment"
 let kind_number = "code_number"
 let kind_type = "code_type"
 
+(* A diff's two answers. They are line-shaped rather than token-shaped, which
+   is why they are their own kinds: no lexer run can end mid-line and mean
+   something. *)
+let kind_diff_added = "code_diff_added"
+let kind_diff_removed = "code_diff_removed"
+
 (* {1 Fenced-code lexers}
 
    Each lexer reads one whole fence body, newlines included, and returns the
@@ -350,11 +356,47 @@ let json_lexer text =
 (* The fence tag decides who lexes. Untagged and unknown tags answer None and
    the fence keeps the single code span -- a guess at the grammar from the
    text alone is exactly the colouring-as-pretence the palette avoids. *)
+(* A diff line is read whole: its first cell decides the whole line, so this
+   emits one run per line instead of scanning for tokens. A hunk header reads
+   as a comment because it locates the change rather than being part of it,
+   and "---"/"+++" file headers are left plain so they are not mistaken for
+   the removal and addition directly under them. *)
+let diff_line_kind line =
+  if String.length line = 0 then kind_code
+  else if
+    String.length line >= 3
+    && (String.sub line 0 3 = "+++" || String.sub line 0 3 = "---")
+  then
+    (* A file header, not the change under it. Colouring it would put a green
+       "+++" directly above the first added line and read as part of it. *)
+    kind_code
+  else
+    match line.[0] with
+    | '+' -> kind_diff_added
+    | '-' -> kind_diff_removed
+    | '@' -> kind_comment
+    | _ -> kind_code
+
+let diff_lexer text =
+  let runs = new_runs kind_code in
+  let add kind s = String.iter (fun c -> runs_add runs kind c) s in
+  let lines = String.split_on_char '\n' text in
+  let count = List.length lines in
+  List.iteri
+    (fun index line ->
+      add (diff_line_kind line) line;
+      (* The newline belongs to no line's colour: [rows_of_segments] cuts rows
+         on it, and a coloured one would carry the run past the cut. *)
+      if index < count - 1 then add kind_code "\n")
+    lines;
+  runs_segments runs
+
 let lexer_of_language (tag : string) =
   match String.lowercase_ascii (String.trim tag) with
   | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
   | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
   | "json" -> Some json_lexer
+  | "diff" | "patch" -> Some diff_lexer
   | _ -> None
 
 

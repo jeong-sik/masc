@@ -17,7 +17,7 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
 ;;
 
 let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
-    content =
+    ?transcript_slot ?turn_ref content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
@@ -26,6 +26,10 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
      ]
      @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
+     @ (match transcript_slot with
+        | None -> []
+        | Some json -> [ "transcript_slot", json ])
+     @ (match turn_ref with None -> [] | Some id -> [ "turn_ref", `String id ])
      @ (match tool_call_id with
         | None -> []
         | Some id -> [ "tool_call_id", `String id ])
@@ -35,6 +39,15 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
 
 let operation_key id =
   `Assoc [ "kind", `String "operation"; "operation_id", `String id ]
+
+let transcript_slot kind = `Assoc [ "kind", `String kind ]
+
+let tool_transcript_slot execution_id ordinal =
+  `Assoc
+    [ "kind", `String "tool_call"
+    ; "execution_id", `String execution_id
+    ; "ordinal", `Int ordinal
+    ]
 
 let origin_request_id = function
   | History.Delivery_failed { origin_request_id } -> origin_request_id
@@ -61,14 +74,15 @@ let kind_to_string : History.kind -> string = function
    steps. [content] is [null] on the wire when the turn said nothing
    ([server_dashboard_http_keeper_api.ml], the autonomous row encoder), so
    the default here is the wire's shape, not an empty string. *)
-let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted steps
-    =
+let autonomous_turn ?(ts = 1.0) ?(content = `Null) ?(marked = true) ?omitted
+    ?turn_ref steps =
   `Assoc
     ([ "id", `String "autonomous:trace-1#54"
      ; "role", `String "assistant"
      ; "content", content
      ; "ts", `Float ts
      ]
+    @ (match turn_ref with None -> [] | Some id -> [ "turn_ref", `String id ])
     @ (if marked then
          [ "autonomous_turn", `Assoc [ "turn_id", `String "trace-1#54" ] ]
        else [])
@@ -143,6 +157,54 @@ let test_a_failed_turn_names_the_request_it_came_from () =
   check (list (option string)) "an operation key is the request, anything else is not"
     [ Some "tui-28e58beb"; None; None ]
     (List.map (fun r -> origin_request_id r.History.kind) decoded.History.rows)
+;;
+
+let test_rows_retain_the_exact_turn_identity () =
+  let key = operation_key "tui-turn-42" in
+  let decoded =
+    decode
+      (`List
+         [ row ~role:"user" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "accepted_user") "check it"
+         ; row ~role:"tool" ~delivery_key:key
+             ~transcript_slot:(tool_transcript_slot "exec-1" 0)
+             ~tool_call_name:"Read" "{}"
+         ; row ~role:"assistant" ~delivery_key:key
+             ~transcript_slot:(transcript_slot "terminal_assistant") "done"
+         ])
+  in
+  check (list (option string)) "every row keeps the producer's operation id"
+    [ Some "tui-turn-42"; Some "tui-turn-42"; Some "tui-turn-42" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+let test_consecutive_tools_from_different_turns_do_not_merge () =
+  let tool turn execution =
+    row ~role:"tool" ~delivery_key:(operation_key turn)
+      ~transcript_slot:(tool_transcript_slot execution 0)
+      ~tool_call_name:"Read" "{}"
+  in
+  let decoded =
+    decode (`List [ tool "turn-one" "exec-1"; tool "turn-two" "exec-2" ])
+  in
+  check int "two turn identities produce two blocks" 2
+    (List.length decoded.History.rows);
+  check (list (option string)) "each block keeps its own turn"
+    [ Some "turn-one"; Some "turn-two" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
+;;
+
+let test_autonomous_trace_rows_keep_the_turn_ref () =
+  let decoded =
+    decode
+      (`List
+         [ autonomous_turn ~turn_ref:"trace-1#54"
+             [ reason "look"; tool "Read" ]
+         ])
+  in
+  check (list (option string)) "reasoning, tools and reply share the turn_ref"
+    [ Some "trace-1#54"; Some "trace-1#54" ]
+    (List.map (fun row -> row.History.turn_id) decoded.History.rows)
 ;;
 
 (* A [role: "user"] row is whatever was put in front of the keeper, and most of
@@ -610,11 +672,14 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
         (fun needle ->
            check bool needle true (contains row.text needle))
         [ "Librarian committed current memory revision 7"
-        ; "DELTA: 1 added (now present)"
-        ; "1 removed (now absent)"
-        ; "3 retained from previous"
-        ; "+ ADDED (now in current memory) [fact] the probe uses HTTP/2"
-        ; "- REMOVED (no longer in current memory) [constraint] use the old endpoint"
+        ; "now 1 added, 1 removed, 3 retained"
+          (* The change is a diff fence. That is what colours the two
+             directions, and what keeps a leading [+] out of markdown's list
+             grammar -- the renderer used to escape it and nothing consumed
+             the escape, so a backslash reached the pane. *)
+        ; "```diff"
+        ; "+ [fact] the probe uses HTTP/2"
+        ; "- [constraint] use the old endpoint"
         ; "drop memory-old \xe2\x80\x94 superseded by live evidence"
         ]
   | Ok decoded ->
@@ -658,6 +723,12 @@ let () =
             test_roles_map_to_what_the_pane_draws
         ; test_case "a failed turn names the request it came from" `Quick
             test_a_failed_turn_names_the_request_it_came_from
+        ; test_case "rows retain the exact turn identity" `Quick
+            test_rows_retain_the_exact_turn_identity
+        ; test_case "different turns do not merge their tool blocks" `Quick
+            test_consecutive_tools_from_different_turns_do_not_merge
+        ; test_case "autonomous trace rows retain turn_ref" `Quick
+            test_autonomous_trace_rows_keep_the_turn_ref
         ; test_case "an addressed row is labelled by who sent it" `Quick
             test_an_addressed_row_is_labelled_by_who_sent_it
         ; test_case "consecutive tool rows become one block" `Quick

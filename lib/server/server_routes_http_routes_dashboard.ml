@@ -242,6 +242,7 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     match protocol.credential_policy with
     | Runtime_toml.Credentials_optional -> "optional"
     | Runtime_toml.Credentials_forbidden -> "forbidden"
+    | Runtime_toml.Credentials_file_required -> "file_required"
   in
   `Assoc
     [ "protocol", `String protocol.protocol
@@ -249,6 +250,9 @@ let runtime_editor_protocol_json (protocol : Runtime_toml.editor_protocol) =
     ; "semantics", `String semantics
     ; "credential_policy", `String credential_policy
     ; "requires_non_interactive", `Bool protocol.requires_non_interactive
+    ; "provider_fields", Json_util.json_string_list protocol.provider_fields
+    ; ( "required_provider_fields"
+      , Json_util.json_string_list protocol.required_provider_fields )
     ]
 ;;
 
@@ -1725,16 +1729,12 @@ let add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
            let timing = Server_timing.create () in
            (* RFC-0138 Phase 3 Step 2: wait-free read via
-              [Dashboard_snapshot.current ()] when an actor filter is
-              not requested.  Per-actor variant continues through
-              [dashboard_tools_http_json] until the snapshot type
-              grows an [Actor_filter] arm. *)
+              [Dashboard_snapshot.current ()] for the global catalog. An exact
+              Keeper selector computes the effective surface beside it. *)
            let json =
              Server_dashboard_snapshot_select.select_tools_json
                ~timing
-               ?actor:
-                 (dashboard_actor_for_request
-                    ~base_path:(Mcp_server.workspace_config state).base_path request)
+               ?keeper:(Server_utils.query_param request "keeper")
                (Mcp_server.workspace_config state)
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
@@ -2010,9 +2010,12 @@ let add_routes ~sw ~clock router =
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
-     a turn: both decide what a running turn is allowed to do next. *)
+     a turn: both decide what a running turn is allowed to do next. The route
+     carries its own catalog auth key (keeper_tool_approval_route) rather than
+     borrowing a dispatchable tool's name, so the permission it enforces stays
+     reviewable on its own terms. *)
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
@@ -2027,12 +2030,13 @@ let add_routes ~sw ~clock router =
   (* The per-keeper approval stance the gate consults per call. Reading the
      overrides is a public-read projection like the listing above; setting
      one decides what a running turn may do next, so it carries the same
-     authority as answering a held call. *)
+     authority as answering a held call (and its own catalog auth key,
+     keeper_tool_approval_mode_route). *)
   |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approval_mode_get state request reqd) request reqd)
   |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"keeper_tool_approval_mode_route" (fun state _req reqd ->
          handle_keeper_tool_approval_mode_set state request reqd) request reqd)
 
   (* Keeper POST sub-routes. *)

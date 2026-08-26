@@ -1910,6 +1910,15 @@ let runtime_config_write_outcome
    [can_save] previews cannot diverge from what [commit_runtime_config_text]
    actually enforces. *)
 let parse_and_validate_config_text ~config_path content =
+  let* () =
+    match Skill_source_config.validate_text content with
+    | Ok () -> Ok ()
+    | Error diagnostics ->
+      Error
+        (String.concat
+           "; "
+           (List.map Skill_source_config.diagnostic_to_string diagnostics))
+  in
   let* loaded, exact_output_lanes =
     materialize_runtime_config_text ~config_path content
   in

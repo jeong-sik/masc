@@ -2,7 +2,3 @@ keepers/tech_lead.toml
 keepers/backend.toml
 keepers/frontend.toml
 keepers/qa.toml
-keepers/tech_lead/AGENT.md
-keepers/backend/AGENT.md
-keepers/frontend/AGENT.md
-keepers/qa/AGENT.md

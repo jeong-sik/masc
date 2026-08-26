@@ -61,6 +61,12 @@ val provider_for_vision
     (including omission), and a fallback [max_tokens] only when the selected
     runtime has not configured one. *)
 
+val sniff_image_media_type : string -> (string, string) result
+(** Identify an image's media type from its leading bytes. [Error] names the
+    admitted set rather than guessing, so an unrecognised file is rejected at
+    the boundary that read it. Shared with the TUI composer so both surfaces
+    admit exactly the same formats. *)
+
 val vision_runtime_ids : unit -> string list
 (** Ordered image-capable runtime ids: [\[runtime\].media_failover] order
     first, then declaration order. The handler tries these candidates in order

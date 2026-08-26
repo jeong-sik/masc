@@ -28,6 +28,7 @@ exception Break
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
+let roster_marquee_interval_ns = 150_000_000L
 (* What one wheel detent moves. Terminals report three lines per detent, so a
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
@@ -89,13 +90,25 @@ let require_interactive_terminal () =
    keypress cannot move past what the frame can show. Surfaces the state
    cannot count keep their old unbounded step; the drawing still clamps those
    on the way past. *)
+(* The rows a surface's list actually draws in. A surface that puts a preview
+   under its list says so in its [scrolled], and both movers ask here: a bound
+   worked out from the full body while the frame draws half of it is not a
+   bound, and the rows past the shortened list stop being reachable. *)
+let surface_body_height ~rows { sc_count; sc_chrome; sc_preview_keep } =
+  let total = max 1 (rows - sc_chrome) in
+  match sc_preview_keep with
+  | None -> total
+  | Some _ when sc_count = 0 -> total
+  | Some keep -> Masc_tui_scroll.body_height ~total ~keep
+
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
   | None -> current + delta
-  | Some { sc_count; sc_chrome } ->
-      let height = max 1 (rows - sc_chrome) in
-      if delta >= 0 then Masc_tui_scroll.down ~count:sc_count ~height current
-      else Masc_tui_scroll.up ~count:sc_count ~height current
+  | Some scrolled ->
+      let height = surface_body_height ~rows scrolled in
+      if delta >= 0 then
+        Masc_tui_scroll.down ~count:scrolled.sc_count ~height current
+      else Masc_tui_scroll.up ~count:scrolled.sc_count ~height current
 
 (* The rows a surface has to draw in: the terminal's, less the composer's,
    which owns the last row. The same arithmetic the drawing does -- a bound
@@ -118,8 +131,8 @@ let surface_page_rows () = max 1 (surface_rows () - 8)
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
-  | Some { sc_count; sc_chrome } ->
-      let height = max 1 (surface_rows () - sc_chrome) in
+  | Some ({ sc_count; _ } as scrolled) ->
+      let height = surface_body_height ~rows:(surface_rows ()) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
@@ -233,6 +246,18 @@ let take_late_palette_publisher reader =
 ;;
 
 let publish_late_terminal_palette reader decoder =
+  (* The page the terminal reports is not the palette and does not wait on
+     it: a multiplexer answers DECSET 996 and no OSC colour query, so this is
+     the only thing that ever arrives there. Published on its own so a colour
+     that has to know which way to move can still be told. *)
+  (match Masc_tui_terminal_probe.theme_mode decoder with
+   | None -> ()
+   | Some _ as theme_mode ->
+     if
+       Masc_tui_terminal_palette.snapshot_theme_mode
+         (Masc_tui_terminal_palette.snapshot ())
+       <> theme_mode
+     then Masc_tui_terminal_palette.set_theme_mode theme_mode);
   match reader.late_palette_publisher with
   | None -> ()
   | Some _ ->
@@ -717,6 +742,7 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
   state.msg_target_keeper_name <- Some keeper_name;
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
+  state.keeper_message_focus <- Right_pane;
   Buffer.clear state.msg_input;
   List.assoc_opt keeper_name state.msg_drafts
   |> Option.iter (Buffer.add_string state.msg_input)
@@ -1152,15 +1178,13 @@ type async_msg =
       string * (Masc.Tui_decode.workspace_tree_node list, string) result
   | Code_file_loaded of string * (string, string) result
   | Code_history_loaded of
-      string * (Masc.Tui_decode.git_log_row list, string) result
+      string * (Masc_tui_types.code_history_listing, string) result
   | Code_diff_loaded of
       string * (Masc.Tui_decode.git_diff, string) result
   | Code_notes_loaded of
       string * (Masc.Tui_decode.ide_annotation list, string) result
   (* The path the note anchored to; success re-reads the listing. *)
   | Code_note_written of string * (unit, string) result
-  | Code_activity_loaded of
-      string * (Masc.Tui_decode.ide_region list, string) result
   (* (question, symbol, answer) — the note the pane shows names both. *)
   | Code_lsp_answered of
       string * string * (Masc.Tui_decode.lsp_answer, string) result
@@ -1491,9 +1515,12 @@ let launch_keeper_approval state ~mailbox (request : Keeper_chat.request)
 let launch_tools_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
+  let keeper =
+    Option.map (fun (row : keeper) -> row.k_name) (selected_keeper state)
+  in
   let run () =
     let result =
-      try Masc_tui_loader.load_tools ~host ~port with
+      try Masc_tui_loader.load_tools ~host ~port ?keeper () with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -1505,6 +1532,18 @@ let launch_tools_load state ~mailbox =
           run ();
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
+
+let cycle_tools_keeper state ~mailbox ~delta =
+  let count = List.length state.keepers in
+  if count > 0 then begin
+    let next = (state.keeper_cursor + delta + count) mod count in
+    state.keeper_cursor <- next;
+    state.tools_inventory <- None;
+    state.tools_error <- None;
+    state.tools_scroll <- 0;
+    launch_tools_load state ~mailbox
+  end
+;;
 
 let launch_schedules_load state ~mailbox =
   let host = server_peer_host in
@@ -1698,6 +1737,39 @@ let code_history_limit = 50
    read. *)
 let tree_diff_base_ref = "HEAD"
 
+(* The annotation and region routes are scoped by the server-minted codebase
+   slug (RFC-0378), and only a Repositories row carries one -- the other
+   scopes say so instead of guessing a slug. *)
+let code_scope_codebase state =
+  match state.code_scope with
+  | Code_scope_repo repo_id -> (
+      match state.repositories with
+      | None -> Error "the repositories listing is not loaded yet"
+      | Some snapshot -> (
+          match
+            List.find_opt
+              (fun (r : Masc.Tui_decode.repository) ->
+                String.equal r.Masc.Tui_decode.rp_id repo_id)
+              snapshot.Masc.Tui_decode.rs_repositories
+          with
+          | None ->
+              Error ("repository " ^ repo_id ^ " is not in the listing")
+          | Some r -> (
+              match r.Masc.Tui_decode.rp_codebase with
+              | Some slug -> Ok slug
+              | None ->
+                  Error
+                    "this repository's remote has no canonical slug, so \
+                     it has no notes")))
+  | Code_scope_keeper _ ->
+      Error "notes are scoped by repository; open the file from Repos"
+  | Code_scope_project ->
+      Error "the project tree is not a registered repository; no notes here"
+
+let code_history_entry_at_ms = function
+  | Hist_commit (row : Masc.Tui_decode.git_log_row) -> row.gl_at_ms
+  | Hist_edit (region : Masc.Tui_decode.ide_region) -> region.ir_at_ms
+
 let launch_code_history_load state ~mailbox ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -1705,8 +1777,38 @@ let launch_code_history_load state ~mailbox ~path =
     let result =
       try
         let keeper, repo = code_scope_axes state in
-        Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
-          ~limit:code_history_limit ()
+        match
+          Masc_tui_http.fetch_git_log ?keeper ?repo ~host ~port ~path
+            ~limit:code_history_limit ()
+        with
+        | Error detail -> Error detail
+        | Ok commits ->
+            (* The recorded keeper edits ride the same listing. A scope
+               without a codebase slug, or a fetch that fails, drops only
+               them -- the commits still show, and the note says what is
+               missing rather than passing the shorter history off as the
+               whole one. *)
+            let edits, chl_edits_note =
+              match code_scope_codebase state with
+              | Error why -> ([], Some ("keeper edits not shown: " ^ why))
+              | Ok codebase -> (
+                  match
+                    Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
+                      ~file_path:path
+                  with
+                  | Error detail ->
+                      ([], Some ("keeper edits not shown: " ^ detail))
+                  | Ok regions -> (regions, None))
+            in
+            let chl_entries =
+              List.stable_sort
+                (fun a b ->
+                  Float.compare (code_history_entry_at_ms b)
+                    (code_history_entry_at_ms a))
+                (List.map (fun c -> Hist_commit c) commits
+                @ List.map (fun r -> Hist_edit r) edits)
+            in
+            Ok { chl_entries; chl_edits_note }
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -1746,35 +1848,55 @@ let launch_code_diff_load state ~mailbox ~path =
       enqueue_async mailbox
         (Code_diff_loaded (path, Error "Eio switch is unavailable"))
 
+(* The squash-merge convention leaves the PR number as the subject's last
+   "(#N)"; a subject without one truthfully has no PR to point at. *)
+let pr_number_of_subject subject =
+  let n = String.length subject in
+  let rec scan i best =
+    if i >= n then best
+    else if
+      subject.[i] = '(' && i + 2 < n && subject.[i + 1] = '#'
+    then begin
+      let rec digits j acc =
+        if j < n && subject.[j] >= '0' && subject.[j] <= '9' then
+          digits (j + 1) ((acc * 10) + (Char.code subject.[j] - 48))
+        else (j, acc)
+      in
+      let stop, value = digits (i + 2) 0 in
+      if value > 0 && stop < n && subject.[stop] = ')' then
+        scan (stop + 1) (Some value)
+      else scan (i + 1) best
+    end
+    else scan (i + 1) best
+  in
+  scan 0 None
+
+(* A GitHub pull-request URL from the registered remote. Only GitHub: other
+   forges spell the path differently, and guessing would link to a 404. *)
+let github_pr_url ~remote ~number =
+  let remote = String.trim remote in
+  let https =
+    if String.starts_with ~prefix:"git@github.com:" remote then
+      Some
+        ("https://github.com/"
+        ^ String.sub remote 15 (String.length remote - 15))
+    else if String.starts_with ~prefix:"https://github.com/" remote then
+      Some remote
+    else None
+  in
+  Option.map
+    (fun base ->
+      let base =
+        if String.ends_with ~suffix:".git" base then
+          String.sub base 0 (String.length base - 4)
+        else base
+      in
+      Printf.sprintf "%s/pull/%d" base number)
+    https
+
 (* The codebase slug for the surface's scope, when it has one. Only a
    repository row carries the server-minted slug (RFC-0378: the client
    never re-derives it); the other scopes honestly have none. *)
-let code_scope_codebase state =
-  match state.code_scope with
-  | Code_scope_repo repo_id -> (
-      match state.repositories with
-      | None -> Error "the repositories listing is not loaded yet"
-      | Some snapshot -> (
-          match
-            List.find_opt
-              (fun (r : Masc.Tui_decode.repository) ->
-                String.equal r.Masc.Tui_decode.rp_id repo_id)
-              snapshot.Masc.Tui_decode.rs_repositories
-          with
-          | None ->
-              Error ("repository " ^ repo_id ^ " is not in the listing")
-          | Some r -> (
-              match r.Masc.Tui_decode.rp_codebase with
-              | Some slug -> Ok slug
-              | None ->
-                  Error
-                    "this repository's remote has no canonical slug, so \
-                     it has no notes")))
-  | Code_scope_keeper _ ->
-      Error "notes are scoped by repository; open the file from Repos"
-  | Code_scope_project ->
-      Error "the project tree is not a registered repository; no notes here"
-
 let launch_code_notes_load state ~mailbox ~codebase ~path =
   let host = server_peer_host in
   let port = state.port in
@@ -1818,29 +1940,6 @@ let start_code_note_write state ~mailbox ~codebase ~path ~line_start ~line_end
   match Eio_context.get_switch_opt () with
   | Some sw -> Eio.Fiber.fork ~sw run
   | None -> run ()
-
-let launch_code_activity_load state ~mailbox ~codebase ~path =
-  let host = server_peer_host in
-  let port = state.port in
-  let run () =
-    let result =
-      try
-        Masc_tui_http.fetch_ide_regions ~host ~port ~codebase
-          ~file_path:path
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn)
-    in
-    enqueue_async mailbox (Code_activity_loaded (path, result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Code_activity_loaded (path, Error "Eio switch is unavailable"))
 
 (* Remember where a jump is about to leave from, so B can walk back.
    Bounded: the oldest entry falls off past twenty. *)
@@ -2282,6 +2381,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
         state.changes_keeper <- Some keeper.k_name;
         state.changes <- None;
         state.changes_error <- None;
+        state.changes_cursor <- 0;
         state.changes_scroll <- 0;
         state.changes_diff_row <- None;
         state.changes_diff_scroll <- 0;
@@ -2440,7 +2540,9 @@ let search_row_cursor state =
   match state.view with
   | Keepers Keeper_list -> Some state.keeper_cursor
   | Lanes -> Some state.lanes_cursor
-  | Verification -> Some state.verification_cursor
+  | Verification ->
+      if Option.is_some state.verification_detail_request_id then None
+      else Some state.verification_cursor
   | Harness -> Some state.harness_cursor
   | Repositories -> Some state.repositories_cursor
   | Connectors -> Some state.connectors_cursor
@@ -2448,9 +2550,8 @@ let search_row_cursor state =
   | System_logs -> Some state.system_logs_cursor
   | Code ->
       if
-        state.code_focus_file && not state.code_history_open
+        state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then Some state.code_file_cursor
       else Some state.code_cursor
   | _ -> None
@@ -2489,9 +2590,8 @@ let search_land state index =
       follow state.system_logs_scroll (fun s -> state.system_logs_scroll <- s)
   | Code ->
       if
-        state.code_focus_file && not state.code_history_open
+        state.code_focus_file = Right_pane && not state.code_history_open
         && not state.code_diff_open && not state.code_notes_open
-        && not state.code_activity_open
       then begin
         state.code_file_cursor <- index;
         state.code_file_scroll <-
@@ -2560,6 +2660,7 @@ let goto_surface state ~mailbox (destination : surface) =
             state.changes_keeper <- Some name;
             state.changes <- None;
             state.changes_error <- None;
+            state.changes_cursor <- 0;
             state.changes_scroll <- 0;
             state.changes_diff_row <- None;
             state.changes_diff_scroll <- 0
@@ -2808,10 +2909,10 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
   ; me_tool_block = tool_block
   ; me_timestamp = timestamp
   ; me_keeper_name = keeper_name
-  ; (* The transcript carries no request id: these rows predate this session, or
-       came from another client. The pane shows the compacted id beside a row,
-       so an empty one is what says "not from a request this session made". *)
-    me_request_id = ""
+  ; (* Direct rows retain their typed delivery key; autonomous rows retain the
+       persisted turn_ref. Old rows and Memory journal entries carry neither,
+       so the empty value continues to mean "no grouping authority". *)
+    me_request_id = Option.value ~default:"" row.Keeper_chat_history.turn_id
   ; me_at = row.Keeper_chat_history.at
   }
 
@@ -2906,6 +3007,15 @@ let drop_inflight state request =
    cannot produce a second turn. The client used to hold its own five-phase
    fence to prevent exactly that, and the price was one un-acknowledged POST
    per workspace — talking to one keeper stopped every other. *)
+(* Staged images belong to the message being composed, so the send that consumes
+   the draft consumes them too. Returning and clearing in one step keeps a failed
+   send from silently re-attaching the same image to the next one. *)
+let take_pending_attachments state =
+  let staged = state.msg_attachments in
+  state.msg_attachments <- [];
+  staged
+;;
+
 let launch_keeper_request state ~mailbox request =
   let live =
     Keeper_chat_transcript.create
@@ -2985,7 +3095,11 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
       match send_disposition state ~keeper_name:target with
       | Sends ->
           let request =
-            Keeper_chat.create_request ~keeper_name:target ~message:text
+            Keeper_chat.create_request
+              ~attachments:(take_pending_attachments state)
+              ~keeper_name:target
+              ~message:text
+              ()
           in
           launch_keeper_request state ~mailbox request
       | Queues_behind request -> (
@@ -3247,6 +3361,23 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
   | Masc_tui_command.View_image path ->
       Buffer.clear state.msg_input;
       open_image state ~notice (String.trim path)
+  | Masc_tui_command.Attach_image_missing_path ->
+      notice ~role:Message_error "/attach needs a path on the same line"
+  | Masc_tui_command.Attach_image path -> (
+      Buffer.clear state.msg_input;
+      match Masc_tui_attachment.of_file ~path:(String.trim path) with
+      | Error error ->
+          notice ~role:Message_error
+            (Masc_tui_attachment.error_to_string error)
+      | Ok attachment ->
+          state.msg_attachments <- state.msg_attachments @ [ attachment ];
+          notice ~role:Message_status
+            (Printf.sprintf
+               "attached %s (%s, %d bytes) — %d staged for the next message"
+               attachment.Masc_tui_keeper_chat_projection.name
+               attachment.Masc_tui_keeper_chat_projection.mime_type
+               attachment.Masc_tui_keeper_chat_projection.size
+               (List.length state.msg_attachments)))
   | Masc_tui_command.Help ->
       Buffer.clear state.msg_input;
       notice ~role:Message_status
@@ -3492,7 +3623,7 @@ let replace_board_posts state posts =
 
 let leave_board_detail state =
   state.board_mode <- Board_list;
-  state.board_focus <- Board_detail_pane;
+  state.board_focus <- Right_pane;
   state.board_scroll <- 0;
   state.board_detail <- Board_detail.clear state.board_detail
 
@@ -3741,6 +3872,15 @@ let apply_http_surfaces state results =
      replacement still moves A -> B as soon as /health succeeds. *)
   state.server_identity <-
     Masc_tui_types.server_identity_of_refresh results.http_server_identity;
+  state.workspace_identity <-
+    Masc_tui_types.workspace_identity_of_refresh
+      ~local_base_path:state.local_base_path
+      results.http_server_identity;
+  (match state.workspace_identity with
+   | Masc_tui_types.Workspace_identity_mismatch _ -> clear_local_workspace state
+   | Masc_tui_types.Workspace_identity_match ->
+     load_from_masc_dir state state.local_base_path
+   | Masc_tui_types.Workspace_identity_unread -> ());
   Option.iter (apply_keeper_roster_load state) results.http_keeper_roster;
   let reached result =
     Result.map (fun _ -> ()) result |> Result.map_error (fun _ -> ())
@@ -3758,6 +3898,46 @@ let apply_http_surfaces state results =
             (fun observation -> reached observation.ao_result)
             results.http_approvals
           |> Option.to_list))
+
+let load_local_workspace_if_safe state base_path =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match -> load_from_masc_dir state base_path
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
+let load_live_context_if_safe state base_path keeper =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+    load_live_context state base_path keeper
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
+let load_keeper_logs_if_safe state base_path limit keeper =
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_match ->
+    load_selected_keeper_logs state base_path limit keeper
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_mismatch _ -> ()
+;;
+
+let refresh_keeper_detail_selection state ~base_path ~mailbox =
+  match selected_keeper state with
+  | None -> ()
+  | Some keeper ->
+      load_live_context_if_safe state base_path keeper;
+      (match state.detail_tab with
+       | Detail_info -> ()
+       | Detail_instructions ->
+           state.keeper_config_view <- None;
+           state.keeper_config_view_error <- None;
+           launch_keeper_config_view state ~mailbox keeper.k_name
+       | Detail_github ->
+           state.github_identity_view <- None;
+           state.github_identity_view_error <- None;
+           launch_github_identity_view state ~mailbox keeper.k_name)
+;;
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
@@ -3967,7 +4147,7 @@ let move_board_posts_pane state ~mailbox ~delta =
   if count > 0 && next <> state.board_cursor then begin
     state.board_cursor <- next;
     Option.iter
-      (open_board_post state ~mailbox ~focus:Board_posts_pane)
+      (open_board_post state ~mailbox ~focus:Left_pane)
       (List.nth_opt state.board_posts next)
   end
 
@@ -4140,7 +4320,7 @@ let apply_keeper_action_result state ~base_path keeper_name action result =
      disk, the fiber is in the roster. Reloading the local half here shows the
      change without waiting a refresh interval; the roster arrives with the
      HTTP refresh the caller starts. *)
-  load_from_masc_dir state base_path
+  load_local_workspace_if_safe state base_path
 
 let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
   let serial = state.keeper_action_serial + 1 in
@@ -4424,7 +4604,13 @@ let verification_cursor_row state =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
-  List.nth_opt requests state.verification_cursor
+  match state.verification_detail_request_id with
+  | Some request_id ->
+      List.find_opt
+        (fun row ->
+           String.equal row.Masc.Tui_decode.vr_request_id request_id)
+        requests
+  | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
    and vote keys: the first names the task, the same press again sends the
@@ -4561,6 +4747,9 @@ let handle_keeper_action state ~base_path ~mailbox action =
    chat surface the [c] key opens, so a message typed on the roster and one
    typed in the chat view take the identical dispatch path. *)
 let handle_composer_key state ~base_path ~mailbox key =
+  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  then false
+  else
   let composer = Composer_projection.of_state state in
   match Composer.classify_key composer key with
   | Composer.Pass_to_surface -> false
@@ -4596,6 +4785,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Set_tools _ | Masc_tui_command.Toggle_memory
        | Masc_tui_command.Inspect_context
        | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
+       | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
        | Masc_tui_command.Unknown _ ->
            (* A command keeps the surface: the operator asked the TUI, not
               the keeper, and the answer lands in Recent Events. *)
@@ -4636,7 +4826,35 @@ let spill_stamp () =
 let spill_nonce () =
   String.sub (Random_id.uuid_v7 ()) 0 8
 
+(* A file dropped on the composer arrives as a paste. An image is meant to be
+   looked at, so it is staged rather than spelled out; every other file keeps
+   its path in the draft, which is how an operator names a file they want read.
+
+   Shares handle_paste's guard: a staged image with no keeper to send it to is
+   the same silence as a paste with nowhere to go. *)
+let attach_dropped_image state ~base_path ~mailbox attachment =
+  let in_chat = state.view = Keepers Keeper_message in
+  if not (in_chat || state.composer_focused) then
+    ignore
+      (handle_composer_key state ~base_path ~mailbox Composer.focus_key : bool);
+  if not (in_chat || state.composer_focused) then
+    add_event state "error"
+      (Printf.sprintf "Dropped %s with no Keeper to send it to"
+         attachment.Masc_tui_keeper_chat_projection.name)
+  else begin
+    state.msg_attachments <- state.msg_attachments @ [ attachment ];
+    add_event state "system"
+      (Printf.sprintf "Attached %s (%s, %d bytes) — %d staged for the next message"
+         attachment.Masc_tui_keeper_chat_projection.name
+         attachment.Masc_tui_keeper_chat_projection.mime_type
+         attachment.Masc_tui_keeper_chat_projection.size
+         (List.length state.msg_attachments))
+  end
+
 let handle_paste state ~base_path ~mailbox ~(paste : Masc_tui_paste.t) =
+  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
+  then ()
+  else
   let in_chat = state.view = Keepers Keeper_message in
   if not (in_chat || state.composer_focused) then
     ignore
@@ -4960,7 +5178,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 in
                 max widest row_width)
               0 rows;
-          state.code_focus_file <- true;
+          state.code_focus_file <- Right_pane;
           (* A new file starts on its content; the old file's history or
              diff would caption the wrong bytes. *)
           state.code_history <- None;
@@ -4974,11 +5192,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.code_notes <- None;
           state.code_notes_error <- None;
           state.code_notes_open <- false;
-          state.code_notes_scroll <- 0;
-          state.code_activity <- None;
-          state.code_activity_error <- None;
-          state.code_activity_open <- false;
-          state.code_activity_scroll <- 0
+          state.code_notes_scroll <- 0
       | Error detail -> state.code_file_error <- Some detail)
   | Code_notes_loaded (path, result) ->
       let still_current =
@@ -5011,19 +5225,6 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                 launch_code_notes_load state ~mailbox ~codebase ~path
             | Error _ -> ())
       | Error detail -> state.code_notes_error <- Some detail)
-  | Code_activity_loaded (path, result) ->
-      let still_current =
-        match state.code_file with
-        | Some (open_path, _) -> String.equal open_path path
-        | None -> false
-      in
-      if still_current then (
-        match result with
-        | Ok regions ->
-            state.code_activity <- Some (path, regions);
-            state.code_activity_error <- None;
-            state.code_activity_scroll <- 0
-        | Error detail -> state.code_activity_error <- Some detail)
   | Code_lsp_answered (question, symbol, result) ->
       (match result with
        | Error detail ->
@@ -5052,9 +5253,17 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              match state.code_file with
              | Some (open_path, rows)
                when String.equal open_path location.ll_path ->
-                 state.code_file_cursor <-
+                 let cursor =
                    max 0
                      (min (location.ll_line - 1) (List.length rows - 1))
+                 in
+                 state.code_file_cursor <- cursor;
+                 (* Follow the jump: a definition past the fold is a cursor
+                    the operator cannot see otherwise. *)
+                 state.code_file_scroll <-
+                   Masc_tui_scroll.ensure_visible ~cursor
+                     ~height:(Masc_tui_render.code_pane_content_height ())
+                     state.code_file_scroll
              | Some _ | None ->
                  state.code_target_line <- Some location.ll_line;
                  launch_code_file_load state ~mailbox
@@ -5242,7 +5451,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           (fun () ->
             apply_keeper_chat_result state request result)
       in
-      if applied then load_from_masc_dir state base_path;
+      if applied then load_local_workspace_if_safe state base_path;
       (* The turn settled, so "next" has arrived for whatever was waiting. *)
       drain_queued_message state ~base_path ~mailbox
   | Keeper_chat_stream_deltas (request, deltas) ->
@@ -5551,6 +5760,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Ok snapshot ->
             state.changes <- Some snapshot;
             state.changes_error <- None;
+            state.changes_cursor <- 0;
             state.changes_scroll <- 0;
             (* The open row indexes the snapshot it was opened against. A new
                snapshot can hold a different change at the same index, so the
@@ -5606,7 +5816,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
-          state.verification_error <- None
+          state.verification_error <- None;
+          let requests = snapshot.Masc.Tui_decode.vs_requests in
+          let count = List.length requests in
+          if state.verification_cursor >= count then
+            state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_detail_request_id with
+           | Some request_id
+             when not
+                    (List.exists
+                       (fun row ->
+                          String.equal row.Masc.Tui_decode.vr_request_id
+                            request_id)
+                       requests) ->
+               state.verification_detail_request_id <- None;
+               state.verification_detail_scroll <- 0
+           | Some _ | None -> ())
       | Error detail ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
@@ -5855,7 +6080,8 @@ let main () =
   redirect_stderr_off_terminal ~base_path;
   Log.init_from_env ();
   let state =
-    create_state ~reasoning_visibility ~tool_visibility ~workspace ~port
+    create_state ~reasoning_visibility ~tool_visibility ~workspace
+      ~local_base_path:base_path ~port
       ~refresh_interval:refresh ()
   in
   state.view <- Overview;
@@ -5974,7 +6200,8 @@ let main () =
   flush stdout;
 
   (* Initial load *)
-  load_from_masc_dir state base_path;
+  (* Local workspace state is loaded only after /health proves that this TUI
+     and the server resolve the same canonical base path. *)
   let host = server_peer_host in
   let port = state.port in
   let http_refresh_inflight = ref false in
@@ -5999,6 +6226,8 @@ let main () =
     Int64.of_float (max 0.0 refresh *. nanoseconds_per_second)
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let roster_marquee_target = ref None in
+  let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
      read as "there is nothing here". What is watched is the set of data the
@@ -6348,17 +6577,48 @@ let main () =
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
-          Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal "{\n}\n"
+          Masc_tui_loader.load_keeper_config_editor ~host ~port
+            ~keeper_name:keeper.k_name
         with
-        | None -> add_event state "system" (keeper.k_name ^ ": settings unchanged")
-        | Some patch -> (
+        | Error detail -> add_event state "error" detail
+        | Ok (observed, stem) -> (
           match
-            Masc_tui_http.post_keeper_config ~host ~port
-              ~keeper_name:keeper.k_name ~patch_json:patch
+            Masc_tui_editor.roundtrip ~restore:restore_terminal
+              ~reenter:reenter_terminal stem
           with
-          | Ok _ -> add_event state "system" (keeper.k_name ^ ": settings applied")
-          | Error detail -> add_event state "error" detail)))
+          | None ->
+              add_event state "system" (keeper.k_name ^ ": settings unchanged")
+          | Some edited -> (
+            match Yojson.Safe.from_string edited with
+            | exception Yojson.Json_error detail ->
+                add_event state "error" ("settings are not JSON: " ^ detail)
+            | edited_json -> (
+              match
+                Masc_tui_keeper_config.patch_of_edit ~before:observed
+                  ~after:edited_json
+              with
+              | Error detail -> add_event state "error" detail
+              | Ok (`Assoc []) ->
+                  add_event state "system"
+                    (keeper.k_name ^ ": no settings changed")
+              | Ok patch -> (
+                match
+                  Masc_tui_http.post_keeper_config ~host ~port
+                    ~keeper_name:keeper.k_name
+                    ~patch_json:(Yojson.Safe.to_string patch)
+                with
+                | Error detail -> add_event state "error" detail
+                | Ok _ ->
+                    add_event state "system"
+                      (keeper.k_name ^ ": changed settings applied");
+                    if
+                      state.view = Keepers Keeper_detail
+                      && state.detail_tab = Detail_instructions
+                    then (
+                      state.keeper_config_view <- None;
+                      state.keeper_config_view_error <- None;
+                      launch_keeper_config_view state
+                        ~mailbox:async_messages keeper.k_name)))))))
   in
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
@@ -6461,13 +6721,20 @@ let main () =
               filesystem is the check that keeps this from touching text that
               merely looks like a path: an existing file is what the operator
               dropped, and anything else is left byte-for-byte as pasted. *)
-           let paste =
-             match Masc_tui_paste.unescaped_path paste.Masc_tui_paste.text with
-             | Some path when Sys.file_exists path ->
-                 { paste with Masc_tui_paste.text = path }
-             | Some _ | None -> paste
-           in
-           handle_paste state ~base_path ~mailbox:async_messages ~paste
+           (match Masc_tui_paste.unescaped_path paste.Masc_tui_paste.text with
+            | Some path when Sys.file_exists path -> (
+                match Masc_tui_attachment.classify_drop ~path with
+                | Masc_tui_attachment.Attach attachment ->
+                    attach_dropped_image state ~base_path
+                      ~mailbox:async_messages attachment
+                | Masc_tui_attachment.Keep_path ->
+                    handle_paste state ~base_path ~mailbox:async_messages
+                      ~paste:{ paste with Masc_tui_paste.text = path }
+                | Masc_tui_attachment.Refuse error ->
+                    add_event state "error"
+                      (Masc_tui_attachment.error_to_string error))
+            | Some _ | None ->
+                handle_paste state ~base_path ~mailbox:async_messages ~paste)
        (* A graphics reply is read and dropped. Nothing asks for one outside
           the capability probe, which does its own reading before the loop
           starts; what matters here is that it does not become keys. *)
@@ -6553,6 +6820,8 @@ let main () =
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
            state.roster_pane_hidden <- not state.roster_pane_hidden;
+           if state.roster_pane_hidden then
+             state.keeper_message_focus <- Right_pane;
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact prompt text must not leak
           keys into the composer underneath. The quit confirmation and chrome
@@ -6562,6 +6831,17 @@ let main () =
              match state.context_inspector_reading with
              | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
                  capture.Masc.Keeper_prompt_capture.blocks
+             | Some _ | None -> []
+           in
+           let input_map_rows () =
+             match state.context_inspector_reading with
+             | Some
+                 ( _
+                 , { Masc_tui_context_inspector.turn = Ok record
+                   ; prompt
+                   } ) ->
+                 let capture = match prompt with Ok value -> Some value | Error _ -> None in
+                 Masc_tui_context_inspector.input_map_rows record capture
              | Some _ | None -> []
            in
            let close () =
@@ -6586,11 +6866,19 @@ let main () =
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Composition;
                 state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
             | "2" ->
                 state.context_inspector_tab <-
                   Masc_tui_context_inspector.Prompt_blocks;
                 state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
+                state.context_inspector_scroll <- 0
+            | "3" ->
+                state.context_inspector_tab <-
+                  Masc_tui_context_inspector.Input_map;
+                state.context_inspector_exact <- None;
+                state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
             | "\t" | "left" | "right" when Option.is_none state.context_inspector_exact ->
                 state.context_inspector_tab <-
@@ -6598,6 +6886,8 @@ let main () =
                    | Masc_tui_context_inspector.Composition ->
                        Masc_tui_context_inspector.Prompt_blocks
                    | Masc_tui_context_inspector.Prompt_blocks ->
+                       Masc_tui_context_inspector.Input_map
+                   | Masc_tui_context_inspector.Input_map ->
                        Masc_tui_context_inspector.Composition);
                 state.context_inspector_cursor <- 0;
                 state.context_inspector_scroll <- 0
@@ -6616,7 +6906,15 @@ let main () =
                 state.context_inspector_scroll <-
                   move ~count ~height state.context_inspector_scroll
             | "j" | "down" ->
-                let last = max 0 (List.length (prompt_blocks ()) - 1) in
+                let count =
+                  match state.context_inspector_tab with
+                  | Masc_tui_context_inspector.Prompt_blocks ->
+                      List.length (prompt_blocks ())
+                  | Masc_tui_context_inspector.Input_map ->
+                      List.length (input_map_rows ())
+                  | Masc_tui_context_inspector.Composition -> 0
+                in
+                let last = max 0 (count - 1) in
                 state.context_inspector_cursor <-
                   min last (state.context_inspector_cursor + 1)
             | "k" | "up" ->
@@ -6633,6 +6931,20 @@ let main () =
                         Some state.context_inspector_cursor;
                       state.context_inspector_scroll <- 0
                   | None -> ()
+                end
+                else if
+                  state.context_inspector_tab
+                  = Masc_tui_context_inspector.Input_map
+                then begin
+                  match
+                    List.nth_opt (input_map_rows ())
+                      state.context_inspector_cursor
+                  with
+                  | Some { Masc_tui_context_inspector.exact_text = Some _; _ } ->
+                      state.context_inspector_exact <-
+                        Some state.context_inspector_cursor;
+                      state.context_inspector_scroll <- 0
+                  | Some _ | None -> ()
                 end
             | _ -> ())
        (* The help overlay is modal: it answers scrolling and closing, and
@@ -6686,17 +6998,38 @@ let main () =
                   if String.equal question "def" then "definition"
                   else question
                 in
-                close ();
-                if String.equal symbol "" then
-                  add_event state "error"
-                    (question ^ " needs a symbol: :" ^ question ^ " <name>")
-                else if state.view <> Code || Option.is_none state.code_file
-                then
-                  add_event state "error"
-                    "hover/def ask about the file open on the Code surface"
-                else
-                  start_code_lsp_question state ~mailbox:async_messages
-                    ~question ~symbol
+                if String.equal symbol "" then begin
+                  (* Bare "def " or "hover ": run the highlighted candidate
+                     entry -- the cursor line's names ride the palette list,
+                     so Enter alone picks the one in view. *)
+                  let matches = Masc_tui_types.palette_matches state in
+                  let chosen =
+                    List.nth_opt matches
+                      (max 0
+                         (min state.palette_cursor
+                            (List.length matches - 1)))
+                  in
+                  close ();
+                  match chosen with
+                  | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                    ->
+                      start_code_lsp_question state
+                        ~mailbox:async_messages ~question ~symbol
+                  | Some _ | None ->
+                      add_event state "error"
+                        (question ^ " needs a symbol: :" ^ question
+                       ^ " <name>")
+                end
+                else begin
+                  close ();
+                  if state.view <> Code || Option.is_none state.code_file
+                  then
+                    add_event state "error"
+                      "hover/def ask about the file open on the Code surface"
+                  else
+                    start_code_lsp_question state ~mailbox:async_messages
+                      ~question ~symbol
+                end
             | "\r" ->
                 let matches = Masc_tui_types.palette_matches state in
                 let chosen =
@@ -6741,8 +7074,12 @@ let main () =
                       | Some (index, post) ->
                           state.board_cursor <- index;
                           open_board_post state ~mailbox:async_messages
-                            ~focus:Board_detail_pane post
+                            ~focus:Right_pane post
                       | None -> ())
+                 | Some (_, Masc_tui_types.Palette_lsp (question, symbol))
+                   ->
+                     start_code_lsp_question state ~mailbox:async_messages
+                       ~question ~symbol
                  | None -> ())
             | "down" -> state.palette_cursor <- state.palette_cursor + 1
             | "up" -> state.palette_cursor <- max 0 (state.palette_cursor - 1)
@@ -6820,6 +7157,10 @@ let main () =
          when state.view = Changes && not compact_viewport ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
+       | Some (("[" | "]") as bracket)
+         when state.view = Tools && not compact_viewport ->
+           cycle_tools_keeper state ~mailbox:async_messages
+             ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_github
@@ -6836,7 +7177,7 @@ let main () =
                   List.nth_opt rows state.resources_cursor)
             with
             | Some (uri, _) ->
-                state.resource_focus <- true;
+                state.resource_focus <- Right_pane;
                 launch_resource_read state ~mailbox:async_messages ~uri
             | None -> ())
        | Some "J" when state.view = Resources && not compact_viewport ->
@@ -6858,6 +7199,46 @@ let main () =
        | Some "?" when message_mode && Buffer.length state.msg_input = 0 ->
            state.help_open <- true;
            state.help_scroll <- 0
+       | Some ("right" | "l" | "esc")
+         when message_mode
+              && state.keeper_message_focus = Left_pane ->
+           state.keeper_message_focus <- Right_pane
+       | Some "left"
+         when message_mode
+              && Masc_tui_render.keeper_roster_pane_shown state
+                   ~cols:terminal_columns ->
+           state.keeper_message_focus <- Left_pane
+       | Some "h"
+         when message_mode && Buffer.length state.msg_input = 0
+              && Masc_tui_render.keeper_roster_pane_shown state
+                   ~cols:terminal_columns ->
+           state.keeper_message_focus <- Left_pane
+       | Some ("j" | "down")
+         when message_mode
+              && state.keeper_message_focus = Left_pane ->
+           state.keeper_cursor <-
+             Masc_tui_scroll.cursor_down ~count:(List.length state.keepers)
+               state.keeper_cursor
+       | Some ("k" | "up")
+         when message_mode
+              && state.keeper_message_focus = Left_pane ->
+           state.keeper_cursor <-
+             Masc_tui_scroll.cursor_up ~count:(List.length state.keepers)
+               state.keeper_cursor
+       | Some ("\r" | "\n")
+         when message_mode
+              && state.keeper_message_focus = Left_pane ->
+           (match List.nth_opt state.keepers state.keeper_cursor with
+            | Some keeper ->
+                open_message_for_keeper ~return_to:state.msg_return state
+                  keeper.k_name;
+                set_msg_scroll state 0;
+                state.msg_loaded <- [];
+                state.msg_loaded_keeper <- None;
+                state.msg_loaded_error <- None;
+                launch_keeper_history_load state ~mailbox:async_messages
+                  ~keeper_name:keeper.k_name
+            | None -> ())
        | Some k when message_mode ->
            let reasoning_key =
              String.length k = 1 && Char.code k.[0] = 18
@@ -6933,16 +7314,25 @@ let main () =
             | Board_read _ ->
                 state.board_focus <-
                   (match state.board_focus with
-                   | Board_posts_pane -> Board_detail_pane
-                   | Board_detail_pane -> Board_posts_pane)
+                   | Left_pane -> Right_pane
+                   | Right_pane -> Left_pane)
             | Board_list | Board_compose -> ())
        | Some "\023" when state.view = Resources ->
-           state.resource_focus <- not state.resource_focus
-       | Some "h" when state.view = Code && state.code_focus_file
-                       && not state.code_history_open ->
-           (* One cell per press: precise, and holding the key repeats it.
-              The lowercase only -- H is the history toggle below. *)
+           state.resource_focus <-
+             (match state.resource_focus with
+              | Left_pane -> Right_pane
+              | Right_pane -> Left_pane)
+       | Some "shift-left"
+         when state.view = Code && state.code_focus_file = Right_pane
+              && not state.code_history_open ->
            state.code_file_hscroll <- max 0 (state.code_file_hscroll - 1)
+       | Some "shift-right"
+         when state.view = Code && state.code_focus_file = Right_pane
+              && not state.code_history_open ->
+           state.code_file_hscroll <-
+             min
+               (max 0 (state.code_file_max_width - 1))
+               (state.code_file_hscroll + 1)
        | Some "B" when state.view = Code ->
            (* Walk back through the definition jumps, newest first. The
               stack holds where each jump left from; an empty stack says so
@@ -6965,72 +7355,49 @@ let main () =
                  | None ->
                      state.code_file <- None;
                      state.code_file_error <- None;
-                     state.code_focus_file <- false
+                     state.code_focus_file <- Left_pane
                  | Some path -> (
                      match state.code_file with
                      | Some (open_path, _)
                        when String.equal open_path path ->
                          state.code_file_cursor <- cursor;
                          state.code_file_scroll <- scroll;
-                         state.code_focus_file <- true
+                         state.code_focus_file <- Right_pane
                      | Some _ | None ->
                          state.code_target_line <- Some (cursor + 1);
                          launch_code_file_load state
                            ~mailbox:async_messages ~path)))
-       | Some "K" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file
-                       && not state.code_history_open
-                       && not state.code_diff_open
-                       && not state.code_notes_open
-                       && not state.code_activity_open ->
-           (* Ask the language server what a name on the cursor line is. The
-              palette collects the name: the pane has no character cursor,
-              and the route's address arithmetic wants the literal symbol. *)
-           state.palette_open <- true;
-           state.palette_query <- "hover ";
-           state.palette_cursor <- 0
-       | Some "D" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file
-                       && not state.code_history_open
-                       && not state.code_diff_open
-                       && not state.code_notes_open
-                       && not state.code_activity_open ->
-           state.palette_open <- true;
-           state.palette_query <- "def ";
-           state.palette_cursor <- 0
-       | Some "c" when state.view = Code && state.code_focus_file
-                       && Option.is_some state.code_file ->
-           (* Which keeper wrote which lines of the open file, through what,
-              and when. Repository scope, like the notes: the regions are
-              keyed by the same server-minted codebase slug. *)
-           (match state.code_file with
-            | None -> ()
-            | Some (path, _) ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else
-                  match code_scope_codebase state with
-                  | Error why ->
-                      add_event state "system" ("activity: " ^ why)
-                  | Ok codebase ->
-                      state.code_activity_open <- true;
-                      state.code_notes_open <- false;
-                      state.code_diff_open <- false;
-                      state.code_history_open <- false;
-                      (match state.code_activity with
-                       | Some (loaded_path, _)
-                         when String.equal loaded_path path ->
-                           ()
-                       | Some _ | None ->
-                           state.code_activity <- None;
-                           state.code_activity_error <- None;
-                           launch_code_activity_load state
-                             ~mailbox:async_messages ~codebase ~path))
+       | Some (("K" | "D") as key_name)
+         when state.view = Code && state.code_focus_file = Right_pane
+              && Option.is_some state.code_file
+              && not state.code_history_open
+              && not state.code_diff_open
+              && not state.code_notes_open ->
+           (* Ask the language server about a name on the cursor line. The
+              pane has no character cursor, so the line's own names are the
+              candidates: one name is asked about at once, several open the
+              palette with each as an entry (typing still narrows, and a
+              typed "def <name>" keeps working), and none says so. *)
+           let question, prefix =
+             if String.equal key_name "K" then ("hover", "hover ")
+             else ("definition", "def ")
+           in
+           (match Masc_tui_types.code_cursor_line_symbols state with
+            | [] ->
+                state.code_lsp_note <-
+                  Some "the cursor line has no name to ask about"
+            | [ symbol ] ->
+                start_code_lsp_question state ~mailbox:async_messages
+                  ~question ~symbol
+            | _ :: _ :: _ ->
+                state.palette_open <- true;
+                state.palette_query <- prefix;
+                state.palette_cursor <- 0)
        | Some "w" when state.view = Code && state.code_notes_open ->
            (* Adding a note lives inside the notes view: the view proves the
               scope, and the fresh listing lands where the writer looks. *)
            handle_code_note_write ()
-       | Some "m" when state.view = Code && state.code_focus_file
+       | Some "m" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The notes anchored to the open file. Repository scope only:
               the annotation routes are scoped by the server-minted codebase
@@ -7047,7 +7414,6 @@ let main () =
                       state.code_notes_open <- true;
                       state.code_diff_open <- false;
                       state.code_history_open <- false;
-                      state.code_activity_open <- false;
                       (match state.code_notes with
                        | Some (loaded_path, _)
                          when String.equal loaded_path path ->
@@ -7057,7 +7423,7 @@ let main () =
                            state.code_notes_error <- None;
                            launch_code_notes_load state
                              ~mailbox:async_messages ~codebase ~path))
-       | Some "d" when state.view = Code && state.code_focus_file
+       | Some "d" when state.view = Code && state.code_focus_file = Right_pane
                        && Option.is_some state.code_file ->
            (* The working tree against HEAD, over the open file. One overlay
               at a time: opening this closes the history, and H the reverse.
@@ -7071,7 +7437,6 @@ let main () =
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
-                  state.code_activity_open <- false;
                   (match state.code_diff with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -7082,10 +7447,10 @@ let main () =
                        launch_code_diff_load state ~mailbox:async_messages
                          ~path)
                 end)
-       | Some "H" when state.view = Code && state.code_focus_file ->
-           (* History over the open file. The capital only: h stays free for
-              the horizontal scroll the file pane is due. Same key closes it;
-              a listing already fetched for this path is shown as it stands. *)
+       | Some "H" when state.view = Code && state.code_focus_file = Right_pane ->
+           (* History over the open file. The capital only: lowercase h/l
+              choose panes, while shifted arrows pan the file. Same key closes
+              it; a listing already fetched for this path is shown as it stands. *)
            (match state.code_file with
             | None -> ()
             | Some (path, _) ->
@@ -7095,7 +7460,6 @@ let main () =
                   state.code_history_open <- true;
                   state.code_diff_open <- false;
                   state.code_notes_open <- false;
-                  state.code_activity_open <- false;
                   (match state.code_history with
                    | Some (loaded_path, _)
                      when String.equal loaded_path path ->
@@ -7106,18 +7470,34 @@ let main () =
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
-       | Some ("h" | "H")
-         when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols ->
-           (match state.board_mode with
-            | Board_read _ -> state.board_focus <- Board_posts_pane
-            | Board_list | Board_compose -> ())
-       | Some ("l" | "L")
-         when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols ->
-           (match state.board_mode with
-            | Board_read _ -> state.board_focus <- Board_detail_pane
-            | Board_list | Board_compose -> ())
+       | Some ("h" | "l")
+         when terminal_columns >= keeper_split_threshold_cols
+              && (match state.view with
+                  | Overview | Keepers Keeper_detail | Resources -> true
+                  | Board ->
+                      (match state.board_mode with
+                       | Board_read _ -> true
+                       | Board_list | Board_compose -> false)
+                  | Code -> Option.is_some state.code_file
+                  | Acting | Keepers _ | Lanes | Approvals | Planning
+                  | Schedules | Verification | Harness | Fusion
+                  | Repositories | Changes | Connectors | Runtime | Config
+                  | Tools | System_logs -> false) ->
+           let focus = if key = Some "h" then Left_pane else Right_pane in
+           (match state.view with
+            | Overview -> state.task_focus <- focus
+            | Board ->
+                (match state.board_mode with
+                 | Board_read _ -> state.board_focus <- focus
+                 | Board_list | Board_compose -> ())
+            | Keepers Keeper_detail -> state.keeper_detail_focus <- focus
+            | Resources -> state.resource_focus <- focus
+            | Code when Option.is_some state.code_file ->
+                state.code_focus_file <- focus
+            | Acting | Keepers _ | Lanes | Approvals | Planning | Schedules
+            | Verification | Harness | Fusion | Repositories | Changes
+            | Connectors | Runtime | Config | Code | Tools
+            | System_logs -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
@@ -7165,10 +7545,10 @@ let main () =
                          (min (count - 1) (state.board_cursor + (direction * page)))
                  | Board_read _ ->
                      (match state.board_focus with
-                      | Board_posts_pane ->
+                      | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(direction * page)
-                      | Board_detail_pane ->
+                      | Right_pane ->
                           state.board_scroll <-
                             max 0 (state.board_scroll + (direction * page)))
                  | Board_compose -> ())
@@ -7200,15 +7580,28 @@ let main () =
                     max 0
                       (min (count - 1)
                          (state.schedule_cursor + (direction * page)))
+            | Verification ->
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    max 0
+                      (state.verification_detail_scroll + (direction * page))
+                else
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(direction * page)
+                      ~cursor:state.verification_cursor
+                      ~scroll:state.verification_scroll
+                  in
+                  state.verification_cursor <- cursor;
+                  state.verification_scroll <- scroll
             | Config when state.config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
-            | Verification | Harness | Repositories | Changes | Connectors
+            | Harness | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
-           load_from_masc_dir state base_path;
+           load_local_workspace_if_safe state base_path;
            let host = server_peer_host in
            let port = state.port in
            start_http_refresh state ~host ~port
@@ -7218,7 +7611,7 @@ let main () =
            (match state.view with
             | Code -> launch_code_entries_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
-                load_selected_keeper_logs state base_path 200
+                load_keeper_logs_if_safe state base_path 200
                   (List.nth_opt state.keepers state.keeper_cursor)
             | Keepers Keeper_calls ->
                 (match selected_keeper state with
@@ -7279,13 +7672,12 @@ let main () =
            (* Esc goes back *)
            (match state.view with
             | Code ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
-                else if state.code_focus_file then state.code_focus_file <- false
+                else if state.code_focus_file = Right_pane then
+                  state.code_focus_file <- Left_pane
                 else if not (String.equal state.code_dir "") then begin
                   (* Up one directory; "." from Filename.dirname means the
                      root, which this surface spells "". *)
@@ -7306,6 +7698,7 @@ let main () =
                   state.code_entries_error <- None;
                   launch_code_entries_load state ~mailbox:async_messages
                 end
+                else state.view <- Overview
             | Keepers Keeper_detail ->
                 state.view <- Keepers Keeper_list;
                 state.detail_scroll <- 0
@@ -7315,10 +7708,12 @@ let main () =
                 state.view <- Keepers Keeper_list
             | Keepers Keeper_logs ->
                 state.view <- Keepers Keeper_detail;
+                state.keeper_detail_focus <- Right_pane;
                 state.log_scroll <- 0;
                 state.detail_scroll <- 0
             | Keepers Keeper_calls ->
                 state.view <- Keepers Keeper_detail;
+                state.keeper_detail_focus <- Right_pane;
                 state.keeper_calls_scroll <- 0;
                 state.detail_scroll <- 0
             | Keepers Keeper_message ->
@@ -7349,13 +7744,14 @@ let main () =
                 (match state.board_mode with
                  | Board_read _ ->
                      leave_board_detail state
-                 | Board_list | Board_compose -> ())
+                 | Board_list -> state.view <- Overview
+                 | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_detail _ ->
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
-                 | Planning_list -> ())
+                 | Planning_list -> state.view <- Overview)
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_detail _ ->
@@ -7365,7 +7761,7 @@ let main () =
                      state.fusion_detail_error <- None;
                      state.fusion_detail_generation <-
                        state.fusion_detail_generation + 1
-                 | Fusion_list -> ())
+                 | Fusion_list -> state.view <- Overview)
             | Overview ->
                 (* Back out one level: an open task detail closes to the panel,
                    a focused task panel hands j/k back to the event log. *)
@@ -7373,42 +7769,62 @@ let main () =
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- false
+                else state.task_focus <- Left_pane
             | Schedules ->
-                state.schedule_detail_id <- None;
-                state.schedule_scroll <- 0
-            | Resources -> state.resource_focus <- false
-            | Acting | Keepers Keeper_list | Lanes -> ()
+                if Option.is_some state.schedule_detail_id then begin
+                  state.schedule_detail_id <- None;
+                  state.schedule_scroll <- 0
+                end
+                else state.view <- Overview
+            | Verification ->
+                if Option.is_some state.verification_detail_request_id then begin
+                  state.verification_detail_request_id <- None;
+                  state.verification_detail_scroll <- 0
+                end
+                else state.view <- Overview
+            | Resources ->
+                if state.resource_focus = Right_pane then
+                  state.resource_focus <- Left_pane
+                else state.view <- Overview
+            | Acting | Keepers Keeper_list | Lanes -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
                    where it was, the way the Changes diff does. *)
-                state.approval_detail_open <- false;
-                state.approval_detail_scroll <- 0
+                if state.approval_detail_open then begin
+                  state.approval_detail_open <- false;
+                  state.approval_detail_scroll <- 0
+                end
+                else state.view <- Overview
             | Changes ->
                 (* Esc closes the open diff and leaves the list where it was,
                    so the row an operator was reading is still under the
                    cursor when they come back. *)
-                state.changes_diff_row <- None;
-                state.changes_diff_scroll <- 0;
-                state.changes_tree_diff <- None;
-                state.changes_tree_diff_error <- None;
-                state.changes_tree_diff_path <- None
-            | Verification | Harness | Repositories | Connectors | Runtime
+                if
+                  Option.is_some state.changes_diff_row
+                  || Option.is_some state.changes_tree_diff_path
+                then begin
+                  state.changes_diff_row <- None;
+                  state.changes_diff_scroll <- 0;
+                  state.changes_tree_diff <- None;
+                  state.changes_tree_diff_error <- None;
+                  state.changes_tree_diff_path <- None
+                end
+                else state.view <- Overview
+            | Harness | Repositories | Connectors | Runtime
             | Config | Tools
-            | System_logs -> ())
+            | System_logs -> state.view <- Overview)
        | Some "left" ->
            (* Left is the non-destructive structural back key. Unlike Esc it
               never interrupts a live chat turn; it only closes a detail the
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                if state.code_activity_open then
-                  state.code_activity_open <- false
-                else if state.code_notes_open then state.code_notes_open <- false
+                if state.code_notes_open then state.code_notes_open <- false
                 else if state.code_diff_open then state.code_diff_open <- false
                 else if state.code_history_open then
                   state.code_history_open <- false
-                else if state.code_focus_file then state.code_focus_file <- false
+                else if state.code_focus_file = Right_pane then
+                  state.code_focus_file <- Left_pane
                 else if not (String.equal state.code_dir "") then begin
                   let parent = Filename.dirname state.code_dir in
                   state.code_dir <-
@@ -7430,6 +7846,7 @@ let main () =
                 state.detail_scroll <- 0
             | Keepers Keeper_logs | Keepers Keeper_calls ->
                 state.view <- Keepers Keeper_detail;
+                state.keeper_detail_focus <- Right_pane;
                 state.log_scroll <- 0;
                 state.keeper_calls_scroll <- 0;
                 state.detail_scroll <- 0
@@ -7458,11 +7875,14 @@ let main () =
                   state.task_detail_id <- None;
                   state.task_detail_scroll <- 0
                 end
-                else state.task_focus <- false
+                else state.task_focus <- Left_pane
             | Schedules ->
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
-            | Resources -> state.resource_focus <- false
+            | Verification ->
+                state.verification_detail_request_id <- None;
+                state.verification_detail_scroll <- 0
+            | Resources -> state.resource_focus <- Left_pane
             | Changes ->
                 state.changes_diff_row <- None;
                 state.changes_diff_scroll <- 0;
@@ -7470,22 +7890,14 @@ let main () =
                 state.changes_tree_diff_error <- None;
                 state.changes_tree_diff_path <- None
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
-            | Keepers Keeper_list | Acting | Lanes | Approvals | Verification
+            | Keepers Keeper_list | Acting | Lanes | Approvals
             | Harness | Repositories | Connectors | Runtime | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file then (
-                  if state.code_activity_open then (
-                    match state.code_activity with
-                    | Some (_, regions) ->
-                        state.code_activity_scroll <-
-                          min
-                            (max 0 (List.length regions - 1))
-                            (state.code_activity_scroll + 1)
-                    | None -> ())
-                  else if state.code_notes_open then (
+                if state.code_focus_file = Right_pane then (
+                  if state.code_notes_open then (
                     match state.code_notes with
                     | Some (_, notes) ->
                         state.code_notes_scroll <-
@@ -7504,10 +7916,10 @@ let main () =
                     | None -> ())
                   else if state.code_history_open then (
                     match state.code_history with
-                    | Some (_, rows) ->
+                    | Some (_, listing) ->
                         state.code_history_scroll <-
                           min
-                            (max 0 (List.length rows - 1))
+                            (max 0 (List.length listing.chl_entries - 1))
                             (state.code_history_scroll + 1)
                     | None -> ())
                   else
@@ -7533,11 +7945,20 @@ let main () =
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k
+                   | Some k -> load_live_context_if_safe state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                state.detail_scroll <- state.detail_scroll + 1
+                if state.keeper_detail_focus = Left_pane then begin
+                  state.keeper_cursor <-
+                    Masc_tui_scroll.cursor_down
+                      ~count:(List.length state.keepers)
+                      state.keeper_cursor;
+                  state.detail_scroll <- 0;
+                  refresh_keeper_detail_selection state ~base_path
+                    ~mailbox:async_messages
+                end
+                else state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
                   Metrics_tail.scroll_down
@@ -7574,10 +7995,10 @@ let main () =
                        state.board_cursor <- state.board_cursor + 1
                  | Board_read _ ->
                      (match state.board_focus with
-                      | Board_posts_pane ->
+                      | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:1
-                      | Board_detail_pane ->
+                      | Right_pane ->
                           state.board_scroll <- state.board_scroll + 1)
                  | Board_compose -> ())
             | Planning ->
@@ -7618,7 +8039,7 @@ let main () =
             | Overview ->
                 if Option.is_some state.task_detail_id then
                   state.task_detail_scroll <- state.task_detail_scroll + 1
-                else if state.task_focus then begin
+                else if state.task_focus = Right_pane then begin
                   if state.task_cursor < List.length state.tasks - 1 then
                     state.task_cursor <- state.task_cursor + 1
                 end
@@ -7633,12 +8054,17 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
-                 in
-                 state.verification_cursor <- cursor;
-                 state.verification_scroll <- scroll)
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    state.verification_detail_scroll + 1
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.verification_cursor
+                       ~scroll:state.verification_scroll
+                   in
+                   state.verification_cursor <- cursor;
+                   state.verification_scroll <- scroll)
             | Lanes ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(1)
@@ -7667,9 +8093,12 @@ let main () =
                 | Some _ ->
                     state.changes_diff_scroll <- state.changes_diff_scroll + 1
                 | None ->
-                    state.changes_scroll <-
-                      move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
-                        ~current:state.changes_scroll)
+                    let cursor, scroll =
+                      move_row_cursor state ~delta:1 ~cursor:state.changes_cursor
+                        ~scroll:state.changes_scroll
+                    in
+                    state.changes_cursor <- cursor;
+                    state.changes_scroll <- scroll)
             | Connectors ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(1)
@@ -7691,7 +8120,7 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
                     ~current:state.config_scroll
             | Resources ->
-                if state.resource_focus then
+                if state.resource_focus = Right_pane then
                   state.resource_scroll <- state.resource_scroll + 1
                 else
                   let total =
@@ -7722,11 +8151,8 @@ let main () =
        | Some "k" | Some "up" | Some "wheel-up" ->
            (match state.view with
             | Code ->
-                if state.code_focus_file then (
-                  if state.code_activity_open then
-                    state.code_activity_scroll <-
-                      max 0 (state.code_activity_scroll - 1)
-                  else if state.code_notes_open then
+                if state.code_focus_file = Right_pane then (
+                  if state.code_notes_open then
                     state.code_notes_scroll <-
                       max 0 (state.code_notes_scroll - 1)
                   else if state.code_diff_open then
@@ -7758,11 +8184,20 @@ let main () =
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k
+                   | Some k -> load_live_context_if_safe state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                if state.detail_scroll > 0 then
+                if state.keeper_detail_focus = Left_pane then begin
+                  state.keeper_cursor <-
+                    Masc_tui_scroll.cursor_up
+                      ~count:(List.length state.keepers)
+                      state.keeper_cursor;
+                  state.detail_scroll <- 0;
+                  refresh_keeper_detail_selection state ~base_path
+                    ~mailbox:async_messages
+                end
+                else if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
@@ -7797,10 +8232,10 @@ let main () =
                        state.board_cursor <- state.board_cursor - 1
                  | Board_read _ ->
                      (match state.board_focus with
-                      | Board_posts_pane ->
+                      | Left_pane ->
                           move_board_posts_pane state ~mailbox:async_messages
                             ~delta:(-1)
-                      | Board_detail_pane ->
+                      | Right_pane ->
                           if state.board_scroll > 0 then
                             state.board_scroll <- state.board_scroll - 1)
                  | Board_compose -> ())
@@ -7830,7 +8265,7 @@ let main () =
                   if state.task_detail_scroll > 0 then
                     state.task_detail_scroll <- state.task_detail_scroll - 1
                 end
-                else if state.task_focus then begin
+                else if state.task_focus = Right_pane then begin
                   if state.task_cursor > 0 then
                     state.task_cursor <- state.task_cursor - 1
                 end
@@ -7845,12 +8280,17 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
-                 in
-                 state.verification_cursor <- cursor;
-                 state.verification_scroll <- scroll)
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    max 0 (state.verification_detail_scroll - 1)
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.verification_cursor
+                       ~scroll:state.verification_scroll
+                   in
+                   state.verification_cursor <- cursor;
+                   state.verification_scroll <- scroll)
             | Lanes ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
@@ -7878,10 +8318,13 @@ let main () =
                     state.changes_diff_scroll <-
                       max 0 (state.changes_diff_scroll - 1)
                 | None ->
-                    if state.changes_scroll > 0 then
-                      state.changes_scroll <-
-                        move_surface_scroll state ~rows:(surface_rows ())
-                          ~delta:(-1) ~current:state.changes_scroll)
+                    let cursor, scroll =
+                      move_row_cursor state ~delta:(-1)
+                        ~cursor:state.changes_cursor
+                        ~scroll:state.changes_scroll
+                    in
+                    state.changes_cursor <- cursor;
+                    state.changes_scroll <- scroll)
             | Connectors ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
@@ -7907,7 +8350,7 @@ let main () =
                   move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
                     ~current:state.config_scroll
             | Resources ->
-                if state.resource_focus then
+                if state.resource_focus = Right_pane then
                   state.resource_scroll <- max 0 (state.resource_scroll - 1)
                 else if state.resources_cursor > 0 then
                   state.resources_cursor <- state.resources_cursor - 1
@@ -7932,7 +8375,85 @@ let main () =
               makes detail -> list consistent across the TUI. *)
            (match state.view with
             | Code -> (
-                if state.code_focus_file then ()
+                if state.code_history_open then (
+                  (* The top visible row is the selected one, the way the
+                     Changes list treats its scroll. A commit answers with
+                     its PR -- the subject's "(#N)" against the repository's
+                     remote, or why there is no link. A keeper edit jumps
+                     the cursor to the lines it wrote, the way a definition
+                     jump lands, with B holding the way back. *)
+                  match state.code_history with
+                  | None -> ()
+                  | Some (_, listing) -> (
+                      match
+                        List.nth_opt listing.chl_entries
+                          state.code_history_scroll
+                      with
+                      | None -> ()
+                      | Some (Hist_edit region) -> (
+                          match state.code_file with
+                          | None -> ()
+                          | Some (_, rows) ->
+                              push_code_jump state;
+                              state.code_history_open <- false;
+                              let cursor =
+                                max 0
+                                  (min
+                                     (region.Masc.Tui_decode.ir_line_start
+                                     - 1)
+                                     (List.length rows - 1))
+                              in
+                              state.code_file_cursor <- cursor;
+                              state.code_file_scroll <-
+                                Masc_tui_scroll.ensure_visible ~cursor
+                                  ~height:
+                                    (Masc_tui_render
+                                     .code_pane_content_height ())
+                                  state.code_file_scroll)
+                      | Some (Hist_commit row) ->
+                          let open Masc.Tui_decode in
+                          state.code_lsp_note <-
+                            Some
+                              (match pr_number_of_subject row.gl_subject with
+                               | None ->
+                                   Printf.sprintf
+                                     "%s: no PR number in this subject"
+                                     row.gl_hash
+                               | Some number -> (
+                                   let remote =
+                                     match state.code_scope with
+                                     | Code_scope_repo repo_id -> (
+                                         match state.repositories with
+                                         | None -> None
+                                         | Some snapshot ->
+                                             Option.map
+                                               (fun r -> r.rp_url)
+                                               (List.find_opt
+                                                  (fun r ->
+                                                    String.equal r.rp_id
+                                                      repo_id)
+                                                  snapshot.rs_repositories))
+                                     | Code_scope_keeper _
+                                     | Code_scope_project -> None
+                                   in
+                                   match remote with
+                                   | None ->
+                                       Printf.sprintf
+                                         "#%d -- this scope has no \
+                                          registered remote to link into"
+                                         number
+                                   | Some remote -> (
+                                       match
+                                         github_pr_url ~remote ~number
+                                       with
+                                       | Some url -> url
+                                       | None ->
+                                           Printf.sprintf
+                                             "#%d -- the remote is not \
+                                              GitHub, so the link shape is \
+                                              unknown"
+                                             number)))))
+                else if state.code_focus_file = Right_pane then ()
                 else
                   match List.nth_opt state.code_entries state.code_cursor with
                   | Some node ->
@@ -7972,7 +8493,7 @@ let main () =
             | Overview ->
                 (* Only under task focus: Enter while the events own j/k would
                    open whatever row the cursor happens to rest on. *)
-                if state.task_focus then
+                if state.task_focus = Right_pane then
                   (match List.nth_opt state.tasks state.task_cursor with
                    | Some task ->
                        state.task_detail_id <- Some task.id;
@@ -7982,9 +8503,10 @@ let main () =
                 (match List.nth_opt state.keepers state.keeper_cursor with
                  | Some k ->
                      state.view <- Keepers Keeper_detail;
+                     state.keeper_detail_focus <- Right_pane;
                      state.detail_scroll <- 0;
-                     load_live_context state base_path k;
-                     load_selected_keeper_logs state base_path 200 (Some k);
+                     load_live_context_if_safe state base_path k;
+                     load_keeper_logs_if_safe state base_path 200 (Some k);
                      (* A sticky non-Info tab re-reads for the keeper the
                         cursor now names; without this the pane shows
                         "(loading)" forever after a cursor move, because the
@@ -8015,7 +8537,7 @@ let main () =
                      (match List.nth_opt state.board_posts state.board_cursor with
                       | Some p ->
                           open_board_post state ~mailbox:async_messages
-                            ~focus:Board_detail_pane p
+                            ~focus:Right_pane p
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
@@ -8027,6 +8549,16 @@ let main () =
                           state.schedule_scroll <- 0)
                        (List.nth_opt snapshot.scs_rows state.schedule_cursor)
                  | Some _, _ | None, None -> ())
+            | Verification ->
+                (match state.verification_detail_request_id with
+                 | Some _ -> ()
+                 | None ->
+                     Option.iter
+                       (fun row ->
+                          state.verification_detail_request_id <-
+                            Some row.Masc.Tui_decode.vr_request_id;
+                          state.verification_detail_scroll <- 0)
+                       (verification_cursor_row state))
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -8069,12 +8601,12 @@ let main () =
                 | Some snapshot -> (
                     match
                       List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                        state.changes_scroll
+                        state.changes_cursor
                     with
                     | None ->
                         add_event state "error" "no change under the cursor"
                     | Some _ ->
-                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_row <- Some state.changes_cursor;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -8100,13 +8632,13 @@ let main () =
                         state.code_entries_error <- None;
                         state.code_file <- None;
                         state.code_file_error <- None;
-                        state.code_focus_file <- false;
+                        state.code_focus_file <- Left_pane;
                         state.view <- Code;
                         launch_code_entries_load state
                           ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Verification | Harness
+            | Acting | Lanes | Harness
             | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->
@@ -8165,8 +8697,11 @@ let main () =
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
             | Overview when Option.is_none state.task_detail_id ->
-                state.task_focus <- not state.task_focus;
-                if not state.task_focus then state.task_cursor <- 0
+                state.task_focus <-
+                  (match state.task_focus with
+                   | Left_pane -> Right_pane
+                   | Right_pane -> Left_pane);
+                if state.task_focus = Left_pane then state.task_cursor <- 0
             | Keepers (Keeper_list | Keeper_detail) ->
                 (* Tool calls, from the roster and from detail, the way logs
                    are: the keeper under the cursor is the one asked about. *)
@@ -8193,7 +8728,7 @@ let main () =
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (
@@ -8203,7 +8738,7 @@ let main () =
                           "this write is outside the playground; the tree \
                            reading needs a path under it"
                     | Some path ->
-                        state.changes_diff_row <- Some state.changes_scroll;
+                        state.changes_diff_row <- Some state.changes_cursor;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -8221,7 +8756,7 @@ let main () =
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (
@@ -8241,7 +8776,7 @@ let main () =
                         state.code_cursor <- 0;
                         state.code_file <- None;
                         state.code_file_error <- None;
-                        state.code_focus_file <- false;
+                        state.code_focus_file <- Left_pane;
                         (* The line is found in the local copy when one
                            exists (a Docker keeper's bundle is not on this
                            filesystem); a miss opens at the top, which is
@@ -8258,13 +8793,13 @@ let main () =
                           ~path)))
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is
-              the one the list marks, which is the top of the visible page. *)
+              the one the list marks, which the arrow keys move. *)
            (match state.changes with
             | None -> add_event state "error" "no changes loaded yet"
             | Some snapshot -> (
                 match
                   List.nth_opt snapshot.Masc.Tui_decode.fcs_changes
-                    state.changes_scroll
+                    state.changes_cursor
                 with
                 | None -> add_event state "error" "no change under the cursor"
                 | Some change -> (
@@ -8346,39 +8881,24 @@ let main () =
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
            handle_verification_reject ()
-       | Some "l" | Some "L" ->
+       | Some (("l" | "L" | "o") as log_key)
+         when (match log_key, state.view with
+               | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)
+               | "o", Keepers Keeper_detail -> true
+               | _ -> false) ->
            (* Logs, from the roster as well as from detail, for the same reason
               chat is reachable from both: the keeper an operator wants the
               logs of is the one under the cursor. *)
-           (match state.view with
-            | Code ->
-                (* The lowercase scrolls the open file right, one cell per
-                   press; the clamp is the widest row so the pane cannot
-                   scroll into blank space. *)
-                if
-                  key = Some "l" && state.code_focus_file
-                  && not state.code_history_open
-                then
-                  state.code_file_hscroll <-
-                    min
-                      (max 0 (state.code_file_max_width - 1))
-                      (state.code_file_hscroll + 1)
-            | Keepers Keeper_runtime_pick -> ()
-            | Keepers (Keeper_list | Keeper_detail) ->
-                let keeper = selected_keeper state in
-                load_selected_keeper_logs state base_path 200 keeper;
-                (match keeper with
-                 | Some _ ->
-                     state.log_scroll <-
-                       Metrics_tail.maximum_scroll
-                         ~entry_count:(List.length state.log_entries)
-                         ~content_height:(keeper_log_content_height state);
-                     state.view <- Keepers Keeper_logs
-                 | None -> ())
-            | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+           let keeper = selected_keeper state in
+           load_keeper_logs_if_safe state base_path 200 keeper;
+           (match keeper with
+            | Some _ ->
+                state.log_scroll <-
+                  Metrics_tail.maximum_scroll
+                    ~entry_count:(List.length state.log_entries)
+                    ~content_height:(keeper_log_content_height state);
+                state.view <- Keepers Keeper_logs
+            | None -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat, from the roster as well as from detail, for the same reason
               logs are reachable from both: the keeper an operator wants to
@@ -8542,13 +9062,35 @@ let main () =
 
       (* Periodic refresh *)
       let now_ns = Mtime_clock.elapsed_ns () in
+      let _, terminal_cols = get_terminal_size () in
+      let current_marquee_target =
+        keeper_roster_marquee_target state ~cols:terminal_cols
+      in
+      if current_marquee_target <> !roster_marquee_target then begin
+        roster_marquee_target := current_marquee_target;
+        roster_marquee_last_step_ns := now_ns;
+        state.roster_marquee_frame <- 0
+      end
+      else if
+        Option.is_some current_marquee_target
+        && Int64.compare
+             (Int64.sub now_ns !roster_marquee_last_step_ns)
+             roster_marquee_interval_ns
+           >= 0
+      then begin
+        roster_marquee_last_step_ns := now_ns;
+        state.roster_marquee_frame <-
+          if state.roster_marquee_frame = max_int then 0
+          else state.roster_marquee_frame + 1;
+        Render_schedule.request render_schedule Render_schedule.Background
+      end;
       if
         Int64.compare (Int64.sub now_ns !last_check_ns) refresh_interval_ns >= 0
       then begin
         (* The armed approval survives the tick: the snapshot apply already
            disarms it when its token leaves the list, so clearing here only
            made the second press race a two-second clock. *)
-        load_from_masc_dir state base_path;
+        load_local_workspace_if_safe state base_path;
         let host = server_peer_host in
         let port = state.port in
         (* The retry a closed feed waits for. *)
@@ -8562,7 +9104,7 @@ let main () =
          | Code -> ()
          | Keepers Keeper_runtime_pick -> ()
          | Keepers (Keeper_logs | Keeper_detail) ->
-             load_selected_keeper_logs state base_path 200
+             load_keeper_logs_if_safe state base_path 200
                (List.nth_opt state.keepers state.keeper_cursor)
          | Keepers Keeper_calls ->
              (match selected_keeper state with

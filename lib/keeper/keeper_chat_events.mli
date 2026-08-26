@@ -103,11 +103,14 @@ type keeper_chat_event =
       ; tool_call_name : string
       ; args : string
       ; question : string
+      ; because : string
       }
       (** The turn is held at this call until an operator answers or the wait
           runs out. Carries the call's arguments as sent, because a reader
           deciding whether to allow it needs to see what it would do -- the
-          name alone does not distinguish reading a file from rewriting it. *)
+          name alone does not distinguish reading a file from rewriting it.
+          [because] is the policy's one-line reason for asking rather than
+          running: the operator cannot see the policy table, only this. *)
   | Tool_approval_settled of
       { tool_call_id : string
       ; outcome : string

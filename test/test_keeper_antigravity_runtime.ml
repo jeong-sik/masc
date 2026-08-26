@@ -388,6 +388,14 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       "MASC_ANTIGRAVITY_KEEPER_OK"
                       (keeper_response_text turn);
                     check int "turn count" 1 turn.turns;
+                    (match turn.runtime_observation with
+                     | Some observation ->
+                       check bool
+                         "Antigravity usage is conversation cumulative"
+                         true
+                         (observation.usage_scope
+                          = Runtime_usage_scope.Conversation_cumulative)
+                     | None -> fail "Antigravity runtime observation is missing");
                     (match List.rev !stream_events with
                      | [ Agent_core.Types.MessageStart
                            { id = "conversation-antigravity-fixture:ordinal:1"

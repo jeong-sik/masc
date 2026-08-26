@@ -112,6 +112,34 @@ let test_tui_status_colors_use_theme_tokens () =
        |> String.concat "\n")
 ;;
 
+(* The chat pane's role colours draw through the readable path, not out of the
+   palette raw. Measured on twelve base16 schemes, the raw ones are where the
+   pane loses rows: the Keeper's blue reads at 2.26:1 on default-light and the
+   tool trail's bright black at 1.69:1 on Nord -- the row an operator scans to
+   see what a keeper just did.
+
+   The R8 guard above watches [masc_tui_render.ml] and reserves red, yellow
+   and green. It cannot see this: the mapping lives in [masc_tui_ansi.ml], and
+   cyan, blue and bright black are not reserved there because borders and
+   rules legitimately draw in them. So the check is the other way round --
+   every arm of [origin] reaches a resolved token, and a reverting arm takes
+   one of these counts with it. *)
+let test_chat_roles_draw_through_the_readable_path () =
+  List.iter
+    (fun callee ->
+      check int
+        (Printf.sprintf "chat origin resolves %s once" callee)
+        1
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee))
+    [ "Theme.user_origin"
+    ; "Theme.keeper_origin"
+    ; "Theme.quiet_origin"
+    ; "Theme.warn"
+    ; "Theme.bad"
+    ]
+;;
+
 let test_tui_status_color_ast_guard_fixtures () =
   let expect_violation source =
     let violations =
@@ -423,11 +451,16 @@ let test_user_message_background_has_one_render_snapshot () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
-  (* Three sites close back onto the row's own style rather than resetting:
-     a bare link, the folded-origin margin, and the origin drawn left of the
-     rule. A reset at any of them would strip the ambient background from
-     everything after it on the row. *)
-  check int "link, margin, and rule each restore the captured row" 3
+  (* Two sites close back onto the row's own style rather than resetting: a
+     bare link and the folded-origin margin. A reset at either would strip the
+     ambient background from everything after it on the row.
+
+     There were three. #30654 stopped drawing the rule between the margin and
+     the body -- a rail on every row gave a continuation the same weight as a
+     new event -- so the site that closed after the rule went with it. The
+     count is what is drawn, so removing a drawn thing lowers it; a reset
+     appearing at either surviving site is still what this catches. *)
+  check int "link and margin each restore the captured row" 2
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);
@@ -670,11 +703,29 @@ let test_tui_current_projection_wiring () =
     (Ast_grep.count_calls_with_label
        ~module_path:"bin/masc_tui_loader.ml"
        ~callee:"Metrics_tail.load" ~label:"expected_keeper");
-  check bool "all log interactions use the selected Keeper loader" true
+  (* #30658 put every call site behind a workspace-identity gate, so the
+     invariant moved with it. Counting the raw loader name now passes on the
+     single call inside that wrapper while the gate itself goes unguarded, so
+     the count follows the name the sites actually reach for, and a second
+     check pins the wrapper as the only way through. *)
+  check bool "all log interactions use the identity-gated Keeper loader" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"
-       ~callee:"load_selected_keeper_logs"
+       ~callee:"load_keeper_logs_if_safe"
      >= 3);
+  check int "the gate is the only caller of the raw Keeper log loader" 1
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"load_selected_keeper_logs");
+  (* Where that one call sits, not just that there is one. Emptying the gate's
+     body and calling the loader from anywhere else keeps the count at one and
+     reads every workspace's logs. (From #30681, which reached the pair above
+     independently and saw the gap this closes.) *)
+  check int "and the gate is where that call sits" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"load_keeper_logs_if_safe"
+       ~callee:"load_selected_keeper_logs");
   check int "Board list success uses shared post replacement" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml" ~binding_name:"apply_board_list_load"
@@ -766,6 +817,26 @@ let test_tui_current_projection_wiring () =
        ~binding_name:"load_selected_live_context"
        ~callee:"Context_state.for_selection"
      = 1);
+  check int "keeper detail reads context through the Keeper stamp" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"keeper_detail_pane"
+       ~callee:"Context_state.reading_for_keeper");
+  check int "chat header reads context through the Keeper stamp" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Context_state.reading_for_keeper");
+  check int "chat header uses one measured context item projection" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Observation_layout.context_header_item");
+  check int "chat context item measures the actual header budget" 2
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render_keeper_message"
+       ~callee:"Message_layout.display_width");
   check bool "log diagnostics remain operator-visible" true
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
@@ -1011,9 +1082,23 @@ let test_planning_refresh_reconciles_navigation_identity () =
   check int "HTTP surface application owns one planning apply" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"apply_http_surfaces" ~callee:"apply_planning_load");
-  check int "refresh loop no longer checks the stale planning snapshot" 0
-    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
-       ~binding_name:"main" ~callee:"List.find_opt")
+  (* #29443 removed two [List.find_opt (fun g -> g.pg_id = goal_id) p.pl_goals]
+     lookups from the key loop: the loop re-derived the Planning selection from
+     whichever snapshot it happened to hold, and a reorder between refreshes
+     moved the cursor onto a different goal. Reconciliation belongs to
+     [Planning_selection.reconcile], pinned above.
+
+     That absence was guarded by counting [List.find_opt] in [main], which is a
+     2,700-line key dispatcher: #30603 added a repository lookup for the PR-URL
+     jump and turned this red on a call with nothing to do with Planning. What
+     the loop must not do is reach into the snapshot's goal list itself; the two
+     reads it legitimately makes both go through [planning_visible_goals], so
+     that projection is the permitted path and anything else is the bug coming
+     back. *)
+  check int "refresh loop reads planning goals only through the visible projection" 0
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callees:[ "planning_visible_goals" ] ~fields:[ "pl_goals" ])
 ;;
 
 let test_overview_events_use_scroll_projection () =
@@ -1616,17 +1701,17 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  (* [String.equal] is named here for the same reason [Board_detail.view_for]
-     is above: the guard counts a field reference that is not inside one of
-     these calls, and #30219 compares the pane's keeper against the stamp on a
-     cached answer so one keeper's live context cannot be drawn under
-     another's name. A comparison reaches no terminal, so there is nothing for
-     a sanitiser to do -- and asking for one would be asking the pane to
-     compare sanitised text against raw text, which is a different string. *)
-  check_fields ~non_rendering_calls:[ "String.equal" ] "keeper_detail_pane"
+  (* Both calls compare the raw Keeper identity before anything is rendered:
+     [String.equal] checks the cached detail stamp, and the typed context lookup
+     checks its own snapshot stamp. Neither reaches the terminal, so those raw
+     [k_name] accesses do not belong inside a text sanitizer. *)
+  check_fields
+    ~non_rendering_calls:
+      [ "String.equal"; "Context_state.reading_for_keeper" ]
+    "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"
-    ; "live_context_error"
+    ; "error"
     ; "observed_at"
     ; "turn_ref"
     ; "k_last_turn_ts"
@@ -1754,6 +1839,10 @@ let () =
           "TUI status color AST guard fixtures"
           `Quick
           test_tui_status_color_ast_guard_fixtures;
+        test_case
+          "chat roles draw through the readable path"
+          `Quick
+          test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;

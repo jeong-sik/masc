@@ -202,8 +202,11 @@ let default_favicon_url url =
   |> Uri.to_string
 
 let extract_html_preview_fields ~url body =
+  (* Byte slicing here splits multibyte characters at max_html_chars —
+     the #7690 shape. utf8_prefix clamps to the previous character
+     boundary instead; parsing tolerates the shortened tail. *)
   let head =
-    String.sub body 0 (min (String.length body) max_html_chars)
+    String_util.utf8_prefix ~max_bytes:max_html_chars body
     |> Markup_document.parse_html
   in
   let title =
@@ -352,10 +355,14 @@ let fetch_preview ~clock ~net url =
                            ~favicon_url:(default_favicon_url normalized_url)
                            ~cache_state:"miss" ())
                     else
+                      (* Byte slicing a UTF-8 body can split a multibyte
+                         character at max_html_chars, and the partial byte
+                         kills downstream decoding (#7690 shape). utf8_prefix
+                         clamps to the previous character boundary and passes
+                         shorter bodies through unchanged. *)
                       let body =
-                        if String.length response.body > max_html_chars then
-                          String.sub response.body 0 max_html_chars
-                        else response.body
+                        String_util.utf8_prefix ~max_bytes:max_html_chars
+                          response.body
                       in
                       let extracted =
                         extract_html_preview_fields ~url:normalized_url body

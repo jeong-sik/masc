@@ -1,4 +1,4 @@
-# Canonical Projection SSOT — OAS should own the serialization of its own ADTs
+# Canonical Projection SSOT — agent_core should own the serialization of its own ADTs
 
 - Date: 2026-06-29
 - Status: in progress (F1 landed; F2–F14 are follow-ups)
@@ -6,15 +6,15 @@
 
 ## Problem
 
-OAS defines the core ADTs (`stop_reason`, `api_usage`, `content_block`,
+agent_core defines the core ADTs (`stop_reason`, `api_usage`, `content_block`,
 `inference_telemetry`, `provider_kind`, `capabilities`) but does not always
 expose the *canonical projection* of those types — `to_string`, `to_label`,
 `summarize`, `sanitize`, `total_tokens`. When the projection is missing,
-consumers (including OAS's own modules) re-spell it locally, and the copies
+consumers (including agent_core's own modules) re-spell it locally, and the copies
 drift.
 
-This is an OAS-internal defect first. The clearest proof needs no external
-consumer: `stop_reason -> string` was re-implemented in four OAS modules with
+This is an agent_core-internal defect first. The clearest proof needs no external
+consumer: `stop_reason -> string` was re-implemented in four agent_core modules with
 **divergent output**:
 
 | variant | `agent.ml` (label) | `agent_tool.ml` | `cache.ml` | `response_shape.ml` (diag) |
@@ -46,12 +46,12 @@ Collapsing these two into one string type is what produced the drift.
 
 ## Boundary note (MASC)
 
-OAS must never reference MASC; this initiative does not change that. MASC is one
+agent_core must never reference MASC; this initiative does not change that. MASC is one
 downstream consumer that *also* re-implements these projections
 (`keeper_hooks_oas_types.stop_reason_to_label`,
 `keeper_event_bridge_error_json.stop_reason_to_wire`, `inference_utils.zero_usage`,
-`summarize_thinking_blocks`, …). Every projection OAS exposes lets a MASC copy be
-deleted in favor of `Agent_sdk.*` — the dependency direction stays MASC→OAS.
+`summarize_thinking_blocks`, …). Every projection agent_core exposes lets a MASC copy be
+deleted in favor of `Agent_sdk.*` — the dependency direction stays MASC→agent_core.
 What stays in MASC is policy: identity redaction, Otel label keys, per-keeper
 routing headers, cost-ledger and operator-alert routing.
 
@@ -71,7 +71,7 @@ routing headers, cost-ledger and operator-alert routing.
 
 ## Follow-up projections to expose (roadmap)
 
-| # | ADT / concern | Add to OAS | Drops these duplicates |
+| # | ADT / concern | Add to agent_core | Drops these duplicates |
 |---|---|---|---|
 | F2 | `content_block` thinking summary | `Response_shape.summarize_blocks : content_block list -> t` | MASC `summarize_thinking_blocks` |
 | F3 | `content_block`/`message` UTF-8 sanitize | `Utf8_sanitize.sanitize_message(s)` | MASC `inference_utils.sanitize_*_utf8` |
@@ -84,17 +84,17 @@ routing headers, cost-ledger and operator-alert routing.
 | F11 | wall tok/s from `inference_telemetry` | `usage_projection.wall_tokens_per_second` | MASC `wall_tokens_per_second` |
 | F12 | `api_usage` total | `Types.total_tokens` | MASC `total_tokens` ×2 |
 | F13 | misc usage/telemetry/cost helpers | `Types`/`pricing` helpers | MASC `keeper_hooks_oas_types.{usage_has_tokens,context_max_of_telemetry,oas_reported_cost}` |
-| F14 | `stop_reason` metric/diagnostic migration | consumer analysis for `agent.ml` labels and `response_shape.ml` diagnostics (#2241) | legacy OAS-local `stop_reason` string variants, if migration is safe |
+| F14 | `stop_reason` metric/diagnostic migration | consumer analysis for `agent.ml` labels and `response_shape.ml` diagnostics (#2241) | legacy agent_core-local `stop_reason` string variants, if migration is safe |
 
-Sequencing: F4/F12 (trivial) → F5/F6/F7 (OAS-internal, immediate value) →
+Sequencing: F4/F12 (trivial) → F5/F6/F7 (agent_core-internal, immediate value) →
 F2/F3 (content_block utils) → F9/F10/F11/F13/F14.
 
-Rule for every step: OAS exposes a generic util; consumers call it. Never the
+Rule for every step: agent_core exposes a generic util; consumers call it. Never the
 reverse.
 
 ## Not in scope (intentionally)
 
 - telemetry-as-fix counters in MASC (timeout/usage-anomaly counters) — those are
-  alert signals over OAS-side gaps, a different class, not boundary violations.
+  alert signals over agent_core-side gaps, a different class, not boundary violations.
 - MASC policy that must stay MASC: identity redaction, Otel label keys,
   per-keeper routing, cost ledger, operator alert routing.

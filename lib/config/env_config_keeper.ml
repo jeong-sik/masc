@@ -536,7 +536,7 @@ module KeeperKeepalive = struct
      [stream_idle_failsafe_floor_sec]: an order above real silent prefill
      observed in production (152s mimo 1M-context 2026-07-20; ~200-525s local
      MLX 20.7K-token keeper prompts 2026-08-16), not a per-provider tuning
-     (RFC-OAS-037 §3). *)
+     (RFC-AC-037 §3). *)
   let first_event_failsafe_floor_sec = 600.0
 
   (** Explicit first-event (TTFT/prefill) timeout for streaming AGENT_CORE
@@ -544,7 +544,7 @@ module KeeperKeepalive = struct
       [stream_idle_timeout_sec] bounds the gaps after it. Providers that emit
       no keepalives while prefilling are legitimately silent in this phase,
       so this budget is distinct from — and typically longer than — the
-      inter-line idle gap (RFC-OAS-037). Unset means no explicit value; the
+      inter-line idle gap (RFC-AC-037). Unset means no explicit value; the
       resolved layer substitutes {!first_event_failsafe_floor_sec}. A
       configured value must be finite and strictly positive; malformed values
       are operator configuration errors, never a fallback. Same value grammar

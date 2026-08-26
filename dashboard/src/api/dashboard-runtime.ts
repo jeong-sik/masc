@@ -1096,7 +1096,7 @@ export interface RuntimeConfigPreview {
 
 export type RuntimeTomlEditorTransport = 'endpoint' | 'command'
 export type RuntimeTomlEditorSemantics = 'http_provider' | 'official_client'
-export type RuntimeTomlEditorCredentialPolicy = 'optional' | 'forbidden'
+export type RuntimeTomlEditorCredentialPolicy = 'optional' | 'forbidden' | 'file_required'
 
 export interface RuntimeTomlEditorProtocol {
   protocol: string
@@ -1104,11 +1104,15 @@ export interface RuntimeTomlEditorProtocol {
   semantics: RuntimeTomlEditorSemantics
   credential_policy: RuntimeTomlEditorCredentialPolicy
   requires_non_interactive: boolean
+  provider_fields: string[]
+  required_provider_fields: string[]
 }
 
 const RUNTIME_TOML_EDITOR_PROTOCOL_KEYS = [
   'credential_policy',
   'protocol',
+  'provider_fields',
+  'required_provider_fields',
   'requires_non_interactive',
   'semantics',
   'transport',
@@ -1133,23 +1137,34 @@ function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtoco
     const semantics = entry.semantics
     const credentialPolicy = entry.credential_policy
     const requiresNonInteractive = entry.requires_non_interactive
+    const providerFields = entry.provider_fields
+    const requiredProviderFields = entry.required_provider_fields
     if (
       typeof protocol !== 'string'
       || protocol === ''
       || protocol.trim() !== protocol
       || (transport !== 'endpoint' && transport !== 'command')
       || (semantics !== 'http_provider' && semantics !== 'official_client')
-      || (credentialPolicy !== 'optional' && credentialPolicy !== 'forbidden')
+      || (credentialPolicy !== 'optional'
+        && credentialPolicy !== 'forbidden'
+        && credentialPolicy !== 'file_required')
       || typeof requiresNonInteractive !== 'boolean'
+      || !Array.isArray(providerFields)
+      || providerFields.some(field => typeof field !== 'string' || field === '')
+      || !Array.isArray(requiredProviderFields)
+      || requiredProviderFields.some(field => typeof field !== 'string' || !providerFields.includes(field))
       || seen.has(protocol)
     ) {
       throw new Error('유효하지 않은 runtime provider protocol contract')
     }
     if (
       (semantics === 'official_client'
-        && (transport !== 'command' || credentialPolicy !== 'forbidden' || !requiresNonInteractive))
+        && (transport !== 'command' || credentialPolicy === 'optional' || !requiresNonInteractive))
       || (semantics === 'http_provider'
-        && (transport !== 'endpoint' || credentialPolicy !== 'optional' || requiresNonInteractive))
+        && (transport !== 'endpoint'
+          || credentialPolicy !== 'optional'
+          || requiresNonInteractive
+          || providerFields.length > 0))
     ) {
       throw new Error('일관되지 않은 runtime provider protocol contract')
     }
@@ -1160,6 +1175,8 @@ function parseRuntimeTomlEditorProtocols(raw: unknown): RuntimeTomlEditorProtoco
       semantics,
       credential_policy: credentialPolicy,
       requires_non_interactive: requiresNonInteractive,
+      provider_fields: [...providerFields],
+      required_provider_fields: [...requiredProviderFields],
     }
   })
 }

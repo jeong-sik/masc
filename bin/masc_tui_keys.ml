@@ -45,6 +45,7 @@ let keeper_actions =
 let for_surface = function
   | Overview ->
       [ b Navigate "j/k" "events" ~help:"scroll events"
+      ; b Navigate "h/l" "pane" ~help:"move between events and tasks"
       ; b Act "t" "tasks" ~help:"hand j/k to the task list"
       ; b Act "Right / Enter" "open" ~help:"open the selected task"
       ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
@@ -55,6 +56,7 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Navigate "g / G" "newest / oldest"
       ; b Act "f" "filter" ~help:"cycle the filter"
+      ; b Act "Esc" "overview"
       ; b Meta "Tab" "next"
       ; b Meta "q" "quit"
       ]
@@ -64,20 +66,28 @@ let for_surface = function
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
+        ; b Act "Esc" "overview"
         ]
       @ listing_meta
   | Keepers Keeper_detail ->
-      [ b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Instructions / GitHub"
+      [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
+      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / GitHub"
       ; b Act "L" "gh login" ~help:"on the GitHub tab: start the gh device-flow login"
+      ; b Act "o" "logs" ~help:"open this Keeper's logs"
       ; b Act "Left / Esc" "back"
       ]
-      @ keeper_actions
+      @ List.filter (fun binding -> binding.key <> "l") keeper_actions
   | Keepers Keeper_logs ->
       [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
   | Keepers Keeper_calls ->
       [ b Navigate "j/k" "scroll"; b Act "Left / Esc" "back" ]
   | Keepers Keeper_message ->
-      [ b Act "Enter" "send" ~help:"send, or queue while a turn runs"
+      [ b Navigate "h / Left" "roster"
+          ~help:"focus the visible Keeper roster (h when the draft is empty)"
+      ; b Navigate "Right / Esc" "chat" ~help:"return focus to the chat composer"
+      ; b Navigate "j/k" "roster move" ~help:"move while the roster has focus"
+      ; b Act "Enter" "send / open"
+          ~help:"send from chat, or open the selected Keeper from the roster"
       ; b Act "Ctrl-J" "newline" ~help:"newline in the draft"
       ; b Act "Ctrl-G" "next keeper" ~help:"next keeper with a chat open"
       ; b Act "Ctrl-U" "clear" ~help:"clear the draft"
@@ -95,7 +105,8 @@ let for_surface = function
       ]
   | Keepers Keeper_runtime_pick ->
       [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
-  | Lanes -> b Navigate "j/k" "scroll" :: listing_meta
+  | Lanes ->
+      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"
@@ -104,6 +115,7 @@ let for_surface = function
       ; b Act "v / V" "vote up / down"
       ; b Act "c" "reply" ~help:"reply (while reading)"
       ; b Navigate "Ctrl-W" "pane" ~help:"switch between the post list and detail pane"
+      ; b Navigate "h/l" "pane" ~help:"focus the post list or detail pane"
       ]
       @ listing_meta
   | Approvals ->
@@ -132,12 +144,15 @@ let for_surface = function
       ]
       @ listing_meta
   | Verification ->
-      [ b Navigate "j/k" "scroll"
+      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      ; b Act "Right / Enter" "details" ~help:"read the request and evidence"
+      ; b Act "Left / Esc" "back" ~help:"back to the verification queue"
       ; b Act "a" "approve" ~help:"approve the row under the cursor (press twice)"
       ; b Act "x" "reject" ~help:"reject with a reason ($EDITOR form)"
       ]
       @ listing_meta
-  | Harness -> b Navigate "j/k" "scroll" :: listing_meta
+  | Harness ->
+      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
@@ -151,10 +166,13 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
       ; b Act "Enter" "browse"
           ~help:"open this repository's tree on the Code surface"
+      ; b Act "Esc" "overview"
       ]
       @ listing_meta
   | Changes ->
-      [ b Navigate "j/k" "scroll"
+      (* "move", not "scroll": the keys move the marked row and the window
+         follows it, which is also what the surface's own footer says. *)
+      [ b Navigate "j/k" "move"
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
       ; b Act "Right / Enter" "written diff"
           ~help:"what the call wrote, as a diff"
@@ -169,9 +187,11 @@ let for_surface = function
   | Connectors ->
       [ b Navigate "j/k" "scroll"
       ; b Act "b / u" "bind / unbind" ~help:"bind / unbind a channel (editor form)"
+      ; b Act "Esc" "overview"
       ]
       @ listing_meta
-  | Runtime -> b Navigate "j/k" "scroll" :: listing_meta
+  | Runtime ->
+      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
   | Config ->
       [ b Navigate "j/k" "scroll"
         (* The surface owns the two files the server reads. Which one [e]
@@ -180,11 +200,13 @@ let for_surface = function
       ; b Act "e" "edit"
           ~help:"runtime.toml previews before it writes; a prompt saves as an override"
       ; b Act "x" "clear override" ~help:"on a prompt: back to the file's words"
+      ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"
       ]
   | Resources ->
       [ b Navigate "j/k" "move" ~help:"move the list; with the text focused, scroll it"
+      ; b Navigate "h/l" "pane" ~help:"focus the resource list or text"
       ; b Navigate "Ctrl-W" "focus" ~help:"switch between resource list and text"
       ; b Navigate "J / K" "scroll text"
       ; b Act "Enter" "read" ~help:"read the selected resource"
@@ -199,6 +221,7 @@ let for_surface = function
          from those two facts rather than from the render, so the footer does
          not advertise a key nothing handles. *)
       [ b Navigate "j/k" "move"
+      ; b Navigate "h/l" "pane" ~help:"focus the tree or open file"
       ; b Act "Right / Enter" "open" ~help:"drill in, or open the file"
         (* Esc walks back out the way Enter came in: it closes an open file
            first, and only climbs a directory once no file is open
@@ -206,7 +229,7 @@ let for_surface = function
            drift as a listed key that does nothing, pointing the other way. *)
       ; b Act "Left / Esc" "back"
           ~help:"close the history, then the file, then climb one directory"
-      ; b Navigate "h/l" "pan"
+      ; b Navigate "Shift-Left / Shift-Right" "pan"
           ~help:"with a file open, scroll it sideways one cell at a time"
       ; b Search "/" "find"
           ~help:"jump the cursor to a match: the tree, or the open file's \
@@ -214,14 +237,13 @@ let for_surface = function
       ; b Search "n / N" "next / previous match"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
-                 (the palette collects the name)"
+                 (one name asks at once; several open the palette as \
+                 choices)"
       ; b Act "D" "definition"
-          ~help:"jump to where a name on the cursor line is defined"
+          ~help:"jump to where a name on the cursor line is defined (one \
+                 name jumps at once; several open the palette as choices)"
       ; b Act "B" "back"
           ~help:"walk back through the definition jumps, newest first"
-      ; b Act "c" "activity"
-          ~help:"which keeper wrote which lines, through what, and when \
-                 (repository scope)"
       ; b Act "m" "notes"
           ~help:"the notes anchored to the open file (repository scope)"
       ; b Act "w" "add note"
@@ -229,15 +251,25 @@ let for_surface = function
                  (kind: Comment / Decision / Question / Bookmark)"
       ; b Act "d" "diff"
           ~help:"the open file's working tree against HEAD (d or Esc closes)"
+      ; b Act "Enter (history)" "open"
+          ~help:"a commit answers with its pull request, from its (#N) and \
+                 the repository's remote; a keeper edit jumps the cursor \
+                 to the lines it wrote (B walks back)"
       ; b Act "H" "history"
-          ~help:"the commits that touched the open file (H or Esc closes)"
+          ~help:"the work over the open file: its commits and the recorded \
+                 keeper edits, newest first (H or Esc closes)"
       ]
       @ listing_meta
-  | Tools -> b Navigate "j/k" "scroll" :: listing_meta
+  | Tools ->
+      [ b Navigate "j/k" "scroll"
+      ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "Esc" "overview"
+      ]
+      @ listing_meta
   | System_logs ->
       (* j/k only: g, G, and f are Acting's keys. The old help table listed
          them here, documenting keys that did nothing. *)
-      b Navigate "j/k" "scroll" :: listing_meta
+      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
 
 let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 

@@ -234,6 +234,16 @@
   yojson))
 
 (library
+ (name masc_tui_attachment)
+ (wrapped false)
+ (modules masc_tui_attachment)
+ (libraries
+  masc
+  masc_tui_keeper_chat_projection
+  masc.masc_random_id
+  base64))
+
+(library
  (name masc_tui_keeper_chat_live)
  (wrapped false)
  (modules masc_tui_keeper_chat_live)
@@ -272,7 +282,10 @@
  (name masc_tui_keeper_chat_history)
  (wrapped false)
  (modules masc_tui_keeper_chat_history)
- (libraries masc_tui_keeper_chat_transcript yojson))
+ (libraries
+  masc.keeper_chat_delivery_identity
+  masc_tui_keeper_chat_transcript
+  yojson))
 
 (library
  (name masc_tui_keeper_chat_transcript)
@@ -301,10 +314,16 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_color)
+ (wrapped false)
+ (modules masc_tui_color)
+ (libraries masc_tui_terminal_palette))
+
+(library
  (name masc_tui_theme)
  (wrapped false)
  (modules masc_tui_theme)
- (libraries masc_tui_terminal_palette))
+ (libraries masc_tui_color masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_palette)
@@ -375,7 +394,8 @@
 (library
  (name masc_tui_frame_presenter)
  (wrapped false)
- (modules masc_tui_frame_presenter))
+ (modules masc_tui_frame_presenter)
+ (libraries masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_profile)
@@ -404,7 +424,7 @@
  (name masc_tui_context_inspector)
  (wrapped false)
  (modules masc_tui_context_inspector)
- (libraries masc masc.masc_types yojson))
+ (libraries digestif masc masc.masc_types yojson))
 
 (library
  (name masc_tui_observation_layout)
@@ -426,7 +446,8 @@
 (library
  (name masc_tui_roster_pane)
  (wrapped false)
- (modules masc_tui_roster_pane))
+ (modules masc_tui_roster_pane)
+ (libraries masc_tui_message_layout))
 
 (library
  (name masc_tui_keeper_mark)
@@ -514,6 +535,12 @@
  (libraries unix))
 
 (library
+ (name masc_tui_keeper_config)
+ (wrapped false)
+ (modules masc_tui_keeper_config)
+ (libraries yojson))
+
+(library
  (name masc_tui_csi)
  (wrapped false)
  (modules masc_tui_csi))
@@ -541,11 +568,14 @@
   masc.masc_types
   masc_tui_acting
   masc_tui_board_detail
+  masc_tui_attachment
+  masc_tui_code_lexer
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_keeper_selection
+  masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector
@@ -556,7 +586,8 @@
   masc_tui_utf8_input
   masc_tui_send_disposition
   unix
-  yojson))
+  yojson
+  masc.server))
 
 (library
  (name masc_tui_composer_projection)
@@ -581,6 +612,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_attachment
   masc_tui_keys
   masc_tui_theme
   masc_tui_terminal_palette
@@ -623,6 +655,7 @@
   masc_tui_composer
   masc_tui_composer_projection
   masc_tui_keeper_control
+  masc_tui_keeper_config
   masc_tui_markdown
   masc_tui_graphics
   masc_tui_markdown_render_cache

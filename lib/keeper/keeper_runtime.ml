@@ -449,6 +449,7 @@ let ensure_keeper_meta_with_cause config name =
                  persisted_updated.telemetry_feedback_window_hours
              ; always_allow = persisted_updated.always_allow
              ; agent_core_env = persisted_updated.agent_core_env
+             ; tool_groups = persisted_updated.tool_groups
              ; updated_at = persisted_updated.updated_at
              })
       with

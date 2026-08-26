@@ -117,6 +117,8 @@ type stream_event =
       ; model : string
       }
   | Text_delta of string
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 let emit_stream_event on_stream_event event =
@@ -228,6 +230,7 @@ type wire_event =
       }
   | Step_update of
       { conversation_id : string option
+      ; step_index : int option
       ; state : step_state
       ; step_type : step_type
       }
@@ -350,14 +353,23 @@ let parse_step_update fields =
   let* step_json = required_member stage "step_update" fields in
   let* step_fields = assoc_at stage step_json in
   let* conversation_id = restated_string stage "conversation_id" step_fields in
-  (* [step_index] is not read; [state] and [step_type] are what this event
-     contributes. Requiring a non-negative int on an unread ordinal made a
-     step update fail on a value nothing consumes (#28010). *)
+  (* The ordinal is now carried only as optional native-tool identity. An absent
+     or drifted value therefore stays [None] instead of turning an otherwise
+     usable step update into a terminal protocol failure (#28010). *)
+  let step_index =
+    match List.assoc_opt "step_index" step_fields with
+    | Some (`Int value) when value >= 0 -> Some value
+    | Some (`Intlit value) ->
+      (match int_of_string_opt value with
+       | Some value when value >= 0 -> Some value
+       | Some _ | None -> None)
+    | Some _ | None -> None
+  in
   let* state_string = required_string stage "state" step_fields in
   let* state = parse_step_state stage state_string in
   let* step_type_string = required_string stage "step_type" step_fields in
   let* step_type = parse_step_type stage step_type_string in
-  Ok (Step_update { conversation_id; state; step_type })
+  Ok (Step_update { conversation_id; step_index; state; step_type })
 ;;
 
 let parse_result fields =
@@ -635,7 +647,7 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
              on_stream_event
              (Turn_started { conversation_id; model });
            Ok { state with init = Some (conversation_id, model, permission_mode) })
-  | Step_update { conversation_id; state = step_state; step_type } ->
+  | Step_update { conversation_id; step_index; state = step_state; step_type } ->
     let stage = "step_update event" in
     (match state.init with
      | None -> protocol_error stage "received step_update before init"
@@ -645,6 +657,16 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
        then protocol_error stage "received step_update after result"
        else
          let is_tool = step_type = Tool in
+         if is_tool
+         then (
+           let observation : Runtime_native_tools.observation =
+             { call_id = Option.map string_of_int step_index; tool_name = None }
+           in
+           match step_state with
+           | Active ->
+             emit_stream_event on_stream_event (Native_tool_started observation)
+           | Done | Step_error ->
+             emit_stream_event on_stream_event (Native_tool_finished observation));
          Ok
            { state with
              tool_steps =

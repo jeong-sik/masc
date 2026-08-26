@@ -321,8 +321,28 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
       if (input.credentialType !== 'none' && input.credentialValue.trim() !== '') {
         next = setRuntimeTomlProviderCredential(next, input.id, input.credentialType, input.credentialValue)
       }
+      if (input.agent !== '') {
+        next = setRuntimeTomlProviderField(next, input.id, 'agent', input.agent)
+      }
+      if (input.effort !== '') {
+        next = setRuntimeTomlProviderField(next, input.id, 'effort', input.effort)
+      }
+      if (input.timeoutS !== null) {
+        next = setRuntimeTomlProviderField(next, input.id, 'timeout-s', input.timeoutS)
+      }
       return next
     })
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderOptionChange(
+    providerId: string,
+    field: 'agent' | 'effort' | 'timeout-s',
+    value: string | number | null,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
     setNotice(null)
     setError(null)
   }
@@ -712,7 +732,8 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
                 onDeleteProvider=${handleDeleteProvider}
               onProviderTransportChange=${handleProviderTransportChange}
               onProviderEnabledChange=${handleProviderEnabledChange}
-              onProviderCredentialChange=${handleProviderCredentialChange}
+                onProviderCredentialChange=${handleProviderCredentialChange}
+                onProviderOptionChange=${handleProviderOptionChange}
               />` : null}
             </div>
 

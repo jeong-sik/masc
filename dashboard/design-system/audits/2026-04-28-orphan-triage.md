@@ -76,7 +76,7 @@ Tailwind v4 `@utility` syntax: 5 of 7 files (chat, pipeline, live-monitor, keepe
 | Workstream | File | Classification | Mode | Notes |
 |---|---|---|---|---|
 | W05 | `chat.css` | live | preview gallery (chat-bubble user/assistant/system/error variants + chat-transcript + role-chip + detail-callout) | 4 bubble variants + transcript surface |
-| W06 | `pipeline.css` | live | preview gallery (pipeline-stage-node × {idle, thinking, tool_use, error, success} active states) | OAS pipeline visual — 5 active states from selectors |
+| W06 | `pipeline.css` | live | preview gallery (pipeline-stage-node × {idle, thinking, tool_use, error, success} active states) | agent_core pipeline visual — 5 active states from selectors |
 | W07 | `live-monitor.css` | live | preview gallery (pulse-bubble × {default, working, selected} states) | 3 pulse variants |
 | W08 | `keeper-detail.css` | live | preview gallery (overlay + content frame) | small surface (16 LOC) — 1 overlay pattern |
 | W09 | `pixel-avatar.css` | live | preview gallery (pixel-avatar × {active, working, busy, idle, listening} status) | 5 status variants |

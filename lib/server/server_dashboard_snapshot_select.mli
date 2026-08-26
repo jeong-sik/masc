@@ -48,22 +48,20 @@ val select_shell_json :
     retire criterion ("snapshot_read;dur~0ms p99 for /shell"). *)
 
 val select_tools_json :
-  ?actor:string ->
+  ?keeper:string ->
   ?timing:Server_timing.t ->
   Workspace.config ->
   Yojson.Safe.t
 (** RFC-0138 Phase 3 Step 2 — /api/v1/dashboard/tools read path
     selector.  Returns [Dashboard_snapshot.current ()].tools when the
-    refresh fiber has published AND [~actor] is omitted (the snapshot
+    refresh fiber has published AND [~keeper] is omitted (the snapshot
     stores the canonical full registry view, not per-agent filtered
-    catalogues).  Falls back to
+    catalogues or per-Keeper effective surfaces).  Falls back to
     [Server_dashboard_http_runtime_info.dashboard_tools_http_json]
     otherwise.
 
-    Per RFC-0138 §3.3 Step 2 the per-actor variant continues through
-    [Dashboard_cache] until the snapshot type grows an [Actor_filter]
-    arm; retire criterion is the [Server-Timing snapshot_read;dur~0ms]
-    p99 on the actor-less call path. *)
+    The retired actor argument never filtered the catalog and therefore is
+    not part of this API or its cache key. *)
 
 val select_telemetry_summary_json :
   ?timing:Server_timing.t ->

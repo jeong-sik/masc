@@ -229,37 +229,28 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 |---|---|
 | `runtime.toml` | 프로바이더·모델 목록, 필수 항목인 `[runtime].default`, 런타임 레인, Keeper 배정 |
 | `agent-core-models-overlay.toml` | 배포 환경에서만 쓰는 모델 능력 항목. 파일이 없으면 내장 Agent Core 목록을 씁니다 |
-| `keepers/<name>.toml` | Keeper 운영 설정 |
-| `keepers/<name>/AGENT.md` | Keeper 프롬프트 전문. TOML로 만든 모든 Keeper에 필요합니다 |
+| `keepers/<name>.toml` | Keeper 하나에 필요한 전부. 운영 설정과 프롬프트(`keeper.instructions`)가 같이 들어갑니다 |
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
 | `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
 | `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
 
-Keeper 하나는 사람이 쓰는 파일 두 개로 만듭니다.
-
-```text
-<base-path>/.masc/config/keepers/reviewer.toml
-<base-path>/.masc/config/keepers/reviewer/AGENT.md
-```
+Keeper 하나는 파일 하나로 만듭니다. `<base-path>/.masc/config/keepers/reviewer.toml`:
 
 ```toml
-# keepers/reviewer.toml
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
 sandbox_profile = "local"
 mention_targets = ["operator"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
-```
 
-```markdown
-<!-- keepers/reviewer/AGENT.md -->
+instructions = """
 당신은 리뷰 Keeper입니다. 지금 변경을 살펴보고 파일 경로와 명령을 붙여
-구체적인 근거를 보고하세요.
+구체적인 근거를 보고해 주세요.
+"""
 ```
 
-Keeper TOML에는 운영 설정만 넣습니다. 프롬프트는 `AGENT.md`에 씁니다. TOML에
-모르는 키가 있으면 거부합니다.
+TOML에 모르는 키가 있으면 거부합니다.
 
 런타임 배정은 `runtime.toml`에 적습니다.
 

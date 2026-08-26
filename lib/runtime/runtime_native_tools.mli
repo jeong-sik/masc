@@ -10,6 +10,17 @@ type posture =
   | Native_read  (** Built-in read tools allowed; effects stay MASC-owned. *)
   | Native_full  (** The full built-in surface, effects included. *)
 
+type observation =
+  { call_id : string option
+  ; tool_name : string option
+  }
+(** Bounded identity reported by an official CLI for one built-in tool step.
+    Missing fields stay [None]; adapters must not invent provider identities. *)
+
+val stream_content_type : string
+(** Internal AGENT_CORE content-block discriminator used only to carry a typed
+    native observation through the Keeper stream bridge. *)
+
 val to_string : posture -> string
 val of_string : string -> posture option
 
@@ -27,6 +38,13 @@ val antigravity_default : posture
 
 val claude_code_read_tool_names : string list
 (** Built-in Claude Code tools that observe without effect. *)
+
+val degrade_on_admission : posture:posture -> none_supported:bool -> unit -> posture
+(** The safest posture the client can run when admission cannot honor the
+    declared one: [full] degrades to [read] (effects stay behind the MASC
+    approval gate), [none] on a client without a disable switch degrades
+    to [read]. Used with a typed event, never silently — see
+    RFC-0390 admission review. *)
 
 val claude_code_tools_arg : posture -> string
 (** Value for the [--tools] flag: [""] disables the built-in set,

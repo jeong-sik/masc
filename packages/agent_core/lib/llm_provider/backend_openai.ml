@@ -1217,7 +1217,11 @@ let ollama_cloud_reasoning_effort_capabilities =
   }
 ;;
 
-let ollama_cloud_no_thinking_control_capabilities =
+(* Only the inline test below reads this, and --profile release drops inline
+   tests, so the release build sees a value nobody uses. Its sibling
+   [ollama_cloud_config] already carries the same annotation for the same
+   reason. *)
+let[@warning "-32"] ollama_cloud_no_thinking_control_capabilities =
   { ollama_cloud_reasoning_effort_capabilities with
     thinking_control_format = Capabilities.No_thinking_control
   }

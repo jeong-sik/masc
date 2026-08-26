@@ -817,12 +817,27 @@ let run_keeper_cycle
                let (run_result, turn_state), latency_ms =
                  (* Cancel-safe cleanup (#9747): stdlib [Fun.protect] wraps cleanup
            exceptions in [Fun.Finally_raised], losing the outer
-           [Eio.Cancel.Cancelled]. Cleanup here swallows Cancelled (the
-           outer one is already in flight) and logs non-cancel exceptions
-           instead of propagating them. *)
+           [Eio.Cancel.Cancelled]. Cleanup here logs its failures instead of
+           propagating them, so a cleanup fault cannot replace the turn's own
+           outcome.
+
+           Each step runs under [Eio.Cancel.protect]. Since #15932 put the turn
+           body inside [turn_sw], this cleanup runs in that switch's context,
+           and an Eio call made after it is cancelled raises before doing
+           anything. [mark_turn_finished] is a registry file write, so skipping
+           it leaves [current_turn_observation] set and the keeper reads as
+           mid-turn after its turn ended. The earlier reading — that the outer
+           cancellation makes the cleanup unnecessary — is what lost sandbox
+           containers in #30590.
+
+           Both steps stay bounded: the registry write takes the keeper key
+           lock, which raises [Flock_timeout] rather than waiting forever, so
+           [protect] cannot park the caller.
+
+           [Cancelled] is counted and logged like any other failure. A silent
+           arm here is why a skipped cleanup left no evidence at all. *)
                  let cleanup () =
-                   (try unsubscribe_event_bus () with
-                    | Eio.Cancel.Cancelled _ -> ()
+                   (try Eio.Cancel.protect unsubscribe_event_bus with
                     | e ->
                       Log.Keeper.warn
                         ~keeper_name:meta.name
@@ -834,11 +849,11 @@ let run_keeper_cycle
                         ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Unsubscribe_event_bus) ]
                         ());
                    try
-                     Keeper_registry.mark_turn_finished
-                       ~base_path:config.base_path
-                       meta.name
+                     Eio.Cancel.protect (fun () ->
+                       Keeper_registry.mark_turn_finished
+                         ~base_path:config.base_path
+                         meta.name)
                    with
-                   | Eio.Cancel.Cancelled _ -> ()
                    | e ->
                      Log.Keeper.warn
                        ~keeper_name:meta.name

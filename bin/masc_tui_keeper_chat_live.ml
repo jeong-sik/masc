@@ -78,20 +78,6 @@ let object_field fields name =
   | Some (`Assoc value) -> Some value
   | Some _ | None -> None
 
-let int_field fields name =
-  match List.assoc_opt name fields with
-  | Some (`Int value) -> Some value
-  | Some _ | None -> None
-
-(* The server's own vocabulary for an operation's state. An unknown word is
-   reported rather than folded into one of these: this reader is lenient about
-   lines it cannot read, not about inventing a state for the pane to draw. *)
-let admission_of_string = function
-  | "Queued" -> Some Queued
-  | "Running" -> Some Running
-  | "Succeeded" | "Failed" | "Cancelled" -> Some Settled
-  | _ -> None
-
 let nonnegative_int_field fields name =
   match List.assoc_opt name fields with
   | Some (`Int value) when value >= 0 -> Some value
@@ -162,17 +148,24 @@ let custom_deltas_unvalidated fields =
             (fun delta -> Thinking delta))
   | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
       let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
-      match object_field fields "value" with
-      | None -> [ Undecodable (event ^ " value is not an object") ]
+      match List.assoc_opt "value" fields with
+      | None -> [ Undecodable (event ^ " value is required") ]
       | Some value -> (
-          match string_field value "state", int_field value "queued_count" with
-          | None, _ -> [ Undecodable (event ^ " has no state") ]
-          | Some _, None -> [ Undecodable (event ^ " has no queued_count") ]
-          | Some state, Some queue_length -> (
-              match admission_of_string state with
-              | Some admission -> [ Accepted { admission; queue_length } ]
-              | None ->
-                  [ Undecodable (event ^ " has an unknown state: " ^ state) ])))
+          match Projection.decode_acceptance value with
+          | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+          | Error error ->
+              [ Undecodable (Projection.stream_error_to_string error) ]
+          | Ok acceptance ->
+              let admission =
+                match acceptance.Projection.state with
+                | Projection.Queued -> Queued
+                | Projection.Running -> Running
+                | Projection.Succeeded | Projection.Failed
+                | Projection.Cancelled -> Settled
+              in
+              [ Accepted
+                  { admission; queue_length = acceptance.Projection.queued_count }
+              ]))
   | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
     (match List.assoc_opt "value" fields with
      | Some `Null -> [ Runtime_attempt_started ]

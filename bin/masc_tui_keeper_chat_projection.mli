@@ -146,6 +146,14 @@ val classify_sse_line : string -> sse_line
 val current_custom_names : string list
 val known_custom_names : string list
 
+(** Decode the acceptance payload for both the strict whole-stream reader
+    and the incremental live reader. [expected_request_id] additionally binds
+    the strict response to the request that opened it. *)
+val decode_acceptance
+  :  ?expected_request_id:string
+  -> Yojson.Safe.t
+  -> (acceptance, stream_error) result
+
 (** Validate payload rules shared by strict and live CUSTOM-event decoders. *)
 val validate_custom_value
   :  name:string

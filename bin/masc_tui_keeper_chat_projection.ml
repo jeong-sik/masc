@@ -506,7 +506,7 @@ let acceptance_state_of_string = function
   | "Cancelled" -> Ok Cancelled
   | value -> Error (Printf.sprintf "unknown Keeper chat operation state %S" value)
 
-let decode_acceptance ~expected_request_id json =
+let decode_acceptance ?expected_request_id json =
   let surface = "KEEPER_CHAT_OPERATION_ACCEPTED.value" in
   let* fields =
     exact_object_fields ~surface
@@ -529,9 +529,10 @@ let decode_acceptance ~expected_request_id json =
     required_nonnegative_int ~surface "queued_count" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
-  if not (String.equal operation_id expected_request_id) then
-    Error (Request_id_mismatch { expected = expected_request_id; received = operation_id })
-  else Ok { state; queued_count }
+  match expected_request_id with
+  | Some expected when not (String.equal operation_id expected) ->
+      Error (Request_id_mismatch { expected; received = operation_id })
+  | None | Some _ -> Ok { state; queued_count }
 
 type reply_details = {
   reply : string;
@@ -661,7 +662,9 @@ let null_custom_names =
   ]
 
 let validate_custom_value ~name value =
-  if List.mem name null_custom_names && value <> `Null
+  if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
+    Result.map (fun _ -> ()) (decode_acceptance value)
+  else if List.mem name null_custom_names && value <> `Null
   then
     Error
       (Malformed_event

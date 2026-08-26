@@ -430,20 +430,31 @@ let test_acceptance_states_are_read () =
 let test_unknown_acceptance_state_is_reported () =
   check (list delta) "the unknown word is named"
     [ Live.Undecodable
-        "KEEPER_CHAT_OPERATION_ACCEPTED has an unknown state: Vanished"
+        "unknown Keeper chat operation state \"Vanished\""
     ]
     (feed_whole (sse (accepted ~state:"Vanished" ~queued_count:1 ())))
 
 let test_acceptance_missing_fields_are_named () =
   let value fields = event "CUSTOM"
-    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"; "value", `Assoc fields ]
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; "value", `Assoc (("operation_id", `String "op-1") :: fields)
+    ]
   in
   check (list delta) "a missing state names itself"
-    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no state" ]
+    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED.value.state is required" ]
     (feed_whole (sse (value [ "queued_count", `Int 1 ])));
   check (list delta) "a missing queued_count names itself"
-    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no queued_count" ]
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count is required"
+    ]
     (feed_whole (sse (value [ "state", `String "Queued" ])))
+
+let test_acceptance_rejects_negative_queue_length () =
+  check (list delta) "the live and strict readers share the queue bound"
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count must be a nonnegative integer"
+    ]
+    (feed_whole (sse (accepted ~state:"Queued" ~queued_count:(-1) ())))
 
 let test_runtime_attempt_boundary_is_typed () =
   let body = sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" `Null) in
@@ -491,6 +502,8 @@ let () =
             test_unknown_acceptance_state_is_reported
         ; test_case "missing fields name themselves" `Quick
             test_acceptance_missing_fields_are_named
+        ; test_case "negative queue length is rejected" `Quick
+            test_acceptance_rejects_negative_queue_length
         ] )
     ; ( "held calls"
       , [ test_case "an approval request is read whole" `Quick

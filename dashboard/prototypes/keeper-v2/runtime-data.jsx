@@ -61,8 +61,8 @@ const RT_ROUTING = {
 
 // fictional → real runtime id (used by the one-time migration of keeper data)
 const RT_LEGACY_MAP = {
-  'oas·seoul-1': 'ollama_cloud.deepseek-v4-flash',
-  'oas·tokyo-2': 'deepseek.deepseek-v4-pro',
+  'agent-core·seoul-1': 'ollama_cloud.deepseek-v4-flash',
+  'agent-core·tokyo-2': 'deepseek.deepseek-v4-pro',
   'local·docker': 'ollama.gemma4-26b-a4b-qat',
 };
 

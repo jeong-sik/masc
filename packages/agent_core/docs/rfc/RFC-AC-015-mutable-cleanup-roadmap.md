@@ -1,4 +1,4 @@
-# RFC-OAS-015: Mutable Cleanup Roadmap
+# RFC-AC-015: Mutable Cleanup Roadmap
 
 | | |
 |---|---|
@@ -164,7 +164,7 @@ risky because every caller of `add` becomes responsible for threading the
 accumulator. Treat closure-around-ref as **Category B with elevated review
 cost** — defer to lab/ branch demos, never bulk-cleanup.
 
-##### Verified scan as of RFC-OAS-015 PR-C
+##### Verified scan as of RFC-AC-015 PR-C
 
 | Repo | Category C strict (true zero mutation) |
 |---|---|

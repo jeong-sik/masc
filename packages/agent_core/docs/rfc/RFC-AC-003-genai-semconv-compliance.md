@@ -1,4 +1,4 @@
-# RFC-OAS-003: OpenTelemetry GenAI Semantic Conventions Compliance
+# RFC-AC-003: OpenTelemetry GenAI Semantic Conventions Compliance
 
 Status: Draft
 Created: 2026-04-16

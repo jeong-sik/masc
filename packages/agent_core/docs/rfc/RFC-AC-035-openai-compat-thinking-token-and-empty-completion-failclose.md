@@ -1,4 +1,4 @@
-# RFC-OAS-035: OpenAI-compat chat-template thinking token injection + empty-completion fail-close
+# RFC-AC-035: OpenAI-compat chat-template thinking token injection + empty-completion fail-close
 
 | | |
 |---|---|
@@ -6,8 +6,8 @@
 | Author | jeong-sik (Claude Opus 4.8 조사·구현) |
 | Created | 2026-07-08 |
 | Target | `agent_sdk` (oas) — `lib/llm_provider/` (`backend_openai_serialize.ml`, `backend_openai_request.ml`, `backend_ollama.ml`, `backend_openai_parse.ml`, `http_client.ml`, `complete_sync.ml`, `error.ml`) |
-| Supplements | RFC-OAS-029 §thinking/reasoning (thinking control), RFC-OAS-033 (typed-vs-string classifier), RFC-OAS-034 (capability는 model×transport) |
-| Boundary | parse 계약 + openai-compat wire serialization 변경. OAS-side only; MASC는 typed outcome을 소비(RFC-OAS-029 §6: OAS는 MASC에 의존하지 않는다). |
+| Supplements | RFC-AC-029 §thinking/reasoning (thinking control), RFC-AC-033 (typed-vs-string classifier), RFC-AC-034 (capability는 model×transport) |
+| Boundary | parse 계약 + openai-compat wire serialization 변경. OAS-side only; MASC는 typed outcome을 소비(RFC-AC-029 §6: OAS는 MASC에 의존하지 않는다). |
 | Triggering issue | oas#2483 (blank 200 → Ok content=[] → empty-turn storm), 2026-07-06 오류폭풍 근본 분석 |
 
 ## 0. Summary
@@ -25,7 +25,7 @@
 
 - **caps-gated**: `caps.thinking_control_format = Chat_template_token _` 인 row만 주입. 비-token 모델(GLM/Kimi/DashScope/plain OpenAI)은 wire byte-identical.
 - **think 조건**: `Some true`/`Some false`는 두 backend에서 동일하게 명시적이다. `None`의 기본값은 backend가 소유한다. Ollama만 `OAS_OLLAMA_THINK_DEFAULT`를 읽고, OpenAI-compatible은 다른 provider 이름의 env에 영향받지 않도록 기본 off다.
-- **reject 안 함**: 이슈가 제안한 boot-reject(option b)는 채택하지 않음. 주입이 가능해지면 reject는 정상 config를 깨뜨리고, `validate_all`이 kind-agnostic이라 Ollama에도 오발동한다. RFC-OAS-023 DISABLE 가드(complete_common의 `validate_thinking_control_request`)는 직교이므로 유지.
+- **reject 안 함**: 이슈가 제안한 boot-reject(option b)는 채택하지 않음. 주입이 가능해지면 reject는 정상 config를 깨뜨리고, `validate_all`이 kind-agnostic이라 Ollama에도 오발동한다. RFC-AC-023 DISABLE 가드(complete_common의 `validate_thinking_control_request`)는 직교이므로 유지.
 
 ## 2. Fix B — typed empty-completion (parse 경계 fail-closed)
 
@@ -40,7 +40,7 @@ type parse_error = Provider_error of string | Empty_completion of empty_completi
 
 전파: `http_client.provider_failure_kind`에 `Empty_completion of { stop_reason : Types.stop_reason }`를 두고 모든 completion 경로가 공용 `Http_client.empty_completion_error`로 매핑한다. `retry_classify`의 `ProviderFailure _ -> None` 규칙으로 **non-retryable**이며, typed stop reason은 transport 경계까지 보존된다. 기존 공개 SDK 경계에서는 source compatibility를 위해 `ProviderUnavailable`로 일관되게 투영한다. 진단 문자열은 표시 전용이며 제어 흐름에서 다시 파싱하지 않는다.
 
-**문자열 분류기 아님**: string sentinel(`Error "empty_completion:…"`)은 RFC-OAS-033/RFC-0042가 금하는 substring 분류기라 채택 안 함. typed variant로 닫음.
+**문자열 분류기 아님**: string sentinel(`Error "empty_completion:…"`)은 RFC-AC-033/RFC-0042가 금하는 substring 분류기라 채택 안 함. typed variant로 닫음.
 
 ## 3. 범위에서 제외 (명시적 후속)
 
@@ -56,7 +56,7 @@ streaming 경로도 `Ok content=[]`를 낼 수 있어 non-streaming과 대칭으
 
 ### 3.2 MASC 소비 (B-full, 별도 repo/PR)
 
-MASC는 OAS SHA를 pin하고 기존 `Error.sdk_error`를 소비한다(RFC-OAS-029 §6, 단방향). 현재 실제 소비자는 typed stop reason을 분기하지 않으므로 새 공개 error variant를 추가하지 않는다. typed downstream 정책이 실제로 필요해질 때는 구체적 소비자와 함께 별도 API 변경으로 다룬다.
+MASC는 OAS SHA를 pin하고 기존 `Error.sdk_error`를 소비한다(RFC-AC-029 §6, 단방향). 현재 실제 소비자는 typed stop reason을 분기하지 않으므로 새 공개 error variant를 추가하지 않는다. typed downstream 정책이 실제로 필요해질 때는 구체적 소비자와 함께 별도 API 변경으로 다룬다.
 
 **상태 업데이트 (실측)**: A+B는 oas#2488(aad819bb1)로 main 착지, MASC는 pin bump #23682으로 이를 흡수했다. 이후 oas#2491은 legacy `lib/streaming.ml`에 fail-close를 추가했지만 Agent가 사용하는 canonical `Complete.complete_stream`과 injected transport는 보호하지 못했고 `Stream_parse_failed` 문자열을 경유했다. 현재 수렴 경로는 모든 completion 소비 경계에서 `Http_client.Empty_completion { stop_reason : Types.stop_reason }`, 공개 SDK 경계에서 기존 `ProviderUnavailable`이다.
 

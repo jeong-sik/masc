@@ -1,4 +1,4 @@
-# RFC-OAS-019: Stream Lifecycle Aggregation
+# RFC-AC-019: Stream Lifecycle Aggregation
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-05-14 |
 | Target | `agent_sdk` (oas) |
-| Sibling | RFC-OAS-018 (provider-model-catalog-externalization) |
+| Sibling | RFC-AC-018 (provider-model-catalog-externalization) |
 
 ## 0. Summary
 
@@ -62,7 +62,7 @@ Registered in `lib/telemetry_sca_registry.ml:24` as a known signal (registry rem
 ## 3. Non-goals
 
 - Touching prometheus or any other in-SDK metric path. If those exist, they remain at chunk granularity for SRE traceability. This RFC scopes the change to `Event_bus` external emission.
-- Adding cost-per-stream estimates to the summary (`cost_usd_estimate`) — defer to a billing-focused RFC after `pricing.ml` externalization (RFC-OAS-018).
+- Adding cost-per-stream estimates to the summary (`cost_usd_estimate`) — defer to a billing-focused RFC after `pricing.ml` externalization (RFC-AC-018).
 - Rewriting SDK-internal per-chunk typed-value call sites that read `Streaming_chunk_n` for liveness or progress. Internal call sites stay on the typed value path; only `telemetry_bus.publish` of the chunk variant is removed.
 
 ## 4. Design
@@ -144,7 +144,7 @@ Downstream repos that vendor or depend on `agent_sdk` are responsible for their 
 ### 5.3 Versioning
 
 - Variant removal is breaking on the `Event_bus.Custom("telemetry_event", json)` consumer schema. Bump minor version (`0.194.0`).
-- Release-please (RFC-OAS-010) entry: `feat!: replace per-chunk Streaming_chunk_n with Streaming_summary (RFC-OAS-019)`.
+- Release-please (RFC-AC-010) entry: `feat!: replace per-chunk Streaming_chunk_n with Streaming_summary (RFC-AC-019)`.
 
 ## 6. Verification
 

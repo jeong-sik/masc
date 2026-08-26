@@ -1,8 +1,8 @@
-# RFC-OAS-036: Model catalog overlay and alias-canonicalized provider lookup
+# RFC-AC-036: Model catalog overlay and alias-canonicalized provider lookup
 
 - Status: Implemented (this PR)
 - Date: 2026-07-15
-- Related: RFC-OAS-034 (endpoint/capability boundary), masc RFC-0342 (D1), masc#24528
+- Related: RFC-AC-034 (endpoint/capability boundary), masc RFC-0342 (D1), masc#24528
 
 ## Problem
 
@@ -17,7 +17,7 @@ catalog and re-install it, which:
   shadowed the current 171-row embedded catalog and took a whole fleet's boot
   gate down),
 - pushes deployment-specific rows upstream instead (`provider_name =
-  "runpod_rtxa6000"` in the shared `models.toml`), violating RFC-OAS-034's
+  "runpod_rtxa6000"` in the shared `models.toml`), violating RFC-AC-034's
   serving-contract namespace rule from the other direction.
 
 Separately, capability lookup had two alias semantics. The binding-registry

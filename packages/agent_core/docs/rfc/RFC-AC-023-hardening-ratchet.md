@@ -1,4 +1,4 @@
-# RFC-OAS-023: Production Hardening Ratchet
+# RFC-AC-023: Production Hardening Ratchet
 
 **Status**: Draft
 **Date**: 2026-06-27
@@ -7,7 +7,7 @@
 
 ## 0. Summary
 
-This RFC adds a hardening companion to RFC-OAS-022's existing monotone-decrease ratchet. It does not create a second required workflow. The existing `Code Smell Ratchet` workflow runs both scripts and applies the same `RATCHET-WAIVED: <reason>` pull-request escape hatch.
+This RFC adds a hardening companion to RFC-AC-022's existing monotone-decrease ratchet. It does not create a second required workflow. The existing `Code Smell Ratchet` workflow runs both scripts and applies the same `RATCHET-WAIVED: <reason>` pull-request escape hatch.
 
 The hardening script is deliberately narrower than a general linter:
 
@@ -28,7 +28,7 @@ The baseline stores these metrics:
 | `exception_message_classifiers` | Source shapes that classify by exception message text, such as `classify_by_message`, `String.lowercase_ascii msg`, or `has_substr msg`. Plain user-facing string literals like `"timeout"` are not counted. | Target zero after typed `Unix_error` / Eio / `http_error` classifiers replace message inspection. |
 | `heuristic_markers` | Runtime source identifiers that explicitly mark untyped heuristic behavior. Comments and string literals are stripped before matching. | Target zero for routing/provider behavior that should be typed or catalog-backed. New heuristic code requires `RATCHET-WAIVED` with a sunset plan. |
 | `workaround_markers` | Runtime source identifiers that explicitly mark workaround behavior. Comments and string literals are stripped before matching. | Target zero for permanent runtime workaround debt. Temporary additions require `RATCHET-WAIVED` with a sunset issue/RFC. |
-| `model_id_string_classifiers_outside_catalog` | Direct `String.lowercase_ascii`, `String.starts_with`, `String.ends_with`, `String.contains`, or `String.equal` classification on `model`/`model_id` outside configured catalog/capability boundary files. | Keep model-id classification in catalog/capability SSOT modules; scattered provider/model matching is RFC-OAS-029 drift. |
+| `model_id_string_classifiers_outside_catalog` | Direct `String.lowercase_ascii`, `String.starts_with`, `String.ends_with`, `String.contains`, or `String.equal` classification on `model`/`model_id` outside configured catalog/capability boundary files. | Keep model-id classification in catalog/capability SSOT modules; scattered provider/model matching is RFC-AC-029 drift. |
 | `stub_markers` | Runtime stubs such as `Not_implemented` and `failwith "not implemented"`. `assert false` is excluded because it is a common OCaml proof idiom for unreachable arms. | Target zero. |
 | `wildcard_silent_defaults` | Line-leading catch-all arms that collapse to permissive defaults like `None`, `[]`, `Ok`, `true`, `false`, `()`, or `""`. | Reduce by replacing permissive catch-all defaults with typed/default-explicit handling. |
 

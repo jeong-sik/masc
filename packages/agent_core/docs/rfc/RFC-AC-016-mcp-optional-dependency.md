@@ -1,4 +1,4 @@
-# RFC-OAS-016: Make `mcp_protocol` an Optional Dependency
+# RFC-AC-016: Make `mcp_protocol` an Optional Dependency
 
 | | |
 |---|---|

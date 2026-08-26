@@ -1,4 +1,4 @@
-# RFC-OAS-017: Coordinator-Shape Leak in the Public SDK Surface
+# RFC-AC-017: Coordinator-Shape Leak in the Public SDK Surface
 
 | Field | Value |
 |---|---|

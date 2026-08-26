@@ -4,9 +4,9 @@ Date: 2026-06-14
 
 ## Purpose
 
-OAS exposes typed continuation boundaries so hosts can accept user input while
+agent_core exposes typed continuation boundaries so hosts can accept user input while
 an agent is busy without inserting it into unsafe positions in the provider
-history. The host (the downstream coordinator) owns the queue and UI. OAS owns
+history. The host (the downstream coordinator) owns the queue and UI. agent_core owns
 the boundary policy.
 
 ## Boundaries

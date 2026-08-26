@@ -10,7 +10,7 @@
     [stream_idle_timeout_sec] additionally substitutes a fail-safe liveness floor
     ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128), and
     [first_event_timeout_sec] substitutes {!first_event_failsafe_floor_sec}
-    (RFC-OAS-037); an explicit value still overrides either. *)
+    (RFC-AC-037); an explicit value still overrides either. *)
 
 type source =
   | Env
@@ -19,7 +19,7 @@ type source =
   | Failsafe_floor
       (** The compiled default was [None] (unset) and a fail-safe liveness
           floor was substituted. Applies to [stream_idle_timeout_sec]
-          (RFC-0345) and [first_event_timeout_sec] (RFC-OAS-037). *)
+          (RFC-0345) and [first_event_timeout_sec] (RFC-AC-037). *)
 
 type 'a field = {
   value : 'a;
@@ -67,14 +67,14 @@ val first_event_failsafe_floor_sec : float
     (600.0 = 10 min). Substituted for [first_event_timeout_sec] when no
     explicit value is configured, so the first-event wait is never governed by
     the much shorter inter-line idle knob through AGENT_CORE's fallback chain
-    (RFC-OAS-037; measured silent prefill: 152s mimo 1M-context, ~200-525s
+    (RFC-AC-037; measured silent prefill: 152s mimo 1M-context, ~200-525s
     local MLX 20.7K-token keeper prompts). A universal liveness ceiling, not a
     per-provider tuned default; an explicit env/toml value overrides it. *)
 
 val first_event_timeout_sec : unit -> float option
 (** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. Bounds
     only the wait for the FIRST provider event; [stream_idle_timeout_sec] arms
-    the inter-line gaps after it (RFC-OAS-037). Always [Some] at runtime: an
+    the inter-line gaps after it (RFC-AC-037). Always [Some] at runtime: an
     explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] (or runtime.toml
     [turn.first_event_timeout_sec]) is honoured verbatim; when unset,
     {!first_event_failsafe_floor_sec} is substituted. The [float option]

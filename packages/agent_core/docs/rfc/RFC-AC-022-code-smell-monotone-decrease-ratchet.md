@@ -1,4 +1,4 @@
-# RFC-OAS-022: Code-Smell Monotone-Decrease Ratchet
+# RFC-AC-022: Code-Smell Monotone-Decrease Ratchet
 
 **Status**: Draft
 **Date**: 2026-05-20
@@ -179,7 +179,7 @@ counts rather than monotone-decrease).
 - It does not replace `dune -w +8` strict warnings or
   bisect coverage floors.
 - It does not back-fill the existing godfiles toward 300-line
-  decomposition — that is RFC-OAS-017 / future work.
+  decomposition — that is RFC-AC-017 / future work.
 
 ## 9. Risks
 
@@ -200,7 +200,7 @@ counts rather than monotone-decrease).
 
 The two RFCs share script structure but not metric definitions:
 
-| metric (slot)      | masc-mcp (RFC-0146)                       | OAS (RFC-OAS-022)                                                                                  |
+| metric (slot)      | masc-mcp (RFC-0146)                       | OAS (RFC-AC-022)                                                                                  |
 |--------------------|-------------------------------------------|----------------------------------------------------------------------------------------------------|
 | godfile            | `find lib -name "*.ml"` (≥ 1000 LoC)      | `find lib -name "*.ml" -o -name "*.mli"` (≥ 1000 LoC) — `.mli` included                            |
 | catch_all          | same                                      | same                                                                                                |

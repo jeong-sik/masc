@@ -1,4 +1,4 @@
-# RFC-OAS-002: OTel Metric Naming Convention & Eval Feed Schema
+# RFC-AC-002: OTel Metric Naming Convention & Eval Feed Schema
 
 **Status**: Draft — Part A and Part B still apply. Part C is obsolete. Phase 2 is partially superseded and Phase 3 is obsolete; see the per-phase notes below and PR #2689.
 **Date**: 2026-04-13

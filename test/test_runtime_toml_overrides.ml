@@ -342,7 +342,7 @@ let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
 let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
-  (* RFC-OAS-037: with no explicit env/toml value the resolver substitutes the
+  (* RFC-AC-037: with no explicit env/toml value the resolver substitutes the
      silent-prefill liveness ceiling (not [None]). Without it AGENT_CORE's
      first-event resolver falls through to the much shorter inter-line idle
      value and any provider that prefills silently past it dies at

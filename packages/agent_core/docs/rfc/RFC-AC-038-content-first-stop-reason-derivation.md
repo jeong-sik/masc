@@ -1,4 +1,4 @@
-# RFC-OAS-038: Content-first stop_reason derivation (consolidate the reconcile case-pile)
+# RFC-AC-038: Content-first stop_reason derivation (consolidate the reconcile case-pile)
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
 | Target | `agent_sdk` (oas) |
-| Related | [[RFC-OAS-035]] (openai-compat thinking-token / empty-completion failclose), oas#2728 (EndTurn+tool-blocks patch — the motivating instance this RFC consolidates) |
+| Related | [[RFC-AC-035]] (openai-compat thinking-token / empty-completion failclose), oas#2728 (EndTurn+tool-blocks patch — the motivating instance this RFC consolidates) |
 
 ## 0. Summary
 

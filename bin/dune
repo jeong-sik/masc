@@ -215,6 +215,12 @@
  (libraries masc masc.operator masc.masc_core yojson))
 
 (library
+ (name masc_tui_ask_projection)
+ (wrapped false)
+ (modules masc_tui_ask_projection)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_task_selection)
  (wrapped false)
  (modules masc_tui_task_selection)

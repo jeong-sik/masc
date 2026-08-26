@@ -29,3 +29,14 @@ let theme ~base_path =
   match doc_of_path (runtime_toml_path ~base_path) with
   | None -> None
   | Some doc -> theme_of_doc doc
+
+(* Whether tables draw their outer box, [tui].table_frame. Absent reads as
+   "no", which is what the pane drew before the key existed: the box is paid
+   for out of the columns, and taking a cell of content from a reader who did
+   not ask is the change that needs the stronger reason. *)
+let table_frame_of_doc doc = Keeper_toml_loader.toml_bool_opt doc "tui.table_frame"
+
+let table_frame ~base_path =
+  match doc_of_path (runtime_toml_path ~base_path) with
+  | None -> None
+  | Some doc -> table_frame_of_doc doc

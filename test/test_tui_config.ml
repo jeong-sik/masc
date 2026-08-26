@@ -31,6 +31,34 @@ let cases =
         check_opt "none" None (theme_of ""))
   ]
 
+(* The box a table draws, [tui].table_frame. Absence has to read as "no" the
+   same way an absent theme reads as "follow the terminal": the frame is paid
+   for out of the columns, and a reader who never asked for it should not lose
+   a cell of content to it. *)
+let frame_of s = Config.table_frame_of_doc (doc_of s)
+let check_frame = Alcotest.(check (option bool))
+
+let frame_cases =
+  [ Alcotest.test_case "reads [tui] table_frame" `Quick (fun () ->
+        check_frame "true" (Some true)
+          (frame_of "[tui]\ntable_frame = true\n"))
+  ; Alcotest.test_case "off reads through as off, not as absent" `Quick
+      (fun () ->
+        check_frame "false" (Some false)
+          (frame_of "[tui]\ntable_frame = false\n"))
+  ; Alcotest.test_case "no [tui] table -> None" `Quick (fun () ->
+        check_frame "none" None
+          (frame_of "[turn]\nstream_idle_timeout_sec = 120\n"))
+  ; Alcotest.test_case "[tui] present but no key -> None" `Quick (fun () ->
+        check_frame "none" None (frame_of "[tui]\ntheme = \"monokai\"\n"))
+  ; (* One table, two keys, neither reading the other's. *)
+    Alcotest.test_case "the theme and the frame do not shadow each other"
+      `Quick (fun () ->
+        let doc = "[tui]\ntheme = \"monokai\"\ntable_frame = true\n" in
+        check_opt "theme" (Some "monokai") (theme_of doc);
+        check_frame "frame" (Some true) (frame_of doc))
+  ]
+
 (* The IO path: a runtime.toml under [base]/.masc/config is the same file the
    server reads, so [theme ~base_path] must resolve to it. A missing file reads
    as no choice, not a crash. *)
@@ -70,4 +98,7 @@ let io_cases =
 
 let () =
   Alcotest.run "tui_config"
-    [ ("theme_of_doc", cases); ("theme_io", io_cases) ]
+    [ ("theme_of_doc", cases)
+    ; ("table_frame_of_doc", frame_cases)
+    ; ("theme_io", io_cases)
+    ]

@@ -6901,6 +6901,11 @@ let main () =
        state.theme_choice <- Some name
    | Some _ | None -> ());
 
+  (* Same file, same moment: the box a table draws is a look, and a look that
+     survives a restart is the point of storing it. *)
+  set_table_frame
+    (Option.value (Masc_tui_config.table_frame ~base_path) ~default:false);
+
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   (* Read beside [old_term] because the record cannot carry it. The literal-next

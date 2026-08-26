@@ -80,6 +80,13 @@ let data_unreliable_row ~cols err =
   ^ Ansi.reset
 ;;
 
+(* Whether tables are drawn with an outer box, read once from [tui].table_frame
+   at start-up. Held here rather than threaded through every caller of
+   [chat_markdown_palette]: the palette is built fresh on each render, so this
+   is the one setting projected into it rather than a second copy of it. *)
+let table_frame_enabled = ref false
+let set_table_frame enabled = table_frame_enabled := enabled
+
 (* Terminal dress for the markdown a keeper writes. The marker is the noise:
    a backticked identifier should read as the identifier, and a fenced diff
    should keep the alignment that made it worth fencing. Colours stay inside
@@ -114,6 +121,8 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; quote_gutter = "\xe2\x96\x8f "
   ; table_header = (Ansi.bold, closing)
   ; table_gutter = " \xe2\x94\x82 "
+  ; table_rule_gutter = "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
+  ; table_frame = !table_frame_enabled
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)

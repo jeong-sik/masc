@@ -28,6 +28,7 @@ import { route } from '../router'
 import { dashboardWsConnected } from '../dashboard-ws-state'
 import { tweaksDensity } from './tweaks-panel'
 import { notificationDeliveryError, notifyRules } from '../notifications'
+import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 const runtimeProviderProtocols = [
@@ -381,28 +382,25 @@ function stubEmptyApi() {
     reloaded: false,
     provider_protocols: runtimeProviderProtocols,
   })
-  apiMock.patchRuntimeMediaFailover.mockImplementation(async () => ({
+  apiMock.patchRuntimeMediaFailover.mockImplementation(async () => committedRuntimeTomlConfigFixture({
     ok: true,
     path: MOCK_RUNTIME_PATH,
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
-    reloaded: true,
     provider_protocols: runtimeProviderProtocols,
   }))
-  apiMock.patchRuntimeRouting.mockImplementation(async () => ({
+  apiMock.patchRuntimeRouting.mockImplementation(async () => committedRuntimeTomlConfigFixture({
     ok: true,
     path: MOCK_RUNTIME_PATH,
     file_name: 'runtime.toml',
     source_text: '[runtime]\ndefault = "rt-a"\n',
-    reloaded: true,
     provider_protocols: runtimeProviderProtocols,
   }))
-  apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
+  apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => committedRuntimeTomlConfigFixture({
     ok: true,
     path: MOCK_RUNTIME_PATH,
     file_name: 'runtime.toml',
     source_text: sourceText,
-    reloaded: true,
     provider_protocols: runtimeProviderProtocols,
   }))
 }
@@ -1464,6 +1462,10 @@ describe('SettingsSurface', () => {
     await fireEvent.input(select, { target: { value: 'rt-b' } })
     await waitFor(() => {
       expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b')
+      expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
+        .toContain('Skill catalog 게시됨')
+      expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
+        .toContain('파일 내구성 확인됨')
     })
   })
 
@@ -1530,6 +1532,8 @@ describe('SettingsSurface', () => {
       expect(apiMock.patchRuntimeMediaFailover).toHaveBeenCalledWith(['rt-b', 'rt-c'])
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')?.textContent)
         .toContain('rt-c')
+      expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
+        .toContain('Skill catalog 게시됨')
     })
   })
 

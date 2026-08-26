@@ -196,6 +196,7 @@ val run_turn
        (base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
   -> user_message:string
   -> turn_kind:Turn_record.turn_kind
+  -> skill_snapshot:Skill_catalog_snapshot.t
   -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation
@@ -230,3 +231,7 @@ val run_turn
   -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit
   -> (run_result, Agent_core.Error.t) result
+
+val capture_skill_snapshot : base_path:string -> Skill_catalog_snapshot.t
+(** Capture one immutable Skill revision outside provider retry/failover loops.
+    Every attempt of the same logical turn must receive the same value. *)

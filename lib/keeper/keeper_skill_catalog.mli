@@ -17,6 +17,12 @@ type surface =
   | Instruction
   | Composition of Keeper_tool_composition_catalog.entry
 
+type provenance = private
+  { identity : Skill_catalog_snapshot.identity
+  ; source : Skill_source_config.source
+  ; directory : string
+  }
+
 type skill = private
   { name : string
   ; description : string
@@ -26,7 +32,13 @@ type skill = private
   ; conformance : Agent_core.Skill_document.conformance
         (** Specification diagnostics retained for the turn and operator
             projections. Runtime-compatible documents remain usable. *)
+  ; provenance : provenance option
   ; surface : surface
+  }
+
+type composition = private
+  { entry : Keeper_tool_composition_catalog.entry
+  ; provenance : provenance option
   }
 
 type t
@@ -66,6 +78,11 @@ type rejected_document = private
   ; error : error
   }
 
+type projection_diagnostic = private
+  { identity : Skill_catalog_snapshot.identity
+  ; error : error
+  }
+
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
@@ -78,6 +95,15 @@ val partition_documents :
     A rejected document never contributes a tool or instruction. Every caller
     receives the rejection list explicitly, so one bad optional Skill cannot
     stop unrelated Keeper turns or disappear silently. *)
+
+val of_snapshot :
+  Skill_catalog_snapshot.t -> t * projection_diagnostic list
+(** Project effective snapshot entries into the temporary composition-tool
+    catalog. Snapshot order and exact source provenance are preserved. A
+    composition projection failure keeps the frozen document as an instruction
+    Skill and returns a diagnostic. Removed invocation-policy fields still omit
+    that entry; neither failure rejects the snapshot or an unrelated Keeper
+    turn. *)
 
 val empty : t
 val skills : t -> skill list
@@ -92,6 +118,11 @@ val instruction_names_for :
 (** Resolve task-declared names and return only instruction skill names in
     declaration order. Composition names are valid but omitted. *)
 
+val compositions : t -> composition list
+(** Model-invocable composition entries with their exact snapshot provenance.
+    Catalogs built directly from document strings carry [None]; production
+    snapshot projections carry [Some provenance]. *)
+
 val composition_entries : t -> Keeper_tool_composition_catalog.entry list
 (** The validated composition entries declared by composition skills, in
     catalog (name) order. The tool surface materializes these directly from
@@ -100,4 +131,7 @@ val composition_entries : t -> Keeper_tool_composition_catalog.entry list
 val surface_to_string : surface -> string
 (** ["instruction"] or ["composition"] — diagnostics and dashboard wire. *)
 
+val provenance_to_yojson : provenance -> Yojson.Safe.t
+
+val error_code : error -> string
 val error_to_string : error -> string

@@ -3,7 +3,7 @@
 (test
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
- (libraries masc masc_test_deps alcotest))
+ (libraries masc masc_test_deps alcotest masc.skill_config masc.skill_snapshot))
 
 (test
  (name test_task_skill_reference)
@@ -734,7 +734,8 @@
   test_operator_surface_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn))
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_snapshot))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
@@ -2748,6 +2749,11 @@
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
+ (name test_tui_runtime_config_receipt)
+ (modules test_tui_runtime_config_receipt)
+ (libraries alcotest masc_tui_runtime_config_receipt yojson))
+
+(test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries
@@ -3347,6 +3353,20 @@
   masc.skill_snapshot
   masc.skill_config
   unix))
+
+(test
+ (name test_keeper_skill_activation_ledger)
+ (modules test_keeper_skill_activation_ledger)
+ (libraries
+  alcotest
+  digestif
+  masc
+  masc.keeper_registry
+  masc.masc_types
+  masc.skill_snapshot
+  masc.skill_config
+  unix
+  yojson))
 
 (test
  (name test_asset_sync_report)

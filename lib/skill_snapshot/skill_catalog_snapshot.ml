@@ -13,6 +13,10 @@ type config_revision = string
 type catalog_revision = string
 type snapshot_revision = string
 
+type revision_error =
+  | Invalid_revision_length of { actual : int }
+  | Invalid_revision_character of { index : int; found : char }
+
 type identity =
   { source_id : Skill_source_config.source_id
   ; package_id : package_id
@@ -139,6 +143,26 @@ let config_revision_to_string revision = revision
 let catalog_revision_to_string revision = revision
 let snapshot_revision_to_string revision = revision
 let equal_snapshot_revision = String.equal
+
+let revision_of_string value =
+  let expected_length = 64 in
+  let actual = String.length value in
+  if actual <> expected_length
+  then Error (Invalid_revision_length { actual })
+  else
+    let rec validate index =
+      if index = actual
+      then Ok value
+      else
+        match value.[index] with
+        | '0' .. '9' | 'a' .. 'f' -> validate (index + 1)
+        | found -> Error (Invalid_revision_character { index; found })
+    in
+    validate 0
+;;
+
+let content_revision_of_string value = revision_of_string value
+let snapshot_revision_of_string value = revision_of_string value
 
 let digest_fields fields =
   let buffer = Buffer.create (List.length fields) in

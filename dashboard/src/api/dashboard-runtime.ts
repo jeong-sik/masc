@@ -1037,12 +1037,69 @@ export interface RuntimeTomlConfig {
   message?: string | null
   reason?: string | null
   issues?: unknown
+  state?: 'committed'
+  commit?: RuntimeConfigCommit
 }
+
+export interface RuntimeConfigCommit {
+  source_revision: string
+  order: string
+  durability: 'durable' | 'unconfirmed'
+}
+
+export type RuntimeSkillApplication =
+  | { state: 'invalid_workspace' }
+  | { state: 'workspace_retired'; input_source_revision: string | null }
+  | { state: 'superseded'; commit_order: string; applied_order: string }
+  | {
+      state: 'published' | 'unchanged'
+      input_source_revision: string
+      snapshot_revision: string
+      catalog_revision: string
+      config_state: 'configured' | 'rejected' | 'unreadable'
+    }
+
+export type CommittedRuntimeSkillApplication =
+  | { state: 'invalid_workspace' }
+  | { state: 'workspace_retired'; input_source_revision: string }
+  | { state: 'superseded'; commit_order: string; applied_order: string }
+  | {
+      state: 'published' | 'unchanged'
+      input_source_revision: string
+      snapshot_revision: string
+      catalog_revision: string
+      config_state: 'configured' | 'rejected' | 'unreadable'
+    }
 
 export interface RuntimeConfigApplicationLane {
   status: string
   requires_restart: boolean
   applied_at: string | number | null
+}
+
+export type RuntimeConfigRoutingStatus = 'active' | 'applied'
+export type RuntimeConfigKeeperOverlayStatus =
+  | 'not_configured'
+  | 'pending_restart'
+  | 'applied'
+  | 'preempted_by_env'
+  | 'mixed'
+
+export interface CommittedRuntimeConfigApplicationLane
+  extends RuntimeConfigApplicationLane {
+  status: RuntimeConfigRoutingStatus
+}
+
+export interface CommittedRuntimeConfigKeeperOverlayApplication
+  extends RuntimeConfigKeeperOverlayApplication {
+  status: RuntimeConfigKeeperOverlayStatus
+}
+
+export interface CommittedRuntimeConfigApplication extends RuntimeConfigApplication {
+  operation: string
+  routing: CommittedRuntimeConfigApplicationLane
+  keeper_overlay: CommittedRuntimeConfigKeeperOverlayApplication
+  skills: CommittedRuntimeSkillApplication
 }
 
 export interface RuntimeConfigKeeperOverlayApplication extends RuntimeConfigApplicationLane {
@@ -1056,6 +1113,15 @@ export interface RuntimeConfigApplication {
   operation: string
   routing: RuntimeConfigApplicationLane
   keeper_overlay: RuntimeConfigKeeperOverlayApplication
+  skills?: RuntimeSkillApplication
+}
+
+export interface CommittedRuntimeTomlConfig extends RuntimeTomlConfig {
+  ok: true
+  path: string
+  state: 'committed'
+  commit: RuntimeConfigCommit
+  application: CommittedRuntimeConfigApplication
 }
 
 export interface RuntimeConfigValidationIssue {
@@ -1336,7 +1402,8 @@ const OFFICIAL_CLIENT_KINDS = new Set<DashboardOfficialClientKind>([
 const OFFICIAL_CLIENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const OFFICIAL_CLIENT_SHA256 = /^[0-9a-f]{64}$/
 
-function hasExactKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
+function hasExactKeys(raw: unknown, allowed: readonly string[]): raw is Record<string, unknown> {
+  if (!isRecord(raw)) return false
   const keys = Object.keys(raw)
   return keys.length === allowed.length && keys.every(key => allowed.includes(key))
 }
@@ -1717,6 +1784,216 @@ function normalizeRuntimeTomlConfig(raw: unknown): RuntimeTomlConfig {
   }
 }
 
+function decodeRuntimeConfigCommit(raw: unknown): RuntimeConfigCommit | undefined {
+  if (!hasExactKeys(raw, ['source_revision', 'order', 'durability'])) return undefined
+  const sourceRevision = asString(raw.source_revision)
+  const order = asString(raw.order)
+  const durability = asString(raw.durability)
+  if (!sourceRevision || !order || (durability !== 'durable' && durability !== 'unconfirmed')) {
+    return undefined
+  }
+  return { source_revision: sourceRevision, order, durability }
+}
+
+function decodeRuntimeSkillApplication(raw: unknown): RuntimeSkillApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const state = asString(raw.state)
+  if (state === 'invalid_workspace') return { state }
+  if (state === 'workspace_retired') {
+    if (!Object.hasOwn(raw, 'input_source_revision')) return undefined
+    const inputSourceRevision = raw.input_source_revision
+    if (inputSourceRevision !== null && typeof inputSourceRevision !== 'string') return undefined
+    return { state, input_source_revision: inputSourceRevision }
+  }
+  if (state === 'superseded') {
+    const commitOrder = asString(raw.commit_order)
+    const appliedOrder = asString(raw.applied_order)
+    return commitOrder && appliedOrder
+      ? { state, commit_order: commitOrder, applied_order: appliedOrder }
+      : undefined
+  }
+  if (state !== 'published' && state !== 'unchanged') return undefined
+  const inputSourceRevision = asString(raw.input_source_revision)
+  const snapshotRevision = asString(raw.snapshot_revision)
+  const catalogRevision = asString(raw.catalog_revision)
+  const configState = asString(raw.config_state)
+  if (
+    !inputSourceRevision
+    || !snapshotRevision
+    || !catalogRevision
+    || (configState !== 'configured' && configState !== 'rejected' && configState !== 'unreadable')
+  ) return undefined
+  return {
+    state,
+    input_source_revision: inputSourceRevision,
+    snapshot_revision: snapshotRevision,
+    catalog_revision: catalogRevision,
+    config_state: configState,
+  }
+}
+
+function decodeCommittedRuntimeSkillApplication(
+  raw: unknown,
+  commit: RuntimeConfigCommit,
+): CommittedRuntimeSkillApplication | undefined {
+  if (!isRecord(raw)) return undefined
+  const state = asString(raw.state)
+  if (state === 'invalid_workspace') {
+    return hasExactKeys(raw, ['state']) ? { state } : undefined
+  }
+  if (state === 'workspace_retired') {
+    if (!hasExactKeys(raw, ['state', 'input_source_revision'])) return undefined
+    const inputSourceRevision = asString(raw.input_source_revision)
+    return inputSourceRevision === commit.source_revision
+      ? { state, input_source_revision: inputSourceRevision }
+      : undefined
+  }
+  if (state === 'superseded') {
+    if (!hasExactKeys(raw, ['state', 'commit_order', 'applied_order'])) return undefined
+    const commitOrder = asString(raw.commit_order)
+    const appliedOrder = asString(raw.applied_order)
+    return commitOrder === commit.order && appliedOrder
+      ? { state, commit_order: commitOrder, applied_order: appliedOrder }
+      : undefined
+  }
+  if (state !== 'published' && state !== 'unchanged') return undefined
+  if (!hasExactKeys(raw, [
+    'state',
+    'input_source_revision',
+    'snapshot_revision',
+    'catalog_revision',
+    'config_state',
+  ])) return undefined
+  const inputSourceRevision = asString(raw.input_source_revision)
+  const snapshotRevision = asString(raw.snapshot_revision)
+  const catalogRevision = asString(raw.catalog_revision)
+  const configState = asString(raw.config_state)
+  if (
+    inputSourceRevision !== commit.source_revision
+    || !snapshotRevision
+    || !catalogRevision
+    || (configState !== 'configured' && configState !== 'rejected' && configState !== 'unreadable')
+  ) return undefined
+  return {
+    state,
+    input_source_revision: inputSourceRevision,
+    snapshot_revision: snapshotRevision,
+    catalog_revision: catalogRevision,
+    config_state: configState,
+  }
+}
+
+function strictStringArray(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw) || raw.some(value => typeof value !== 'string')) return undefined
+  return [...raw]
+}
+
+function strictAppliedAt(raw: unknown): string | number | null | undefined {
+  if (raw === null || (typeof raw === 'string' && raw !== '')) return raw
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined
+}
+
+function decodeCommittedRuntimeApplicationLane(
+  raw: unknown,
+): CommittedRuntimeConfigApplicationLane | undefined {
+  if (!hasExactKeys(raw, ['status', 'requires_restart', 'applied_at'])) return undefined
+  const status = asString(raw.status)
+  const requiresRestart = raw.requires_restart
+  const appliedAt = strictAppliedAt(raw.applied_at)
+  if (
+    (status !== 'active' && status !== 'applied')
+    || typeof requiresRestart !== 'boolean'
+    || appliedAt === undefined
+  ) return undefined
+  return { status, requires_restart: requiresRestart, applied_at: appliedAt }
+}
+
+function decodeCommittedRuntimeKeeperOverlay(
+  raw: unknown,
+): CommittedRuntimeConfigKeeperOverlayApplication | undefined {
+  if (!hasExactKeys(raw, [
+    'status',
+    'configured_count',
+    'requires_restart',
+    'pending_keys',
+    'applied_keys',
+    'preempted_keys',
+    'applied_at',
+  ])) return undefined
+  const status = asString(raw.status)
+  const requiresRestart = raw.requires_restart
+  const appliedAt = strictAppliedAt(raw.applied_at)
+  const configuredCount = raw.configured_count
+  const pendingKeys = strictStringArray(raw.pending_keys)
+  const appliedKeys = strictStringArray(raw.applied_keys)
+  const preemptedKeys = strictStringArray(raw.preempted_keys)
+  if (
+    (status !== 'not_configured'
+      && status !== 'pending_restart'
+      && status !== 'applied'
+      && status !== 'preempted_by_env'
+      && status !== 'mixed')
+    || typeof requiresRestart !== 'boolean'
+    || appliedAt === undefined
+    || typeof configuredCount !== 'number'
+    || !Number.isInteger(configuredCount)
+    || configuredCount < 0
+    || !pendingKeys
+    || !appliedKeys
+    || !preemptedKeys
+  ) return undefined
+  return {
+    status,
+    requires_restart: requiresRestart,
+    applied_at: appliedAt,
+    configured_count: configuredCount,
+    pending_keys: pendingKeys,
+    applied_keys: appliedKeys,
+    preempted_keys: preemptedKeys,
+  }
+}
+
+function decodeCommittedRuntimeConfigApplication(
+  raw: unknown,
+  commit: RuntimeConfigCommit,
+): CommittedRuntimeConfigApplication | undefined {
+  if (!hasExactKeys(raw, ['operation', 'routing', 'keeper_overlay', 'skills'])) return undefined
+  const operation = asString(raw.operation)
+  const routing = decodeCommittedRuntimeApplicationLane(raw.routing)
+  const keeperOverlay = decodeCommittedRuntimeKeeperOverlay(raw.keeper_overlay)
+  const skills = decodeCommittedRuntimeSkillApplication(raw.skills, commit)
+  if (!operation || !routing || !keeperOverlay || !skills) return undefined
+  return { operation, routing, keeper_overlay: keeperOverlay, skills }
+}
+
+function decodeCommittedRuntimeTomlConfig(raw: unknown): CommittedRuntimeTomlConfig {
+  if (
+    !isRecord(raw)
+    || raw.state !== 'committed'
+    || raw.ok !== true
+    || typeof raw.path !== 'string'
+    || typeof raw.source_text !== 'string'
+  ) {
+    throw new Error('runtime.toml 커밋 영수증이 없습니다')
+  }
+  const commit = decodeRuntimeConfigCommit(raw.commit)
+  const normalized = normalizeRuntimeTomlConfig(raw)
+  const application = commit
+    ? decodeCommittedRuntimeConfigApplication(raw.application, commit)
+    : undefined
+  if (!commit || !application) {
+    throw new Error('유효하지 않은 runtime.toml 적용 영수증')
+  }
+  return {
+    ...normalized,
+    ok: true,
+    path: raw.path,
+    state: 'committed',
+    commit,
+    application,
+  }
+}
+
 function appliedAt(raw: unknown): string | number | null {
   return asString(raw) ?? asNumber(raw) ?? null
 }
@@ -1743,6 +2020,7 @@ function normalizeRuntimeConfigApplication(raw: unknown): RuntimeConfigApplicati
       applied_keys: asStringArray(keeperOverlay.applied_keys) ?? [],
       preempted_keys: asStringArray(keeperOverlay.preempted_keys) ?? [],
     },
+    skills: decodeRuntimeSkillApplication(raw.skills),
   }
 }
 
@@ -1858,11 +2136,11 @@ export async function fetchRuntimeResolved(
   return parseRuntimeResolvedResponse(raw)
 }
 
-export async function saveRuntimeTomlConfig(sourceText: string): Promise<RuntimeTomlConfig> {
+export async function saveRuntimeTomlConfig(sourceText: string): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/raw', {
     source_text: sourceText,
-  }).then(normalizeRuntimeTomlConfig)
+  }).then(decodeCommittedRuntimeTomlConfig)
 }
 
 export async function previewRuntimeTomlConfig(sourceText: string): Promise<RuntimeConfigPreview> {
@@ -1887,31 +2165,31 @@ export type RuntimeRoutingLane =
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
   runtimeId: string | null,
-): Promise<RuntimeTomlConfig> {
+): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: runtimeId,
-  }).then(normalizeRuntimeTomlConfig)
+  }).then(decodeCommittedRuntimeTomlConfig)
 }
 
 export async function patchRuntimeMediaFailover(
   runtimeIds: readonly string[],
-): Promise<RuntimeTomlConfig> {
+): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane: 'media_failover',
     runtime_ids: [...runtimeIds],
-  }).then(normalizeRuntimeTomlConfig)
+  }).then(decodeCommittedRuntimeTomlConfig)
 }
 
 export async function patchRuntimeAssignment(
   keeperName: string,
   runtimeId: string | null,
-): Promise<RuntimeTomlConfig> {
+): Promise<CommittedRuntimeTomlConfig> {
   await ensureDevToken()
   return post<unknown>('/api/v1/runtime/config/assignment', {
     keeper_name: keeperName,
     runtime_id: runtimeId,
-  }).then(normalizeRuntimeTomlConfig)
+  }).then(decodeCommittedRuntimeTomlConfig)
 }

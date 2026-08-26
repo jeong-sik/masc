@@ -257,6 +257,8 @@ let update_keeper ?(preserve_prompt_defaults = false)
                ~keeper_name:p.name
                ~runtime_id
                ()
+             (* See [Runtime.set_runtime_id_for_keeper]: the persisted receipt is the effect. *)
+             |> Result.map ignore
          in
          (match runtime_assignment_result with
           | Error err ->

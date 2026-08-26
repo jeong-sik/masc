@@ -418,7 +418,7 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
          ~runtime_id:"runpod_mtp.qwen"
          ()
      with
-     | Ok () -> ()
+     | Ok _receipt -> ()
      | Error msg -> Alcotest.failf "set_runtime_id_for_keeper failed: %s" msg);
     Alcotest.(check bool)
       "runtime.toml assignment rewritten"
@@ -724,7 +724,7 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
          ~runtime_id:"missing.runtime"
          ()
      with
-     | Ok () -> Alcotest.fail "expected unknown runtime assignment to fail"
+     | Ok _receipt -> Alcotest.fail "expected unknown runtime assignment to fail"
      | Error msg ->
        Alcotest.(check bool)
          "error mentions unresolved assignment"
@@ -743,7 +743,7 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
 let test_runtime_assignment_writer_clears_assignment () =
   with_runtime_file (fun path ->
     (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest" () with
-     | Ok () -> ()
+     | Ok _receipt -> ()
      | Error msg -> Alcotest.failf "clear_runtime_id_for_keeper failed: %s" msg);
     Alcotest.(check bool)
       "runtime.toml assignment removed"
@@ -758,7 +758,7 @@ let test_runtime_assignment_writer_clears_assignment () =
 let test_runtime_route_writer_updates_default () =
   with_runtime_file (fun path ->
     (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
-     | Ok () -> ()
+     | Ok _receipt -> ()
      | Error msg -> Alcotest.failf "set_runtime_default failed: %s" msg);
     Alcotest.(check bool)
       "runtime.toml default rewritten"
@@ -774,7 +774,7 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
   with_runtime_file (fun path ->
     let before = Fs_compat.load_file path in
     (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
-     | Ok () -> Alcotest.fail "expected unknown default runtime to fail"
+     | Ok _receipt -> Alcotest.fail "expected unknown default runtime to fail"
      | Error msg ->
        Alcotest.(check bool)
          "error mentions unresolved default"
@@ -798,7 +798,7 @@ let test_runtime_route_writer_updates_media_failover () =
          ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
          ()
      with
-     | Ok () -> ()
+     | Ok _receipt -> ()
      | Error msg -> Alcotest.failf "set_runtime_media_failover failed: %s" msg);
     Alcotest.(check (list string))
       "media failover cache"
@@ -816,7 +816,7 @@ let test_runtime_route_writer_updates_media_failover () =
          ~runtime_ids:[]
          ()
      with
-     | Ok () -> ()
+     | Ok _receipt -> ()
      | Error msg -> Alcotest.failf "clear runtime media_failover failed: %s" msg);
     Alcotest.(check (list string))
       "media failover cleared"
@@ -830,22 +830,45 @@ let test_runtime_route_writer_updates_media_failover () =
 
 let test_runtime_config_text_loads_runtime_toml () =
   with_runtime_file (fun path ->
-    match Runtime.load_config_text ~runtime_config_path:path () with
-    | Error msg -> Alcotest.failf "load_config_text failed: %s" msg
-    | Ok (loaded_path, source_text) ->
-      Alcotest.(check string) "loaded path" path loaded_path;
-      Alcotest.(check string) "loaded source text" runtime_config source_text)
+    match Runtime.load_config_observation ~runtime_config_path:path () with
+    | Error msg -> Alcotest.failf "load_config_observation failed: %s" msg
+    | Ok observation ->
+      Alcotest.(check string) "loaded path" path observation.path;
+      Alcotest.(check string)
+        "loaded source text"
+        runtime_config
+        observation.source_text)
 ;;
 
 let test_runtime_config_text_save_reloads_runtime_cache () =
   with_runtime_file (fun path ->
-    (match
-       Runtime.save_config_text
-         ~runtime_config_path:path
-         runtime_config_openai_default
-     with
-     | Ok () -> ()
-     | Error msg -> Alcotest.failf "save_config_text failed: %s" msg);
+    let receipt =
+      match
+        Runtime.save_config_text
+          ~runtime_config_path:path
+          runtime_config_openai_default
+      with
+      | Ok receipt -> receipt
+      | Error msg -> Alcotest.failf "save_config_text failed: %s" msg
+    in
+    Alcotest.(check string) "receipt path" path receipt.observation.path;
+    Alcotest.(check string)
+      "receipt exact source"
+      runtime_config_openai_default
+      receipt.observation.source_text;
+    (match receipt.durability with
+     | Runtime.Durable -> ()
+     | Durability_unconfirmed _ ->
+       Alcotest.fail "ordinary save unexpectedly reported uncertain durability");
+    let loaded_observation =
+      match Runtime.load_config_observation ~runtime_config_path:path () with
+      | Ok observation -> observation
+      | Error msg -> Alcotest.failf "load_config_observation failed: %s" msg
+    in
+    Alcotest.(check string)
+      "receipt revision equals reloaded revision"
+      (Runtime.config_source_revision_to_string receipt.observation.source_revision)
+      (Runtime.config_source_revision_to_string loaded_observation.source_revision);
     Alcotest.(check string)
       "runtime.toml raw source saved exactly"
       runtime_config_openai_default
@@ -864,7 +887,7 @@ let test_runtime_config_text_save_rejects_invalid_without_write () =
          ~runtime_config_path:path
          "[runtime]\ndefault = \"missing.runtime\"\n"
      with
-     | Ok () -> Alcotest.fail "expected invalid raw runtime.toml to fail"
+     | Ok _receipt -> Alcotest.fail "expected invalid raw runtime.toml to fail"
      | Error msg ->
        Alcotest.(check bool)
          "error mentions unresolved default"

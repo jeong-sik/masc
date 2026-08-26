@@ -1591,6 +1591,9 @@ let run_production_keeper_turn ~base_path ~trace_id ~user_message ~cli_path ~mod
                                     })
                                 ~user_message
                                 ~turn_kind:Turn_record.Direct
+                                ~skill_snapshot:
+                                  (Skill_catalog_snapshot.config_unreadable
+                                     ~detail:"test fixture has no Skill publication")
                                 ~runtime_id:"codex.codex"
                                 ()))))))
 ;;

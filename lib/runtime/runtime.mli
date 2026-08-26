@@ -21,6 +21,29 @@ type t =
         dispatch never used (PR #28219 review). *)
   }
 
+type config_source_revision = private Config_source_revision of string
+type config_commit_order = private Config_commit_order of int64
+
+type config_observation = private
+  { path : string
+  ; source_text : string
+  ; source_revision : config_source_revision
+  }
+
+type config_durability =
+  | Durable
+  | Durability_unconfirmed of { detail : string }
+
+type config_commit_receipt = private
+  { observation : config_observation
+  ; durability : config_durability
+  ; order : config_commit_order
+  }
+
+val config_source_revision_to_string : config_source_revision -> string
+val config_commit_order_to_string : config_commit_order -> string
+val compare_config_commit_order : config_commit_order -> config_commit_order -> int
+
 val id_of_binding : binding -> string
 
 type drop_reason =
@@ -224,6 +247,11 @@ val init_default_degraded_report :
     routing references to uncatalogued runtimes remain fatal so configured intent
     is never erased into default fallback. *)
 
+val init_default_degraded_observation :
+  config_observation -> (init_default_outcome, strict_init_error) result
+(** Initialize from one immutable source observation so Runtime and sibling
+    consumers can use the same exact bytes without a second filesystem read. *)
+
 module For_testing : sig
   type snapshot
 
@@ -248,7 +276,7 @@ module For_testing : sig
     ?runtime_config_path:string ->
     sync_parent:(string -> unit) ->
     string ->
-    (unit, string) result
+    (config_commit_receipt, string) result
   (** Production-equivalent runtime config replacement with an injected
       parent-directory sync operation. *)
 
@@ -484,20 +512,22 @@ val config_path : unit -> string option
     deleted [Runtime.config_path] (delegates to
     [Config_dir_resolver]). *)
 
-val load_config_text :
-  ?runtime_config_path:string -> unit -> ((string * string), string) result
-(** Load the raw runtime.toml source text. Returns [(path, source_text)]. *)
+val load_config_observation :
+  ?runtime_config_path:string -> unit -> (config_observation, string) result
+(** Load one immutable runtime.toml observation, including its exact source
+    revision. *)
 
 val save_config_text :
-  ?runtime_config_path:string -> string -> (unit, string) result
+  ?runtime_config_path:string -> string -> (config_commit_receipt, string) result
 (** Validate raw runtime.toml and prepare its exact-output replacement without
     changing or credential-resolving the active frozen registry. The writer
     then reserves that exact base and atomically replaces the file. A failure
     before rename leaves the published registry and runtime cache unchanged.
     Once rename is visible, the prepared immutable registry and runtime cache
     are synchronously converged even when parent-directory fsync fails; that
-    durability-uncertain case returns [Error] and is safe to retry. A fully
-    durable replacement returns [Ok ()]. Before exact-output registry bootstrap,
+    durability-uncertain case returns an [Ok] receipt carrying
+    [Durability_unconfirmed], because the replacement is already visible. A
+    fully durable replacement returns an [Ok] receipt carrying [Durable]. Before exact-output registry bootstrap,
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished. *)
 
@@ -515,26 +545,35 @@ val set_runtime_id_for_keeper :
   keeper_name:string ->
   runtime_id:string ->
   unit ->
-  (unit, string) result
+  (config_commit_receipt, string) result
 (** Persist [keeper_name] -> [runtime_id] in
     [\[runtime.assignments\]] (runtime.toml SSOT), validate the resulting
     runtime config, atomically write it, and refresh the in-process runtime
     assignment cache. *)
 
 val clear_runtime_id_for_keeper :
-  ?runtime_config_path:string -> keeper_name:string -> unit -> (unit, string) result
+  ?runtime_config_path:string ->
+  keeper_name:string ->
+  unit ->
+  (config_commit_receipt, string) result
 (** Remove [keeper_name] from [\[runtime.assignments\]], validate the resulting
     runtime config, atomically write it, and refresh the in-process runtime
     assignment cache. *)
 
 val set_runtime_default :
-  ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
+  ?runtime_config_path:string ->
+  runtime_id:string ->
+  unit ->
+  (config_commit_receipt, string) result
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
 val set_runtime_media_failover :
-  ?runtime_config_path:string -> runtime_ids:string list -> unit -> (unit, string) result
+  ?runtime_config_path:string ->
+  runtime_ids:string list ->
+  unit ->
+  (config_commit_receipt, string) result
 (** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. The list order is preserved. *)

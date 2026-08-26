@@ -85,6 +85,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; publication_recovery :
       Keeper_publication_recovery_availability.turn_context
+  ; skill_snapshot : Skill_catalog_snapshot.t
   ; shared_context : Agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
@@ -121,6 +122,7 @@ let run (ctx : ctx)
       ; trajectory_acc
       ; profile_defaults
       ; publication_recovery
+      ; skill_snapshot
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
@@ -200,6 +202,7 @@ let run (ctx : ctx)
                  ~build_turn_prompt
                  ~user_message
                  ~turn_kind:Turn_record.Autonomous
+                 ~skill_snapshot
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~history_user_source:"world_state_prompt"

@@ -867,6 +867,10 @@ let run_keeper_cycle
                        ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
                  in
+                 let skill_snapshot =
+                   Keeper_agent_run.capture_skill_snapshot
+                     ~base_path:config.base_path
+                 in
                  match
                    Inference_utils.timed (fun () ->
                      match Eio_context.get_clock () with
@@ -898,6 +902,7 @@ let run_keeper_cycle
                            ; observation
                            ; profile_defaults
                            ; publication_recovery
+                           ; skill_snapshot
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id

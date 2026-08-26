@@ -2,6 +2,44 @@ open Alcotest
 
 module Skill_catalog = Masc.Keeper_skill_catalog
 module Catalog = Masc.Keeper_tool_composition_catalog
+module Snapshot = Skill_catalog_snapshot
+
+let snapshot_of_document ~directory source_text =
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+[[skills.sources]]
+id = "fixture"
+anchor = "base-path"
+path = "skills"
+access = "read-write"
+|}
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "Skill source fixture config was rejected"
+  in
+  let source =
+    match config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "Skill source fixture did not contain exactly one source"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let scan : Snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Snapshot.Source_ready { resolved_path = "/workspace/skills"; candidates = 1 }
+    ; candidates = [ Snapshot.Candidate_document { directory; source_text } ]
+    }
+  in
+  match Snapshot.configured ~config [ scan ] with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "Skill snapshot fixture was rejected"
+;;
 
 let instruction_document =
   {|---
@@ -349,6 +387,39 @@ let test_multiple_blocks_rejected () =
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let test_malformed_composition_is_diagnostic_only () =
+  let malformed =
+    "---\nname: broken\ndescription: Invalid composition fixture.\n---\n\n```toml composition\n[[compositions]]\n"
+  in
+  let snapshot = snapshot_of_document ~directory:"broken" malformed in
+  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
+  (match Skill_catalog.skills catalog with
+   | [ skill ] ->
+     check string "instruction name survives" "broken" skill.name;
+     check string "frozen body survives" "```toml composition\n[[compositions]]\n" skill.body;
+     (match skill.provenance with
+      | Some provenance ->
+        check string "frozen provenance survives" "broken" provenance.directory
+      | None -> fail "frozen snapshot provenance was lost");
+     (match skill.surface with
+      | Skill_catalog.Instruction -> ()
+      | Skill_catalog.Composition _ ->
+        fail "malformed composition remained executable")
+   | skills ->
+     failf "expected one fallback instruction, got %d" (List.length skills));
+  match diagnostics with
+  | [ diagnostic ] ->
+    (match diagnostic.Skill_catalog.error with
+     | Skill_catalog.Unterminated_composition_block { skill } ->
+       check string "typed diagnostic retains skill" "broken" skill
+     | error ->
+       fail
+         ("unexpected projection diagnostic: "
+          ^ Skill_catalog.error_to_string error))
+  | diagnostics ->
+    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
+;;
+
 let test_composition_name_must_match_skill () =
   let document =
     String.concat
@@ -649,6 +720,10 @@ let () =
             "an ordinary fence does not hide a later declaration"
             `Quick
             test_ordinary_fence_does_not_hide_a_declaration
+        ; test_case
+            "malformed snapshot composition is diagnostic-only"
+            `Quick
+            test_malformed_composition_is_diagnostic_only
         ; test_case
             "composition name must equal the skill name"
             `Quick

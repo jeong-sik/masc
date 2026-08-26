@@ -1,6 +1,7 @@
 open Alcotest
 
 module Layout = Masc_tui_message_layout
+module Frame = Masc_tui_frame
 module Markdown_cache = Masc_tui_markdown_render_cache
 
 let entry ?(timestamp = "12:34:56")
@@ -351,10 +352,12 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (supported 10 80 3);
   check bool "status frame fits above its final newline" true
     (supported 11 80 3);
-  check bool "narrow viewport uses the compact gate" false
-    (supported 30 8 0);
-  check bool "minimum width shows an omission marker and wide grapheme" true
-    (supported 30 11 0)
+  check bool "twelve columns cannot preserve a source suffix" false
+    (supported 30 12 0);
+  check bool "thirteen columns preserve a source suffix" true
+    (supported 30 13 0);
+  check int "the minimum terminal leaves nine framed content cells" 9
+    (Frame.inner_width ~cols:13)
 
 let test_history_wraps_by_cells_without_losing_bytes () =
   let body = "A한🙂B" in
@@ -1077,6 +1080,99 @@ let test_inline_margin_carries_clock_and_speaker () =
   check string "bare keeps the speaker only" "you"
     (first_gutter ~origin:Layout.Origin_bare entries)
 
+let inline_rows ~terminal_cols source =
+  let inner_width = Frame.inner_width ~cols:terminal_cols in
+  let role =
+    Layout.align_role_label ~column:Layout.chat_role_label_column
+      ~style:Layout.Keeper source
+  in
+  let rows =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:20
+      [ entry Layout.Keeper role "tui-..bbbbbbbb" "hello" ]
+  in
+  match rows with
+  | row :: _ -> row, rows
+  | [] -> failwith "no rows"
+
+(* The clock used to take the narrow gutter from the left and cut the source
+   away before its first cell. These widths exercise the smallest supported
+   pane and two wider ceilings. The two source names share their head and
+   differ at the tail, so distinct suffixes prove that the identity -- not
+   just a generic speaker mark -- survived. *)
+let test_a_narrow_inline_margin_keeps_the_source () =
+  List.iter
+    (fun terminal_cols ->
+      let inner_width = Frame.inner_width ~cols:terminal_cols in
+      let one, one_rows = inline_rows ~terminal_cols "keeper.aa" in
+      let two, two_rows = inline_rows ~terminal_cols "keeper.zz" in
+      check bool
+        (Printf.sprintf "%d terminal cells keep source aa" terminal_cols)
+        true (String.ends_with ~suffix:"aa" one.Layout.gutter);
+      check bool
+        (Printf.sprintf "%d terminal cells keep source zz" terminal_cols)
+        true (String.ends_with ~suffix:"zz" two.Layout.gutter);
+      check bool
+        (Printf.sprintf "%d terminal cells keep sources distinct" terminal_cols)
+        true (not (String.equal one.Layout.gutter two.Layout.gutter));
+      check int
+        (Printf.sprintf "%d terminal cells omit the truncated mark" terminal_cols)
+        0 one.Layout.gutter_label_at;
+      check int
+        (Printf.sprintf "%d terminal cells omit the other truncated mark"
+           terminal_cols)
+        0 two.Layout.gutter_label_at;
+      check bool
+        (Printf.sprintf "%d terminal cells remove the mark bytes" terminal_cols)
+        false
+        (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper)
+           one.Layout.gutter);
+      List.iter
+        (fun (row : Layout.row) ->
+          check bool
+            (Printf.sprintf "%d-terminal-cell row stays inside %d content cells"
+               terminal_cols inner_width)
+            true
+            (Layout.display_width row.Layout.gutter
+             + Layout.display_width row.Layout.text
+            <= inner_width))
+        (one_rows @ two_rows))
+    [ 13; 16; 24 ]
+
+(* A normal pane has room for both pieces. Pin the exact bytes, including the
+   aligned badge, and the existing continuation rule: keep the clock, replace
+   the repeated source with the quiet mark, and retain the first gutter's
+   width. *)
+let test_normal_inline_margin_bytes_stay_stable () =
+  let role =
+    Layout.align_role_label ~column:Layout.chat_role_label_column
+      ~style:Layout.Keeper "keeper.one"
+  in
+  let entries =
+    [ entry ~timestamp:"12:34:56" Layout.Keeper role "tui-..bbbbbbbb" "first"
+    ; entry ~timestamp:"12:35:56" Layout.Keeper role "tui-..bbbbbbbb" "second"
+    ]
+  in
+  let inner_width = Frame.inner_width ~cols:40 in
+  match
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:20
+      entries
+  with
+  | [ first; second ] ->
+      check string "normal first gutter bytes"
+        ("12:34 " ^ Layout.speaker_mark Layout.Keeper ^ "     keeper.one")
+        first.Layout.gutter;
+      check string "normal continuation bytes"
+        ("12:35 " ^ Layout.speaker_mark Layout.Thinking ^ String.make 15 ' ')
+        second.Layout.gutter;
+      check int "normal gutter keeps clock plus mark boundary" 8
+        first.Layout.gutter_label_at;
+      check int "continuation has no source boundary" 0
+        second.Layout.gutter_label_at;
+      check int "continuation keeps the first gutter width"
+        (Layout.display_width first.Layout.gutter)
+        (Layout.display_width second.Layout.gutter)
+  | _ -> failwith "expected two rows"
+
 (* A timestamp that is not [HH:MM:SS] is left alone rather than cut blind:
    the shortener is a normaliser, and the case where it does nothing is the
    one that would otherwise lose bytes silently. *)
@@ -1380,6 +1476,10 @@ let () =
             test_folding_returns_one_row_per_message
         ; test_case "inline margin carries clock and speaker" `Quick
             test_inline_margin_carries_clock_and_speaker
+        ; test_case "a narrow inline margin keeps the source" `Quick
+            test_a_narrow_inline_margin_keeps_the_source
+        ; test_case "normal inline margin bytes stay stable" `Quick
+            test_normal_inline_margin_bytes_stay_stable
         ; test_case "a timestamp of another shape survives" `Quick
             test_a_timestamp_of_another_shape_survives
         ; test_case "wrapped rows indent under the first" `Quick

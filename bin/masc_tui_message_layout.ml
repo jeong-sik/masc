@@ -596,7 +596,11 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
   else mark ^ " " ^ fit_name inner label
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
-  terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
+  (* At thirteen columns the frame leaves nine content cells: two for the
+     body indent, four for the body itself, and three for a shortened source
+     such as […aa]. Eleven columns left one source cell, which could draw only
+     the omission marker and therefore admitted a chat pane with no identity. *)
+  terminal_cols >= 13 && terminal_rows >= 8 + max 0 status_rows
 
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in
@@ -818,17 +822,40 @@ let origin_gutter ~origin ~previous ~inner_width entry =
          left, and on a pane with nothing left it gets nothing rather than
          pushing the messages out. *)
       let ceiling = max 0 (inner_width - 2 - min_body_cells) in
-      let filled = fit_width (clock ^ entry.role_label) (min ceiling
-        (display_width (clock ^ entry.role_label))) in
+      let role_cells = display_width entry.role_label in
+      let role_fits = role_cells <= ceiling in
+      let label, mark_cells =
+        if role_fits then
+          ( entry.role_label
+          , min role_cells (max 0 entry.role_label_mark_cells) )
+        else
+          (* [role_label_mark_cells] is the producer's typed boundary between
+             the speaker mark and the source. Once the whole aligned label no
+             longer fits, omit that mark and spend every gutter cell on the
+             source after it. Reusing the old boundary after [fit_middle]
+             would colour an ellipsis or source byte as though it were a mark. *)
+          let source =
+            drop_cells entry.role_label
+              (min role_cells (max 0 entry.role_label_mark_cells))
+          in
+          fit_middle ceiling source, 0
+      in
+      (* Only a complete aligned label earns a clock. A shortened source uses
+         the whole ceiling; at normal width both pieces still return exactly
+         [clock ^ entry.role_label], byte for byte. *)
+      let clock_cells =
+        if role_fits then
+          min (display_width clock)
+            (max 0 (ceiling - display_width label))
+        else 0
+      in
+      let filled = fit_width clock clock_cells ^ label in
       (* Where the kind label starts: past the clock and past the speaker mark.
          Computed here because this is where the clock is prepended; a renderer
-         deriving it would be measuring the same two things a second time. A
-         gutter cut short by [ceiling] can end before the label, so the offset
-         is clamped to what actually survived. *)
-      let label_at =
-        min (display_width filled)
-          (display_width clock + entry.role_label_mark_cells)
-      in
+         deriving it would be measuring the same two things a second time.
+         [mark_cells] is zero for a shortened source, because that row no
+         longer contains the mark the original boundary described. *)
+      let label_at = clock_cells + mark_cells in
 
       if continues_previous ~previous entry then
         (* Padded rather than repeated: a second row from the same speaker in

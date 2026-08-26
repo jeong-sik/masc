@@ -60,10 +60,10 @@ native = "read"   # "none" | "read" | "full"
   어느 레인의 동작이 조용히 바뀐다 — 그 방식은 택하지 않는다.
 - 알 수 없는 값은 TOML 로드를 실패시킨다 (RFC-0389 의 값 검증과 같은
   결). 그 런타임이 실현할 수 없는 값(`none` on Codex/Antigravity — 두
-  CLI 는 내장 도구를 끄는 스위치가 없다)은 근사하지 않고 lane
-  admission 시점에 typed error 로 거부한다 — keeper↔runtime 배정은
-  runtime.toml 소관이라 profile 로드 시점에는 어떤 런타임인지 알 수
-  없다.
+  CLI 는 내장 도구를 끄는 스위치가 없다)은 profile 로드를 실패시키지
+  않는다 — keeper↔runtime 배정은 runtime.toml 소관이라 profile 로드
+  시점에는 어떤 런타임인지 알 수 없다. 대신 lane admission 시점에
+  판정한다.
 - Codex `danger-full-access` 와 Antigravity `--sandbox` 해제는 이
   RFC 범위 밖. sandbox 는 도구 가용성과 별개의 안전 바닥으로 남긴다.
 
@@ -75,8 +75,22 @@ native = "read"   # "none" | "read" | "full"
 
 - `full` 은 해당 keeper 의 tool approval mode 가 `Yolo`
   (`keeper_tool_approval_mode`, #30067) 일 때만 레인 admission 을
-  통과한다. `Auto` keeper 가 `full` 레인에 배정되면 typed error 로
-  거부한다 — 조용한 강등 없음.
+  통과한다. `Auto` keeper 가 `full` 레인에 배정되면 **그 턴은 죽지
+  않는다** — 자세를 `read` 로 낮춰 돌리고, 선언된 `full` 이 이번
+  실행에 반영되지 않았다는 사실을 typed 이벤트
+  (`masc.keeper.native_posture_degraded`)로 남긴다. 조용한 강등은
+  없다는 뜻이지 fail-closed 라는 뜻은 아니다. `read` 는 `full` 보다
+  안전하므로 턴을 정지시켜 가며 지킬 가치가 없다. 승인 모드가
+  프로세스 메모리 기본값(`Auto`)으로 돌아가는 재시작 상황에서
+  `full` keeper 가 매번 턴을 거부당하는 일도 막는다. 승인 모드는
+  턴 상태이므로 이 갈래의 이벤트는 **영향받는 턴마다** 발행된다.
+- `none` 이 끌 수 없는 클라이언트(Codex/Antigravity)에 배정된 경우는
+  성질이 다르다: 턴마다 달라지는 상태가 아니라 profile(선언)과
+  runtime.toml(배정)의 **정적 모순**이다. 자세는 클라이언트의
+  `read` 바닥으로 돌아가되, 이벤트는 프로세스당 (keeper, client)
+  쌍마다 **최초 1회** 발행되고 그 후 조용하다(#30408 리뷰). 모순이
+  해소된 해석(선언이 존중되는 해석)이 오면 게이트가 재장전되어,
+  다시 생긴 모순은 새로 보고된다.
 - `read` 는 효과가 없으므로 `Auto` 에서도 허용한다. 승인 게이트는
   효과를 지키는 장치지 읽기를 지키는 장치가 아니다.
 - 네이티브 호출도 transcript/timeline 에는 남는다 (Claude Code
@@ -110,8 +124,12 @@ official client 세션 재개는 `tool_surface_sha256` 으로 표면 일치를
 
 - 파서 테스트: 3값 왕복, unknown 값 거부. admission 테스트: 실현 불가
   조합의 typed 거부.
-- admission 테스트: `Auto` keeper + `full` 레인 = typed 거부,
-  `Yolo` + `full` = 통과.
+- admission 테스트: `Auto` keeper + `full` 레인 = `read` 로 하향되고
+  `masc.keeper.native_posture_degraded` 이벤트 발생(런타임 호출은
+  성공, **턴마다**), `Yolo` + `full` = 통과. `none` on
+  Codex/Antigravity = `read` 로 하향 + 이벤트 **프로세스당 1회**
+  (같은 (keeper, client) 쌍의 후속 턴은 조용; 선언이 존중되는 해석이
+  게이트를 재장전).
 - 효과 측정: `tool_call_quality_benchmark` 로 같은 과제를
   API 레인 / Claude Code `none` / Claude Code `read` 에 돌려 도구
   호출 성공률·재시도율 비교. "네이티브를 껐더니 멍청해졌는가"는 이

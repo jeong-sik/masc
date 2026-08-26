@@ -1,21 +1,21 @@
-# RFC-OAS-034: Endpoint capability boundary — host는 capability의 provenance가 아니다
+# RFC-AC-034: Endpoint capability boundary — host는 capability의 provenance가 아니다
 
 | | |
 |---|---|
 | Status | Superseded by the explicit provider/model tuple hard cut (#2590) |
 | Author | jeong-sik (Claude Opus 4.8 조사) |
 | Created | 2026-07-01 |
-| Target | `agent_sdk` (oas) — `lib/llm_provider/` (`provider_endpoint.ml`, `provider_config.ml`, `provider_registry.ml`, `discovery.ml`, `capabilities.ml`, `complete_sampling.ml`) |
-| Supplements | RFC-OAS-023 (capability axis = model × transport) — 034는 그 원칙의 *집행* 레이어 |
-| Mirrors | RFC-OAS-022 (monotone-decrease ratchet) — 신규 위반 사이트를 CI에서 0으로 고정 |
-| Aligned infra | RFC-OAS-018 (catalog externalization), PR #2404 (declarative override SSOT) |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/` (`provider_endpoint.ml`, `provider_config.ml`, `provider_registry.ml`, `discovery.ml`, `capabilities.ml`, `complete_sampling.ml`) |
+| Supplements | RFC-AC-023 (capability axis = model × transport) — 034는 그 원칙의 *집행* 레이어 |
+| Mirrors | RFC-AC-022 (monotone-decrease ratchet) — 신규 위반 사이트를 CI에서 0으로 고정 |
+| Aligned infra | RFC-AC-018 (catalog externalization), PR #2404 (declarative override SSOT) |
 | Triggering PRs | #2374, #2408 (둘 다 host `*.proxy.runpod.net` → capability namespace `runpod_mtp`) |
 
 ## 0. Summary
 
 > Current contract: provider identity and model id are separate typed/configured
 > values. A model row may declare `provider_name` plus its bare `id_prefix`;
-> OAS does not synthesize `/`, `:`, or `.`-qualified model ids. Provider identity
+> agent_core does not synthesize `/`, `:`, or `.`-qualified model ids. Provider identity
 > is carried as the explicit provider selector / `Provider_config.provider_id`;
 > endpoint URLs and request paths never select it, even when they happen to
 > equal a catalog row. The rest of this RFC records the historical problem and
@@ -23,17 +23,17 @@
 
 OAS가 엔드포인트의 **capability set / catalog namespace를 배포 host·URL에서 추론**하는 사이트가 여럿 있다. capability는 `(serving runtime) × (model)`의 함수이고 host는 직교하는 전송 주소일 뿐이다. capability를 host에 키잉하면 **동일 server+model이 임대 위치를 옮기는 순간 다르게 동작하거나 capability를 통째로 잃는다(silent fail-closed)**.
 
-RFC-OAS-023이 이미 축을 선언했다 — capability = `model_caps ∩ transport_caps`, host/provider는 model 축이 아니다. 그럼에도 2026-06~07 사이 **같은 host→capability 패턴으로 PR이 2개 열렸다**(#2374 via `provider_endpoint.ml`, #2408 via `provider_config.ml`). 원칙 문서만으로는 재발이 막히지 않는다는 실측이다. 본 RFC는 원칙을 집행 가능한 형태로 못박는다:
+RFC-AC-023이 이미 축을 선언했다 — capability = `model_caps ∩ transport_caps`, host/provider는 model 축이 아니다. 그럼에도 2026-06~07 사이 **같은 host→capability 패턴으로 PR이 2개 열렸다**(#2374 via `provider_endpoint.ml`, #2408 via `provider_config.ml`). 원칙 문서만으로는 재발이 막히지 않는다는 실측이다. 본 RFC는 원칙을 집행 가능한 형태로 못박는다:
 
 1. 위반 유형을 명명하고 감사 인벤토리를 고정한다 (§3).
-2. 신규 `base_url_targets_* → capability-label` 사이트를 금지하는 ratchet을 추가한다 (§5, RFC-OAS-022 미러).
+2. 신규 `base_url_targets_* → capability-label` 사이트를 금지하는 ratchet을 추가한다 (§5, RFC-AC-022 미러).
 3. host 변경에 capability가 불변임을 증명하는 회귀 테스트를 추가한다 (§6).
 
 ## 1. Problem
 
 ### 1.1 재발하는 계열 (원칙 RFC만으로 안 막힘)
 
-2026-07-01 감사 (`oas-endpoint-capability-boundary-audit`, 29 agents, 7 finder 차원 + 적대 검증): 41 dedup 사이트 중 **confirmed 4 / borderline 5 / legit 32**.
+2026-07-01 감사 (`agent_core-endpoint-capability-boundary-audit`, 29 agents, 7 finder 차원 + 적대 검증): 41 dedup 사이트 중 **confirmed 4 / borderline 5 / legit 32**.
 
 핵심은 `runpod_mtp`가 신규 실수 하나가 아니라 **이미 main에 사는 계열의 재발**이라는 것이다. main에 `provider_registry.ml`의 `is_local → "nous"`가 이미 있었고(§3 B3), #2374·#2408은 그 선례를 두 번 따랐다. 한 번 워크어라운드 패턴이 main에 들어가면 이후 코드 생성(AI든 사람이든)이 그 패턴을 *합리적 선례*로 학습해 누적되는 나선 — 이 RFC가 문서화하는 반복이 바로 그 실측 사례다.
 
@@ -116,11 +116,11 @@ capability(MTP, tool_choice, reasoning dialect, structured output)를 결정하�
    **B4'(:804 host→output_schema capability)는 설계 변경 필요로 defer**(§7 참조).
 5. §5 ratchet 추가로 재발 차단 — **#2419 착지**(hardening ratchet 확장).
 
-## 5. Ratchet (RFC-OAS-022/023 미러) — 구현: PR #2419
+## 5. Ratchet (RFC-AC-022/023 미러) — 구현: PR #2419
 
 초안은 standalone `scripts/ci-endpoint-capability-ratchet.sh` +
 `.ci/endpoint-capability-baseline.json`을 제안했으나, **기존 production hardening
-ratchet**(`scripts/hardening-ratchet.sh`, RFC-OAS-023)에 metric 1개를 추가하는
+ratchet**(`scripts/hardening-ratchet.sh`, RFC-AC-023)에 metric 1개를 추가하는
 방식으로 구현했다. scan/waiver/baseline/reporting 인프라를 재사용해 중복
 (anti-pattern #1 scattered infra)을 피한다. 이미 `model_id_string_classifiers_outside_catalog`라는 정확한 대칭 metric이 존재한다.
 
@@ -150,9 +150,9 @@ stale-high(monotone-safe)이며, 전체 rebaseline은 별도 hygiene 작업으�
 
 ## 7. Related
 
-- **RFC-OAS-023** capability axis reshape — 034는 그 원칙(model × transport)의 집행. 023이 축을 정의하고 034가 host-유도 위반을 금지.
-- **RFC-OAS-022** monotone-decrease ratchet — §5가 script/workflow shape를 미러.
-- **RFC-OAS-018** provider-model catalog externalization — namespace의 선언 출처가 catalog임을 전제.
+- **RFC-AC-023** capability axis reshape — 034는 그 원칙(model × transport)의 집행. 023이 축을 정의하고 034가 host-유도 위반을 금지.
+- **RFC-AC-022** monotone-decrease ratchet — §5가 script/workflow shape를 미러.
+- **RFC-AC-018** provider-model catalog externalization — namespace의 선언 출처가 catalog임을 전제.
 - **PR #2404** declarative override SSOT — B1/B2/B3의 root fix가 안착할 기반.
 - **PR #2374, #2408** — 본 RFC가 흡수하는 트리거 (host→capability namespace, 중복 구현).
 - AI 코드 생성 안티패턴 3종(§1.1의 재발 논의가 근거하는 분류): #1 scattered hardcoded defaults(같은 설정값이 여러 파일에 리터럴로 산포), #2 unknown → permissive default(모르는 입력을 에러 대신 편리한 기본값으로 매핑 — 본 RFC의 B1-B7이 정확히 이 패턴), #3 boundary violation(하위 모듈이 상위 소비자의 타입/모듈을 참조).

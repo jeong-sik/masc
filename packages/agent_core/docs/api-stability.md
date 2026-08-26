@@ -1,6 +1,6 @@
 # API Stability Tiers
 
-OAS (OCaml Agent SDK) modules are classified into three stability tiers.
+agent_core (OCaml Agent SDK) modules are classified into three stability tiers.
 Public facade modules carry a `@stability` annotation in their top-level doc
 comment; unannotated modules are Internal by default.
 
@@ -86,7 +86,7 @@ Representative modules:
 | Runtime | `lib/runtime.mli` | Runtime protocol types are still evolving |
 | Wire_observer | `lib/llm_provider/wire_observer.mli` | Caller-owned wire observation boundary is still evolving |
 
-CDAL proof-bundle artifacts are intentionally schema-only in OAS. They are
+CDAL proof-bundle artifacts are intentionally schema-only in agent_core. They are
 tracked in `docs/schema-surfaces/runtime-output-surfaces.v1.json`, not as
 public OCaml modules in this stability table.
 
@@ -123,7 +123,7 @@ contract.
 
 This classification does not claim a runtime behavior upgrade. The single-writer
 hard cut this section used to describe as future work has landed (#2683): the
-OAS execution path (`Agent_execution_runner` / `Execution_agent_scope`) owns
+agent_core execution path (`Agent_execution_runner` / `Execution_agent_scope`) owns
 occurrence creation, surfaced through the public `Agent.execution_store` API.
 `Durable_event` remains as the journal type and idempotency-key foundation
 (`agent_execution_event_writer`, `agent_tools`) — not as an independent second

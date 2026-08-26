@@ -1,4 +1,4 @@
-# RFC-OAS-039: Synchronous exact-tool approval before execution
+# RFC-AC-039: Synchronous exact-tool approval before execution
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-28 |
 | Target | `agent_sdk` |
-| Related | [[RFC-OAS-025]] (forced tool-use enforcement boundary) |
+| Related | [[RFC-AC-025]] (forced tool-use enforcement boundary) |
 
 ## 0. Summary
 
@@ -22,7 +22,7 @@ the tool invocation is opened.
   effect is started.
 
 This is deliberately a synchronous authorization gate, not an SDK-owned
-durable suspension. OAS installs no timer, stores no pending approval request,
+durable suspension. agent_core installs no timer, stores no pending approval request,
 and exposes no resume token here. The callback must settle any remote prompt,
 deadline, or restart policy before it returns; `Timed_out` reports a deadline
 already enforced by the caller. A callback that does not return blocks its

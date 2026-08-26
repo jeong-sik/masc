@@ -246,6 +246,18 @@ let take_late_palette_publisher reader =
 ;;
 
 let publish_late_terminal_palette reader decoder =
+  (* The page the terminal reports is not the palette and does not wait on
+     it: a multiplexer answers DECSET 996 and no OSC colour query, so this is
+     the only thing that ever arrives there. Published on its own so a colour
+     that has to know which way to move can still be told. *)
+  (match Masc_tui_terminal_probe.theme_mode decoder with
+   | None -> ()
+   | Some _ as theme_mode ->
+     if
+       Masc_tui_terminal_palette.snapshot_theme_mode
+         (Masc_tui_terminal_palette.snapshot ())
+       <> theme_mode
+     then Masc_tui_terminal_palette.set_theme_mode theme_mode);
   match reader.late_palette_publisher with
   | None -> ()
   | Some _ ->
@@ -2528,7 +2540,9 @@ let search_row_cursor state =
   match state.view with
   | Keepers Keeper_list -> Some state.keeper_cursor
   | Lanes -> Some state.lanes_cursor
-  | Verification -> Some state.verification_cursor
+  | Verification ->
+      if Option.is_some state.verification_detail_request_id then None
+      else Some state.verification_cursor
   | Harness -> Some state.harness_cursor
   | Repositories -> Some state.repositories_cursor
   | Connectors -> Some state.connectors_cursor
@@ -4590,7 +4604,13 @@ let verification_cursor_row state =
     | None -> []
     | Some s -> s.Masc.Tui_decode.vs_requests
   in
-  List.nth_opt requests state.verification_cursor
+  match state.verification_detail_request_id with
+  | Some request_id ->
+      List.find_opt
+        (fun row ->
+           String.equal row.Masc.Tui_decode.vr_request_id request_id)
+        requests
+  | None -> List.nth_opt requests state.verification_cursor
 
 (* The approve key on the row under the cursor. Two presses, like the cancel
    and vote keys: the first names the task, the same press again sends the
@@ -5796,7 +5816,22 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       match result with
       | Ok snapshot ->
           state.verification <- Some snapshot;
-          state.verification_error <- None
+          state.verification_error <- None;
+          let requests = snapshot.Masc.Tui_decode.vs_requests in
+          let count = List.length requests in
+          if state.verification_cursor >= count then
+            state.verification_cursor <- max 0 (count - 1);
+          (match state.verification_detail_request_id with
+           | Some request_id
+             when not
+                    (List.exists
+                       (fun row ->
+                          String.equal row.Masc.Tui_decode.vr_request_id
+                            request_id)
+                       requests) ->
+               state.verification_detail_request_id <- None;
+               state.verification_detail_scroll <- 0
+           | Some _ | None -> ())
       | Error detail ->
           (* The previous list stays: a failed reload must not make the queue
              look empty, which reads as "nothing is waiting". *)
@@ -6542,17 +6577,48 @@ let main () =
           "no $EDITOR set; export EDITOR to edit keeper settings here"
       | Some _ -> (
         match
-          Masc_tui_editor.roundtrip ~restore:restore_terminal
-            ~reenter:reenter_terminal "{\n}\n"
+          Masc_tui_loader.load_keeper_config_editor ~host ~port
+            ~keeper_name:keeper.k_name
         with
-        | None -> add_event state "system" (keeper.k_name ^ ": settings unchanged")
-        | Some patch -> (
+        | Error detail -> add_event state "error" detail
+        | Ok (observed, stem) -> (
           match
-            Masc_tui_http.post_keeper_config ~host ~port
-              ~keeper_name:keeper.k_name ~patch_json:patch
+            Masc_tui_editor.roundtrip ~restore:restore_terminal
+              ~reenter:reenter_terminal stem
           with
-          | Ok _ -> add_event state "system" (keeper.k_name ^ ": settings applied")
-          | Error detail -> add_event state "error" detail)))
+          | None ->
+              add_event state "system" (keeper.k_name ^ ": settings unchanged")
+          | Some edited -> (
+            match Yojson.Safe.from_string edited with
+            | exception Yojson.Json_error detail ->
+                add_event state "error" ("settings are not JSON: " ^ detail)
+            | edited_json -> (
+              match
+                Masc_tui_keeper_config.patch_of_edit ~before:observed
+                  ~after:edited_json
+              with
+              | Error detail -> add_event state "error" detail
+              | Ok (`Assoc []) ->
+                  add_event state "system"
+                    (keeper.k_name ^ ": no settings changed")
+              | Ok patch -> (
+                match
+                  Masc_tui_http.post_keeper_config ~host ~port
+                    ~keeper_name:keeper.k_name
+                    ~patch_json:(Yojson.Safe.to_string patch)
+                with
+                | Error detail -> add_event state "error" detail
+                | Ok _ ->
+                    add_event state "system"
+                      (keeper.k_name ^ ": changed settings applied");
+                    if
+                      state.view = Keepers Keeper_detail
+                      && state.detail_tab = Detail_instructions
+                    then (
+                      state.keeper_config_view <- None;
+                      state.keeper_config_view_error <- None;
+                      launch_keeper_config_view state
+                        ~mailbox:async_messages keeper.k_name)))))))
   in
   let handle_keeper_create () =
     match Masc_tui_editor.editor_command () with
@@ -7514,11 +7580,24 @@ let main () =
                     max 0
                       (min (count - 1)
                          (state.schedule_cursor + (direction * page)))
+            | Verification ->
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    max 0
+                      (state.verification_detail_scroll + (direction * page))
+                else
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(direction * page)
+                      ~cursor:state.verification_cursor
+                      ~scroll:state.verification_scroll
+                  in
+                  state.verification_cursor <- cursor;
+                  state.verification_scroll <- scroll
             | Config when state.config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
-            | Verification | Harness | Repositories | Changes | Connectors
+            | Harness | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
@@ -7697,6 +7776,12 @@ let main () =
                   state.schedule_scroll <- 0
                 end
                 else state.view <- Overview
+            | Verification ->
+                if Option.is_some state.verification_detail_request_id then begin
+                  state.verification_detail_request_id <- None;
+                  state.verification_detail_scroll <- 0
+                end
+                else state.view <- Overview
             | Resources ->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
@@ -7725,7 +7810,7 @@ let main () =
                   state.changes_tree_diff_path <- None
                 end
                 else state.view <- Overview
-            | Verification | Harness | Repositories | Connectors | Runtime
+            | Harness | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> state.view <- Overview)
        | Some "left" ->
@@ -7794,6 +7879,9 @@ let main () =
             | Schedules ->
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
+            | Verification ->
+                state.verification_detail_request_id <- None;
+                state.verification_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
             | Changes ->
                 state.changes_diff_row <- None;
@@ -7802,7 +7890,7 @@ let main () =
                 state.changes_tree_diff_error <- None;
                 state.changes_tree_diff_path <- None
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
-            | Keepers Keeper_list | Acting | Lanes | Approvals | Verification
+            | Keepers Keeper_list | Acting | Lanes | Approvals
             | Harness | Repositories | Connectors | Runtime | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
@@ -7966,12 +8054,17 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
-                 in
-                 state.verification_cursor <- cursor;
-                 state.verification_scroll <- scroll)
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    state.verification_detail_scroll + 1
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.verification_cursor
+                       ~scroll:state.verification_scroll
+                   in
+                   state.verification_cursor <- cursor;
+                   state.verification_scroll <- scroll)
             | Lanes ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(1)
@@ -8187,12 +8280,17 @@ let main () =
                       state.overview_event_scroll
                 end
             | Verification ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.verification_cursor ~scroll:state.verification_scroll
-                 in
-                 state.verification_cursor <- cursor;
-                 state.verification_scroll <- scroll)
+                if Option.is_some state.verification_detail_request_id then
+                  state.verification_detail_scroll <-
+                    max 0 (state.verification_detail_scroll - 1)
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.verification_cursor
+                       ~scroll:state.verification_scroll
+                   in
+                   state.verification_cursor <- cursor;
+                   state.verification_scroll <- scroll)
             | Lanes ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
@@ -8451,6 +8549,16 @@ let main () =
                           state.schedule_scroll <- 0)
                        (List.nth_opt snapshot.scs_rows state.schedule_cursor)
                  | Some _, _ | None, None -> ())
+            | Verification ->
+                (match state.verification_detail_request_id with
+                 | Some _ -> ()
+                 | None ->
+                     Option.iter
+                       (fun row ->
+                          state.verification_detail_request_id <-
+                            Some row.Masc.Tui_decode.vr_request_id;
+                          state.verification_detail_scroll <- 0)
+                       (verification_cursor_row state))
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -8530,7 +8638,7 @@ let main () =
                           ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Verification | Harness
+            | Acting | Lanes | Harness
             | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->

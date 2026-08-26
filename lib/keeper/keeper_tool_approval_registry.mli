@@ -52,6 +52,7 @@ val await :
   tool_name:string ->
   args:string ->
   question:string ->
+  because:string ->
   timeout_sec:float ->
   outcome
 (** Register a wait and block until it settles.
@@ -60,11 +61,13 @@ val await :
     turn for the life of the process if nobody is watching, and how long an
     operator gets to answer is a policy this module cannot know.
 
-    [tool_name], [args] and [question] describe the ask for {!pending}: a
-    listing of bare call ids gave an operator nothing to decide on, so a wait
-    only visible to the stream that opened it timed out unanswered whenever
-    that stream's watcher was gone (masc#30034). They identify nothing — the
-    wait's identity stays (keeper, call id).
+    [tool_name], [args], [question] and [because] describe the ask for
+    {!pending}: a listing of bare call ids gave an operator nothing to decide
+    on, so a wait only visible to the stream that opened it timed out
+    unanswered whenever that stream's watcher was gone (masc#30034). They
+    identify nothing — the wait's identity stays (keeper, call id). [because]
+    is the policy's reason for asking rather than running; an operator reading
+    the pending list has no other view of the policy table.
 
     The entry is removed before returning on every path, so a caller that
     raises through [await] — cancellation included — does not leave a waiter
@@ -87,6 +90,7 @@ type pending =
   ; tool_name : string
   ; args : string
   ; question : string
+  ; because : string
   ; asked_at : float
   ; timeout_sec : float
   }

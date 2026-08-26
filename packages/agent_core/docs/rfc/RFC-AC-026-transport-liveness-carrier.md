@@ -1,18 +1,18 @@
-# RFC-OAS-026: Transport Liveness Carrier (stream-idle deadline through the transport boundary)
+# RFC-AC-026: Transport Liveness Carrier (stream-idle deadline through the transport boundary)
 
 | | |
 |---|---|
 | Status | Draft |
 | Author | vincent (with Claude analysis) |
 | Created | 2026-06-09 |
-| Target | `agent_sdk` (oas) + masc consumer |
+| Target | `agent_sdk` (agent_core) + masc consumer |
 | Invariant | I2 (the only legitimate timeout is the provider transport idle/connect timeout; no heuristic per-turn/wall-clock deadlines as control flow) |
-| Sibling | RFC-OAS-019 (stream-lifecycle-aggregation), RFC-OAS-020 (ttft-instrumentation) |
+| Sibling | RFC-AC-019 (stream-lifecycle-aggregation), RFC-AC-020 (ttft-instrumentation) |
 | Audit source | `/Users/dancer/me/.tmp/masc-fiber-audit-2026-06-09/DIAGNOSIS.md` §3 (S1), §5, §F1 |
 
 ## 0. Summary
 
-A streaming liveness deadline has two halves — an inter-chunk idle timeout (a `float`, data) and an Eio `clock` (a capability) — and `read_sse` arms the timeout only when **both** are present (http_client.ml:771-773). The OAS streaming dispatch carries both down the *built-in HTTP* (`None`-transport) path, but the **idle half is structurally dropped at the transport boundary**: when a caller supplies a `Llm_transport.t` (the production path for masc keepers), the dispatch's `Some t` arm passes only `{ config; messages; tools }` into `t.complete_stream` — there is no field on `completion_request` and no parameter on `complete_stream` to carry the idle deadline. The transport falls to `read_sse … ?idle_timeout:None` → bare `Eio.Buf_read.line` with no per-line deadline. A provider that stops mid-stream with the socket held open hangs the read; the only backstop is a masc-side 1800s heuristic attempt watchdog, exactly the timeout I2 forbids. This is the mechanism of the 2026-06-08 fleet stall (DIAGNOSIS §3, 1772s ≈ 1800s cap), confirmed below to have run on a pre-0.204.5 SDK where the idle half was fully dropped.
+A streaming liveness deadline has two halves — an inter-chunk idle timeout (a `float`, data) and an Eio `clock` (a capability) — and `read_sse` arms the timeout only when **both** are present (http_client.ml:771-773). The agent_core streaming dispatch carries both down the *built-in HTTP* (`None`-transport) path, but the **idle half is structurally dropped at the transport boundary**: when a caller supplies a `Llm_transport.t` (the production path for masc keepers), the dispatch's `Some t` arm passes only `{ config; messages; tools }` into `t.complete_stream` — there is no field on `completion_request` and no parameter on `complete_stream` to carry the idle deadline. The transport falls to `read_sse … ?idle_timeout:None` → bare `Eio.Buf_read.line` with no per-line deadline. A provider that stops mid-stream with the socket held open hangs the read; the only backstop is a masc-side 1800s heuristic attempt watchdog, exactly the timeout I2 forbids. This is the mechanism of the 2026-06-08 fleet stall (DIAGNOSIS §3, 1772s ≈ 1800s cap), confirmed below to have run on a pre-0.204.5 SDK where the idle half was fully dropped.
 
 **Current live state (not the historical incident state)** — three distinct defects, plus a clock-side hole this RFC does not fully close:
 
@@ -26,13 +26,13 @@ This RFC adds a typed idle carrier to `completion_request` so the idle deadline 
 ## 1. Problem (line-pinned)
 
 Verified against:
-- oas `main` HEAD `3ab74d58` (release 0.204.3)
-- oas tag `v0.204.5` (the version masc pins: `masc.opam:31 (agent_sdk {>= "0.204.5"})`, `dune-project:56`)
+- agent_core `main` HEAD `3ab74d58` (release 0.204.3)
+- agent_core tag `v0.204.5` (the version masc pins: `masc.opam:31 (agent_sdk {>= "0.204.5"})`, `dune-project:56`)
 - masc HEAD `c3f308a`
 
 ### 1.1 The carrier does not exist on the transport boundary
 
-`oas lib/llm_provider/llm_transport.ml:28-33` — `completion_request` has four fields, none liveness-bearing:
+`agent_core lib/llm_provider/llm_transport.ml:28-33` — `completion_request` has four fields, none liveness-bearing:
 
 ```ocaml
 type completion_request =
@@ -42,7 +42,7 @@ type completion_request =
   }
 ```
 
-`oas lib/llm_provider/llm_transport.ml:93-100` (and the contract in `llm_transport.mli:63-70`) — the transport interface's `complete_stream` takes only `?on_telemetry` and `~on_event` besides the request:
+`agent_core lib/llm_provider/llm_transport.ml:93-100` (and the contract in `llm_transport.mli:63-70`) — the transport interface's `complete_stream` takes only `?on_telemetry` and `~on_event` besides the request:
 
 ```ocaml
 type t =
@@ -59,7 +59,7 @@ There is no slot — neither a record field nor a labeled parameter — through 
 
 ### 1.2 The dispatch drops liveness on the transport arm
 
-`oas lib/llm_provider/complete.ml:1671-1690` — the high-level `complete_stream` (whose own signature accepts `?clock` and `?stream_idle_timeout_s`, complete.ml:1638-1639) branches:
+`agent_core lib/llm_provider/complete.ml:1671-1690` — the high-level `complete_stream` (whose own signature accepts `?clock` and `?stream_idle_timeout_s`, complete.ml:1638-1639) branches:
 
 ```ocaml
 match transport with
@@ -79,11 +79,11 @@ match transport with
 
 The `None` arm threads `?clock` and `?stream_idle_timeout_s` into `complete_stream_http`. The `Some t` arm cannot — there is nowhere to put them (§1.1) — so both are **structurally discarded**. This is unchanged between 0.204.3 and v0.204.5 (verified `git show v0.204.5:lib/llm_provider/complete.ml`).
 
-The high-level call site populates both: `oas lib/pipeline/pipeline_stage_route.ml:90-95` passes `?clock`, `?stream_idle_timeout_s:agent.options.stream_idle_timeout_s`, and `?transport:agent.options.transport`. When `transport` is `Some _` (the keeper path), the idle deadline the operator configured is silently lost at the dispatch.
+The high-level call site populates both: `agent_core lib/pipeline/pipeline_stage_route.ml:90-95` passes `?clock`, `?stream_idle_timeout_s:agent.options.stream_idle_timeout_s`, and `?transport:agent.options.transport`. When `transport` is `Some _` (the keeper path), the idle deadline the operator configured is silently lost at the dispatch.
 
 ### 1.3 The read degrades to a deadline-free line read
 
-`oas lib/llm_provider/http_client.ml:759-792` — `read_sse` arms the idle deadline only when **both** clock and idle_timeout are present:
+`agent_core lib/llm_provider/http_client.ml:759-792` — `read_sse` arms the idle deadline only when **both** clock and idle_timeout are present:
 
 ```ocaml
 let read_sse ?clock ?idle_timeout ~reader ~on_data () =
@@ -100,7 +100,7 @@ let read_sse ?clock ?idle_timeout ~reader ~on_data () =
   ...
 ```
 
-With liveness dropped at §1.2, the transport reaches the `None, None` arm: `Eio.Buf_read.line reader` with no per-line deadline. The loop returns only on `End_of_file` (http_client.ml:789), which fires on socket EOF/RST — not on a provider that goes silent mid-stream with the socket held open. That stall has no OAS-side escape.
+With liveness dropped at §1.2, the transport reaches the `None, None` arm: `Eio.Buf_read.line reader` with no per-line deadline. The loop returns only on `End_of_file` (http_client.ml:789), which fires on socket EOF/RST — not on a provider that goes silent mid-stream with the socket held open. That stall has no agent_core-side escape.
 
 ### 1.4 The 0.204.5 partial fix and its residual gap
 
@@ -128,7 +128,7 @@ The construction-capability is a per-transport-author obligation enforced by nob
 1. Add a typed liveness carrier to `Llm_transport.completion_request` so a stream-idle deadline travels as data through the dispatch — the dispatch cannot drop what it must pass through.
 2. Thread the carrier from `completion_request` into `read_sse`/`read_ndjson` so a stalled stream raises the typed `Eio.Time.Timeout` → mapped to `Http_client.TimeoutError` → `Retry.Timeout` / `Llm_provider.Error.Timeout` → keeper FSM `Cancelled_provider_timeout`.
 3. Arm only the inter-chunk idle detector that already exists. Introduce no new wall-clock or per-turn deadline.
-4. Ship the OAS change back-compatible (no simultaneous masc compile break): a new optional field on a record threaded by functional update, released as a minor `feat`, then masc pins and populates it.
+4. Ship the agent_core change back-compatible (no simultaneous masc compile break): a new optional field on a record threaded by functional update, released as a minor `feat`, then masc pins and populates it.
 
 ## 3. Non-goals
 
@@ -141,7 +141,7 @@ The construction-capability is a per-transport-author obligation enforced by nob
 
 ### 4.1 The clock is a capability, not data — split the carrier
 
-`?clock` in OAS is `_ Eio.Time.clock` (oas `complete.mli:69`), an Eio capability resource. Storing it in `completion_request` would force a type parameter onto a record that is otherwise monomorphic pure data, polluting every consumer of the type. So the carrier is split by nature:
+`?clock` in agent_core is `_ Eio.Time.clock` (agent_core `complete.mli:69`), an Eio capability resource. Storing it in `completion_request` would force a type parameter onto a record that is otherwise monomorphic pure data, polluting every consumer of the type. So the carrier is split by nature:
 
 - **Clock**: closed over at transport construction, exactly as `sw` and `net` already are (`make_http_transport ~sw ~net`, complete.ml:1713). A transport without a clock can never arm a timeout regardless; making the clock a construction argument (not request data) is the honest encoding. 0.204.5 already added `?clock` to `make_http_transport`; this RFC keeps that.
 - **Idle deadline**: a plain `float`, pure data, belongs on `completion_request` where it rides the dispatch.
@@ -150,7 +150,7 @@ This keeps `completion_request` a pure data record (no capability, no type param
 
 ### 4.2 New field on `completion_request`
 
-`oas lib/llm_provider/llm_transport.ml` (and `.mli`):
+`agent_core lib/llm_provider/llm_transport.ml` (and `.mli`):
 
 ```ocaml
 type completion_request =
@@ -171,7 +171,7 @@ type completion_request =
 
 ### 4.3 Dispatch passes the field through (drop becomes impossible)
 
-`oas lib/llm_provider/complete.ml:1671-1690`, `Some t` arm:
+`agent_core lib/llm_provider/complete.ml:1671-1690`, `Some t` arm:
 
 ```ocaml
 | Some t ->
@@ -247,7 +247,7 @@ The exact failure form (raise vs `Error` return vs a startup assertion that a cl
 
 ## 5. Files & signatures changed
 
-### 5.1 OAS (`agent_sdk`)
+### 5.1 agent_core (`agent_sdk`)
 
 | File | Change |
 |---|---|
@@ -256,7 +256,7 @@ The exact failure form (raise vs `Error` return vs a startup assertion that a cl
 | `lib/llm_provider/complete.ml:1671-1690` | `Some t` arm: write `stream_idle_timeout_s` into the request record. |
 | `lib/llm_provider/complete.ml:1726-1737` | `make_http_transport.complete_stream`: read only `req.stream_idle_timeout_s`; no construction-time timeout fallback. |
 | `lib/llm_provider/transport_openai_compat.ml:67-80` | No signature change; forwards `req` (now carrying the field). Verify no `{ config; messages; tools }` literal needs the new field — there is one literal at complete.ml dispatch; the compiler enumerates all. |
-| `lib/sdk_version.ml` | Bumped by release-please (RFC-OAS-010); minor `feat`. |
+| `lib/sdk_version.ml` | Bumped by release-please (RFC-AC-010); minor `feat`. |
 
 Compiler enumeration: every `{ Llm_transport.config = …; … }` record literal must now supply `stream_idle_timeout_s`. `rg 'Llm_transport.config =' lib/ test/ bin/` and `rg '{ config =' lib/llm_provider` enumerate them. Each is updated with the value it has in scope, or `stream_idle_timeout_s = None` if it has none. This is the Parse-don't-validate payoff — the compiler, not a reviewer, finds every construction site.
 
@@ -268,21 +268,21 @@ masc populates the request-borne idle through `Builder.with_stream_idle_timeout`
 |---|---|
 | `lib/runtime/runtime_agent.ml` ~365 / ~471 (clock derivation in `build` / `resume_from_checkpoint`) | **Required** — §4.6 fail-fast: a configured `stream_idle_timeout_s` with no resolvable clock must error, not silently proceed unarmed. |
 | `lib/runtime/runtime_agent.ml:236-240` (`patch_request`) | Preserve the request-borne `stream_idle_timeout_s`; it is the only idle-timeout source. |
-| `masc.opam:31`, `dune-project:56` | Bump pin to the OAS release carrying the field (`>= 0.205.0`). |
+| `masc.opam:31`, `dune-project:56` | Bump pin to the agent_core release carrying the field (`>= 0.205.0`). |
 
-Back-compat verified: masc constructs `Llm_transport.completion_request` only via `{ req with … }` (the single site `runtime_agent.ml:236`; `rg 'Llm_transport.completion_request' lib/` returns one hit). Adding an `option` field to the OAS record therefore does not break masc compilation. This is what makes the migration ordering (§6) non-breaking on the masc side.
+Back-compat verified: masc constructs `Llm_transport.completion_request` only via `{ req with … }` (the single site `runtime_agent.ml:236`; `rg 'Llm_transport.completion_request' lib/` returns one hit). Adding an `option` field to the agent_core record therefore does not break masc compilation. This is what makes the migration ordering (§6) non-breaking on the masc side.
 
 ## 6. Migration order (neither repo breaks)
 
-1. **OAS PR**: add the optional field, fix the dispatch arm and transport readers, add the test (§7.1). The field is `option` and threaded by record literal/functional update; existing OAS callers compile after the compiler-enumerated literals are updated. Back-compatible for downstream: masc's `{ req with … }` carries the new field for free.
-2. **OAS release**: release-please minor bump → `0.205.0`. Release note describes only the `agent_sdk` surface (§9).
+1. **agent_core PR**: add the optional field, fix the dispatch arm and transport readers, add the test (§7.1). The field is `option` and threaded by record literal/functional update; existing agent_core callers compile after the compiler-enumerated literals are updated. Back-compatible for downstream: masc's `{ req with … }` carries the new field for free.
+2. **agent_core release**: release-please minor bump → `0.205.0`. Release note describes only the `agent_sdk` surface (§9).
 3. **masc pin bump + clock fail-fast**: `masc.opam` / `dune-project` to `>= 0.205.0`. Remove any constructor-time idle argument, keep the request field authoritative, and reject a configured deadline when no clock is available.
 4. **Verify armed** (§7.2 + §7.4): confirm a stalled stream produces `Cancelled_provider_timeout` at the keeper FSM with the configured idle deadline (120s), not the 1800s watchdog; and that a `None`-clock keeper fails fast rather than hanging.
 5. **Only after step 4**: the F2 follow-up may downgrade/retune the 1800s attempt watchdog and livelock threshold (DIAGNOSIS §5). Doing this before step 4 removes the only backstop while the real idle detector is still proven-or-not — resurrecting I1. This ordering is a hard constraint, not a preference.
 
 ## 7. Test plan
 
-### 7.1 OAS — the test must drive the `Some t` transport arm
+### 7.1 agent_core — the test must drive the `Some t` transport arm
 
 The bug lives only in the transport arm. `complete_stream_http` (the `None` arm) already arms idle correctly, so a test calling it directly **passes with the bug present** and guards nothing. The regression test must construct a transport via `make_http_transport` and drive the dispatch with `~transport:(Some …)`:
 
@@ -312,7 +312,7 @@ The bug lives only in the transport arm. `complete_stream_http` (the `None` arm)
 
 ### 7.3 Build gates
 
-- `scripts/dune-local.sh build` clean in OAS; the compiler-enumerated record literals (§5.1) all updated.
+- `scripts/dune-local.sh build` clean in agent_core; the compiler-enumerated record literals (§5.1) all updated.
 - `scripts/check-sdk-independence.sh` passes — the field is plain OCaml (`float option`), no masc/keeper naming leaks into `lib/`.
 - masc builds against the bumped pin; the only masc code change is the §4.6 fail-fast (no `completion_request` literal change needed — §5.2 confirms masc constructs the request only via `{ req with … }`).
 
@@ -320,7 +320,7 @@ The bug lives only in the transport arm. `complete_stream_http` (the `None` arm)
 
 ### 8.1 Why a `completion_request` field, not `?clock ?stream_idle_timeout_s` params on the transport
 
-Adding labeled params to the transport's `complete_stream` function type changes that type. masc assigns a lambda to it (`runtime_agent.ml:251`, `transport_openai_compat.ml:73-79`); changing the type means those lambdas no longer unify — a **simultaneous cross-repo break**, a broken-main window during the version bump. A field on `completion_request` rides through untouched: the dispatch forwards the record, masc's wrapper uses `{ req with config = … }` (runtime_agent.ml:236-240) which carries a new field without naming it, and OAS ships it as non-breaking minor `feat`, not `feat!`. The field approach is also the only one that makes the drop *unrepresentable* — optional params that default to `None` at each hop are precisely the failure mode that caused S1 (§1.2). Putting the deadline in the value the dispatch already threads makes losing it a visible record-field change, caught by the compiler.
+Adding labeled params to the transport's `complete_stream` function type changes that type. masc assigns a lambda to it (`runtime_agent.ml:251`, `transport_openai_compat.ml:73-79`); changing the type means those lambdas no longer unify — a **simultaneous cross-repo break**, a broken-main window during the version bump. A field on `completion_request` rides through untouched: the dispatch forwards the record, masc's wrapper uses `{ req with config = … }` (runtime_agent.ml:236-240) which carries a new field without naming it, and agent_core ships it as non-breaking minor `feat`, not `feat!`. The field approach is also the only one that makes the drop *unrepresentable* — optional params that default to `None` at each hop are precisely the failure mode that caused S1 (§1.2). Putting the deadline in the value the dispatch already threads makes losing it a visible record-field change, caught by the compiler.
 
 ### 8.2 Why the clock stays a construction capability
 
@@ -342,12 +342,12 @@ Rejected. It pulls the clock capability into the pure data record (§8.2) and co
 ## 9. Backward compatibility & release
 
 - The field is `float option`; existing record literals updated to `None` preserve current behaviour. Downstream consumers using `{ req with … }` (masc) compile unchanged.
-- Breaking only for code that constructs `completion_request` from a positional/exhaustive literal — within OAS, enumerated and fixed by the compiler (§5.1). masc has one consumer and it uses functional update (§5.2), so masc does not break.
-- Release-please entry: `feat(transport): carry stream_idle_timeout_s on completion_request (RFC-OAS-026)` → minor bump `0.205.0`.
+- Breaking only for code that constructs `completion_request` from a positional/exhaustive literal — within agent_core, enumerated and fixed by the compiler (§5.1). masc has one consumer and it uses functional update (§5.2), so masc does not break.
+- Release-please entry: `feat(transport): carry stream_idle_timeout_s on completion_request (RFC-AC-026)` → minor bump `0.205.0`.
 - Release note (SDK-surface only):
   > Starting `agent_sdk` 0.205.0, `Llm_transport.completion_request` carries an optional `stream_idle_timeout_s`. When set (and a clock is available to the transport), a streaming read that stalls mid-stream beyond the deadline raises `Http_client.TimeoutError` instead of blocking until the provider closes the socket. The built-in HTTP transport and any transport that forwards the request inherit this automatically. Consumers constructing `completion_request` literals must add the field (`None` preserves prior behaviour).
 
-2026-07-14 hard cut: `make_http_transport` no longer accepts a parallel construction-time idle value, and OAS no longer injects provider-kind defaults when the request field is `None`. Callers that relied on the constructor argument must move the value to the request/agent option; there is deliberately no compatibility fallback. `None` now means disabled throughout the transport boundary.
+2026-07-14 hard cut: `make_http_transport` no longer accepts a parallel construction-time idle value, and agent_core no longer injects provider-kind defaults when the request field is `None`. Callers that relied on the constructor argument must move the value to the request/agent option; there is deliberately no compatibility fallback. `None` now means disabled throughout the transport boundary.
 
 ## 10. Risks
 
@@ -368,7 +368,7 @@ The DIAGNOSIS forensic measured the incident stall at 1772s ≈ the 1800s watchd
 
 ### 10.3 Telemetry volume
 
-The armed path emits a `Telemetry_event.Timeout` on each stall (complete.ml:1505). At the configured 120s idle this is rare; no expected volume regression. Cross-ref RFC-OAS-019 (the stream-summary already emits a terminal classification).
+The armed path emits a `Telemetry_event.Timeout` on each stall (complete.ml:1505). At the configured 120s idle this is rare; no expected volume regression. Cross-ref RFC-AC-019 (the stream-summary already emits a terminal classification).
 
 ## 11. Open items
 

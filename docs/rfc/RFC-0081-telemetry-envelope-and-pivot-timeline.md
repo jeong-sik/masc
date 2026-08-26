@@ -15,12 +15,12 @@ related: ["0046", "0049", "0063"]
 - **Status**: Implemented (PR #15137).
 - **Author**: vincent (yousleepwhen)
 - **Created**: 2026-05-14
-- **Related**: RFC-0046 (keeper detail FSM Hub SSOT — same UI surface), RFC-0049 (surface telemetry foundation), RFC-0063 (telemetry feedback loop — same consumer fiber), **RFC-OAS-019** (upstream stream lifecycle aggregation in `agent_core`)
-- **Supersedes**: closed PR #15128 (RFC-0073) — same operator-facing goal but mis-located the emission source inside masc; RFC-0081 carves the work into the correct boundary (developer: `agent_core` for emission via RFC-OAS-019, masc for envelope context and pivot UI here)
+- **Related**: RFC-0046 (keeper detail FSM Hub SSOT — same UI surface), RFC-0049 (surface telemetry foundation), RFC-0063 (telemetry feedback loop — same consumer fiber), **RFC-AC-019** (upstream stream lifecycle aggregation in `agent_core`)
+- **Supersedes**: closed PR #15128 (RFC-0073) — same operator-facing goal but mis-located the emission source inside masc; RFC-0081 carves the work into the correct boundary (developer: `agent_core` for emission via RFC-AC-019, masc for envelope context and pivot UI here)
 
 ## 0. Summary
 
-Two operator-facing defects in masc's telemetry view of agent_core streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_core` repo's emission surface and is now scoped under **RFC-OAS-019** in `~/me/workspace/yousleepwhen/agent_core`.
+Two operator-facing defects in masc's telemetry view of agent_core streams are addressed here. Per-chunk noise — the third defect originally bundled in the closed RFC-0073 — is the upstream `agent_core` repo's emission surface and is now scoped under **RFC-AC-019** in `~/me/workspace/yousleepwhen/agent_core`.
 
 1. **Envelope context null** — every `agent_core:telemetry_event` record written to `.masc/agent-core-events/YYYY-MM/DD.jsonl` (the durable agent_core-event store; see `lib/telemetry_unified.ml:105` and `lib/keeper/keeper_event_bridge.ml:710`) has `agent_name`, `task_id`, `turn` as `null`. Operators cannot answer "which keeper, which turn, which goal produced this record?" from the raw jsonl alone.
 
@@ -28,7 +28,7 @@ Two operator-facing defects in masc's telemetry view of agent_core streams are a
 
 This RFC fixes both at the **read boundary**, not the write boundary. The relay code in `keeper_event_bridge.ml` is unchanged. Three rounds of design (fiber-local binding → shared Hashtbl → read-time join) plus three rounds of grep verification settled on read-time as the structural fit: agent_core's `event_envelope` does not carry a turn-level identifier (per-event `fresh_id ()` defaults at `agent_core/lib/event_envelope.ml:55-57`), so any write-time stamping mechanism would race or fail. The fix instead extends `keeper_runtime_manifest` with three timestamp/id fields and lets `telemetry_unified` perform a time-overlap join at API read time. The user-visible artifacts (pivot UI, pivot API) deliver the same stamped events; only the inside of the system is simpler.
 
-The emission-side change (per-chunk noise) is RFC-OAS-019's responsibility.
+The emission-side change (per-chunk noise) is RFC-AC-019's responsibility.
 
 ## 1. Cross-repo boundary (why this RFC exists separately)
 
@@ -36,12 +36,12 @@ The emission-side change (per-chunk noise) is RFC-OAS-019's responsibility.
 
 | Concern | Owner repo | RFC |
 |---|---|---|
-| Per-chunk emission → lifecycle summary | `agent_core` (`agent_core`) | **RFC-OAS-019** |
+| Per-chunk emission → lifecycle summary | `agent_core` (`agent_core`) | **RFC-AC-019** |
 | Turn boundary index in `keeper_runtime_manifest` | `masc` | This RFC §4.2 |
 | Read-time join (agent-core-events ⨝ manifest) | `masc` | This RFC §4.1, §4.3 |
 | Pivot API + UI | `masc` | This RFC §4.3–4.4 |
 
-Mixing the two would blur the emission/consumption boundary. This RFC names no `agent_core` internal identifiers in `lib/`; it only consumes the public `Telemetry_event` variants as published by `agent_core` ≥ 0.194.0 (RFC-OAS-019's target version).
+Mixing the two would blur the emission/consumption boundary. This RFC names no `agent_core` internal identifiers in `lib/`; it only consumes the public `Telemetry_event` variants as published by `agent_core` ≥ 0.194.0 (RFC-AC-019's target version).
 
 ## 2. Goal
 
@@ -53,7 +53,7 @@ Mixing the two would blur the emission/consumption boundary. This RFC names no `
 ## 3. Non-goals
 
 - Modify `keeper_event_bridge.ml` or anything else on the write side. The relay path remains unchanged.
-- Re-emit, throttle, or deduplicate any upstream `agent_core:telemetry_event` payload. The bus contents are RFC-OAS-019's responsibility. masc consumes whatever the SDK publishes.
+- Re-emit, throttle, or deduplicate any upstream `agent_core:telemetry_event` payload. The bus contents are RFC-AC-019's responsibility. masc consumes whatever the SDK publishes.
 - Stamp envelope fields directly into `.masc/agent-core-events/` jsonl. Three rounds of grep verification showed write-time stamping does not fit agent_core event-envelope semantics; the read-time join is the structural fix.
 - Rewrite the dashboard timeline framework. `vis-timeline` is already loaded by `fsm-hub-timeline-panels.ts` — reuse, don't replace.
 - Add a new aggregation engine. Extend `tool_agent_timeline` 6-source merger by adding key branches; do not duplicate the merger.
@@ -157,19 +157,19 @@ Mount points:
 
 - New routes, manifest field extension (`turn_started_at`, `turn_ended_at`, `correlation_id_first`), new envelope fields: all additive. No new file family — §4.2 retracted the parallel `.masc/run-index/` design in favor of manifest-only indexing. Existing consumers that ignore unknown fields continue to work.
 
-### 5.2 Coupling to RFC-OAS-019
+### 5.2 Coupling to RFC-AC-019
 
-If RFC-OAS-019 ships before RFC-0081, the pivot UI shows the typed `Streaming_summary` records grouped by turn — best case.
+If RFC-AC-019 ships before RFC-0081, the pivot UI shows the typed `Streaming_summary` records grouped by turn — best case.
 
-If RFC-0081 ships first, the pivot UI groups raw `Streaming_chunk_n` records (still hundreds per attempt). The grouping is correct but each turn balloons. This is operationally usable (filter by `payload[0] == "Streaming_summary"` once RFC-OAS-019 lands) and not a regression versus today.
+If RFC-0081 ships first, the pivot UI groups raw `Streaming_chunk_n` records (still hundreds per attempt). The grouping is correct but each turn balloons. This is operationally usable (filter by `payload[0] == "Streaming_summary"` once RFC-AC-019 lands) and not a regression versus today.
 
-If RFC-0081 ships and RFC-OAS-019 stalls, masc does *not* take on receive-side aggregation as a workaround. AGENT-LLM-A.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
+If RFC-0081 ships and RFC-AC-019 stalls, masc does *not* take on receive-side aggregation as a workaround. AGENT-LLM-A.md §Workaround Rejection Bar §1 (telemetry-as-fix). Wait for upstream.
 
 ### 5.3 Cross-RFC interlock
 
 | RFC | Interaction |
 |---|---|
-| RFC-OAS-019 (agent_core) | Upstream emission shape. Pivot UI gains clarity once `Streaming_summary` is emitted, but RFC-0081 does not block on RFC-OAS-019 merge. |
+| RFC-AC-019 (agent_core) | Upstream emission shape. Pivot UI gains clarity once `Streaming_summary` is emitted, but RFC-0081 does not block on RFC-AC-019 merge. |
 | RFC-0046 (masc) | Same `keeper-detail-state.ts` slot layout. Sync with RFC-0046 author before Phase 2 frontend merge: timeline above/below FsmHub. |
 | RFC-0063 (masc) | Same consumer fiber. RFC-0063's drain-yield contract is preserved without modification — read-time join is on the API path, not the consumer fiber. |
 | RFC-0049 (masc) | Surface telemetry foundation; the manifest-field extension is a foundation-layer additive change. |

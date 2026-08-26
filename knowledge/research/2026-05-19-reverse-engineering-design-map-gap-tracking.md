@@ -22,7 +22,7 @@ Plan declares 3 "high-heat" gaps in the `#gaps` table and 1 additional HIGH (Aut
 | Plan gap | Plan heat | Now | RFC required |
 |---|---|---|---|
 | 1. Keeper turn FSM vs run_turn mixed orchestration | HIGH | Partial — `turn_plan` typed at phase gate; SpawnAdmission/PostTurn/MetricsClose still untyped inside 2,066-LoC monolith | RFC required |
-| 2. OAS provider/model redaction broad + regression-prone | HIGH | Untreated — 11+ scattered `"runtime"` literals, no SSOT constant; `observability_redact` is secrets-only and orthogonal | RFC required |
+| 2. agent_core provider/model redaction broad + regression-prone | HIGH | Untreated — 11+ scattered `"runtime"` literals, no SSOT constant; `observability_redact` is secrets-only and orthogonal | RFC required |
 | 3. H1/H2 MCP route behavior drift | HIGH | Partial — `Server_mcp_request_context` shared; **actor injection drift already closed by PR #16137** (see CORRECTION below); internal_keeper_runtime decision still duplicated; profile_conflict not extracted | PR-able + RFC for full identity FSM |
 | 3-bonus. Auth identity spread (token owner / request hints / dashboard actor / `_agent_name` / SSE query-token) | HIGH | Partial — caller identity extracted to `mcp_server_eio_caller_identity.ml` (PR #16163); transport-side still rewrites `_agent_name` inline | RFC required (request identity reducer) |
 
@@ -45,7 +45,7 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ### Plan claim
 - Plan `#gaps` row 3: *"`Keeper_turn_fsm` has typed states; docs still list run_turn-side streaming/tool transitions and cancellation propagation as pending/risky."*
-- Plan `#refactor` row 1: `keeper_unified_turn.ml` 2,890 LoC, first cut = "pre-dispatch gate / OAS dispatch / post-turn / acquisition guard modules".
+- Plan `#refactor` row 1: `keeper_unified_turn.ml` 2,890 LoC, first cut = "pre-dispatch gate / agent_core dispatch / post-turn / acquisition guard modules".
 - Plan `#improvement-plan` evidence-box 3: Pipeline stages `SpawnAdmission → EventIntake → PhaseGate → PromptPlan → ProviderAttempt → ReceiptClose → PostTurn → MetricsClose`.
 
 ### Current state (file:line evidence)
@@ -73,7 +73,7 @@ LOC moves since plan (size monolith-reduction proxy):
 
 ---
 
-## Gap 2 — OAS provider/model redaction broad + regression-prone
+## Gap 2 — agent_core provider/model redaction broad + regression-prone
 
 ### Plan claim
 - Plan `#gaps` row 4: *"Boundary doc enumerates many compatibility keys that must emit neutral runtime/null values."*
@@ -112,11 +112,11 @@ LOC moves since plan (size monolith-reduction proxy):
 - Per `software-development.md` §워크어라운드 거부 기준 §2 ("String/Substring 분류기 보강") — *adding* a constant without typed boundary is workaround; closed-sum type is the root fix.
 
 ### RFC candidate
-**Title**: *OAS-MASC boundary redaction SSOT — closed public-label types*
-**Scope**: One-sentence — replace 11+ inline `"runtime"` string literals across `lib/runtime/*` and `lib/keeper/*` with a single `Boundary_redaction` module exporting a private type that makes the neutral-lane projection the only constructible value at the OAS↔MASC boundary, so future regressions fail to type-check rather than silently leak provider identity.
+**Title**: *agent_core-MASC boundary redaction SSOT — closed public-label types*
+**Scope**: One-sentence — replace 11+ inline `"runtime"` string literals across `lib/runtime/*` and `lib/keeper/*` with a single `Boundary_redaction` module exporting a private type that makes the neutral-lane projection the only constructible value at the agent_core↔MASC boundary, so future regressions fail to type-check rather than silently leak provider identity.
 
 ### Classification
-**RFC required** — touches `lib/keeper/*` (covered in `agent_delegation` subsystem list indirectly via runtime), introduces a new module with cross-cutting type boundary; *not* a narrow cleanup because the boundary doc (`docs/OAS-MASC-BOUNDARY.md:62-68, :108-188`) lists many compatibility keys that need a coherent treatment.
+**RFC required** — touches `lib/keeper/*` (covered in `agent_delegation` subsystem list indirectly via runtime), introduces a new module with cross-cutting type boundary; *not* a narrow cleanup because the boundary doc (`docs/agent_core-MASC-BOUNDARY.md:62-68, :108-188`) lists many compatibility keys that need a coherent treatment.
 
 ---
 
@@ -200,10 +200,10 @@ LOC moves since plan (size monolith-reduction proxy):
 - `lib/server/server_dashboard_surface.ml/.mli` exists (151+37 LoC, PR #16240 `60d7e58b0d`).
 - **Only 1 consumer** in `lib/` per `rg -l 'Server_dashboard_surface'`.
 - Plan §5 calls for *all* dashboard read-models to consume `DashboardSurface` envelope. Wide rollout open.
-- **PR-able**: each domain projection (keeper, OAS telemetry, planning, governance) can wrap independently. **RFC required** for the envelope contract version 2 if cache state / stale fallback / broadcast hook fields need extension.
+- **PR-able**: each domain projection (keeper, agent_core telemetry, planning, governance) can wrap independently. **RFC required** for the envelope contract version 2 if cache state / stale fallback / broadcast hook fields need extension.
 
 ### Plan #refactor row "Metrics SSOT transitional" — substantial progress
-- 6 metrics-backend split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/runtime/oas/policy/runtime metric names split into separate modules.
+- 6 metrics-backend split PRs landed (#16193, #16192, #16196, #16199, #16277, #16278, #16291): core/transport/runtime/agent_core/policy/runtime metric names split into separate modules.
 - Plan `#gaps` row 10 (runtime vs retired metrics backend drift) likely resolved. Recommend close.
 
 ---
@@ -213,7 +213,7 @@ LOC moves since plan (size monolith-reduction proxy):
 | # | Title | Scope | Class |
 |---|---|---|---|
 | A | Keeper Turn typed pipeline records (post-PhaseGate stages) | Extend `turn_plan`-style record contract to 7 remaining stages; preserve 8 listed turn invariants | RFC required |
-| B | OAS-MASC boundary redaction SSOT — closed public-label types | Replace 11+ `"runtime"` literals with `Boundary_redaction` module exposing private types | RFC required |
+| B | agent_core-MASC boundary redaction SSOT — closed public-label types | Replace 11+ `"runtime"` literals with `Boundary_redaction` module exposing private types | RFC required |
 | C | MCP request admission reducer + identity FSM (H1/H2 parity) | Expand `Server_mcp_request_context` to 6 outputs; consume from H1+H2 as adapters | RFC required (with 2 PR-able prereqs) |
 | C-pre1 | ~~*PR-able*: Wire H2 to `Server_mcp_actor_injection`~~ — **WITHDRAWN, already closed by PR #16137 (`33adab28fd`, "test: pin MCP H1/H2 admission parity")** | n/a | closed |
 | C-pre2 | ~~*PR-able*: Hoist `internal_keeper_runtime` decision (3 sites)~~ — **WITHDRAWN, hoist already exists at `lib/server/server_auth.ml:351` (`Server_auth.is_verified_internal_keeper_request`); the "3 sites" are byte-identical applications of the already-hoisted function, not three independent decisions** | n/a | closed |

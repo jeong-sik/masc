@@ -520,6 +520,51 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
    [flush_dirty] clears the dirty flags before writing. Dropping this failure
    left the cast votes out of the log with nothing scheduled to write them
    again -- the shape the posts and comments writers fixed in #26168. *)
+(* Why a cancelled shutdown flush does not lose its snapshot.
+
+   [flush_dirty] clears the dirty flags before it writes, so a write that never
+   happens would drop the snapshot with nothing scheduled to retry -- the
+   #26168 shape. [save_jsonl_snapshot_result] catches only [Sys_error], so an
+   exception would pass straight through it, and the caller in [main_stdio_eio]
+   swallows [Eio.Cancel.Cancelled] without a counter or a log line.
+
+   The write survives anyway, because [with_persist_lock] holds its mutex with
+   [~protect:true] and that covers the whole persist body. Nothing in
+   [flush_dirty] itself says so, and the guarantee disappears the moment that
+   flag does, which is what this test is for. See masc#30619. *)
+let test_flush_under_cancellation_still_writes () =
+  let voter = "vote-log-cancel-voter" in
+  let post =
+    create_post_exn ~author:"vote-log-cancel-author" ~content:"vote log cancel body"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let store =
+    match Board_dispatch.backend () with Board_dispatch.Jsonl store -> store
+  in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail ("vote must succeed: " ^ Board.show_board_error e));
+  Alcotest.(check bool) "the vote marked the post dirty" true store.Board.dirty_posts;
+  (try
+     Eio.Cancel.sub (fun cc ->
+       Eio.Cancel.cancel cc (Failure "flush_cancelled_for_test");
+       Board.flush_dirty store)
+   with
+   | Eio.Cancel.Cancelled _ ->
+     Alcotest.fail
+       "the flush was cut by cancellation; its snapshot is gone and the dirty \
+        flags were already cleared");
+  Alcotest.(check bool)
+    "the flush completed, so nothing stayed scheduled"
+    false
+    store.Board.dirty_posts;
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  Alcotest.(check bool)
+    "the vote reached the log despite the cancellation"
+    true
+    (find_row ~target:("post:" ^ post_id ^ ":" ^ voter) ~voter rows <> None)
+;;
+
 let test_flush_failure_keeps_the_vote_log_scheduled () =
   let voter = "vote-log-retry-voter" in
   let post =
@@ -611,5 +656,9 @@ let () =
             "rewrite_posts: failed snapshot write stays scheduled"
             `Quick
             (with_eio test_rewrite_posts_failure_stays_scheduled);
+          Alcotest.test_case
+            "flush: cancellation cannot cut the write"
+            `Quick
+            (with_eio test_flush_under_cancellation_still_writes);
         ] );
     ]

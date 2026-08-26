@@ -239,6 +239,37 @@ let explicit_metadata : (string * metadata) list =
     ("masc_plan_set_task", broadcast_tool);
     ("masc_broadcast", with_semantic_flags ~mcp_context_required:true broadcast_tool);
     ("channel_gate", broadcast_tool);
+    (* Auth keys owned by the approval-mode HTTP routes themselves, not
+       borrowed from a dispatchable tool. [with_tool_auth] resolves the
+       caller's role through the catalog entry named by ~tool_name, so an
+       HTTP route needs a name here to be authorizable at all; these two
+       exist only for that lookup. They are hidden runtime keys with no
+       schema and no dispatch path, so they never appear on the public MCP
+       surface and cannot be called as tools.
+
+       Review (#30533): these decide what a running turn is allowed to do —
+       answering a held call, or turning a keeper's approval gate off until
+       restart. Worker tokens carry [CanBroadcast] for normal chat writes;
+       they must not be able to flip any keeper's approval stance, so both
+       keys sit at [CanAdmin] like the voice transcribe route's operator
+       quota. The two routes also keep separate keys: answering one held
+       call (keeper_tool_approval_route) and disabling the whole gate
+       (keeper_tool_approval_mode_route) are different weights of action. *)
+    ( "keeper_tool_approval_route",
+      hidden_runtime_tool
+        "Auth key for the tool-approval HTTP route (answering a held tool \
+         call); no schema, no dispatch path, route-authority only. Admin \
+         tier: a worker token must not answer held calls for keepers it \
+         does not own."
+        admin_tool );
+    ( "keeper_tool_approval_mode_route",
+      hidden_runtime_tool
+        "Auth key for the tool-approval-mode HTTP route (setting the \
+         per-keeper approval stance); no schema, no dispatch path, \
+         route-authority only. Admin tier: setting YOLO for a keeper \
+         disables its approval gate until restart, which is not a \
+         broadcast-level action."
+        admin_tool );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
        RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,

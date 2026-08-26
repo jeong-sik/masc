@@ -530,7 +530,7 @@ let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
-  | Detail_instructions -> "Instructions"
+  | Detail_instructions -> "Settings"
   | Detail_github -> "GitHub"
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
@@ -1104,6 +1104,11 @@ type state = {
   mutable verification_error: string option;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* The request being read, not merely the current cursor position. A refresh
+     may reorder the queue; retaining the request id prevents the detail pane
+     and verdict keys from silently moving to a different task. *)
+  mutable verification_detail_request_id: string option;
+  mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
      press on a different row re-arms for that row. Reject carries no arm --
@@ -1506,6 +1511,8 @@ let create_state
   verification_error = None;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_detail_request_id = None;
+  verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
   system_logs_scroll = 0;
@@ -1643,6 +1650,7 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Verification_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -1661,6 +1669,8 @@ let apply_clamped_scroll (state : state) = function
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Verification_detail_scroll value ->
+      state.verification_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -1695,10 +1705,12 @@ let scrolled_surface (state : state) : surface -> scrolled option =
         ; sc_preview_keep = None
         }
   | Verification ->
-      listing ~error:state.verification_error
-        (match state.verification with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.vs_requests)
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        listing ~error:state.verification_error
+          (match state.verification with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.vs_requests)
   | Lanes ->
       listing ~error:state.lanes_error
         (match state.lanes with
@@ -1772,14 +1784,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
           List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
         state.lanes
   | Verification ->
-      Option.map
-        (fun s ->
-          List.map
-            (fun r ->
-              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
-              ^ r.Tui_decode.vr_submitted_by)
-            s.Tui_decode.vs_requests)
-        state.verification
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        Option.map
+          (fun s ->
+            List.map
+              (fun r ->
+                r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+                ^ r.Tui_decode.vr_submitted_by)
+              s.Tui_decode.vs_requests)
+          state.verification
   | Harness ->
       Option.map
         (fun s ->
@@ -1914,6 +1928,13 @@ type palette_action =
      entries so one keypress can also be a choice among several names. *)
   | Palette_lsp of string * string
 
+(* Prefix match: the lowercased label starts with the query. An empty query
+   is a prefix of everything. *)
+let palette_starts_with ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle in
+  String.length h >= n && String.equal (String.sub h 0 n) needle
+
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
   let n = String.length needle and hl = String.length h in
@@ -1976,6 +1997,19 @@ let code_cursor_line_symbols (state : state) =
             segments;
           List.rev !names)
 
+(* The Code pane asks the server for at most this many entries per directory
+   and the server answers a bare list, so a full page is the only sign that a
+   directory holds more. The title says so rather than presenting the page as
+   the total: masc's own test/ has 955 entries. *)
+let workspace_entries_limit =
+  Server_routes_http_routes_workspace.max_tree_node_limit
+
+let workspace_entries_count_label total =
+  if total = 0 then ""
+  else if total >= workspace_entries_limit then
+    Printf.sprintf " (%d+, more not listed)" total
+  else Printf.sprintf " (%d)" total
+
 let palette_entries (state : state) =
   List.map
     (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
@@ -1992,8 +2026,8 @@ let palette_entries (state : state) =
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
   @ (* With a file focused on the Code surface, the cursor line's names are
-       askable: K/D pre-fill the matching prefix, so exactly these entries
-       remain in view. *)
+       askable: K/D pre-fill the matching prefix, and [palette_matches] ranks
+       a label that starts with the query first, so these lead the list. *)
   (if state.view = Code && state.code_focus_file = Right_pane then
      List.concat_map
        (fun name ->
@@ -2020,16 +2054,18 @@ let palette_matches (state : state) =
     String.lowercase_ascii (String.trim state.palette_query)
   in
   let entries = palette_entries state in
-  (* Substring hits rank above subsequence-only hits, both keep entry
-     order inside their rank. *)
-  let substring_hits =
-    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  (* Three ranks, entry order kept inside each: a label that starts with the
+     query, then one that contains it, then one that only has its characters
+     in order. A K/D pre-fill of "def " therefore lists the cursor line's
+     names before a post that merely mentions "deferred". *)
+  let rank (label, _) =
+    if palette_starts_with ~needle label then Some 0
+    else if palette_contains ~needle label then Some 1
+    else if palette_subsequence ~needle label then Some 2
+    else None
   in
-  let subsequence_hits =
-    List.filter
-      (fun (label, _) ->
-        (not (palette_contains ~needle label))
-        && palette_subsequence ~needle label)
-      entries
-  in
-  substring_hits @ subsequence_hits
+  entries
+  |> List.filter_map (fun entry ->
+         Option.map (fun r -> (r, entry)) (rank entry))
+  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
+  |> List.map snd

@@ -1,20 +1,20 @@
-# RFC-OAS-022: Code-Smell Monotone-Decrease Ratchet
+# RFC-AC-022: Code-Smell Monotone-Decrease Ratchet
 
 **Status**: Draft
 **Date**: 2026-05-20
 **Scope**: `.ci/code-smell-baseline.json`, `scripts/ci-code-smell-ratchet.sh`, `.github/workflows/code-smell-ratchet.yml`
-**One sentence**: Lock four OAS code-smell metrics (godfile / catch_all / duplicate_helpers / ignore_calls) against a stored baseline so that PRs can only decrease or hold the counts.
+**One sentence**: Lock four agent_core code-smell metrics (godfile / catch_all / duplicate_helpers / ignore_calls) against a stored baseline so that PRs can only decrease or hold the counts.
 
 ## Related Documents
 
-- `memory/2026-05-20-masc-mcp-oas-workaround-audit.md` — Cluster C (exhaustive-match cleanup) prescription: `dune -w +8` strict + monotone-decrease ratchet for `_ ->` regressions.
-- masc-mcp PR #16833 (`29c2befa9f` — `ci(code-smell): 4-metric monotone-decrease ratchet + RFC-0146`) — sibling implementation in masc-mcp. OAS mirrors the script/workflow shape but defines a different metric set, since OAS has no HTML code-smell report and `contains_substring` is not the dominant duplicate-helper signature.
+- `memory/2026-05-20-masc-mcp-agent_core-workaround-audit.md` — Cluster C (exhaustive-match cleanup) prescription: `dune -w +8` strict + monotone-decrease ratchet for `_ ->` regressions.
+- masc-mcp PR #16833 (`29c2befa9f` — `ci(code-smell): 4-metric monotone-decrease ratchet + RFC-0146`) — sibling implementation in masc-mcp. agent_core mirrors the script/workflow shape but defines a different metric set, since agent_core has no HTML code-smell report and `contains_substring` is not the dominant duplicate-helper signature.
 - `~/me/instructions/software-development.md` §Workaround Rejection Bar — ratchets are the prescribed prevention for "every audit becomes a Sisyphus task" pattern.
-- OAS exhaustive-match cleanup history (9 merged PRs touching 27 sites) — without a gate, the next refactor wave will re-introduce `_ ->` arms in closed-variant contexts.
+- agent_core exhaustive-match cleanup history (9 merged PRs touching 27 sites) — without a gate, the next refactor wave will re-introduce `_ ->` arms in closed-variant contexts.
 
 ## 0. Summary
 
-OAS has no automated guard against the four code-smell shapes that
+agent_core has no automated guard against the four code-smell shapes that
 the 2026-05-20 audit (Cluster C) identified as regression-prone:
 
 1. **godfile** — `.ml` / `.mli` files ≥ 1000 LoC.
@@ -35,15 +35,15 @@ links a sunset RFC.
 
 ## 1. Problem
 
-Audit cycles in OAS have repeatedly converged on the same pattern:
+Audit cycles in agent_core have repeatedly converged on the same pattern:
 
 1. A sweep identifies N regression-prone sites.
 2. K PRs land that reduce N → N - K.
 3. New PRs over the next weeks re-introduce roughly K sites.
 4. The next audit re-discovers the same shapes with the same N.
 
-The audit memory (`2026-05-20-masc-mcp-oas-workaround-audit.md`)
-records this for masc-mcp as the "Sisyphus task" pattern; the OAS
+The audit memory (`2026-05-20-masc-mcp-agent_core-workaround-audit.md`)
+records this for masc-mcp as the "Sisyphus task" pattern; the agent_core
 exhaustive-match cleanup (9 PRs, 27 sites) is the local instance.
 
 `dune -w +8` strict warnings catch *fully-exhaustive missing arms*,
@@ -130,19 +130,19 @@ file. The RFC body of that PR must explain the increase.
 
 ## 6. Why These Four Metrics
 
-OAS-specific reasoning, divergent from masc-mcp's identical-name
+agent_core-specific reasoning, divergent from masc-mcp's identical-name
 slot:
 
-- **godfile** — OAS `lib/` has 10 files ≥ 1000 LoC, mostly in
+- **godfile** — agent_core `lib/` has 10 files ≥ 1000 LoC, mostly in
   `lib/llm_provider/`. Each new provider tends to push existing
   files past the threshold. Holding the line is the first step
   toward the existing `agent.ml → agent/` decomposition convention.
-- **catch_all** — most of OAS's 768 hits are list-pattern filters
+- **catch_all** — most of agent_core's 768 hits are list-pattern filters
   (`| _ -> false` / `| [] -> ... | _ -> ...`). The ratchet does
   not require *removing* them; it forbids *adding* new ones in
   closed-variant matches without a manual review acknowledging the
   trade-off.
-- **duplicate_helpers** — the OAS-specific four names
+- **duplicate_helpers** — the agent_core-specific four names
   (`contains_substring`, `starts_with`, `first_token_basename`,
   `last_pipeline_segment`) are textual signatures of helpers that
   appear in 2+ files. `starts_with` is the most common drift
@@ -174,12 +174,12 @@ counts rather than monotone-decrease).
 
 - This RFC does not measure or gate test code under `test/`.
 - It does not classify catch-all arms by RHS — that is a separate
-  audit step (see masc-mcp `audit-catchall.sh`; OAS may adopt a
+  audit step (see masc-mcp `audit-catchall.sh`; agent_core may adopt a
   similar tool in a follow-up).
 - It does not replace `dune -w +8` strict warnings or
   bisect coverage floors.
 - It does not back-fill the existing godfiles toward 300-line
-  decomposition — that is RFC-OAS-017 / future work.
+  decomposition — that is RFC-AC-017 / future work.
 
 ## 9. Risks
 
@@ -200,14 +200,14 @@ counts rather than monotone-decrease).
 
 The two RFCs share script structure but not metric definitions:
 
-| metric (slot)      | masc-mcp (RFC-0146)                       | OAS (RFC-OAS-022)                                                                                  |
+| metric (slot)      | masc-mcp (RFC-0146)                       | agent_core (RFC-AC-022)                                                                                  |
 |--------------------|-------------------------------------------|----------------------------------------------------------------------------------------------------|
 | godfile            | `find lib -name "*.ml"` (≥ 1000 LoC)      | `find lib -name "*.ml" -o -name "*.mli"` (≥ 1000 LoC) — `.mli` included                            |
 | catch_all          | same                                      | same                                                                                                |
 | 3rd metric         | `contains_substring` only                 | `contains_substring \| starts_with \| first_token_basename \| last_pipeline_segment` (4 names)     |
 | ignore_calls       | same                                      | same                                                                                                |
 
-The divergence is intentional: OAS does not have an HTML
+The divergence is intentional: agent_core does not have an HTML
 code-smell report to constrain it, and the helper-duplication
 signatures observed in `lib/llm_provider/` and `lib/pipeline/`
 differ from the masc-mcp keeper sub-system.

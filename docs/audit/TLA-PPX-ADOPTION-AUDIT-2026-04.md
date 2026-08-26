@@ -133,7 +133,7 @@ domains_with_zero_ppx_link: count of TLA spec domains with 0 PPX-instrumented mo
 # Floor: 14 (current). Goal: monotonic decrease.
 ```
 
-Same enforcement discipline as the OAS chain: defer hard-gating until at least 2 follow-up PRs land, otherwise the floor enforces nothing meaningful. This is the same logic as the Q-P0-2 Phase 4 deferral.
+Same enforcement discipline as the agent_core chain: defer hard-gating until at least 2 follow-up PRs land, otherwise the floor enforces nothing meaningful. This is the same logic as the Q-P0-2 Phase 4 deferral.
 
 ## 9. Suggested next steps (out of scope)
 

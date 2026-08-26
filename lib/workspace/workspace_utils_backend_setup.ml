@@ -194,6 +194,50 @@ let resolve_masc_base_path path =
 
 let resolve_server_default_base_path path = resolve_masc_base_path path
 
+(* task-351: quarantine escape guard.
+   2026-08-25 04:38:30Z incident: a test-harness Workspace.init with a
+   temp-dir base request (test_warn_root_causes.ml, agent
+   "test-stale-task-hint") resolved its base to the production root
+   (/Users/dancer/me) and rewrote production state: messages seq 2604→1,
+   backlog replaced. Filesystem proof: /Users/dancer/me/.masc/agents/
+   test-stale-task-hint.json (session_bound_at 04:38:30Z).
+
+   The primary cause — the MASC_TEST_ALLOW_BASE_PATH_OVERRIDE switch that
+   let a test executable resolve to a live base — was removed in #30487.
+   This guard is defense-in-depth: whatever future path makes a temp-dir
+   base request resolve outside temp, the resolution is refused and the
+   scratch dir is kept, so a temp-shaped base request can never resolve
+   to a non-temp base — whatever executable makes it, test-named or not.
+   Note the guard fires on the only remaining branch: a non-test-named
+   binary with an inherited MASC_BASE_PATH (| Some explicit -> explicit).
+   test_-prefixed executables keep temp on every branch already; scratch
+   dirs outside the four temp roots (e.g. a fixture dir inside the repo)
+   are not covered by this predicate — that is a separate concern. *)
+let temp_dir_roots =
+  [ Filename.get_temp_dir_name (); "/tmp"; "/var/tmp"; "/dev/shm" ]
+
+let is_temp_scratch_dir path =
+  (* Resolve symlinks (e.g. /var -> /private/var on macOS) on both the input
+     and the roots. A leaf that does not exist yet cannot be realpath'd, so
+     walk up to the nearest existing ancestor, realpath it, and re-append the
+     remaining components. *)
+  let rec realpath_or_parent p =
+    try Unix.realpath p
+    with Unix.Unix_error _ ->
+      let dir = Filename.dirname p in
+      if String.equal dir p then p
+      else Filename.concat (realpath_or_parent dir) (Filename.basename p)
+  in
+  let path = realpath_or_parent path in
+  List.exists
+    (fun root ->
+      let root = realpath_or_parent root in
+      String.equal root path || String.starts_with ~prefix:(root ^ "/") path)
+    temp_dir_roots
+
+let resolved_base_escapes_temp_request requested resolved =
+  is_temp_scratch_dir requested && not (is_temp_scratch_dir resolved)
+
 (* ============================================ *)
 (* Environment helpers                          *)
 (* ============================================ *)
@@ -359,7 +403,18 @@ let reset_default_config_cache () =
 
 let build_default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
-  let resolved_path = resolve_masc_base_path base_path in
+  let resolved_path =
+    match resolve_masc_base_path base_path with
+    | resolved when resolved_base_escapes_temp_request base_path resolved ->
+        (* task-351: a temp-dir request must never resolve to production.
+           [resolve_masc_base_path] already logged the escape; keep the
+           scratch dir as the base so all writes stay quarantined. *)
+        Log.Backend.error
+          "task-351 guard: keeping scratch base %s for temp-dir request"
+          base_path;
+        base_path
+    | resolved -> resolved
+  in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   (* #10919: this factory is invoked per-tool-dispatch (8 call sites:
@@ -404,7 +459,16 @@ let default_config base_path =
     [on_backend_ready] is called after backend creation, allowing callers
     to initialize dependent systems (e.g., Board) without Workspace depending on them. *)
 let default_config_uncached ?(on_backend_ready = fun _backend -> ()) base_path =
-  let resolved_path = resolve_masc_base_path base_path in
+  let resolved_path =
+    match resolve_masc_base_path base_path with
+    | resolved when resolved_base_escapes_temp_request base_path resolved ->
+        Log.Backend.error
+          "task-351 guard: keeping scratch base %s for temp-dir request \
+           (resolved %s rejected)"
+          base_path resolved;
+        base_path
+    | resolved -> resolved
+  in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
   (* #10919: same noise pattern as [default_config]; demote success

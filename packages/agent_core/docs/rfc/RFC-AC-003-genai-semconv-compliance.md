@@ -1,4 +1,4 @@
-# RFC-OAS-003: OpenTelemetry GenAI Semantic Conventions Compliance
+# RFC-AC-003: OpenTelemetry GenAI Semantic Conventions Compliance
 
 Status: Draft
 Created: 2026-04-16
@@ -7,7 +7,7 @@ Reference spec: https://opentelemetry.io/docs/specs/semconv/gen-ai/
 
 ## 1. Summary
 
-OAS emits OTel spans with a subset of GenAI semantic conventions. Several required and recommended attributes are missing, and one OAS-local extension (`gen_ai.turn`) is not part of the spec. This RFC proposes compliance without breaking existing consumers, using the `OTEL_SEMCONV_STABILITY_OPT_IN` dual-emission pattern that OTel itself uses for transition.
+agent_core emits OTel spans with a subset of GenAI semantic conventions. Several required and recommended attributes are missing, and one agent_core-local extension (`gen_ai.turn`) is not part of the spec. This RFC proposes compliance without breaking existing consumers, using the `OTEL_SEMCONV_STABILITY_OPT_IN` dual-emission pattern that OTel itself uses for transition.
 
 ## 2. Current State
 
@@ -30,7 +30,7 @@ Metrics (`lib/metrics.mli`) do emit `gen_ai.client.token.usage` and `gen_ai.clie
 |-----------|---------|--------|
 | `gen_ai.request.model` | Model name as requested by the caller | `agent_state.config.model` or `Provider_config.model_id` |
 | `gen_ai.system` | Provider name (openai/anthropic/ollama/...) | `Provider_config.kind` lowercased |
-| `gen_ai.operation.name` | ✅ present but spec enum is `chat|text_completion|embeddings|...` — verify OAS passes `"chat"` not a custom name |
+| `gen_ai.operation.name` | ✅ present but spec enum is `chat|text_completion|embeddings|...` — verify agent_core passes `"chat"` not a custom name |
 
 ### 3.2 Recommended, missing on spans
 
@@ -45,11 +45,11 @@ Metrics (`lib/metrics.mli`) do emit `gen_ai.client.token.usage` and `gen_ai.clie
 | `gen_ai.request.max_tokens` | Max output tokens | `Provider_config.max_tokens` |
 | `gen_ai.request.top_p` | Top-p sampling | `Provider_config.top_p` |
 
-### 3.3 OAS-specific non-standard
+### 3.3 agent_core-specific non-standard
 
 | Attribute | Notes |
 |-----------|-------|
-| `gen_ai.turn` | Turn counter inside a multi-turn loop. Not in OTel spec. Keep but rename to `oas.agent.turn` to avoid polluting the `gen_ai` namespace. |
+| `gen_ai.turn` | Turn counter inside a multi-turn loop. Not in OTel spec. Keep but rename to `agent_core.agent.turn` to avoid polluting the `gen_ai` namespace. |
 
 ## 4. Proposal
 
@@ -83,7 +83,7 @@ let opt_attr k v =
 
 let semantic_attrs (attrs : Tracing.span_attrs) =
   [ ("gen_ai.agent.name", attrs.agent_name);
-    ("oas.agent.turn", string_of_int attrs.turn);
+    ("agent_core.agent.turn", string_of_int attrs.turn);
     ("gen_ai.operation.name", attrs.name) ]
   @ opt_attr "gen_ai.system" attrs.system
   @ opt_attr "gen_ai.request.model" attrs.request_model
@@ -105,8 +105,8 @@ OTel recommends dual emission during transition:
 
 | Env value | Emitted attributes |
 |-----------|-------------------|
-| unset (default) | Legacy (`gen_ai.turn` in the old place) + new (`oas.agent.turn`) — dual |
-| `gen_ai_latest` | New only (`oas.agent.turn`) |
+| unset (default) | Legacy (`gen_ai.turn` in the old place) + new (`agent_core.agent.turn`) — dual |
+| `gen_ai_latest` | New only (`agent_core.agent.turn`) |
 | `gen_ai_legacy` | Legacy only (`gen_ai.turn` in the old place) |
 
 After N releases, drop dual-emit and require `gen_ai_latest` implicitly.
@@ -119,7 +119,7 @@ After N releases, drop dual-emit and require `gen_ai_latest` implicitly.
 ## 5. Breaking changes
 
 - `Tracing.span_attrs` gains 10 optional fields. Callers constructing the record literal must set them. Most callers use a helper (`Tracer.start_span`) that already owns this construction, so downstream impact is bounded.
-- `gen_ai.turn` removed from spans (moved to `oas.agent.turn`); dashboards filtering on the old attribute break unless they run in dual-emit mode.
+- `gen_ai.turn` removed from spans (moved to `agent_core.agent.turn`); dashboards filtering on the old attribute break unless they run in dual-emit mode.
 
 ## 6. Test plan
 
@@ -130,13 +130,13 @@ After N releases, drop dual-emit and require `gen_ai_latest` implicitly.
 ## 7. Out of scope
 
 - `gen_ai.prompt` / `gen_ai.completion` (full message capture). Requires a log/event pipeline separate from span attributes and raises PII concerns. Separate RFC.
-- `server.address` / `server.port` on spans. Inherited from HTTP semconv when present via the HTTP client layer — OAS should not duplicate.
-- Vector DB conventions (`db.system = "chroma"` etc.). OAS has no vector DB integration today.
+- `server.address` / `server.port` on spans. Inherited from HTTP semconv when present via the HTTP client layer — agent_core should not duplicate.
+- Vector DB conventions (`db.system = "chroma"` etc.). agent_core has no vector DB integration today.
 
 ## 8. Risks
 
 - Attribute cardinality growth: new fields push OTel backends harder. Keep string encoding compact (no JSON blobs on spans).
-- `gen_ai.response.finish_reasons` is documented as an array attribute. OAS `(string * string) list` encoding stringifies it; verify target backend (Datadog, Grafana Tempo, Honeycomb) accepts this shape.
+- `gen_ai.response.finish_reasons` is documented as an array attribute. agent_core `(string * string) list` encoding stringifies it; verify target backend (Datadog, Grafana Tempo, Honeycomb) accepts this shape.
 - `OTEL_SEMCONV_STABILITY_OPT_IN` reads env at every span start; consider caching.
 
 ## 9. References
@@ -145,7 +145,7 @@ After N releases, drop dual-emit and require `gen_ai_latest` implicitly.
 - [GenAI span attributes](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-spans/)
 - [GenAI metrics](https://opentelemetry.io/docs/specs/semconv/gen-ai/gen-ai-metrics/)
 - [Datadog adoption note (v1.37)](https://opentelemetry.io/blog/2024/otel-generative-ai/)
-- OAS RFC-002 (metric naming) — same observability track, this RFC extends it to spans.
+- agent_core RFC-002 (metric naming) — same observability track, this RFC extends it to spans.
 
 ## 10. Decision log entry (when accepted)
 

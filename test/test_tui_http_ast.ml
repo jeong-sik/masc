@@ -112,6 +112,34 @@ let test_tui_status_colors_use_theme_tokens () =
        |> String.concat "\n")
 ;;
 
+(* The chat pane's role colours draw through the readable path, not out of the
+   palette raw. Measured on twelve base16 schemes, the raw ones are where the
+   pane loses rows: the Keeper's blue reads at 2.26:1 on default-light and the
+   tool trail's bright black at 1.69:1 on Nord -- the row an operator scans to
+   see what a keeper just did.
+
+   The R8 guard above watches [masc_tui_render.ml] and reserves red, yellow
+   and green. It cannot see this: the mapping lives in [masc_tui_ansi.ml], and
+   cyan, blue and bright black are not reserved there because borders and
+   rules legitimately draw in them. So the check is the other way round --
+   every arm of [origin] reaches a resolved token, and a reverting arm takes
+   one of these counts with it. *)
+let test_chat_roles_draw_through_the_readable_path () =
+  List.iter
+    (fun callee ->
+      check int
+        (Printf.sprintf "chat origin resolves %s once" callee)
+        1
+        (Ast_grep.count_calls_in_value_binding
+           ~module_path:"bin/masc_tui_ansi.ml" ~binding_name:"origin" ~callee))
+    [ "Theme.user_origin"
+    ; "Theme.keeper_origin"
+    ; "Theme.quiet_origin"
+    ; "Theme.warn"
+    ; "Theme.bad"
+    ]
+;;
+
 let test_tui_status_color_ast_guard_fixtures () =
   let expect_violation source =
     let violations =
@@ -1811,6 +1839,10 @@ let () =
           "TUI status color AST guard fixtures"
           `Quick
           test_tui_status_color_ast_guard_fixtures;
+        test_case
+          "chat roles draw through the readable path"
+          `Quick
+          test_chat_roles_draw_through_the_readable_path;
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "missing operator token is reported" `Quick
           test_missing_operator_token_is_reported;

@@ -3301,6 +3301,23 @@ let test_config_post_round_trips_typed_tools_patch () =
          (Keeper_toml_loader.toml_string_list doc "keeper.tools.groups");
        check (option string) "TOML native" (Some "full")
          (Keeper_toml_loader.toml_string_opt doc "keeper.tools.native");
+       (* The POST above restarts this keeper's keepalive lane, and that lane
+          takes the turn slot once it runs. A second POST arriving after it
+          does gets keeper_turn_in_flight instead of 200 -- the handler
+          behaving correctly, and this assertion racing it. CI logged exactly
+          that refusal on the line before this check, and the same commit
+          passed at 19:02 and failed at 19:10.
+
+          The race does not reproduce locally: the suite passes eight runs in
+          a row both with and without this call, and sleeping a second in its
+          place does not lose it either. So this is the mechanism CI named,
+          not a mechanism reproduced here. What the call does buy regardless
+          is that the second POST starts from the state the first one found,
+          instead of from whatever the lane reached in between. *)
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
        Masc.Keeper_tool_approval_mode.set
          (Masc.Keeper_tool_approval_mode.shared ())
          ~keeper_name:name

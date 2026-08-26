@@ -44,6 +44,7 @@ let test_transcript_slot_roundtrip () =
         { execution_id = Ids.Execution_id.of_string "exec-delivery-test"
         ; ordinal = 2
         }
+    ; Identity.Tool_delivery { ordinal = 3 }
     ; Identity.Terminal_assistant
     ]
   in
@@ -67,6 +68,19 @@ let test_transcript_slot_roundtrip () =
   with
   | Error _ -> ()
   | Ok _ -> fail "negative tool ordinal was accepted"
+;;
+
+let test_tool_delivery_rejects_execution_identity () =
+  match
+    Identity.transcript_slot_of_yojson
+      (`Assoc
+          [ "kind", `String "tool_delivery"
+          ; "execution_id", `String "provider-call"
+          ; "ordinal", `Int 0
+          ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "a delivery-only slot accepted an execution identity"
 ;;
 
 let test_identity_rejects_schema_drift () =
@@ -149,6 +163,10 @@ let () =
             "schema drift fails closed"
             `Quick
             test_identity_rejects_schema_drift
+        ; test_case
+            "delivery-only slot rejects execution identity"
+            `Quick
+            test_tool_delivery_rejects_execution_identity
         ; test_case
             "provenance pair is all or nothing"
             `Quick

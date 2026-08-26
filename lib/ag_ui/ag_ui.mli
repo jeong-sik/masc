@@ -50,6 +50,9 @@ type event = private {
   step_name : string option;
   tool_call_id : string option;
   tool_call_name : string option;
+  tool_stream_scope : int option;
+  provider_message_id : string option;
+  tool_call_block_index : int option;
   snapshot : Yojson.Safe.t option;
       (** Full state for [State_snapshot]. *)
   message : string option;
@@ -70,6 +73,9 @@ val make_event :
   ?step_name:string option ->
   ?tool_call_id:string option ->
   ?tool_call_name:string option ->
+  ?tool_stream_scope:int option ->
+  ?provider_message_id:string option ->
+  ?tool_call_block_index:int option ->
   ?snapshot:Yojson.Safe.t option ->
   ?message:string option ->
   ?code:string option ->

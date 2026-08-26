@@ -352,9 +352,40 @@ let test_adapter_terminal_success_once () =
   check (list (pair string string)) "one final blocks send"
     [ "blocks", "done" ] (List.rev !sends)
 
+let test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail () =
+  let sends = ref [] in
+  let outcomes =
+    run_adapter
+      [ Masc.Keeper_chat_events.Run_started
+          { run_id = "run-retry"; thread_id = "thread-retry" }
+      ; Masc.Keeper_chat_events.Text_delta "stale"
+      ; Masc.Keeper_chat_events.Tool_call_start
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-retry"
+          ; tool_call_name = "Read"
+          }
+      ; Masc.Keeper_chat_events.Agent_core_runtime_attempt_started
+      ; Masc.Keeper_chat_events.Text_delta "fresh"
+      ; Masc.Keeper_chat_events.Run_finished { run_id = "run-retry" }
+      ]
+      ~send_plain:(fun ~content:_ -> fail "terminal reply uses block delivery")
+      ~send_blocks:(fun ~content ~blocks:_ ->
+        sends := content :: !sends;
+        Ok ())
+  in
+  check bool "runtime attempt settles successfully" true (outcomes = [ Ok () ]);
+  match List.rev !sends with
+  | [ content ] ->
+      check bool "prior attempt text is discarded" false (contains content "stale");
+      check bool "fresh attempt text is delivered" true (contains content "fresh");
+      check bool "prior tool evidence is retained" true (contains content "Read")
+  | sent -> failf "expected one final Slack send, got %d" (List.length sent)
+
 let test_protocol_diagnostic_cannot_mask_final_failure () =
   let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
     { kind = Masc.Keeper_chat_events.Sse_error
+    ; quarantined_occurrence = None
     ; index = None
     ; tool_call_id = None
     ; event_type = Some "error"
@@ -549,7 +580,9 @@ let test_native_activity_failure_does_not_affect_delivery () =
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-activity"; thread_id = "thread-activity" }
       ; Masc.Keeper_chat_events.Tool_call_start
-          { tool_call_id = "call-activity"
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-activity"
           ; tool_call_name = "keeper_surface_post"
           }
       ; Masc.Keeper_chat_events.Tool_context_block
@@ -559,7 +592,10 @@ let test_native_activity_failure_does_not_affect_delivery () =
           ; result_summary = Some "private result"
           }
       ; Masc.Keeper_chat_events.Tool_call_end
-          { tool_call_id = "call-activity" }
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-activity"
+          }
       ; Masc.Keeper_chat_events.Text_delta "final"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-activity" }
       ]
@@ -674,6 +710,8 @@ let () =
     ; ( "terminal-receipt"
       , [ test_case "terminal success settles once" `Quick
             test_adapter_terminal_success_once
+        ; test_case "runtime retry drops stale text and keeps tool evidence" `Quick
+            test_runtime_attempt_discards_unfinished_text_and_keeps_tool_trail
         ; test_case "streams one edited reply" `Quick
             test_adapter_streams_one_edited_reply
         ; test_case "stream error edits accepted reply" `Quick

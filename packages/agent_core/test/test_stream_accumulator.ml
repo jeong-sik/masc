@@ -171,8 +171,91 @@ let test_accumulate_delta_without_start () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 5; delta = TextDelta "orphan" });
+  match Streaming.finalize_stream_acc acc with
+  | Error
+      (Stream_parse_failed
+         { reason = "content_block_delta_without_start:index:5"; raw = "" }) -> ()
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "unannounced delta must fail before projection"
+;;
+
+let test_repeated_text_deltas_append () =
+  let acc = Streaming.create_stream_acc () in
+  Streaming.accumulate_event
+    acc
+    (ContentBlockStart
+       { index = 0; content_type = "text"; tool_id = None; tool_name = None });
+  let resolve text =
+    Streaming.resolve_event acc (ContentBlockDelta { index = 0; delta = TextDelta text })
+  in
+  (match resolve "a" with
+   | Stream_event_accepted
+       (ContentBlockDelta { delta = TextDelta "a"; _ }) -> ()
+   | _ -> Alcotest.fail "first incremental text delta was not accepted exactly");
+  (match resolve "a" with
+   | Stream_event_accepted
+       (ContentBlockDelta { delta = TextDelta "a"; _ }) -> ()
+   | _ -> Alcotest.fail "repeated incremental text delta was not appended");
   let response = finalize_with_end_turn acc in
-  Alcotest.(check int) "unannounced delta is not projected" 0 (List.length response.content)
+  match response.content with
+  | [ Text "aa" ] -> ()
+  | _ -> Alcotest.fail "repeated incremental text was lost"
+;;
+
+let test_text_snapshot_resolution_is_canonical () =
+  let acc = Streaming.create_stream_acc () in
+  Streaming.accumulate_event acc
+    (ContentBlockStart
+       { index = 0; content_type = "text"; tool_id = None; tool_name = None });
+  Streaming.accumulate_event acc
+    (ContentBlockDelta { index = 0; delta = TextDelta "ha" });
+  (match
+     Streaming.resolve_event acc
+       (ContentBlockDelta { index = 0; delta = TextSnapshot "haha" })
+   with
+   | Stream_event_accepted
+       (ContentBlockDelta { delta = TextDelta "ha"; _ }) -> ()
+   | _ -> Alcotest.fail "typed text snapshot was not reduced to its unseen suffix");
+  (match
+     Streaming.resolve_event acc
+       (ContentBlockDelta { index = 0; delta = TextSnapshot "haha" })
+   with
+   | Stream_event_suppressed -> ()
+   | _ -> Alcotest.fail "exact typed text snapshot replay was not suppressed");
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Text "haha" ] -> ()
+  | _ -> Alcotest.fail "typed snapshot callbacks diverged from canonical response"
+;;
+
+let test_text_snapshot_conflict_fails_closed () =
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc
+    [ ContentBlockStart
+        { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 0; delta = TextDelta "abc" }
+    ];
+  match
+    Streaming.resolve_event acc
+      (ContentBlockDelta { index = 0; delta = TextSnapshot "ax" })
+  with
+  | Stream_event_rejected
+      (Stream_parse_failed { reason = "text_snapshot_conflict:index:0"; raw = "" }) -> ()
+  | _ -> Alcotest.fail "conflicting typed text snapshot did not fail closed"
+;;
+
+let test_incremental_text_deltas_remain_incremental () =
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc
+    [ ContentBlockStart
+        { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta { index = 0; delta = TextDelta "Hel" }
+    ; ContentBlockDelta { index = 0; delta = TextDelta "lo" }
+    ];
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Text "Hello" ] -> ()
+  | _ -> Alcotest.fail "incremental text deltas changed meaning"
 ;;
 
 let test_accumulate_thinking_delta () =
@@ -294,11 +377,11 @@ let test_accumulate_ignores_ping () =
   let acc = Streaming.create_stream_acc () in
   Alcotest.(check bool) "fresh stream has not failed" false (Streaming.stream_failed acc);
   Streaming.accumulate_event acc Ping;
-  Streaming.accumulate_event acc MessageStop;
-  Streaming.accumulate_event acc (ContentBlockStop { index = 0 });
   Streaming.accumulate_event
     acc
     (SSEError { message = "oops"; error_type = None; raw = "oops" });
+  Streaming.accumulate_event acc MessageStop;
+  Streaming.accumulate_event acc (ContentBlockStop { index = 0 });
   Alcotest.(check bool)
     "typed stream failure is terminal"
     true
@@ -435,6 +518,336 @@ let test_finalize_tool_use () =
      | _ -> Alcotest.fail "expected ToolUse")
 ;;
 
+let test_duplicate_tool_start_before_payload_is_idempotent () =
+  let acc = Streaming.create_stream_acc () in
+  let start =
+    ContentBlockStart
+      { index = 0
+      ; content_type = "tool_use"
+      ; tool_id = Some "tu-replayed"
+      ; tool_name = Some "Read"
+      }
+  in
+  acc_events acc
+    [ start
+    ; start
+    ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"path\":" }
+    ; ContentBlockDelta { index = 0; delta = InputJsonDelta "\"a.ml\"}" }
+    ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
+    ];
+  match Streaming.finalize_stream_acc acc with
+  | Error err -> fail_unexpected_stream_error err
+  | Ok response ->
+    (match response.content with
+     | [ ToolUse { input; _ } ] ->
+       Alcotest.(check string)
+         "empty duplicate header is idempotent"
+         "{\"path\":\"a.ml\"}"
+         (Yojson.Safe.to_string input)
+     | _ -> Alcotest.fail "expected one ToolUse")
+;;
+
+let test_duplicate_tool_start_after_payload_fails_closed () =
+  let acc = Streaming.create_stream_acc () in
+  let start =
+    ContentBlockStart
+      { index = 0
+      ; content_type = "tool_use"
+      ; tool_id = Some "tu-ambiguous"
+      ; tool_name = Some "Read"
+      }
+  in
+  acc_events acc
+    [ start
+    ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"path\":" }
+    ; start
+    ];
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string)
+      "typed ambiguous replay"
+      "content_block_start_after_payload:index:0"
+      reason;
+    Alcotest.(check string) "provider payload omitted" "" raw
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "a repeated tool header after payload must fail closed"
+;;
+
+let test_conflicting_tool_start_fails_closed () =
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc
+    [ ContentBlockStart
+        { index = 0
+        ; content_type = "tool_use"
+        ; tool_id = Some "tu-first"
+        ; tool_name = Some "Read"
+        }
+    ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }
+    ; ContentBlockStart
+        { index = 0
+        ; content_type = "tool_use"
+        ; tool_id = Some "tu-second"
+        ; tool_name = Some "Write"
+        }
+    ];
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "typed conflict" "content_block_start_conflict:index:0" reason;
+    Alcotest.(check string) "provider payload omitted" "" raw
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "conflicting block start must fail closed"
+;;
+
+let test_tool_use_rejects_non_input_delta_kinds () =
+  let deltas =
+    [ "text", TextDelta "not args"
+    ; "thinking", ThinkingDelta "not args"
+    ; ( "reasoning"
+      , ReasoningDetailsDelta { reasoning_content = Some "not args"; details = [] } )
+    ; ( "media"
+      , MediaDelta
+          { media_type = "image/png"; source_type = Base64; data = "not args" } )
+    ; "thinking signature", ThinkingSignatureDelta "not args"
+    ]
+  in
+  List.iter
+    (fun (label, delta) ->
+       let acc = Streaming.create_stream_acc () in
+       acc_events acc
+         [ ContentBlockStart
+             { index = 3
+             ; content_type = "tool_use"
+             ; tool_id = Some "tu-kind"
+             ; tool_name = Some "Read"
+             }
+         ; ContentBlockDelta { index = 3; delta }
+         ];
+       match Streaming.finalize_stream_acc acc with
+       | Error (Stream_parse_failed { reason; raw }) ->
+         let expected =
+           "content_block_delta_kind_mismatch:index:3:block:tool_use:delta:"
+           ^ (match label with
+              | "text" -> "text"
+              | "thinking" -> "thinking"
+              | "reasoning" -> "reasoning_details"
+              | "media" -> "media"
+              | "thinking signature" -> "thinking_signature"
+              | _ -> assert false)
+         in
+         Alcotest.(check string)
+           (label ^ " mismatch")
+           expected
+           reason;
+         Alcotest.(check string) (label ^ " raw omitted") "" raw
+       | Error err -> fail_unexpected_stream_error err
+       | Ok _ -> Alcotest.fail (label ^ " delta must not become tool input"))
+    deltas
+;;
+
+let test_tool_use_rejects_delta_after_stop () =
+  let terminal_events =
+    [ "content block stop", ContentBlockStop { index = 0 }
+    ; "message stop", MessageStop
+    ]
+  in
+  List.iter
+    (fun (label, terminal) ->
+       let acc = Streaming.create_stream_acc () in
+       acc_events acc
+         [ ContentBlockStart
+             { index = 0
+             ; content_type = "tool_use"
+             ; tool_id = Some "tu-late"
+             ; tool_name = Some "Read"
+             }
+         ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot "{}" }
+         ; terminal
+         ; ContentBlockDelta
+             { index = 0; delta = InputJsonSnapshot "{\"late\":true}" }
+         ];
+       match Streaming.finalize_stream_acc acc with
+       | Error (Stream_parse_failed { reason; raw }) ->
+         let expected_reason =
+           match label with
+           | "content block stop" -> "content_block_delta_after_stop:index:0"
+           | "message stop" -> "content_block_delta_after_terminal"
+           | _ -> assert false
+         in
+         Alcotest.(check string)
+           (label ^ " closes input")
+           expected_reason
+           reason;
+         Alcotest.(check string) (label ^ " raw omitted") "" raw
+       | Error err -> fail_unexpected_stream_error err
+       | Ok _ -> Alcotest.fail (label ^ " must freeze the tool input"))
+    terminal_events
+;;
+
+let test_conflicting_message_start_fails_closed () =
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc
+    [ MessageStart { id = "message-a"; model = "m"; usage = None }
+    ; ContentBlockStart
+        { index = 0
+        ; content_type = "tool_use"
+        ; tool_id = Some "tu-message"
+        ; tool_name = Some "Read"
+        }
+    ; MessageStart { id = "message-b"; model = "m"; usage = None }
+    ];
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "typed message conflict" "message_start_conflict" reason;
+    Alcotest.(check string) "provider payload omitted" "" raw
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "different MessageStart must not inherit open blocks"
+;;
+
+let expect_parse_failure expected events =
+  let acc = Streaming.create_stream_acc () in
+  acc_events acc events;
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_parse_failed { reason; raw }) ->
+    Alcotest.(check string) "typed parse failure" expected reason;
+    Alcotest.(check string) "provider payload omitted" "" raw
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail (expected ^ " was accepted")
+;;
+
+let test_message_start_replay_requires_exact_metadata () =
+  let usage = make_usage 10 1 in
+  expect_parse_failure "message_start_conflict"
+    [ MessageStart { id = "same"; model = "model-a"; usage = Some usage }
+    ; MessageStart { id = "same"; model = "model-b"; usage = Some usage }
+    ];
+  expect_parse_failure "message_start_conflict"
+    [ MessageStart { id = ""; model = "model-a"; usage = Some usage }
+    ; MessageStart
+        { id = ""; model = "model-a"; usage = Some (make_usage 10 2) }
+    ]
+;;
+
+let test_terminal_state_is_write_once () =
+  expect_parse_failure "content_block_start_after_terminal"
+    [ MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; ContentBlockStart
+        { index = 1
+        ; content_type = "tool_use"
+        ; tool_id = Some "late-tool"
+        ; tool_name = Some "Read"
+        }
+    ];
+  expect_parse_failure "stop_reason_conflict"
+    [ MessageDelta { stop_reason = Some EndTurn; usage = None }
+    ; MessageDelta { stop_reason = Some StopToolUse; usage = None }
+    ];
+  expect_parse_failure "content_block_start_after_terminal"
+    [ MessageStop
+    ; ContentBlockStart
+        { index = 2
+        ; content_type = "tool_use"
+        ; tool_id = Some "after-stop"
+        ; tool_name = Some "Read"
+        }
+    ]
+;;
+
+let test_tool_start_requires_complete_identity () =
+  expect_parse_failure "malformed_tool_use:index:0:missing_identity"
+    [ ContentBlockStart
+        { index = 0
+        ; content_type = "tool_use"
+        ; tool_id = None
+        ; tool_name = Some "Read"
+        }
+    ]
+;;
+
+let test_content_kind_and_delta_kind_must_match () =
+  let fixtures =
+    [ ( "image text"
+      , ContentBlockStart
+          { index = 0; content_type = "image"; tool_id = None; tool_name = None }
+      , TextDelta "visible-before-finalize"
+      , "content_block_delta_kind_mismatch:index:0:block:image:delta:text" )
+    ; ( "text input"
+      , ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+      , InputJsonSnapshot "{}"
+      , "content_block_delta_kind_mismatch:index:0:block:text:delta:input_json_snapshot" )
+    ]
+  in
+  List.iter
+    (fun (label, start, delta, expected) ->
+       let acc = Streaming.create_stream_acc () in
+       Streaming.accumulate_event acc start;
+       (match
+          Streaming.resolve_event acc (ContentBlockDelta { index = 0; delta })
+        with
+        | Stream_event_rejected
+            (Stream_parse_failed { reason; raw = "" }) ->
+          Alcotest.(check string) label expected reason
+        | _ -> Alcotest.fail (label ^ " mismatch escaped canonical validation")))
+    fixtures
+;;
+
+let test_unknown_content_kind_is_rejected_at_start () =
+  let acc = Streaming.create_stream_acc () in
+  match
+    Streaming.resolve_event acc
+      (ContentBlockStart
+         { index = 7; content_type = "future_kind"; tool_id = None; tool_name = None })
+  with
+  | Stream_event_rejected
+      (Stream_parse_failed
+         { reason = "unsupported_content_block_kind:future_kind:index:7"; raw = "" }) -> ()
+  | _ -> Alcotest.fail "unknown block start escaped canonical validation"
+;;
+
+let test_media_metadata_is_frozen_by_first_delta () =
+  let accepted = Streaming.create_stream_acc () in
+  acc_events accepted
+    [ ContentBlockStart
+        { index = 1; content_type = "image"; tool_id = None; tool_name = None }
+    ; ContentBlockDelta
+        { index = 1
+        ; delta =
+            MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+        }
+    ; ContentBlockDelta
+        { index = 1
+        ; delta =
+            MediaDelta { media_type = "image/png"; source_type = Base64; data = "b" }
+        }
+    ];
+  let accepted_response = finalize_with_end_turn accepted in
+  (match accepted_response.content with
+   | [ Image { media_type = "image/png"; source_type = Base64; data = "ab" } ] -> ()
+   | _ -> Alcotest.fail "matching media chunks did not assemble canonically");
+  let acc = Streaming.create_stream_acc () in
+  Streaming.accumulate_event acc
+    (ContentBlockStart
+       { index = 2; content_type = "image"; tool_id = None; tool_name = None });
+  Streaming.accumulate_event acc
+    (ContentBlockDelta
+       { index = 2
+       ; delta = MediaDelta { media_type = "image/png"; source_type = Base64; data = "a" }
+       });
+  (match
+     Streaming.resolve_event acc
+       (ContentBlockDelta
+          { index = 2
+          ; delta =
+              MediaDelta
+                { media_type = "image/jpeg"; source_type = Base64; data = "b" }
+          })
+   with
+   | Stream_event_rejected
+       (Stream_parse_failed
+          { reason = "media_delta_metadata_conflict:index:2"; raw = "" }) -> ()
+   | _ -> Alcotest.fail "media metadata drift escaped canonical validation")
+;;
+
 let test_finalize_tool_use_invalid_json () =
   let acc = Streaming.create_stream_acc () in
   acc_events
@@ -452,7 +865,7 @@ let test_finalize_tool_use_invalid_json () =
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
     (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis (the Unknown_block/media arms still omit it). *)
+       diagnosis; structural failures intentionally omit provider payloads. *)
     Alcotest.(check string) "raw preserved" "not json{" raw;
     Alcotest.(check bool)
       "malformed tool args"
@@ -669,6 +1082,22 @@ let () =
             "delta without start"
             `Quick
             test_accumulate_delta_without_start
+        ; Alcotest.test_case
+            "repeated text deltas append"
+            `Quick
+            test_repeated_text_deltas_append
+        ; Alcotest.test_case
+            "text snapshot resolution is canonical"
+            `Quick
+            test_text_snapshot_resolution_is_canonical
+        ; Alcotest.test_case
+            "text snapshot conflict fails closed"
+            `Quick
+            test_text_snapshot_conflict_fails_closed
+        ; Alcotest.test_case
+            "incremental text deltas remain incremental"
+            `Quick
+            test_incremental_text_deltas_remain_incremental
         ; Alcotest.test_case "thinking delta" `Quick test_accumulate_thinking_delta
         ; Alcotest.test_case
             "thinking signature delta"
@@ -698,6 +1127,54 @@ let () =
             `Quick
             test_finalize_redacted_thinking_block
         ; Alcotest.test_case "tool_use" `Quick test_finalize_tool_use
+        ; Alcotest.test_case
+            "duplicate tool start before payload is idempotent"
+            `Quick
+            test_duplicate_tool_start_before_payload_is_idempotent
+        ; Alcotest.test_case
+            "duplicate tool start after payload fails closed"
+            `Quick
+            test_duplicate_tool_start_after_payload_fails_closed
+        ; Alcotest.test_case
+            "conflicting tool start fails closed"
+            `Quick
+            test_conflicting_tool_start_fails_closed
+        ; Alcotest.test_case
+            "tool_use rejects non-input deltas"
+            `Quick
+            test_tool_use_rejects_non_input_delta_kinds
+        ; Alcotest.test_case
+            "tool_use rejects deltas after stop"
+            `Quick
+            test_tool_use_rejects_delta_after_stop
+        ; Alcotest.test_case
+            "conflicting message start fails closed"
+            `Quick
+            test_conflicting_message_start_fails_closed
+        ; Alcotest.test_case
+            "message start replay requires exact metadata"
+            `Quick
+            test_message_start_replay_requires_exact_metadata
+        ; Alcotest.test_case
+            "terminal state is write-once"
+            `Quick
+            test_terminal_state_is_write_once
+        ; Alcotest.test_case
+            "tool start requires complete identity"
+            `Quick
+            test_tool_start_requires_complete_identity
+        ; Alcotest.test_case
+            "content kind matches delta kind"
+            `Quick
+            test_content_kind_and_delta_kind_must_match
+        ; Alcotest.test_case
+            "unknown content kind is rejected at start"
+            `Quick
+            test_unknown_content_kind_is_rejected_at_start
+        ; Alcotest.test_case
+            "media metadata is frozen"
+            `Quick
+            test_media_metadata_is_frozen_by_first_delta
         ; Alcotest.test_case
             "tool_use invalid json"
             `Quick

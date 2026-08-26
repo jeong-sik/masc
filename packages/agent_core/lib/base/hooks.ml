@@ -49,6 +49,21 @@ type tool_failure_stage =
   | Validation_before_execution
   | Execution
 
+(** Exact relationship between the tool schedule exposed to hooks and the
+    provider ToolUse from which that scheduled call came. Admission may drop
+    an unroutable ToolUse, so [planned_index] is deliberately not inferred
+    from [source_tool_use_ordinal]. Non-tool stream blocks may be omitted while the
+    response is assembled, therefore a raw content-block index is not used. *)
+type admitted_tool_use_source =
+  { planned_index : int
+  ; source_tool_use_ordinal : int
+  }
+
+type admitted_tool_source_map =
+  { admitted_tool_sources : admitted_tool_use_source list
+  ; source_tool_use_count : int
+  }
+
 (** Extract structured reasoning summary from message list.
     This only preserves provider-emitted Thinking blocks; it does not infer
     uncertainty or tool rationale from prose. *)
@@ -91,6 +106,7 @@ type hook_event =
   | AfterTurn of
       { turn : int
       ; response : api_response
+      ; tool_source_map : admitted_tool_source_map option
       }
   | PreToolUse of
       { invocation : Tool_contract.Invocation.t

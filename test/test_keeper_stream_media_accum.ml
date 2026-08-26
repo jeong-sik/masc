@@ -73,6 +73,42 @@ let test_audio_media_as_voice_block () =
   | [ Blocks.Voice { src = Some _; _ } ] -> ()
   | _ -> fail "expected exactly one Voice block for audio media"
 
+let test_runtime_attempt_discards_unfinished_media () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  A.start_runtime_attempt accum;
+  A.on_event accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string "stale"
+             }
+       });
+  A.start_runtime_attempt accum;
+  let fresh = "fresh" in
+  A.on_event accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string fresh
+             }
+       });
+  A.on_event accum (ContentBlockStop { index = 0 });
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src; _ } ] ->
+    check string "fallback media excludes failed-attempt chunks"
+      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" fresh)
+      src
+  | _ -> fail "expected only the fallback attempt image"
+;;
+
 let test_open_media_finalized_on_message_stop () =
   (* Mirrors the bridge's message-end safety net: an open media block is still
      reload-visible when the provider omits ContentBlockStop. Multiple open
@@ -111,6 +147,54 @@ let test_open_media_finalized_on_message_stop () =
         ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
         src
   | _ -> fail "expected Image then Voice blocks finalized at message stop"
+
+let test_stop_reason_finalizes_media_until_next_exact_scope () =
+  let open Agent_core.Types in
+  let accum = A.create () in
+  A.on_event ~stream_scope:0 accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string "first"
+             }
+       });
+  A.on_event ~stream_scope:0 accum
+    (MessageDelta { stop_reason = Some EndTurn; usage = None });
+  A.on_event ~stream_scope:0 accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string "late"
+             }
+       });
+  A.on_event ~stream_scope:1 accum
+    (ContentBlockDelta
+       { index = 0
+       ; delta =
+           MediaDelta
+             { media_type = "image/png"
+             ; source_type = Base64
+             ; data = Base64.encode_string "second"
+             }
+       });
+  A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
+  let base_dir = Filename.temp_dir "media_accum_test" "" in
+  match A.to_chat_blocks ~base_dir accum with
+  | [ Blocks.Image { src = first; _ }; Blocks.Image { src = second; _ } ] ->
+    check string "terminal media excludes late bytes"
+      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "first")
+      first;
+    check string "new exact scope may reuse the index"
+      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "second")
+      second
+  | _ -> fail "expected one finalized image per exact stream scope"
+;;
 
 let test_tool_block_media_not_persisted () =
   let open Agent_core.Types in
@@ -301,8 +385,12 @@ let () =
         [
           test_case "image media -> Image block" `Quick test_image_media_persisted_as_block;
           test_case "audio media -> Voice block" `Quick test_audio_media_as_voice_block;
+          test_case "runtime attempt discards unfinished media" `Quick
+            test_runtime_attempt_discards_unfinished_media;
           test_case "open media finalized on message stop" `Quick
             test_open_media_finalized_on_message_stop;
+          test_case "stop reason freezes media until next exact scope" `Quick
+            test_stop_reason_finalizes_media_until_next_exact_scope;
           test_case "tool block media not persisted" `Quick
             test_tool_block_media_not_persisted;
           test_case "metadata drift preserves first media block" `Quick

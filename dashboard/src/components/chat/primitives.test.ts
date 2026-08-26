@@ -70,6 +70,8 @@ function dataTransferWith(files: File[]): DataTransfer {
 function toolEntry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id'>,
 ): KeeperConversationEntry {
+  const providerId = overrides.toolCallId
+    ?? (overrides.id.startsWith('tool-') ? overrides.id.slice('tool-'.length) : null)
   return {
     role: 'tool',
     source: 'tool_result',
@@ -81,6 +83,8 @@ function toolEntry(
     streamState: null,
     details: null,
     error: null,
+    toolCallId: providerId,
+    executionId: overrides.executionId ?? (providerId ? `exec-${providerId}` : null),
     ...overrides,
   }
 }
@@ -94,6 +98,7 @@ function toolCallOutput(overrides: Partial<ToolCallEntry> & Pick<ToolCallEntry, 
     output: 'context window ok',
     success: true,
     duration_ms: 12,
+    execution_id: overrides.execution_id ?? `exec-${overrides.tool_use_id}`,
     ...overrides,
   }
 }
@@ -139,7 +144,7 @@ describe('ChatTranscript', () => {
     resetToolCallOutputs()
   })
 
-  it('surfaces tool output joined by tool_use_id in the collapsed preview', () => {
+  it('surfaces tool output joined by execution_id in the collapsed preview', () => {
     recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
     render(
       html`<${ChatTranscript}
@@ -2704,6 +2709,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
                 kind: 'tool',
                 name: 'masc_board_list',
                 toolCallId: 'tc-prov',
+                executionId: 'exec-prov',
                 status: 'ok',
                 args: '{"limit":1}',
                 agentCoreBlockIndex: 4,
@@ -2774,6 +2780,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
                 kind: 'tool',
                 name: 'keeper_context_status',
                 toolCallId: 't-order',
+                executionId: 'exec-t-order',
                 status: 'ok',
                 ts: '2026-03-24T00:00:02.000Z',
               },
@@ -3134,7 +3141,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
   })
 
-  it('marks trace-only tool steps without tool_call_id as unlinked, not pending', async () => {
+  it('marks trace-only tool steps without execution_id as unlinked, not pending', async () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -3143,7 +3150,11 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             text: 'legacy trace',
             role: 'assistant',
             source: 'direct_assistant',
-            traceSteps: [{ kind: 'tool', name: 'legacy_tool_without_id' }],
+            traceSteps: [{
+              kind: 'tool',
+              name: 'legacy_tool_without_id',
+              toolCallId: 'provider-only-call',
+            }],
           }),
         ]}
         emptyText="empty"
@@ -3158,16 +3169,16 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
     expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
-    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('unlinked_trace')
+    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(step?.getAttribute('data-chat-trace-link-state')).toBe('unlinked')
     expect(step?.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
-    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBe('provider-only-call')
     expect(step?.getAttribute('data-chat-trace-entry-id')).toBeNull()
 
     ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
     await flushUi()
 
-    expect(step?.textContent).toContain('도구 호출 ID 없음')
+    expect(step?.textContent).toContain('실행 ID 없음')
     expect(step?.textContent).not.toContain('출력 대기 중')
   })
 

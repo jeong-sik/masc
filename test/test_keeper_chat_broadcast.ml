@@ -90,12 +90,27 @@ let test_projection_covers_thinking_and_tool_args () =
   let _, tool_args =
     project state
       (E.Tool_call_args
-         { tool_call_id = "tc-1"; delta = "{\"path\":" })
+         { occurrence =
+             { E.stream_scope = 3
+             ; provider_message_id = Some "provider-message-3"
+             ; block_index = 7
+             }
+         ; tool_call_id = Some "tc-1"
+         ; delta = "{\"path\":"
+         })
   in
   let tool_args = Ag_ui.event_to_json (projected_exn (state, tool_args)) in
   Alcotest.(check (option string)) "tool args event"
     (Some "TOOL_CALL_ARGS")
-    (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option)
+    (Yojson.Safe.Util.member "type" tool_args |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option int)) "tool stream scope"
+    (Some 3)
+    (Yojson.Safe.Util.member "toolStreamScope" tool_args
+     |> Yojson.Safe.Util.to_int_option);
+  Alcotest.(check (option int)) "tool block index"
+    (Some 7)
+    (Yojson.Safe.Util.member "toolCallBlockIndex" tool_args
+     |> Yojson.Safe.Util.to_int_option)
 
 let test_tool_result_ready_projection_has_exact_identity () =
   let state, _ =
@@ -104,7 +119,16 @@ let test_tool_result_ready_projection_has_exact_identity () =
          { run_id = "run-3"; thread_id = "keeper-consumer:fixture-keeper" })
   in
   let _, ready =
-    project state (E.Tool_result_ready { tool_call_id = "tool-use-7" })
+    project state
+      (E.Tool_result_ready
+         { occurrence =
+             { E.stream_scope = 3
+             ; provider_message_id = Some "provider-message-3"
+             ; block_index = 7
+             }
+         ; tool_call_id = Some "tool-use-7"
+         ; execution_id = Ids.Execution_id.of_string "exec-7"
+         })
   in
   let ready = Ag_ui.event_to_json (projected_exn (state, ready)) in
   Alcotest.(check (option string)) "result-ready custom event"
@@ -113,8 +137,18 @@ let test_tool_result_ready_projection_has_exact_identity () =
   Alcotest.(check (option string)) "exact tool identity"
     (Some "tool-use-7")
     (Yojson.Safe.Util.member "value" ready
-     |> Yojson.Safe.Util.member "tool_call_id"
-     |> Yojson.Safe.Util.to_string_option)
+     |> Yojson.Safe.Util.member "toolCallId"
+     |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option string)) "canonical execution identity"
+    (Some "exec-7")
+    (Yojson.Safe.Util.member "value" ready
+     |> Yojson.Safe.Util.member "executionId"
+     |> Yojson.Safe.Util.to_string_option);
+  Alcotest.(check (option int)) "result occurrence scope"
+    (Some 3)
+    (Yojson.Safe.Util.member "value" ready
+     |> Yojson.Safe.Util.member "toolStreamScope"
+     |> Yojson.Safe.Util.to_int_option)
 
 let () =
   Alcotest.run "keeper_chat_broadcast"

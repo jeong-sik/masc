@@ -1046,6 +1046,9 @@ type file_change = {
   fc_keeper : string;
   fc_turn : int option;
   fc_task_id : string option;
+  fc_execution_id : string option;
+      (** Canonical physical-execution identity. A chat activity may join a
+          change only through this field, never through provider call ids. *)
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -1064,6 +1067,9 @@ type file_change_snapshot = {
 
 val decode_file_change_snapshot :
   Yojson.Safe.t -> (file_change_snapshot, string) result
+(** Decode one Keeper-stamped snapshot. Every inner change must carry the same
+    Keeper identity; a mixed response is rejected rather than indexed under
+    the top-level name. *)
 
 (** {1 What the tree holds}
 

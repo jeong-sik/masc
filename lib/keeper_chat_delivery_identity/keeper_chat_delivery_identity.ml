@@ -42,6 +42,7 @@ type transcript_slot =
       { execution_id : Ids.Execution_id.t
       ; ordinal : int
       }
+  | Tool_delivery of { ordinal : int }
   | Terminal_assistant
 
 type delivery_provenance =
@@ -155,6 +156,15 @@ let transcript_slot_to_yojson = function
       ; "execution_id", `String (Ids.Execution_id.to_string execution_id)
       ; "ordinal", `Int ordinal
       ]
+  | Tool_delivery { ordinal } ->
+    `Assoc [ "kind", `String "tool_delivery"; "ordinal", `Int ordinal ]
+;;
+
+let transcript_ordinal fields =
+  let* ordinal = assoc_field "ordinal" fields in
+  match ordinal with
+  | `Int value when value >= 0 -> Ok value
+  | _ -> Error "tool transcript ordinal must be a non-negative integer"
 ;;
 
 let transcript_slot_of_yojson = function
@@ -190,13 +200,17 @@ let transcript_slot_of_yojson = function
          then Error "tool transcript execution_id must not be blank"
          else Ok (Ids.Execution_id.of_string execution_id)
        in
-       let* ordinal = assoc_field "ordinal" fields in
-       let* ordinal =
-         match ordinal with
-         | `Int value when value >= 0 -> Ok value
-         | _ -> Error "tool transcript ordinal must be a non-negative integer"
-       in
+       let* ordinal = transcript_ordinal fields in
        Ok (Tool_call { execution_id; ordinal })
+     | "tool_delivery" ->
+       let* () =
+         validate_fields
+           ~context:"tool delivery transcript slot"
+           ~expected:[ "kind"; "ordinal" ]
+           fields
+       in
+       let* ordinal = transcript_ordinal fields in
+       Ok (Tool_delivery { ordinal })
      | _ -> Error (Printf.sprintf "unsupported transcript slot kind %S" kind))
   | _ -> Error "transcript slot must be an object"
 ;;
@@ -208,9 +222,11 @@ let transcript_slot_equal left right =
   | Tool_call left, Tool_call right ->
     Ids.Execution_id.equal left.execution_id right.execution_id
     && Int.equal left.ordinal right.ordinal
-  | Accepted_user, (Terminal_assistant | Tool_call _)
-  | Terminal_assistant, (Accepted_user | Tool_call _)
-  | Tool_call _, (Accepted_user | Terminal_assistant) -> false
+  | Tool_delivery left, Tool_delivery right -> Int.equal left.ordinal right.ordinal
+  | Accepted_user, (Terminal_assistant | Tool_call _ | Tool_delivery _)
+  | Terminal_assistant, (Accepted_user | Tool_call _ | Tool_delivery _)
+  | Tool_call _, (Accepted_user | Terminal_assistant | Tool_delivery _)
+  | Tool_delivery _, (Accepted_user | Terminal_assistant | Tool_call _) -> false
 ;;
 
 let delivery_provenance_fields { delivery_key; transcript_slot } =

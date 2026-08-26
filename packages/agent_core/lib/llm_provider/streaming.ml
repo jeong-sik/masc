@@ -189,7 +189,7 @@ let parse_sse_event event_type data_str =
 let sse_event_is_first_token_signal (e : sse_event) : bool =
   let non_empty s = String.length s > 0 in
   match e with
-  | ContentBlockDelta { delta = TextDelta s; _ } -> non_empty s
+  | ContentBlockDelta { delta = TextDelta s | TextSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = ThinkingDelta s; _ } -> non_empty s
   | ContentBlockDelta { delta = ReasoningDetailsDelta { reasoning_content; details }; _ }
     ->
@@ -220,7 +220,7 @@ let sse_event_is_first_token_signal (e : sse_event) : bool =
 let sse_event_is_deliverable_progress_signal (e : sse_event) : bool =
   let non_empty s = String.length s > 0 in
   match e with
-  | ContentBlockDelta { delta = TextDelta s; _ } -> non_empty s
+  | ContentBlockDelta { delta = TextDelta s | TextSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = InputJsonDelta s | InputJsonSnapshot s; _ } -> non_empty s
   | ContentBlockDelta { delta = MediaDelta { data; _ }; _ } -> non_empty data
   | ContentBlockStart { content_type = "tool_use"; _ } -> true
@@ -2879,13 +2879,15 @@ let gemini_chunk_to_events_impl (state : openai_stream_state) (chunk : gemini_ch
        (MessageDelta
           { stop_reason = Some stop_reason
           ; usage = Option.map Types.delta_usage_of_api_usage chunk.gem_usage
-          })
+          });
+     emit MessageStop
    | Some (Gemini_prompt_block_reason _) ->
      emit
        (MessageDelta
           { stop_reason = Some Refusal
           ; usage = Option.map Types.delta_usage_of_api_usage chunk.gem_usage
-          })
+          });
+     emit MessageStop
    | None -> ());
   List.rev !events, !telemetry_event
 ;;
@@ -3243,7 +3245,8 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
       (MessageDelta
          { stop_reason
          ; usage = Option.map Types.delta_usage_of_api_usage chunk.oll_usage
-         }));
+         });
+    emit MessageStop);
   List.rev !events, !telemetry_event
 ;;
 
@@ -3437,7 +3440,7 @@ let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
   in
   let events, _tel = ollama_chunk_to_events state chunk in
   match events with
-  | [ MessageDelta { stop_reason = Some EndTurn; usage = Some u } ] ->
+  | [ MessageDelta { stop_reason = Some EndTurn; usage = Some u }; MessageStop ] ->
     u.input_tokens = Some 10 && u.output_tokens = Some 20
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in
@@ -3458,7 +3461,9 @@ let%test "ollama_chunk_to_events: overflow reason stays typed" =
     }
   in
   match fst (ollama_chunk_to_events state chunk) with
-  | [ MessageDelta { stop_reason = Some ContextWindowExceeded; usage = None } ] -> true
+  | [ MessageDelta { stop_reason = Some ContextWindowExceeded; usage = None }
+    ; MessageStop
+    ] -> true
   | _ -> false
 ;;
 
@@ -3477,7 +3482,7 @@ let%test "ollama_chunk_to_events: done with zero usage → usage=None" =
   in
   let events, _tel = ollama_chunk_to_events state chunk in
   match events with
-  | [ MessageDelta { stop_reason = Some EndTurn; usage = None } ] -> true
+  | [ MessageDelta { stop_reason = Some EndTurn; usage = None }; MessageStop ] -> true
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in
     false
@@ -3512,6 +3517,7 @@ let%test "ollama_chunk_to_events: tool_calls emit Start+InputJsonSnapshot" =
         }
     ; ContentBlockDelta { index = 0; delta = InputJsonSnapshot args }
     ; MessageDelta { stop_reason = Some StopToolUse; _ }
+    ; MessageStop
     ] -> String.starts_with ~prefix:"call_agent_core_" tool_id && args = {|{"q":"hello"}|}
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in

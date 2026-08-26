@@ -201,17 +201,17 @@ let test_acc_content_block_start_image () =
 
 (* ── accumulate_event: ContentBlockDelta for missing index ──────── *)
 
-let test_acc_delta_creates_buffer_on_missing_index () =
+let test_acc_delta_rejects_missing_index () =
   let acc = Streaming.create_stream_acc () in
-  (* Delta arrives without a prior ContentBlockStart *)
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 5; delta = TextDelta "surprise" });
-  (* The immutable state retains the unannounced block while projection omits
-     it because no typed block header was observed. *)
-  let resp = finalize_ok acc in
-  (* No block_type registered for index 5, so content stays empty *)
-  check_int "no content (no block_type)" 0 (List.length resp.content)
+  match Streaming.finalize_stream_acc acc with
+  | Error
+      (Stream_parse_failed
+         { reason = "content_block_delta_without_start:index:5"; raw = "" }) -> ()
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "delta without a typed block start must fail closed"
 ;;
 
 (* ── accumulate_event: MessageDelta ─────────────────────────────── *)
@@ -299,11 +299,13 @@ let test_acc_ignores_ping () =
   check_int "no content" 0 (List.length resp.content)
 ;;
 
-let test_acc_ignores_message_stop () =
+let test_acc_message_stop_without_reason_is_terminal_incomplete () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc MessageStop;
-  let resp = finalize_ok acc in
-  check_string "empty id" "" resp.id
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_incomplete { reason = "stream_terminal_without_stop_reason" }) -> ()
+  | Error err -> fail_unexpected_stream_error err
+  | Ok _ -> Alcotest.fail "MessageStop without a stop reason was accepted"
 ;;
 
 let test_acc_sse_error_propagated () =
@@ -412,7 +414,7 @@ let test_finalize_tool_use_invalid_json () =
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
     (* The offending tool-arg buffer is preserved in [raw] for keeper-log
-       diagnosis (the Unknown_block/media arms still omit it). *)
+       diagnosis; structural failures intentionally omit provider payloads. *)
     check_string "raw preserved" "not valid json{{{" raw;
     check_bool
       "malformed tool args"
@@ -854,7 +856,7 @@ let test_finalize_thinking_empty_content () =
   | _ -> Alcotest.fail "expected empty Thinking block"
 ;;
 
-let test_finalize_media_missing_metadata_fails () =
+let test_media_rejects_text_delta () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event
     acc
@@ -868,7 +870,9 @@ let test_finalize_media_missing_metadata_fails () =
     (MessageDelta { stop_reason = Some EndTurn; usage = None });
   match Streaming.finalize_stream_acc acc with
   | Error (Stream_parse_failed { reason; raw }) ->
-    check_string "error" "malformed_media_block:image:index:0" reason;
+    check_string "error"
+      "content_block_delta_kind_mismatch:index:0:block:image:delta:text"
+      reason;
     check_string "raw omitted" "" raw
   | Error err -> fail_unexpected_stream_error err
   | Ok _ -> Alcotest.fail "expected malformed media error"
@@ -909,7 +913,7 @@ let () =
         ; Alcotest.test_case
             "delta missing index"
             `Quick
-            test_acc_delta_creates_buffer_on_missing_index
+            test_acc_delta_rejects_missing_index
         ; Alcotest.test_case
             "message_delta stop_reason"
             `Quick
@@ -940,7 +944,10 @@ let () =
             test_acc_multiple_message_deltas
         ; Alcotest.test_case "partial tool metadata" `Quick test_acc_partial_tool_metadata
         ; Alcotest.test_case "ignores Ping" `Quick test_acc_ignores_ping
-        ; Alcotest.test_case "ignores MessageStop" `Quick test_acc_ignores_message_stop
+        ; Alcotest.test_case
+            "MessageStop without reason is terminal incomplete"
+            `Quick
+            test_acc_message_stop_without_reason_is_terminal_incomplete
         ; Alcotest.test_case "SSEError propagated" `Quick test_acc_sse_error_propagated
         ; Alcotest.test_case
             "SSEParseFailed truncates"
@@ -998,9 +1005,9 @@ let () =
             `Quick
             test_finalize_thinking_empty_content
         ; Alcotest.test_case
-            "media missing metadata"
+            "media rejects text delta"
             `Quick
-            test_finalize_media_missing_metadata_fails
+            test_media_rejects_text_delta
         ] )
     ; ( "full_sequence"
       , [ Alcotest.test_case "anthropic stream" `Quick test_full_anthropic_sequence

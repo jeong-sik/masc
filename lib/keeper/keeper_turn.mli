@@ -135,7 +135,9 @@ val handle_keeper_msg_admitted :
   admission_token:Keeper_turn_dispatch_authority.token ->
   ?on_text_delta:(string -> unit) ->
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
-  ?on_tool_result_ready:(tool_call_id:string -> unit) ->
+  ?on_tool_stream_observation:
+    (Keeper_hooks_agent_core.tool_stream_observation -> unit) ->
+  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) ->
   ?approval_gate:Keeper_tool_approval_gate.t ->
   ?event_bus:Agent_core.Event_bus.t ->
   ?continuation_channel:Keeper_continuation_channel.t ->

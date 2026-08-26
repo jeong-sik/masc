@@ -47,7 +47,9 @@ let trajectory_line_to_chat_trace_step = function
     Some
       (Keeper_chat_blocks.Trace_tool
          { name = entry.tool_name
-         ; tool_call_id = entry.execution_id
+         ; tool_call_id = None
+         ; execution_id =
+             Option.map Ids.Execution_id.of_string entry.execution_id
          ; status =
              (match entry.error with
               | Some _ -> Some Keeper_chat_blocks.Trace_tool_err

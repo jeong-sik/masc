@@ -84,6 +84,22 @@ let test_distinct_occurrences_with_repeated_id_do_not_overwrite () =
     (Some "exec-1-000a")
     (Join.take ~invocation:first)
 
+let test_discard_removes_exact_invocation_only () =
+  Join.For_testing.clear ();
+  let discarded = invocation ~turn:3 ~planned_index:0 "tu-reused" in
+  let retained = invocation ~turn:3 ~planned_index:0 "tu-reused" in
+  Join.record ~invocation:discarded ~execution_id:"exec-discarded";
+  Join.record ~invocation:retained ~execution_id:"exec-retained";
+  Join.discard ~invocation:discarded;
+  Join.discard ~invocation:discarded;
+  check (option string) "discarded occurrence has no join" None
+    (Join.take ~invocation:discarded);
+  check (option string) "same provider id, different invocation remains"
+    (Some "exec-retained")
+    (Join.take ~invocation:retained);
+  check int "table empty after retained join is consumed" 0
+    (Join.For_testing.size ())
+
 let test_abandoned_join_is_released_with_invocation () =
   Join.For_testing.clear ();
   let record_abandoned () =
@@ -664,6 +680,8 @@ let () =
         ; test_case "missing entry is None" `Quick test_missing_entry_is_none
         ; test_case "repeated ids keep distinct occurrences" `Quick
             test_distinct_occurrences_with_repeated_id_do_not_overwrite
+        ; test_case "discard removes only the exact invocation" `Quick
+            test_discard_removes_exact_invocation_only
         ; test_case "cancelled invocation releases abandoned join" `Quick
             test_abandoned_join_is_released_with_invocation
         ] )

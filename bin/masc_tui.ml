@@ -733,6 +733,17 @@ let place_spilled_paste state ~base_path ~keeper_name text =
                        (Keeper_chat.terminal_safe_text keeper_name));
                   pointed)))
 
+let reset_message_file_changes state keeper_name =
+  (* A late alpha response must not populate alpha after alpha -> beta ->
+     alpha. Identity plus this generation is the cache authority. *)
+  state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
+  state.msg_file_changes <- None;
+  state.msg_file_changes_keeper <- Some keeper_name;
+  state.msg_file_change_index <- Masc_tui_keeper_chat_diff.empty;
+  state.msg_file_changes_loading <- false;
+  state.msg_file_changes_refresh_pending <- false;
+  state.msg_file_changes_error <- None
+
 let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
     keeper_name =
   (* The paste goes back into the draft before the draft is put away. A spill
@@ -743,6 +754,10 @@ let open_message_for_keeper ?(return_to = Keeper_chat_return_detail) state
    Buffer.clear state.msg_input;
    Buffer.add_string state.msg_input materialised);
   save_message_draft state;
+  (* Re-entering the same Keeper is a fresh reading too: another process may
+     have written files while this pane was elsewhere. Compact mode still
+     performs no GET; it only invalidates this presentation cache. *)
+  reset_message_file_changes state keeper_name;
   state.msg_target_keeper_name <- Some keeper_name;
   state.msg_live <- live_for_keeper state keeper_name;
   state.msg_return <- return_to;
@@ -905,6 +920,7 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
+    ~(load_tool_changes : unit -> unit)
     (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
@@ -1007,7 +1023,9 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
       true
     end else if c = Some 4 then begin
       (* Ctrl-D opens/folds the per-call rows without changing typed calls. *)
-      state.msg_tool_visibility <- toggle_tool_visibility state.msg_tool_visibility;
+      let visibility = toggle_tool_visibility state.msg_tool_visibility in
+      state.msg_tool_visibility <- visibility;
+      if visibility = Tools_full then load_tool_changes ();
       true
     end else if c = Some 6 then begin
       (* Ctrl-F folds the origin headings into the body's margin and then
@@ -1177,6 +1195,11 @@ type async_msg =
      lands. *)
   | File_changes_loaded of
       string * (Masc.Tui_decode.file_change_snapshot, string) result
+  | Keeper_chat_file_changes_loaded of
+      int * string * (Masc.Tui_decode.file_change_snapshot, string) result
+      (** Generation and keeper-stamped answer for the chat-only cache. The
+          Changes surface owns [File_changes_loaded] and is never populated by
+          this response. *)
   (* Keyed by the path it answers for, for the same reason the file-change
      message carries a keeper: an answer for a file the operator has since
      left is not this view's answer. *)
@@ -2525,6 +2548,56 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
       enqueue_async mailbox
         (File_changes_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
+    ~keeper_name =
+  if state.msg_tool_visibility <> Tools_full then ()
+  else begin
+    if
+      not
+        (Option.equal String.equal state.msg_file_changes_keeper
+           (Some keeper_name))
+    then reset_message_file_changes state keeper_name;
+    if state.msg_file_changes_loading then
+      if force then state.msg_file_changes_refresh_pending <- true else ()
+    else if
+      (Option.is_some state.msg_file_changes
+       || Option.is_some state.msg_file_changes_error)
+      && not force
+    then ()
+    else begin
+      state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
+      let generation = state.msg_file_changes_generation in
+      state.msg_file_changes_loading <- true;
+      state.msg_file_changes_refresh_pending <- false;
+      state.msg_file_changes_error <- None;
+      let host = server_peer_host in
+      let port = state.port in
+      let run () =
+        let result =
+          try
+            Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
+              ~window_hours:changes_window_hours
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox
+          (Keeper_chat_file_changes_loaded (generation, keeper_name, result))
+      in
+      match Eio_context.get_switch_opt () with
+      | Some sw ->
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+              run ();
+              `Stop_daemon)
+      | None ->
+          enqueue_async mailbox
+            (Keeper_chat_file_changes_loaded
+               ( generation
+               , keeper_name
+               , Error "Eio switch is unavailable" ))
+    end
+  end
+
 (* Changes follows the selected Keeper, but the surface is useful precisely
    when comparing more than one Keeper. Brackets move that shared selection
    and invalidate every row whose identity belonged to the previous Keeper;
@@ -2896,7 +2969,8 @@ let launch_keeper_older_page state ~mailbox ~keeper_name ~before =
         (Keeper_chat_older_loaded
            (generation, keeper_name, before, Error "Eio switch is unavailable"))
 
-let launch_keeper_history_load state ~mailbox ~keeper_name =
+let launch_keeper_history_load ?(load_file_changes = true) state ~mailbox
+    ~keeper_name =
   let host = server_peer_host in
   let port = state.port in
   state.msg_history_load_generation <- state.msg_history_load_generation + 1;
@@ -2919,18 +2993,22 @@ let launch_keeper_history_load state ~mailbox ~keeper_name =
       (Keeper_chat_history_loaded
          (generation, keeper_name, history_result, memory_result))
   in
-  match Eio_context.get_switch_opt () with
-  | Some sw ->
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-          run ();
-          `Stop_daemon)
-  | None ->
-      enqueue_async mailbox
-        (Keeper_chat_history_loaded
-           ( generation
-           , keeper_name
-           , Error "Eio switch is unavailable"
-           , Error "Eio switch is unavailable" ))
+  (match Eio_context.get_switch_opt () with
+   | Some sw ->
+       Eio.Fiber.fork_daemon ~sw (fun () ->
+           run ();
+           `Stop_daemon)
+   | None ->
+       enqueue_async mailbox
+         (Keeper_chat_history_loaded
+            ( generation
+            , keeper_name
+            , Error "Eio switch is unavailable"
+            , Error "Eio switch is unavailable" )));
+  (* Full tool detail owns the only lazy read. Compact chat remains byte- and
+     network-compatible; repeated history refreshes reuse this separate cache. *)
+  if load_file_changes then
+    launch_keeper_chat_file_changes_load state ~mailbox ~keeper_name
 
 let launch_context_inspector_load state ~mailbox ~keeper_name =
   let host = server_peer_host in
@@ -3779,6 +3857,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox text =
          | `Compact -> Tools_compact
          | `Full -> Tools_full
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
+      (match state.msg_tool_visibility, target with
+       | Tools_full, Some keeper_name ->
+           launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+             ~keeper_name
+       | Tools_compact, _ | Tools_full, None -> ());
       notice ~role:Message_status
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Toggle_memory ->
@@ -5356,6 +5439,13 @@ let handle_composer_key state ~base_path ~mailbox key =
       (match Masc_tui_command.parse text with
        | Masc_tui_command.Say _ ->
            set_msg_scroll state 0;
+           if state.view <> Keepers Keeper_message then begin
+             match state.msg_target_keeper_name with
+             | Some keeper_name ->
+                 reset_message_file_changes state keeper_name;
+                 launch_keeper_history_load state ~mailbox ~keeper_name
+             | None -> ()
+           end;
            state.view <- Keepers Keeper_message
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
@@ -5380,6 +5470,12 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
+          ~load_tool_changes:(fun () ->
+            match state.msg_target_keeper_name with
+            | Some keeper_name ->
+                launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+                  ~keeper_name
+            | None -> ())
           key
       in
       true
@@ -6071,9 +6167,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         Option.exists
           (String.equal request.Keeper_chat.keeper_name)
           state.msg_target_keeper_name
-      then
-        launch_keeper_history_load state ~mailbox
+      then begin
+        launch_keeper_history_load ~load_file_changes:false state ~mailbox
           ~keeper_name:request.Keeper_chat.keeper_name;
+        (* Persistence is complete at this boundary. A load already serving a
+           live result coalesces this request through [refresh_pending], so the
+           final snapshot cannot miss a later tool in the same turn. *)
+        if state.view = Keepers Keeper_message then
+          launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+            ~keeper_name:request.Keeper_chat.keeper_name
+      end;
       let applied =
         Fun.protect
           ~finally:(fun () -> Eio.Promise.resolve acknowledge ())
@@ -6380,6 +6483,40 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.repositories <- Some snapshot;
           state.repositories_error <- None
       | Error detail -> state.repositories_error <- Some detail)
+  | Keeper_chat_file_changes_loaded (generation, keeper_name, result) ->
+      let still_current =
+        generation = state.msg_file_changes_generation
+        && Option.equal String.equal state.msg_file_changes_keeper
+             (Some keeper_name)
+        && Option.equal String.equal state.msg_target_keeper_name
+             (Some keeper_name)
+      in
+      if still_current then begin
+        let refresh_pending = state.msg_file_changes_refresh_pending in
+        state.msg_file_changes_loading <- false;
+        state.msg_file_changes_refresh_pending <- false;
+        let store_error detail =
+          state.msg_file_changes_error <- Some detail;
+          add_event state "error" ("chat recorded changes unavailable: " ^ detail)
+        in
+        (match result with
+         | Ok snapshot
+           when String.equal snapshot.Masc.Tui_decode.fcs_keeper keeper_name ->
+             state.msg_file_changes <- Some snapshot;
+             state.msg_file_change_index <-
+               Masc_tui_keeper_chat_diff.index
+                 snapshot.Masc.Tui_decode.fcs_changes;
+             state.msg_file_changes_error <- None
+         | Ok snapshot ->
+             store_error
+               (Printf.sprintf
+                  "file-change response named keeper %s, expected %s"
+                  snapshot.Masc.Tui_decode.fcs_keeper keeper_name)
+         | Error detail -> store_error detail);
+        if refresh_pending && state.view = Keepers Keeper_message then
+          launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+            ~keeper_name
+      end
   | File_changes_loaded (keeper_name, result) ->
       (* An answer for a keeper the surface has since left is not this
          surface's answer. Dropping it keeps one keeper's files from being
@@ -8074,6 +8211,12 @@ let main () =
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
+                   ~load_tool_changes:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         launch_keeper_chat_file_changes_load ~force:true state
+                           ~mailbox:async_messages ~keeper_name
+                     | None -> ())
                    k
                in
                ()
@@ -8474,8 +8617,10 @@ let main () =
             | Keepers Keeper_message ->
                 (match state.msg_target_keeper_name with
                  | Some keeper_name ->
-                     launch_keeper_history_load state ~mailbox:async_messages
-                       ~keeper_name
+                     launch_keeper_history_load ~load_file_changes:false state
+                       ~mailbox:async_messages ~keeper_name;
+                     launch_keeper_chat_file_changes_load ~force:true state
+                       ~mailbox:async_messages ~keeper_name
                  | None -> ())
             | Verification ->
                 launch_verification_load state ~mailbox:async_messages

@@ -165,6 +165,8 @@ let dummy_after_turn =
         ; usage = None
         ; telemetry = None
         }
+    ; tool_source_map =
+        Some { admitted_tool_sources = []; source_tool_use_count = 0 }
     }
 ;;
 

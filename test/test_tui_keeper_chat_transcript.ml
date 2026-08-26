@@ -15,6 +15,42 @@ let rows ?(now = origin) t = Transcript.status_rows ~now t
 
 let feed t deltas = List.iter (Transcript.apply t) deltas
 
+let occurrence ?(scope = 0) ?block_index call_id =
+  { Live.stream_scope = scope
+  ; block_index = Option.value ~default:(Hashtbl.hash call_id) block_index
+  ; provider_message_id = None
+  ; tool_call_id = Some call_id
+  }
+;;
+
+let tool_started ?scope ?block_index call_id tool_name =
+  Live.Tool_started
+    { occurrence = occurrence ?scope ?block_index call_id; tool_name }
+;;
+
+let tool_args_delta ?scope ?block_index call_id delta =
+  Live.Tool_args
+    { occurrence = occurrence ?scope ?block_index call_id
+    ; fragment = Live.Args_delta delta
+    }
+;;
+
+let tool_args_snapshot ?scope ?block_index call_id snapshot =
+  Live.Tool_args
+    { occurrence = occurrence ?scope ?block_index call_id
+    ; fragment = Live.Args_snapshot snapshot
+    }
+;;
+
+let tool_ended ?scope ?block_index call_id =
+  Live.Tool_ended { occurrence = occurrence ?scope ?block_index call_id }
+;;
+
+let tool_result ?scope ?block_index call_id execution_id =
+  Live.Tool_result
+    { occurrence = occurrence ?scope ?block_index call_id; execution_id }
+;;
+
 let phase_to_string : Transcript.phase -> string = function
   | Transcript.Waiting -> "waiting"
   | Transcript.Working -> "working"
@@ -32,8 +68,9 @@ let outcome_to_string : Transcript.tool_outcome -> string = function
   | Transcript.Outcome_unrecorded -> "outcome_unrecorded"
 
 let call_to_string (call : Transcript.tool_activity) =
-  Printf.sprintf "%s|%s|%s|%s|%s|%s"
+  Printf.sprintf "%s|%s|%s|%s|%s|%s|%s"
     (Option.value ~default:"-" call.call_id)
+    (Option.value ~default:"-" call.execution_id)
     call.tool_name call.args (Option.value ~default:"-" call.subject)
     (outcome_to_string call.outcome)
     (Option.value ~default:"-" call.duration)
@@ -42,13 +79,10 @@ let tool_call = testable (Fmt.of_to_string call_to_string) ( = )
 let tool_outcome = testable (Fmt.of_to_string outcome_to_string) ( = )
 
 let read_file_call =
-  [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-  ; Live.Tool_args
-      { call_id = "c1"
-      ; fragment = Live.Args_delta "{\"file_path\":\"lib/keeper/a.ml\"}"
-      }
-  ; Live.Tool_ended { call_id = "c1" }
-  ; Live.Tool_result { call_id = "c1" }
+  [ tool_started "c1" "read_file"
+  ; tool_args_delta "c1" "{\"file_path\":\"lib/keeper/a.ml\"}"
+  ; tool_ended "c1"
+  ; tool_result "c1" "exec-c1"
   ]
 
 let test_text_and_thinking_accumulate () =
@@ -71,34 +105,177 @@ let test_tool_call_is_named_the_way_the_other_surfaces_name_it () =
   match Transcript.tool_calls t with
   | [ call ] ->
       check tool_call "the row carries the file, not the whole argument object"
-        (Transcript.make_tool_activity ~call_id:(Some "c1")
+        (Transcript.make_tool_activity ~execution_id:"exec-c1"
+           ~call_id:(Some "c1")
            ~tool_name:"read_file"
            ~args:"{\"file_path\":\"lib/keeper/a.ml\"}"
-           ~outcome:Transcript.Returned ~duration:None)
+           ~outcome:Transcript.Returned ~duration:None ())
         call
   | other -> failf "expected one call, got %d" (List.length other)
 
 let test_calls_keep_stream_order () =
   let t = fresh () in
   feed t
-    [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_started { call_id = "c2"; tool_name = "edit_file" }
-    ; Live.Tool_started { call_id = "c3"; tool_name = "shell_light" }
+    [ tool_started "c1" "read_file"
+    ; tool_started "c2" "edit_file"
+    ; tool_started "c3" "shell_light"
     ];
   check (list string) "rows read in the order the turn opened them"
     [ "read_file"; "edit_file"; "shell_light" ]
     (Transcript.tool_calls t
      |> List.map (fun (c : Transcript.tool_activity) -> c.Transcript.tool_name))
 
+let test_reused_provider_id_keeps_distinct_live_occurrences () =
+  let t = fresh () in
+  feed t
+    [ tool_started ~block_index:0 "reused" "Read"
+    ; tool_ended ~block_index:0 "reused"
+    ; tool_result ~block_index:0 "reused" "exec-first"
+    ; tool_started ~block_index:1 "reused" "Write"
+    ; tool_ended ~block_index:1 "reused"
+    ; tool_result ~block_index:0 "reused" "exec-first"
+    ; tool_result ~block_index:1 "reused" "exec-second"
+    ];
+  let calls = Transcript.tool_calls t in
+  check (list string) "both tool names retain their own trail node"
+    [ "Read"; "Write" ]
+    (List.map (fun (call : Transcript.tool_activity) -> call.tool_name) calls);
+  check (list (option string)) "each occurrence keeps its canonical execution"
+    [ Some "exec-first"; Some "exec-second" ]
+    (List.map (fun (call : Transcript.tool_activity) -> call.execution_id) calls)
+;;
+
+let test_tool_result_identity_is_write_once () =
+  let t = fresh () in
+  feed t
+    [ tool_started "call-once" "Read"
+    ; tool_ended "call-once"
+    ; tool_result "call-once" "exec-one"
+    ; tool_result "call-once" "exec-one"
+    ];
+  check (option bool) "same canonical replay is idempotent" None
+    (Option.map (fun _ -> true) (Transcript.unreadable t));
+  feed t [ tool_args_delta "call-once" "{\"changed\":true}" ];
+  (match Transcript.tool_calls t with
+   | [ call ] ->
+     check string "canonical result freezes later arguments" "" call.args
+   | calls -> failf "expected one tool call, got %d" (List.length calls));
+  feed t
+    [ tool_result "call-once" "exec-two" ];
+  (match Transcript.unreadable t with
+   | Some { count = 1; _ } -> ()
+   | Some { count; _ } -> failf "expected one conflict, got %d" count
+   | None -> fail "conflicting canonical replay was not surfaced");
+  match Transcript.tool_calls t with
+  | [ call ] ->
+      check (option string) "the first canonical identity remains authoritative"
+        (Some "exec-one") call.execution_id
+  | calls -> failf "expected one tool call, got %d" (List.length calls)
+;;
+
+let test_same_turn_duplicate_provider_id_uses_server_occurrence () =
+  let t = fresh () in
+  feed t
+    [ tool_started ~block_index:0 "duplicate" "Read"
+    ; tool_ended ~block_index:0 "duplicate"
+    ; tool_started ~block_index:1 "duplicate" "Write"
+    ; tool_ended ~block_index:1 "duplicate"
+    ; tool_result ~block_index:1 "duplicate" "exec-second"
+    ];
+  check (list (option string)) "only the named occurrence receives the result"
+    [ None; Some "exec-second" ]
+    (Transcript.tool_calls t
+     |> List.map (fun (call : Transcript.tool_activity) -> call.execution_id));
+  check (option bool) "duplicate provider correlation is not an error" None
+    (Option.map (fun _ -> true) (Transcript.unreadable t))
+;;
+
+let test_protocol_error_fails_only_the_quarantined_occurrence () =
+  let t = fresh () in
+  let first = occurrence ~block_index:0 "duplicate" in
+  let second = occurrence ~block_index:1 "duplicate" in
+  feed t
+    [ Live.Tool_started { occurrence = first; tool_name = "Read" }
+    ; Live.Tool_started { occurrence = second; tool_name = "Write" }
+    ; Live.Stream_protocol_error
+        { quarantined_occurrence = Some second
+        ; detail = "tool_replay_mismatch: replayed arguments changed"
+        }
+    ];
+  check (list string) "only the exact occurrence becomes failed"
+    [ "started"; "failed" ]
+    (Transcript.tool_calls t
+     |> List.map (fun (call : Transcript.tool_activity) ->
+       outcome_to_string call.outcome));
+  match Transcript.unreadable t with
+  | Some { count = 1; last_detail } ->
+    check bool "the typed diagnostic stays visible" true
+      (String_util.contains_substring last_detail "tool_replay_mismatch")
+  | Some { count; _ } -> failf "expected one protocol diagnostic, got %d" count
+  | None -> fail "protocol diagnostic was dropped"
+;;
+
+let test_quarantine_freezes_late_args_and_result () =
+  let t = fresh () in
+  let target = occurrence ~block_index:2 "call-failed" in
+  feed t
+    [ Live.Tool_started { occurrence = target; tool_name = "Read" }
+    ; tool_args_snapshot ~block_index:2 "call-failed" {|{"path":"before"}|}
+    ; Live.Stream_protocol_error
+        { quarantined_occurrence = Some target
+        ; detail = "tool_replay_mismatch: occurrence quarantined"
+        }
+    ; tool_args_snapshot ~block_index:2 "call-failed" {|{"path":"after"}|}
+    ; tool_result ~block_index:2 "call-failed" "exec-too-late"
+    ];
+  (match Transcript.tool_calls t with
+   | [ call ] ->
+     check string "quarantine freezes arguments" {|{"path":"before"}|} call.args;
+     check (option string) "quarantine rejects late execution identity" None
+       call.execution_id;
+     check string "quarantined outcome remains failed" "failed"
+       (outcome_to_string call.outcome)
+   | calls -> failf "expected one tool call, got %d" (List.length calls));
+  match Transcript.unreadable t with
+  | Some { count = 2; last_detail } ->
+    check bool "late result names the quarantined occurrence" true
+      (String_util.contains_substring last_detail "targets quarantined")
+  | Some { count; _ } ->
+    failf "expected quarantine and late-result diagnostics, got %d" count
+  | None -> fail "quarantine diagnostics were dropped"
+;;
+
+let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Thinking "failed reasoning"
+    ; Live.Text "failed reply"
+    ; tool_started "call-kept" "Read"
+    ; tool_ended "call-kept"
+    ; tool_result "call-kept" "exec-kept"
+    ; Live.Runtime_attempt_started
+    ; Live.Thinking "fallback reasoning"
+    ; Live.Text "fallback reply"
+    ];
+  check string "only fallback text remains" "fallback reply" (Transcript.text t);
+  check string "only fallback thinking remains" "fallback reasoning"
+    (Transcript.thinking t);
+  (match Transcript.tool_calls t with
+   | [ call ] ->
+     check (option string) "execution identity survives attempt reset"
+       (Some "exec-kept") call.execution_id;
+     check string "settled outcome survives attempt reset" "returned"
+       (outcome_to_string call.outcome)
+   | calls -> failf "expected one preserved tool call, got %d" (List.length calls))
+;;
+
 let test_snapshot_replaces_accumulated_args () =
   let t = fresh () in
   feed t
-    [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_args { call_id = "c1"; fragment = Live.Args_delta "{\"file_" }
-    ; Live.Tool_args
-        { call_id = "c1"
-        ; fragment = Live.Args_snapshot "{\"file_path\":\"b.ml\"}"
-        }
+    [ tool_started "c1" "read_file"
+    ; tool_args_delta "c1" "{\"file_"
+    ; tool_args_snapshot "c1" "{\"file_path\":\"b.ml\"}"
     ];
   match Transcript.tool_calls t with
   | [ call ] ->
@@ -111,9 +288,8 @@ let test_snapshot_replaces_accumulated_args () =
 let test_fragment_for_an_unopened_call_is_dropped () =
   let t = fresh () in
   feed t
-    [ Live.Tool_args
-        { call_id = "never-opened"; fragment = Live.Args_delta "{\"a\":1}" }
-    ; Live.Tool_ended { call_id = "never-opened" }
+    [ tool_args_delta "never-opened" "{\"a\":1}"
+    ; tool_ended "never-opened"
     ];
   check int "no nameless row is opened for it" 0
     (List.length (Transcript.tool_calls t))
@@ -180,11 +356,8 @@ let test_control_bytes_never_reach_the_pane () =
     [ Live.Text "before\x1b"
     ; Live.Text "[2Jafter"
     ; Live.Thinking "\x1b[31mred"
-    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_args
-        { call_id = "c1"
-        ; fragment = Live.Args_delta "{\"file_path\":\"a\x1b[2Jb.ml\"}"
-        }
+    ; tool_started "c1" "read_file"
+    ; tool_args_delta "c1" "{\"file_path\":\"a\x1b[2Jb.ml\"}"
     ; Live.Run_failed { message = "boom\x1b[2J" }
     ];
   let has_escape text = String.contains text '\x1b' in
@@ -238,7 +411,7 @@ let test_a_held_call_shows_its_question () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; tool_started "c1" "Edit"
     ; requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit on a.ml?"
     ];
   (match Transcript.awaiting_approval t with
@@ -263,7 +436,7 @@ let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; tool_started "c1" "Edit"
     ; Live.Approval_requested
         { call_id = "c1"
         ; tool_name = "Edit"
@@ -336,7 +509,7 @@ let test_a_late_settle_for_another_call_leaves_the_prompt () =
 let test_the_arguments_reach_the_call_row () =
   let t = fresh () in
   feed t
-    [ Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    [ tool_started "c1" "Edit"
     ; Live.Approval_requested
         { call_id = "c1"
         ; tool_name = "Edit"
@@ -491,14 +664,13 @@ let test_a_declined_interrupt_carries_the_reason () =
 let test_tool_rows_mark_how_far_each_call_got () =
   let t = fresh () in
   feed t
-    [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_args
-        { call_id = "c1"; fragment = Live.Args_delta "{\"file_path\":\"a.ml\"}" }
-    ; Live.Tool_started { call_id = "c2"; tool_name = "edit_file" }
-    ; Live.Tool_ended { call_id = "c2" }
-    ; Live.Tool_started { call_id = "c3"; tool_name = "glob" }
-    ; Live.Tool_ended { call_id = "c3" }
-    ; Live.Tool_result { call_id = "c3" }
+    [ tool_started "c1" "read_file"
+    ; tool_args_delta "c1" "{\"file_path\":\"a.ml\"}"
+    ; tool_started "c2" "edit_file"
+    ; tool_ended "c2"
+    ; tool_started "c3" "glob"
+    ; tool_ended "c3"
+    ; tool_result "c3" "exec-c3"
     ];
   match Transcript.tool_rows t with
   | [ open_call; running; done_call ] ->
@@ -519,7 +691,7 @@ let test_tool_rows_mark_how_far_each_call_got () =
    disagree about one block. *)
 let activity ~name ~outcome =
   Transcript.make_tool_activity ~call_id:(Some name) ~tool_name:name ~args:""
-    ~outcome ~duration:None
+    ~outcome ~duration:None ()
 
 let summary_outcome mode activities =
   (Transcript.project_tool_block mode (Transcript.tool_block ~omitted_steps:0 activities))
@@ -561,12 +733,12 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   let activities =
     [ Transcript.make_tool_activity ~call_id:(Some "c1")
         ~tool_name:"read_file" ~args:"{\"file_path\":\"a.ml\"}"
-        ~outcome:Transcript.Returned ~duration:(Some "12ms")
+        ~outcome:Transcript.Returned ~duration:(Some "12ms") ()
     ; Transcript.make_tool_activity ~call_id:(Some "c2")
         ~tool_name:"edit_file" ~args:"{\"file_path\":\"b.ml\"}"
-        ~outcome:Transcript.Failed ~duration:(Some "18ms")
+        ~outcome:Transcript.Failed ~duration:(Some "18ms") ()
     ; Transcript.make_tool_activity ~call_id:None ~tool_name:"glob" ~args:""
-        ~outcome:Transcript.Outcome_unrecorded ~duration:None
+        ~outcome:Transcript.Outcome_unrecorded ~duration:None ()
     ]
   in
   let block = Transcript.tool_block ~omitted_steps:2 activities in
@@ -606,7 +778,7 @@ let test_compact_and_full_keep_the_same_typed_facts () =
 let test_compact_summary_counts_registered_public_names () =
   let activity name =
     Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
-      ~outcome:Transcript.Returned ~duration:None
+      ~outcome:Transcript.Returned ~duration:None ()
   in
   let projection =
     Transcript.tool_block
@@ -642,13 +814,10 @@ let test_trail_keeps_arrival_order () =
   feed t
     [ Live.Run_started
     ; Live.Thinking "find the file first"
-    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_args
-        { call_id = "c1"
-        ; fragment = Live.Args_delta "{\"file_path\":\"lib/keeper/a.ml\"}"
-        }
-    ; Live.Tool_ended { call_id = "c1" }
-    ; Live.Tool_result { call_id = "c1" }
+    ; tool_started "c1" "read_file"
+    ; tool_args_delta "c1" "{\"file_path\":\"lib/keeper/a.ml\"}"
+    ; tool_ended "c1"
+    ; tool_result "c1" "exec-c1"
     ; Live.Thinking "now the caller"
     ; Live.Text "The caller is safe."
     ];
@@ -676,8 +845,8 @@ let test_trail_groups_consecutive_calls_into_one_block () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
-    ; Live.Tool_started { call_id = "c2"; tool_name = "execute" }
+    ; tool_started "c1" "read_file"
+    ; tool_started "c2" "execute"
     ; Live.Text "done"
     ];
   match Transcript.trail t with
@@ -692,13 +861,10 @@ let test_trail_updates_a_call_after_later_stretches_open () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
+    ; tool_started "c1" "read_file"
     ; Live.Thinking "while it runs"
-    ; Live.Tool_args
-        { call_id = "c1"
-        ; fragment = Live.Args_snapshot "{\"file_path\":\"lib/keeper/a.ml\"}"
-        }
-    ; Live.Tool_result { call_id = "c1" }
+    ; tool_args_snapshot "c1" "{\"file_path\":\"lib/keeper/a.ml\"}"
+    ; tool_result "c1" "exec-c1"
     ];
   match Transcript.trail t with
   | [ Transcript.Trail_tools block; Transcript.Trail_thinking _ ] ->
@@ -725,6 +891,8 @@ let () =
             test_text_and_thinking_accumulate
         ; test_case "the whole reasoning trail is kept" `Quick
             test_the_whole_reasoning_trail_is_kept
+        ; test_case "runtime attempt resets unfinished narrative" `Quick
+            test_runtime_attempt_reset_discards_only_unfinished_narrative
         ] )
     ; ( "trail"
       , [ test_case "arrival order is kept" `Quick
@@ -740,6 +908,16 @@ let () =
       , [ test_case "named as the other surfaces name it" `Quick
             test_tool_call_is_named_the_way_the_other_surfaces_name_it
         ; test_case "kept in stream order" `Quick test_calls_keep_stream_order
+        ; test_case "reused provider id keeps distinct live occurrences" `Quick
+            test_reused_provider_id_keeps_distinct_live_occurrences
+        ; test_case "canonical result identity is write-once" `Quick
+            test_tool_result_identity_is_write_once
+        ; test_case "same-turn duplicate provider id is never guessed" `Quick
+            test_same_turn_duplicate_provider_id_uses_server_occurrence
+        ; test_case "protocol error uses exact quarantined occurrence" `Quick
+            test_protocol_error_fails_only_the_quarantined_occurrence
+        ; test_case "quarantine freezes late args and result" `Quick
+            test_quarantine_freezes_late_args_and_result
         ; test_case "a snapshot replaces the fragments" `Quick
             test_snapshot_replaces_accumulated_args
         ; test_case "a fragment with no open call is dropped" `Quick

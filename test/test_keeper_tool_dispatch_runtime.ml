@@ -915,6 +915,8 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
               ~turn:0
               ~keeper_turn_id:1
               ();
+            let callback_saw_committed_row = ref true in
+            let ready_callbacks : (string * int * int * string) list ref = ref [] in
             let hooks =
               Masc.Keeper_hooks_agent_core.make_hooks
                 ~config
@@ -923,6 +925,25 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                 ~trace_id
                 ~keeper_turn_id:1
                 ~on_after_turn_ordinal:ignore
+                ~on_tool_result_ready:
+                  (fun ~tool_call_id ~turn ~planned_index ~execution_id ->
+                     let execution_id = Ids.Execution_id.to_string execution_id in
+                     let committed =
+                       Masc.Keeper_tool_call_log.read_recent
+                         ~keeper_name:meta.name
+                         ~n:8
+                         ()
+                       |> List.exists (function
+                         | `Assoc fields ->
+                           (match List.assoc_opt "execution_id" fields with
+                            | Some (`String stored) -> String.equal stored execution_id
+                            | _ -> false)
+                         | _ -> false)
+                     in
+                     if not committed then callback_saw_committed_row := false;
+                     ready_callbacks :=
+                       (tool_call_id, turn, planned_index, execution_id)
+                       :: !ready_callbacks)
                 ()
             in
             let event_bus = Agent_core.Event_bus.create () in
@@ -1094,6 +1115,29 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
                    | None -> fail "durable Keeper tool row has no execution_id")
                 log_rows
             in
+            let ready_callbacks = List.rev !ready_callbacks in
+            check bool
+              "result-ready callbacks observe their committed rows"
+              true
+              !callback_saw_committed_row;
+            check int
+              "one result-ready callback per execution"
+              2
+              (List.length ready_callbacks);
+            List.iter
+              (fun (tool_call_id, turn, planned_index, _) ->
+                 check string "callback preserves opaque provider id" "" tool_call_id;
+                 check int "callback preserves Agent Core turn" 0 turn;
+                 check int "callback preserves planned index" 0 planned_index)
+              ready_callbacks;
+            let callback_execution_ids =
+              List.map (fun (_, _, _, execution_id) -> execution_id) ready_callbacks
+            in
+            check
+              (list string)
+              "callback and durable-log joins agree"
+              (List.sort String.compare log_execution_ids)
+              (List.sort String.compare callback_execution_ids);
             check
               (list string)
               "event and durable-log joins agree"

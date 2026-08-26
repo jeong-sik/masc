@@ -9,19 +9,34 @@ module Live = Masc_tui_keeper_chat_live
 
 let delta_to_string : Live.delta -> string = function
   | Live.Run_started -> "run_started"
+  | Live.Runtime_attempt_started -> "runtime_attempt_started"
   | Live.Text text -> Printf.sprintf "text(%s)" text
   | Live.Thinking text -> Printf.sprintf "thinking(%s)" text
-  | Live.Tool_started { call_id; tool_name } ->
-      Printf.sprintf "tool_started(%s,%s)" call_id tool_name
-  | Live.Tool_args { call_id; fragment = Live.Args_delta delta } ->
-      Printf.sprintf "tool_args_delta(%s,%s)" call_id delta
-  | Live.Tool_args { call_id; fragment = Live.Args_snapshot snapshot } ->
-      Printf.sprintf "tool_args_snapshot(%s,%s)" call_id snapshot
-  | Live.Tool_ended { call_id } -> Printf.sprintf "tool_ended(%s)" call_id
-  | Live.Tool_result { call_id } -> Printf.sprintf "tool_result(%s)" call_id
-  | Live.Approval_requested { call_id; tool_name; args; question } ->
-      Printf.sprintf "approval_requested(%s,%s,%s,%s)" call_id tool_name args
-        question
+  | Live.Tool_started { occurrence; tool_name } ->
+      Printf.sprintf "tool_started(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index tool_name
+  | Live.Tool_args { occurrence; fragment = Live.Args_delta delta } ->
+      Printf.sprintf "tool_args_delta(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index delta
+  | Live.Tool_args { occurrence; fragment = Live.Args_snapshot snapshot } ->
+      Printf.sprintf "tool_args_snapshot(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index snapshot
+  | Live.Tool_ended { occurrence } ->
+      Printf.sprintf "tool_ended(%d/%d)" occurrence.stream_scope occurrence.block_index
+  | Live.Tool_result { occurrence; execution_id } ->
+      Printf.sprintf "tool_result(%d/%d,%s)" occurrence.stream_scope
+        occurrence.block_index execution_id
+  | Live.Stream_protocol_error { quarantined_occurrence; detail } ->
+      let occurrence =
+        Option.fold ~none:"-"
+          ~some:(fun (occurrence : Live.tool_occurrence) ->
+            Printf.sprintf "%d/%d" occurrence.stream_scope occurrence.block_index)
+          quarantined_occurrence
+      in
+      Printf.sprintf "stream_protocol_error(%s,%s)" occurrence detail
+  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
+      Printf.sprintf "approval_requested(%s,%s,%s,%s,%s)" call_id tool_name
+        args question because
   | Live.Approval_settled { call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
   | Live.Accepted { admission; queue_length } ->
@@ -67,6 +82,21 @@ let custom name value =
   event "CUSTOM"
     [ "runId", `String run_id; "name", `String name; "value", value ]
 
+let occurrence_fields ?(scope = 2) ?(block_index = 1) ?(call_id = Some "call-1") () =
+  [ "toolStreamScope", `Int scope
+  ; "toolCallBlockIndex", `Int block_index
+  ]
+  @ Option.fold ~none:[] ~some:(fun id -> [ "toolCallId", `String id ]) call_id
+;;
+
+let occurrence ?(scope = 2) ?(block_index = 1) ?(call_id = Some "call-1") () =
+  { Live.stream_scope = scope
+  ; block_index
+  ; provider_message_id = None
+  ; tool_call_id = call_id
+  }
+;;
+
 (* A turn that answers, reads a file, thinks, and answers again — the shape
    the live pane exists to show. *)
 let coding_turn_events =
@@ -79,19 +109,16 @@ let coding_turn_events =
   ; text_content "Let me "
   ; text_content "look."
   ; event "TOOL_CALL_START"
-      [ "runId", `String run_id
-      ; "toolCallId", `String "call-1"
-      ; "toolCallName", `String "read_file"
-      ]
+      ([ "runId", `String run_id; "toolCallName", `String "read_file" ]
+       @ occurrence_fields ())
   ; event "TOOL_CALL_ARGS"
-      [ "runId", `String run_id
-      ; "toolCallId", `String "call-1"
-      ; "delta", `String "{\"path\":\"lib/a.ml\"}"
-      ]
+      ([ "runId", `String run_id; "delta", `String "{\"path\":\"lib/a.ml\"}" ]
+       @ occurrence_fields ())
   ; event "TOOL_CALL_END"
-      [ "runId", `String run_id; "toolCallId", `String "call-1" ]
+      ([ "runId", `String run_id ] @ occurrence_fields ())
   ; custom "KEEPER_TOOL_RESULT_READY"
-      (`Assoc [ "tool_call_id", `String "call-1" ])
+      (`Assoc
+         (occurrence_fields () @ [ "executionId", `String "exec-1" ]))
   ; custom "KEEPER_THINKING_DELTA"
       (`Assoc [ "index", `Int 0; "delta", `String "weighing it" ])
   ; text_content " Found it."
@@ -107,11 +134,11 @@ let expected_coding_turn =
   [ Live.Run_started
   ; Live.Text "Let me "
   ; Live.Text "look."
-  ; Live.Tool_started { call_id = "call-1"; tool_name = "read_file" }
+  ; Live.Tool_started { occurrence = occurrence (); tool_name = "read_file" }
   ; Live.Tool_args
-      { call_id = "call-1"; fragment = Live.Args_delta "{\"path\":\"lib/a.ml\"}" }
-  ; Live.Tool_ended { call_id = "call-1" }
-  ; Live.Tool_result { call_id = "call-1" }
+      { occurrence = occurrence (); fragment = Live.Args_delta "{\"path\":\"lib/a.ml\"}" }
+  ; Live.Tool_ended { occurrence = occurrence () }
+  ; Live.Tool_result { occurrence = occurrence (); execution_id = "exec-1" }
   ; Live.Thinking "weighing it"
   ; Live.Text " Found it."
   ; Live.Run_finished
@@ -200,24 +227,57 @@ let test_missing_field_names_the_event () =
   let body =
     sse
       (event "TOOL_CALL_START"
-         [ "runId", `String run_id; "toolCallId", `String "call-9" ])
+         ([ "runId", `String run_id ]
+          @ occurrence_fields ~call_id:(Some "call-9") ()))
   in
   check (list delta) "a tool start with no name is reported as such"
-    [ Live.Undecodable "TOOL_CALL_START has no toolCallName" ]
+    [ Live.Undecodable "TOOL_CALL_START has no nonblank toolCallName" ]
     (feed_whole body)
+
+let test_tool_result_requires_nonblank_canonical_identity () =
+  let result value =
+    sse (custom "KEEPER_TOOL_RESULT_READY" value) |> feed_whole
+  in
+  check (list delta) "missing execution id is reported"
+    [ Live.Undecodable "KEEPER_TOOL_RESULT_READY has no nonblank executionId" ]
+    (result (`Assoc (occurrence_fields ~call_id:(Some "call-9") ())));
+  check (list delta) "blank execution id is reported"
+    [ Live.Undecodable "KEEPER_TOOL_RESULT_READY has no nonblank executionId" ]
+    (result
+       (`Assoc
+          (occurrence_fields ~call_id:(Some "call-9") ()
+           @ [ "executionId", `String " " ])))
+
+let test_protocol_error_carries_only_the_quarantined_occurrence () =
+  let value =
+    `Assoc
+      [ "kind", `String "tool_replay_mismatch"
+      ; "reason", `String "replayed arguments changed"
+      ; ( "quarantined_occurrence"
+        , `Assoc (occurrence_fields ~scope:4 ~block_index:7 ~call_id:None ()) )
+      ]
+  in
+  check (list delta) "the exact quarantined row reaches the live view"
+    [ Live.Stream_protocol_error
+        { quarantined_occurrence =
+            Some (occurrence ~scope:4 ~block_index:7 ~call_id:None ())
+        ; detail = "tool_replay_mismatch: replayed arguments changed"
+        }
+    ]
+    (sse (custom "KEEPER_STREAM_PROTOCOL_ERROR" value) |> feed_whole)
 
 let test_args_snapshot_replaces_rather_than_appends () =
   let body =
     sse
       (event "TOOL_CALL_ARGS"
-         [ "runId", `String run_id
-         ; "toolCallId", `String "call-2"
-         ; "snapshot", `String "{\"path\":\"b.ml\"}"
-         ])
+         ([ "runId", `String run_id
+          ; "snapshot", `String "{\"path\":\"b.ml\"}"
+          ]
+          @ occurrence_fields ~call_id:(Some "call-2") ()))
   in
   check (list delta) "a snapshot is carried as a snapshot"
     [ Live.Tool_args
-        { call_id = "call-2"
+        { occurrence = occurrence ~call_id:(Some "call-2") ()
         ; fragment = Live.Args_snapshot "{\"path\":\"b.ml\"}"
         }
     ]
@@ -370,20 +430,53 @@ let test_acceptance_states_are_read () =
 let test_unknown_acceptance_state_is_reported () =
   check (list delta) "the unknown word is named"
     [ Live.Undecodable
-        "KEEPER_CHAT_OPERATION_ACCEPTED has an unknown state: Vanished"
+        "unknown Keeper chat operation state \"Vanished\""
     ]
     (feed_whole (sse (accepted ~state:"Vanished" ~queued_count:1 ())))
 
 let test_acceptance_missing_fields_are_named () =
   let value fields = event "CUSTOM"
-    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"; "value", `Assoc fields ]
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; "value", `Assoc (("operation_id", `String "op-1") :: fields)
+    ]
   in
   check (list delta) "a missing state names itself"
-    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no state" ]
+    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED.value.state is required" ]
     (feed_whole (sse (value [ "queued_count", `Int 1 ])));
   check (list delta) "a missing queued_count names itself"
-    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no queued_count" ]
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count is required"
+    ]
     (feed_whole (sse (value [ "state", `String "Queued" ])))
+
+let test_acceptance_rejects_negative_queue_length () =
+  check (list delta) "the live and strict readers share the queue bound"
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED.value.queued_count must be a nonnegative integer"
+    ]
+    (feed_whole (sse (accepted ~state:"Queued" ~queued_count:(-1) ())))
+
+let test_runtime_attempt_boundary_is_typed () =
+  let body = sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" `Null) in
+  check (list delta) "runtime boundary is not silently dropped"
+    [ Live.Runtime_attempt_started ]
+    (feed_whole body)
+
+let test_runtime_attempt_rejects_non_null_payload () =
+  let body =
+    sse (custom "KEEPER_RUNTIME_ATTEMPT_STARTED" (`Assoc []))
+  in
+  check (list delta) "runtime boundary payload is exact"
+    [ Live.Undecodable
+        "Keeper chat CUSTOM event KEEPER_RUNTIME_ATTEMPT_STARTED.value must be null"
+    ]
+    (feed_whole body)
+
+let test_unknown_custom_event_is_reported () =
+  let body = sse (custom "KEEPER_FUTURE_EVENT" `Null) in
+  check (list delta) "new server vocabulary cannot disappear silently"
+    [ Live.Undecodable "unknown CUSTOM event name: KEEPER_FUTURE_EVENT" ]
+    (feed_whole body)
 
 let () =
   run "tui_keeper_chat_live"
@@ -397,6 +490,10 @@ let () =
             test_args_snapshot_replaces_rather_than_appends
         ; test_case "checkpoint and external effect are drawn" `Quick
             test_checkpoint_and_external_effect_are_drawn
+        ; test_case "runtime attempt boundary is typed" `Quick
+            test_runtime_attempt_boundary_is_typed
+        ; test_case "runtime attempt rejects non-null payload" `Quick
+            test_runtime_attempt_rejects_non_null_payload
         ] )
     ; ( "acceptance"
       , [ test_case "the three states are read" `Quick
@@ -405,6 +502,8 @@ let () =
             test_unknown_acceptance_state_is_reported
         ; test_case "missing fields name themselves" `Quick
             test_acceptance_missing_fields_are_named
+        ; test_case "negative queue length is rejected" `Quick
+            test_acceptance_rejects_negative_queue_length
         ] )
     ; ( "held calls"
       , [ test_case "an approval request is read whole" `Quick
@@ -423,9 +522,15 @@ let () =
             `Quick test_unreadable_line_is_reported_and_does_not_stop_the_stream
         ; test_case "a missing field names its event" `Quick
             test_missing_field_names_the_event
+        ; test_case "tool result requires canonical identity" `Quick
+            test_tool_result_requires_nonblank_canonical_identity
+        ; test_case "protocol error carries quarantined occurrence" `Quick
+            test_protocol_error_carries_only_the_quarantined_occurrence
         ; test_case "a run error with no message still fails" `Quick
             test_run_error_is_a_failure_even_with_no_message
         ; test_case "undrawn events stay silent" `Quick
             test_events_this_view_does_not_draw_are_silent
+        ; test_case "unknown custom event is reported" `Quick
+            test_unknown_custom_event_is_reported
         ] )
     ]

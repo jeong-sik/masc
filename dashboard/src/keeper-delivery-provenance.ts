@@ -1,7 +1,7 @@
 export type KeeperChatDeliveryKey =
   | { readonly kind: 'operation'; readonly operation_id: string }
   | { readonly kind: 'fusion_run'; readonly request_id: string }
-  | { readonly kind: 'continuation'; readonly intent_id: string }
+  | { readonly kind: 'workspace_message'; readonly request_id: string }
 
 export type KeeperChatTranscriptSlot =
   | { readonly kind: 'accepted_user' }
@@ -9,6 +9,10 @@ export type KeeperChatTranscriptSlot =
   | {
       readonly kind: 'tool_call'
       readonly execution_id: string
+      readonly ordinal: number
+    }
+  | {
+      readonly kind: 'tool_delivery'
       readonly ordinal: number
     }
 
@@ -52,6 +56,17 @@ export function toolCallDeliveryProvenance(
   }
 }
 
+export function toolDeliveryProvenance(
+  parent: KeeperChatDeliveryProvenance | null | undefined,
+  ordinal: number,
+): KeeperChatDeliveryProvenance | null {
+  if (!parent) return null
+  return {
+    delivery_key: parent.delivery_key,
+    transcript_slot: { kind: 'tool_delivery', ordinal },
+  }
+}
+
 function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryKey): boolean {
   if (left.kind !== right.kind) return false
   switch (left.kind) {
@@ -59,8 +74,8 @@ function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDeliveryK
       return right.kind === 'operation' && left.operation_id === right.operation_id
     case 'fusion_run':
       return right.kind === 'fusion_run' && left.request_id === right.request_id
-    case 'continuation':
-      return right.kind === 'continuation' && left.intent_id === right.intent_id
+    case 'workspace_message':
+      return right.kind === 'workspace_message' && left.request_id === right.request_id
   }
 }
 
@@ -69,10 +84,17 @@ function sameTranscriptSlot(
   right: KeeperChatTranscriptSlot,
 ): boolean {
   if (left.kind !== right.kind) return false
-  if (left.kind !== 'tool_call') return true
-  return right.kind === 'tool_call'
-    && left.execution_id === right.execution_id
-    && left.ordinal === right.ordinal
+  switch (left.kind) {
+    case 'accepted_user':
+    case 'terminal_assistant':
+      return true
+    case 'tool_call':
+      return right.kind === 'tool_call'
+        && left.execution_id === right.execution_id
+        && left.ordinal === right.ordinal
+    case 'tool_delivery':
+      return right.kind === 'tool_delivery' && left.ordinal === right.ordinal
+  }
 }
 
 export function sameDeliveryProvenance(

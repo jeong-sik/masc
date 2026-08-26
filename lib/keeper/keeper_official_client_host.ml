@@ -153,7 +153,8 @@ let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
         ~turn_count
         ~hook_name:"after_turn"
         hooks.Agent_core.Hooks.after_turn
-        (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
+        (Agent_core.Hooks.AfterTurn
+           { turn = turn_count; response; tool_source_map = None })
     with
     | Continue -> Ok ()
     | HookFailed { stage; detail } ->

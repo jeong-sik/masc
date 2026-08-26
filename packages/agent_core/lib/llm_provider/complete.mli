@@ -263,8 +263,14 @@ val complete_serialized
 (** {1 Streaming Completion} *)
 
 (** Execute a streaming LLM completion.
-    Each SSE event is passed to [on_event] as it arrives.
-    Returns the final assembled {!Types.api_response} after the stream ends.
+    On the built-in HTTP path, raw provider events enter one canonical stream
+    state before [on_event]: accepted events are projected in order, exact
+    explicitly typed cumulative [TextSnapshot] values are reduced to their
+    unseen suffix, exact snapshot replays are suppressed, ordinary [TextDelta]
+    chunks always append, and an invalid raw event is replaced by one typed failure.
+    The returned {!Types.api_response} is assembled from those same canonical
+    decisions. An injected {!Llm_transport.t} owns the equivalent normalization
+    contract and must keep its callbacks consistent with its returned response.
     Non-fatal exceptions raised by [on_event] are logged and do not abort the
     stream assembly.
 

@@ -77,7 +77,14 @@ type stream_result = (Types.api_response, Http_client.http_error) result
     request → I/O → response pipeline for their transport kind.
 
     - HTTP transport: build request body, POST, parse response
-    - Subprocess transport: write stdin, read stdout, parse output *)
+    - Subprocess transport: write stdin, read stdout, parse output
+
+    A custom [complete_stream] is the event producer for its injected path. It
+    must emit only canonical typed events and return an [api_response] assembled
+    from the same decisions: cumulative text snapshots are reduced to unseen
+    suffixes only when explicitly typed as [TextSnapshot], ordinary [TextDelta]
+    values always append, and invalid raw input becomes one typed failure rather
+    than an accepted content callback. *)
 type t =
   { complete_sync : completion_request -> sync_result
   ; complete_stream :

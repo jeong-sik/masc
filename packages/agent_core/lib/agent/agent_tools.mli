@@ -55,6 +55,10 @@ val strip_registered_suffix : available:string list -> string -> string option
     [admitted] keeps every non-tool block untouched and rewrites each routable
     tool call to the registered name dispatch will use; [rejected] counts the
     calls dropped because no registered tool answers their name.
+    [tool_source_map] preserves the exact pre-admission ToolUse ordinal for
+    every surviving tool schedule entry and the complete pre-admission ToolUse
+    inventory, so consumers never reconstruct either fact from a provider-owned
+    call id.
 
     Dropping is the point. A name the index cannot answer is replayed to the
     model on every later request as a well-formed example of calling that
@@ -64,6 +68,7 @@ val strip_registered_suffix : available:string list -> string -> string option
 type tool_use_admission =
   { admitted : Types.content_block list
   ; rejected : int
+  ; tool_source_map : Hooks.admitted_tool_source_map
   }
 
 val admit_tool_use_names : tool_index -> Types.content_block list -> tool_use_admission

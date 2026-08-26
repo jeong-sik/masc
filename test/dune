@@ -1575,7 +1575,7 @@
 (test
  (name test_keeper_stream_tool_accum)
  (modules test_keeper_stream_tool_accum)
- (libraries alcotest masc masc_server masc.agent_core unix))
+ (libraries alcotest masc masc.masc_types masc_server masc.agent_core unix))
 
 (test
  (name test_keeper_stream_media_accum)
@@ -2779,6 +2779,7 @@
  (libraries
   alcotest
   fmt
+  masc.string_util
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_transcript))
 
@@ -2941,6 +2942,17 @@
  (name test_tui_diff)
  (modules test_tui_diff)
  (libraries alcotest masc_tui_diff))
+
+(test
+ (name test_tui_keeper_chat_diff)
+ (modules test_tui_keeper_chat_diff)
+ (libraries
+  alcotest
+  masc
+  masc_tui_keeper_chat_diff
+  masc_tui_keeper_chat_transcript
+  masc_tui_message_layout
+  yojson))
 
 (test
  (name test_tui_git_diff_decode)

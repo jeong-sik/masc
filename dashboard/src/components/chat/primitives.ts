@@ -27,7 +27,7 @@ import type { ChatBlock, ChatBroadcastBlock, ChatCalloutBlock, ChatChartBlock, C
 import type { KeeperConversationAttachment, KeeperConversationAudioClip, KeeperConversationDetails, KeeperConversationEntry, KeeperConversationSource, SurfaceRef } from '../../types'
 import type { ToolCallEntry, ToolCallOutputBlob } from '../../api/dashboard'
 import { fetchBoardPost } from '../../api/board'
-import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById } from '../../tool-call-output-store'
+import { lookupToolCallOutput, toolCallOutputsByExecutionId } from '../../tool-call-output-store'
 import type { ToolCallOutputHydrationContract } from '../../tool-call-output-store'
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
@@ -136,9 +136,17 @@ function traceSourceBadge(step: ChatTraceStep): TraceSourceBadgeInfo {
       tone: 'tool',
     }
   }
+  const executionId = step.executionId?.trim()
+  if (executionId) {
+    return {
+      label: 'execution_id',
+      title: `source: trace.kind=tool, execution_id=${executionId}`,
+      tone: 'tool',
+    }
+  }
   return {
     label: 'unlinked_trace',
-    title: 'source: trace.kind=tool without tool_call_id',
+    title: 'source: trace.kind=tool without provider or canonical identity',
     tone: 'warn',
   }
 }
@@ -1709,8 +1717,9 @@ function ChatTraceStep({
       data-chat-turn-order-kind="tool"
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${step.toolCallId?.trim() || undefined}
+      data-chat-trace-execution-id=${step.executionId?.trim() || undefined}
       data-chat-trace-agent-core-block-index=${step.agentCoreBlockIndex ?? undefined}
-      data-chat-trace-link-state=${step.toolCallId?.trim() ? 'trace-only' : 'unlinked'}
+      data-chat-trace-link-state=${step.executionId?.trim() ? 'trace-only' : 'unlinked'}
       data-chat-trace-output-state=${step.status ?? 'pending'}
       data-chat-trace-ts=${step.ts ?? undefined}
     >
@@ -3153,16 +3162,16 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
   const [expanded, setExpanded] = useState(false)
   const timestamp = timeLabel(entry.timestamp)
   const toolName = entry.label || 'tool'
-  const toolCallId = toolCallIdFromToolEntryId(entry.id)
+  const toolCallId = entry.toolCallId?.trim() ? entry.toolCallId : null
   const displayArgs = prettyJsonish(entry.text || '')
   const isEmptyArgs = EMPTY_ARG_TEXTS.has(displayArgs.trim())
   // Same reason as the trace-step row: the name repeats, the subject does not.
   const subject = isEmptyArgs ? null : toolSubject(displayArgs)
 
   // Tool results never travel on the chat stream — they are joined here from
-  // the tool-call output store by this row's id (`tool-<tool_use_id>`). Null
-  // until that hydration lands, or for rows whose call had no provider id.
-  const outputEntry = lookupToolCallOutput(entry.id)
+  // the tool-call output store by canonical execution_id. Null until result
+  // readiness and output hydration have both landed.
+  const outputEntry = lookupToolCallOutput(entry.executionId)
   const outputView = outputEntry ? toolOutputDisplay(outputEntry.output) : null
   const hasOutput = outputView !== null && outputView.text.trim() !== ''
 
@@ -3198,6 +3207,7 @@ function ToolCallBubble({ entry }: { entry: KeeperConversationEntry }) {
       data-chat-stream-contract-reason=${entry.streamContract?.reason ?? undefined}
       data-chat-turn-ref=${entry.turnRef ?? undefined}
       data-chat-tool-call-id=${toolCallId ?? undefined}
+      data-chat-tool-execution-id=${entry.executionId ?? undefined}
     >
       <button
         type="button"
@@ -3272,7 +3282,7 @@ const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
   'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
   'hydration-failed': '출력 hydration 실패 — 결과 누락 여부를 확정할 수 없음',
-  unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
+  unlinked: '실행 ID 없음 — 출력 조인 불가',
   ok: TOOL_STATUS_TITLE_OK,
   bad: TOOL_STATUS_TITLE_BAD,
 }
@@ -3280,7 +3290,8 @@ const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
 // A tool call's output is legitimately "pending" while its turn is still
 // streaming, or before the separate tool-output hydration surface has loaded.
 // Once both have settled, an output that never joined is a gap (e.g. a call
-// whose tool_use_id was empty and never joined), not indefinite "pending".
+// whose canonical execution_id was absent and never joined), not indefinite
+// "pending".
 function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
   return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing'
 }
@@ -3302,28 +3313,38 @@ function toolOutputCoverageState(
 
 function toolTraceCallId(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): string | null {
   const traceCallId = traceStep?.toolCallId?.trim()
-  if (traceCallId) return traceCallId
-  return entry ? toolCallIdFromToolEntryId(entry.id) : null
+  if (traceCallId) return traceStep?.toolCallId ?? null
+  return entry?.toolCallId?.trim() ? entry.toolCallId : null
 }
 
 function toolTraceSourceBadge(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): TraceSourceBadgeInfo {
   if (traceStep) return traceSourceBadge(traceStep)
-  const callId = entry ? toolCallIdFromToolEntryId(entry.id) : null
-  return callId
-    ? {
-        label: 'tool_call_id',
-        title: `source: tool transcript row, tool_call_id=${callId}`,
-        tone: 'tool',
-      }
-    : {
-        label: 'unlinked_row',
-        title: 'source: tool transcript row without tool_call_id',
-        tone: 'warn',
-      }
+  const callId = entry?.toolCallId?.trim() ? entry.toolCallId : null
+  if (callId) {
+    return {
+      label: 'tool_call_id',
+      title: `source: tool transcript row, tool_call_id=${callId}`,
+      tone: 'tool',
+    }
+  }
+  if (entry?.executionId?.trim()) {
+    return {
+      label: 'execution_id',
+      title: `source: tool transcript row, execution_id=${entry.executionId}`,
+      tone: 'tool',
+    }
+  }
+  return {
+    label: 'delivery_row',
+    title: 'source: delivery-only tool transcript row',
+    tone: 'warn',
+  }
 }
 
 function isUnlinkedTraceTool(entry: KeeperConversationEntry | null, traceStep?: ChatTraceToolStep): boolean {
-  return traceStep !== undefined && toolTraceCallId(entry, traceStep) === null
+  return traceStep !== undefined
+    && entry === null
+    && !traceStep.executionId?.trim()
 }
 
 function ToolTraceStep({
@@ -3359,14 +3380,14 @@ function ToolTraceStep({
     ? { label: 'activity', title: 'source: autonomous activity summary', tone: 'tool' as const }
     : toolTraceSourceBadge(entry, traceStep)
   let status: ToolTraceDisplayStatus
-  if (unlinkedTraceTool) {
-    status = 'unlinked'
-  } else if (output !== null) {
+  if (output !== null) {
     status = output.success === false ? 'bad' : 'ok'
   } else if (traceStep?.status === 'err') {
     status = 'bad'
   } else if (traceStep?.status === 'ok') {
     status = 'ok'
+  } else if (unlinkedTraceTool) {
+    status = 'unlinked'
   } else if (coverageState === 'hydration-failed') {
     status = 'hydration-failed'
   } else if (coverageState === 'coverage-gap') {
@@ -3392,6 +3413,7 @@ function ToolTraceStep({
       data-chat-turn-order-kind=${orderKind}
       data-chat-trace-provenance=${sourceBadge.label}
       data-chat-trace-tool-call-id=${callId ?? undefined}
+      data-chat-trace-execution-id=${entry?.executionId ?? traceStep?.executionId ?? undefined}
       data-chat-trace-agent-core-block-index=${traceStep?.agentCoreBlockIndex ?? undefined}
       data-chat-trace-entry-id=${entry?.id ?? undefined}
       data-chat-trace-link-state=${structuralSummary ? 'structural' : unlinkedTraceTool ? 'unlinked' : entry ? 'joined' : 'trace-only'}
@@ -3422,7 +3444,7 @@ function ToolTraceStep({
           ? html`
             <div class="chat-block-tool-body">
                 ${unlinkedTraceTool
-                  ? html`<div class="chat-block-tool-label">도구 호출 ID 없음 — 출력 조인 불가</div>`
+                  ? html`<div class="chat-block-tool-label">실행 ID 없음 — 출력 조인 불가</div>`
                   : isEmptyArgs
                   ? html`<div class="chat-block-tool-label">입력 없음</div>`
                   : html`
@@ -3489,32 +3511,36 @@ export function interleaveTraceAndTools(
   traceSteps: ChatTraceStep[],
   toolSteps: { entry: KeeperConversationEntry; output: ToolCallEntry | null }[],
 ): TraceOrderItem[] {
-  const toolsByCallId = new Map<string, { entry: KeeperConversationEntry; output: ToolCallEntry | null }>()
+  const toolsByIdentity = new Map<string, { entry: KeeperConversationEntry; output: ToolCallEntry | null }>()
   for (const item of toolSteps) {
-    const callId = toolCallIdFromToolEntryId(item.entry.id)
-    if (callId) toolsByCallId.set(callId, item)
+    toolsByIdentity.set(`occurrence:${item.entry.id}`, item)
+    if (item.entry.executionId?.trim()) {
+      toolsByIdentity.set(`execution:${item.entry.executionId}`, item)
+    }
   }
-  const usedToolIds = new Set<string>()
+  const usedEntryIds = new Set<string>()
   const ordered: TraceOrderItem[] = []
   for (const step of traceSteps) {
     if (step.kind !== 'tool') {
       ordered.push({ kind: 'trace', step })
       continue
     }
-    const callId = step.toolCallId?.trim()
-    if (!callId && toolSteps.length > 0) continue
-    const matched = callId ? toolsByCallId.get(callId) : undefined
-    if (callId) usedToolIds.add(callId)
+    const joinKey = step.toolOccurrenceId?.trim()
+      ? `occurrence:${step.toolOccurrenceId}`
+      : step.executionId?.trim()
+        ? `execution:${step.executionId}`
+        : null
+    const matched = joinKey ? toolsByIdentity.get(joinKey) : undefined
+    if (matched) usedEntryIds.add(matched.entry.id)
     ordered.push({
       kind: 'tool',
       step,
       entry: matched?.entry ?? null,
-      output: matched?.output ?? null,
+      output: matched?.output ?? lookupToolCallOutput(step.executionId),
     })
   }
   for (const item of toolSteps) {
-    const callId = toolCallIdFromToolEntryId(item.entry.id)
-    if (callId && usedToolIds.has(callId)) continue
+    if (usedEntryIds.has(item.entry.id)) continue
     ordered.push({ kind: 'tool-entry', entry: item.entry, output: item.output })
   }
   return ordered
@@ -3637,7 +3663,10 @@ function ToolTraceCard({
     // no addressable turn identity.
     setLocalOpen(next)
   }
-  const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
+  const steps = tools.map((entry) => ({
+    entry,
+    output: lookupToolCallOutput(entry.executionId),
+  }))
   const coverageStateForEntry = (entry: KeeperConversationEntry): ToolOutputCoverageState =>
     toolOutputCoverageState(
       entry,
@@ -3679,7 +3708,7 @@ function ToolTraceCard({
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
   ).length
   const unlinkedN = orderedToolSteps.filter(
-    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
+    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.executionId?.trim(),
   ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),
@@ -4464,14 +4493,14 @@ export function ChatTranscript({
       return entries
         .filter(entry => entry.role === 'tool')
         .map((entry) => {
-          const output = lookupToolCallOutput(entry.id)
+          const output = lookupToolCallOutput(entry.executionId)
           return output
             ? `${entry.id}:${output.success}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
             : `${entry.id}:pending:${coverageSig}`
         })
         .join('|')
     },
-    [entries, toolCallOutputsById.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
+    [entries, toolCallOutputsByExecutionId.value, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract],
   )
 
   const scrollToBottom = () => {

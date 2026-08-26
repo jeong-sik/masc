@@ -9,20 +9,35 @@ type admission =
   | Running
   | Settled
 
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  ; tool_call_id : string option
+  }
+
 type delta =
   | Run_started
+  | Runtime_attempt_started
   | Text of string
   | Thinking of string
   | Tool_started of
-      { call_id : string
+      { occurrence : tool_occurrence
       ; tool_name : string
       }
   | Tool_args of
-      { call_id : string
+      { occurrence : tool_occurrence
       ; fragment : args_fragment
       }
-  | Tool_ended of { call_id : string }
-  | Tool_result of { call_id : string }
+  | Tool_ended of { occurrence : tool_occurrence }
+  | Tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+  | Stream_protocol_error of
+      { quarantined_occurrence : tool_occurrence option
+      ; detail : string
+      }
   | Approval_requested of
       { call_id : string
       ; tool_name : string
@@ -63,19 +78,32 @@ let object_field fields name =
   | Some (`Assoc value) -> Some value
   | Some _ | None -> None
 
-let int_field fields name =
+let nonnegative_int_field fields name =
   match List.assoc_opt name fields with
-  | Some (`Int value) -> Some value
+  | Some (`Int value) when value >= 0 -> Some value
   | Some _ | None -> None
 
-(* The server's own vocabulary for an operation's state. An unknown word is
-   reported rather than folded into one of these: this reader is lenient about
-   lines it cannot read, not about inventing a state for the pane to draw. *)
-let admission_of_string = function
-  | "Queued" -> Some Queued
-  | "Running" -> Some Running
-  | "Succeeded" | "Failed" | "Cancelled" -> Some Settled
-  | _ -> None
+let optional_nonblank_string fields name =
+  match List.assoc_opt name fields with
+  | None -> Ok None
+  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some _ -> Error (name ^ " must be a nonblank string when present")
+
+let tool_occurrence ~event fields =
+  match
+    nonnegative_int_field fields "toolStreamScope",
+    nonnegative_int_field fields "toolCallBlockIndex"
+  with
+  | Some stream_scope, Some block_index ->
+    (match
+       optional_nonblank_string fields "providerMessageId",
+       optional_nonblank_string fields "toolCallId"
+     with
+     | Ok provider_message_id, Ok tool_call_id ->
+       Ok { stream_scope; block_index; provider_message_id; tool_call_id }
+     | Error detail, _ | _, Error detail -> Error (event ^ " " ^ detail))
+  | None, _ -> Error (event ^ " has no nonnegative toolStreamScope")
+  | _, None -> Error (event ^ " has no nonnegative toolCallBlockIndex")
 
 (* [required] reads one string field and names the event in the failure, so an
    Undecodable row says which event was short of what. *)
@@ -85,28 +113,31 @@ let required ~event ~field fields build =
   | None -> [ Undecodable (Printf.sprintf "%s has no %s" event field) ]
 
 let tool_args_deltas fields =
-  match string_field fields "toolCallId" with
-  | None -> [ Undecodable "TOOL_CALL_ARGS has no toolCallId" ]
-  | Some call_id -> (
+  match tool_occurrence ~event:"TOOL_CALL_ARGS" fields with
+  | Error detail -> [ Undecodable detail ]
+  | Ok occurrence -> (
       match string_field fields "delta", string_field fields "snapshot" with
-      | Some delta, None -> [ Tool_args { call_id; fragment = Args_delta delta } ]
+      | Some delta, None -> [ Tool_args { occurrence; fragment = Args_delta delta } ]
       | None, Some snapshot ->
-          [ Tool_args { call_id; fragment = Args_snapshot snapshot } ]
+          [ Tool_args { occurrence; fragment = Args_snapshot snapshot } ]
       | Some _, Some _ ->
           [ Undecodable "TOOL_CALL_ARGS carries both delta and snapshot" ]
       | None, None ->
           [ Undecodable "TOOL_CALL_ARGS carries neither delta nor snapshot" ])
 
 let tool_start_deltas fields =
-  match string_field fields "toolCallId", string_field fields "toolCallName" with
-  | Some call_id, Some tool_name -> [ Tool_started { call_id; tool_name } ]
-  | None, _ -> [ Undecodable "TOOL_CALL_START has no toolCallId" ]
-  | Some _, None -> [ Undecodable "TOOL_CALL_START has no toolCallName" ]
+  match tool_occurrence ~event:"TOOL_CALL_START" fields with
+  | Error detail -> [ Undecodable detail ]
+  | Ok occurrence ->
+    (match string_field fields "toolCallName" with
+     | Some tool_name when String.trim tool_name <> "" ->
+       [ Tool_started { occurrence; tool_name } ]
+     | Some _ | None -> [ Undecodable "TOOL_CALL_START has no nonblank toolCallName" ])
 
 (* Custom event names the live pane draws something for. The rest are on the
    strict decoder's allowlist and validated there; they carry nothing this
    view shows, so they produce no delta. *)
-let custom_deltas fields =
+let custom_deltas_unvalidated fields =
   match string_field fields "name" with
   | None -> [ Undecodable "CUSTOM has no name" ]
   | Some "KEEPER_THINKING_DELTA" -> (
@@ -117,23 +148,79 @@ let custom_deltas fields =
             (fun delta -> Thinking delta))
   | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
       let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
-      match object_field fields "value" with
-      | None -> [ Undecodable (event ^ " value is not an object") ]
+      match List.assoc_opt "value" fields with
+      | None -> [ Undecodable (event ^ " value is required") ]
       | Some value -> (
-          match string_field value "state", int_field value "queued_count" with
-          | None, _ -> [ Undecodable (event ^ " has no state") ]
-          | Some _, None -> [ Undecodable (event ^ " has no queued_count") ]
-          | Some state, Some queue_length -> (
-              match admission_of_string state with
-              | Some admission -> [ Accepted { admission; queue_length } ]
-              | None ->
-                  [ Undecodable (event ^ " has an unknown state: " ^ state) ])))
+          match Projection.decode_acceptance value with
+          | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+          | Error error ->
+              [ Undecodable (Projection.stream_error_to_string error) ]
+          | Ok acceptance ->
+              let admission =
+                match acceptance.Projection.state with
+                | Projection.Queued -> Queued
+                | Projection.Running -> Running
+                | Projection.Succeeded | Projection.Failed
+                | Projection.Cancelled -> Settled
+              in
+              [ Accepted
+                  { admission; queue_length = acceptance.Projection.queued_count }
+              ]))
+  | Some "KEEPER_RUNTIME_ATTEMPT_STARTED" ->
+    (match List.assoc_opt "value" fields with
+     | Some `Null -> [ Runtime_attempt_started ]
+     | Some _ | None ->
+       [ Undecodable "KEEPER_RUNTIME_ATTEMPT_STARTED value must be null" ])
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_TOOL_RESULT_READY value is not an object" ]
-      | Some value ->
-          required ~event:"KEEPER_TOOL_RESULT_READY" ~field:"tool_call_id" value
-            (fun call_id -> Tool_result { call_id }))
+      | Some value -> (
+          match tool_occurrence ~event:"KEEPER_TOOL_RESULT_READY" value with
+          | Error detail -> [ Undecodable detail ]
+          | Ok occurrence ->
+            (match string_field value "executionId" with
+             | Some execution_id when String.trim execution_id <> "" ->
+               [ Tool_result { occurrence; execution_id } ]
+             | Some _ | None ->
+               [ Undecodable
+                   "KEEPER_TOOL_RESULT_READY has no nonblank executionId"
+               ])))
+  | Some "KEEPER_STREAM_PROTOCOL_ERROR" -> (
+      match object_field fields "value" with
+      | None ->
+          [ Undecodable "KEEPER_STREAM_PROTOCOL_ERROR value is not an object" ]
+      | Some value -> (
+          match string_field value "kind" with
+          | Some kind
+            when Option.is_some
+                   (Masc.Keeper_chat_events.stream_protocol_error_kind_of_string
+                      kind) ->
+            let detail =
+              match string_field value "reason" with
+              | Some reason when String.trim reason <> "" -> kind ^ ": " ^ reason
+              | Some _ | None -> kind
+            in
+            (match List.assoc_opt "quarantined_occurrence" value with
+             | None ->
+               [ Stream_protocol_error
+                   { quarantined_occurrence = None; detail }
+               ]
+             | Some (`Assoc occurrence_fields) ->
+               (match
+                  tool_occurrence ~event:"KEEPER_STREAM_PROTOCOL_ERROR"
+                    occurrence_fields
+                with
+                | Ok occurrence ->
+                  [ Stream_protocol_error
+                      { quarantined_occurrence = Some occurrence; detail }
+                  ]
+                | Error detail -> [ Undecodable detail ])
+             | Some _ ->
+               [ Undecodable
+                   "KEEPER_STREAM_PROTOCOL_ERROR quarantined_occurrence is not an object"
+               ])
+          | Some _ | None ->
+            [ Undecodable "KEEPER_STREAM_PROTOCOL_ERROR has no known kind" ]))
   | Some "KEEPER_TOOL_APPROVAL_REQUESTED" -> (
       match object_field fields "value" with
       | None ->
@@ -179,7 +266,18 @@ let custom_deltas fields =
               ]))
   | Some "KEEPER_CONTINUATION_CHECKPOINT" -> [ Checkpoint ]
   | Some "KEEPER_EXTERNAL_EFFECT_COMPLETED" -> [ External_effect_completed ]
-  | Some _ -> []
+  | Some name when List.mem name Projection.known_custom_names -> []
+  | Some name -> [ Undecodable ("unknown CUSTOM event name: " ^ name) ]
+
+let custom_deltas fields =
+  match string_field fields "name", List.assoc_opt "value" fields with
+  | Some name, Some value ->
+    (match Projection.validate_custom_value ~name value with
+     | Ok () -> custom_deltas_unvalidated fields
+     | Error (Projection.Malformed_event detail) -> [ Undecodable detail ]
+     | Error error ->
+       [ Undecodable (Projection.stream_error_to_string error) ])
+  | None, _ | Some _, None -> custom_deltas_unvalidated fields
 
 (* Annotated rather than inferred. Without it the parameter widens to an open
    variant, every tag listed below is accepted whether or not Yojson has it,
@@ -208,8 +306,9 @@ let event_deltas (event : Yojson.Safe.t) =
       | Some "TOOL_CALL_START" -> tool_start_deltas fields
       | Some "TOOL_CALL_ARGS" -> tool_args_deltas fields
       | Some "TOOL_CALL_END" ->
-          required ~event:"TOOL_CALL_END" ~field:"toolCallId" fields
-            (fun call_id -> Tool_ended { call_id })
+          (match tool_occurrence ~event:"TOOL_CALL_END" fields with
+           | Ok occurrence -> [ Tool_ended { occurrence } ]
+           | Error detail -> [ Undecodable detail ])
       | Some "CUSTOM" -> custom_deltas fields
       (* Accepted by the strict decode, nothing for this view to draw. *)
       | Some

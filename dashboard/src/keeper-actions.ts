@@ -250,6 +250,7 @@ export async function hydrateKeeperToolApprovals(): Promise<void> {
       toolName: row.tool,
       args: row.args,
       question: row.question,
+      because: row.because,
       askedAtMs: row.asked_at !== null ? row.asked_at * 1000 : null,
       timeoutSec: row.timeout_sec,
       answering: false,

@@ -191,11 +191,15 @@ function startHead(): void {
   })
   emit(head.operationId, {
     type: 'TOOL_CALL_START',
+    toolStreamScope: 0,
+    toolCallBlockIndex: 0,
     toolCallId: `tool-${head.operationId}`,
     toolCallName: 'keeper_context_status',
   })
   emit(head.operationId, {
     type: 'TOOL_CALL_ARGS',
+    toolStreamScope: 0,
+    toolCallBlockIndex: 0,
     toolCallId: `tool-${head.operationId}`,
     delta: '{"scope":"current"}',
   })
@@ -206,6 +210,8 @@ function finishRunning(): void {
   if (!running) return
   emit(running.operationId, {
     type: 'TOOL_CALL_END',
+    toolStreamScope: 0,
+    toolCallBlockIndex: 0,
     toolCallId: `tool-${running.operationId}`,
   })
   emit(running.operationId, {

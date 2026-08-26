@@ -6,7 +6,8 @@
     persistence. It collects media
     payload per block index, rejects media deltas for tool/invalid blocks, preserves
     the first media metadata for an active block, and finalizes at either
-    [ContentBlockStop] or [MessageStop]. {!Keeper_chat_agent_core_stream_bridge} surfaces
+    [ContentBlockStop], a stop-bearing [MessageDelta], or [MessageStop].
+    {!Keeper_chat_agent_core_stream_bridge} surfaces
     the same media live over SSE; this captures it for durable chat persistence so
     a dashboard reload still shows the generated image/audio instead of only text. *)
 
@@ -14,11 +15,17 @@ type t
 
 val create : unit -> t
 
-val on_event : t -> Agent_core.Types.sse_event -> unit
+val start_runtime_attempt : t -> unit
+(** Mark the resolved-candidate attempt boundary. The first attempt keeps the
+    initial empty state; later attempts discard unfinished media/tool occupancy
+    while retaining already finalized delivery evidence. *)
+
+val on_event : ?stream_scope:int -> t -> Agent_core.Types.sse_event -> unit
 (** Feed one raw AGENT_CORE stream event. Media deltas accumulate per block index;
-    [ContentBlockStop] finalizes one index and [MessageStop] finalizes all still
-    open media. Non-media events are ignored except tool starts, which mark their
-    index invalid for media persistence. *)
+    [ContentBlockStop] finalizes one index; the first stop-bearing
+    [MessageDelta] and [MessageStop] finalize all still-open media. The optional
+    [stream_scope] is the exact Agent Core turn scope; production callers always
+    pass it, while focused single-scope tests may use the default 0. *)
 
 val to_chat_blocks : base_dir:string -> t -> Keeper_chat_blocks.chat_block list
 (** Decode and persist each finalized media payload under [base_dir] via

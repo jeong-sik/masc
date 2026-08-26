@@ -110,12 +110,17 @@ let translate_agent_core_stream ?base_dir events =
         ((fun () -> try remove_tree base_dir with _ -> ()), base_dir)
   in
   Fun.protect ~finally:cleanup (fun () ->
+    let occurrence_tracker = Keeper_stream_tool_accum.create () in
     let rec loop bridge_state acc = function
       | [] -> List.rev acc, bridge_state
       | event :: rest ->
+          Keeper_stream_tool_accum.on_event occurrence_tracker event;
+          let stream_scope =
+            Keeper_stream_tool_accum.current_stream_scope occurrence_tracker
+          in
           let translated =
             Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
-              bridge_state event
+              ~stream_scope bridge_state event
           in
           loop translated.bridge_state
             (List.rev_append translated.chat_events acc) rest
@@ -721,12 +726,12 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
           content_type;
           tool_call_id = Some block_tool_id;
           tool_call_name = Some block_tool_name };
-      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
-      Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name; _ };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a; _ };
       Keeper_chat_events.Tool_call_args_snapshot
-        { tool_call_id = snapshot_id; snapshot };
+        { tool_call_id = snapshot_id; snapshot; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
       Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
@@ -734,14 +739,14 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       check string "content type" "tool_use" content_type;
       check string "block tool id" "tc-1" block_tool_id;
       check string "block tool name" "masc_board_list" block_tool_name;
-      check string "tool id" "tc-1" tool_call_id;
+      check (option string) "tool id" (Some "tc-1") tool_call_id;
       check string "tool name" "masc_board_list" tool_call_name;
-      check string "args id a" "tc-1" args_id_a;
-      check string "snapshot id" "tc-1" snapshot_id;
+      check (option string) "args id a" (Some "tc-1") args_id_a;
+      check (option string) "snapshot id" (Some "tc-1") snapshot_id;
       check string "args a" "{\"limit\":" args_a;
       check string "snapshot" "{\"limit\":1}" snapshot;
       check int "tool stop index" 1 stop_index;
-      check string "end id" "tc-1" end_id;
+      check (option string) "end id" (Some "tc-1") end_id;
       check int "last thinking index" 2 last_index;
       check string "last thinking" "think B" last
   | _ ->
@@ -822,13 +827,13 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
           content_type;
           tool_call_id = Some block_tool_id;
           tool_call_name = Some block_tool_name };
-      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name; _ };
       Keeper_chat_events.Tool_call_args_snapshot
-        { tool_call_id = snapshot_id_a; snapshot = snapshot_a };
+        { tool_call_id = snapshot_id_a; snapshot = snapshot_a; _ };
       Keeper_chat_events.Tool_call_args_snapshot
-        { tool_call_id = snapshot_id_b; snapshot = snapshot_b };
+        { tool_call_id = snapshot_id_b; snapshot = snapshot_b; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ };
       Keeper_chat_events.Agent_core_thinking_delta { index = last_index; delta = last } ] ->
       check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
@@ -836,14 +841,14 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
       check string "content type" "tool_use" content_type;
       check string "block tool id" "tc-snapshot" block_tool_id;
       check string "block tool name" "masc_board_list" block_tool_name;
-      check string "tool id" "tc-snapshot" tool_call_id;
+      check (option string) "tool id" (Some "tc-snapshot") tool_call_id;
       check string "tool name" "masc_board_list" tool_call_name;
-      check string "snapshot id a" "tc-snapshot" snapshot_id_a;
-      check string "snapshot id b" "tc-snapshot" snapshot_id_b;
+      check (option string) "snapshot id a" (Some "tc-snapshot") snapshot_id_a;
+      check (option string) "snapshot id b" (Some "tc-snapshot") snapshot_id_b;
       check string "snapshot a" "{\"limit\":1}" snapshot_a;
       check string "snapshot b" "{\"limit\":2}" snapshot_b;
       check int "tool stop index" 1 stop_index;
-      check string "end id" "tc-snapshot" end_id;
+      check (option string) "end id" (Some "tc-snapshot") end_id;
       check int "last thinking index" 2 last_index;
       check string "last thinking" "think B" last
   | _ ->
@@ -899,9 +904,9 @@ let agent_core_interleaving_event_label = function
   | Keeper_chat_events.Tool_call_start { tool_call_name; _ } ->
       Some ("tool_start:" ^ tool_call_name)
   | Keeper_chat_events.Tool_call_args_snapshot { tool_call_id; _ } ->
-      Some ("tool_snapshot:" ^ tool_call_id)
-  | Keeper_chat_events.Tool_call_end { tool_call_id } ->
-      Some ("tool_end:" ^ tool_call_id)
+      Some ("tool_snapshot:" ^ Option.value ~default:"<provider-id-absent>" tool_call_id)
+  | Keeper_chat_events.Tool_call_end { tool_call_id; _ } ->
+      Some ("tool_end:" ^ Option.value ~default:"<provider-id-absent>" tool_call_id)
   | _ -> None
 
 let trajectory_interleaving_label = function
@@ -1188,25 +1193,446 @@ let test_keeper_stream_bridge_ignores_replayed_tool_start () =
   match events with
   | [ Keeper_chat_events.Agent_core_content_block_start
         { index = first_index; tool_call_id = Some first_block_id; _ };
-      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name; _ };
       Keeper_chat_events.Agent_core_content_block_start
         { index = replay_index; tool_call_id = Some replay_block_id; _ };
-      Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Tool_call_end { tool_call_id = end_id } ] ->
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id; _ } ] ->
       check int "first block index" 2 first_index;
       check string "first block tool id" "tc-repeat" first_block_id;
-      check string "tool id" "tc-repeat" tool_call_id;
+      check (option string) "tool id" (Some "tc-repeat") tool_call_id;
       check string "tool name" "keeper_memory_search" tool_call_name;
       check int "replay block index" 2 replay_index;
       check string "replay block tool id" "tc-repeat" replay_block_id;
-      check string "args id" "tc-repeat" args_id;
+      check (option string) "args id" (Some "tc-repeat") args_id;
       check string "args" "{\"q\":\"loop\"}" delta;
       check int "stop index" 2 stop_index;
-      check string "end id" "tc-repeat" end_id
+      check (option string) "end id" (Some "tc-repeat") end_id
   | _ ->
       fail
         "expected replayed block start, one tool start, one args delta, and one end"
+
+let test_keeper_stream_bridge_quarantines_duplicate_start_after_payload () =
+  let open Agent_core.Types in
+  let events =
+    translate_agent_core_stream_events
+      [ ContentBlockStart
+          { index = 2
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-ambiguous"
+          ; tool_name = Some "Read"
+          }
+      ; ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"path\":" }
+      ; ContentBlockStart
+          { index = 2
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-ambiguous"
+          ; tool_name = Some "Read"
+          }
+      ]
+  in
+  match List.rev events with
+  | Keeper_chat_events.Agent_core_stream_protocol_error error :: _ ->
+    check string "typed ambiguous start" "tool_start_duplicate_index"
+      (Keeper_chat_events.stream_protocol_error_kind_to_string error.kind);
+    (match error.quarantined_occurrence with
+     | Some occurrence ->
+       check int "ambiguous start scope" 0 occurrence.stream_scope;
+       check int "ambiguous start block" 2 occurrence.block_index
+     | None -> fail "ambiguous repeated start did not quarantine its occurrence")
+  | _ -> fail "ambiguous repeated start emitted no terminal protocol error"
+
+let test_keeper_stream_bridge_quarantines_args_after_stop () =
+  let open Agent_core.Types in
+  let events =
+    translate_agent_core_stream_events
+      [ ContentBlockStart
+          { index = 2
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-late"
+          ; tool_name = Some "Read"
+          }
+      ; ContentBlockDelta { index = 2; delta = InputJsonSnapshot "{}" }
+      ; ContentBlockStop { index = 2 }
+      ; ContentBlockDelta
+          { index = 2; delta = InputJsonSnapshot "{\"late\":true}" }
+      ]
+  in
+  match List.rev events with
+  | Keeper_chat_events.Agent_core_stream_protocol_error error :: _ ->
+    check string "typed late args" "tool_args_without_start"
+      (Keeper_chat_events.stream_protocol_error_kind_to_string error.kind);
+    (match error.quarantined_occurrence with
+     | Some occurrence ->
+       check int "late args scope" 0 occurrence.stream_scope;
+       check int "late args block" 2 occurrence.block_index
+     | None -> fail "late args did not quarantine the closed occurrence")
+  | _ -> fail "late args emitted no terminal protocol error"
+
+let test_keeper_stream_bridge_terminalizes_superseded_attempt_tool () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-attempt-boundary" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let first =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0
+           (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-first-attempt"
+              ; tool_name = Some "Read"
+              })
+       in
+       let superseded =
+         Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+           ~previous_scope:Keeper_chat_events.Abandon_previous_scope
+           first.bridge_state
+       in
+       (match superseded.chat_events with
+        | [ Keeper_chat_events.Agent_core_stream_protocol_error error
+          ; Keeper_chat_events.Agent_core_runtime_attempt_started
+          ] ->
+          check string "typed attempt terminal" "tool_attempt_superseded"
+            (Keeper_chat_events.stream_protocol_error_kind_to_string error.kind);
+          (match error.quarantined_occurrence with
+           | Some occurrence ->
+             check int "superseded scope" 0 occurrence.stream_scope;
+             check int "superseded block" 0 occurrence.block_index
+           | None -> fail "superseded attempt did not name its exact occurrence")
+        | _ -> fail "attempt boundary did not terminalize the open tool");
+       let fallback =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:1 superseded.bridge_state
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-fallback"
+              ; tool_name = Some "Write"
+              })
+       in
+       check bool "fallback scope opens an independent tool" true
+         (List.exists
+            (function
+              | Keeper_chat_events.Tool_call_start
+                  { occurrence; tool_call_id = Some "tc-fallback"; _ } ->
+                occurrence.stream_scope = 1
+              | _ -> false)
+            fallback.chat_events))
+
+let test_keeper_stream_bridge_preserves_authoritative_attempt_tool () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-sealed-attempt-boundary" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0 state event
+       in
+       let started =
+         translate (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-sealed-attempt"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate started.bridge_state (ContentBlockStop { index = 0 })
+       in
+       let preserved =
+         Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+           ~previous_scope:Keeper_chat_events.Preserve_previous_scope
+           finalized.bridge_state
+       in
+       match preserved.chat_events with
+       | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+       | _ -> fail "authoritative prior tool was quarantined at fallback boundary")
+
+let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-failed-attempt-boundary" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0 state event
+       in
+       List.iter
+         (fun (label, failure_event) ->
+            let started =
+              translate (Keeper_chat_agent_core_stream_bridge.empty_state ())
+                (ContentBlockStart
+                   { index = 0
+                   ; content_type = "tool_use"
+                   ; tool_id = Some ("tc-" ^ label)
+                   ; tool_name = Some "Read"
+                   })
+            in
+            let finalized =
+              translate started.bridge_state (ContentBlockStop { index = 0 })
+            in
+            let failed = translate finalized.bridge_state failure_event in
+            let quarantines =
+              List.filter
+                (function
+                  | Keeper_chat_events.Agent_core_stream_protocol_error
+                      { quarantined_occurrence = Some _; _ } -> true
+                  | _ -> false)
+                failed.chat_events
+            in
+            check int (label ^ " first quarantine count") 1
+              (List.length quarantines);
+            let fallback =
+              Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+                ~previous_scope:Keeper_chat_events.Abandon_previous_scope
+                failed.bridge_state
+            in
+            match fallback.chat_events with
+            | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+            | _ -> fail (label ^ " re-quarantined the same occurrence"))
+         [ ( "sse-error"
+           , SSEError
+               { message = "provider failed"
+               ; error_type = Some "server_error"
+               ; raw = {|{"error":"provider failed"}|}
+               } )
+         ; "incomplete", StreamIncomplete { reason = "max_output_tokens" }
+         ])
+
+let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-incomplete-late-events" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate ~stream_scope state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope state event
+       in
+       let started =
+         translate ~stream_scope:0
+           (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-incomplete"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate ~stream_scope:0 started.bridge_state
+           (ContentBlockStop { index = 0 })
+       in
+       let failed =
+         translate ~stream_scope:0 finalized.bridge_state
+           (StreamIncomplete { reason = "max_output_tokens" })
+       in
+       let first_quarantine =
+         List.find_map
+           (function
+             | Keeper_chat_events.Agent_core_stream_protocol_error
+                 ({ quarantined_occurrence = Some _; _ } as error) -> Some error
+             | _ -> None)
+           failed.chat_events
+       in
+       (match first_quarantine with
+        | Some { kind = Keeper_chat_events.Sse_stream_incomplete; _ } -> ()
+        | Some _ -> fail "incomplete stream recorded the wrong first quarantine kind"
+        | None -> fail "incomplete stream did not quarantine the finalized tool");
+       let terminalized =
+         translate ~stream_scope:0 failed.bridge_state
+           (MessageDelta { stop_reason = Some EndTurn; usage = None })
+       in
+       let late_events =
+         [ ContentBlockDelta
+             { index = 0; delta = InputJsonDelta {|{"late":true}|} }
+         ; ContentBlockStart
+             { index = 0
+             ; content_type = "tool_use"
+             ; tool_id = Some "tc-incomplete"
+             ; tool_name = Some "Read"
+             }
+         ; ContentBlockDelta { index = 0; delta = TextDelta "late" }
+         ; ContentBlockStop { index = 0 }
+         ]
+       in
+       let after_late =
+         List.fold_left
+           (fun state event ->
+              let rejected = translate ~stream_scope:0 state event in
+              check int "late event is suppressed after first quarantine" 0
+                (List.length rejected.chat_events);
+              rejected.bridge_state)
+           terminalized.bridge_state late_events
+       in
+       let fallback =
+         Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+           ~previous_scope:Keeper_chat_events.Abandon_previous_scope after_late
+       in
+       (match fallback.chat_events with
+        | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+        | _ -> fail "fallback re-quarantined an already frozen occurrence");
+       let fresh =
+         translate ~stream_scope:1 fallback.bridge_state
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-fallback-fresh"
+              ; tool_name = Some "Write"
+              })
+       in
+       check bool "fallback scope reuses the index independently" true
+         (List.exists
+            (function
+              | Keeper_chat_events.Tool_call_start
+                  { occurrence; tool_call_id = Some "tc-fallback-fresh"; _ } ->
+                occurrence.stream_scope = 1 && occurrence.block_index = 0
+              | _ -> false)
+            fresh.chat_events))
+
+let test_keeper_stream_bridge_terminal_quarantine_is_write_once () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-terminal-quarantine" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0 state event
+       in
+       let started =
+         translate (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-terminal"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate started.bridge_state (ContentBlockStop { index = 0 })
+       in
+       let terminal =
+         translate finalized.bridge_state
+           (MessageDelta { stop_reason = Some EndTurn; usage = None })
+       in
+       let first_late =
+         translate terminal.bridge_state
+           (ContentBlockDelta
+              { index = 0; delta = InputJsonDelta {|{"late":true}|} })
+       in
+       (match first_late.chat_events with
+        | [ Keeper_chat_events.Agent_core_stream_protocol_error
+                { kind = Keeper_chat_events.Stream_event_after_terminal
+                ; quarantined_occurrence = Some occurrence
+                ; _
+                }
+          ] ->
+          check int "terminal quarantine scope" 0 occurrence.stream_scope;
+          check int "terminal quarantine block" 0 occurrence.block_index
+        | _ -> fail "first terminal violation did not quarantine exactly once");
+       let second_late =
+         translate first_late.bridge_state (ContentBlockStop { index = 0 })
+       in
+       check int "second terminal violation is frozen" 0
+         (List.length second_late.chat_events))
+
+let test_keeper_stream_bridge_quarantines_transport_failed_scope () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-transport-failure" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let run events =
+         List.fold_left
+           (fun state event ->
+              (Keeper_chat_agent_core_stream_bridge.translate ~redact_text
+                 ~base_dir ~stream_scope:0 state event).bridge_state)
+           (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           events
+       in
+       List.iter
+         (fun (label, events) ->
+            let failed =
+              Keeper_chat_agent_core_stream_bridge.fail_stream (run events)
+                ~reason:"transport failed"
+            in
+            match failed.chat_events with
+            | [ Keeper_chat_events.Agent_core_stream_protocol_error error ] ->
+              check string (label ^ " kind") "sse_stream_incomplete"
+                (Keeper_chat_events.stream_protocol_error_kind_to_string
+                   error.kind);
+              check bool (label ^ " exact occurrence") true
+                (Option.exists
+                   (fun
+                     (occurrence : Keeper_chat_events.tool_stream_occurrence)
+                     -> occurrence.block_index = 0)
+                   error.quarantined_occurrence)
+            | _ -> fail (label ^ " did not quarantine one exact occurrence"))
+         [ ( "active"
+           , [ ContentBlockStart
+                 { index = 0
+                 ; content_type = "tool_use"
+                 ; tool_id = Some "active"
+                 ; tool_name = Some "Read"
+                 }
+             ] )
+         ; ( "finalized"
+           , [ ContentBlockStart
+                 { index = 0
+                 ; content_type = "tool_use"
+                 ; tool_id = Some "finalized"
+                 ; tool_name = Some "Read"
+                 }
+             ; ContentBlockStop { index = 0 }
+             ] )
+         ])
+
+let test_keeper_stream_bridge_terminalizes_conflicting_message_tool () =
+  let open Agent_core.Types in
+  let events =
+    translate_agent_core_stream_events
+      [ MessageStart { id = "message-a"; model = "m"; usage = None }
+      ; ContentBlockStart
+          { index = 0
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-message"
+          ; tool_name = Some "Read"
+          }
+      ; ContentBlockDelta { index = 0; delta = InputJsonDelta "{\"path\":" }
+      ; MessageStart { id = "message-b"; model = "m"; usage = None }
+      ]
+  in
+  let error =
+    List.find_map
+      (function
+        | Keeper_chat_events.Agent_core_stream_protocol_error error
+          when error.kind = Keeper_chat_events.Tool_message_start_conflict ->
+          Some error.quarantined_occurrence
+        | _ -> None)
+      events
+  in
+  match error with
+  | None -> fail "conflicting MessageStart left its open tool unterminated"
+  | Some quarantined_occurrence ->
+    (match quarantined_occurrence with
+     | Some occurrence ->
+       check int "message conflict scope" 0 occurrence.stream_scope;
+       check int "message conflict block" 0 occurrence.block_index
+     | None -> fail "message conflict did not name the exact tool occurrence")
 
 let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
   let open Agent_core.Types in
@@ -1231,7 +1657,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
           tool_call_name = Some first_block_name;
           _ };
       Keeper_chat_events.Tool_call_start
-        { tool_call_id = first_start_id; tool_call_name = first_start_name };
+        { tool_call_id = first_start_id; tool_call_name = first_start_name; _ };
       Keeper_chat_events.Agent_core_content_block_start
         { tool_call_id = Some replay_block_id;
           tool_call_name = Some replay_block_name;
@@ -1244,7 +1670,7 @@ let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
           _ } ] ->
       check string "first block id" "tc-repeat" first_block_id;
       check string "first block name" "keeper_memory_search" first_block_name;
-      check string "first start id" "tc-repeat" first_start_id;
+      check (option string) "first start id" (Some "tc-repeat") first_start_id;
       check string "first start name" "keeper_memory_search" first_start_name;
       check string "replay block id" "tc-repeat" replay_block_id;
       check string "replay block name" "masc_board_list" replay_block_name;
@@ -1286,7 +1712,7 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
   | [ Keeper_chat_events.Agent_core_content_block_start
         { index = first_block_index; tool_call_id = Some first_block_id; _ };
       Keeper_chat_events.Tool_call_start { tool_call_id = first_start; _ };
-      Keeper_chat_events.Tool_call_args { tool_call_id = first_args; delta = args_a };
+      Keeper_chat_events.Tool_call_args { tool_call_id = first_args; delta = args_a; _ };
       Keeper_chat_events.Agent_core_content_block_start
         { index = second_block_index; tool_call_id = Some second_block_id; _ };
       Keeper_chat_events.Agent_core_stream_protocol_error
@@ -1294,24 +1720,11 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
           index = Some duplicate_index;
           tool_call_id = Some duplicate_tool_id;
           reason = Some duplicate_reason;
-          _ };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = args_kind;
-          index = Some args_index;
-          tool_call_id = Some args_tool_id;
-          reason = Some args_reason;
-          _ };
-      Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = stop_kind;
-          index = Some stop_error_index;
-          tool_call_id = Some stop_tool_id;
-          reason = Some stop_reason;
           _ } ] ->
       check int "first block index" 2 first_block_index;
       check string "first block id" "tc-first" first_block_id;
-      check string "first start" "tc-first" first_start;
-      check string "first args id" "tc-first" first_args;
+      check (option string) "first start" (Some "tc-first") first_start;
+      check (option string) "first args id" (Some "tc-first") first_args;
       check string "first args" "{\"q\":\"first\"}" args_a;
       check int "second block index" 2 second_block_index;
       check string "second block id" "tc-second" second_block_id;
@@ -1321,59 +1734,60 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
       check int "duplicate index" 2 duplicate_index;
       check string "duplicate tool id" "tc-first" duplicate_tool_id;
       check bool "duplicate reason names incoming tool" true
-        (string_contains duplicate_reason "incoming tool tc-second");
-      check string "args kind" "tool_args_without_start"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string args_kind);
-      check int "args index" 2 args_index;
-      check string "args error tool id" "tc-first" args_tool_id;
-      check string "args reason"
-        "tool argument event arrived after invalid tool block start" args_reason;
-      check int "stop index" 2 stop_index;
-      check string "stop kind" "tool_stop_without_start"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string stop_kind);
-      check int "stop error index" 2 stop_error_index;
-      check string "stop error tool id" "tc-first" stop_tool_id;
-      check string "stop reason"
-        "content block stop arrived for invalid tool block" stop_reason
+        (string_contains duplicate_reason "incoming tool tc-second")
   | _ ->
       fail
         "expected conflicting reused-index tool start to fail closed without forged tool events"
 
 let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
   let open Agent_core.Types in
-  (* A keeper dispatch is a multi-turn tool loop: each AGENT_CORE call is a SEPARATE
-     provider message whose block indices restart at 0, and the OpenAI-compat
-     path carries no wire content_block_stop. The MessageStop ending message 1
-     must clear the per-message block table so message 2's tool start at the SAME
-     reused index opens a fresh Active_tool instead of colliding with message 1's
-     still-open block — otherwise the args delta surfaces a spurious
-     tool_args_without_start. Live regression: deepseek-v4-flash via ollama_cloud.
-     Contrast with the within-message reuse test above, which MUST still fail
-     closed (no MessageStop separates the two starts there). *)
+  (* Block indices may restart only after Agent Core successfully seals the
+     provider call. [stream_scope = 1] below is that exact boundary; MessageStop
+     alone does not mint it. *)
   let events =
-    translate_agent_core_stream_events
-      [
-        ContentBlockStart
+    let base_dir = temp_base_path "gate-keeper-stream-scope" in
+    Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+      (fun () ->
+         let redact_text text = text in
+         let scoped_events =
+           [ 0, ContentBlockStart
           { index = 2;
             content_type = "tool_use";
             tool_id = Some "call_first";
-            tool_name = Some "keeper_tasks_audit" };
-        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"a\":1}" };
-        MessageStop;
-        ContentBlockStart
+            tool_name = Some "keeper_tasks_audit" }
+           ; 0, ContentBlockDelta
+               { index = 2; delta = InputJsonDelta "{\"a\":1}" }
+           ; 0, MessageDelta { stop_reason = Some StopToolUse; usage = None }
+           ; 0, MessageStop
+           ; 1, ContentBlockStart
           { index = 2;
             content_type = "tool_use";
             tool_id = Some "call_second";
-            tool_name = Some "keeper_tasks_audit" };
-        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"b\":2}" };
-      ]
+            tool_name = Some "keeper_tasks_audit" }
+           ; 1, ContentBlockDelta
+               { index = 2; delta = InputJsonDelta "{\"b\":2}" }
+           ]
+         in
+         let _, reversed =
+           List.fold_left
+             (fun (state, reversed) (stream_scope, event) ->
+                let translated =
+                  Keeper_chat_agent_core_stream_bridge.translate ~redact_text
+                    ~base_dir ~stream_scope state event
+                in
+                translated.bridge_state,
+                List.rev_append translated.chat_events reversed)
+             (Keeper_chat_agent_core_stream_bridge.empty_state (), [])
+             scoped_events
+         in
+         List.rev reversed)
   in
   check bool "no protocol error across message boundary" false
     (has_stream_protocol_error events);
   let tool_starts =
     List.filter_map
       (function
-        | Keeper_chat_events.Tool_call_start { tool_call_id; _ } -> Some tool_call_id
+        | Keeper_chat_events.Tool_call_start { tool_call_id; _ } -> tool_call_id
         | _ -> None)
       events
   in
@@ -1382,7 +1796,7 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
   let tool_ends =
     List.filter_map
       (function
-        | Keeper_chat_events.Tool_call_end { tool_call_id } -> Some tool_call_id
+        | Keeper_chat_events.Tool_call_end { tool_call_id; _ } -> tool_call_id
         | _ -> None)
       events
   in
@@ -1391,7 +1805,8 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
   let second_args =
     List.filter_map
       (function
-        | Keeper_chat_events.Tool_call_args { tool_call_id = "call_second"; delta } ->
+        | Keeper_chat_events.Tool_call_args
+            { tool_call_id = Some "call_second"; delta; _ } ->
             Some delta
         | _ -> None)
       events
@@ -1404,14 +1819,36 @@ let stream_text_deltas events =
     (function Keeper_chat_events.Text_delta text -> Some text | _ -> None)
     events
 
+let resolve_canonical_agent_core_stream_events events =
+  let acc = Agent_core.Llm_provider.Complete_stream_acc.create_stream_acc () in
+  let canonical =
+    List.filter_map
+      (fun event ->
+         match Agent_core.Llm_provider.Complete_stream_acc.resolve_event acc event with
+         | Agent_core.Types.Stream_event_accepted event -> Some event
+         | Agent_core.Types.Stream_event_suppressed -> None
+         | Agent_core.Types.Stream_event_rejected _ ->
+           fail "text fixture was rejected by canonical stream state")
+      events
+  in
+  acc, canonical
+
+let translate_canonical_agent_core_stream_events events =
+  let _, canonical = resolve_canonical_agent_core_stream_events events in
+  translate_agent_core_stream_events canonical
+
 let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
   let open Agent_core.Types in
   let events =
-    translate_agent_core_stream_events
+    translate_canonical_agent_core_stream_events
       [
+        ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None };
         ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
         ContentBlockDelta { index = 0; delta = TextDelta "" };
         ContentBlockDelta { index = 0; delta = TextDelta " world" };
+        ContentBlockStart
+          { index = 1; content_type = "text"; tool_id = None; tool_name = None };
         ContentBlockDelta { index = 1; delta = TextDelta "second block" };
       ]
   in
@@ -1419,35 +1856,43 @@ let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
     [ "Hello"; ""; " world"; "second block" ]
     (stream_text_deltas events)
 
-let test_keeper_stream_bridge_text_delta_reconciles_cumulative_snapshot () =
+let test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once () =
   let open Agent_core.Types in
-  (* An OpenAI-compatible provider that puts the cumulative text-so-far into
-     each chunk's content instead of an incremental delta: only the unseen
-     suffix may reach the user. *)
-  let events =
-    translate_agent_core_stream_events
-      [
-        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
-        ContentBlockDelta { index = 0; delta = TextDelta "Hello world" };
-        ContentBlockDelta { index = 0; delta = TextDelta "Hello world!" };
+  (* Canonical normalization happens before the bridge. The repeated suffix
+     value intentionally equals the first accepted delta ("ha") so a second
+     normalization would incorrectly drop it. *)
+  let acc, canonical =
+    resolve_canonical_agent_core_stream_events
+      [ ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+      ; ContentBlockDelta { index = 0; delta = TextDelta "ha" }
+      ; ContentBlockDelta { index = 0; delta = TextSnapshot "haha" }
       ]
   in
+  let events = translate_agent_core_stream_events canonical in
   check (list string) "cumulative snapshots forward only the new suffix"
-    [ "Hello"; " world"; "!" ]
-    (stream_text_deltas events)
+    [ "ha"; "ha" ]
+    (stream_text_deltas events);
+  Agent_core.Llm_provider.Complete_stream_acc.accumulate_event acc
+    (MessageDelta { stop_reason = Some EndTurn; usage = None });
+  (match Agent_core.Llm_provider.Complete_stream_acc.finalize_stream_acc acc with
+   | Ok { content = [ Text "haha" ]; _ } -> ()
+   | Ok _ -> fail "canonical final response did not retain both accepted suffixes"
+   | Error _ -> fail "canonical cumulative stream failed to finalize")
 
-let test_keeper_stream_bridge_text_delta_drops_retransmission () =
+let test_keeper_stream_pipeline_drops_text_retransmission () =
   let open Agent_core.Types in
-  (* A reconnecting transport re-sends a chunk that was already delivered:
-     the replayed bytes are an exact prefix of the accumulated text and must
-     be dropped, not shown twice. *)
+  (* A producer explicitly labels reconnect snapshots. Older/equal snapshots
+     are safe to suppress; ordinary repeated TextDelta values still append. *)
   let events =
-    translate_agent_core_stream_events
+    translate_canonical_agent_core_stream_events
       [
+        ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None };
         ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
         ContentBlockDelta { index = 0; delta = TextDelta " world" };
-        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
-        ContentBlockDelta { index = 0; delta = TextDelta "Hello world" };
+        ContentBlockDelta { index = 0; delta = TextSnapshot "Hello" };
+        ContentBlockDelta { index = 0; delta = TextSnapshot "Hello world" };
         ContentBlockDelta { index = 0; delta = TextDelta " again" };
       ]
   in
@@ -1455,20 +1900,23 @@ let test_keeper_stream_bridge_text_delta_drops_retransmission () =
     [ "Hello"; " world"; " again" ]
     (stream_text_deltas events)
 
-let test_keeper_stream_bridge_text_dedup_resets_per_message () =
+let test_keeper_stream_text_normalization_resets_per_response () =
   let open Agent_core.Types in
-  (* Block indices restart per provider message, so the accumulated text used
-     for dedup must reset at MessageStop: message 2 reusing index 0 with text
-     that is a prefix of message 1's text is new content, not a duplicate. *)
+  (* Every provider response owns a fresh canonical accumulator. Reusing block
+     index 0 in the next response cannot alias the first response's text. *)
   let events =
-    translate_agent_core_stream_events
-      [
-        ContentBlockDelta { index = 0; delta = TextDelta "abcdef" };
-        MessageStop;
-        ContentBlockDelta { index = 0; delta = TextDelta "abc" };
+    translate_canonical_agent_core_stream_events
+      [ ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+      ; ContentBlockDelta { index = 0; delta = TextDelta "abcdef" }
       ]
+    @ translate_canonical_agent_core_stream_events
+        [ ContentBlockStart
+            { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+        ; ContentBlockDelta { index = 0; delta = TextDelta "abc" }
+        ]
   in
-  check (list string) "dedup state is message-scoped"
+  check (list string) "normalization state is response-scoped"
     [ "abcdef"; "abc" ]
     (stream_text_deltas events)
 
@@ -1476,10 +1924,12 @@ let test_keeper_stream_bridge_text_delta_appends_unrelated_overlap () =
   let open Agent_core.Types in
   (* A delta that shares neither an exact-prefix relation with the accumulated
      text is new content by the deterministic rule and passes through — the
-     bridge never guesses at partial overlaps. *)
+     canonical state never guesses at partial overlaps. *)
   let events =
-    translate_agent_core_stream_events
+    translate_canonical_agent_core_stream_events
       [
+        ContentBlockStart
+          { index = 0; content_type = "text"; tool_id = None; tool_name = None };
         ContentBlockDelta { index = 0; delta = TextDelta "abc" };
         ContentBlockDelta { index = 0; delta = TextDelta "bcd" };
       ]
@@ -1540,13 +1990,32 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   let message_start id =
     MessageStart { id; model = "provider-model"; usage = None }
   in
-  let _, no_final_text =
-    translate_agent_core_stream
-      [ message_start "intermediate"
-      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
-      ; MessageStop
-      ; message_start "terminal"
-      ; MessageStop
+  let text_start =
+    ContentBlockStart
+      { index = 0; content_type = "text"; tool_id = None; tool_name = None }
+  in
+  let terminal = MessageDelta { stop_reason = Some EndTurn; usage = None } in
+  let translate_scoped scoped_events =
+    let base_dir = temp_base_path "gate-keeper-terminal-text-scope" in
+    Fun.protect ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+      (fun () ->
+         List.fold_left
+           (fun state (stream_scope, event) ->
+              (Keeper_chat_agent_core_stream_bridge.translate ~redact_text:Fun.id
+                 ~base_dir ~stream_scope state event).bridge_state)
+           (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           scoped_events)
+  in
+  let no_final_text =
+    translate_scoped
+      [ 0, message_start "intermediate"
+      ; 0, text_start
+      ; 0, ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; 0, terminal
+      ; 0, MessageStop
+      ; 1, message_start "terminal"
+      ; 1, terminal
+      ; 1, MessageStop
       ]
   in
   check bool "intermediate narration is not terminal text" false
@@ -1554,30 +2023,37 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
   let _, open_final_text =
     translate_agent_core_stream
       [ message_start "terminal-open"
+      ; text_start
       ; ContentBlockDelta { index = 0; delta = TextDelta "approved" }
       ]
   in
   check bool "open terminal message text is observable" true
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text open_final_text);
-  let _, open_final_without_text =
-    translate_agent_core_stream
-      [ message_start "intermediate"
-      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
-      ; MessageStop
-      ; message_start "terminal-open-empty"
+  let open_final_without_text =
+    translate_scoped
+      [ 0, message_start "intermediate"
+      ; 0, text_start
+      ; 0, ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; 0, terminal
+      ; 0, MessageStop
+      ; 1, message_start "terminal-open-empty"
       ]
   in
   check bool "new open message resets prior text state" false
     (Keeper_chat_agent_core_stream_bridge.terminal_message_had_text
        open_final_without_text);
-  let _, final_text =
-    translate_agent_core_stream
-      [ message_start "intermediate"
-      ; ContentBlockDelta { index = 0; delta = TextDelta "working" }
-      ; MessageStop
-      ; message_start "terminal"
-      ; ContentBlockDelta { index = 0; delta = TextDelta "approved" }
-      ; MessageStop
+  let final_text =
+    translate_scoped
+      [ 0, message_start "intermediate"
+      ; 0, text_start
+      ; 0, ContentBlockDelta { index = 0; delta = TextDelta "working" }
+      ; 0, terminal
+      ; 0, MessageStop
+      ; 1, message_start "terminal"
+      ; 1, text_start
+      ; 1, ContentBlockDelta { index = 0; delta = TextDelta "approved" }
+      ; 1, terminal
+      ; 1, MessageStop
       ]
   in
   check bool "terminal message text suppresses terminal resend" true
@@ -1594,6 +2070,11 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   let events =
     translate_agent_core_stream_events
       [
+        ContentBlockStart
+          { index = 0;
+            content_type = "image";
+            tool_id = None;
+            tool_name = None };
         ContentBlockDelta
           {
             index = 0;
@@ -1614,10 +2095,13 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   in
   match events with
   | [
+      Keeper_chat_events.Agent_core_content_block_start
+        { index = start_index; content_type = "image"; _ };
       Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
       Keeper_chat_events.Agent_core_media_delta
         { index; media_type; source_type; media_ref };
     ] ->
+      check int "block start index" 0 start_index;
       check int "block stop index" 0 stop_index;
       check int "block index" 0 index;
       check string "media type" "image/png" media_type;
@@ -1650,25 +2134,35 @@ let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
         ContentBlockStop { index = 2 };
       ]
   in
-  match events with
-  | [ Keeper_chat_events.Agent_core_content_block_start _;
-      Keeper_chat_events.Tool_call_start _;
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind; index = Some index; tool_call_id = Some tool_call_id; reason = Some reason; _ };
-      Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta };
-      Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Tool_call_end { tool_call_id = end_id } ] ->
-      check string "media conflict kind" "media_delta_invalid_block"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
-      check int "media conflict index" 2 index;
-      check string "media conflict tool id" "tc-media-conflict" tool_call_id;
-      check string "media conflict reason"
-        "media delta arrived for an active tool block" reason;
-      check string "tool args preserved" "tc-media-conflict" args_id;
-      check string "tool args payload" "{\"q\":\"ok\"}" delta;
-      check int "tool stop preserved" 2 stop_index;
-      check string "tool end preserved" "tc-media-conflict" end_id
-  | _ -> fail "expected media delta to error without clobbering the tool block"
+  let errors =
+    List.filter_map
+      (function
+        | Keeper_chat_events.Agent_core_stream_protocol_error error ->
+          Some
+            ( Keeper_chat_events.stream_protocol_error_kind_to_string error.kind
+            , error.quarantined_occurrence )
+        | _ -> None)
+      events
+  in
+  check (list string) "tool occurrence remains invalid after media mismatch"
+    [ "tool_delta_invalid_kind" ]
+    (List.map fst errors);
+  (match errors with
+   | (_, quarantined_occurrence) :: _ ->
+     (match quarantined_occurrence with
+      | Some occurrence ->
+        check int "media conflict scope" 0 occurrence.stream_scope;
+        check int "media conflict block" 2 occurrence.block_index
+      | None -> fail "media conflict did not quarantine the exact occurrence")
+   | [] -> fail "media conflict emitted no protocol error");
+  check bool "invalid tool emits no later args or end" false
+    (List.exists
+       (function
+         | Keeper_chat_events.Tool_call_args _
+         | Keeper_chat_events.Tool_call_args_snapshot _
+         | Keeper_chat_events.Tool_call_end _ -> true
+         | _ -> false)
+       events)
 
 let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
   let open Agent_core.Types in
@@ -2004,44 +2498,71 @@ let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   | _ -> fail "expected a stream protocol error for missing tool start"
 
 let test_stream_protocol_error_summary_includes_diagnostics () =
-  let summary =
-    Keeper_chat_events.stream_protocol_error_summary
-      {
-        kind = Keeper_chat_events.Tool_args_without_start;
-        index = Some 2;
-        tool_call_id = Some "tc-1";
-        event_type = Some "response.future";
-        reason = Some "tool argument delta arrived before tool start";
-        raw_bytes = Some 7;
-      }
+  let error : Keeper_chat_events.stream_protocol_error =
+    { kind = Keeper_chat_events.Tool_args_without_start
+    ; quarantined_occurrence =
+        Some
+          { stream_scope = 3
+          ; provider_message_id = None
+          ; block_index = 2
+          }
+    ; index = Some 2
+    ; tool_call_id = Some "tc-1"
+    ; event_type = Some "response.future"
+    ; reason = Some "tool argument delta arrived before tool start"
+    ; raw_bytes = Some 7
+    }
   in
+  let summary = Keeper_chat_events.stream_protocol_error_summary error in
   check bool "kind" true (string_contains summary "tool_args_without_start");
+  check bool "quarantined occurrence" true
+    (string_contains summary "quarantined_occurrence=3/2");
   check bool "index" true (string_contains summary "index=2");
   check bool "tool id" true (string_contains summary "tool_call_id=tc-1");
   check bool "event type" true
     (string_contains summary "event_type=response.future");
   check bool "reason" true
     (string_contains summary "tool argument delta arrived before tool start");
-  check bool "raw bytes" true (string_contains summary "raw_bytes=7")
+  check bool "raw bytes" true (string_contains summary "raw_bytes=7");
+  match Keeper_chat_events.stream_protocol_error_to_json error with
+  | `Assoc fields ->
+    (match List.assoc_opt "quarantined_occurrence" fields with
+     | Some (`Assoc occurrence) ->
+       check (option int) "wire scope" (Some 3)
+         (match List.assoc_opt "toolStreamScope" occurrence with
+          | Some (`Int value) -> Some value
+          | Some _ | None -> None);
+       check (option int) "wire block" (Some 2)
+         (match List.assoc_opt "toolCallBlockIndex" occurrence with
+          | Some (`Int value) -> Some value
+          | Some _ | None -> None)
+     | Some _ | None -> fail "typed quarantine was missing from protocol JSON")
+  | _ -> fail "stream protocol error JSON is not an object"
 
 let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   let open Agent_core.Types in
-  let events =
+  let unknown_then_incomplete =
     translate_agent_core_stream_events
       [
         SSEUnknownEventType { event_type = "response.future"; raw = "{\"x\":1}" };
         StreamIncomplete { reason = "max_output_tokens" };
       ]
   in
-  match events with
+  (match unknown_then_incomplete with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = unknown_kind; event_type = Some event_type; _ };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = incomplete_kind; _ };
-      Keeper_chat_events.Event_error { message } ] ->
+        { kind = unknown_kind; event_type = Some event_type; _ } ] ->
       check string "unknown kind" "sse_unknown_event_type"
         (Keeper_chat_events.stream_protocol_error_kind_to_string unknown_kind);
-      check string "unknown event type" "response.future" event_type;
+      check string "unknown event type" "response.future" event_type
+  | _ -> fail "expected the first unknown provider event to freeze its stream");
+  let incomplete =
+    translate_agent_core_stream_events
+      [ StreamIncomplete { reason = "max_output_tokens" } ]
+  in
+  match incomplete with
+  | [ Keeper_chat_events.Agent_core_stream_protocol_error
+        { kind = incomplete_kind; _ };
+      Keeper_chat_events.Event_error { message } ] ->
       check string "incomplete kind" "sse_stream_incomplete"
         (Keeper_chat_events.stream_protocol_error_kind_to_string incomplete_kind);
       check string "incomplete is visible error"
@@ -2053,15 +2574,13 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
   let part_raw = "{\"inlineData\":{}}" in
   let response_raw = "{\"promptFeedback\":{}}" in
-  let events =
+  let part_events =
     translate_agent_core_stream_events
       [ SSEUnsupportedPart
           { provider_kind; part = "inline_data"; raw = part_raw }
-      ; SSEUnsupportedResponse
-          { provider_kind; response = "prompt_feedback"; raw = response_raw }
       ]
   in
-  match events with
+  (match part_events with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
         { kind = part_kind
         ; event_type = Some "inline_data"
@@ -2070,7 +2589,22 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         ; _
         }
     ; Keeper_chat_events.Event_error { message = part_message }
-    ; Keeper_chat_events.Agent_core_stream_protocol_error
+    ] ->
+      check string "unsupported part kind" "sse_unsupported_part"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
+      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
+      check string "unsupported part is visible"
+        "Provider stream capability unsupported: gemini.part.inline_data"
+        part_message
+  | _ -> fail "expected a typed visible unsupported provider part");
+  let response_events =
+    translate_agent_core_stream_events
+      [ SSEUnsupportedResponse
+          { provider_kind; response = "prompt_feedback"; raw = response_raw }
+      ]
+  in
+  match response_events with
+  | [ Keeper_chat_events.Agent_core_stream_protocol_error
         { kind = response_kind
         ; event_type = Some "prompt_feedback"
         ; reason = Some "gemini.response.prompt_feedback"
@@ -2079,20 +2613,14 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         }
     ; Keeper_chat_events.Event_error { message = response_message }
     ] ->
-      check string "unsupported part kind" "sse_unsupported_part"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
       check string "unsupported response kind" "sse_unsupported_response"
         (Keeper_chat_events.stream_protocol_error_kind_to_string response_kind);
-      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
       check int "unsupported response raw bytes" (String.length response_raw)
         response_bytes;
-      check string "unsupported part is visible"
-        "Provider stream capability unsupported: gemini.part.inline_data"
-        part_message;
       check string "unsupported response is visible"
         "Provider stream capability unsupported: gemini.response.prompt_feedback"
         response_message
-  | _ -> fail "expected typed visible failures for unsupported provider shapes"
+  | _ -> fail "expected a typed visible unsupported provider response"
 
 let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   let open Agent_core.Types in
@@ -2930,8 +3458,27 @@ let () =
             test_agent_core_tool_call_projection_preserves_adjacent_reasoning_groups;
           test_case "AGENT_CORE interleaving matches MASC receipt/progress facts" `Quick
             test_agent_core_interleaving_matches_masc_receipt_and_progress_facts;
-          test_case "stream bridge ignores replayed tool starts" `Quick
+          test_case "stream bridge accepts duplicate start before payload" `Quick
             test_keeper_stream_bridge_ignores_replayed_tool_start;
+          test_case "stream bridge quarantines duplicate start after payload" `Quick
+            test_keeper_stream_bridge_quarantines_duplicate_start_after_payload;
+          test_case "stream bridge quarantines args after stop" `Quick
+            test_keeper_stream_bridge_quarantines_args_after_stop;
+          test_case "stream bridge terminalizes superseded attempt tool" `Quick
+            test_keeper_stream_bridge_terminalizes_superseded_attempt_tool;
+          test_case "stream bridge preserves authoritative attempt tool" `Quick
+            test_keeper_stream_bridge_preserves_authoritative_attempt_tool;
+          test_case "stream bridge does not re-quarantine failed attempt tool"
+            `Quick
+            test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool;
+          test_case "stream bridge freezes late events after incomplete" `Quick
+            test_keeper_stream_bridge_freezes_late_events_after_incomplete;
+          test_case "stream bridge terminal quarantine is write-once" `Quick
+            test_keeper_stream_bridge_terminal_quarantine_is_write_once;
+          test_case "stream bridge quarantines transport-failed scope" `Quick
+            test_keeper_stream_bridge_quarantines_transport_failed_scope;
+          test_case "stream bridge terminalizes conflicting message tool" `Quick
+            test_keeper_stream_bridge_terminalizes_conflicting_message_tool;
           test_case "stream bridge rejects replayed tool name drift" `Quick
             test_keeper_stream_bridge_rejects_replayed_tool_name_drift;
           test_case "stream bridge rejects conflicting tool index reuse" `Quick
@@ -2940,12 +3487,12 @@ let () =
             test_keeper_stream_bridge_isolates_tool_blocks_across_messages;
           test_case "stream bridge passes through incremental text deltas" `Quick
             test_keeper_stream_bridge_text_delta_passthrough_incremental;
-          test_case "stream bridge reconciles cumulative text snapshots" `Quick
-            test_keeper_stream_bridge_text_delta_reconciles_cumulative_snapshot;
-          test_case "stream bridge drops retransmitted text deltas" `Quick
-            test_keeper_stream_bridge_text_delta_drops_retransmission;
-          test_case "stream bridge text dedup resets per message" `Quick
-            test_keeper_stream_bridge_text_dedup_resets_per_message;
+          test_case "stream pipeline normalizes cumulative text once" `Quick
+            test_keeper_stream_pipeline_reconciles_cumulative_snapshot_once;
+          test_case "stream pipeline drops retransmitted text" `Quick
+            test_keeper_stream_pipeline_drops_text_retransmission;
+          test_case "stream text normalization resets per response" `Quick
+            test_keeper_stream_text_normalization_resets_per_response;
           test_case "stream bridge appends non-prefix text deltas verbatim" `Quick
             test_keeper_stream_bridge_text_delta_appends_unrelated_overlap;
           test_case "stream bridge surfaces AGENT_CORE message metadata" `Quick

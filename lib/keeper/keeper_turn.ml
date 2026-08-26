@@ -364,6 +364,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
 let run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -740,6 +741,7 @@ let run_keeper_invocation_turn_admitted_inner
 			                                ~runtime_id
 			                                ~world_observation
 		                                ?on_event
+		                                ?on_tool_stream_observation
 		                                ?on_tool_result_ready
 		                                ?approval_gate
 		                                ~trajectory_acc
@@ -885,6 +887,7 @@ let run_keeper_invocation_turn_admitted_inner
 let run_keeper_invocation_turn_admitted
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -925,6 +928,7 @@ let run_keeper_invocation_turn_admitted
     run_keeper_invocation_turn_admitted_inner
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -946,6 +950,7 @@ let handle_keeper_msg_admitted
       ~admission_token:_
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?event_bus
@@ -959,6 +964,7 @@ let handle_keeper_msg_admitted
   run_keeper_invocation_turn_admitted
     ?on_text_delta
     ?on_event
+    ?on_tool_stream_observation
     ?on_tool_result_ready
     ?approval_gate
     ?event_bus

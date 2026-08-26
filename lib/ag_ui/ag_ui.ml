@@ -68,6 +68,9 @@ type event = {
   step_name: string option;
   tool_call_id: string option;
   tool_call_name: string option;
+  tool_stream_scope: int option;
+  provider_message_id: string option;
+  tool_call_block_index: int option;
   snapshot: Yojson.Safe.t option;  (** Full state for STATE_SNAPSHOT *)
   message: string option;          (** Required top-level RUN_ERROR message *)
   code: string option;             (** Optional top-level RUN_ERROR code *)
@@ -79,7 +82,8 @@ type event = {
 (** Create an event with defaults *)
 let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
     ?(delta=None) ?(step_name=None) ?(tool_call_id=None)
-    ?(tool_call_name=None) ?(snapshot=None)
+    ?(tool_call_name=None) ?(tool_stream_scope=None)
+    ?(provider_message_id=None) ?(tool_call_block_index=None) ?(snapshot=None)
     ?(message=None) ?(code=None)
     ?(custom_name=None) ?(custom_value=None)
     ~thread_id event_type =
@@ -121,6 +125,9 @@ let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=Non
     step_name;
     tool_call_id;
     tool_call_name;
+    tool_stream_scope;
+    provider_message_id;
+    tool_call_block_index;
     snapshot;
     message;
     code;
@@ -156,6 +163,9 @@ let event_to_json (e : event) : Yojson.Safe.t =
     @ optional "stepName" (fun s -> `String s) e.step_name
     @ optional "toolCallId" (fun s -> `String s) e.tool_call_id
     @ optional "toolCallName" (fun s -> `String s) e.tool_call_name
+    @ optional "toolStreamScope" (fun value -> `Int value) e.tool_stream_scope
+    @ optional "providerMessageId" (fun s -> `String s) e.provider_message_id
+    @ optional "toolCallBlockIndex" (fun value -> `Int value) e.tool_call_block_index
     @ optional "snapshot" (fun j -> j) e.snapshot
     @ optional "message" (fun s -> `String s) e.message
     @ optional "code" (fun s -> `String s) e.code

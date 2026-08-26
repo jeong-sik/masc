@@ -103,14 +103,26 @@ let trail_of events =
   t
 ;;
 
-let tool_start id name =
-  Events.Tool_call_start { tool_call_id = id; tool_call_name = name }
+let occurrence id =
+  { Events.stream_scope = 0; provider_message_id = None; block_index = Hashtbl.hash id }
 ;;
 
-let tool_args id delta = Events.Tool_call_args { tool_call_id = id; delta }
+let tool_start id name =
+  Events.Tool_call_start
+    { occurrence = occurrence id
+    ; tool_call_id = Some id
+    ; tool_call_name = name
+    }
+;;
+
+let tool_args id delta =
+  Events.Tool_call_args
+    { occurrence = occurrence id; tool_call_id = Some id; delta }
+;;
 
 let tool_snapshot id snapshot =
-  Events.Tool_call_args_snapshot { tool_call_id = id; snapshot }
+  Events.Tool_call_args_snapshot
+    { occurrence = occurrence id; tool_call_id = Some id; snapshot }
 ;;
 
 let test_no_tools_renders_nothing () =

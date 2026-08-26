@@ -624,12 +624,28 @@ describe('sendKeeperThreadMessage operation stream', () => {
         name: 'KEEPER_THINKING_DELTA',
         value: { index: 0, delta: 'checking' },
       })
-      opts.onEvent({ type: 'TOOL_CALL_START', toolCallId: 'tool-1', toolCallName: 'lookup' })
-      opts.onEvent({ type: 'TOOL_CALL_END', toolCallId: 'tool-1' })
+      opts.onEvent({
+        type: 'TOOL_CALL_START',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+        toolCallId: 'tool-1',
+        toolCallName: 'lookup',
+      })
+      opts.onEvent({
+        type: 'TOOL_CALL_END',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+        toolCallId: 'tool-1',
+      })
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_TOOL_RESULT_READY',
-        value: { tool_call_id: 'tool-1' },
+        value: {
+          toolStreamScope: 0,
+          toolCallBlockIndex: 0,
+          toolCallId: 'tool-1',
+          executionId: 'exec-tool-1',
+        },
       })
       opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'done' })
       opts.onEvent({ type: 'RUN_FINISHED' })

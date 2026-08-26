@@ -376,7 +376,8 @@ let make_tool_bundle_for_descriptors
   in
   let composition_tools =
     Keeper_tool_composition_surface.make_tools
-        ~instruction_skills:(Keeper_skill_catalog.instruction_entries skill_catalog)
+        ~instruction_skills:
+          (Keeper_skill_catalog.instruction_entries skill_catalog)
         ~skill_composition_entries:
           (Keeper_skill_catalog.composition_entries skill_catalog)
         ?composition_plan_index

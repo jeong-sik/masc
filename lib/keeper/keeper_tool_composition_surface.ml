@@ -230,16 +230,58 @@ let instruction_skill_input_schema instruction_skills =
   | _ -> invalid_arg "keeper_skill schema root is not an object"
 ;;
 
+type 'evidence schema_tool_origin =
+  | Declared_composition of 'evidence
+  | Plan_execute
+  | Async_status
+  | Async_cancel
+
+let schema_tool_of_entry (entry : Catalog.entry) =
+  schema_tool
+    ~name:(Catalog.tool_name entry)
+    ~description:(entry_description entry)
+    ~input_schema:(Catalog.input_schema_of_params entry.params)
+;;
+
+let schema_tool_rows ?(skill_compositions = []) () =
+  let composition_tools =
+    List.map
+      (fun (entry, evidence) ->
+         Declared_composition evidence, schema_tool_of_entry entry)
+      skill_compositions
+  in
+  let plan_execute_tool =
+    ( Plan_execute
+    , schema_tool
+        ~name:plan_execute_tool_name
+        ~description:plan_execute_description
+        ~input_schema:plan_execute_input_schema )
+  in
+  if
+    List.exists
+      (fun ((entry : Catalog.entry), _) -> entry.execution = Catalog.Async)
+      skill_compositions
+  then
+    composition_tools
+    @ [ plan_execute_tool
+      ; ( Async_status
+        , schema_tool
+            ~name:Catalog.status_tool_name
+            ~description:Tool_schemas_composition_control.status_schema.description
+            ~input_schema:Tool_schemas_composition_control.status_schema.input_schema )
+      ; ( Async_cancel
+        , schema_tool
+            ~name:Catalog.cancel_tool_name
+            ~description:Tool_schemas_composition_control.cancel_schema.description
+            ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema )
+      ]
+  else composition_tools @ [ plan_execute_tool ]
+;;
+
 let schema_tools ?(skill_composition_entries = [])
       ?(instruction_skills = []) () =
   let composition_tools =
-    List.map
-      (fun (entry : Catalog.entry) ->
-         schema_tool
-           ~name:(Catalog.tool_name entry)
-           ~description:(entry_description entry)
-           ~input_schema:(Catalog.input_schema_of_params entry.params))
-      skill_composition_entries
+    List.map schema_tool_of_entry skill_composition_entries
   in
   let plan_execute_tool =
     schema_tool

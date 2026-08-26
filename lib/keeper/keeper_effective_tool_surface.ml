@@ -1,7 +1,8 @@
 type tool_origin =
   | Descriptor of { group : string }
   | Instruction_skill
-  | Composition_skill of { source : string }
+  | Composition_skill of
+      { provenance : Keeper_skill_catalog.provenance option }
   | Composition_plan
   | Composition_control
 
@@ -70,26 +71,52 @@ let descriptor_rows descriptors =
     descriptors
 ;;
 
-let composition_origin name =
-  if String.equal name Keeper_tool_composition_catalog.skill_tool_name
-  then Instruction_skill
-  else match Keeper_tool_composition_catalog.skill_source_of_tool_name name with
-  | Some source -> Composition_skill { source }
-  | None when
-      String.equal name Keeper_tool_composition_surface.plan_execute_tool_name ->
-    Composition_plan
-  | None -> Composition_control
+let instruction_rows skill_catalog =
+  let instruction_skills = Keeper_skill_catalog.instruction_entries skill_catalog in
+  match instruction_skills with
+  | [] -> []
+  | _ :: _ ->
+    Keeper_tool_composition_surface.schema_tools ~instruction_skills ()
+    |> List.filter_map (fun (schema_tool : Agent_core.Tool.t) ->
+         if
+           String.equal
+             schema_tool.schema.name
+             Keeper_tool_composition_catalog.skill_tool_name
+         then
+           Some
+             ( { name = schema_tool.schema.name; origin = Instruction_skill }
+             , schema_tool )
+         else None)
 ;;
 
 let composition_rows skill_catalog =
-  Keeper_tool_composition_surface.schema_tools
-    ~skill_composition_entries:
-      (Keeper_skill_catalog.composition_entries skill_catalog)
-    ~instruction_skills:(Keeper_skill_catalog.instruction_entries skill_catalog)
-    ()
-  |> List.map (fun (schema_tool : Agent_core.Tool.t) ->
-    let name = schema_tool.schema.name in
-    { name; origin = composition_origin name }, schema_tool)
+  let skill_compositions =
+    Keeper_skill_catalog.compositions skill_catalog
+    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
+      composition.entry, composition.provenance)
+  in
+  let composition_rows =
+    Keeper_tool_composition_surface.schema_tool_rows ~skill_compositions ()
+    |> List.map (fun (origin, (schema_tool : Agent_core.Tool.t)) ->
+         let name = schema_tool.schema.name in
+         let origin =
+           match origin with
+           | Keeper_tool_composition_surface.Declared_composition provenance ->
+             Composition_skill { provenance }
+           | Keeper_tool_composition_surface.Plan_execute -> Composition_plan
+           | Keeper_tool_composition_surface.Async_status
+           | Keeper_tool_composition_surface.Async_cancel -> Composition_control
+         in
+         { name; origin }, schema_tool)
+  in
+  let instruction_rows = instruction_rows skill_catalog in
+  let rec insert_instruction_rows reversed = function
+    | (({ origin = Composition_control; _ }, _) :: _) as control_rows ->
+      List.rev_append reversed (instruction_rows @ control_rows)
+    | row :: rest -> insert_instruction_rows (row :: reversed) rest
+    | [] -> List.rev_append reversed instruction_rows
+  in
+  insert_instruction_rows [] composition_rows
 ;;
 
 let validate_task_skills ~task_skill_names ~skill_catalog =
@@ -214,6 +241,33 @@ let unavailable keeper_name (reason, detail) =
   Unavailable { keeper_name; reason; detail }
 ;;
 
+let published_skill_catalog ~base_path =
+  match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
+  | Error error ->
+    Error
+      ( "skill_snapshot_invalid_workspace"
+      , Config_dir_resolver.canonical_base_path_error_to_string error )
+  | Ok None ->
+    Error ("skill_snapshot_not_registered", "Skill snapshot is not registered")
+  | Ok (Some workspace) ->
+    (match Skill_catalog_snapshot_service.current ~workspace with
+     | None ->
+       Error ("skill_snapshot_uninitialized", "Skill snapshot is not published")
+     | Some snapshot ->
+       let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
+       let skills_left_out =
+         List.map
+           (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+              Printf.sprintf
+                "%s: %s"
+                (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity
+                 |> Yojson.Safe.to_string)
+                (Keeper_skill_catalog.error_to_string diagnostic.error))
+           diagnostics
+       in
+       Ok (catalog, skills_left_out))
+;;
+
 let resolve ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error detail -> unavailable keeper_name ("keeper_meta_unreadable", detail)
@@ -226,21 +280,9 @@ let resolve ~config ~keeper_name =
     (match task_skills config current_task_id with
      | Error error -> unavailable keeper_name error
      | Ok task_skill_names ->
-       (match Keeper_run_tools_setup.load_skill_catalog ~base_path:config.base_path with
-        | Error error ->
-          unavailable
-            keeper_name
-            ("skill_catalog_unreadable", Agent_core.Error.to_string error)
-        | Ok (skill_catalog, rejections) ->
-        let skills_left_out =
-          List.map
-            (fun (rejection : Keeper_skill_catalog.rejected_document) ->
-              Printf.sprintf
-                "%s: %s"
-                rejection.directory
-                (Keeper_skill_catalog.error_to_string rejection.error))
-            rejections
-        in
+       (match published_skill_catalog ~base_path:config.base_path with
+        | Error error -> unavailable keeper_name error
+        | Ok (skill_catalog, skills_left_out) ->
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->
@@ -277,9 +319,14 @@ let origin_to_yojson = function
   | Descriptor { group } ->
     `Assoc [ "kind", `String "descriptor"; "group", `String group ]
   | Instruction_skill -> `Assoc [ "kind", `String "instruction_skill" ]
-  | Composition_skill { source } ->
+  | Composition_skill { provenance } ->
     `Assoc
-      [ "kind", `String "composition_skill"; "skill_source", `String source ]
+      [ "kind", `String "composition_skill"
+      ; ( "skill_provenance"
+        , match provenance with
+          | Some provenance -> Keeper_skill_catalog.provenance_to_yojson provenance
+          | None -> `Null )
+      ]
   | Composition_plan -> `Assoc [ "kind", `String "composition_plan" ]
   | Composition_control -> `Assoc [ "kind", `String "composition_control" ]
 ;;

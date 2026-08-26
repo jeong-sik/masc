@@ -101,85 +101,6 @@ let skill_catalog_config_error detail =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig { field = "skills"; detail })
 ;;
-
-let refresh_skill_snapshot ~base_path =
-  match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path with
-  | Error error ->
-    Error
-      (skill_catalog_config_error
-         (Config_dir_resolver.canonical_base_path_error_to_string error))
-  | Ok workspace ->
-    (match
-       Skill_catalog_snapshot_service.refresh
-         ~workspace
-         ~user_home:Config_dir_resolver.initial_env_home
-         ~read_config:(fun () ->
-           match Runtime.load_config_text () with
-           | Ok (_path, text) -> Skill_catalog_snapshot_service.Config_text text
-           | Error detail -> Skill_catalog_snapshot_service.Config_unreadable detail)
-     with
-     | Skill_catalog_snapshot_service.Published snapshot
-     | Skill_catalog_snapshot_service.Unchanged snapshot -> Ok snapshot
-     | Skill_catalog_snapshot_service.Workspace_retired ->
-       Error (skill_catalog_config_error "skill snapshot workspace was retired"))
-;;
-
-let snapshot_rejections_json snapshot =
-  match Skill_catalog_snapshot.to_public_yojson snapshot with
-  | `Assoc fields -> Option.value ~default:(`List []) (List.assoc_opt "rejections" fields)
-  | _ -> `List []
-;;
-
-(* The published multi-source snapshot is the sole catalog authority. The old
-   loader rescanned only [<base>/.masc/skills] on every turn, while the API and
-   Dashboard projected the configured source set; one workspace therefore had
-   two different answers. Refreshing through the publisher preserves exact
-   source precedence and gives the turn the same immutable bytes the operator
-   sees. Rejected documents remain absent from the tool surface and visible in
-   the snapshot/API; they do not take unrelated Keeper turns down with them. *)
-let load_skill_catalog ~base_path =
-  match refresh_skill_snapshot ~base_path with
-  | Error _ as error -> error
-  | Ok snapshot ->
-    (match Skill_catalog_snapshot.config_state snapshot with
-     | Skill_catalog_snapshot.Config_rejected { diagnostics; _ } ->
-       Error
-         (skill_catalog_config_error
-            (String.concat
-               "; "
-               (List.map Skill_source_config.diagnostic_to_string diagnostics)))
-     | Skill_catalog_snapshot.Config_unreadable { detail } ->
-       Error (skill_catalog_config_error detail)
-     | Skill_catalog_snapshot.Configured _ ->
-       let snapshot_rejections = Skill_catalog_snapshot.rejections snapshot in
-       if snapshot_rejections <> []
-       then
-         Log.Keeper.warn
-           "Skill snapshot omitted %d rejected document(s): %s"
-           (List.length snapshot_rejections)
-           (Yojson.Safe.to_string (snapshot_rejections_json snapshot));
-       let documents =
-         Skill_catalog_snapshot.effective_entries snapshot
-         |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
-           entry.directory, entry.source_text)
-       in
-       let catalog, keeper_rejections =
-         Keeper_skill_catalog.partition_documents documents
-       in
-       List.iter
-         (fun (rejected : Keeper_skill_catalog.rejected_document) ->
-            Log.Keeper.warn
-              "Skill %S is absent from the Keeper surface: %s"
-              rejected.directory
-              (Keeper_skill_catalog.error_to_string rejected.error))
-         keeper_rejections;
-       (* Returned, not only logged. A log line is where a reader goes to find
-          out what happened after they already suspect something; the surfaces
-          that answer "what can this Keeper call" are where the absence shows
-          up first, and they cannot say it if the loader keeps it. *)
-       Ok (catalog, keeper_rejections))
-;;
-
 let expected_model_tool_names ~skill_catalog ~identity_tool_names
       ~model_visible_descriptors =
   let descriptor_names =
@@ -300,6 +221,7 @@ let prepare_agent_setup
       ~(is_retry : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
+      ~(skill_snapshot : Skill_catalog_snapshot.t)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -364,9 +286,18 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* skill_catalog, _skills_left_out =
-    load_skill_catalog ~base_path:config.base_path
+  let skill_catalog, skill_projection_diagnostics =
+    Keeper_skill_catalog.of_snapshot skill_snapshot
   in
+  List.iter
+    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+       Log.Keeper.warn
+         "Skill composition projection omitted for keeper=%s identity=%s error=%s"
+         meta.name
+         (Yojson.Safe.to_string
+            (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
+         (Keeper_skill_catalog.error_to_string diagnostic.error))
+    skill_projection_diagnostics;
   let* () = validate_held_task_skill_admission ~config ~meta ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
@@ -669,5 +600,6 @@ let prepare_agent_setup
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc
+    ~skill_projection_diagnostics
     ?gate_replay_evidence:model_message.replay_evidence
     ?runtime_manifest_context ?runtime_manifest_append ()

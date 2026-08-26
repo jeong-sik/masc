@@ -20,6 +20,20 @@ val plan_execute_input_schema : Yojson.Safe.t
     [Keeper_tool_descriptor.Batch_plan_tool]. *)
 val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
+type 'evidence schema_tool_origin =
+  | Declared_composition of 'evidence
+  | Plan_execute
+  | Async_status
+  | Async_cancel
+
+val schema_tool_rows :
+  ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
+  unit ->
+  ('evidence schema_tool_origin * Agent_core.Tool.t) list
+(** Handler-free schemas paired with caller-owned composition evidence. This
+    preserves typed provenance through materialization instead of recovering it
+    from a generated tool name. *)
+
 val schema_tools :
   ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
   ?instruction_skills:(string * string * string) list ->

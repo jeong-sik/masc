@@ -452,6 +452,23 @@ module For_testing = struct
   let raw_trace_reference_for_turn = raw_trace_reference_for_turn
 end
 
+let capture_skill_snapshot ~base_path =
+  match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
+  | Error error ->
+    Skill_catalog_snapshot.config_unreadable
+      ~detail:
+        (Config_dir_resolver.canonical_base_path_error_to_string error)
+  | Ok None ->
+    Skill_catalog_snapshot.config_unreadable
+      ~detail:"Skill snapshot workspace is not initialized"
+  | Ok (Some workspace) ->
+    (match Skill_catalog_snapshot_service.current ~workspace with
+     | Some snapshot -> snapshot
+     | None ->
+       Skill_catalog_snapshot.config_unreadable
+         ~detail:"Skill snapshot workspace has no published revision")
+;;
+
 (** Run a single keeper turn via Agent_core.Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -490,6 +507,7 @@ let run_turn
          base_system_prompt:string -> messages:Agent_core.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(turn_kind : Turn_record.turn_kind)
+      ~(skill_snapshot : Skill_catalog_snapshot.t)
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
@@ -704,6 +722,7 @@ let run_turn
       ~is_retry
       ~config_root
       ~runtime_config_path
+      ~skill_snapshot
       ~trajectory_acc
       ~runtime_manifest_context
       ~runtime_manifest_append:
@@ -770,6 +789,42 @@ let run_turn
               ; "history_messages_digest", `String history_messages_digest
               ; "context_window", `Int max_context
               ; "context_digest", `String context_digest
+              ; ( "skill_snapshot_revision"
+                , `String
+                    (Skill_catalog_snapshot.snapshot_revision skill_snapshot
+                     |> Skill_catalog_snapshot.snapshot_revision_to_string) )
+              ; ( "skill_catalog_revision"
+                , `String
+                    (Skill_catalog_snapshot.catalog_revision skill_snapshot
+                     |> Skill_catalog_snapshot.catalog_revision_to_string) )
+              ; ( "skill_config_revision"
+                , match Skill_catalog_snapshot.config_revision skill_snapshot with
+                  | Some revision ->
+                    `String
+                      (Skill_catalog_snapshot.config_revision_to_string revision)
+                  | None -> `Null )
+              ; ( "skill_rejection_count"
+                , `Int
+                    (List.length
+                       (Skill_catalog_snapshot.rejections skill_snapshot)) )
+              ; ( "skill_projection_diagnostic_count"
+                , `Int (List.length s.skill_projection_diagnostics) )
+              ; ( "skill_projection_diagnostics"
+                , `List
+                    (List.map
+                       (fun
+                         (diagnostic :
+                           Keeper_skill_catalog.projection_diagnostic) ->
+                          `Assoc
+                            [ ( "identity"
+                              , Skill_catalog_snapshot.identity_to_yojson
+                                  diagnostic.identity )
+                            ; ( "code"
+                              , `String
+                                  (Keeper_skill_catalog.error_code
+                                     diagnostic.error) )
+                            ])
+                       s.skill_projection_diagnostics) )
               ]))
       Keeper_runtime_manifest.Context_injected;
     let cleanup_agent_setup () =

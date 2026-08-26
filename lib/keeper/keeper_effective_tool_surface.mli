@@ -6,7 +6,8 @@
 type tool_origin =
   | Descriptor of { group : string }
   | Instruction_skill
-  | Composition_skill of { source : string }
+  | Composition_skill of
+      { provenance : Keeper_skill_catalog.provenance option }
   | Composition_plan
   | Composition_control
 

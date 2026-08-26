@@ -5029,6 +5029,12 @@ let enter_ask_answering state =
   match selected_ask_row state with
   | None -> add_event state "system" "No question is waiting on you"
   | Some (row : Tui_decode.ask_row) ->
+      (* The answer flow is drawn by the approvals list. With an approval's
+         detail open that surface is not on screen, so [a] used to set the mode
+         and change nothing an operator could see -- the keypress landed and
+         the questions stayed hidden. Close the detail, which is where the
+         operator asked to go. *)
+      state.approval_detail_open <- false;
       state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
       state.ask_question_cursor <- 0;
       state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);

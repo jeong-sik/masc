@@ -2902,6 +2902,98 @@ def assert_overview_event_rows(
     os.write(master_fd, b"q")
 
 
+# A Keeper's question to a human is not an approval; it sits under the queue on
+# the same surface. Nothing in this suite had ever driven it, so the answer flow
+# shipped on the word of the compiler alone.
+KEEPER_ASKS_PATH = "/api/v1/keepers/asks"
+
+
+def keeper_asks_response() -> HttpFixture:
+    return (
+        200,
+        {
+            "keeper": None,
+            "open_count": 1,
+            "asks": [
+                {
+                    "keeper": "alpha",
+                    "ask_id": "ask-1",
+                    "asked_at": 1787557669.0,
+                    "context": "the rollout needs a call",
+                    "resolution": {"state": "open"},
+                    "questions": [
+                        {
+                            "question_id": "q-1",
+                            "header": "Rollout",
+                            "prompt": "ship the cold-start change now?",
+                            "mode": "single",
+                            "free_text": {"allowed": False},
+                            "choices": [
+                                {"choice_id": "c-yes", "label": "ship it"},
+                                {"choice_id": "c-no", "label": "hold"},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+
+def keeper_ask_answer_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
+        )
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=180,
+            needle=b"MASC Overview",
+            final_cursor=b"\x1b[?25l",
+        )
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(process, master_fd, output, b"Questions waiting on you")
+
+        # Open an approval's detail. The answer flow is drawn by the list, so
+        # this is where [a] used to set the mode and change nothing on screen.
+        detail = send_and_wait(
+            process, master_fd, output, b"\r", b"Esc: back to the list"
+        )
+        if b"Questions waiting on you" in CSI_RE.sub(
+            b"", frame_containing(detail, b"Esc: back to the list")
+        ):
+            raise AssertionError(
+                "the detail draws the questions; this scenario no longer tests "
+                f"the surface that cannot: {detail!r}"
+            )
+
+        answering = send_and_wait(process, master_fd, output, b"a", b"Enter:answer")
+        answering_plain = CSI_RE.sub(b"", answering)
+        for needle in (b"ship the cold-start change now?", b"ship it", b"hold"):
+            if needle not in answering_plain:
+                raise AssertionError(
+                    f"answering the ask did not draw {needle!r}: {answering!r}"
+                )
+
+        # Leave the answer mode, then arm the exit the harness confirms.
+        os.write(master_fd, b"\x1b")
+        drain_until_quiet(process, master_fd, output)
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def approval_selection_identity_interaction(
     fixtures: HttpFixtures,
     initial_items: list[dict[str, object]],
@@ -8102,6 +8194,14 @@ def run_keyboard_regression(executable: str) -> None:
         http_fixtures=planning_missing_fixtures,
     )
     board_reference_fixtures = board_reference_http_fixtures()
+    keeper_ask_fixtures, _ask_initial, _ask_new = approval_selection_http_fixtures()
+    keeper_ask_fixtures[KEEPER_ASKS_PATH] = keeper_asks_response()
+    run_terminal_scenario(
+        executable,
+        description="Answering a Keeper's question from an approval detail",
+        interact=keeper_ask_answer_interaction(keeper_ask_fixtures),
+        http_fixtures=keeper_ask_fixtures,
+    )
     run_terminal_scenario(
         executable,
         description="Board references and related posts",

@@ -1392,7 +1392,9 @@ let render_approval_detail (state : state) (row : approval_row) =
     let left_cols = keeper_roster_pane_cols in
     let left_buf = Buffer.create 1024 in
     let right_buf = Buffer.create 4096 in
-    write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Asks"
+    (* Not "Asks": this surface already calls a Keeper's question to a human
+       an ask, and these rows are the confirmations waiting on an operator. *)
+    write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
       ~focused:false
       ~labels:(List.map approval_sidebar_label (approval_items state))
       ~selected:state.approval_cursor;

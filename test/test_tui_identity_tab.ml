@@ -117,11 +117,32 @@ let test_the_provider_row_sits_below_the_preamble () =
   (* The key handler scrolls the pane to the line a provider is drawn on.
      Both sides read the preamble rather than counting it, so a line added
      to the header moves the cursor's target with it. *)
-  let preamble = List.length (Masc_tui_types.identity_preamble ~keeper:"k") in
+  let preamble =
+    List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[])
+  in
   check Alcotest.int "first provider" preamble
-    (Masc_tui_types.identity_provider_line ~index:0);
+    (Masc_tui_types.identity_provider_line ~notice:[] ~index:0);
   check Alcotest.int "fourth provider" (preamble + 3)
-    (Masc_tui_types.identity_provider_line ~index:3)
+    (Masc_tui_types.identity_provider_line ~notice:[] ~index:3)
+
+let test_a_notice_pushes_the_list_down () =
+  (* A refusal from one provider is drawn where the operator is looking,
+     which is above the list. The row a keypress scrolls to has to move with
+     it or the cursor lands on the wrong line by however tall the message
+     is -- and the messages worth showing are the long ones. *)
+  let notice = [ "first line"; "second line" ] in
+  let bare = Masc_tui_types.identity_provider_line ~notice:[] ~index:0 in
+  let with_notice = Masc_tui_types.identity_provider_line ~notice ~index:0 in
+  check Alcotest.bool "the list starts lower" true (with_notice > bare);
+  check Alcotest.int "by the notice and the blank line after it"
+    (bare + List.length notice + 1) with_notice
+
+let test_no_notice_reserves_no_room () =
+  (* Nothing is held back for a message there is none of. A blank line kept
+     "just in case" is a row the list is pushed down by on every screen that
+     has nothing to report. *)
+  check Alcotest.int "the hint and one blank, and that is all" 2
+    (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
 
 let () =
   Alcotest.run "tui_identity_tab"
@@ -142,6 +163,10 @@ let () =
             test_nothing_connectable_names_nothing;
           Alcotest.test_case "a provider row sits below the preamble" `Quick
             test_the_provider_row_sits_below_the_preamble;
+          Alcotest.test_case "a notice pushes the list down" `Quick
+            test_a_notice_pushes_the_list_down;
+          Alcotest.test_case "no notice reserves no room" `Quick
+            test_no_notice_reserves_no_room;
         ] );
       ( "when the tick stops asking",
         [ Alcotest.test_case "a login lands when its service reports tools"

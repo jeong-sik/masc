@@ -597,12 +597,238 @@ let python_lexer text =
   advance 0;
   runs_segments runs
 
+(* {1 Configuration and query lexers}
+
+   The three shapes masc's own surfaces show most and none of them had a
+   lexer: the workflows are YAML, the keeper and repository files are TOML,
+   and a query pasted into a pane is SQL. *)
+
+(* Everything from [index] to the end of the line. Shared by the three below
+   because [#] and [--] differ only in where a comment starts. *)
+let take_line_comment text index (runs : runs) =
+  take_while text index (fun c -> c <> '\n') kind_comment runs
+
+(* Where a line's content begins: past the indent, and for YAML past one list
+   marker, since the word after "- " is still a key. TOML has no list marker,
+   so a leading dash there is content and stays one. *)
+let line_content_start ~list_marker text line_start =
+  let limit = String.length text in
+  let rec skip i =
+    if i >= limit then i
+    else
+      match text.[i] with
+      | ' ' | '\t' -> skip (i + 1)
+      | '-'
+        when list_marker && i + 1 < limit
+             && (text.[i + 1] = ' ' || text.[i + 1] = '\t') ->
+          skip (i + 2)
+      | _ -> i
+  in
+  skip line_start
+
+(* A key only where its delimiter closes it before the line does. A word at
+   the head of a line that never reaches [delimiter] is a value -- a bare list
+   item, a wrapped string, a line of prose in a comment-free file -- and
+   colouring it as a key would be reading a grammar that is not there.
+
+   Trailing spaces are crossed but not coloured: TOML writes [name = "masc"],
+   and the key is [name], not [name ]. *)
+let key_end ~delimiter text index =
+  let limit = String.length text in
+  let rec word i =
+    if
+      i < limit
+      && (is_identifier_char text.[i] || text.[i] = '-' || text.[i] = '.')
+    then word (i + 1)
+    else i
+  in
+  let stop = word index in
+  let rec spaces i =
+    if i < limit && (text.[i] = ' ' || text.[i] = '\t') then spaces (i + 1)
+    else i
+  in
+  let after = spaces stop in
+  if stop > index && after < limit && Char.equal text.[after] delimiter then
+    Some stop
+  else None
+
+let paint ~kind text start stop (runs : runs) =
+  for i = start to stop - 1 do
+    runs_add runs kind text.[i]
+  done
+
+(* The words both config formats spell as values rather than as text. Matched
+   on word boundaries: [nullable] is not [null], and a key called [true] is
+   still a key because the key branch runs first. *)
+let config_literals = [ "true"; "false"; "null" ]
+
+let literal_at text index =
+  let limit = String.length text in
+  if index > 0 && is_identifier_char text.[index - 1] then None
+  else
+    List.find_opt
+      (fun word ->
+        starts_at text index word
+        &&
+        let after = index + String.length word in
+        after >= limit || not (is_identifier_char text.[after]))
+      config_literals
+
+(* YAML as far as a tokenizer can honestly go: comments, keys, quoted text and
+   numbers. Anchors, block scalars and flow collections are grammar, and a
+   tokenizer that guessed at them would colour text it had not read. *)
+let yaml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let line_start = ref 0 in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if char = '\n' then begin
+        runs_add runs kind_code char;
+        line_start := index + 1;
+        advance (index + 1)
+      end
+      else if
+        char = '#'
+        && (index = !line_start || text.[index - 1] = ' '
+           || text.[index - 1] = '\t')
+      then advance (take_line_comment text index runs)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if index = line_content_start ~list_marker:true text !line_start then begin
+        match key_end ~delimiter:':' text index with
+        | Some stop ->
+            paint ~kind:kind_type text index stop runs;
+            advance stop
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else
+        match literal_at text index with
+        | Some word ->
+            String.iter (fun c -> runs_add runs kind_number c) word;
+            advance (index + String.length word)
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+  in
+  advance 0;
+  runs_segments runs
+
+(* TOML. A table header owns its whole line -- [[repository]] and [tui] are
+   the file's structure, and the brackets are part of the name, so the line is
+   taken whole rather than the brackets coloured apart from what they hold. *)
+let toml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let line_start = ref 0 in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if char = '\n' then begin
+        runs_add runs kind_code char;
+        line_start := index + 1;
+        advance (index + 1)
+      end
+      else if char = '#' then advance (take_line_comment text index runs)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if
+        char = '[' && index = line_content_start ~list_marker:false text !line_start
+      then
+        advance (take_while text index (fun c -> c <> '\n') kind_keyword runs)
+      else if index = line_content_start ~list_marker:false text !line_start then begin
+        match key_end ~delimiter:'=' text index with
+        | Some stop ->
+            paint ~kind:kind_type text index stop runs;
+            advance stop
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else
+        match literal_at text index with
+        | Some word ->
+            String.iter (fun c -> runs_add runs kind_number c) word;
+            advance (index + String.length word)
+        | None ->
+            runs_add runs kind_code char;
+            advance (index + 1)
+  in
+  advance 0;
+  runs_segments runs
+
+(* SQL keywords, lowercased for the comparison because the same query arrives
+   shouted, whispered and mixed. The set is the one a reader needs to see the
+   shape of a statement, not the standard's full reserved list -- a word this
+   does not know stays plain rather than being coloured on a guess. *)
+let sql_reserved =
+  [ "add"; "all"; "alter"; "and"; "as"; "asc"; "begin"; "between"; "by"
+  ; "case"; "cast"; "commit"; "constraint"; "create"; "cross"; "delete"
+  ; "desc"; "distinct"; "drop"; "else"; "end"; "except"; "exists"; "from"
+  ; "full"; "group"; "having"; "in"; "index"; "inner"; "insert"; "intersect"
+  ; "into"; "is"; "join"; "left"; "like"; "limit"; "not"; "null"; "offset"
+  ; "on"; "or"; "order"; "outer"; "primary"; "references"; "returning"
+  ; "right"; "rollback"; "select"; "set"; "table"; "then"; "union"; "unique"
+  ; "update"; "using"; "values"; "view"; "when"; "where"; "with" ]
+
+let is_sql_reserved word =
+  List.mem (String.lowercase_ascii word) sql_reserved
+
+let sql_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else
+      let char = text.[index] in
+      if starts_at text index "--" then
+        advance (take_line_comment text index runs)
+      else if starts_at text index "/*" then
+        advance (take_c_block_comment text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if char = '"' then begin
+        (* Double quotes name a column here, they do not hold text: SQL's
+           string is the single quote. Coloured as an identifier so a quoted
+           name does not read as a value. *)
+        runs_add runs kind_type char;
+        let stop =
+          take_while text (index + 1)
+            (fun c -> c <> '"' && c <> '\n')
+            kind_type runs
+        in
+        if stop < limit && text.[stop] = '"' then begin
+          runs_add runs kind_type '"';
+          advance (stop + 1)
+        end
+        else advance stop
+      end
+      else if is_digit char then advance (take_number text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_sql_reserved text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+  in
+  advance 0;
+  runs_segments runs
+
 let lexer_of_language (tag : string) =
   match String.lowercase_ascii (String.trim tag) with
   | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
   | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
   | "json" -> Some json_lexer
   | "diff" | "patch" -> Some diff_lexer
+  | "yaml" | "yml" -> Some yaml_lexer
+  | "toml" -> Some toml_lexer
+  | "sql" -> Some sql_lexer
   | "c_like" | "typescript" | "ts" | "javascript" | "js" | "tsx" | "jsx"
   | "go" | "rust" | "rs" | "c" | "cpp" | "java" | "kotlin" | "swift" | "scala"
   | "php" | "dart" ->
@@ -628,11 +854,16 @@ let rows_of_segments segments =
   List.rev_map List.rev !rev_rows
 
 
-(* The extension decides the language, mirroring the server's
-   Lsp_process_manager.lang_of_path table. Only extensions whose language has
-   a lexer here answer; the rest are None, and the caller keeps the plain
-   span -- a guess at the grammar is the colouring-as-pretence the fence
-   lexers already refuse. *)
+(* The extension decides the language. Only extensions whose language has a
+   lexer here answer; the rest are None, and the caller keeps the plain span
+   -- a guess at the grammar is the colouring-as-pretence the fence lexers
+   already refuse.
+
+   Not the server's [Lsp_process_manager] table, which this used to say it
+   mirrored. That one lists the languages with a language server behind them
+   and is the smaller set: it has never held .json or .sh, which have been
+   coloured here for as long as the lexers existed. Two tables answering two
+   questions -- what can be analysed, and what can be coloured. *)
 let language_of_path path =
   let lower = String.lowercase_ascii path in
   let has suffix = Filename.check_suffix lower suffix in
@@ -646,6 +877,13 @@ let language_of_path path =
     || has ".swift" || has ".scala" || has ".php" || has ".dart"
   then Some "c_like"
   else if has ".py" then Some "python"
+  else if has ".yaml" || has ".yml" then Some "yaml"
+  else if has ".toml" then Some "toml"
+  else if has ".sql" then Some "sql"
+  (* The lexer was already here; only the extension was missing, so a patch
+     opened as a file read as prose while the same text inside a fence read as
+     a diff. *)
+  else if has ".patch" || has ".diff" then Some "diff"
   else None
 
 (* A whole file as rows of (text, kind) segments. Lexing reads the whole

@@ -199,6 +199,7 @@
   test_lsp_process_manager
   test_keeper_tool_code_query
   test_lsp_questions
+  test_lsp_message_router
   test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge
@@ -542,6 +543,7 @@
   test_lsp_process_manager
   test_keeper_tool_code_query
   test_lsp_questions
+  test_lsp_message_router
   test_lsp_workspace_pool
   test_ide_annotations
   test_agent_observation_bridge

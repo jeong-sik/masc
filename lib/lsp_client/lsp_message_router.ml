@@ -134,7 +134,20 @@ let parse_response (json : Yojson.Safe.t) : (int * (Yojson.Safe.t, string) resul
              | Some (`String s) -> s
              | _ -> "unknown LSP error"
            in
-           Error (Printf.sprintf "LSP error for request %d: %s" id msg)
+           (* ocamllsp answers an internal failure with the bare message
+              "uncaught exception" and puts the exception itself under
+              [data.exn] (e.g. a cmi magic-number mismatch from a build made
+              by another compiler). Carry it, or the operator only sees the
+              bare message. *)
+           let detail =
+             match List.assoc_opt "data" err_fields with
+             | Some (`Assoc data) ->
+               (match List.assoc_opt "exn" data with
+                | Some (`String exn) -> " (" ^ exn ^ ")"
+                | _ -> "")
+             | _ -> ""
+           in
+           Error (Printf.sprintf "LSP error for request %d: %s%s" id msg detail)
          | Some _ -> Error (Printf.sprintf "LSP error for request %d" id)
          | None -> Error (Printf.sprintf "LSP response missing result/error for %d" id))
     in

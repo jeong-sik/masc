@@ -703,6 +703,51 @@ let heartbeat_event_intake
            ?connector_attention_items
            selection.source
        with
+       | Stimulus_consumed []
+         when (match selection.source.payload with
+               | Keeper_event_queue.Board_signal _
+               | Keeper_event_queue.Board_attention _ -> true
+               | Keeper_event_queue.Bootstrap
+               | Keeper_event_queue.Fusion_completed _
+               | Keeper_event_queue.Schedule_due _
+               | Keeper_event_queue.Connector_attention _
+               | Keeper_event_queue.Hitl_resolved _
+               | Keeper_event_queue.Manual_compaction_requested
+               | Keeper_event_queue.Completion_authority_rejected _
+               | Keeper_event_queue.Task_cancelled _
+               | Keeper_event_queue.Workspace_message _
+               | Keeper_event_queue.Delegate_completed _ -> false)
+         ->
+         (* A permanently unavailable Board row has already been classified
+            as consumed.  Leaving its exact source pending would select the
+            same empty row on every heartbeat; a Keeper with proactive turns
+            disabled would then never run a turn that could acknowledge it.
+            Retire only this validated selection and continue looking for an
+            actionable source.  Transient reads never reach this arm. *)
+         (match
+            Keeper_registry_event_queue.ack_pending_result
+              ~base_path
+              keeper_name
+              ~selection
+          with
+          | Ok () ->
+            Log.Keeper.info
+              "turn entry: acknowledged Board stimulus with no remaining \
+               observation stimulus_id=%s keeper=%s"
+              selection.source.post_id
+              keeper_name;
+            intake_selection first_withdrawn
+          | Error message ->
+            let detail =
+              "failed to acknowledge Board stimulus with no remaining \
+               observation: "
+              ^ message
+            in
+            Log.Keeper.error
+              "turn entry: %s keeper=%s"
+              detail
+              keeper_name;
+            [], [], Some selection, [], Some (Pending_selection_failed detail))
        | Stimulus_consumed primary_observations ->
          let companion_observations =
            List.concat_map

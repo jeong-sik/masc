@@ -84,6 +84,9 @@ let start
              (fun (r : Registration.registered) ->
                ( { Store.client_id = r.Registration.client_id
                  ; client_secret = r.Registration.client_secret
+                   (* Nothing recorded: a client this install registered can
+                      be granted whatever the resource publishes. *)
+                 ; scopes = []
                  }
                , true ))
              (Result.map_error
@@ -92,7 +95,8 @@ let start
     in
     let client_id = credentials.Store.client_id in
     let flow_pending =
-      Flow.begin_authorization ~provider ~discovered ~client_id ~redirect_uri
+      Flow.begin_authorization ~provider ~discovered ~client_id
+        ~scopes:credentials.Store.scopes ~redirect_uri
         ~keeper
     in
     Pending.remember pending ~now ~ttl_sec

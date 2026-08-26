@@ -25,6 +25,16 @@ type credentials = {
           with. It is not "unknown": the id is written after the secret, so
           an id on disk means whatever secret came with it is already
           beside it. *)
+  scopes : string list;
+      (** What to ask for instead of everything the service publishes.
+
+          Empty means ask for what it publishes, which is right when the
+          client was registered here: a client this install made can be
+          granted anything the resource offers. It is not right for an app
+          an operator brought, because that app is the authority on what it
+          may be granted -- a request for a scope it does not declare is
+          refused, and adding the scope means reinstalling an app other
+          people may depend on. *)
 }
 
 val load :

@@ -2,6 +2,10 @@
    config/tools/keeper_composition_{status,cancel}.toml, and the loaded schema
    is byte-identical to the request-id schema they used to build inline. *)
 
+(* Byte-identity holds because the two TOMLs omit a description on the
+   request_id param; adding one would put a "description" in the property
+   and this pin would fail. That omission is deliberate, noted in each
+   config/tools/keeper_composition_*.toml. *)
 let expected_request_id_input_schema : Yojson.Safe.t =
   `Assoc
     [ "type", `String "object"

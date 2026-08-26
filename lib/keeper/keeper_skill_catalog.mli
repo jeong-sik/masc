@@ -23,6 +23,9 @@ type skill = private
   ; body : string
         (** Everything after the frontmatter, including any composition
             fence, exactly as {!Agent_core.Skill_document} returned it. *)
+  ; conformance : Agent_core.Skill_document.conformance
+        (** Specification diagnostics retained for the turn and operator
+            projections. Runtime-compatible documents remain usable. *)
   ; surface : surface
   }
 

@@ -20,6 +20,7 @@ export interface SkillSnapshotEntry {
   content_revision: string
   description: string
   conformance: string
+  diagnostics?: string[]
   body_bytes: number
 }
 

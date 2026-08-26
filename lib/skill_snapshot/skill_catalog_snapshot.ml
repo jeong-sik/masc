@@ -595,12 +595,18 @@ let source_to_public_yojson (scan : source_scan) =
 ;;
 
 let entry_to_public_yojson (entry : entry) =
+  let diagnostics =
+    Agent_core.Skill_document.conformance_diagnostics entry.conformance
+    |> List.map (fun diagnostic ->
+      `String (Agent_core.Skill_document.diagnostic_to_string diagnostic))
+  in
   `Assoc
     [ "identity", identity_to_yojson entry.identity
     ; "content_revision", `String entry.content_revision
     ; "description", `String entry.document.description
     ; ( "conformance"
       , `String (Agent_core.Skill_document.conformance_to_string entry.conformance) )
+    ; "diagnostics", `List diagnostics
     ; "body_bytes", `Int (String.length entry.document.body)
     ]
 ;;

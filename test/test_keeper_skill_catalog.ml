@@ -254,7 +254,21 @@ let test_composition_skill_materializes_entry () =
    that wrote it never ran this file. *)
 let test_directory_name_mismatch_is_runtime_compatible () =
   let skill = parsed ~directory:"another-name" instruction_document in
-  check string "the directory is what a task can name" "another-name" skill.name
+  check string "the directory is what a task can name" "another-name" skill.name;
+  match skill.conformance with
+  | Agent_core.Skill_document.Conformant -> fail "name mismatch lost its diagnostic"
+  | Runtime_compatible diagnostics ->
+    check
+      bool
+      "turn catalog retains the mismatch diagnostic"
+      true
+      (List.exists
+         (function
+           | Agent_core.Skill_document.Name_mismatch
+               { declared = "release-checklist"; directory = "another-name" } ->
+             true
+           | _ -> false)
+         diagnostics)
 ;;
 
 let test_missing_required_frontmatter_rejected () =

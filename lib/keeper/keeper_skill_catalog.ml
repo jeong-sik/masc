@@ -8,6 +8,7 @@ type skill =
   { name : string
   ; description : string
   ; body : string
+  ; conformance : Agent_core.Skill_document.conformance
   ; surface : surface
   }
 
@@ -136,7 +137,7 @@ let composition_of_block ~skill block =
 let parse_skill ~directory content =
   match Agent_core.Skill_document.decode ~directory_name:directory content with
   | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
-  | Loaded { document; _ } ->
+  | Loaded { document; conformance } ->
     let { Agent_core.Skill_document.name; description; body; extensions; _ } = document in
     let model_invocable =
       match List.assoc_opt "disable-model-invocation" extensions with
@@ -145,7 +146,7 @@ let parse_skill ~directory content =
     in
     (match composition_blocks body with
      | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
-     | Ok [] -> Ok { name; description; body; surface = Instruction }
+     | Ok [] -> Ok { name; description; body; conformance; surface = Instruction }
      | Ok [ block ] ->
        (match composition_of_block ~skill:name block with
         | Error _ as error -> error
@@ -155,7 +156,7 @@ let parse_skill ~directory content =
              and the skill still loads — it just does not become a tool the
              model can see. *)
           let surface = if model_invocable then Composition entry else Instruction in
-          Ok { name; description; body; surface })
+          Ok { name; description; body; conformance; surface })
      | Ok blocks ->
        Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))
 ;;

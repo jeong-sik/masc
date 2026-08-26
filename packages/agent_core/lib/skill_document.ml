@@ -498,9 +498,13 @@ let decode ~directory_name contents =
      | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
 ;;
 
+let conformance_diagnostics = function
+  | Conformant -> []
+  | Runtime_compatible diagnostics -> diagnostics
+;;
+
 let diagnostics = function
-  | Loaded { conformance = Conformant; _ } -> []
-  | Loaded { conformance = Runtime_compatible diagnostics; _ }
+  | Loaded { conformance; _ } -> conformance_diagnostics conformance
   | Unloadable diagnostics -> diagnostics
 ;;
 

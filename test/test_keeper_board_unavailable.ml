@@ -194,6 +194,64 @@ let test_poison_stimulus_intake_does_not_crash_and_stays_dropped () =
       (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
 ;;
 
+let test_poison_durable_source_is_retired_during_intake () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let base_path = fresh_test_base_path () in
+  Board.reset_global_for_test ();
+  Board_dispatch.reset_for_test ();
+  Board_dispatch.init_jsonl ();
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  let meta = test_meta "poison-durable" in
+  let config = Workspace.default_config base_path in
+  let ctx : _ Keeper_types_profile.context =
+    { config
+    ; agent_name = "board-unavailable-test"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  ignore (Keeper_registry.For_testing.register ~base_path meta.name meta);
+  let stimulus = poison_board_signal_stimulus () in
+  (match
+     Keeper_registry_event_queue.enqueue_durable_result
+       ~base_path
+       meta.name
+       stimulus
+   with
+   | Ok () -> ()
+   | Error message -> failf "failed to seed durable poison: %s" message);
+  let intake =
+    Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx
+      ~meta_after_triage:meta
+      ~pending_board_events:[]
+  in
+  check int "no empty source is offered to a provider turn" 0
+    intake.consumed_stimulus_count;
+  check int "no fabricated Board observation is returned" 0
+    (List.length intake.pending_board_events);
+  check bool "permanent retirement is not an intake error" true
+    (Option.is_none intake.event_queue_intake_error);
+  let queued =
+    match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
+    | Ok queue -> queue
+    | Error message -> failf "failed to reload durable queue: %s" message
+  in
+  check int "the permanently unavailable durable source is acknowledged" 0
+    (Keeper_event_queue.length queued)
+;;
+
 let test_transient_result_is_retryable () =
   let unavailable = transient_unavailable "transient-classification" in
   match
@@ -463,6 +521,10 @@ let () =
             "stimulus intake consumes without crash, stable on repeat"
             `Quick
             (with_eio test_poison_stimulus_intake_does_not_crash_and_stays_dropped)
+        ; test_case
+            "durable poison is acknowledged during intake"
+            `Quick
+            test_poison_durable_source_is_retired_during_intake
         ] )
     ; ( "transient stimulus"
       , [ test_case

@@ -1,23 +1,6 @@
 name: CI
 
 on:
-  push:
-    branches: [develop]
-  schedule:
-    # main is checked on a timer, not once per merge. Merges land every 5.7
-    # minutes (254 commits in the 24h to 2026-08-24T01:00Z) and a run takes
-    # 22-34 minutes, so per-commit main runs need 4.4 runs in flight at all
-    # times -- 53 job slots -- to keep up, and they never did. Keying them by
-    # github.sha stopped the collapsing that produced 148 cancellations and
-    # zero verdicts, and replaced it with a queue: at 2026-08-24T01:20Z there
-    # were 50 CI runs waiting, 26 of them main pushes for commits already in
-    # main. A verdict on a commit that is already merged blocks nothing, so
-    # validation is timer-based instead of per-merge.
-    #
-    # The group below pins scheduled runs to one shared key with
-    # cancel-in-progress false, so GitHub keeps at most one running and one
-    # pending: the timer cannot outrun the build no matter how often it fires.
-    - cron: '*/30 * * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -25,26 +8,8 @@ permissions:
   actions: write
 
 concurrency:
-  # Branch runs verify the current branch state: a newer push supersedes the
-  # older run, so the older one cancels.
-  #
-  # Scheduled main runs share one key with cancel-in-progress false, so GitHub
-  # holds at most one running and one pending. The timer fires every 30 minutes
-  # and a run takes 22-34, so a firing that lands on a busy pool is dropped
-  # rather than queued behind the one already working. That is the cap the
-  # per-commit trigger never had.
-  #
-  # workflow_dispatch on main keys by commit: a dispatch is asked for by hand
-  # about one specific sha, so it gets its own group and is not collapsed into
-  # whatever the timer happens to be doing.
-  group: >-
-    ${{ github.workflow }}-${{ github.event_name }}-${{
-      (github.event_name == 'schedule' && 'main-timer')
-      || (github.ref == 'refs/heads/main' && github.sha)
-      || github.ref_name
-      || github.run_id
-    }}
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref != 'refs/heads/main' }}
+  group: ci-manual-${{ github.sha || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   changes:
@@ -299,7 +264,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [changes]
-    # Repository-wide audits are a timer/manual safety net, not a per-PR tax.
+    # Repository-wide audits run only when full CI is requested manually.
     if: ${{ always() && !cancelled() && needs.changes.result == 'success' }}
 
     steps:
@@ -566,14 +531,13 @@ jobs:
     # 10:57:15), so a run where every group uses its full budget ends at
     # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
     # prints its timeout diagnostics before GitHub ends the job.
-    # Build and full validation belong to timer/manual lanes. PR authors and
+    # Build and full validation belong to the manual lane. PR authors and
     # agents provide their focused exact-head evidence before opening the PR;
     # repeating a cold 15-minute toolchain build on every synchronization cost
     # more runner time than the failures it prevented.
     timeout-minutes: 110
     needs: [changes]
-    # Non-PR events (develop push, the main timer, workflow_dispatch) run full
-    # validation so a
+    # Manual dispatch runs full validation so a
     # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
     # merge) is detected on the next timer run instead of persisting silently
     # behind a green "CI Gate" — ci-gate check() treats a skipped required job as
@@ -1083,13 +1047,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [changes]
-    # Dashboard validation runs on timer/manual lanes, not on every PR. Those
-    # non-PR events ignore path scope and always run, so a dashboard regression
+    # Dashboard validation runs only when full CI is dispatched. It ignores
+    # path scope and always runs, so a dashboard regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,
     # or a dashboard-touching PR merged via admin fast-track while
-    # the dashboard job was red) is detected on the next timer run
-    # rather than persisting silently. Same main safety-net pattern as
-    # tla-main.yml; root cause:
+    # the dashboard job was red) is detectable in a requested full run
+    # rather than persisting silently. Root cause:
     # keeper-fsm-specs.test.ts / keeper-composite.test.ts sat red on main
     # after #14252/#14380 because no main-push run re-checked them.
     if: ${{ always() && !cancelled() && needs.changes.result == 'success' }}
@@ -1296,7 +1259,7 @@ jobs:
           # mode=advisory: fail → log a WARN line, do not block
           #
           # Product tests, transport/contract harnesses, lifecycle evidence,
-          # ratchets, Dashboard, and TLA run on timer/manual/release lanes.
+          # ratchets, Dashboard, and TLA run only when explicitly dispatched.
           # A cancelled job did not fail — it did not run. Both block, because
           # a check that never ran cannot be evidence of anything, but they are
           # printed apart: over the last 20 CI runs the job conclusions were 110

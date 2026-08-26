@@ -350,7 +350,16 @@ let test_the_entrypoint_survives_the_home_masc_passes () =
     bool
     "and the build exercises the entrypoint under that HOME"
     true
-    (List.exists (line_has ~needles:[ "HOME=/tmp"; "opam exec" ]) lines)
+    (List.exists (line_has ~needles:[ "HOME=/tmp"; "opam exec" ]) lines);
+  (* The build runs as root by default, and root ignores the permission bits the
+     chmod above exists to fix -- so a root-only check stays green with the chmod
+     deleted. Measured: it did. A keeper is a uid with no account in this image,
+     so the build has to become one before it asks. *)
+  check
+    bool
+    "as a uid that has no account, the way a keeper runs"
+    true
+    (List.exists (line_has ~needles:[ "USER 60123" ]) lines)
 ;;
 
 (* apt's nodejs is 18.19 on this base, so resolving node from apt alone cannot

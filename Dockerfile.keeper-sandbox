@@ -216,8 +216,6 @@ RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
 # so if OPAMROOT ever stops covering it this fails here rather than in a
 # container that vanishes before anyone can look at it. The version it prints
 # lands in the build log, which is the cheapest place to read what shipped.
-RUN HOME=/tmp opam exec -- dune --version \
- || { echo "opam exec fails when HOME is not /home/opam -- OPAMROOT is not covering it" >&2; exit 1; }
 
 # The container runs as the host uid (`--user <uid>:<gid>`), which matches no
 # account in the image, so every path it reads has to be world-readable.
@@ -245,3 +243,20 @@ VOLUME ["/tmp/keeper-creds"]
 STOPSIGNAL SIGTERM
 
 CMD ["/bin/bash"]
+
+# Asked as a uid that matches no account in the image, because that is what a
+# keeper is: masc passes --user <host uid>:<gid> and mounts an /etc/passwd that
+# names it "keeper". Running this check as root would prove nothing -- root
+# ignores the permission bits this is meant to catch, so the chmod above could
+# be deleted and a root-only build would still pass. Deleting it was tried and
+# a root check did stay green.
+#
+# HOME=/tmp is the value masc actually passes (added in #12036 for a sandbox UID
+# mismatch), and the entrypoint inherited from the base image is `opam exec --`,
+# so this line is the whole keeper turn in miniature: the wrong answer here is
+# exit 50 before the keeper's command runs at all. The version it prints lands
+# in the build log, which is the cheapest place to read what shipped.
+USER 60123:60123
+RUN HOME=/tmp opam exec -- dune --version \
+ || { echo "opam exec fails as a uid with no account -- OPAMROOT or the chmod above is not covering it" >&2; exit 1; }
+USER root

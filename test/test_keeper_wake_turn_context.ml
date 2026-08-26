@@ -387,11 +387,15 @@ let test_held_task_skills_projection () =
     { (make_task ~task_status ()) with id; skills }
   in
   let tasks =
-    [ held "task-42" ~by:assignee ~skills:[ "a" ] ~status:`In_progress
-    ; held "task-43" ~by:assignee ~skills:[ "b"; "c" ] ~status:`Claimed
-    ; held "task-44" ~by:"someone-else" ~skills:[ "d" ] ~status:`Claimed
+    [ held "task-42" ~by:assignee ~skills:[ skill_reference "a" 'a' ] ~status:`In_progress
+    ; held "task-43" ~by:assignee
+        ~skills:[ skill_reference "b" 'b'; skill_reference "c" 'c' ] ~status:`Claimed
+    ; held "task-44" ~by:"someone-else" ~skills:[ skill_reference "d" 'd' ] ~status:`Claimed
     ; held "task-45" ~by:assignee ~skills:[] ~status:`In_progress
-    ; { (make_task ~task_status:Masc_domain.Todo ()) with id = "task-46"; skills = [ "e" ] }
+    ; { (make_task ~task_status:Masc_domain.Todo ()) with
+        id = "task-46"
+      ; skills = [ skill_reference "e" 'e' ]
+      }
     ]
   in
   let meta =
@@ -404,7 +408,12 @@ let test_held_task_skills_projection () =
     (List.map (fun (h : Inputs.held_task_skills) -> h.held_task_id) projected);
   check (list string) "its skills in declaration order"
     [ "b"; "c" ]
-    (List.concat_map (fun (h : Inputs.held_task_skills) -> h.held_skills) projected);
+    (List.concat_map
+       (fun (h : Inputs.held_task_skills) ->
+         List.map
+           (fun (reference : Skill_reference.t) -> reference.identity.name)
+           h.held_skills)
+       projected);
   let meta = { meta with current_task_id = None } in
   check (list string) "without a current task both held tasks project"
     [ "task-42"; "task-43" ]

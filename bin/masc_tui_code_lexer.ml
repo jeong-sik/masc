@@ -353,6 +353,117 @@ let json_lexer text =
   advance 0;
   runs_segments runs
 
+(* TOML, which this repository keeps its runtime configuration and tool
+   declarations in. Written as a lexer over the whole file rather than per row
+   because of one shape: [key = """] opens a string that runs until a matching
+   ["""] several rows later. A row read on its own cannot know it is inside
+   one, and masc's own files use it -- config/tools/masc_keeper_up.toml
+   describes every parameter that way. Reading a row at a time would paint the
+   prose as keys and operators.
+
+   Table headers take [kind_type] rather than a keyword colour: [[params]] and
+   [keeper.sandbox] name where a value lives, which is the same job a type name
+   does elsewhere in this palette. *)
+let toml_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let at_line_start index =
+    let rec back i =
+      if i <= 0 then true
+      else
+        match text.[i - 1] with
+        | ' ' | '\t' -> back (i - 1)
+        | '\n' -> true
+        | _ -> false
+    in
+    back index
+  in
+  (* A bare key is only a key when an [=] follows it on the same row. Without
+     that test the words inside a multi-line string would each read as one. *)
+  let assignment_follows index =
+    let rec peek i =
+      if i >= limit then false
+      else
+        match text.[i] with
+        | ' ' | '\t' -> peek (i + 1)
+        | '=' -> true
+        | _ -> false
+    in
+    peek index
+  in
+  let take_multiline_string index =
+    (* Past the opening delimiter, then to the closing one. An unterminated
+       string colours to the end of the file, which is what the file looks
+       like: everything after the opening quote is inside it. *)
+    let rec scan i =
+      if i + 2 >= limit then limit
+      else if text.[i] = '"' && text.[i + 1] = '"' && text.[i + 2] = '"' then
+        i + 3
+      else scan (i + 1)
+    in
+    let stop = scan (index + 3) in
+    for i = index to stop - 1 do
+      runs_add runs kind_string text.[i]
+    done;
+    stop
+  in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if char = '#' then begin
+        let stop =
+          take_while text index (fun c -> c <> '\n') kind_comment runs
+        in
+        advance stop
+      end
+      else if char = '"' && index + 2 < limit && text.[index + 1] = '"'
+              && text.[index + 2] = '"' then advance (take_multiline_string index)
+      else if char = '"' then advance (take_ocaml_string text index runs)
+      else if char = '[' && at_line_start index then begin
+        let stop = take_while text index (fun c -> c <> '\n') kind_type runs in
+        advance stop
+      end
+      else if is_identifier_start char && at_line_start index then begin
+        (* Measured first, then emitted with the kind already decided.
+           json_lexer retags the open run instead, which works there because a
+           string opens a run of its own; a bare key here shares the plain run
+           with whatever came before it, so retagging painted the preceding
+           newline as part of the key. *)
+        let key_char c = is_identifier_char c || c = '-' || c = '.' in
+        let rec extent i = if i < limit && key_char text.[i] then extent (i + 1) else i in
+        let stop = extent index in
+        let kind = if assignment_follows stop then kind_keyword else kind_code in
+        advance (take_while text index key_char kind runs)
+      end
+      else if is_digit char
+              || (char = '-' && index + 1 < limit && is_digit text.[index + 1])
+      then begin
+        let stop =
+          take_while text index
+            (fun c -> is_digit c || c = '.' || c = '-' || c = ':' || c = 'T'
+                      || c = 'Z')
+            kind_number runs
+        in
+        advance stop
+      end
+      else if starts_at text index "true" then begin
+        String.iter (fun c -> runs_add runs kind_number c) "true";
+        advance (index + 4)
+      end
+      else if starts_at text index "false" then begin
+        String.iter (fun c -> runs_add runs kind_number c) "false";
+        advance (index + 5)
+      end
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
 (* The fence tag decides who lexes. Untagged and unknown tags answer None and
    the fence keeps the single code span -- a guess at the grammar from the
    text alone is exactly the colouring-as-pretence the palette avoids. *)

@@ -44,6 +44,11 @@ type error =
       }
   | Duplicate_skill of { name : string }
 
+type rejected_document =
+  { directory : string
+  ; error : error
+  }
+
 let composition_fence_open = "```toml composition"
 let fence_close = "```"
 
@@ -195,22 +200,32 @@ let parse_skill ~directory content =
 
 let empty = []
 
-let of_documents documents =
-  let rec build parsed = function
+let partition_documents documents =
+  let rec build parsed rejected = function
     | [] ->
-      Ok
-        (List.sort
-           (fun left right -> String.compare left.name right.name)
-           (List.rev parsed))
+      ( List.sort
+          (fun left right -> String.compare left.name right.name)
+          (List.rev parsed)
+      , List.rev rejected )
     | (directory, content) :: rest ->
       (match parse_skill ~directory content with
-       | Error _ as error -> error
+       | Error error -> build parsed ({ directory; error } :: rejected) rest
        | Ok skill ->
          if List.exists (fun known -> String.equal known.name skill.name) parsed
-         then Error (Duplicate_skill { name = skill.name })
-         else build (skill :: parsed) rest)
+         then
+           build
+             parsed
+             ({ directory; error = Duplicate_skill { name = skill.name } } :: rejected)
+             rest
+         else build (skill :: parsed) rejected rest)
   in
-  build [] documents
+  build [] [] documents
+;;
+
+let of_documents documents =
+  match partition_documents documents with
+  | catalog, [] -> Ok catalog
+  | _, { error; _ } :: _ -> Error error
 ;;
 
 let skills catalog = catalog

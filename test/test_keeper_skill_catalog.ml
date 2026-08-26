@@ -430,6 +430,29 @@ let test_of_documents_sorts_and_rejects_duplicates () =
   | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let test_partition_documents_isolates_rejections () =
+  let catalog, rejections =
+    Skill_catalog.partition_documents
+      [ "release-checklist", instruction_document
+      ; "broken", "---\nname: broken\n---\n\n# Missing description\n"
+      ]
+  in
+  check
+    (list string)
+    "valid skill remains usable"
+    [ "release-checklist" ]
+    (Skill_catalog.skills catalog
+     |> List.map (fun skill -> skill.Skill_catalog.name));
+  match rejections with
+  | [ { Skill_catalog.directory; error = Skill_catalog.Definition_rejected _ } ] ->
+    check string "rejection names its package" "broken" directory
+  | [ rejected ] ->
+    fail
+      ("wrong rejection: " ^ Skill_catalog.error_to_string rejected.error)
+  | rejected ->
+    failf "expected one isolated rejection, got %d" (List.length rejected)
+;;
+
 let write_file path content =
   let channel = open_out_bin path in
   Fun.protect
@@ -508,12 +531,14 @@ let test_loader_scans_the_skills_directory () =
          (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
          "---\nname: half-installed\n---\n";
        match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Error
-           (Agent_core.Error.Config
-             (Agent_core.Error.InvalidConfig { field = "skills"; detail })) ->
-         check bool "detail names the defect" true (String.length detail > 0)
-       | Ok _ | Error _ ->
-         fail "broken SKILL.md did not return a typed config error")
+       | Ok catalog ->
+         check
+           (list string)
+           "one broken optional skill does not stop unrelated turns"
+           [ "agent-review"; "release-checklist" ]
+           (Skill_catalog.skills catalog
+            |> List.map (fun skill -> skill.Skill_catalog.name))
+       | Error _ -> fail "one broken Skill stopped the whole Keeper catalog")
 ;;
 
 let skill_catalog_of documents =
@@ -683,6 +708,10 @@ let () =
             "of_documents sorts by name and rejects duplicates"
             `Quick
             test_of_documents_sorts_and_rejects_duplicates
+        ; test_case
+            "partition_documents isolates rejections"
+            `Quick
+            test_partition_documents_isolates_rejections
         ; test_case
             "loader scans the skills directory"
             `Quick

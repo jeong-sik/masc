@@ -101,6 +101,8 @@ let test_never_attached_is_not_an_error () =
   let base_path = temp_base () in
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok None -> ()
@@ -113,6 +115,8 @@ let test_an_unreadable_catalog_is_not_no_tools () =
     Filename.concat
       (Filename.concat (Filename.concat base_path ".masc") "identity")
       (Filename.concat "catalogs" "acme-daycare")
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+      (Filename.concat "catalogs" "oauth-fixture")
   in
   let rec ensure path =
     if not (Sys.file_exists path) then (
@@ -124,6 +128,8 @@ let test_an_unreadable_catalog_is_not_no_tools () =
       Out_channel.output_string oc "{ this is not json");
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Error _ -> ()
@@ -133,9 +139,13 @@ let test_an_unreadable_catalog_is_not_no_tools () =
 let test_a_written_catalog_comes_back () =
   let base_path = temp_base () in
   write_catalog ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture"
     [ tool "getJiraIssue"; tool "searchIssues" ];
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
@@ -156,13 +166,19 @@ let test_names_are_namespaced_by_provider () =
      mean either. *)
   let base_path = temp_base () in
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "search" ];
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture" [ tool "search" ];
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
       let offering =
         Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+        Identity_tools.agent_tools ~base_path ~keeper_name:"oauth-fixture"
           ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "prefixed" [ "atlassian_search" ]
@@ -178,13 +194,19 @@ let test_a_schema_that_cannot_be_projected_is_reported () =
       input_schema = `String "not a schema" }
   in
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "fine"; bad ];
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture" [ tool "fine"; bad ];
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
       let offering =
         Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+        Identity_tools.agent_tools ~base_path ~keeper_name:"oauth-fixture"
           ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "the usable one is offered"
@@ -199,13 +221,19 @@ let test_a_keeper_with_no_token_gets_a_refusal_not_a_crash () =
      get an answer, not an exception. *)
   let base_path = temp_base () in
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "getJiraIssue" ];
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture" [ tool "getJiraIssue" ];
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) -> (
       let offering =
         Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+        Identity_tools.agent_tools ~base_path ~keeper_name:"oauth-fixture"
           ~provider:(provider ()) catalog
       in
       match offering.Identity_tools.offered with
@@ -249,11 +277,15 @@ let bearer sent =
 let single_tool ~base_path ~post =
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+    Identity_tools.load ~base_path ~keeper_name:"oauth-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) -> (
       let offering =
         Identity_tools.agent_tools ~post ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+        Identity_tools.agent_tools ~post ~base_path ~keeper_name:"oauth-fixture"
           ~provider:(provider ()) catalog
       in
       match offering.Identity_tools.offered with
@@ -281,6 +313,8 @@ let test_this_process_env_is_not_a_keepers_credential () =
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "getJiraIssue" ];
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture" [ tool "getJiraIssue" ];
   let post, sent = recording_transport () in
   match Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []) with
   | Ok _ ->
@@ -300,8 +334,12 @@ let test_the_projected_token_is_the_one_sent () =
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "getJiraIssue" ];
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+  write_catalog ~base_path ~keeper_name:"oauth-fixture" [ tool "getJiraIssue" ];
   (match
      Projection.set_env_entry ~base_path ~keeper_name:"acme-daycare"
+||||||| parent of 8a47e477fc (fix(ci): rename the oauth-fixture fixture in identity_tools tests to oauth-fixture)
+     Projection.set_env_entry ~base_path ~keeper_name:"oauth-fixture"
        ~scope:Projection.Keeper_secret ~name:"ATLASSIAN_ACCESS_TOKEN"
        ~value:"the-keepers-token"
    with

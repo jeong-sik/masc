@@ -3931,14 +3931,18 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   if numbered = [] && rejected = [] && state.identity_filter <> None then
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
-      ~notice:(attempt @ filter_rows)
+      ~notice:
+        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        @ filter_rows)
     @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
   else if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
       ~keeper:(Terminal_text.single_line k.k_name)
-      ~notice:(attempt @ filter_rows)
+      ~notice:
+        (attempt @ Masc_tui_types.identity_app_form_rows state.identity_app_form
+        @ filter_rows)
     @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
@@ -4138,7 +4142,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
       | Detail_identity ->
-        "[ ]:tab  arrows+enter:connect  /:filter  1-9:jump  R:refresh"
+        "[ ]:tab  arrows+enter:connect  A:app  /:filter  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

@@ -3242,4 +3242,6 @@
  (modules test_asset_sync_report)
  (libraries alcotest masc))
 
+(include stanzas/test_rest_approvals_because.inc)
+
 (include stanzas/test_keeper_ask.inc)

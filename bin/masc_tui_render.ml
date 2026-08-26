@@ -1236,7 +1236,9 @@ let render_approvals (state : state) =
                    ("tool: " ^ Terminal_text.single_line held.kta_tool)
                    20)
                 (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
-                (Terminal_text.single_line held.kta_question)
+                (Terminal_text.single_line held.kta_question ^ " — "
+                ^ Terminal_text.single_line_or ~default:"(not provided)"
+                    held.kta_because)
         in
         let is_selected = idx = state.approval_cursor in
         let content =
@@ -1278,12 +1280,21 @@ let render_approvals (state : state) =
                 Ansi.reset)
     | Some (Keeper_tool_row held) ->
         (* One press answers a held call, matching the chat pane's [y]. The
-           question is the whole ask, so it is the row the eye lands on. *)
-        Printf.sprintf "  %s%s  [y] allow  [n] deny%s"
+           question is the whole ask, so it is the row the eye lands on;
+           the because is why this call was held at all — an operator
+           repeating the same yes needs the reason visible, not the name
+           of a policy table they cannot open. *)
+        Printf.sprintf "  %s%s  [y] allow  [n] deny%s\\n  %swhy: %s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
              (max 8 (cols - 26)))
+          Ansi.reset
+          Ansi.dim
+          (fit_width
+             (Terminal_text.single_line_or ~default:"(not provided)"
+                held.kta_because)
+             (max 8 (cols - 12)))
           Ansi.reset
     | None -> ""
   in

@@ -70,7 +70,7 @@ type = "boolean"
 name = "file"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params]]
 name = "stdout"
@@ -87,13 +87,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "fd"
@@ -115,13 +115,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "fd"
@@ -188,7 +188,7 @@ type = "boolean"
 name = "file"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.items.params]]
 name = "stdout"
@@ -205,13 +205,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.items.params.params]]
 name = "fd"
@@ -233,13 +233,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.items.params.params]]
 name = "fd"
@@ -261,7 +261,7 @@ type = "boolean"
 name = "file"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params]]
 name = "stdout"
@@ -278,13 +278,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "fd"
@@ -306,13 +306,13 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 
 [[params.items.params.params]]
 name = "fd"
@@ -363,7 +363,7 @@ type = "boolean"
 name = "file"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 description = "Absolute path to read from, the typed form of '<'."
 
 [[params]]
@@ -381,14 +381,14 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 description = "Absolute path to replace, the typed form of '>'."
 
 [[params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 description = "Absolute path to add to, the typed form of '>>'."
 
 [[params.params]]
@@ -415,14 +415,14 @@ type = "boolean"
 name = "truncate"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 description = "Absolute path to replace, the typed form of '>'."
 
 [[params.params]]
 name = "append"
 type = "string"
 min_length = 1
-pattern = "^/"
+pattern = "^/.*$"
 description = "Absolute path to add to, the typed form of '>>'."
 
 [[params.params]]

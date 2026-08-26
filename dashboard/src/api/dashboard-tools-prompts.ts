@@ -494,18 +494,125 @@ export interface DashboardKeeperBackground {
   keepers: DashboardKeeperBackgroundKeeper[]
 }
 
+export interface DashboardToolsWarmingProjection {
+  status: 'warming'
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   status?: string
   is_warming?: boolean
   stale_reason?: string | null
-  config_resolution?: DashboardConfigResolution
-  runtime_resolution?: DashboardRuntimeResolution
+  config_resolution?: DashboardConfigResolution | DashboardToolsWarmingProjection
+  runtime_resolution?: DashboardRuntimeResolution | DashboardToolsWarmingProjection
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
+  effective_keeper_surface?: DashboardEffectiveKeeperSurface | null
+  skill_activations?: DashboardSkillActivationProjection | null
 }
+
+export interface DashboardSkillReference {
+  identity: {
+    source_id: string
+    package_id: string
+    name: string
+  }
+  content_revision: string
+}
+
+export type DashboardToolDelivery =
+  | { status: 'delivered' }
+  | { status: 'suppressed'; reason: 'runtime_tools_unsupported' }
+
+export type DashboardEffectiveKeeperSurface =
+  | {
+      status: 'available'
+      keeper_name: string
+      runtime_id: string
+      official_client_kind: string
+      tool_delivery: DashboardToolDelivery
+      native_posture: string | null
+      tool_groups: string[]
+      current_task_id: string | null
+      instruction_skills: DashboardSkillReference[]
+      composition_skills: DashboardSkillReference[]
+      count: number
+      tools: Array<{ name: string; origin: { kind: string } }>
+      tool_surface_sha256: string | null
+    }
+  | {
+      status: 'unavailable'
+      keeper_name: string
+      reason: string
+      detail: string
+    }
+  | {
+      status: 'warming'
+      keeper_name: string
+    }
+
+export type DashboardSkillActivationOrigin =
+  | { kind: 'task_instruction'; task_id: string }
+  | { kind: 'session_instruction' }
+  | { kind: 'task_composition'; task_id: string; tool_name: string }
+  | { kind: 'session_composition'; tool_name: string }
+
+export interface DashboardSkillActivation {
+  identity: DashboardSkillReference['identity']
+  content_revision: string
+  snapshot_revision: string
+  turn_ref: string
+  runtime_id: string
+  skill_tool_use_id: string
+  agent_core_turn: number
+  served_content:
+    | { kind: 'skill_body'; bytes: number; sha256: string }
+    | {
+        kind: 'skill_resource'
+        relative_path: string
+        bytes: number
+        sha256: string
+      }
+  delivery: { agent_core_turn: number; delivered_at: string } | null
+  actions: Array<{
+    tool_use_id: string
+    tool_name: string
+    agent_core_turn: number
+    observed_at: string
+  }>
+  activated_at: string
+  origin: DashboardSkillActivationOrigin
+}
+
+export interface DashboardSkillActivationSummary {
+  instruction_invocations: number
+  skill_bodies_served: number
+  skill_resources_served: number
+  instruction_deliveries: number
+  instruction_actions_observed: number
+  composition_invocations: number
+  composition_deliveries: number
+  composition_actions_observed: number
+  invalid_transitions: number
+}
+
+export type DashboardSkillActivationProjection =
+  | {
+      status: 'available'
+      keeper_name: string
+      summary: DashboardSkillActivationSummary
+      ledger: {
+        schema: string
+        workspace_key: string
+        session_id: string
+        revision: string
+        activations: DashboardSkillActivation[]
+      }
+    }
+  | { status: 'no_session'; keeper_name: string }
+  | { status: 'unavailable'; keeper_name: string; reason: string; detail: string }
 
 export interface DashboardScheduleRunnerCounts {
   due_changed?: number
@@ -811,9 +918,16 @@ function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueu
   }
 }
 
-export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
+export interface DashboardToolsRequestOptions extends AbortableRequestOptions {
+  keeperName?: string
+}
+
+export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): Promise<DashboardToolsResponse> {
   await ensureDevToken()
-  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
+  const keeperQuery = opts?.keeperName
+    ? `?keeper=${encodeURIComponent(opts.keeperName)}`
+    : ''
+  const raw = await get<DashboardToolsResponse>(`/api/v1/dashboard/tools${keeperQuery}`, { signal: opts?.signal })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',

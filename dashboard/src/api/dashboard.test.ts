@@ -1055,6 +1055,35 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
+  it('requests an exact Keeper surface when selected', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        tool_inventory: { tools: [] },
+        tool_usage: {
+          total_calls: 0,
+          distinct_tools_called: 0,
+          top_20: [],
+          never_called_count: 0,
+          registered_count: 0,
+        },
+        effective_keeper_surface: { status: 'warming', keeper_name: 'keeper/one' },
+        skill_activations: { status: 'no_session', keeper_name: 'keeper/one' },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardTools({ keeperName: 'keeper/one' })
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/tools?keeper=keeper%2Fone')
+    expect(result.skill_activations).toEqual({
+      status: 'no_session',
+      keeper_name: 'keeper/one',
+    })
+  })
+
   it('parses the owner shutdown source without accepting source drift', () => {
     expect(parseDashboardKeeperWaitingSource('owner_shutdown')).toBe('owner_shutdown')
     expect(parseDashboardKeeperWaitingSource('chat_operation_queued')).toBe('chat_operation_queued')

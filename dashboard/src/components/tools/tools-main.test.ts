@@ -1,7 +1,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomationProjection } from '../../api'
+import type {
+  DashboardKeeperWaitingInventory,
+  DashboardScheduledAutomationProjection,
+  DashboardToolsResponse,
+} from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -16,11 +20,18 @@ type MockToolsResponse = {
 
 const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
+  fetchDashboardTools: vi.fn(),
   navigate: vi.fn(),
+  configResolutionPanel: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
   scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
+}))
+
+vi.mock('../../api', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api')>(),
+  fetchDashboardTools: mocks.fetchDashboardTools,
 }))
 
 vi.mock('../schedule/schedule-state', () => ({
@@ -33,6 +44,11 @@ vi.mock('./tool-state', () => ({
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
+}))
+
+vi.mock('../../lib/auto-refresh', () => ({
+  setupVisibleAutoRefresh: () => () => {},
 }))
 
 vi.mock('../common/card', () => ({
@@ -57,7 +73,10 @@ vi.mock('../../router', () => ({
 }))
 
 vi.mock('./config-resolution-panel', () => ({
-  ConfigResolutionPanel: () => html`<div>ConfigResolutionPanel</div>`,
+  ConfigResolutionPanel: (props: unknown) => {
+    mocks.configResolutionPanel(props)
+    return html`<div>ConfigResolutionPanel</div>`
+  },
 }))
 
 vi.mock('../tool-executor/tool-executor', () => ({
@@ -66,23 +85,25 @@ vi.mock('../tool-executor/tool-executor', () => ({
 
 import { Tools } from './tools-main'
 
-function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
+function waitingInventoryFixture(
+  keeperNames: string[] = ['sangsu'],
+): DashboardKeeperWaitingInventory {
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     keeper_count_known: true,
-    keeper_count: 1,
-    waiting_keeper_count: 1,
-    row_count: 1,
+    keeper_count: keeperNames.length,
+    waiting_keeper_count: keeperNames.length,
+    row_count: keeperNames.length,
     global_row_count: 0,
-    keepers: [
-      {
-        keeper_name: 'sangsu',
+    keepers: keeperNames.map(keeperName =>
+      ({
+        keeper_name: keeperName,
         state: 'waiting',
         waiting_count: 1,
         waiting_on: [
           {
-            keeper_name: 'sangsu',
+            keeper_name: keeperName,
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
             what: '기동 직후 첫 턴',
@@ -90,10 +111,102 @@ function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
             next_action: 'keeper_drain_event_queue',
           },
         ],
-      },
-    ],
+      })),
     global_waiting_on: [],
   }
+}
+
+function keeperReceiptFixture(
+  keeperName: string,
+  sessionId = 'trace-one',
+): DashboardToolsResponse {
+  const reference = {
+    identity: {
+      source_id: 'project-masc',
+      package_id: 'ocaml-coding',
+      name: 'ocaml-coding',
+    },
+    content_revision: 'a'.repeat(64),
+  }
+  return {
+    tool_inventory: { count: 0, tools: [] },
+    tool_usage: {
+      total_calls: 0,
+      distinct_tools_called: 0,
+      top_20: [],
+      never_called_count: 0,
+      registered_count: 0,
+    },
+    effective_keeper_surface: {
+      status: 'available',
+      keeper_name: keeperName,
+      runtime_id: 'openai.codex',
+      official_client_kind: 'codex',
+      tool_delivery: { status: 'delivered' },
+      native_posture: 'read',
+      tool_groups: [],
+      current_task_id: 'task-001',
+      instruction_skills: [reference],
+      composition_skills: [],
+      count: 2,
+      tools: [],
+      tool_surface_sha256: 'b'.repeat(64),
+    },
+    skill_activations: {
+      status: 'available',
+      keeper_name: keeperName,
+      summary: {
+        instruction_invocations: 1,
+        skill_bodies_served: 1,
+        skill_resources_served: 0,
+        instruction_deliveries: 1,
+        instruction_actions_observed: 1,
+        composition_invocations: 0,
+        composition_deliveries: 0,
+        composition_actions_observed: 0,
+        invalid_transitions: 0,
+      },
+      ledger: {
+        schema: 'masc.skill-activations/v2',
+        workspace_key: 'e'.repeat(64),
+        session_id: sessionId,
+        revision: 'c'.repeat(64),
+        activations: [
+          {
+            ...reference,
+            snapshot_revision: 'd'.repeat(64),
+            turn_ref: `${sessionId}#1`,
+            runtime_id: 'openai.codex',
+            skill_tool_use_id: 'call-skill-1',
+            agent_core_turn: 0,
+            served_content: {
+              kind: 'skill_body',
+              bytes: 12,
+              sha256: 'f'.repeat(64),
+            },
+            delivery: {
+              agent_core_turn: 1,
+              delivered_at: '2026-08-26T00:00:01Z',
+            },
+            actions: [{
+              tool_use_id: 'call-action-1',
+              tool_name: 'keeper_time_now',
+              agent_core_turn: 1,
+              observed_at: '2026-08-26T00:00:02Z',
+            }],
+            activated_at: '2026-08-26T00:00:00Z',
+            origin: { kind: 'task_instruction', task_id: 'task-001' },
+          },
+        ],
+      },
+    },
+  }
+}
+
+function selectKeeper(container: HTMLElement, keeperName: string): void {
+  const selector = container.querySelector('select') as HTMLSelectElement
+  selector.value = keeperName
+  selector.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 async function flush(): Promise<void> {
@@ -110,6 +223,8 @@ describe('Tools', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
+    mocks.fetchDashboardTools.mockReset()
+    mocks.configResolutionPanel.mockClear()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
@@ -230,6 +345,31 @@ describe('Tools', () => {
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()
   })
 
+  it('keeps the Tools surface alive while config projections warm', async () => {
+    mocks.toolsData.value = {
+      config_resolution: { status: 'warming' },
+      runtime_resolution: { status: 'warming' },
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    } as MockToolsResponse
+
+    render(html`<${Tools} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="tools-config-resolution-warming"]'))
+      .not.toBeNull()
+    expect(container.textContent).toContain('Keeper Skill Receipts')
+    expect(mocks.configResolutionPanel).toHaveBeenLastCalledWith({
+      resolution: undefined,
+      runtimeResolution: undefined,
+    })
+  })
+
   it('renders tool usage coverage gap provenance', async () => {
     mocks.toolsData.value = {
       tool_inventory: { tools: [] },
@@ -265,5 +405,152 @@ describe('Tools', () => {
     expect(container.textContent).toContain('store .masc/tool_usage')
     expect(container.textContent).toContain('surface /api/v1/dashboard/tools')
     expect(container.textContent).toContain('error synthetic append failure')
+  })
+
+  it('loads and renders exact Keeper Skill receipts', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('sangsu'))
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(mocks.fetchDashboardTools).toHaveBeenCalledWith(expect.objectContaining({
+      keeperName: 'sangsu',
+    }))
+    expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
+    expect(container.textContent).toContain('Task instruction · task-001')
+    expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
+    expect(container.textContent).toContain('offered 1')
+    expect(container.textContent).toContain('invoked 1')
+    expect(container.textContent).toContain('delivered 1')
+    expect(container.textContent).toContain('actions 1')
+    expect(container.textContent).toContain('invalid 0')
+    expect(container.textContent).toContain('call-skill-1')
+    expect(container.textContent).toContain('keeper_time_now')
+  })
+
+  it('fails loudly when one Keeper projection is omitted', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const partial = keeperReceiptFixture('sangsu')
+    delete partial.skill_activations
+    mocks.fetchDashboardTools.mockResolvedValue(partial)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain('Server response omitted skill_activations')
+    expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('shows runtime capability suppression as a normal typed posture', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const receipt = keeperReceiptFixture('sangsu')
+    if (receipt.effective_keeper_surface?.status !== 'available') {
+      throw new Error('fixture effective surface is not available')
+    }
+    receipt.effective_keeper_surface.tool_delivery = {
+      status: 'suppressed',
+      reason: 'runtime_tools_unsupported',
+    }
+    receipt.effective_keeper_surface.instruction_skills = []
+    receipt.effective_keeper_surface.composition_skills = []
+    receipt.effective_keeper_surface.tools = []
+    receipt.effective_keeper_surface.count = 0
+    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.querySelector('[data-testid="skill-tool-delivery-suppressed"]'))
+      .not.toBeNull()
+    expect(container.textContent).toContain('runtime_tools_unsupported')
+  })
+
+  it('rejects a receipt belonging to another Keeper', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('other-keeper'))
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain(
+      'effective_keeper_surface belongs to other-keeper, not sangsu',
+    )
+    expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('does not render a late receipt after the selected Keeper changes', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(['alpha', 'beta']),
+    }
+    let resolveAlpha: ((value: DashboardToolsResponse) => void) | undefined
+    let resolveBeta: ((value: DashboardToolsResponse) => void) | undefined
+    mocks.fetchDashboardTools.mockImplementation(({ keeperName }: { keeperName: string }) =>
+      new Promise<DashboardToolsResponse>(resolve => {
+        if (keeperName === 'alpha') resolveAlpha = resolve
+        if (keeperName === 'beta') resolveBeta = resolve
+      }))
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'alpha')
+    await flush()
+    selectKeeper(container, 'beta')
+    await flush()
+
+    resolveBeta?.(keeperReceiptFixture('beta', 'trace-beta'))
+    await flush()
+    expect(container.textContent).toContain('session trace-beta')
+
+    resolveAlpha?.(keeperReceiptFixture('alpha', 'trace-alpha'))
+    await flush()
+    expect(container.textContent).toContain('session trace-beta')
+    expect(container.textContent).not.toContain('session trace-alpha')
   })
 })

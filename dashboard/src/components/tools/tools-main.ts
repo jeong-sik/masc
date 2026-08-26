@@ -1,7 +1,7 @@
 // Tools main component — orchestrates inventory and executor views
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { SectionCard } from '../common/card'
 import { ToolMetrics } from '../tool-metrics'
@@ -10,6 +10,7 @@ import {
   toolsLoading,
   toolsError,
   loadTools,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
 import { ConfigResolutionPanel } from './config-resolution-panel'
@@ -20,6 +21,9 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { SkillActivationPanel } from './skill-activation-panel'
+import { fetchDashboardTools, type DashboardToolsResponse } from '../../api'
+import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -35,13 +39,41 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
   return `latest ${formatElapsedCompact(latestAge)}`
 }
 
+function validateKeeperReceipt(
+  response: DashboardToolsResponse,
+  expectedKeeper: string,
+): string | null {
+  const effectiveSurface = response.effective_keeper_surface
+  if (!effectiveSurface) return 'Server response omitted effective_keeper_surface'
+  const activations = response.skill_activations
+  if (!activations) return 'Server response omitted skill_activations'
+  if (effectiveSurface.keeper_name !== expectedKeeper) {
+    return `effective_keeper_surface belongs to ${effectiveSurface.keeper_name}, not ${expectedKeeper}`
+  }
+  if (activations.keeper_name !== expectedKeeper) {
+    return `skill_activations belongs to ${activations.keeper_name}, not ${expectedKeeper}`
+  }
+  return null
+}
+
 export function Tools() {
   const data = toolsData.value
   const loading = toolsLoading.value
   const error = toolsError.value
   const inventory = data?.tool_inventory.tools ?? []
   const usage = data?.tool_usage ?? null
+  const configResolution = data?.config_resolution
+  const runtimeResolution = data?.runtime_resolution
+  const configResolutionWarming = configResolution?.status === 'warming'
+  const runtimeResolutionWarming = runtimeResolution?.status === 'warming'
   const usageCoverageGap = usage ? coverageGapDisplay(usage) : null
+  const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
+    .map(keeper => keeper.keeper_name)
+    .sort((left, right) => left.localeCompare(right))
+  const [selectedKeeper, setSelectedKeeper] = useState<string | null>(null)
+  const [keeperReceipt, setKeeperReceipt] = useState<DashboardToolsResponse | null>(null)
+  const [keeperReceiptLoading, setKeeperReceiptLoading] = useState(false)
+  const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -51,6 +83,51 @@ export function Tools() {
     // part of the tools response.
     return subscribeScheduledAutomationRefresh()
   }, [])
+
+  useEffect(() => {
+    if (selectedKeeper === null) {
+      setKeeperReceipt(null)
+      setKeeperReceiptError(null)
+      setKeeperReceiptLoading(false)
+      return
+    }
+    let controller: AbortController | null = null
+    const refresh = () => {
+      controller?.abort()
+      controller = new AbortController()
+      const current = controller
+      setKeeperReceiptLoading(true)
+      setKeeperReceiptError(null)
+      void fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal })
+        .then(response => {
+          if (current.signal.aborted) return
+          const receiptError = validateKeeperReceipt(response, selectedKeeper)
+          if (receiptError) {
+            setKeeperReceipt(null)
+            setKeeperReceiptError(receiptError)
+            return
+          }
+          setKeeperReceipt(response)
+        })
+        .catch((cause: unknown) => {
+          if (current.signal.aborted) return
+          setKeeperReceipt(null)
+          setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+        })
+        .finally(() => {
+          if (!current.signal.aborted) setKeeperReceiptLoading(false)
+        })
+    }
+    refresh()
+    const stopRefresh = setupVisibleAutoRefresh(
+      refresh,
+      KEEPER_WAITING_INVENTORY_REFRESH_MS,
+    )
+    return () => {
+      stopRefresh()
+      controller?.abort()
+    }
+  }, [selectedKeeper])
 
   return html`
     <div class="v2-lab-surface flex flex-col gap-4">
@@ -62,9 +139,16 @@ export function Tools() {
       </div>
       ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
       <${ConfigResolutionPanel}
-        resolution=${data?.config_resolution}
-        runtimeResolution=${data?.runtime_resolution}
+        resolution=${configResolutionWarming ? undefined : configResolution}
+        runtimeResolution=${runtimeResolutionWarming ? undefined : runtimeResolution}
       />
+      ${configResolutionWarming || runtimeResolutionWarming
+        ? html`<${SectionCard} label="설정 경로" class="section v2-lab-panel mb-4">
+            <div class="text-xs text-[var(--color-fg-muted)]" data-testid="tools-config-resolution-warming">
+              Config and runtime resolution warming
+            </div>
+          <//>`
+        : null}
 
       <${SectionCard} label="프롬프트 레지스트리" class="section v2-lab-panel mb-4">
         <div class="text-xs text-[var(--color-fg-muted)] mb-3">
@@ -93,6 +177,18 @@ export function Tools() {
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
         <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
+      <//>
+
+      <${SectionCard} label="Keeper Skill Receipts" class="section v2-lab-panel mb-4">
+        <${SkillActivationPanel}
+          keeperNames=${keeperNames}
+          selectedKeeper=${selectedKeeper}
+          effectiveSurface=${keeperReceipt?.effective_keeper_surface}
+          activations=${keeperReceipt?.skill_activations}
+          loading=${keeperReceiptLoading}
+          error=${keeperReceiptError}
+          onSelectKeeper=${setSelectedKeeper}
+        />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

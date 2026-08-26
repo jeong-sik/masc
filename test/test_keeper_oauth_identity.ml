@@ -285,6 +285,59 @@ let test_renewal_window_opens_before_expiry () =
     "already expired" true
     (Keeper_oauth_flow.needs_renewal ~provider ~expires_at:900.0 ~now:1000.0)
 
+(* ── the exchanges waiting for a browser ─────────────────────────────── *)
+
+let pending_for provider = begin_for provider
+
+let test_a_state_is_redeemed_once () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let pending = pending_for provider in
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 pending;
+  let state = pending.Keeper_oauth_flow.state in
+  (match Keeper_oauth_pending.take table ~now:1.0 ~state with
+  | None -> Alcotest.fail "the exchange was not held"
+  | Some found ->
+      check str "the verifier came back" pending.Keeper_oauth_flow.verifier
+        found.Keeper_oauth_flow.verifier);
+  (* A replayed callback finds nothing, which is what it should find. *)
+  Alcotest.(check bool)
+    "a second callback finds nothing" true
+    (Keeper_oauth_pending.take table ~now:2.0 ~state = None)
+
+let test_an_abandoned_login_expires () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let pending = pending_for provider in
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 pending;
+  let state = pending.Keeper_oauth_flow.state in
+  Alcotest.(check int) "held while inside the window" 1
+    (Keeper_oauth_pending.waiting table ~now:599.0);
+  Alcotest.(check int) "gone once past it" 0
+    (Keeper_oauth_pending.waiting table ~now:601.0);
+  Alcotest.(check bool)
+    "and a late callback finds nothing" true
+    (Keeper_oauth_pending.take table ~now:601.0 ~state = None)
+
+let test_logins_do_not_collide () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let one = pending_for provider and two = pending_for provider in
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 one;
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 two;
+  Alcotest.(check int) "both are held" 2
+    (Keeper_oauth_pending.waiting table ~now:1.0);
+  match
+    ( Keeper_oauth_pending.take table ~now:1.0 ~state:one.Keeper_oauth_flow.state,
+      Keeper_oauth_pending.take table ~now:1.0 ~state:two.Keeper_oauth_flow.state )
+  with
+  | Some a, Some b ->
+      check str "the first kept its own verifier" one.Keeper_oauth_flow.verifier
+        a.Keeper_oauth_flow.verifier;
+      check str "the second kept its own" two.Keeper_oauth_flow.verifier
+        b.Keeper_oauth_flow.verifier
+  | _ -> Alcotest.fail "one of two concurrent logins was lost"
+
 let () =
   Alcotest.run "keeper_oauth_identity"
     [ ( "declaration",
@@ -318,5 +371,13 @@ let () =
             test_refresh_asks_for_a_refresh_grant;
           Alcotest.test_case "the renewal window opens before expiry" `Quick
             test_renewal_window_opens_before_expiry;
+        ] );
+      ( "pending",
+        [ Alcotest.test_case "a state is redeemed once" `Quick
+            test_a_state_is_redeemed_once;
+          Alcotest.test_case "an abandoned login expires" `Quick
+            test_an_abandoned_login_expires;
+          Alcotest.test_case "two logins do not collide" `Quick
+            test_logins_do_not_collide;
         ] );
     ]

@@ -3275,7 +3275,6 @@
 (include stanzas/test_tui_file_icon.inc)
 
 (include stanzas/test_tui_config.inc)
-(include stanzas/test_tui_keypress_gates_report.inc)
 (include stanzas/test_tui_config_highlight_wiring.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)

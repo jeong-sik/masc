@@ -379,11 +379,62 @@ let test_request_timeout_bounds_never_returning_transport () =
    | Ok () -> Alcotest.fail "never-returning transport must time out");
   Alcotest.(check bool) "deadline settles promptly" true (elapsed < 0.5)
 
+(* ── Idle queue: never hand out a connection past its TTL ────── *)
+
+module Take = Masc_http_client.Pool.For_testing
+
+let take ~now entries = Take.take_live ~now ~ttl:60.0 entries
+let ids = List.map fst
+
+let test_a_live_entry_is_taken () =
+  let taken, rest, expired = take ~now:100.0 [ ("a", 90.0); ("b", 80.0) ] in
+  Alcotest.(check (option string)) "the first still inside its TTL" (Some "a") taken;
+  Alcotest.(check (list string)) "the rest stays" [ "b" ] (ids rest);
+  Alcotest.(check (list string)) "nothing expired" [] expired
+
+let test_an_expired_entry_is_not_handed_out () =
+  (* The whole point. The eviction fiber may not have run -- a blocking
+     syscall on this domain, a cancellation, or the failure the pool already
+     counts -- and this used to hand out whatever was at the head. The peer
+     had closed it (#30831). *)
+  let taken, _, expired = take ~now:1000.0 [ ("stale", 100.0) ] in
+  Alcotest.(check (option string)) "nothing warm to take" None taken;
+  Alcotest.(check (list string)) "and the dead one is named" [ "stale" ] expired
+
+let test_expired_entries_are_dropped_not_skipped () =
+  (* Skipping would leave them in the queue until the fiber runs, and the
+     reason this function exists is that it may not. *)
+  let taken, rest, expired =
+    take ~now:1000.0 [ ("old", 100.0); ("older", 50.0); ("warm", 990.0) ]
+  in
+  Alcotest.(check (option string)) "the warm one" (Some "warm") taken;
+  Alcotest.(check (list string)) "queue holds nothing else" [] (ids rest);
+  Alcotest.(check (list string)) "both dead ones come back to be closed"
+    [ "old"; "older" ] expired
+
+let test_exactly_at_the_ttl_is_still_live () =
+  (* [>] not [>=], the same comparison the eviction fiber makes. Two rules
+     for one boundary is how a connection becomes live to one and dead to
+     the other. *)
+  let taken, _, _ = take ~now:160.0 [ ("edge", 100.0) ] in
+  Alcotest.(check (option string)) "still usable" (Some "edge") taken
+
 (* ── Runner ──────────────────────────────────────────────────── *)
 
 let () =
   Alcotest.run "pool"
     [
+      ( "idle queue",
+        [
+          Alcotest.test_case "a live entry is taken" `Quick
+            test_a_live_entry_is_taken;
+          Alcotest.test_case "an expired entry is not handed out" `Quick
+            test_an_expired_entry_is_not_handed_out;
+          Alcotest.test_case "expired entries are dropped, not skipped" `Quick
+            test_expired_entries_are_dropped_not_skipped;
+          Alcotest.test_case "exactly at the TTL is still live" `Quick
+            test_exactly_at_the_ttl_is_still_live;
+        ] );
       ( "Host_key normalization",
         [
           Alcotest.test_case "default port 80 for http" `Quick

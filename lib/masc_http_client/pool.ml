@@ -221,18 +221,77 @@ let create ~sw ~env ?(config = default_config) () : t =
 
 (* ── acquire / release ─────────────────────────────────────────── *)
 
-(* Try to take a warm client for [key]; returns [None] if the host's
-   queue is empty.  No network IO. *)
-let try_acquire_idle t key =
-  with_mu t (fun () ->
-    match Host_map.find_opt key t.idle with
-    | None | Some [] -> None
-    | Some (e :: rest) ->
-      let updated = if rest = [] then Host_map.remove key t.idle
-                    else Host_map.add key rest t.idle in
-      t.idle <- updated;
-      t.counters.reuse_count_total <- t.counters.reuse_count_total + 1;
-      Some e.client)
+(* The decision, separated from the resource so it can be driven with plain
+   values: given a queue of (client, last_used) in park order, the first one
+   still inside [ttl], what is left of the queue, and what was found expired
+   on the way.
+
+   Expired entries are dropped rather than skipped. A queue nobody sweeps
+   would otherwise keep them until the eviction fiber next runs, and the
+   whole reason this function exists is that the fiber cannot be relied on
+   to run. *)
+let take_live ~now ~ttl entries =
+  let rec walk expired = function
+    | [] -> (None, [], List.rev expired)
+    | (client, last_used) :: rest ->
+      if now -. last_used > ttl
+      then walk (client :: expired) rest
+      else (Some client, rest, List.rev expired)
+  in
+  walk [] entries
+
+(* Try to take a warm client for [key]; returns [None] if the host's queue
+   holds nothing still inside [idle_ttl_seconds].  No network IO.
+
+   The age check is here and not only in [start_eviction_fiber] because that
+   fiber is one fiber: anything that keeps the scheduler from running it --
+   a blocking syscall on this domain, a cancellation, the failure the pool
+   already counts in [evict_failure_count_total] -- leaves entries past
+   their TTL in the queue, and this handed one out without looking. The peer
+   had closed it, and the request failed with "unexpected eof" (#30831).
+
+   Retrying is not the fix. RFC-0107 says no silent retry, and the first
+   place this was seen was an OAuth token exchange, where the code is
+   single-use: a request that got no answer cannot be repeated without
+   risking the tokens it may already have minted. Not handing out a dead
+   connection is the fix. *)
+let try_acquire_idle t key ~now =
+  let expired = ref [] in
+  let client =
+    with_mu t (fun () ->
+      match Host_map.find_opt key t.idle with
+      | None | Some [] -> None
+      | Some entries ->
+        let taken, rest, dead =
+          take_live ~now ~ttl:t.config.idle_ttl_seconds
+            (List.map (fun e -> (e.client, e.last_used_ts)) entries)
+        in
+        expired := dead;
+        t.counters.evict_count_total
+          <- t.counters.evict_count_total + List.length dead;
+        t.idle <-
+          (if rest = []
+           then Host_map.remove key t.idle
+           else
+             Host_map.add key
+               (List.map
+                  (fun (client, last_used_ts) -> { client; last_used_ts })
+                  rest)
+               t.idle);
+        (match taken with
+         | Some _ ->
+           t.counters.reuse_count_total <- t.counters.reuse_count_total + 1
+         | None -> ());
+        taken)
+  in
+  (* Outside the lock, like the eviction fiber does. *)
+  List.iter
+    (fun c ->
+      try Piaf.Client.shutdown c with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | _ -> ())
+    !expired;
+  client
 
 (* Build a fresh piaf client.  Returns [Result] mirroring piaf's API
    so callers can surface DNS/TCP/TLS failures distinctly. *)
@@ -391,7 +450,7 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
-    match try_acquire_idle t key with
+    match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
     | None -> create_fresh t host_origin
   in
@@ -592,7 +651,7 @@ let do_request_streaming
   let key = Host_key.of_uri uri in
   let host_origin = Uri.with_uri ~path:(Some "") ~query:None uri in
   let acquired =
-    match try_acquire_idle t key with
+    match try_acquire_idle t key ~now:(Eio.Time.now (Eio.Stdenv.clock t.env)) with
     | Some c -> Ok c
     | None -> create_fresh t host_origin
   in
@@ -701,5 +760,6 @@ module For_testing = struct
   module Host_key = Host_key
   let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
+  let take_live = take_live
   let ensure_host_header = ensure_host_header
 end

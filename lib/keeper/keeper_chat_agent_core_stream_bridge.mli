@@ -22,12 +22,12 @@ type translated_event = {
 val empty_state : unit -> state
 
 val start_runtime_attempt
-  :  abandon_current_scope:bool
+  :  previous_scope:Keeper_chat_events.runtime_attempt_scope_disposition
   -> state
   -> translated_event
 (** Reset unfinished text/thinking state at an exact resolved-runtime attempt
-    boundary. When [abandon_current_scope] is true, terminalize every tool
-    occurrence in that unsealed scope as superseded. The durable tool
+    boundary. When [previous_scope] is [Abandon_previous_scope], terminalize
+    every tool occurrence in that unsealed scope as superseded. The durable tool
     accumulator computes this disposition before advancing, so a sealed or
     result-ready occurrence remains intact on both live and persisted surfaces. *)
 

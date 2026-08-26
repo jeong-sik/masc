@@ -17,8 +17,6 @@
 
 type t
 
-type runtime_attempt_transition = { abandon_previous_scope : bool }
-
 val create : unit -> t
 
 val current_stream_scope : t -> int
@@ -31,14 +29,16 @@ val current_scope_is_sealed : t -> bool
     without exact tool sources. Outer failures must not revoke that sealed
     evidence. *)
 
-val start_runtime_attempt : t -> runtime_attempt_transition
+val start_runtime_attempt
+  :  t
+  -> Keeper_chat_events.runtime_attempt_scope_disposition
 (** Mark the exact resolved-candidate attempt boundary before its first stream
     event. The first attempt retains the initial scope; every later attempt
     advances to a fresh scope and quarantines every unsealed row from the
     failed attempt, including syntactically finalized tool blocks. Already
-    sealed source evidence remains append-only. The returned transition carries
-    that same pre-advance disposition so the live bridge cannot independently
-    disagree about whether to tombstone the prior scope. This is what lets
+    sealed source evidence remains append-only. The returned closed disposition
+    carries that same pre-advance authority so the live bridge cannot
+    independently disagree about whether to tombstone the prior scope. This lets
     blank provider message ids replay within one attempt without aliasing a
     lane fallback or outer retry. *)
 

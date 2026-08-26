@@ -837,6 +837,7 @@ let state_guard_fragments =
     "no active";
     "unknown";
     "not a member";
+    "not a registered keeper";
     "no document matching";
   ]
 

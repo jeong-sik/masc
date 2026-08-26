@@ -89,6 +89,30 @@ ensure_server() {
   TRANSPORT_SERVER_BASE_PATH="$(harness_mktemp_dir "masc-transport-workspace")"
   TRANSPORT_SERVER_LOG_FILE="$(harness_mktemp_file "masc-transport-server" ".log")"
 
+  # The isolated server is auth-required. A health probe does not prove MCP or
+  # dashboard access, and the old dev-token fallback is intentionally absent
+  # in production-shaped boot. Mint the same workspace-local admin credential
+  # as the contract harness before starting the server; otherwise initialize
+  # returns 401 and transport-health is an auth body whose listener_mode is
+  # null, which the harness misreports as two unrelated transport failures.
+  if [[ -z "${MASC_TRANSPORT_AUTH_TOKEN:-}" ]]; then
+    if ! MASC_TRANSPORT_AUTH_TOKEN="$(
+      harness_mint_admin_token \
+        "$server_exe" \
+        "$MASC_HTTP_PORT" \
+        "$TRANSPORT_SERVER_BASE_PATH" \
+        "transport-harness-admin"
+    )"; then
+      echo "ERROR: failed to mint transport harness admin token" >&2
+      exit 1
+    fi
+    if [[ -z "$MASC_TRANSPORT_AUTH_TOKEN" ]]; then
+      echo "ERROR: transport harness admin token is empty" >&2
+      exit 1
+    fi
+    export MASC_TRANSPORT_AUTH_TOKEN
+  fi
+
   # shellcheck disable=SC2031
   export MASC_BASE_PATH="${TRANSPORT_SERVER_BASE_PATH}"
   export MASC_GRPC_ENABLED="${MASC_GRPC_ENABLED:-1}"

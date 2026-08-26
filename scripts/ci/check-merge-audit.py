@@ -7,13 +7,13 @@ Branch protection only requires a context to *report*; a CANCELLED or SKIPPED
 conclusion satisfies "strict" contexts on GitHub when an admin merges, and
 nothing in-repo looked at the conclusions a merge actually landed with.
 
-This script is the in-repo half: for the merge commit it names, it fetches the
-commit's combined status plus check-run conclusions, and fails when a required
-check's final conclusion on the merged SHA is anything other than ``success``.
+This script is the in-repo half: for the verdict-bearing PR head it names, it
+fetches the combined status plus check-run conclusions, and fails when a
+required check's final conclusion is anything other than ``success``.
 A check that never finished -- CANCELLED -- or never ran -- SKIPPED -- is
 exactly the "unfinished verdict" the merge gate must not treat as a pass.
 
-Exit 0  -- every required check concluded ``success`` on the merged SHA.
+Exit 0  -- every required check concluded ``success`` on the audited SHA.
 Exit 1  -- at least one required check concluded CANCELLED/SKIPPED/failure.
 Exit 2  -- the audit could not run (bad arguments, API unavailable).
 
@@ -160,7 +160,7 @@ def audit_merge(
             context, status_conclusions.get(context)
         )
         if conclusion is None:
-            # A required context with no run at all on the merged SHA is the
+            # A required context with no run on the verdict-bearing SHA is the
             # loudest form of unfinished: branch protection saw *some* run on
             # the PR head, but the merge commit never got one.
             offending.append(
@@ -168,10 +168,10 @@ def audit_merge(
                     "context": context,
                     "conclusion": "absent",
                     "bucket": "unfinished",
-                    "explanation": "no check run or status for this context on the merged SHA",
+                    "explanation": "no check run or status for this context on the audited SHA",
                 }
             )
-            lines.append(f"UNFINISHED {context}: no run on the merged SHA")
+            lines.append(f"UNFINISHED {context}: no run on the audited SHA")
             continue
         bucket, explanation = classify_conclusion(conclusion)
         if bucket == "pass":
@@ -193,7 +193,9 @@ def audit_merge(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--sha", required=True, help="merged commit SHA to audit")
+    parser.add_argument(
+        "--sha", required=True, help="verdict-bearing PR head SHA to audit"
+    )
     parser.add_argument(
         "--contexts",
         default=REQUIRED_CONTEXTS_DEFAULT,

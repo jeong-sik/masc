@@ -37,10 +37,10 @@ MASC(Multi-Agent Shared Context)는 여러 코딩 에이전트가 같이 쓰는 
 | **대시보드** | 브라우저에서 전체를 보고 운영자로서 조작할 때 | 서버가 같은 프로세스에서 `/dashboard/` 로 띄웁니다 |
 | **TUI** | 터미널에서 Keeper를 지켜보고 지시할 때. 코드와 diff도 여기서 봅니다 | `masc-tui`. 설치하면 `masc` 옆에 같이 깔립니다 |
 
-![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-25/01-overview.png)
+![MASC 대시보드 개요](docs/screenshots/dashboard/2026-08-26/01-overview.png)
 
 로컬에서 실행 중인 MASC를 캡처한 화면입니다. 운영 정보는 알아볼 수 없도록
-바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-25/README.md)에서
+바꿨습니다. [대시보드 화면 목록](docs/screenshots/dashboard/2026-08-26/README.md)에서
 24개 화면과 캡처 조건을 확인할 수 있습니다.
 
 ## 처음 실행하기
@@ -138,9 +138,12 @@ masc_status()
 
 `masc_start`가 프로젝트를 고르고, 작업 공간에 참여시키고, 원하면 작업을 하나
 만들어서 바로 담당까지 잡아 줍니다. 그다음부터는 목표, 작업, 보드 글, 상태 변경이
-MASC 도구를 통해 공유됩니다. 지금 공개된 MCP 도구는 39개이고, 작업 공간 참여와
-메시지, 작업, 목표, 계획, Keeper 조작, 보드로 나뉩니다. 클라이언트 안에서
-`masc_tool_help`로 각 도구 설명을 볼 수 있습니다.
+MASC 도구를 통해 공유됩니다. 도구는 작업 공간 참여와 메시지, 작업, 목표, 계획,
+예약, Keeper 조작, 보드로 나뉩니다. 클라이언트 안에서 `masc_tool_help`로 각 도구
+설명을 볼 수 있습니다.
+
+도구는 계속 늘어나니, 여기 적힌 숫자를 믿지 말고 붙어 있는 서버에 직접 물어보세요
+— 같은 세션에서 `tools/list`가 답합니다. 2026-08-26 빌드는 43개로 답했습니다.
 
 URL만 적어 두면 기본 인증 설정에서 `401 Unauthorized`가 납니다. 다른 클라이언트
 형식, initialize 직접 확인, bearer 수동 발급은
@@ -164,11 +167,11 @@ dune build --root . bin/masc_tui.exe
 `MASC_BASE_PATH`를, 그것도 없으면 현재 디렉터리를 씁니다. `dune install`이나 opam
 설치를 하면 `masc-tui` 이름으로 `PATH`에 올라갑니다.
 
-![MASC 터미널 UI](docs/screenshots/tui/2026-08-25/surfaces/01-overview.png)
+![MASC 터미널 UI](docs/screenshots/tui/2026-08-26/surfaces/01-overview.png)
 
 이 화면의 Keeper 이름과 경로는 같은 글자 수의 가짜 값으로 바꿨습니다. 나머지 네
 장과 캡처 조건은
-[화면 목록](docs/screenshots/tui/2026-08-25/surfaces/README.md)에 있습니다.
+[화면 목록](docs/screenshots/tui/2026-08-26/surfaces/README.md)에 있습니다.
 
 `Tab`을 누르면 화면 20개를 돌아가며 보여 주고, 지금 보는 화면은 맨 윗줄 띠에
 표시됩니다.
@@ -177,19 +180,27 @@ dune build --root . bin/masc_tui.exe
 |---|---|
 | Overview | 작업 공간 요약, 할 일 목록, 지금 손이 필요한 것 |
 | Acting | 모든 Keeper의 도구 호출, 턴 시작과 종료를 들어오는 대로 |
-| Keepers | Keeper 명단, 그리고 Keeper별 대화·로그·도구 호출·런타임 |
+| Keepers | Keeper 명단, 그리고 Keeper별 대화·로그·도구 호출·런타임, 그 Keeper가 들고 있는 비밀의 이름 |
 | Lanes, Runtime | 런타임 레인과 후보 순서, 프로바이더에 실제로 닿는지 |
-| Approvals | Gate 승인 대기 목록. 터미널에서 바로 승인하거나 거절합니다 |
+| Approvals | Gate 승인 대기 목록과 Keeper가 답을 기다리는 질문. 터미널에서 바로 승인·거절하고 답합니다 |
 | Board | 사람, 에이전트, 자동화, 시스템이 올린 글 |
 | Planning, Schedules, Verify | 계획과 목표, 예약된 작업, 검증 판정 |
 | Repositories, Code, Changes | 등록된 저장소, 그 안의 파일 탐색, Keeper가 최근에 고친 것 |
 | Harness, Fusion, Tools, Resources, Config, Connectors, Logs | 하네스 실행, 패널·심사 실행, 도구 목록, MCP 리소스, `runtime.toml`, 외부 채널 연결, 런타임 로그 |
 
+입력줄 바로 위 한 줄이 모든 화면에서 다음 예약 시각과, 사람을 기다리며 멈춘
+Keeper를 알려 줍니다. 둘 다 없으면 그 줄도 없습니다.
+
 보기만 하는 화면은 아닙니다. 맨 아래 입력줄은 지금 지정된 Keeper에게 메시지를
 보내고, `/task <제목>`을 치면 `masc_add_task`로 작업을 만든 뒤 그 작업 번호를 붙여
-Keeper에게 바로 넘깁니다. Code 화면에서는 `Enter`로 파일을 열고, `d`로 HEAD 대비
-지금 고친 내용을, `H`로 그 파일을 건드린 커밋을, `m`으로 그 파일에 달린 메모를
-봅니다.
+Keeper에게 바로 넘깁니다. `masc_ask`로 질문을 던진 Keeper에게는 터미널에서 바로
+답합니다 — 입력줄 위 그 줄이 가리키는 것이 이겁니다. Code 화면에서는 `Enter`로
+파일을 열고, `d`로 HEAD 대비 지금 고친 내용을, `H`로 그 파일을 건드린 커밋을,
+`m`으로 그 파일에 달린 메모를 봅니다.
+
+TUI와 서버가 서로 다른 작업 공간을 보고 있으면 머리글이 그렇게 말합니다 — 연결
+표시 옆 `[workspace mismatch]`, 그리고 아래 줄에 두 경로가 같이 나옵니다. 그동안
+둘을 섞을 읽기는 거절되지만, 서버가 답하는 화면은 그대로 그려집니다.
 
 서버가 꺼져 있어도 Keeper 명단, Keeper 상세, 할 일 목록은 디스크에서 읽으므로 그대로
 보입니다. Approvals, Board, Planning, Fusion, Runtime, 로그, 메시지 보내기는 서버가
@@ -233,6 +244,12 @@ MASC는 런타임 데이터를 `<base-path>/.masc` 아래에서 찾습니다. �
 | `repositories.toml` | 저장소 작업에 쓰는 저장소 정보와 체크아웃 경로 |
 | `keeper_repo_mappings.toml` | Keeper–저장소 기본 연결. 권한 경계가 아니라 기본값입니다 |
 | `.env.local` | 설치와 quickstart가 써 넣는 프로바이더 환경 변수 |
+
+같은 뿌리 아래 한 디렉터리는 생성물이 아니라 사람이 씁니다.
+
+| 경로 | 쓰임 |
+|---|---|
+| `<base-path>/.masc/skills/<이름>/SKILL.md` | Keeper에게 이름으로 건네줄 수 있는 능력. frontmatter의 `name`은 디렉터리 이름과 같아야 합니다 — 작업이 스킬을 그 디렉터리 이름으로 가리키기 때문입니다 |
 
 Keeper 하나는 파일 하나로 만듭니다. `<base-path>/.masc/config/keepers/reviewer.toml`:
 
@@ -314,7 +331,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 
 | 화면 | 하위 항목 |
 |---|---|
-| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory` |
+| Monitor | `agents`, `internal-agents`, `fleet-health`, `runtime`, `observatory`, `skills` |
 | Work | `work`, `planning`, `repositories`, `verification` |
 | Connectors | `connector-status` |
 | IDE | `ide-shell` |
@@ -331,7 +348,7 @@ curl -fsS 'http://127.0.0.1:8935/health?full=1' \
 화면입니다.
 
 주 메뉴, Monitor, Work, Lab 화면을 캡처한
-[24개 화면 목록](docs/screenshots/dashboard/2026-08-25/README.md)도 있습니다.
+[24개 화면 목록](docs/screenshots/dashboard/2026-08-26/README.md)도 있습니다.
 
 ## 저장소 구조
 
@@ -356,6 +373,7 @@ masc/
 | [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | 터미널 UI 화면, 키, 문제 해결 |
 | [`docs/KEEPER-USER-MANUAL.ko.md`](docs/KEEPER-USER-MANUAL.ko.md) | Keeper 를 만들고 켜고 지켜보는 법 |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Keeper 파일과 런타임 배정 규칙 |
+| [`docs/SKILLS.md`](docs/SKILLS.md) | `SKILL.md`로 능력을 선언하고 Keeper에게 건네는 법 |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |
 | [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md) | 로컬 bearer와 대시보드 쓰기 권한 |
 | [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC와 내장 Agent Core의 역할 구분 |

@@ -65,9 +65,10 @@ flowchart LR
   NM -->|"예"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
 
-fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
-`disable-model-invocation`은 둘 다 명시적으로 거부한다. composition 선언을 남겨 놓고
-도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
+fence 개수가 유일한 갈림길이다. `masc-composition-tool`, 다른 클라이언트의
+`disable-model-invocation`, `allowed-tools`는 모두 명시적으로 거부한다. composition
+선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부
+fence로 감싼다.
 
 **실패와 편차는 다르다**: 카탈로그 조립의 유일한 진입점인
 `partition_documents`는 잘못된 문서만 표면에서 제외하고 모든 rejection을 별도로

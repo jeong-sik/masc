@@ -564,45 +564,8 @@ let test_invocation_policy_fields_are_rejected () =
     [ "masc-composition-tool", "false"
     ; "masc-composition-tool", "true"
     ; "disable-model-invocation", "true"
+    ; "allowed-tools", "Read Bash(git:*)"
     ]
-;;
-
-(* Portable input may carry the experimental ecosystem key, but the decoded
-   document and Keeper catalog deliberately retain no value or semantics for
-   it. *)
-let test_allowed_tools_is_discarded () =
-  let document =
-    {|---
-name: release-checklist
-description: Walk the release checklist before shipping.
-allowed-tools: Read Bash(git:*)
----
-
-# Release checklist
-|}
-  in
-  match Skill_catalog.parse_skill ~directory:"release-checklist" document with
-  | Error error ->
-    fail
-      ("a standard skill field stopped the skill loading: "
-      ^ Skill_catalog.error_to_string error)
-  | Ok skill ->
-    check string "the skill is the one it names" "release-checklist"
-      skill.Skill_catalog.name;
-    (* The point of the removal: nothing downstream carries the field, so
-       nothing reads it as an effective permission. Checked on the body the
-       catalog keeps, which is what a turn is handed. *)
-    let body = skill.Skill_catalog.body in
-    let mentions needle =
-      let nl = String.length needle and hl = String.length body in
-      let rec go i =
-        i + nl <= hl
-        && (String.equal (String.sub body i nl) needle || go (i + 1))
-      in
-      go 0
-    in
-    check bool "the body does not carry the hint" false
-      (mentions "allowed-tools")
 ;;
 
 let test_composition_skill_joins_projection () =
@@ -706,10 +669,6 @@ let () =
             "invocation policy fields are rejected"
             `Quick
             test_invocation_policy_fields_are_rejected
-        ; test_case
-            "allowed-tools is discarded"
-            `Quick
-            test_allowed_tools_is_discarded
         ; test_case
             "composition skill joins the model projection"
             `Quick

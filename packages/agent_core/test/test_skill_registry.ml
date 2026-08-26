@@ -62,7 +62,7 @@ let test_json_projection () =
     match
       Skill_document.decode
         ~directory_name:"inspect"
-        "---\nname: inspect\ndescription: Inspect state\nlicense: MIT\nmetadata:\n  owner: masc\nallowed-tools: Read Shell\n---\nInspect exactly."
+        "---\nname: inspect\ndescription: Inspect state\nlicense: MIT\nmetadata:\n  owner: masc\n---\nInspect exactly."
     with
     | Loaded { document; _ } -> document
     | Unloadable diagnostics ->
@@ -83,10 +83,6 @@ let test_json_projection () =
     "body"
     "Inspect exactly."
     (projected |> member "body" |> to_string);
-  Alcotest.(check bool)
-    "experimental approval hint is not projected"
-    true
-    (Yojson.Safe.equal (projected |> member "allowed_tools") `Null);
   Alcotest.(check string)
     "metadata"
     "masc"

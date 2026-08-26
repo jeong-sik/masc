@@ -7434,7 +7434,10 @@ let render_surface (state : state) =
   | Changes -> render_changes state
   | Connectors -> render_connectors state
   | Runtime -> render_runtime state
-  | Config -> if state.config_prompts then render_prompts state else render_config state
+  | Config -> (
+    match state.config_pane with
+    | Config_prompts -> render_prompts state
+    | Config_runtime -> render_config state)
   | Resources -> render_resources state
   | Code -> render_code state
   | Tools -> render_tools state

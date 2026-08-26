@@ -51,6 +51,18 @@ type activation = private
 
 type t
 
+type summary =
+  { instruction_invocations : int
+  ; skill_bodies_served : int
+  ; skill_resources_served : int
+  ; instruction_deliveries : int
+  ; instruction_actions_observed : int
+  ; composition_invocations : int
+  ; composition_deliveries : int
+  ; composition_actions_observed : int
+  ; invalid_transitions : int
+  }
+
 type record_outcome =
   | Recorded of activation
   | Already_recorded of activation
@@ -129,6 +141,8 @@ val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val workspace_key : t -> string
 val session_id : t -> Keeper_id.Trace_id.t
+val summarize : t -> summary
+val summary_to_yojson : summary -> Yojson.Safe.t
 
 val make_activation :
   identity:Skill_reference.identity ->

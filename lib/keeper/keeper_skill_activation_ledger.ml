@@ -57,6 +57,18 @@ type t =
   ; revision : ledger_revision
   }
 
+type summary =
+  { instruction_invocations : int
+  ; skill_bodies_served : int
+  ; skill_resources_served : int
+  ; instruction_deliveries : int
+  ; instruction_actions_observed : int
+  ; composition_invocations : int
+  ; composition_deliveries : int
+  ; composition_actions_observed : int
+  ; invalid_transitions : int
+  }
+
 type record_outcome =
   | Recorded of activation
   | Already_recorded of activation
@@ -217,6 +229,71 @@ let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
+
+let empty_summary =
+  { instruction_invocations = 0
+  ; skill_bodies_served = 0
+  ; skill_resources_served = 0
+  ; instruction_deliveries = 0
+  ; instruction_actions_observed = 0
+  ; composition_invocations = 0
+  ; composition_deliveries = 0
+  ; composition_actions_observed = 0
+  ; invalid_transitions = 0
+  }
+;;
+
+let summarize ledger =
+  List.fold_left
+    (fun summary activation ->
+       let delivered =
+         match activation.delivery with
+         | Some _ -> 1
+         | None -> 0
+       in
+       let actions = List.length activation.actions in
+       match activation.origin with
+       | Task_instruction _
+       | Session_instruction ->
+         let skill_bodies_served, skill_resources_served =
+           match activation.served_content with
+           | Skill_body _ -> summary.skill_bodies_served + 1, summary.skill_resources_served
+           | Skill_resource _ ->
+             summary.skill_bodies_served, summary.skill_resources_served + 1
+         in
+         { summary with
+           instruction_invocations = summary.instruction_invocations + 1
+         ; skill_bodies_served
+         ; skill_resources_served
+         ; instruction_deliveries = summary.instruction_deliveries + delivered
+         ; instruction_actions_observed =
+             summary.instruction_actions_observed + actions
+         }
+       | Task_composition _
+       | Session_composition _ ->
+         { summary with
+           composition_invocations = summary.composition_invocations + 1
+         ; composition_deliveries = summary.composition_deliveries + delivered
+         ; composition_actions_observed =
+             summary.composition_actions_observed + actions
+         })
+    empty_summary
+    ledger.activations
+;;
+
+let summary_to_yojson summary =
+  `Assoc
+    [ "instruction_invocations", `Int summary.instruction_invocations
+    ; "skill_bodies_served", `Int summary.skill_bodies_served
+    ; "skill_resources_served", `Int summary.skill_resources_served
+    ; "instruction_deliveries", `Int summary.instruction_deliveries
+    ; "instruction_actions_observed", `Int summary.instruction_actions_observed
+    ; "composition_invocations", `Int summary.composition_invocations
+    ; "composition_deliveries", `Int summary.composition_deliveries
+    ; "composition_actions_observed", `Int summary.composition_actions_observed
+    ; "invalid_transitions", `Int summary.invalid_transitions
+    ]
+;;
 
 let validate_served_content = function
   | Skill_body { bytes; sha256 } ->

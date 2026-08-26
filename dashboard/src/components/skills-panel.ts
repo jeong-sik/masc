@@ -75,8 +75,11 @@ export function kindLabel(usage: SkillUsage | null): string {
 /** "in the last N calls" — the window rides with the response. */
 export function usageLabel(usage: SkillUsage | null, windowRows?: number): string {
   if (!usage || usage.kind === 'unparsed') return '—'
-  if (windowRows === undefined) return `${usage.recent_use_count} (window unreported)`
-  return `${usage.recent_use_count} in last ${windowRows} calls`
+  const window = windowRows === undefined ? 'window unreported' : `last ${windowRows} rows`
+  if (usage.recent_success_count === undefined || usage.recent_failure_count === undefined) {
+    return `${usage.recent_use_count} (${window})`
+  }
+  return `${usage.recent_use_count} used · ${usage.recent_success_count} ok / ${usage.recent_failure_count} failed (${window})`
 }
 
 export function formatBytes(bytes: number): string {

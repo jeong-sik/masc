@@ -33,16 +33,21 @@ export interface SkillSnapshot {
   rejections: unknown[]
 }
 
+interface SkillUsageCounts {
+  recent_use_count: number
+  recent_success_count?: number
+  recent_failure_count?: number
+}
+
 export type SkillUsage =
-  | { name: string; directory: string; kind: 'instruction'; recent_use_count: number }
-  | {
+  | ({ name: string; directory: string; kind: 'instruction' } & SkillUsageCounts)
+  | ({
       name: string
       directory: string
       kind: 'composition'
       tool_name: string
       execution: string
-      recent_use_count: number
-    }
+    } & SkillUsageCounts)
   | { name: string; directory: string; kind: 'unparsed'; error: string }
 
 export type SkillsResponse =

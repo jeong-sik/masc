@@ -21,8 +21,8 @@ function entry(name: string, body_bytes = 100, diagnostics?: string[]): SkillSna
 }
 
 const usage: SkillUsage[] = [
-  { name: 'mission-snapshot', directory: 'mission-snapshot', kind: 'composition', tool_name: 'keeper_compose_mission-snapshot', execution: 'inline', recent_use_count: 5 },
-  { name: 'work-intake', directory: 'work-intake', kind: 'instruction', recent_use_count: 1 },
+  { name: 'mission-snapshot', directory: 'mission-snapshot', kind: 'composition', tool_name: 'keeper_compose_mission-snapshot', execution: 'inline', recent_use_count: 5, recent_success_count: 4, recent_failure_count: 1 },
+  { name: 'work-intake', directory: 'work-intake', kind: 'instruction', recent_use_count: 1, recent_success_count: 1, recent_failure_count: 0 },
   { name: 'broken', directory: 'broken', kind: 'unparsed', error: 'fence declares another name' },
 ]
 
@@ -76,13 +76,20 @@ describe('sortSkillRows', () => {
 
 describe('labels', () => {
   it('names the window beside the count and says why there is none', () => {
-    expect(usageLabel(usage[1]!, 2000)).toBe('1 in last 2000 calls')
+    expect(usageLabel(usage[1]!, 2000)).toBe('1 used · 1 ok / 0 failed (last 2000 rows)')
     expect(usageLabel(usage[2]!, 2000)).toBe('—')
     expect(usageLabel(null, 2000)).toBe('—')
   })
 
   it('does not claim a window the server never reported', () => {
-    expect(usageLabel(usage[1]!, undefined)).toBe('1 (window unreported)')
+    expect(usageLabel(usage[1]!, undefined)).toBe('1 used · 1 ok / 0 failed (window unreported)')
+  })
+
+  it('keeps compatibility with a server that only reports use count', () => {
+    const old: SkillUsage = {
+      name: 'work-intake', directory: 'work-intake', kind: 'instruction', recent_use_count: 2,
+    }
+    expect(usageLabel(old, 2000)).toBe('2 (last 2000 rows)')
   })
 
   it('shows the parsed kind, the refusal, or the absence', () => {

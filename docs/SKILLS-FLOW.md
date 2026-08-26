@@ -135,7 +135,7 @@ config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read
 
 `lib/server/server_routes_http_routes_activity.ml`. 발행된 워크스페이스 스냅샷
 (`masc.skill-snapshot/v1`, `lib/skill_snapshot`)을 그대로 투영하고, 그 옆에 **사용
-횟수**를 붙인다: `effective_entries`마다 턴과 같은 파서(`parse_skill`)로 종류·도구
+횟수와 완료 성공/실패 횟수**를 붙인다: `effective_entries`마다 턴과 같은 파서(`parse_skill`)로 종류·도구
 이름을 정하고, tool-call 로그 꼬리 N행(`Keeper_skill_usage`)에서 합성은 도구 이름으로,
 지시는 `keeper_skill`의 `name` 인자로 센다. 스냅샷의 conformance diagnostics도
 같이 돌려 대시보드 Monitor › Skills 패널이 경고로 표시한다.
@@ -147,7 +147,7 @@ flowchart TD
   M["모델이 도구 호출"] --> K{"어느 도구?"}
   K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
   K -->|"keeper_skill(name)"| IR["지시 본문 반환<br/>keeper_skill 호출로 기록"]
-  CR --> EV["tool_calls 스토어<br/>composition_tool / composition_run_id / composition_node_id"]
+  CR --> EV["tool_calls 스토어<br/>노드 행 + composition_run 종결 행"]
   IR --> EV
   EV --> SSE["SSE keeper_tool_call_evidence_committed"]
   CR -.->|"async"| ST["keeper_composition_status / _cancel 로 조회·취소"]
@@ -159,7 +159,10 @@ flowchart TD
   조회·취소. "정적 read-only 노드만" 제약은 게이트가 아니라 effect 재실행 안전이다.
 - 모든 실행은 `tool_calls` 스토어(`lib/keeper_tool_call_log.ml`)에 노드 단위로 남고
   (`composition_tool`, `composition_run_id`, `composition_node_id`) SSE
-  `keeper_tool_call_evidence_committed`로도 흐른다.
+  `keeper_tool_call_evidence_committed`로도 흐른다. 이 SSE에는 노드의 `success`,
+  `disposition`, `duration_ms`가 로그와 동일하게 실린다. inline/async 실행 모두 별도
+  `record_kind=composition_run` 종결 행을 남기며, async는 durable broker settlement가
+  확정된 뒤에만 기록한다. 따라서 async 접수 성공을 실행 성공으로 세지 않는다.
 
 ## 4. 상태: 무엇이 코드에 남았고 무엇이 파일로 갔나
 

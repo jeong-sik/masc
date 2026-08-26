@@ -133,6 +133,15 @@ let committed_revision_ref = Atomic.make 0
 
 let committed_revision () = Atomic.get committed_revision_ref
 
+type record_kind =
+  | Tool_call
+  | Composition_run
+
+let record_kind_to_string = function
+  | Tool_call -> "tool_call"
+  | Composition_run -> "composition_run"
+;;
+
 type append_entry =
   { store : Dated_jsonl.t
   ; keeper_name : string
@@ -505,6 +514,7 @@ let log_call
       ~(output_text : string)
       ~(success : bool)
       ~(duration_ms : float)
+      ?(record_kind = Tool_call)
       ?(model : string = "")
       ?agent_name
       ?turn_kind
@@ -778,6 +788,7 @@ let log_call
       let json =
         `Assoc
           ([ "ts", `Float (Time_compat.now ())
+           ; "record_kind", `String (record_kind_to_string record_kind)
            ; "keeper", `String keeper_name
            ; "tool", `String tool_name
            ; "input", safe_input

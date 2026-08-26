@@ -215,9 +215,12 @@ type t = private
 - 스킬 본문 읽기는 `keeper_skill(name)` 호출로 `tool_calls` 스토어에 기록되고, 그
   `name` 인자로 스킬별 사용량을 집계한다.
 - 합성 실행은 기존 `composition_run_id` 노드 텔레메트리 + SSE
-  (`keeper_tool_call_evidence_committed`) 를 그대로 쓴다.
+  (`keeper_tool_call_evidence_committed`) 를 그대로 쓰며 SSE도 노드의 성공·duration을
+  보존한다. inline/async 모두 `record_kind=composition_run` 종결 행을 남기고 async는
+  durable settlement만 종결로 인정한다.
 - 대시보드: `/api/v1/skills` (카탈로그: name, description, kind, source file, 최근 사용
-  횟수) + Skills 패널. 합성 스킬 상세에서 노드 실행 흐름(run 별 node_result)을 보인다.
+  횟수와 완료 성공/실패 횟수) + Skills 패널. 합성 스킬 상세에서 노드 실행 흐름(run 별
+  node_result)을 보인다.
 
 ### 2.7 하드 컷 — `tool-compositions.toml` 은 삭제한다
 

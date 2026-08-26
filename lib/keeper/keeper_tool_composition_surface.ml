@@ -346,6 +346,9 @@ let observe_node_result
             (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
       ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
       ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
+      ; "success", `Bool (Tool_result.is_success result.result)
+      ; "duration_ms", `Float (Tool_result.duration_ms result.result)
+      ; "disposition", `String (Tool_result.string_of_disposition result.result)
       ; "result_bytes", `Int result.result_bytes
       ; "truncated_to", Json_util.int_opt_to_json result.truncated_to
       ; "planned_index", `Int schedule.planned_index
@@ -371,6 +374,137 @@ let observe_node_result
       (Keeper_tool_plan.Node_id.to_string result.node_id)
       (Printexc.to_string exn);
     Ok ()
+;;
+
+let observe_composition_run_summary
+      ~composition_tool
+      ~composition_execution
+      ~composition_tool_kind
+      ~composition_run_id
+      ~parent_invocation
+      ~meta
+      ~turn_context
+      ~input
+      ~output_text
+      ~success
+      ~duration_ms
+      ?typed_result
+      ()
+  =
+  let field get = Option.bind turn_context get in
+  try
+    let committed = ref false in
+    let schedule = Agent_core.Tool_contract.Invocation.schedule parent_invocation in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:meta.Keeper_meta_contract.name
+      ~tool_name:Keeper_skill_usage.composition_run_summary_tool_name
+      ~input
+      ~output_text
+      ~success
+      ~duration_ms
+      ~record_kind:Keeper_tool_call_log.Composition_run
+      ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
+      ?agent_name:(field (fun context -> context.Keeper_tool_call_log_context.agent_name))
+      ?turn_kind:(field (fun context -> context.turn_kind))
+      ?lane:(field (fun context -> context.lane))
+      ?tool_choice:(field (fun context -> context.tool_choice))
+      ?thinking_enabled:(field (fun context -> context.thinking_enabled))
+      ?thinking_budget:(field (fun context -> context.thinking_budget))
+      ?prompt_fingerprint:(field (fun context -> context.prompt_fingerprint))
+      ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
+      ~planned_index:schedule.planned_index
+      ~batch_index:schedule.batch_index
+      ~batch_size:schedule.batch_size
+      ~execution_mode:schedule.execution_mode
+      ?typed_result
+      ~composition_tool
+      ~composition_run_id:
+        (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+      ~composition_execution
+      ~composition_tool_kind
+      ~parent_tool_use_id:
+        (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
+      ?trace_id:(field (fun context -> context.trace_id))
+      ?session_id:(field (fun context -> context.session_id))
+      ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
+      ?keeper_turn_id:(field (fun context -> context.keeper_turn_id))
+      ?task_id:(field (fun context -> context.task_id))
+      ?sandbox_profile:(field (fun context -> context.sandbox_profile))
+      ?sandbox_root:(field (fun context -> context.sandbox_root))
+      ?allowed_paths:(field (fun context -> context.allowed_paths))
+      ?network_mode:(field (fun context -> context.network_mode))
+      ?runtime_profile:(field (fun context -> context.runtime_profile))
+      ~result_bytes:(String.length output_text)
+      ~on_committed:(fun () -> committed := true)
+      ();
+    if not !committed
+    then failwith "composition run summary commit callback was not delivered"
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      "composition run summary telemetry degraded without changing execution: tool=%s run=%s error=%s"
+      composition_tool
+      (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+      (Printexc.to_string exn)
+;;
+
+let observe_async_run_settlement
+      ~composition_tool
+      ~composition_tool_kind
+      ~composition_run_id
+      ~parent_invocation
+      ~meta
+      ~turn_context
+      settlement
+  =
+  match settlement with
+  | Keeper_msg_async.Status_settlement
+      { entry; durability = Keeper_msg_async.Durable; origin = _ } ->
+    let terminal =
+      match entry.Keeper_msg_async.status with
+      | Keeper_msg_async.Done { ok; body; data = _ } -> Some (ok, body)
+      | Keeper_msg_async.Lost { reason } -> Some (false, reason)
+      | Keeper_msg_async.Cancelled { reason; cancelled_by } ->
+        Some (false, Printf.sprintf "%s: %s" cancelled_by reason)
+      | Keeper_msg_async.Persistence_failed { attempted_status; reason } ->
+        Some (false, Printf.sprintf "persisting %s failed: %s" attempted_status reason)
+      | Keeper_msg_async.Queued
+      | Keeper_msg_async.Running
+      | Keeper_msg_async.Cancelling _ -> None
+    in
+    Option.iter
+      (fun (success, output_text) ->
+         match entry.completed_at with
+         | None ->
+           Log.Keeper.warn
+             "composition run summary omitted: terminal request has no completed_at tool=%s request_id=%s"
+             composition_tool
+             entry.request_id
+         | Some completed_at ->
+           let duration_ms =
+             Keeper_timing.elapsed_duration_ms
+               ~start_time:entry.submitted_at
+               ~end_time:completed_at
+             |> Float.of_int
+           in
+           observe_composition_run_summary
+             ~composition_tool
+             ~composition_execution:Catalog.Async
+             ~composition_tool_kind
+             ~composition_run_id
+             ~parent_invocation
+             ~meta
+             ~turn_context
+             ~input:(`Assoc [ "request_id", `String entry.request_id ])
+             ~output_text
+             ~success
+             ~duration_ms
+             ())
+      terminal
+  | Keeper_msg_async.Status_settlement
+      { durability = Keeper_msg_async.Volatile_persistence_failure; _ }
+  | Keeper_msg_async.Settlement_projection_error _ -> ()
 ;;
 
 let json_type_to_string = function
@@ -611,6 +745,7 @@ let async_worker_result
       ~plan
       ~tool_name
       ~request_id
+      ~composition_run_id
       ~source_invocation
       ~request_sw
       ~(config : Workspace.config)
@@ -628,7 +763,6 @@ let async_worker_result
     Keeper_sandbox_factory.cleanup sandbox_factory);
   let start_time = Time_compat.now () in
   let run_id = Keeper_tool_plan.Run_id.fresh () in
-  let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   Executor.execute_keeper
     ~plan
     ~run_id
@@ -684,6 +818,7 @@ let async_submission_result
   =
   let start_time = Time_compat.now () in
   let tool_kind = Catalog.tool_kind entry in
+  let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
   match Keeper_msg_async.server_background_switch () with
   | Error error ->
     let data =
@@ -708,16 +843,26 @@ let async_submission_result
             2026-08-18..26, 22 submissions produced 12 reads and a settled
             result waited a median of 21.9s against a median 2.7ms of work.
             The same callback Fusion uses, on the same broker. *)
-         ~on_worker_settled:
-           (Keeper_composition_completion_wake.on_worker_settled
-              ~base_path:config.base_path
-              ~composition_tool:tool_name)
+         ~on_worker_settled:(fun settlement ->
+           observe_async_run_settlement
+             ~composition_tool:tool_name
+             ~composition_tool_kind:tool_kind
+             ~composition_run_id
+             ~parent_invocation
+             ~meta
+             ~turn_context
+             settlement;
+           Keeper_composition_completion_wake.on_worker_settled
+             ~base_path:config.base_path
+             ~composition_tool:tool_name
+             settlement)
          ~f:(fun ~request_id request_sw ->
            async_worker_result
              ~entry
              ~plan
              ~tool_name
              ~request_id
+             ~composition_run_id
              ~source_invocation:parent_invocation
              ~request_sw
              ~config
@@ -748,6 +893,9 @@ let async_submission_result
        let data =
          `Assoc
            [ "composition_tool", `String tool_name
+           ; ( "composition_run_id"
+             , `String
+                 (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
            ; tool_kind_field tool_kind
            ; "execution", `String "async"
            ; "request_id", `String request_id
@@ -776,6 +924,9 @@ let async_submission_result
        let data =
          `Assoc
            [ "composition_tool", `String tool_name
+           ; ( "composition_run_id"
+             , `String
+                 (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
            ; tool_kind_field tool_kind
            ; "execution", `String "async"
            ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
@@ -1266,30 +1417,47 @@ let make_tools
                  ~start_time
                  execution
              in
-             (match
-                Tool_bridge.attach_artifact_manifest
-                  ~base_path:config.base_path
-                  result
-              with
-              | Ok result -> result
-              | Error { message; _ } ->
-                let diagnostic =
-                  "composition result manifest persistence failed: " ^ message
-                in
-                Option.iter
-                  (fun mark_failed ->
-                     mark_failed
-                       { Keeper_tools_agent_core.failure_class =
-                           Tool_result.Runtime_failure
-                       ; effect_disposition = Tool_result.Effect_outcome_unknown
-                       ; diagnostic
-                       })
-                  on_failed;
-                Tool_result.make_err
-                  ~tool_name
-                  ~class_:Tool_result.Runtime_failure
-                  ~start_time
-                  "composition result manifest persistence failed"))))))
+             let result =
+               match
+                 Tool_bridge.attach_artifact_manifest
+                   ~base_path:config.base_path
+                   result
+               with
+               | Ok result -> result
+               | Error { message; _ } ->
+                 let diagnostic =
+                   "composition result manifest persistence failed: " ^ message
+                 in
+                 Option.iter
+                   (fun mark_failed ->
+                      mark_failed
+                        { Keeper_tools_agent_core.failure_class =
+                            Tool_result.Runtime_failure
+                        ; effect_disposition = Tool_result.Effect_outcome_unknown
+                        ; diagnostic
+                        })
+                   on_failed;
+                 Tool_result.make_err
+                   ~tool_name
+                   ~class_:Tool_result.Runtime_failure
+                   ~start_time
+                   "composition result manifest persistence failed"
+             in
+             observe_composition_run_summary
+               ~composition_tool:tool_name
+               ~composition_execution:Catalog.Inline
+               ~composition_tool_kind:(Catalog.tool_kind entry)
+               ~composition_run_id
+               ~parent_invocation
+               ~meta
+               ~turn_context
+               ~input
+               ~output_text:(Tool_result.message result)
+               ~success:(Tool_result.is_success result)
+               ~duration_ms:(Tool_result.duration_ms result)
+               ~typed_result:result
+               ();
+             result)))))
   in
   let plan_execute_tool =
     let tool_name = plan_execute_tool_name in

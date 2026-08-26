@@ -86,11 +86,14 @@ describe('OperationsPanel', () => {
 
     const tablist = container.querySelector('[role="tablist"]')
     const buttons = tablist?.querySelectorAll('[role="tab"]') ?? []
-    expect(buttons.length).toBe(4)
+    expect(buttons.length).toBe(5)
     const labels = Array.from(buttons).map(b => b.textContent?.trim())
     expect(labels).toContain('All')
     expect(labels).toContain('Intervene')
     expect(labels).toContain('Gate / HITL')
+    // Its own chip rather than a section of Gate: nothing is held waiting on a
+    // question, so it is not part of the approval queue's backlog.
+    expect(labels).toContain('질문')
     expect(labels).toContain('Inspector')
   })
 

@@ -773,6 +773,33 @@ let test_media_type_comes_from_bytes_not_extension () =
         attachment.Chat.data)
 ;;
 
+(* Bytes that never had a path -- what the clipboard hands over. The name is
+   the operator's label and the endpoint's filename; the media type still
+   comes from the bytes, so a clipboard holding something that is not an image
+   is refused here rather than at the provider. *)
+let test_clipboard_bytes_attach_under_their_own_name () =
+  match Masc_tui_attachment.of_bytes ~name:"image-1.png" png_bytes with
+  | Error error ->
+    Alcotest.failf "clipboard PNG should attach: %s"
+      (Masc_tui_attachment.error_to_string error)
+  | Ok attachment ->
+    Alcotest.(check string) "name is the one given" "image-1.png" attachment.Chat.name;
+    Alcotest.(check string) "sniffed media type" "image/png" attachment.Chat.mime_type;
+    Alcotest.(check int) "size is the bytes'" (String.length png_bytes) attachment.Chat.size
+;;
+
+let test_clipboard_bytes_that_are_not_an_image_are_refused () =
+  match Masc_tui_attachment.of_bytes ~name:"image-1.png" "this is not an image" with
+  | Ok _ -> Alcotest.fail "non-image clipboard bytes must not attach"
+  | Error error ->
+    Alcotest.(check bool)
+      "the error names what was refused, not a path that does not exist"
+      true
+      (String_util.contains_substring
+         (Masc_tui_attachment.error_to_string error)
+         "image-1.png")
+;;
+
 let test_non_image_is_rejected_by_its_bytes () =
   with_temp_file ~suffix:".png" "this is not an image" (fun path ->
     match Masc_tui_attachment.of_file ~path with
@@ -891,6 +918,10 @@ let () =
             test_media_type_comes_from_bytes_not_extension
         ; test_case "non-image is rejected" `Quick
             test_non_image_is_rejected_by_its_bytes
+        ; test_case "clipboard bytes attach under their own name" `Quick
+            test_clipboard_bytes_attach_under_their_own_name
+        ; test_case "clipboard bytes that are not an image are refused" `Quick
+            test_clipboard_bytes_that_are_not_an_image_are_refused
         ; test_case "missing file is named" `Quick
             test_missing_file_is_named_in_the_error
         ; test_case "a dropped image is staged" `Quick

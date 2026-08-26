@@ -1008,6 +1008,13 @@ let render_overview (state : state) =
 (** Render one backlog task in full, from the same load the Overview list was
     projected from. The dispatch falls back to the Overview when the row is no
     longer in the backlog, so the task argument always exists here. *)
+(* What a boxed surface spends on chrome before any row of content: the top
+   border, its title and rule, the closing rule and border, the selected-row
+   detail, and the key hints. Five surfaces subtracted the literal 10 from the
+   terminal height; naming it is what makes a sixth reader able to check the
+   arithmetic instead of trusting it. *)
+let boxed_surface_chrome_rows = 10
+
 let render_task_detail (state : state) (task : Masc_domain.task) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -1132,7 +1139,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
      surface the composer row rather than a body row. On top of the ten, the
      status note lines vary by state -- a verification id or cancellation
      reason must shrink the body, not push rows off the bottom. *)
-  let content_height = max 1 (rows - 10 - List.length note_lines) in
+  let content_height = max 1 (rows - boxed_surface_chrome_rows - List.length note_lines) in
   let offset =
     min state.task_detail_scroll
       (Metrics_tail.maximum_scroll ~entry_count:total_lines ~content_height)
@@ -1218,194 +1225,10 @@ let render_approval_detail (state : state) (row : approval_row) =
   finish_surface state ~surface_key:"approval-detail" ~rows:terminal_rows
     ~cols buf
 
-let render_approvals (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
-
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let approvals = approval_items state in
-  let scope, visible_count, total_count, hidden_count =
-    match state.approval_snapshot with
-    | None -> "-", "?", "?", "?"
-     | Some snapshot ->
-        ( (if snapshot.aps_filter_active then
-             Terminal_text.single_line_or ~default:"?"
-               snapshot.aps_actor_filter
-           else "all")
-        , string_of_int snapshot.aps_visible_count
-        , string_of_int snapshot.aps_total_count
-        , string_of_int snapshot.aps_hidden_count )
-  in
-  let count = List.length approvals in
-  let action_inflight =
-    Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
-  in
-  let action_badge = if action_inflight then "  [submitting]" else "" in
-  let header =
-    Printf.sprintf
-      "%s (%s/%s, hidden %s, actor %s)  %s  %s%s"
-      (screen_title " MASC Approvals")
-      visible_count total_count hidden_count scope timestamp
-      (connection_badge state) action_badge
-  in
-
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
-
-  let approvals_error =
-    Terminal_text.optional_single_line state.approvals_error
-  in
-  if count = 0 then begin
-    (match state.approval_snapshot, approvals_error with
-     | _, Some err ->
-         box_line buf cols (data_unreliable_row ~cols err)
-     | None, None ->
-         box_line buf cols
-           (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
-           ^ Ansi.reset)
-     | Some _, None ->
-         box_line buf cols
-           (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset));
-    for _ = 1 to rows - 10 do
-      box_empty buf cols
-    done
-  end else begin
-    let content_height = max 0 (rows - 10) in
-    let scroll_offset =
-      if content_height > 0 && state.approval_cursor >= content_height then
-        state.approval_cursor - content_height + 1
-      else 0
-    in
-    let now_unix = Unix.gettimeofday () in
-    for i = 0 to content_height - 1 do
-      let idx = i + scroll_offset in
-      if idx < count then begin
-        let line =
-          match List.nth approvals idx with
-          | Operator_row a ->
-              let target_id =
-                Terminal_text.single_line_or ~default:"-" a.ap_target_id
-              in
-              Printf.sprintf "  %s  %s  %s  %s"
-                (fit_width (Terminal_text.single_line a.ap_actor) 16)
-                (fit_width (Terminal_text.single_line a.ap_action_type) 20)
-                (fit_width (Terminal_text.single_line a.ap_target_type) 16)
-                target_id
-          | Keeper_tool_row held ->
-              (* The remaining wait, not the age: this row disappears on its
-                 own when it runs out, and what an operator weighs is how
-                 long they still have. *)
-              let remaining =
-                max 0.
-                  (held.kta_asked_at +. held.kta_timeout_sec -. now_unix)
-              in
-              Printf.sprintf "  %s  %s  %s  %s"
-                (fit_width (Terminal_text.single_line held.kta_keeper) 16)
-                (fit_width
-                   ("tool: " ^ Terminal_text.single_line held.kta_tool)
-                   20)
-                (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
-                (Terminal_text.single_line held.kta_question ^ " — "
-                ^ Terminal_text.single_line_or ~default:"(not provided)"
-                    held.kta_because)
-        in
-        let is_selected = idx = state.approval_cursor in
-        let content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-          else
-            "  " ^ line
-        in
-        box_line buf cols content
-      end else
-        box_empty buf cols
-    done
-  end;
-
-  box_bottom buf cols;
-
-  let detail_line =
-    match List.nth_opt approvals state.approval_cursor with
-    | Some (Operator_row a) -> (
-        if action_inflight then
-          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
-            Ansi.reset
-        else
-          match state.pending_approval_action with
-          | Some { paa_token; paa_decision }
-            when String.equal paa_token a.ap_token ->
-              let key =
-                match paa_decision with
-                | Confirm -> "y"
-                | Deny -> "n"
-              in
-              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
-                Ansi.reset
-          | _ ->
-              Printf.sprintf "  %s%s%s"
-                Ansi.dim
-                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
-                Ansi.reset)
-    | Some (Keeper_tool_row held) ->
-        (* One press answers a held call, matching the chat pane's [y]. The
-           question is the whole ask, so it is the row the eye lands on;
-           the because is why this call was held at all — an operator
-           repeating the same yes needs the reason visible, not the name
-           of a policy table they cannot open. *)
-        Printf.sprintf "  %s%s  [y] allow  [n] deny%s\\n  %swhy: %s%s"
-          (Theme.warn ())
-          (fit_width
-             (Terminal_text.single_line held.kta_question)
-             (max 8 (cols - 26)))
-          Ansi.reset
-          Ansi.dim
-          (fit_width
-             (Terminal_text.single_line_or ~default:"(not provided)"
-                held.kta_because)
-             (max 8 (cols - 12)))
-          Ansi.reset
-    | None -> ""
-  in
-  Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
-
-  let metadata_line, payload_line =
-    match List.nth_opt approvals state.approval_cursor with
-    | None -> "", ""
-    | Some (Operator_row approval) ->
-        let expires =
-          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
-        in
-        let payload =
-          Masc_tui_operator_projection.approval_payload_for_terminal
-            approval.ap_payload
-        in
-        ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
-            (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
-            (Terminal_text.single_line approval.ap_created_at)
-            expires Ansi.reset
-        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
-            (fit_width payload (max 8 (cols - 12)))
-            Ansi.reset )
-    | Some (Keeper_tool_row held) ->
-        ( Printf.sprintf "  %skeeper=%s  call=%s%s" Ansi.dim
-            (fit_width (Terminal_text.single_line held.kta_keeper) 20)
-            (fit_width (Terminal_text.single_line held.kta_tool_call_id) 28)
-            Ansi.reset
-        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
-            (fit_width
-               (Terminal_text.single_line held.kta_args)
-               (max 8 (cols - 9)))
-            Ansi.reset )
-  in
-  Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
-
+(* Drawn into its own buffer so the pane above can be told how many rows it
+   has to give up. Counting the rows a second way is what let the section draw
+   its header into the one row left over and push every question off-screen. *)
+let draw_ask_questions buf cols (state : state) =
   (* Questions Keepers put to a human sit under the approval queue rather than
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
@@ -1546,7 +1369,208 @@ let render_approvals (state : state) =
                       (Printf.sprintf "    %swhy: %s%s" Ansi.dim
                          (fit_width (Terminal_text.single_line context) (max 8 (cols - 12)))
                          Ansi.reset))
-              rows));
+              rows))
+
+let ask_section_rows buf =
+  let n = ref 0 in
+  String.iter (fun c -> if c = '\n' then incr n) (Buffer.contents buf);
+  !n
+
+let render_approvals (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  (* The questions come first so their height is a measured fact rather than a
+     second estimate that can disagree with the drawing. *)
+  let ask_buf = Buffer.create 1024 in
+  draw_ask_questions ask_buf cols state;
+  let ask_rows = ask_section_rows ask_buf in
+  let approval_body_rows = max 1 (rows - boxed_surface_chrome_rows - ask_rows) in
+
+  let now = Unix.localtime (Unix.gettimeofday ()) in
+  let timestamp = Printf.sprintf "%02d:%02d:%02d"
+    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let approvals = approval_items state in
+  let scope, visible_count, total_count, hidden_count =
+    match state.approval_snapshot with
+    | None -> "-", "?", "?", "?"
+     | Some snapshot ->
+        ( (if snapshot.aps_filter_active then
+             Terminal_text.single_line_or ~default:"?"
+               snapshot.aps_actor_filter
+           else "all")
+        , string_of_int snapshot.aps_visible_count
+        , string_of_int snapshot.aps_total_count
+        , string_of_int snapshot.aps_hidden_count )
+  in
+  let count = List.length approvals in
+  let action_inflight =
+    Masc_tui_operator_projection.Flow.action_inflight state.approval_flow
+  in
+  let action_badge = if action_inflight then "  [submitting]" else "" in
+  let header =
+    Printf.sprintf
+      "%s (%s/%s, hidden %s, actor %s)  %s  %s%s"
+      (screen_title " MASC Approvals")
+      visible_count total_count hidden_count scope timestamp
+      (connection_badge state) action_badge
+  in
+
+  box_top buf cols;
+  box_line buf cols header;
+  box_divider buf cols;
+
+  let approvals_error =
+    Terminal_text.optional_single_line state.approvals_error
+  in
+  if count = 0 then begin
+    (match state.approval_snapshot, approvals_error with
+     | _, Some err ->
+         box_line buf cols (data_unreliable_row ~cols err)
+     | None, None ->
+         box_line buf cols
+           (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
+           ^ Ansi.reset)
+     | Some _, None ->
+         box_line buf cols
+           (Ansi.dim ^ "  (no pending approvals)" ^ Ansi.reset));
+    for _ = 1 to approval_body_rows do
+      box_empty buf cols
+    done
+  end else begin
+    let content_height = approval_body_rows in
+    let scroll_offset =
+      if content_height > 0 && state.approval_cursor >= content_height then
+        state.approval_cursor - content_height + 1
+      else 0
+    in
+    let now_unix = Unix.gettimeofday () in
+    for i = 0 to content_height - 1 do
+      let idx = i + scroll_offset in
+      if idx < count then begin
+        let line =
+          match List.nth approvals idx with
+          | Operator_row a ->
+              let target_id =
+                Terminal_text.single_line_or ~default:"-" a.ap_target_id
+              in
+              Printf.sprintf "  %s  %s  %s  %s"
+                (fit_width (Terminal_text.single_line a.ap_actor) 16)
+                (fit_width (Terminal_text.single_line a.ap_action_type) 20)
+                (fit_width (Terminal_text.single_line a.ap_target_type) 16)
+                target_id
+          | Keeper_tool_row held ->
+              (* The remaining wait, not the age: this row disappears on its
+                 own when it runs out, and what an operator weighs is how
+                 long they still have. *)
+              let remaining =
+                max 0.
+                  (held.kta_asked_at +. held.kta_timeout_sec -. now_unix)
+              in
+              Printf.sprintf "  %s  %s  %s  %s"
+                (fit_width (Terminal_text.single_line held.kta_keeper) 16)
+                (fit_width
+                   ("tool: " ^ Terminal_text.single_line held.kta_tool)
+                   20)
+                (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
+                (Terminal_text.single_line held.kta_question ^ " — "
+                ^ Terminal_text.single_line_or ~default:"(not provided)"
+                    held.kta_because)
+        in
+        let is_selected = idx = state.approval_cursor in
+        let content =
+          if is_selected then
+            Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
+          else
+            "  " ^ line
+        in
+        box_line buf cols content
+      end else
+        box_empty buf cols
+    done
+  end;
+
+  box_bottom buf cols;
+
+  let detail_line =
+    match List.nth_opt approvals state.approval_cursor with
+    | Some (Operator_row a) -> (
+        if action_inflight then
+          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
+            Ansi.reset
+        else
+          match state.pending_approval_action with
+          | Some { paa_token; paa_decision }
+            when String.equal paa_token a.ap_token ->
+              let key =
+                match paa_decision with
+                | Confirm -> "y"
+                | Deny -> "n"
+              in
+              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 22))
+                Ansi.reset
+          | _ ->
+              Printf.sprintf "  %s%s%s"
+                Ansi.dim
+                (fit_width (Terminal_text.single_line a.ap_summary) (cols - 6))
+                Ansi.reset)
+    | Some (Keeper_tool_row held) ->
+        (* One press answers a held call, matching the chat pane's [y]. The
+           question is the whole ask, so it is the row the eye lands on;
+           the because is why this call was held at all — an operator
+           repeating the same yes needs the reason visible, not the name
+           of a policy table they cannot open. *)
+        Printf.sprintf "  %s%s  [y] allow  [n] deny%s\\n  %swhy: %s%s"
+          (Theme.warn ())
+          (fit_width
+             (Terminal_text.single_line held.kta_question)
+             (max 8 (cols - 26)))
+          Ansi.reset
+          Ansi.dim
+          (fit_width
+             (Terminal_text.single_line_or ~default:"(not provided)"
+                held.kta_because)
+             (max 8 (cols - 12)))
+          Ansi.reset
+    | None -> ""
+  in
+  Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
+
+  let metadata_line, payload_line =
+    match List.nth_opt approvals state.approval_cursor with
+    | None -> "", ""
+    | Some (Operator_row approval) ->
+        let expires =
+          Terminal_text.single_line_or ~default:"-" approval.ap_expires_at
+        in
+        let payload =
+          Masc_tui_operator_projection.approval_payload_for_terminal
+            approval.ap_payload
+        in
+        ( Printf.sprintf "  %strace=%s  created=%s  expires=%s%s" Ansi.dim
+            (fit_width (Terminal_text.single_line approval.ap_trace_id) 18)
+            (Terminal_text.single_line approval.ap_created_at)
+            expires Ansi.reset
+        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
+            (fit_width payload (max 8 (cols - 12)))
+            Ansi.reset )
+    | Some (Keeper_tool_row held) ->
+        ( Printf.sprintf "  %skeeper=%s  call=%s%s" Ansi.dim
+            (fit_width (Terminal_text.single_line held.kta_keeper) 20)
+            (fit_width (Terminal_text.single_line held.kta_tool_call_id) 28)
+            Ansi.reset
+        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
+            (fit_width
+               (Terminal_text.single_line held.kta_args)
+               (max 8 (cols - 9)))
+            Ansi.reset )
+  in
+  Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
+
+  Buffer.add_buffer buf ask_buf;
 
   let hints =
     match state.ask_answer_mode with
@@ -2042,7 +2066,7 @@ let render_planning_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
-       for _ = 1 to rows - 10 do
+       for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
    | Some p ->
@@ -2291,7 +2315,7 @@ let render_schedule_list (state : state) =
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
-       for _ = 1 to rows - 10 do
+       for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
    | Some snapshot ->
@@ -2305,7 +2329,7 @@ let render_schedule_list (state : state) =
           | None ->
               box_line buf cols
                 ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
-         for _ = 1 to rows - 10 do
+         for _ = 1 to rows - boxed_surface_chrome_rows do
            box_empty buf cols
          done
        end else begin
@@ -3309,12 +3333,44 @@ let secret_lines (state : state) (k : keeper) =
    the same list. *)
 let identity_lines (state : state) (k : keeper) providers =
   let connectable = Masc_tui_types.identity_connectable providers in
+  let tools_of id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared { idp_id; idp_tools; _ }
+          when String.equal idp_id id -> Some idp_tools
+        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _ ->
+            None)
+      providers
+    |> Option.join
+  in
   let numbered =
     List.mapi
-      (fun index (_, label) ->
-        Printf.sprintf "  %d  %s" (index + 1)
-          (Terminal_text.single_line label))
+      (fun index (id, label) ->
+        (* Attached-and-offering-nothing is a third state. Reading it as "not
+           attached" would tell an operator to consent again for no reason. *)
+        let state =
+          match tools_of id with
+          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Some names ->
+              Printf.sprintf "%s%d tools%s" (Theme.ok ()) (List.length names)
+                Ansi.reset
+        in
+        Printf.sprintf "  %d  %-24s %s" (index + 1)
+          (Terminal_text.single_line label) state)
       connectable
+  in
+  let attached_tool_lines =
+    connectable
+    |> List.concat_map (fun (id, _) ->
+           match tools_of id with
+           | None | Some [] -> []
+           | Some names ->
+               ""
+               :: (Ansi.dim ^ "  " ^ Terminal_text.single_line id ^ Ansi.reset)
+               :: List.map
+                    (fun name -> "    " ^ Terminal_text.single_line name)
+                    names)
   in
   let rejected =
     List.filter_map
@@ -3344,9 +3400,10 @@ let identity_lines (state : state) (k : keeper) providers =
   if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
-    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name) ^ ".")
+    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name)
+      ^ ", R to ask again what tools exist.")
      :: "" :: numbered)
-    @ rejected @ started
+    @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -3538,7 +3595,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
-      | Detail_identity -> "[ ]:tab  1-9:connect"
+      | Detail_identity -> "[ ]:tab  1-9:connect  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

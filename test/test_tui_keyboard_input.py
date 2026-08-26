@@ -4387,6 +4387,56 @@ def context_inspector_interaction() -> Interaction:
     return interact
 
 
+def clipboard_paste_key_interaction() -> Interaction:
+    """Ctrl-V reaches the composer at all.
+
+    Ctrl-V is VLNEXT's default character. While IEXTEN is set the tty layer
+    consumes that byte and passes the *following* one through uninterpreted, so
+    the pane would see the letter after Ctrl-V and never Ctrl-V itself -- which
+    is what a handler alone could not fix. The pane answering is the evidence
+    the key arrived.
+
+    What the answer says depends on the host: a machine with no clipboard
+    reader installed says so, and one with a reader and no image on the
+    clipboard says that instead. Both are answers. The success path needs an
+    image on the running machine's clipboard, so it is not asserted here and
+    stays a local check.
+    """
+
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+        select_keeper_row(process, master_fd, output, b"alpha")
+        send_and_wait(
+            process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"m",
+            b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat",
+        )
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x16",
+            re.compile(rb"Ctrl-V: |pasted \[Image #1\]"),
+        )
+        send_and_wait(
+            process, master_fd, output, b"\x1b", b"Keepers \xe2\x96\xb8 \x1b[1malpha"
+        )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def chat_visibility_modes_interaction() -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -7121,6 +7171,14 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper provider-input Context Inspector",
         interact=context_inspector_interaction(),
         http_fixtures=context_inspector_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Ctrl-V is not swallowed by the terminal",
+        interact=clipboard_paste_key_interaction(),
+        http_fixtures={
+            "/api/v1/keepers/alpha/chat/history": (200, []),
+        },
     )
     run_terminal_scenario(
         executable,

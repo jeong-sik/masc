@@ -749,6 +749,32 @@ let set_file_entry ~base_path ~keeper_name ~scope ~container_path ~value =
                           Error (unix_error_message err fn arg)))))))
 ;;
 
+let read_file_entry ~base_path ~keeper_name ~scope ~container_path =
+  match file_rel_components_of_container_path container_path with
+  | Error _ as err -> err
+  | Ok components ->
+    let info = secret_root_info_for_scope ~base_path ~keeper_name scope in
+    let path =
+      List.fold_left Filename.concat (Filename.concat info.root "files") components
+    in
+    (match reject_symlink ~kind:File_source path with
+     | Error _ as err -> err
+     | Ok st ->
+       (match st.Unix.st_kind with
+        | Unix.S_REG ->
+          (try Ok (Some (In_channel.with_open_bin path In_channel.input_all)) with
+           | Sys_error message -> Error message)
+        | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+        | Unix.S_SOCK ->
+          Error
+            (Printf.sprintf "keeper secret file is not a regular file: %s" path)))
+    |> function
+    (* Absent is not an error: a Keeper that never attached has no file, and
+       reading that as a failure would make "not set up" look like "broken". *)
+    | Error _ when not (Sys.file_exists path) -> Ok None
+    | other -> other
+;;
+
 let delete_file_entry ~base_path ~keeper_name ~scope ~container_path =
   match reject_base_keeper_scope_mutation ~keeper_name ~scope with
   | Error _ as err -> err

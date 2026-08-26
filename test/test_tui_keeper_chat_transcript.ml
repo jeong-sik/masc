@@ -384,6 +384,47 @@ let test_status_rows_grow_only_with_what_they_report () =
   check int "an unreadable line adds one more" 3
     (List.length (rows t))
 
+(* The wait before RUN_STARTED is the one an operator cannot read from the
+   outside, and two waits of the same length mean different things: a keeper
+   busy with something else, and a run that should already have begun. The
+   server says which; before it does, the row can only say the request went
+   out. *)
+let progress_text t =
+  match rows t with
+  | (Transcript.Progress, text) :: _ -> text
+  | rows -> failf "expected a progress row, got %d rows" (List.length rows)
+
+let test_the_wait_says_why_once_the_server_has_said () =
+  check bool "before the acceptance there is nothing to say but that it went out"
+    true
+    (contains ~needle:"waiting for the run to start" (progress_text (fresh ())));
+  let queued length =
+    let t = fresh () in
+    feed t [ Live.Accepted { admission = Live.Queued; queue_length = length } ];
+    progress_text t
+  in
+  check bool "a queued request names the queue it is in" true
+    (contains ~needle:"queued" (queued 2));
+  check bool "and how long that queue is" true
+    (contains ~needle:"2 messages in the keeper's queue" (queued 2));
+  check bool "one message is not one messages" true
+    (contains ~needle:"1 message in the keeper's queue" (queued 1));
+  let running = fresh () in
+  feed running [ Live.Accepted { admission = Live.Running; queue_length = 0 } ];
+  check bool "an accepted-and-started request says so" true
+    (contains ~needle:"the run is starting" (progress_text running))
+
+(* Once the run starts the queue is history. Leaving it in the row would keep
+   answering a question the turn has moved past. *)
+let test_the_queue_does_not_outlive_the_wait () =
+  let t = fresh () in
+  feed t
+    [ Live.Accepted { admission = Live.Queued; queue_length = 3 }
+    ; Live.Run_started
+    ];
+  check bool "the queue is not still reported once the run started" false
+    (contains ~needle:"queue" (progress_text t))
+
 let test_progress_row_reports_a_context_checkpoint () =
   let t = fresh () in
   feed t [ Live.Run_started; Live.Checkpoint ];
@@ -734,6 +775,10 @@ let () =
     ; ( "status rows"
       , [ test_case "rows grow only with what they report" `Quick
             test_status_rows_grow_only_with_what_they_report
+        ; test_case "the wait says why once the server has said" `Quick
+            test_the_wait_says_why_once_the_server_has_said
+        ; test_case "the queue does not outlive the wait" `Quick
+            test_the_queue_does_not_outlive_the_wait
         ; test_case "the progress row counts tool calls" `Quick
             test_progress_row_counts_the_tool_calls
         ; test_case "the progress row reports a context checkpoint" `Quick

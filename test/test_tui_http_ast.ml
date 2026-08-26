@@ -1363,7 +1363,13 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
          ; "Sys.set_signal"
          ; "Sys.set_signal"
          ; "Sys.set_signal"
-         ; "Unix.tcsetattr"
+           (* [apply_raw_mode], not [Unix.tcsetattr]: raw mode is the pair of
+              setting the record and turning off the literal-next key the
+              record cannot carry, and the two are named once so the three
+              places that take raw mode back cannot take it without the key.
+              What this pins is unchanged -- the cleanup and the handlers are
+              registered before the terminal is taken. *)
+         ; "apply_raw_mode"
          ]);
   check int "startup registers the real cleanup callback" 1
     (Ast_grep
@@ -1421,7 +1427,19 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"apply_raw_mode" ~position:0 ~identifier:"new_term");
+  (* And [apply_raw_mode] is where the record and the key are set together.
+     Asserted here so the pair cannot come apart under a name this guard
+     already accepts. *)
+  check int "raw mode sets the termios record" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"apply_raw_mode"
        ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+  check int "raw mode reclaims the key the record cannot carry" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"apply_raw_mode"
+       ~callee:"Masc_tui_termios.disable_literal_next");
   check int "terminal restoration cleans presenter state" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");
@@ -1445,11 +1463,15 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"suspend" ~callee:"Unix.kill"
        ~position:1 ~identifier:"Sys.sigtstp");
+  (* Through [apply_raw_mode], like every other place that takes raw mode back.
+     OCaml's tcsetattr restores c_cc from the snapshot its last tcgetattr took,
+     so a resume that set the record alone would hand the terminal back the
+     literal-next key and Ctrl-V would stop arriving after the first Ctrl-Z. *)
   check int "resume reapplies raw termios" 1
     (Ast_grep
      .count_applications_with_exact_positional_identifier_in_value_binding
        ~module_path:main_path ~binding_name:"suspend"
-       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+       ~callee:"apply_raw_mode" ~position:0 ~identifier:"new_term");
   check int "resume requests a repaint" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"suspend" ~callee:"request_full_repaint");
@@ -1463,7 +1485,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~body_callees:[ "Unix.kill" ]
        ~finally_callees:
          [ "Sys.set_signal"
-         ; "Unix.tcsetattr"
+         ; "apply_raw_mode"
          ; "Frame_presenter.setup"
          ; "request_full_repaint"
          ]);

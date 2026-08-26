@@ -3985,7 +3985,19 @@ let render_keeper_message (state : state) =
     let base_role_label_of (message : Masc_tui_types.msg_entry) =
       match message.me_role with
       | Message_user speaker ->
-          if String.equal speaker "you" then "YOU" else speaker
+          if not (String.equal speaker "you") then speaker
+          else if
+            (* A line the operator typed during a turn sits in the
+               conversation from the moment it is typed, in its place in the
+               order. Marked, because a waiting line drawn like a sent one is
+               the same silence that made a refused send look like a sent one
+               -- the operator has to be able to tell which of their messages
+               has actually gone. The queue is the only place that fact lives,
+               so the row asks it rather than carrying a copy. *)
+            Masc_tui_keeper_chat_queue.holds state.msg_queued
+              ~request_id:message.me_request_id
+          then "QUEUED"
+          else "YOU"
       | Message_keeper -> Keeper_chat.terminal_safe_text message.me_keeper_name
       | Message_autonomous -> "AUTO"
       | Message_status -> "STATUS"
@@ -4363,37 +4375,6 @@ let render_keeper_message (state : state) =
                   box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text)))
            (Keeper_chat_transcript.status_rows ~now:(Unix.gettimeofday ()) live)
      | Some _ | None -> ());
-    (* What is waiting, in the order it will go. Drawn in full rather than as
-       a count: an operator who typed three lines during a turn needs to see
-       which three, and a queue that only says "3 waiting" is the same silence
-       that made a refused send look like a sent one.
-
-       [keeper_message_status_rows] has always reserved one row per waiting
-       line. #29818 rewrote the in-flight block above and took these rows out
-       with it, leaving the reservation behind: the history was sized as if
-       the queue were drawn, so each line typed during a turn took a row off
-       the conversation and put nothing in its place. *)
-    List.iteri
-      (fun index (queued_keeper, text) ->
-        (* First line only. A queued line can be a pasted paragraph, and the
-           budget counts one row for it, so this row has one row to fit in. *)
-        let body =
-          match String.index_opt text '\n' with
-          | None -> text
-          | Some cut -> String.sub text 0 cut ^ " …"
-        in
-        (* The operator can switch keepers while a turn runs, and a queued
-           line travels with the keeper it was written to. Naming the ones
-           that are not this pane's keeps a line from looking like it will go
-           to whoever is on screen. *)
-        let addressed =
-          if String.equal queued_keeper keeper_name then ""
-          else " -> " ^ Keeper_chat.terminal_safe_text queued_keeper
-        in
-        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-          (Printf.sprintf "  queued %d%s: %s" (index + 1) addressed
-             (Keeper_chat.terminal_safe_text body)))
-      (Masc_tui_keeper_chat_queue.waiting state.msg_queued);
     if not target_registered then begin
       let unavailable_message =
         match state.keepers_error with

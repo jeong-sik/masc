@@ -3752,18 +3752,27 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
         send_and_wait(
             process, master_fd, output, b"queued-one", composer_showing(b"queued-one")
         )
-        first_queued = send_and_wait(process, master_fd, output, b"\r", b"queued 1")
+        # Each line is checked where it was drawn. They no longer share a
+        # block of rows at the bottom, so one frame need not carry both.
+        first_queued = send_and_wait(
+            process, master_fd, output, b"\r", b"queued-one"
+        )
         send_and_wait(
             process, master_fd, output, b"queued-two", composer_showing(b"queued-two")
         )
-        second_queued = send_and_wait(process, master_fd, output, b"\r", b"queued 2")
+        second_queued = send_and_wait(
+            process, master_fd, output, b"\r", b"queued-two"
+        )
 
-        frame = frame_containing(second_queued, b"queued 2")
+        frame = frame_containing(second_queued, b"queued-two")
         plain = CSI_RE.sub(b"", frame)
-        for expected in (b"queued 1: queued-one", b"queued 2: queued-two"):
+        # A waiting line is drawn in the conversation now, in its place in the
+        # order, rather than in rows of its own beneath it -- and marked, so it
+        # is not mistaken for a line that has already gone.
+        for expected in (b"queued-two", b"QUEUED"):
             if expected not in plain:
                 raise AssertionError(
-                    f"the pane counted a waiting line it did not draw; "
+                    f"a waiting line is not shown in the conversation; "
                     f"missing {expected!r}: {plain!r}"
                 )
         if b"Enter:queue(2)" not in plain:
@@ -3781,7 +3790,11 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
                 f"{footer_while_sending} while sending and on row "
                 f"{footer_with_queue} with two lines waiting"
             )
-        del first_queued
+        first_plain = CSI_RE.sub(b"", frame_containing(first_queued, b"queued-one"))
+        if b"QUEUED" not in first_plain:
+            raise AssertionError(
+                f"the first waiting line is not marked as waiting: {first_plain!r}"
+            )
 
         # The newest thing the operator typed is the first thing the arrows
         # hand back, whether or not it has been dispatched.

@@ -2792,7 +2792,8 @@
 (test
  (name test_tui_keeper_chat_queue)
  (modules test_tui_keeper_chat_queue)
- (libraries alcotest astring masc_tui_keeper_chat_queue))
+ (libraries alcotest astring masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_projection))
 
 (test
  (name test_tui_chat_surface_mirror)

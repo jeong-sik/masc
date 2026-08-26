@@ -102,10 +102,13 @@ let think_withheld =
 
 let reason text = `Assoc [ "kind", `String "reason"; "text", `String text ]
 
-let tool ?call_id ?status ?dur name =
+let tool ?execution_id ?tool_call_id ?status ?dur name =
   `Assoc
     ([ "kind", `String "tool"; "name", `String name ]
-     @ (match call_id with
+     @ (match execution_id with
+        | None -> []
+        | Some id -> [ "execution_id", `String id ])
+     @ (match tool_call_id with
         | None -> []
         | Some id -> [ "tool_call_id", `String id ])
      @ (match status with None -> [] | Some s -> [ "status", `String s ])
@@ -374,12 +377,12 @@ let test_an_autonomous_turn_draws_what_it_did () =
       (`List
          [ autonomous_turn ~ts:5.0
              [ think_withheld
-             ; tool ~call_id:"trace-1" ~status:"ok" ~dur:"32ms"
+             ; tool ~execution_id:"trace-1" ~status:"ok" ~dur:"32ms"
                  "masc_task_history"
              ; think_withheld
-             ; tool ~call_id:"trace-2" ~status:"err" ~dur:"1200ms"
+             ; tool ~execution_id:"trace-2" ~status:"err" ~dur:"1200ms"
                  "tool_execute"
-             ; tool ~call_id:"trace-3" ~status:"pending"
+             ; tool ~execution_id:"trace-3" ~status:"pending"
                  "keeper_task_claim"
              ; tool "read_file"
              ]

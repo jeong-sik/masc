@@ -901,7 +901,8 @@ let provenance_index_of_existing existing =
             let* provenance = provenance_of_line ~line_number line in
             (match provenance with
              | No_provenance -> ()
-             | Valid_provenance provenance -> add_provenance provenance
+             | Valid_provenance (provenance, row_id) ->
+               add_provenance (provenance, row_id)
              | Poisoned_delivery_key (delivery_key, detail) ->
                Poisoned_delivery_keys.replace
                  index.poisoned_delivery_keys

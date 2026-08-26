@@ -685,7 +685,7 @@ let test_failed_tool_observer_releases_next_completion () =
    keeper's own history showed nothing, so it repeated the same malformed call
    every turn. An executed failure must still be written once, not twice:
    [post_tool_use] already records that one. *)
-let rejected_rows_for ?on_tool_result_ready ~stage =
+let rejected_rows_for ?on_tool_result_ready ~stage () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
     ~finally:(fun () ->
@@ -736,7 +736,9 @@ let rejected_rows_for ?on_tool_result_ready ~stage =
 ;;
 
 let test_a_rejected_call_leaves_a_row () =
-  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution in
+  let rows =
+    rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution ()
+  in
   check int "exactly one row" 1 (List.length rows);
   match rows with
   | [ row ] ->
@@ -760,7 +762,7 @@ let test_a_rejected_call_leaves_a_row () =
 ;;
 
 let test_an_executed_failure_is_not_written_twice () =
-  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution in
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution () in
   check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
 ;;
 
@@ -777,6 +779,7 @@ let test_validation_rejection_notifies_after_exact_log_commit () =
                , turn
                , planned_index
                , Ids.Execution_id.to_string execution_id ))
+      ()
   in
   match rows, !observed with
   | [ row ], Some (tool_call_id, turn, planned_index, execution_id) ->

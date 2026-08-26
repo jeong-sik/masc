@@ -241,6 +241,45 @@ let test_coverage_is_carried_per_provider () =
     (Alcotest.option (Alcotest.list Alcotest.string))
     "and none for the one nobody has" (Some []) (coverage "linear")
 
+(* ── the app form ───────────────────────────────────────────────────── *)
+
+let form field secret =
+  { Masc_tui_types.iaf_provider = "slack"
+  ; iaf_label = "Slack"
+  ; iaf_field = field
+  ; iaf_client_id = "an-app"
+  ; iaf_client_secret = secret
+  ; iaf_scopes = "chat:write"
+  }
+
+let test_the_secret_is_never_drawn () =
+  (* A terminal scrolls back. A credential on screen is a credential in the
+     scrollback, and in whatever recorded the session. *)
+  let rows =
+    Masc_tui_types.identity_app_form_rows
+      (Some (form Masc_tui_types.App_client_secret "hunter2"))
+  in
+  let joined = String.concat "\n" rows in
+  check Alcotest.bool "the value is nowhere" false
+    (Masc_tui_types.lowercase_contains ~needle:"hunter2" joined);
+  check Alcotest.bool "its length still shows" true
+    (Masc_tui_types.lowercase_contains ~needle:"*******" joined)
+
+let test_the_marker_is_on_the_field_taking_keys () =
+  let marked field =
+    Masc_tui_types.identity_app_form_rows (Some (form field ""))
+    |> List.filter (fun row -> String.length row > 2 && row.[2] = '>')
+    |> List.length
+  in
+  check Alcotest.int "exactly one row is marked" 1
+    (marked Masc_tui_types.App_client_id);
+  check Alcotest.int "and only one, whichever it is" 1
+    (marked Masc_tui_types.App_scopes)
+
+let test_a_closed_form_takes_no_rows () =
+  check Alcotest.int "nothing reserved" 0
+    (List.length (Masc_tui_types.identity_app_form_rows None))
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "numbering",
@@ -268,6 +307,14 @@ let () =
       ( "which other Keepers hold a service",
         [ Alcotest.test_case "coverage is carried per provider" `Quick
             test_coverage_is_carried_per_provider;
+        ] );
+      ( "the app form",
+        [ Alcotest.test_case "the secret is never drawn" `Quick
+            test_the_secret_is_never_drawn;
+          Alcotest.test_case "the marker is on the field taking keys" `Quick
+            test_the_marker_is_on_the_field_taking_keys;
+          Alcotest.test_case "a closed form takes no rows" `Quick
+            test_a_closed_form_takes_no_rows;
         ] );
       ( "typing to narrow the list",
         [ Alcotest.test_case "a query narrows to what it names" `Quick

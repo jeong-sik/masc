@@ -709,6 +709,39 @@ let identity_cursor_provider ~query ~providers cursor =
 (** A login the operator has started but not finished: they have to open
     [ils_url] in a browser, and until they come back nothing has been
     written to the Keeper. *)
+(** Which of the three fields is taking keys. Sequential rather than
+    clickable: a terminal has no pointer, and tab-between-fields is a second
+    idea to explain when enter-to-advance already reads as a form. *)
+type identity_app_field = App_client_id | App_client_secret | App_scopes
+
+type identity_app_form = {
+  iaf_provider: string;
+  iaf_label: string;
+  iaf_field: identity_app_field;
+  iaf_client_id: string;
+  iaf_client_secret: string;
+  iaf_scopes: string;
+}
+
+(** The form's rows. Built here with the notice and the filter rows so the
+    key handler counts the same preamble the renderer draws. The secret is
+    shown as dots: a terminal scrolls back, and a credential on screen is a
+    credential in the scrollback. *)
+let identity_app_form_rows form =
+  match form with
+  | None -> []
+  | Some f ->
+    let mark field = if f.iaf_field = field then ">" else " " in
+    [ Printf.sprintf "  %s \xec\x95\xb1" f.iaf_label
+    ; Printf.sprintf "  %s client id      %s" (mark App_client_id) f.iaf_client_id
+    ; Printf.sprintf "  %s client secret  %s" (mark App_client_secret)
+        (String.concat "" (List.init (String.length f.iaf_client_secret)
+                             (fun _ -> "*")))
+    ; Printf.sprintf "  %s scopes         %s" (mark App_scopes) f.iaf_scopes
+    ; "  enter 다음 칸 · 마지막 칸에서 enter 저장 · esc 취소"
+    ; ""
+    ]
+
 type identity_login_started = {
   ils_keeper: string;
   ils_provider: string;
@@ -1077,6 +1110,11 @@ type state = {
      which is a different screen from not filtering -- one says the list is
      everything, the other says it is everything so far. *)
   mutable identity_filter: string option;
+  (* The app form, when it is open: which provider it is for, which field is
+     taking keys, and what has been typed. The secret is held here only
+     until it is sent, and cleared with the form -- a field left filled is a
+     credential sitting in the process for as long as the pane is up. *)
+  mutable identity_app_form: identity_app_form option;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -1664,6 +1702,7 @@ let create_state
   identity_cursor = 0;
   identity_attempt_error = None;
   identity_filter = None;
+  identity_app_form = None;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;

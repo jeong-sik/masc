@@ -1257,6 +1257,23 @@ let post_keeper_oauth_login ~(host : string) ~(port : int)
     ~body:
       (Yojson.Safe.to_string (`Assoc [ "provider", `String provider_id ]))
 
+(** POST /api/v1/keepers/oauth/client — record an app the operator made.
+
+    Not keeper-scoped, because the client belongs to the install: the path
+    says so and the server stores it under the provider's client group. *)
+let post_keeper_oauth_client ~(host : string) ~(port : int)
+    ~(provider_id : string) ~(client_id : string) ~(client_secret : string)
+    ~(scopes : string) : (Yojson.Safe.t, string) result =
+  post_json ~host ~port ~path:"/api/v1/keepers/oauth/client"
+    ~body:
+      (Yojson.Safe.to_string
+         (`Assoc
+           [ "provider", `String provider_id
+           ; "client_id", `String client_id
+           ; "client_secret", `String client_secret
+           ; "scopes", `String scopes
+           ]))
+
 (** GET /api/v1/runtime/config/raw — runtime.toml's path and text as the
     server reads them. *)
 let fetch_runtime_config_raw ~(host : string) ~(port : int) :

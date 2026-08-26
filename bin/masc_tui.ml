@@ -197,6 +197,8 @@ let move_identity_cursor (state : state) ~delta =
                        (Masc_tui_types.identity_notice
                           ~cols:(identity_pane_columns state)
                           state.identity_attempt_error
+                       @ Masc_tui_types.identity_app_form_rows
+                           state.identity_app_form
                        @ Masc_tui_types.identity_filter_rows ~providers
                            state.identity_filter)
                      ~index:cursor)
@@ -1362,6 +1364,8 @@ type async_msg =
       string * (string * string * string, string) result
       (** keeper, then (provider id, label, url) *)
   | Identity_refreshed of string * (unit, string) result
+  | Identity_app_saved of string * (int, string) result
+      (** provider id, then how many scopes were recorded *)
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
@@ -2377,6 +2381,51 @@ let launch_identity_view state ~mailbox keeper_name =
 
 (* Begin a login. The answer is a URL the operator has to open; nothing is
    written to the keeper until the browser comes back to the server. *)
+(* Recording an app the operator made. Answers on the same notice line a
+   failed attempt uses -- what an operator wants after pressing save is one
+   sentence saying whether it took, in the place they are already reading. *)
+let launch_identity_app_save state ~mailbox
+      ~(form : Masc_tui_types.identity_app_form) =
+  let host = server_peer_host in
+  let port = state.port in
+  let provider_id = form.Masc_tui_types.iaf_provider in
+  let client_id = form.Masc_tui_types.iaf_client_id in
+  let client_secret = form.Masc_tui_types.iaf_client_secret in
+  let scopes = form.Masc_tui_types.iaf_scopes in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.post_keeper_oauth_client ~host ~port ~provider_id
+            ~client_id ~client_secret ~scopes
+        with
+        | Error err -> Error err
+        | Ok (`Assoc pairs) -> (
+          match List.assoc_opt "error" pairs with
+          | Some (`String detail) -> Error detail
+          | Some _ | None ->
+            let count =
+              match List.assoc_opt "scopes" pairs with
+              | Some (`List rows) -> List.length rows
+              | Some _ | None -> 0
+            in
+            Ok count)
+        | Ok _ -> Error "the server answered with something unreadable"
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_app_saved (provider_id, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      run ();
+      `Stop_daemon)
+  | None ->
+    enqueue_async mailbox
+      (Identity_app_saved (provider_id, Error "Eio switch is unavailable"))
+
 let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   let host = server_peer_host in
   let port = state.port in
@@ -6297,6 +6346,19 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
          to take the others off the screen, and the message that matters
          most here is the one telling them what to do about it. *)
       | Error detail -> state.identity_attempt_error <- Some detail)
+  | Identity_app_saved (provider_id, result) ->
+    state.identity_attempt_error <-
+      Some
+        (match result with
+         | Ok 0 ->
+           Printf.sprintf
+             "%s: app recorded. No scopes given, so the service's own list is \
+              what will be asked for."
+             provider_id
+         | Ok count ->
+           Printf.sprintf "%s: app recorded, asking for %d scope%s." provider_id
+             count (if count = 1 then "" else "s")
+         | Error detail -> Printf.sprintf "%s: %s" provider_id detail)
   | Identity_refreshed (keeper_name, result) -> (
       match result with
       (* Re-read rather than patch what is on screen: the catalog the server
@@ -8365,6 +8427,89 @@ let main () =
                 state.search <- Some longer;
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
+       (* The app form takes every printable key while it is open, the way
+          the filter does. Three fields in order, enter to advance and to
+          send on the last, esc to abandon -- and abandoning clears the
+          secret rather than leaving it in the process. *)
+       | Some k
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && Option.is_some state.identity_app_form
+              && not compact_viewport -> (
+           match state.identity_app_form with
+           | None -> ()
+           | Some form -> (
+               let set text =
+                 state.identity_app_form <-
+                   Some
+                     (match form.Masc_tui_types.iaf_field with
+                      | Masc_tui_types.App_client_id ->
+                        { form with Masc_tui_types.iaf_client_id = text }
+                      | Masc_tui_types.App_client_secret ->
+                        { form with Masc_tui_types.iaf_client_secret = text }
+                      | Masc_tui_types.App_scopes ->
+                        { form with Masc_tui_types.iaf_scopes = text })
+               in
+               let current =
+                 match form.Masc_tui_types.iaf_field with
+                 | Masc_tui_types.App_client_id -> form.Masc_tui_types.iaf_client_id
+                 | Masc_tui_types.App_client_secret ->
+                   form.Masc_tui_types.iaf_client_secret
+                 | Masc_tui_types.App_scopes -> form.Masc_tui_types.iaf_scopes
+               in
+               match k with
+               | "esc" -> state.identity_app_form <- None
+               | "\127" | "\b" ->
+                 set (Masc_tui_message_layout.drop_last_utf8_scalar current)
+               | "\r" | "\n" -> (
+                   match form.Masc_tui_types.iaf_field with
+                   | Masc_tui_types.App_client_id ->
+                     state.identity_app_form <-
+                       Some
+                         { form with
+                           Masc_tui_types.iaf_field =
+                             Masc_tui_types.App_client_secret
+                         }
+                   | Masc_tui_types.App_client_secret ->
+                     state.identity_app_form <-
+                       Some
+                         { form with
+                           Masc_tui_types.iaf_field = Masc_tui_types.App_scopes
+                         }
+                   | Masc_tui_types.App_scopes ->
+                     launch_identity_app_save state ~mailbox:async_messages
+                       ~form;
+                     state.identity_app_form <- None)
+               | s
+                 when (String.length s = 1 && Char.code s.[0] >= 32)
+                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                 set (current ^ s)
+               | _ -> ()))
+       | Some "A"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 Masc_tui_types.identity_cursor_provider
+                   ~query:(identity_query state) ~providers
+                   state.identity_cursor
+               with
+               | Some (provider_id, label) ->
+                 state.identity_attempt_error <- None;
+                 state.identity_app_form <-
+                   Some
+                     { Masc_tui_types.iaf_provider = provider_id
+                     ; iaf_label = label
+                     ; iaf_field = Masc_tui_types.App_client_id
+                     ; iaf_client_id = ""
+                     ; iaf_client_secret = ""
+                     ; iaf_scopes = ""
+                     }
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        (* The Identity list narrows as you type, which the row search above
           deliberately does not: sixty-seven rows is a list to look things up
           in rather than scroll. While it is open every printable key is

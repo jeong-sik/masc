@@ -505,7 +505,73 @@ export interface DashboardToolsResponse {
   tool_usage: ToolMetricsResponse
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory
   keeper_background?: DashboardKeeperBackground
+  effective_keeper_surface?: DashboardEffectiveKeeperSurface | null
+  skill_activations?: DashboardSkillActivationProjection | null
 }
+
+export interface DashboardSkillReference {
+  identity: {
+    source_id: string
+    package_id: string
+    name: string
+  }
+  content_revision: string
+}
+
+export type DashboardEffectiveKeeperSurface =
+  | {
+      status: 'available'
+      keeper_name: string
+      runtime_id: string
+      official_client_kind: string
+      native_posture: string | null
+      tool_groups: string[]
+      current_task_id: string | null
+      instruction_skills: DashboardSkillReference[]
+      composition_skills: DashboardSkillReference[]
+      count: number
+      tools: Array<{ name: string; origin: { kind: string } }>
+      tool_surface_sha256: string | null
+    }
+  | {
+      status: 'unavailable'
+      keeper_name: string
+      reason: string
+      detail: string
+    }
+  | {
+      status: 'warming'
+      keeper_name: string
+    }
+
+export type DashboardSkillActivationOrigin =
+  | { kind: 'task_instruction'; task_id: string }
+  | { kind: 'session_instruction' }
+  | { kind: 'task_composition'; task_id: string; tool_name: string }
+  | { kind: 'session_composition'; tool_name: string }
+
+export interface DashboardSkillActivation {
+  identity: DashboardSkillReference['identity']
+  content_revision: string
+  snapshot_revision: string
+  turn_ref: string
+  activated_at: string
+  origin: DashboardSkillActivationOrigin
+}
+
+export type DashboardSkillActivationProjection =
+  | {
+      status: 'available'
+      keeper_name: string
+      ledger: {
+        schema: string
+        session_id: string
+        revision: string
+        activations: DashboardSkillActivation[]
+      }
+    }
+  | { status: 'no_session'; keeper_name: string }
+  | { status: 'unavailable'; keeper_name: string; reason: string; detail: string }
 
 export interface DashboardScheduleRunnerCounts {
   due_changed?: number
@@ -811,9 +877,16 @@ function normalizeKeeperEventQueueHealth(raw: unknown): DashboardKeeperEventQueu
   }
 }
 
-export async function fetchDashboardTools(opts?: AbortableRequestOptions): Promise<DashboardToolsResponse> {
+export interface DashboardToolsRequestOptions extends AbortableRequestOptions {
+  keeperName?: string
+}
+
+export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): Promise<DashboardToolsResponse> {
   await ensureDevToken()
-  const raw = await get<DashboardToolsResponse>('/api/v1/dashboard/tools', { signal: opts?.signal })
+  const keeperQuery = opts?.keeperName
+    ? `?keeper=${encodeURIComponent(opts.keeperName)}`
+    : ''
+  const raw = await get<DashboardToolsResponse>(`/api/v1/dashboard/tools${keeperQuery}`, { signal: opts?.signal })
   const normalizedTools = raw.tool_inventory?.tools?.map(t => ({
     ...t,
     category: t.category ?? 'uncategorized',

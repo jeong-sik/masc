@@ -1253,7 +1253,9 @@ type async_msg =
   | Github_identity_view_loaded of string * (string list, string) result
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
-  | Identity_login_started of string * (string * string, string) result
+  | Identity_login_started of
+      string * (string * string * string, string) result
+      (** keeper, then (provider id, label, url) *)
   | Identity_refreshed of string * (unit, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
@@ -2286,6 +2288,11 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
             | `Assoc fields -> (
                 match List.assoc_opt "authorize_url" fields with
                 | Some (`String url) ->
+                    let provider_id =
+                      match List.assoc_opt "provider" fields with
+                      | Some (`String id) -> id
+                      | Some _ | None -> provider_id
+                    in
                     (* Opened here, on this fiber, because the URL is about
                        nine hundred characters and a pane truncates it -- an
                        operator cannot select what is not on screen. It is
@@ -2293,7 +2300,7 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
                        no opener. *)
                     (match Masc_tui_browser.open_url url with
                     | Ok _ | Error _ -> ());
-                    Ok (label, url)
+                    Ok (provider_id, label, url)
                 | Some _ | None ->
                     Error "the server answered without an authorize_url")
             | _ -> Error "the server answered with something this cannot read")
@@ -4396,6 +4403,22 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        match state.msg_target_keeper_name with
        | Some keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name
        | None -> ());
+    (* An operator who consented in a browser is standing in front of a tab
+       that does not know it happened: the callback lands on the server, not
+       here. So while a login this TUI started is still outstanding, the tick
+       asks again. It stops as soon as the answer says attached, so this is
+       not a poll that runs forever -- it runs exactly as long as somebody is
+       waiting for it. Same shape as the chat reload above, and for the same
+       reason: a pane that read once on open showed a fact that had since
+       changed. *)
+    (if
+       state.view = Keepers Keeper_detail
+       && state.detail_tab = Detail_identity
+       && state.identity_login <> None
+     then
+       match selected_keeper state with
+       | Some keeper -> launch_identity_view state ~mailbox keeper.k_name
+       | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
        there would be worse than none. The payload is a handful of rows. *)
@@ -5903,13 +5926,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         match result with
         | Ok providers ->
             state.identity_view <- Some (keeper_name, providers);
-            state.identity_view_error <- None
+            state.identity_view_error <- None;
+            (* The login this TUI started has landed once the service it was
+               for reports tools. Clearing it is what stops the tick from
+               asking again -- a poll with no end condition is a poll that
+               runs for the life of the process. *)
+            (match state.identity_login with
+             | Some login
+               when Masc_tui_types.identity_login_landed ~providers ~login ->
+                 state.identity_login <- None
+             | Some _ | None -> ())
         | Error detail -> state.identity_view_error <- Some detail)
   | Identity_login_started (keeper_name, result) -> (
       match result with
-      | Ok (label, url) ->
+      | Ok (provider, label, url) ->
           state.identity_login <-
-            Some { ils_keeper = keeper_name; ils_label = label; ils_url = url };
+            Some
+              { ils_keeper = keeper_name
+              ; ils_provider = provider
+              ; ils_label = label
+              ; ils_url = url
+              };
           state.identity_view_error <- None
       (* Shown on the tab rather than swallowed: the operator pressed a key
          and has to learn that nothing is going to open. *)

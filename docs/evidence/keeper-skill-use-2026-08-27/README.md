@@ -52,6 +52,27 @@
 브라우저 캡처: [dashboard-skill-use.png](dashboard-skill-use.png)  
 캡처 SHA-256: `d0f439e28fe4b5cebbe1bc79895b46b1df808dde3198f3d3ae13c8f7b2a77ea7`
 
+## TUI exact-head 재검증
+
+TUI의 `--base-path`와 부모 셸의 `MASC_BASE_PATH`가 다를 때 저장소 읽기가 부모 환경으로 새는 문제를 #30904로 재현했다. `29511933ac362e4d2669176144d2835e34da0de3`에서 CLI가 정한 경로를 프로세스의 단일 base path로 확정한 뒤 다시 측정했다.
+
+| 항목 | 값 |
+|---|---|
+| source HEAD | `29511933ac362e4d2669176144d2835e34da0de3` |
+| server embedded commit | `29511933ac362e4d2669176144d2835e34da0de3` |
+| runtime repo HEAD | `29511933ac` |
+| server executable SHA-256 | `592765ba13144bb33d117baff6a2f4b8095206251eedc2e443cdc0b2ce304603` |
+| TUI executable SHA-256 | `4ffa5035fdd6c46d99f57663d58e6bd79ba1ac16b5f6167990ceb46dd1b51ab7` |
+| effective base path | `/private/tmp/masc-skill-proof.NVbd5m` |
+| running Keeper | `skill-proof-keeper` (1/1) |
+
+재현 회귀는 부모 환경의 별도 base path에 `env-only` Keeper만 두고 CLI 작업공간에는 `alpha`, `beta`만 둔다. `test_tui_keyboard_input.py ... cli-base-path` 실행은 CLI 작업공간의 `alpha`를 선택했고 `env-only`를 표시하지 않아 통과했다.
+
+같은 HEAD의 서버와 TUI를 ttyd로 연결한 브라우저 실측에서는 `skill-proof-keeper` 한 명을 선택했다. Tools 화면은 `offered=1 invoked=5 bodies=3 resources=2 delivered=5 actions=2 invalid=0`과 다섯 호출의 ID, Agent Core 턴, 본문/리소스 SHA-256, 전달 턴, 후속 `keeper_time_now` 행동을 표시했다.
+
+TUI 캡처: [tui-skill-use.png](tui-skill-use.png)
+캡처 SHA-256: `cd272f2f349f89d399d876911957fef790b71371e50e7553898b25161620b050`
+
 ## 불확실성 (Uncertainty)
 
 - 미확인 항목: 이 기록은 GLM 런타임 한 개의 실제 Keeper 실행을 증명한다. 다른 provider/runtime 조합은 이 기록의 범위가 아니다.

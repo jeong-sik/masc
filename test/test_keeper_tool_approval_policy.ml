@@ -227,6 +227,76 @@ let test_cancelling_a_request_runs_unasked () =
       (asks ~composition_plan_index:None ~tool_name:Catalog.cancel_tool_name ~input:no_input))
 ;;
 
+module Plan = Masc.Keeper_tool_plan
+
+(* An async composition, parsed by the real catalog parser and judged by the
+   real policy, over one node.
+
+   These two used to answer the same question. The parser refused any async
+   entry whose every node did not carry a static read-only hint; the policy
+   asks about a tool whose group changes something outside the turn. The
+   second is narrower, so tools sat between them: [keeper_memory_write] is a
+   Memory_group tool the policy runs without asking, and a keeper could call
+   it directly while an async plan naming it would not parse at all.
+
+   The parser reads a plan's shape now. Who may run it is one question with
+   one answer, and these cases pin both sides of it: the tool that used to be
+   refused, and one that is still asked about. *)
+let async_composition ~name ~tool =
+  Printf.sprintf
+    {|[[compositions]]
+name = "%s"
+execution = "async"
+[[compositions.nodes]]
+id = "only"
+tool = "%s"
+[compositions.nodes.input]
+kind = "literal"
+value = { }
+|}
+    name
+    tool
+;;
+
+let parsed_async_composition ~name ~tool =
+  match Catalog.parse (async_composition ~name ~tool) with
+  | Error error -> fail (Catalog.error_to_string error)
+  | Ok catalog ->
+    (match Catalog.find catalog name with
+     | None -> fail ("async composition " ^ name ^ " did not survive parsing")
+     | Some entry ->
+       ( Catalog.tool_name entry
+       , List.map
+           (fun (node : Plan.node) -> node.Plan.tool_name)
+           (Plan.nodes entry.plan) ))
+;;
+
+let test_an_async_plan_of_a_tool_that_runs_unasked_parses_and_runs_unasked () =
+  let composition, node_tools =
+    parsed_async_composition ~name:"write-background" ~tool:"keeper_memory_write"
+  in
+  check (list string) "the plan the policy is handed" [ "keeper_memory_write" ]
+    node_tools;
+  with_index [ composition, node_tools ] (fun () ->
+    check bool "the same tool called directly runs unasked" false
+      (asks ~tool_name:"keeper_memory_write" ~input:no_input);
+    check bool "so the async plan holding it runs unasked too" false
+      (asks ~tool_name:composition ~input:no_input))
+;;
+
+let test_an_async_plan_that_changes_the_world_is_still_asked_about () =
+  let composition, node_tools =
+    parsed_async_composition ~name:"execute-background" ~tool:"Execute"
+  in
+  with_index [ composition, node_tools ] (fun () ->
+    check bool "running a program is asked about called directly" true
+      (asks ~tool_name:"Execute" ~input:no_input);
+    check bool "and asked about inside an async plan" true
+      (asks ~tool_name:composition ~input:no_input);
+    check bool "the reason names the node responsible" true
+      (mentions (because ~tool_name:composition ~input:no_input) "Execute"))
+;;
+
 (* The names come from the catalog the surface builds these tools from, so a
    rename cannot leave the policy answering about a name nobody calls. *)
 let test_the_control_names_are_the_catalogue_s () =
@@ -278,6 +348,13 @@ let () =
             test_cancelling_a_request_runs_unasked
         ; test_case "the control names are the catalogue's" `Quick
             test_the_control_names_are_the_catalogue_s
+        ] )
+    ; ( "async compositions"
+      , [ test_case "a plan of a tool that runs unasked parses and runs unasked"
+            `Quick
+            test_an_async_plan_of_a_tool_that_runs_unasked_parses_and_runs_unasked
+        ; test_case "a plan that changes the world is still asked about" `Quick
+            test_an_async_plan_that_changes_the_world_is_still_asked_about
         ] )
     ; ( "the question"
       , [ test_case "names the call" `Quick test_the_question_names_the_call ] )

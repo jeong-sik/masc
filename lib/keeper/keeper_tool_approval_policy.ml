@@ -79,27 +79,40 @@ let ad_hoc_plan_nodes input =
   | _ -> None
 ;;
 
+(* One tool, one verdict. [reads_only] is whatever evidence the caller holds
+   that this call only reads; everything after it is a fact about the tool.
+
+   Written once because the two callers differ in that evidence and in nothing
+   else, and a second copy is how they drift. The catalog parser held such a
+   copy for async entries: it demanded a static read-only hint, which is
+   stricter than "this group stays inside masc", so a plan holding
+   keeper_memory_write was refused while a keeper could call that tool
+   directly. Removed -- the parser reads a plan's shape, and who may run it is
+   not a question about shape. *)
+let verdict_of_descriptor ~reads_only (descriptor : Descriptor.t) =
+  match reads_only with
+  | Some true -> Run { because = "this call only reads" }
+  | Some false | None ->
+    let group = descriptor.keeper_tool_group in
+    let group_name = Descriptor.keeper_tool_group_to_string group in
+    if group_changes_the_world group
+    then
+      Ask
+        { because =
+            Printf.sprintf "%s tools change something outside this turn" group_name
+        }
+    else Run { because = Printf.sprintf "%s tools stay inside masc" group_name }
+;;
+
 let rec verdict_for ~composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
   | None -> verdict_for_undescribed ~composition_plan_index ~tool_name ~input
-  | Some descriptor -> (
-      match Descriptor.readonly_for_input descriptor ~input with
-      | Some true ->
-          Run { because = "this call only reads" }
-      | Some false | None ->
-          let group = descriptor.keeper_tool_group in
-          if group_changes_the_world group then
-            Ask
-              { because =
-                  Printf.sprintf "%s tools change something outside this turn"
-                    (Descriptor.keeper_tool_group_to_string group)
-              }
-          else
-            Run
-              { because =
-                  Printf.sprintf "%s tools stay inside masc"
-                    (Descriptor.keeper_tool_group_to_string group)
-              })
+  | Some descriptor ->
+    (* A direct call carries the values the tool will receive, so the
+       descriptor is asked about this call rather than about the tool. *)
+    verdict_of_descriptor
+      ~reads_only:(Descriptor.readonly_for_input descriptor ~input)
+      descriptor
 
 (* A name with no descriptor is either a composition, whose nodes each have
    one, or something this build cannot classify at all.
@@ -120,31 +133,29 @@ let rec verdict_for ~composition_plan_index ~tool_name ~input =
    there is no input to hand [readonly_for_input]. Passing an empty object
    instead would not be neutral: a descriptor whose readonly answer depends on
    its input would be asked about a call it never sees, and whatever [{}]
-   happens to produce would be pinned as the answer for every plan. So this
-   reads the descriptor's static hint and, failing that, the group -- both are
-   facts about the tool rather than about one call.
+   happens to produce would be pinned as the answer for every plan. So the
+   evidence here is the descriptor's static hint -- a fact about the tool
+   rather than about one call -- and the verdict is drawn from it by the same
+   function a direct call uses.
 
-   Today no descriptor's answer would differ ([Grep] is the only one carrying
-   [readonly_of_input] and it ignores the argument), so this is the same
-   verdict by a route that stays right when that stops being true. *)
+   This is the only place a composition node is authorized. A node is
+   dispatched by [Keeper_tool_plan_executor] straight to the keeper tool
+   handler, which is below the [pre_tool_use] hook, so the outer call is where
+   its plan gets asked about. *)
 and node_asks_for_approval node =
   match descriptor_for node with
   (* Unreachable through dispatch: a plan node is validated against the
      descriptor list before the plan is built. Asked rather than assumed,
      because "no descriptor" is exactly the case this whole arm exists for. *)
-  | None -> Some (node, "no descriptor declares what this tool does")
+  | None -> Some (node, unclassifiable_because)
   | Some descriptor ->
-    (match Descriptor.readonly_static_hint descriptor with
-     | Some true -> None
-     | Some false | None ->
-       let group = descriptor.keeper_tool_group in
-       if group_changes_the_world group
-       then
-         Some
-           ( node
-           , Printf.sprintf "%s tools change something outside this turn"
-               (Descriptor.keeper_tool_group_to_string group) )
-       else None)
+    (match
+       verdict_of_descriptor
+         ~reads_only:(Descriptor.readonly_static_hint descriptor)
+         descriptor
+     with
+     | Run _ -> None
+     | Ask { because } -> Some (node, because))
 
 (* What an undescribed name is, decided once.
 

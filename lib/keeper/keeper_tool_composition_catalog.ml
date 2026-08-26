@@ -42,11 +42,6 @@ type error =
       { path : string list
       ; mode : string
       }
-  | Async_tool_not_statically_read_only of
-      { name : string
-      ; node_id : Plan.Node_id.t
-      ; tool_name : string
-      }
   | Invalid_template_kind of
       { path : string list
       ; kind : string
@@ -576,31 +571,7 @@ let parse_composition ~index value =
                          (match validate_declared_params ~name ~params plan with
                           | Error _ as error -> error
                           | Ok () ->
-                         (match execution with
-                          | Inline ->
-                            Ok { name; description; execution; params; plan }
-                          | Async ->
-                            (
-                            (match
-                               Plan.nodes plan
-                               |> List.find_map (fun (node : Plan.node) ->
-                                 match Plan.descriptor plan node.id with
-                                 | Some descriptor
-                                   when Keeper_tool_descriptor.readonly_static_hint
-                                          descriptor
-                                        = Some true ->
-                                   None
-                                 | Some _ | None -> Some node)
-                             with
-                             | None ->
-                               Ok { name; description; execution; params; plan }
-                             | Some node ->
-                               Error
-                                 (Async_tool_not_statically_read_only
-                                    { name
-                                    ; node_id = node.id
-                                    ; tool_name = node.tool_name
-                                    }))))))))))))))))
+                            Ok { name; description; execution; params; plan }))))))))))))
 ;;
 
 let parse content =
@@ -630,8 +601,6 @@ let parse content =
              parse_entries 0 [] raw_compositions)))
 ;;
 
-let node_id_to_string = Keeper_tool_plan.Node_id.to_string
-
 let error_to_string = function
   | Toml_syntax detail -> "invalid TOML: " ^ detail
   | Empty_catalog -> "catalog must declare at least one composition"
@@ -657,12 +626,6 @@ let error_to_string = function
       "invalid execution mode %S at %s (expected inline or async)"
       mode
       (String.concat "." path)
-  | Async_tool_not_statically_read_only { name; node_id; tool_name } ->
-    Printf.sprintf
-      "async composition %S node %S tool %S is not statically read-only"
-      name
-      (node_id_to_string node_id)
-      tool_name
   | Invalid_template_kind { path; kind } ->
     Printf.sprintf "invalid template kind %S at %s" kind (String.concat "." path)
   | Invalid_node_id { path; _ } -> "invalid node id at " ^ String.concat "." path

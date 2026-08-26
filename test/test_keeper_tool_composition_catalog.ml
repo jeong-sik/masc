@@ -210,7 +210,16 @@ let test_catalog_accepts_async_only_for_statically_read_only_tools () =
   check string "cancel control name" "keeper_composition_cancel" Catalog.cancel_tool_name
 ;;
 
-let test_catalog_rejects_async_effectful_tool () =
+(* Whether a call may run is decided per call by
+   [Keeper_tool_approval_policy], from the tool's group and whether that input
+   only reads. The parser used to answer it a second time, for async entries
+   only, by demanding every node carry a static read-only hint -- a stricter
+   and differently-shaped rule than the policy's. The two disagreed on tools
+   the policy runs without asking, [keeper_memory_write] among them: a keeper
+   could call it directly, and could not declare an async plan that contained
+   it. The parser reads the plan's shape now; who may run it is not a
+   question about shape. *)
+let test_catalog_admits_async_plan_the_policy_decides_on () =
   let document =
     {|[[compositions]]
 name = "write-background"
@@ -220,15 +229,25 @@ id = "write"
 tool = "keeper_memory_write"
 [compositions.nodes.input]
 kind = "literal"
-value = { title = "not admitted", content = "effectful async" }
+value = { title = "admitted", content = "decided by the approval policy" }
 |}
   in
   match Catalog.parse document with
-  | Error
-      (Catalog.Async_tool_not_statically_read_only
-        { name = "write-background"; node_id; tool_name = "keeper_memory_write" }) ->
-    check string "rejected node" "write" (Plan.Node_id.to_string node_id)
-  | Error _ | Ok _ -> fail "effectful async composition was admitted"
+  | Error error -> fail (Catalog.error_to_string error)
+  | Ok catalog ->
+    (match Catalog.find catalog "write-background" with
+     | None -> fail "async composition lookup failed"
+     | Some entry ->
+       (match entry.execution with
+        | Catalog.Async -> ()
+        | Catalog.Inline -> fail "async execution mode was rewritten");
+       check
+         (list string)
+         "the plan the policy will judge"
+         [ "keeper_memory_write" ]
+         (List.map
+            (fun (node : Plan.node) -> node.Plan.tool_name)
+            (Plan.nodes entry.plan)))
 ;;
 
 let test_catalog_projects_stable_tool_name_and_path () =
@@ -539,9 +558,9 @@ let () =
             `Quick
             test_catalog_accepts_async_only_for_statically_read_only_tools
         ; test_case
-            "rejects async effectful tool"
+            "admits an async plan the policy decides on"
             `Quick
-            test_catalog_rejects_async_effectful_tool
+            test_catalog_admits_async_plan_the_policy_decides_on
         ; test_case
             "projects stable tool name and path"
             `Quick

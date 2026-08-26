@@ -48,11 +48,6 @@ type error =
       { path : string list
       ; mode : string
       }
-  | Async_tool_not_statically_read_only of
-      { name : string
-      ; node_id : Keeper_tool_plan.Node_id.t
-      ; tool_name : string
-      }
   | Invalid_template_kind of
       { path : string list
       ; kind : string

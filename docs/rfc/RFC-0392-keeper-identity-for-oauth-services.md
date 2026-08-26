@@ -1,6 +1,6 @@
 ---
 rfc: "0392"
-title: "OAuth 교환이 필요한 서비스에 대한 Keeper 신원"
+title: "Keeper 신원을 provider 로 매개변수화 — provider 추가가 OCaml 을 늘리지 않는다"
 status: Draft
 created: 2026-08-26
 updated: 2026-08-26
@@ -11,134 +11,152 @@ related: ["per-keeper-github-cli-identity"]
 implementation_prs: []
 ---
 
-# RFC: OAuth 교환이 필요한 서비스에 대한 Keeper 신원
+# RFC: Keeper 신원을 provider 로 매개변수화
 
 Status: Draft
 
 ## Problem
 
-Keeper 가 외부 서비스 자격증명을 갖는 길은 이미 둘 있고, 셋째만 없다.
+Keeper 별 외부 신원은 **이미 동작한다.** TUI 의 Keeper 상세에 `Info / Instructions /
+GitHub` 탭이 있고, GitHub 탭에서 `L` 을 누르면 그 키퍼 하나의 device-flow 로그인이
+돌고, 결과가 그 키퍼만의 `GH_CONFIG_DIR` 에 남는다. UX 도 경계도 맞다.
 
-| 서비스 모양 | 필요한 것 | 지금 |
-|---|---|---|
-| 고정 토큰 (PAT, bot token) | 보관과 주입 | **있음** — `Keeper_secret_projection` |
-| CLI 가 계정을 소유 (`gh`) | 설정 디렉터리 격리 | **있음** — `GH_CONFIG_DIR` |
-| OAuth + refresh | 획득과 갱신 | **없음** |
+문제는 **"github" 라는 이름이 전 계층에 박혀 있다**는 것이다.
 
-`Keeper_secret_projection` 은 이미 `set_env_entry` 와 `set_file_entry` 로 환경변수와
-파일을 모두 받고, `local_env_for_keeper` 와 `docker_args_for_keeper` 로 두 실행
-경로에 주입하며, `dashboard_status_json` 으로 운영자에게 보이고,
-`Keeper_secret_redaction` 이 값을 가린다. **Jira·Slack·Google 이 장기 토큰을
-발급한다면 오늘 붙일 수 있다.** 붙이는 곳이 없어서가 아니라, 그 사실이 알려져
-있지 않아서 안 붙는다.
+| 파일 | `github` 언급 |
+|---|---|
+| `bin/masc_tui.ml` | 50 |
+| `lib/keeper/keeper_github_identity.ml` | 45 |
+| `lib/server/server_dashboard_http_keeper_api_post.ml` | 14 |
+| `bin/masc_tui_types.ml` | 7 |
+| `bin/masc_tui_http.ml` | 7 |
+| `bin/masc_tui_render.ml` | 4 |
+| `bin/masc_tui_keys.ml` | 2 |
 
-없는 것은 **교환과 갱신**이다. masc 가 지금 이끄는 대화형 로그인은 GitHub 하나뿐이고,
-그건 `gh` 에게 자기 `GH_CONFIG_DIR` 을 건네는 방식이다 — 교환도 보관도 CLI 가 한다.
-`RFC-per-keeper-github-cli-identity` 는 그래서 "No provider/plugin facade in this
-change" 를 비목표로 명시했다.
+```ocaml
+let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
+| Detail_github -> "GitHub"
+| Detail_github -> "[ ]:tab  L:login"
+| Github_identity_view_loaded of ... | Github_login_lines of ... | Github_login_finished of ...
+launch_github_login state ~mailbox keeper_name
+POST /api/v1/keepers/:name/github-login
+```
 
-업무 서비스에는 그런 CLI 가 없다. 그러면 둘 중 하나다.
+Jira 를 붙이려면 129곳을 훑어 같은 모양을 한 벌 더 만들어야 한다. 기능이 없어서가
+아니라 **이름이 상수라서** 안 붙는다.
 
-1. 운영자가 장기 토큰을 손으로 붙여넣는다 — 지금도 된다.
-2. masc 가 OAuth 교환을 직접 하고 **refresh token 을 든다**.
-
-이 RFC 는 2번만 다룬다.
-
-## 무엇이 실제 비용인가
-
-2번은 masc 에 없던 책임을 만든다. GitHub 설계는 **일부러** masc 가 토큰을 안 만지게
-했다 — 값은 `gh` 안에 있고 masc 는 디렉터리만 가리켰다. refresh token 을 들면
-masc 가 값의 보관자가 된다.
-
-이 비용을 감수할 값어치는 대상 서비스가 **장기 토큰을 안 주는 경우에만** 생긴다.
-Slack bot token, Atlassian API token 처럼 만료 없는 자격증명을 주는 서비스는
-1번으로 충분하고, 이 RFC 를 적용하면 안 된다.
+곁들여, GitHub App 은 절반만 있다. `gh` device flow 는 사람 계정이고, App 설치
+토큰은 키퍼마다 다른 신원을 줄 수 있는데 TUI 가 그 흐름을 모른다. 반대로 커밋
+`6638226397` 에 그 흐름을 다 하는 144줄짜리 스크립트가 있는데 **병합되지 않았고
+UI 가 없다.** 두 조각이 서로를 모른다.
 
 ## Decision
 
-### 저장은 새로 만들지 않는다
+### 탭이 provider 를 받는다
 
-refresh token 은 `.masc/secrets/<keeper>` 의 **파일 항목**으로 둔다.
-`Keeper_secret_projection.set_file_entry` 가 이미 그 자리를 소유하고,
-`Keeper_secret_redaction` 이 이미 값을 가린다. 앞 RFC 의
-"No duplicate secret store" 를 그대로 지킨다.
+```ocaml
+| Detail_identity of provider_id     (* Detail_github 를 대체 *)
+```
 
-access token 은 **환경변수 항목**으로 투영한다. 이름은 provider 선언이 정한다.
+`keeper_detail_tabs` 는 상수 목록이 아니라 선언된 provider 에서 만들어진다. 라벨,
+footer 힌트, 로딩 메시지, HTTP 경로가 전부 `provider_id` 를 지난다.
 
 ### provider 는 TOML 이 선언한다
 
-`config/tools/*.toml` 과 같은 자리, 같은 방식이다
+`config/identity/*.toml`. `config/tools/` 와 같은 자리, 같은 방식
 (`RFC-prompts-and-tool-definitions-outside-ocaml`).
 
 ```toml
-name = "atlassian"
-authorize_url = "https://auth.atlassian.com/authorize"
-token_url = "https://auth.atlassian.com/oauth/token"
-scopes = ["read:jira-work", "write:jira-work"]
-access_token_env = "ATLASSIAN_ACCESS_TOKEN"
+id = "github-app"
+label = "GitHub"
+flow = "app_installation"     # gh_cli_device | app_installation | oauth_device
+lands_in = "secrets_env"      # config_dir | secrets_env
+env_name = "GH_TOKEN"
+renew_before_sec = 600
 ```
 
-**provider 를 하나 더 붙이는 일이 TOML 파일 하나여야 한다.** OCaml 에
-provider 별 분기가 생기면 이 RFC 는 목적을 잃는다.
+`flow` 와 `lands_in` 은 **닫힌 variant** 다. 알 수 없는 값은 기본값으로 접히지 않고
+설정 로드에서 거부된다.
 
-### 갱신은 쓰는 시점에 한다
+지금의 `gh` 경로는 삭제되지 않고 **선언 하나가 된다.**
 
-배경 갱신 워커를 두지 않는다. 자격증명을 해석하는 그 순간, 만료가 가까우면
-그 자리에서 교환한다.
-
-앞 RFC 가 "No login lease, claim, settlement, registry, TTL, polling worker, or
-confirmation gate" 를 비목표로 적었고, 그 판단이 여기서도 맞다. 배경 워커는
-**아무도 안 쓰는 자격증명을 계속 갱신하고**, 실패했을 때 알릴 자리가 없다.
-쓰는 시점 갱신은 실패가 곧 그 호출의 실패라 운영자에게 도달한다.
-
-### 실패는 타입으로 가른다
-
-```ocaml
-type resolution =
-  | Fresh of string                  (* 유효한 access token *)
-  | Refreshed of string              (* 교환해서 얻음 *)
-  | Refresh_rejected of { detail : string }
-  | Never_authorized
+```toml
+id = "github-cli"
+label = "GitHub"
+flow = "gh_cli_device"
+lands_in = "config_dir"
 ```
 
-`Never_authorized` (한 번도 로그인 안 함) 와 `Refresh_rejected` (refresh 가
-거부됨 — 취소됐거나 만료됨) 는 운영자에게 **다른 사실**이다. 앞 RFC 의
-"Malformed or unsafe identity state is a typed execution error and is not
-collapsed into absence" 와 같은 축이다. `option` 으로 뭉개지 않는다.
+### App 설치 토큰은 이미 쓴 코드를 쓴다
+
+`6638226397` 의 스크립트가 하는 일이 그대로 `flow = "app_installation"` 이다.
+openssl 로 App JWT 를 RS256 서명하고, 설치 토큰을 발급받고,
+`secrets/<keeper>/env/<env_name>` 에 0600 으로 쓴다. 설치 토큰은 60분을 살고
+스크립트는 50분마다 갱신한다 — `renew_before_sec` 이 그 값이다.
+
+새로 만드는 것이 아니라 **자리를 옮기는 것**이다.
+
+## 제약을 테스트로 만든다
+
+"provider 를 붙여도 OCaml 이 늘지 않는다" 는 약속이면 다음 사람이 안 지킨다.
+이 저장소에 이미 같은 모양의 가드가 있다 — `test_keeper_toml.ml` 의
+`concrete Keeper identities remain in OCaml source` 는 인벤토리를 읽고
+`bin/ lib/ packages/ test/` 의 OCaml 을 훑어 **첫 하나가 아니라 전부** 보고한다.
+
+같은 모양으로 하나 더 둔다.
+
+```
+선언된 provider id 는 OCaml 소스에 나타나면 안 된다.
+```
+
+이 가드는 **오늘 빨갛다** — `github` 이 129번 있다. 그리고 마지막 하드코딩이
+사라지는 순간 초록이 된다. 즉 **이 테스트가 곧 완료 조건이다.** 별도의 "다 했나"
+판단이 필요 없다.
+
+실패 메시지는 위반한 파일과 id 를 전부 대고, 선언 파일 경로를 가리킨다.
 
 ## Explicit non-goals
 
-- provider 별 OCaml 코드. provider 추가는 TOML 하나다.
-- 배경 갱신 워커, 만료 스캐너, 갱신 큐.
-- 새 비밀 저장소. `.masc/secrets/<keeper>` 가 그대로 유일한 자리다.
-- 호스트 계정으로의 폴백.
-- 캐시된 인증 판정. 상태는 물어볼 때 읽는다.
-- `gh` 경로 변경. GitHub 은 지금 방식을 그대로 둔다.
-- **장기 토큰을 주는 서비스에 이 경로를 쓰는 것.** 그건 오늘 있는 투영으로 한다.
-- Keeper lifecycle 진입 게이트. 자격증명 없음은 관측 대상이지 실행 차단이 아니다.
+- provider 별 OCaml 분기. 그게 이 RFC 가 없애려는 것이다.
+- `gh` 흐름의 삭제. 선언 하나로 남는다.
+- masc core 에 GitHub 전용 자격증명 분기. #24332 가 이미 지웠고 되살리지 않는다.
+- 새 비밀 저장소. `secrets/<keeper>/` 와 `keepers/<keeper>/<config_dir>/` 가 그대로다.
+- 배경 갱신 워커. 갱신은 그 키퍼의 신원을 쓰는 시점이나 운영자가 탭에서 누를 때 돈다.
+- 호스트 계정 폴백.
+- Keeper lifecycle 진입 게이트. 신원 없음은 관측 대상이지 실행 차단이 아니다.
 
 ## Failure behavior
 
-자격증명이 없거나 갱신이 거부돼도 Keeper 는 계속 돈다. 그 서비스를 부르는 도구가
-타입 있는 오류로 실패하고, 그 오류가 어느 provider 의 무엇인지 말한다.
+신원이 없거나 갱신이 거부돼도 Keeper 는 계속 돈다. 그 서비스를 부르는 도구가
+타입 있는 오류로 실패한다.
 
-교환 중 취소(`Eio.Cancel.Cancelled`)는 삼키지 않는다 — 갱신 실패와 종료는
-다른 사실이고, 이 저장소가 TLA+ 로 모델링한 `CancelledAbsorbed` 가 정확히 그
-혼동이다.
+상태는 네 가지를 구분한다.
 
-refresh token 은 값으로 절대 노출하지 않는다. 대시보드는 provider 이름과
-마지막 갱신 시각, 그리고 위 네 상태 중 하나만 보여준다.
+```ocaml
+| Fresh          (* 유효 *)
+| Renewed        (* 방금 갱신 *)
+| Renew_rejected of { detail : string }
+| Never_authorized
+```
+
+`Never_authorized`(한 번도 로그인 안 함) 와 `Renew_rejected`(취소됐거나 만료됨) 는
+운영자에게 다른 사실이다. 앞 RFC 의 "Malformed or unsafe identity state is a typed
+execution error and is not collapsed into absence" 와 같은 축이다.
+
+교환 중 취소(`Eio.Cancel.Cancelled`)는 삼키지 않는다. 갱신 실패와 종료는 다른
+사실이고, 이 저장소가 TLA+ 로 모델링한 `CancelledAbsorbed` 가 그 혼동이다.
+
+자격증명 값은 어디에도 노출하지 않는다. 탭은 provider 이름, 마지막 갱신 시각,
+위 네 상태 중 하나만 보여준다.
 
 ## Open questions
 
-1. **redirect URI 를 어디서 받나.** masc 서버가 이미 HTTP 를 연다
-   (`server_routes_http_*`). 거기에 콜백 경로를 하나 더 두는 게 자연스럽지만,
-   그러면 서버가 외부에서 도달 가능해야 한다. device flow 를 지원하는
-   provider 는 그쪽이 낫다 — provider TOML 이 어느 방식인지 선언해야 할 수 있다.
-2. **키퍼별인가 워크스페이스별인가.** GitHub 은 키퍼별이다. Jira 계정을
-   키퍼마다 따로 두는 게 실제로 필요한지, 아니면 하나를 공유하는지는
-   운영 쪽 판단이 필요하다. 공유라면 `.masc/secrets/` 의 상위 스코프를 쓴다
-   (`secret_scope` 가 이미 있다).
-3. **client secret 은 누가 갖나.** provider TOML 에 넣으면 저장소에 들어간다.
-   `.masc/secrets/` 의 워크스페이스 스코프가 맞아 보이지만, 그러면 TOML 은
-   선언만 하고 값은 다른 곳을 가리키게 된다.
+1. **한 provider 에 두 흐름이 필요한가.** GitHub 은 `gh_cli_device`(사람 계정)와
+   `app_installation`(키퍼별 봇)이 둘 다 쓸모 있다. 탭을 두 개로 두는지, 한 탭에서
+   고르는지.
+2. **`oauth_device` 를 이번에 넣는가.** Jira·Slack 이 필요로 하는 흐름인데, 그건
+   masc 가 refresh token 을 드는 첫 사례가 된다. `app_installation` 만 먼저 하고
+   미루는 선택지가 있다.
+3. **client secret 과 PEM 을 어디에 두는가.** TOML 에 넣으면 저장소에 들어간다.
+   `secrets/` 의 워크스페이스 스코프가 맞아 보이지만, 그러면 TOML 은 선언만 하고
+   값은 다른 곳을 가리킨다.

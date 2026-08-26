@@ -1605,7 +1605,7 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "main passes its message mode to Keeper classification" 1
     (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
        ~module_path:main_path ~binding_name:"run_loop"
-       ~callee:"Render_schedule.Input_shortcut.opens_keepers"
+       ~callee:"Masc_tui_keys.opens_keepers"
        ~arguments:[ "message_mode", "message_mode" ])
 ;;
 

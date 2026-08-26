@@ -8698,7 +8698,7 @@ let main () =
             | Verification | Harness | Fusion | Repositories | Changes
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
-       | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
+       | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        (* Ctrl-] follows the reference under the cursor; Ctrl-T comes back.
           vim's tag keys, because that is the move: the screen names a thing

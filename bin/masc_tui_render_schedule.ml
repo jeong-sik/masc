@@ -154,9 +154,6 @@ end
 module Input_shortcut = struct
   let is_quit ~message_mode key =
     (not message_mode) && (String.equal key "q" || String.equal key "Q")
-
-  let opens_keepers ~message_mode key =
-    (not message_mode) && String.equal key "2"
 end
 
 module Viewport = struct

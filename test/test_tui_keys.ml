@@ -146,9 +146,35 @@ let test_help_documents_what_was_missing () =
     [ "[ / ]"; "Right / Enter"; "Left / Esc"; "d"; "o" ];
   let global = List.map fst (section "Global") in
   Alcotest.(check bool) "the palette has a row" true (List.mem ":" global);
+  Alcotest.(check bool) "the cross-surface Keepers jump has a row" true
+    (List.mem "2" global);
   let logs = List.map fst (section "Logs") in
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
+
+let test_keepers_jump_uses_one_binding_for_dispatch_and_help () =
+  let global_twos =
+    List.filter
+      (fun (binding : Masc_tui_keys.binding) -> String.equal binding.key "2")
+      Masc_tui_keys.global
+  in
+  Alcotest.(check int) "Global declares 2 once" 1 (List.length global_twos);
+  Alcotest.(check bool) "2 opens Keepers after local input declines it" true
+    (Masc_tui_keys.opens_keepers ~message_mode:false "2");
+  Alcotest.(check bool) "message input keeps printable 2" false
+    (Masc_tui_keys.opens_keepers ~message_mode:true "2");
+  Alcotest.(check bool) "another key does not open Keepers" false
+    (Masc_tui_keys.opens_keepers ~message_mode:false "x");
+  Alcotest.(check string) "Help states the local-owner boundary"
+    "jump to Keepers when the active field or panel does not use 2"
+    (List.assoc "2" (section "Global"));
+  let overview_keys =
+    List.map
+      (fun (binding : Masc_tui_keys.binding) -> binding.key)
+      (Masc_tui_keys.for_surface Overview)
+  in
+  Alcotest.(check bool) "2 is not an Overview-only binding" false
+    (List.mem "2" overview_keys)
 
 (* The sheet opens on the reader's own surface. Without this the answer to
    "what can I do here" sat behind nineteen other surfaces, in strip order,
@@ -232,6 +258,8 @@ let () =
             test_system_logs_lost_the_keys_it_never_had
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
+        ; Alcotest.test_case "Keepers jump shares dispatch and help" `Quick
+            test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "the sheet opens on the current surface" `Quick
             test_the_sheet_opens_on_the_current_surface
         ; Alcotest.test_case "keeper sub-modes do not share a section" `Quick

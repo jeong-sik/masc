@@ -164,6 +164,23 @@ let test_mcp_jsonrpc_does_not_fallback_to_masc_token () =
     "elif [[ -n \"${MASC_TOKEN:-}\" ]]";
   require_not_contains "no MASC_TOKEN print" source "printf '%s' \"$MASC_TOKEN\""
 
+let test_mcp_jsonrpc_return_trap_is_nounset_safe () =
+  let script =
+    {|
+set -euo pipefail
+source scripts/harness/lib/mcp_jsonrpc.sh
+HTTP_TIMEOUT_SEC=1
+CURL_RETRY_COUNT=1
+mcp_jsonrpc_call 1 tools/list '{}' '' '' 'http://127.0.0.1:1' >/dev/null
+after_call() { :; }
+after_call
+|}
+  in
+  let code, stdout, stderr = run_bash script in
+  check int "exit code" 0 code;
+  check string "stdout" "" stdout;
+  check string "stderr" "" stderr
+
 let () =
   run "contract_harness_auth_script"
     [
@@ -179,5 +196,7 @@ let () =
             test_transport_harness_mints_token_before_server_start;
           test_case "mcp_jsonrpc rejects MASC_TOKEN fallback" `Quick
             test_mcp_jsonrpc_does_not_fallback_to_masc_token;
+          test_case "mcp_jsonrpc return trap is nounset safe" `Quick
+            test_mcp_jsonrpc_return_trap_is_nounset_safe;
         ] );
     ]

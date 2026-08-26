@@ -363,6 +363,28 @@ let save_raw_token_credential_without_expiry config ~agent_name ~role ~raw_token
     ~expires_at:None
 ;;
 
+let save_file_backed_raw_token_credential config ~agent_name ~role ~raw_token
+  : (agent_credential, masc_error) result
+  =
+  match save_raw_token_credential config ~agent_name ~role ~raw_token with
+  | Error _ as error -> error
+  | Ok cred ->
+    (try
+       persist_raw_token config ~agent_name raw_token;
+       Ok cred
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       let msg =
+         Printf.sprintf
+           "Failed to save file-backed credential for %s: %s"
+           agent_name
+           (Printexc.to_string exn)
+       in
+       Log.Auth.error "%s" msg;
+       Error (System (System_error.IoError msg)))
+;;
+
 (* ============================================ *)
 (* Token operations                             *)
 (* ============================================ *)

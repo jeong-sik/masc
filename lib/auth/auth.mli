@@ -251,6 +251,14 @@ val save_raw_token_credential_without_expiry :
     local MCP client bearers backed by private token files, not for
     operator-issued session tokens. *)
 
+val save_file_backed_raw_token_credential :
+  string -> agent_name:string -> role:agent_role -> raw_token:string ->
+  (agent_credential, masc_error) result
+(** [save_file_backed_raw_token_credential config ~agent_name ~role
+    ~raw_token] persists both the hashed credential and its private raw token
+    file. Use only for local operator credentials whose bearer must remain
+    available to file-based clients after process restart. *)
+
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if

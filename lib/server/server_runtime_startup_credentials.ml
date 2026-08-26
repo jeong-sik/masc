@@ -20,7 +20,7 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
         | Error _ -> false
       in
       (match
-         Auth.save_raw_token_credential base_path
+         Auth.save_file_backed_raw_token_credential base_path
            ~agent_name:admin_agent_name ~role:Masc_domain.Admin ~raw_token
        with
        | Ok _ ->

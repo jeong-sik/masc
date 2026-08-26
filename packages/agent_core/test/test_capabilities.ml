@@ -1073,6 +1073,40 @@ let test_ollama_cloud_v1_wire_resolves_the_effort_control () =
     [ "kimi-k2.7-code"; "minimax-m3"; "deepseek-v4-flash"; "deepseek-v4-pro" ]
 ;;
 
+let test_ollama_cloud_v1_unknown_model_uses_the_provider_wire_base () =
+  match
+    Capabilities.for_provider_model_id
+      ~wire:(Some Provider_kind.OpenAI_compat)
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama_cloud"
+      ~model_id:"not-yet-catalogued-model"
+  with
+  | None -> fail "known provider wire lost its provider-level capability base"
+  | Some capabilities ->
+    check_thinking_control
+      "unknown model still uses the declared /v1 transport control"
+      Capabilities.Reasoning_effort
+      capabilities.thinking_control_format
+;;
+
+let test_ollama_cloud_v1_non_reasoning_row_drops_the_effort_ladder () =
+  match
+    Capabilities.for_provider_model_id
+      ~wire:(Some Provider_kind.OpenAI_compat)
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama_cloud"
+      ~model_id:"devstral-2:123b"
+  with
+  | None -> fail "ollama_cloud/devstral-2:123b should resolve"
+  | Some capabilities ->
+    check bool "row stays non-reasoning" false capabilities.supports_reasoning;
+    check
+      bool
+      "non-reasoning row exposes no accepted effort values"
+      true
+      (Option.is_none capabilities.accepted_reasoning_efforts)
+;;
+
 (* The wire argument selects a base; it must not select a row. Asking for the
    native wire has to keep answering exactly as before, or every deployment
    that reaches ollama_cloud natively changes underneath. *)
@@ -3050,6 +3084,14 @@ let () =
             "ollama cloud /v1 wire resolves the effort control"
             `Quick
             test_ollama_cloud_v1_wire_resolves_the_effort_control
+        ; test_case
+            "ollama cloud /v1 unknown model uses provider base"
+            `Quick
+            test_ollama_cloud_v1_unknown_model_uses_the_provider_wire_base
+        ; test_case
+            "ollama cloud /v1 non-reasoning row drops effort ladder"
+            `Quick
+            test_ollama_cloud_v1_non_reasoning_row_drops_the_effort_ladder
         ; test_case
             "ollama cloud native wire is unchanged"
             `Quick

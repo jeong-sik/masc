@@ -72,6 +72,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; api_key_env : string
   ; default_model : string option
   ; capabilities_base : string option
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   }
 
@@ -887,6 +888,20 @@ let canonical_provider_name t provider_name =
     match List.find_opt matches t.providers with
     | Some entry -> normalize_label entry.id
     | None -> provider_name)
+;;
+
+let provider_entry_for_label t provider_name =
+  let requested = normalize_label provider_name in
+  if List.mem requested wire_kind_labels
+  then None
+  else
+    List.find_opt
+      (fun (entry : provider_entry) ->
+         String.equal requested (normalize_label entry.id)
+         || List.exists
+              (fun alias -> String.equal requested (normalize_label alias))
+              entry.aliases)
+      t.providers
 ;;
 
 let lookup_for_provider t ~provider_name ~model_id =

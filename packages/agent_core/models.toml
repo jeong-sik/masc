@@ -2412,6 +2412,7 @@ identity_hosts = ["api.kimi.com"]
 id = "ollama_cloud"
 kind = "ollama"
 identity_kinds = ["ollama", "openai_compat"]
+capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }
 base_url = "https://ollama.com"
 request_path = "/api/chat"
 api_key_env = "OLLAMA_CLOUD_API_KEY"

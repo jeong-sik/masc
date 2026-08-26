@@ -22,6 +22,7 @@ type entry =
   ; api_key_env : string
   ; default_model : string option
   ; capabilities_base : string option
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   }
 
@@ -110,6 +111,7 @@ let known_keys =
   ; "api_key_env"
   ; "default_model"
   ; "capabilities_base"
+  ; "capabilities_base_by_identity_kind"
   ; "identity_hosts"
   ]
 ;;
@@ -194,6 +196,72 @@ let identity_kinds_field ~entry_id ~default toml =
     loop [] values
 ;;
 
+let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
+  match Otoml.find_opt toml Fun.id [ "capabilities_base_by_identity_kind" ] with
+  | None -> Ok []
+  | Some value ->
+    (match Otoml.get_table value with
+     | exception Otoml.Type_error _ ->
+       Error
+         (Printf.sprintf
+            "provider entry %S field \"capabilities_base_by_identity_kind\" expected table"
+            entry_id)
+     | pairs ->
+       let rec loop seen acc = function
+         | [] -> Ok (List.rev acc)
+         | (raw_kind, raw_base) :: rest ->
+           (match Provider_kind.of_string raw_kind with
+            | None ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S capability-base wire %S is unknown (canonical: %s)"
+                   entry_id
+                   raw_kind
+                   (String.concat
+                      ", "
+                      (List.map Provider_kind.to_string Provider_kind.all)))
+            | Some kind when not (List.mem kind identity_kinds) ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S capability-base wire %S is not declared in identity_kinds"
+                   entry_id
+                   raw_kind)
+            | Some kind when List.mem kind seen ->
+              Error
+                (Printf.sprintf
+                   "provider entry %S declares capability-base wire %S twice"
+                   entry_id
+                   raw_kind)
+            | Some kind ->
+              (match Otoml.get_string raw_base with
+               | exception Otoml.Type_error _ ->
+                 Error
+                   (Printf.sprintf
+                      "provider entry %S capability-base wire %S expected string"
+                      entry_id
+                      raw_kind)
+               | base ->
+                 let normalized = String.lowercase_ascii (String.trim base) in
+                 if not (String.equal base (String.trim base))
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S capability-base wire %S must not be padded"
+                        entry_id
+                        raw_kind)
+                 else if not (List.mem normalized Capability_vocab.base_label_values)
+                 then
+                   Error
+                     (Printf.sprintf
+                        "provider entry %S capability-base wire %S has unknown base %S"
+                        entry_id
+                        raw_kind
+                        base)
+                 else loop (kind :: seen) ((kind, normalized) :: acc) rest))
+       in
+       loop [] [] pairs)
+;;
+
 let parse_entry provider_toml =
   let* id =
     match exact_non_empty_string_field ~entry_id:"<unknown>" "id" provider_toml with
@@ -224,6 +292,9 @@ let parse_entry provider_toml =
       ~allowed:Capability_vocab.base_label_values
       provider_toml
   in
+  let* capabilities_base_by_identity_kind =
+    capabilities_base_by_identity_kind_field ~entry_id:id ~identity_kinds provider_toml
+  in
   let* aliases = string_list_field ~entry_id:id "aliases" provider_toml in
   let* identity_hosts = string_list_field ~entry_id:id "identity_hosts" provider_toml in
   Ok
@@ -237,6 +308,7 @@ let parse_entry provider_toml =
     ; api_key_env
     ; default_model
     ; capabilities_base
+    ; capabilities_base_by_identity_kind
     ; identity_hosts =
         Option.value identity_hosts ~default:[] |> List.map String.lowercase_ascii
     }

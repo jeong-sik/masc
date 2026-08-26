@@ -127,7 +127,7 @@ endpoints share one. Moving the key there unresolves all 37 rows.
 The key is not wrong. It is incomplete: capabilities need
 label **and** wire, and today they get label only.
 
-## 4. Proposal
+## 4. Implemented design
 
 Give the wire a place to be declared, so no model row has to encode it.
 
@@ -188,9 +188,9 @@ of the two in code and the smaller one in configuration. It is preferred
 because the contradiction is in the catalog, and that is where it should be
 resolved.
 
-## 8. Until this lands
+## 8. Deployment cleanup
 
-The deployment declares the `/v1` truth per binding in
-`~/me/.masc/config/agent-core-models-overlay.toml`. Seven rows as of
-2026-08-27. That is the workaround this RFC exists to remove, and it is
-recorded there as such.
+Older deployments declare the `/v1` truth per binding in
+`agent-core-models-overlay.toml`. Once a binary containing this catalog is
+deployed, those `thinking_control_format` overrides are redundant and should
+be removed; the provider row and resolved wire are then the only authority.

@@ -245,14 +245,15 @@ val for_model_id_catalog : string -> capabilities option
     [provider_name] and complete normalized [id_prefix] equal [provider_label]
     and [model_id], respectively. AGENT_CORE never rewrites either value into slash,
     colon, or dot-qualified candidates, and does not apply family/prefix
-    matching inside the provider scope. When the exact pair is absent,
-    [allow_bare_fallback] controls whether this falls back to a
+    matching inside the provider scope. When the exact pair is absent, a
+    catalog-declared provider base for [wire] is used first;
+    [allow_bare_fallback] controls only the subsequent fallback to a
     provider-independent {!for_model_id} row.
 
     [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
     one. It selects the base a matched row is laid over for a provider whose
     wires differ in what a request can express; the row lookup is unaffected.
-    Omitting it resolves against the wire the provider entry names. *)
+    Passing [None] resolves against the provider entry's default base. *)
 val for_provider_model_id
   :  wire:Provider_kind.t option
   -> allow_bare_fallback:bool
@@ -286,18 +287,6 @@ val for_model_id : string -> capabilities option
 
     @since 0.170.9 *)
 val capabilities_for_provider_label : string -> capabilities option
-
-val capabilities_for_provider_label_on_wire
-  :  wire:Provider_kind.t option
-  -> string
-  -> capabilities option
-(** {!capabilities_for_provider_label}, told which wire it resolves for.
-
-    A provider may be reachable over more than one wire ([[providers]] carries
-    [identity_kinds]). Where those wires differ in what a request can express,
-    the label alone cannot answer. Labels whose answer does not depend on the
-    wire, and any label on the wire its provider entry names, resolve exactly
-    as {!capabilities_for_provider_label}. *)
 
 (** Capabilities preset for a canonical {!Provider_kind.t}.
 

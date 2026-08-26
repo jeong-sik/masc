@@ -349,9 +349,13 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                         ~query:"ocaml eio" ~limit:3 []
                     in
                     assert (not (Tool_result.is_success result));
+                    (* Nothing was called, so nothing crashed: what is
+                       missing is configuration. Reported as a fault, the
+                       bridge lowers it to [Unknown] and the model retries a
+                       call no retry can fix. *)
                     assert
                       (Tool_result.failure_class result
-                       = Some Tool_result.Runtime_failure);
+                       = Some Tool_result.Dependency_unavailable);
                     assert
                       (str_contains
                          (Tool_result.message result)
@@ -370,7 +374,7 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                          assert (not (Tool_result.is_success dispatched));
                          assert
                            (Tool_result.failure_class dispatched
-                            = Some Tool_result.Runtime_failure);
+                            = Some Tool_result.Dependency_unavailable);
                          assert
                            (str_contains
                               (Tool_result.message dispatched)

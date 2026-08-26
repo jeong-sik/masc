@@ -17,6 +17,6 @@ let handle_keeper_up ctx args : tool_result =
   | Error result -> result
   | Ok p ->
     match read_meta ctx.config p.name with
-    | Error e -> tool_result_error (Printf.sprintf "%s" e)
+    | Error e -> tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "%s" e)
     | Ok None -> Keeper_turn_up_create.create_keeper ctx p
     | Ok (Some old) -> Keeper_turn_up_update.update_keeper ctx p old

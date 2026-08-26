@@ -101,14 +101,14 @@ let validation_error_data message =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
   | Ok meta ->
       let timeout_sec = get_float args "timeout_sec" nan in
       let ttl_sec = Option.value ~default:0.0 (get_float_opt args "ttl_sec") in
       if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
-      then tool_result_error "timeout_sec must be a positive finite number"
+      then tool_result_error ~class_:Tool_result.Policy_rejection "timeout_sec must be a positive finite number"
       else if (not (Float.is_finite ttl_sec)) || ttl_sec < 0.0
-      then tool_result_error "ttl_sec must be a non-negative finite number"
+      then tool_result_error ~class_:Tool_result.Policy_rejection "ttl_sec must be a non-negative finite number"
       else
       let network_mode_raw =
         String.trim
@@ -116,13 +116,13 @@ let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
              (network_mode_to_string meta.network_mode))
       in
       (match parse_network_mode_or_error network_mode_raw with
-       | Error err -> tool_result_error err
+       | Error err -> tool_result_error ~class_:Tool_result.Policy_rejection err
        | Ok network_mode -> (
            match
              Keeper_sandbox_control.start_managed_container
                ~config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
            with
-           | Error err -> tool_result_error err
+           | Error err -> tool_result_error ~class_:Tool_result.Dependency_unavailable err
            | Ok result ->
                tool_result_ok_data
                  (`Assoc
@@ -139,7 +139,7 @@ let handle_keeper_sandbox_start ctx args : tool_result =
 let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
   let timeout_sec = get_float args "timeout_sec" nan in
   if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
-  then tool_result_error "timeout_sec must be a positive finite number"
+  then tool_result_error ~class_:Tool_result.Policy_rejection "timeout_sec must be a positive finite number"
   else
   let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
@@ -151,7 +151,7 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> tool_result_error_data (validation_error_data err)
+  | Error err -> tool_result_error_data ~class_:Tool_result.Policy_rejection (validation_error_data err)
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
@@ -211,7 +211,7 @@ let resolve_ctx ctx ~name:_ = ctx
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_reset_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
   | Ok meta ->
     (match
        Keeper_owner_registry.apply_meta
@@ -226,10 +226,10 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
             "Reset lifecycle latch for %s: pause and blocker state cleared."
             meta.name)
      | Ok None ->
-       tool_result_error
+       tool_result_error ~class_:Tool_result.Runtime_failure
          (Printf.sprintf "Failed to reset %s: owner metadata missing" meta.name)
      | Error error ->
-       tool_result_error
+       tool_result_error ~class_:Tool_result.Runtime_failure
          (Printf.sprintf
             "Failed to reset %s: %s"
             meta.name
@@ -278,20 +278,20 @@ let keeper_compact_body
   : tool_result
   =
   match resolve_keeper_name_config ~config args with
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
   | Ok name ->
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
-      tool_result_error_data
+      tool_result_error_data ~class_:Tool_result.Workflow_rejection
         (validation_error_data
            (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
     if Keeper_state_machine.is_terminal entry.phase then begin
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
-      tool_result_error_data
+      tool_result_error_data ~class_:Tool_result.Workflow_rejection
         (validation_error_data
            (Printf.sprintf "keeper %s is explicitly stopped" name))
     end
@@ -332,7 +332,7 @@ let keeper_compact_body
            ~keeper_name:name
            "manual compaction request enqueue failed: %s"
            detail;
-         tool_result_error
+         tool_result_error ~class_:Tool_result.Runtime_failure
            (Printf.sprintf "keeper %s: compaction request enqueue failed: %s" name detail)
        | Stimulus_enqueued -> queued "enqueued"
        | Stimulus_already_present -> queued "already_present")
@@ -348,11 +348,11 @@ let handle_keeper_compact ?invocation_ref ctx args : tool_result =
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_name_config ~config args with
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
     if String.equal reason "" then
-      tool_result_error_data
+      tool_result_error_data ~class_:Tool_result.Policy_rejection
         (validation_error_data
            "reason is required for masc_keeper_clear (audit trail)")
     else
@@ -361,7 +361,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
        rather than silently proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
-      tool_result_error_data
+      tool_result_error_data ~class_:Tool_result.Workflow_rejection
         (validation_error_data
            (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
@@ -613,7 +613,7 @@ let () =
    provides them via PR-A.2 plumbing. *)
 let eio_context_missing tool_name =
   Some
-    (tool_result_error_data
+    (tool_result_error_data ~class_:Tool_result.Dependency_unavailable
        ~tool_name
        (`Assoc
           [ ( "error"

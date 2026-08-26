@@ -14,8 +14,9 @@ type init_mode = Generic.init_mode =
 
 type expectation = Generic.expectation =
   | Expect_success
-  | Expect_success_or_guard of string list
-  | Expect_guard of string list
+  | Expect_success_or_refusal
+  | Expect_refusal
+  | Expect_refusal_saying of string
 
 type keeper_case = {
   init_mode : init_mode;
@@ -59,20 +60,6 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         Hashtbl.replace seen schema.name ();
         true))
     schemas
-
-let voice_guard_fragments =
-  Generic.provider_guard_fragments
-  @
-  [
-    "rec process failed";
-    "no active audio session";
-    "transcription";
-    "microphone";
-    "audio";
-    "rec exit";
-    "no configured tts endpoint";
-    "tts endpoint";
-  ]
 
 let test_runtime_toml =
   {|
@@ -461,79 +448,17 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
         ]
   | other -> failwith ("missing keeper arguments contract for " ^ other)
 
+(* Every keeper tool here may either do the work or refuse it when called with
+   default arguments in a fresh workspace. Which of the two happens is not the
+   contract; not falling over is. The per-tool word lists this replaced
+   ("file not found", "annotation sink is not installed", ...) only ever said
+   "that refusal was expected", which the typed class now says for all of them
+   at once. [analyze_image] still has to refuse: its case exists to prove
+   argument validation runs. *)
 let keeper_expectation_for_name name =
   match name with
-  | "keeper_voice_listen"
-  | "keeper_voice_speak"
-  | "keeper_voice_agent" ->
-      Expect_success_or_guard voice_guard_fragments
-  | "keeper_task_done" ->
-      Expect_success_or_guard
-        [
-          "Completion rejected by anti-rationalization gate";
-          "review format unrecognized";
-          "Revise your completion notes";
-        ]
-  | "analyze_image" ->
-      Expect_guard
-        [
-          "invalid_args";
-          "requires string fields: artifact, query";
-          "policy_rejection";
-        ]
-  | "keeper_ide_annotate" ->
-      Expect_success_or_guard [ "annotation sink is not installed" ]
-  | "tool_read_file" ->
-      (* Playground resolves paths under .masc/playground/<agent>/ but
-         the sample file is written at base_path. File-not-found in
-         tests without a playground file is an acceptable outcome. *)
-      Expect_success_or_guard
-        [ "file not found"; "keeper not found in registry"; "path_outside_sandbox" ]
-  | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
-      Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed"; "path_outside_sandbox" ]
-  | _ -> Expect_success
-
-let extra_guard_fragments_for_name = function
-  | "masc_auth_refresh" ->
-      [ "agent_name must match the authenticated agent";
-        "no credential found" ]
-  | "masc_auth_revoke" -> [ "no credential found" ]
-  | "masc_dashboard" -> [ "Dashboard handler not registered" ]
-  | "masc_get_metrics" -> [ "no metrics found" ]
-  | "masc_fusion" ->
-      [
-        "fusion requires the server root switch + net (unavailable)";
-        "\"reason\":\"disabled\"";
-      ]
-  | "masc_keeper_delegate" ->
-      [
-        "keeper management tool";
-        "use MCP client";
-        "requires Eio context";
-        "keeper not found";
-      ]
-  | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop" ->
-      [
-        "keeper sandbox docker image is not configured";
-        "docker_container_start_failed";
-        "no such container";
-      ]
-  | "masc_keeper_list" | "masc_keeper_delegate_status"
-  | "masc_keeper_delegate_cancel" | "masc_keeper_delegate_list"
-  | "masc_keeper_status" ->
-      [ "keeper management tool"; "use MCP client" ]
-  | "masc_keeper_up" -> [ "server_initializing" ]
-  | "tool_execute" -> [ "worktree not found" ]
-  | _ -> []
-
-let merge_expectation base extras =
-  match base with
-  | Expect_success when extras <> [] -> Expect_success_or_guard extras
-  | Expect_success -> Expect_success
-  | Expect_guard fragments -> Expect_guard (fragments @ extras)
-  | Expect_success_or_guard fragments ->
-      Expect_success_or_guard (fragments @ extras)
+  | "analyze_image" -> Expect_refusal
+  | _ -> Expect_success_or_refusal
 
 let case_for_name name =
   let runtime_name =
@@ -555,9 +480,7 @@ let case_for_name name =
              Generic.tool_arguments
                fixture.generic
                { schema with name = runtime_name });
-         expectation =
-           merge_expectation generic_case.expectation
-             (extra_guard_fragments_for_name runtime_name);
+         expectation = generic_case.expectation;
        }
      | None ->
        {
@@ -568,10 +491,7 @@ let case_for_name name =
              Generic.tool_arguments
                fixture.generic
                { schema with name = runtime_name });
-         expectation =
-           Expect_success_or_guard
-             (Generic.guard_fragments_for_name runtime_name
-              @ extra_guard_fragments_for_name runtime_name);
+         expectation = Expect_success_or_refusal;
        })
   else if
     string_starts_with ~prefix:"keeper_" runtime_name
@@ -589,45 +509,67 @@ let case_for_name name =
   else
     failwith ("missing keeper tool contract for " ^ name)
 
-let fatal_fragments =
-  Generic.fatal_fragments @ keeper_matrix_guard_fragments
+(* Host-level refusals: the keeper was never handed the tool, so no tool
+   decided anything and there is no class to read. Textual because there is no
+   typed value, not as a shortcut. *)
+let host_failure_fragments =
+  Generic.host_failure_fragments @ keeper_matrix_guard_fragments
+
+(* The keeper path lowers [Tool_result.tool_failure_class] through
+   [Tool_bridge.agent_core_error_class_of_tool_failure_class], which keeps the
+   distinction this test needs: a refusal the tool chose arrives as
+   [Deterministic] or [Transient], and only [Runtime_failure] arrives as
+   [Unknown]. So the same question the MCP matrix asks is answerable here.
+
+   [None] is a boundary that recorded no class. Treated as not-graceful: a
+   smoke test that cannot tell a crash from a guard should say so rather than
+   pass. *)
+let is_graceful_refusal = function
+  | Some Agent_core.Types.Deterministic | Some Agent_core.Types.Transient -> true
+  | Some Agent_core.Types.Unknown | None -> false
+
+let refusal_class_report = function
+  | None -> "no error_class recorded"
+  | Some Agent_core.Types.Deterministic -> "deterministic"
+  | Some Agent_core.Types.Transient -> "transient"
+  | Some Agent_core.Types.Unknown -> "unknown"
 
 let evaluate_expectation ~name expectation = function
-  | Ok _ ->
-      (match expectation with
-       | Expect_success -> Ok ()
-       | Expect_success_or_guard _ -> Ok ()
-       | Expect_guard fragments ->
-           Error
-             (Printf.sprintf "%s expected guard %s but succeeded" name
-                (String.concat ", " fragments)))
-  | Error { Agent_core.Types.message; _ } ->
-      if contains_any message fatal_fragments then
-        Error
-          (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)
-      else
+  | Ok _ -> (
+      match expectation with
+      | Expect_success | Expect_success_or_refusal -> Ok ()
+      | Expect_refusal | Expect_refusal_saying _ ->
+          Error (Printf.sprintf "%s expected a refusal but succeeded" name))
+  | Error { Agent_core.Types.message; error_class; _ } ->
+      let refused_gracefully = is_graceful_refusal error_class in
+      let report = refusal_class_report error_class in
+      if contains_any message host_failure_fragments then
+        Error (Printf.sprintf "%s hit fatal keeper-tool failure: %s" name message)
+      else (
         match expectation with
         | Expect_success ->
-            Error
-              (Printf.sprintf "%s expected success but got error: %s" name
-                 message)
-        | Expect_guard fragments ->
-            if contains_any message fragments then
-              Ok ()
+            Error (Printf.sprintf "%s expected success but got error: %s" name message)
+        | Expect_refusal ->
+            if refused_gracefully then Ok ()
             else
               Error
-                (Printf.sprintf "%s expected guard %s but got: %s" name
-                   (String.concat ", " fragments) message)
-        | Expect_success_or_guard fragments ->
-            if contains_any message fragments then
-              Ok ()
+                (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+                   name report message)
+        | Expect_refusal_saying expected ->
+            if not refused_gracefully then
+              Error
+                (Printf.sprintf "%s refused with %s, which is a fault rather than a guard: %s"
+                   name report message)
+            else if contains_any message [ expected ] then Ok ()
             else
               Error
-                (Printf.sprintf
-                   "%s expected success or guard %s but got: %s"
-                   name
-                   (String.concat ", " fragments)
+                (Printf.sprintf "%s refused as expected but did not say %S: %s" name expected
                    message)
+        | Expect_success_or_refusal ->
+            if refused_gracefully then Ok ()
+            else
+              Error
+                (Printf.sprintf "%s neither succeeded nor refused -- %s: %s" name report message))
 
 let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
     (schema : Masc_domain.tool_schema) =

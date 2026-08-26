@@ -20,15 +20,19 @@ type 'a context = 'a Keeper_types_profile.context = {
 type tool_result = Keeper_types_profile.tool_result
 let schemas = Keeper_schema.schemas
 
+(* The class travels with the error. Without it every relay below had to guess
+   what somebody else's string meant, and guessing produced "the tool crashed"
+   for a name that simply does not exist. *)
 type handler_error =
-  | Message_error of string
-  | Payload_error of Yojson.Safe.t
+  | Message_error of Tool_result.tool_failure_class * string
+  | Payload_error of Tool_result.tool_failure_class * Yojson.Safe.t
 
-let message_error result = Result.map_error (fun error -> Message_error error) result
+let message_error ~class_ result =
+  Result.map_error (fun error -> Message_error (class_, error)) result
 
 let tool_result_of_handler_error = function
-  | Message_error message -> tool_result_error message
-  | Payload_error data -> tool_result_error_data data
+  | Message_error (class_, message) -> tool_result_error ~class_ message
+  | Payload_error (class_, data) -> tool_result_error_data ~class_ data
 ;;
 
 type json_cache = {
@@ -204,7 +208,7 @@ let with_keeper_startup_gate f =
   if not (Server_startup_state.snapshot ()).state_ready then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
     Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
-    tool_result_error_data (startup_not_ready_error_data elapsed)
+    tool_result_error_data ~class_:Tool_result.Dependency_unavailable (startup_not_ready_error_data elapsed)
   end else
     f ()
 let execute_keeper_up ctx args : tool_result =
@@ -224,7 +228,7 @@ let execute_keeper_up ctx args : tool_result =
       Ok (tool_result_ok_data (annotate_keeper_json ~runtime_class:"keeper" json))
   with
   | Ok result -> result
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Runtime_failure err
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
@@ -435,7 +439,7 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
       Ok (tool_result_ok_data json)
   with
   | Ok result -> result
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Runtime_failure err
 
 let handle_keeper_status ctx args : tool_result =
   keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
@@ -540,12 +544,13 @@ let owner_operation_error_code = function
     "store_unavailable"
 ;;
 
-let operation_payload_error code detail =
+let operation_payload_error ~class_ code detail =
   Payload_error
-    (`Assoc
-       [ "error", `String code
-       ; "message", `String detail
-       ])
+    ( class_
+    , `Assoc
+        [ "error", `String code
+        ; "message", `String detail
+        ] )
 ;;
 
 let operation_id_of_invocation_ref invocation_ref =
@@ -576,7 +581,7 @@ let submit_agent_operation
   in
   let* operation_id =
     Keeper_owner.Chat_operation.Operation_id.of_string operation_id_raw
-    |> Result.map_error (operation_payload_error "invalid_input")
+    |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
   in
   let thread_id = "keeper:" ^ keeper_name in
   let* continuation_channel =
@@ -584,7 +589,7 @@ let submit_agent_operation
     | Some continuation_channel -> Ok continuation_channel
     | None ->
       Keeper_continuation_channel.dashboard ~thread_id
-      |> Result.map_error (operation_payload_error "invalid_input")
+      |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
   in
   let* source =
     Keeper_chat_operation_payload.source_to_json
@@ -601,7 +606,7 @@ let submit_agent_operation
       ~workspace_id:None
       ~extra_mentions:[]
       ~user_row_origin:Keeper_chat_store.Needs_append
-    |> Result.map_error (operation_payload_error "invalid_input")
+    |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
   in
   let input =
     Keeper_chat_operation_payload.input_to_json
@@ -633,21 +638,24 @@ let submit_agent_operation
             ]))
   | Error error ->
     Error
-      (operation_payload_error
+      (operation_payload_error ~class_:Tool_result.Runtime_failure
          (owner_operation_error_code error)
          (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
   match
-    let* name, meta = message_error (resolve_keeper ctx message) in
+    let* name, meta =
+      (* The caller named a keeper that is not there. *)
+      message_error ~class_:Tool_result.Workflow_rejection (resolve_keeper ctx message)
+    in
     let* message =
       Keeper_invocation_contract.direct_message_with_keeper_name message name
       |> Result.map_error Keeper_invocation_contract.request_error_to_string
-      |> message_error
+      |> message_error ~class_:Tool_result.Policy_rejection
     in
     let* message =
-      message_error
+      message_error ~class_:Tool_result.Workflow_rejection
         (Turn.preflight_keeper_msg_resolved
            ~base_path:ctx.config.base_path
            ~meta
@@ -705,9 +713,12 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
     let* request =
       Keeper_invocation_contract.request_of_json args
       |> Result.map_error Keeper_invocation_contract.request_error_to_string
-      |> message_error
+      |> message_error ~class_:Tool_result.Policy_rejection
     in
-    let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
+    let* request =
+      message_error ~class_:Tool_result.Policy_rejection
+        (Turn.preflight_keeper_delegate ctx request)
+    in
     submit_agent_operation
       ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
       ?continuation_channel:
@@ -740,7 +751,7 @@ let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
       ~attachments:[]
       ()
     |> Result.map_error Keeper_invocation_contract.request_error_to_string
-    |> message_error
+    |> message_error ~class_:Tool_result.Policy_rejection
   with
   | Ok message -> handle_keeper_msg ~submitted_by ctx message
   | Error error -> tool_result_of_handler_error error
@@ -799,7 +810,7 @@ let operation_target_arg args =
 ;;
 
 let owner_command_error_result error =
-  tool_result_error_data
+  tool_result_error_data ~class_:Tool_result.Runtime_failure
     (`Assoc
        [ "error", `String (owner_operation_error_code error)
        ; "message",
@@ -815,7 +826,7 @@ let operation_is_owned_by ~caller (operation : Keeper_owner.Chat_operation.t) =
 
 let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
   match operation_reference_arg args with
-  | Error json -> tool_result_error_data json
+  | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json
   | Ok (keeper_name, operation_id) ->
     (match
        Keeper_owner_registry.exact_operation
@@ -825,7 +836,7 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
      with
      | Error error -> owner_command_error_result error
      | Ok None ->
-       tool_result_error_data
+       tool_result_error_data ~class_:Tool_result.Workflow_rejection
          (`Assoc
             [ "error", `String "unknown_operation"
             ; "message", `String "Keeper chat operation was not found"
@@ -833,13 +844,13 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
      | Ok (Some operation) ->
        (match operation_is_owned_by ~caller operation with
         | Error detail ->
-          tool_result_error_data
+          tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
                [ "error", `String "store_unavailable"
                ; "message", `String detail
                ])
         | Ok false ->
-          tool_result_error_data
+          tool_result_error_data ~class_:Tool_result.Workflow_rejection
             (`Assoc
                [ "error", `String "unknown_operation"
                ; "message", `String "Keeper chat operation was not found"
@@ -850,7 +861,7 @@ let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
 
 let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
   match operation_reference_arg args with
-  | Error json -> tool_result_error_data json
+  | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json
   | Ok (keeper_name, operation_id) ->
     (match
        Keeper_owner_registry.exact_operation
@@ -860,7 +871,7 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
      with
      | Error error -> owner_command_error_result error
      | Ok None ->
-       tool_result_error_data
+       tool_result_error_data ~class_:Tool_result.Workflow_rejection
          (`Assoc
             [ "error", `String "unknown_operation"
             ; "message", `String "Keeper chat operation was not found"
@@ -868,13 +879,13 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
      | Ok (Some operation) ->
        (match operation_is_owned_by ~caller operation with
         | Error detail ->
-          tool_result_error_data
+          tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
                [ "error", `String "store_unavailable"
                ; "message", `String detail
                ])
         | Ok false ->
-          tool_result_error_data
+          tool_result_error_data ~class_:Tool_result.Workflow_rejection
             (`Assoc
                [ "error", `String "unknown_operation"
                ; "message", `String "Keeper chat operation was not found"
@@ -894,7 +905,7 @@ let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
 
 let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
   match operation_target_arg args with
-  | Error json -> tool_result_error_data json
+  | Error json -> tool_result_error_data ~class_:Tool_result.Policy_rejection json
   | Ok keeper_name ->
     (match
        Keeper_owner_registry.list_queued_operations
@@ -919,7 +930,7 @@ let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
        (match owned [] operations with
         | Ok operations -> tool_result_ok_data (`List operations)
         | Error detail ->
-          tool_result_error_data
+          tool_result_error_data ~class_:Tool_result.Dependency_unavailable
             (`Assoc
                [ "error", `String "store_unavailable"
                ; "message", `String detail
@@ -950,7 +961,7 @@ let handle_keeper_msg_stream_admitted
     Keeper_invocation_contract.direct_message_with_keeper_name message raw_name
   with
   | Error error ->
-    tool_result_error (Keeper_invocation_contract.request_error_to_string error)
+    tool_result_error ~class_:Tool_result.Policy_rejection (Keeper_invocation_contract.request_error_to_string error)
   | Ok message ->
     let event_bus = Event_bus_slots.get_keeper () in
     Turn.handle_keeper_msg_admitted

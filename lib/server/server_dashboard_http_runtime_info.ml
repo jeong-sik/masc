@@ -2587,9 +2587,21 @@ let dashboard_tools_http_json ?keeper ?timing (config : Workspace.config) : Yojs
     let keeper_waiting_inventory =
       run Tools_compute (fun () -> Server_keeper_waiting_inventory.dashboard_json config)
     in
+    let skill_activations =
+      match keeper with
+      | None -> `Null
+      | Some keeper_name ->
+        run Tools_compute (fun () ->
+          Keeper_skill_activation_projection.resolve ~config ~keeper_name
+          |> Keeper_skill_activation_projection.to_yojson)
+    in
     match json with
     | `Assoc fields ->
-      `Assoc (fields @ [ "keeper_waiting_inventory", keeper_waiting_inventory ])
+      `Assoc
+        (fields
+         @ [ "keeper_waiting_inventory", keeper_waiting_inventory
+           ; "skill_activations", skill_activations
+           ])
     | other -> other
   in
   let cached =

@@ -146,14 +146,11 @@ create_payload="$(
       recurrence_interval_sec: $interval_sec,
       requested_by_id: "contract-operator",
       scheduled_by_id: "contract-scheduler",
-      payload_kind: "masc.keeper_wake",
       allow_unregistered_keeper: true,
-      payload_body: {
-        keeper_name: $keeper_name,
-        title: "Contract scheduler evidence",
-        message: $message,
-        urgency: "normal"
-      }
+      keeper_name: $keeper_name,
+      title: "Contract scheduler evidence",
+      message: $message,
+      urgency: "normal"
     }'
 )"
 create_response="$(call_tool 6101 "masc_schedule_create" "$create_payload")"

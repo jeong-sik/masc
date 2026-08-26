@@ -40,7 +40,6 @@ let human ?display_name id = { id; kind = Human_operator; display_name }
 let payload_json () =
   `Assoc
     [ "kind", `String "consumer.note"
-    ; "schema_version", `Int 1
     ; "body", `Assoc [ "text", `String "do later" ]
     ]
 ;;

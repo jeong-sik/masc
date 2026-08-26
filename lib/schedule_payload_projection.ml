@@ -20,7 +20,6 @@ type dispatch_rejection =
 
 type payload_view =
   { raw_kind : string
-  ; schema_version : int
   ; body : (string * Yojson.Safe.t) list
   }
 
@@ -106,19 +105,13 @@ let payload_view_of_json payload =
   match payload with
   | `Assoc fields ->
     let* raw_kind = required_string_field "kind" fields in
-    let* schema_version =
-      match List.assoc_opt "schema_version" fields with
-      | Some (`Int value) -> Ok value
-      | Some _ -> Error "expected int field: schema_version"
-      | None -> Error "missing field: schema_version"
-    in
     let* body =
       match List.assoc_opt "body" fields with
       | Some (`Assoc body) -> Ok body
       | Some _ -> Error "payload.body must be an object"
       | None -> Error "missing field: body"
     in
-    Ok { raw_kind; schema_version; body }
+    Ok { raw_kind; body }
   | _ -> Error "payload must be a JSON object"
 ;;
 
@@ -129,14 +122,6 @@ let payload_view (request : Schedule_domain.schedule_request) =
 let kind_of_json_result payload =
   let* view = payload_view_of_json payload in
   Ok view.raw_kind
-;;
-
-let keeper_wake_schema_version_error ~creation schema_version =
-  if schema_version = 1
-  then Ok ()
-  else if creation
-  then Error (keeper_wake_kind ^ " only supports payload_schema_version=1")
-  else Error (keeper_wake_kind ^ " only supports schema_version=1")
 ;;
 
 let result_delivery_of_body body =
@@ -261,15 +246,8 @@ let validate_keeper_wake_body body =
        |> Result.map (fun _ -> ()))
 ;;
 
-let validate_keeper_wake_for_creation view =
-  let* () = keeper_wake_schema_version_error ~creation:true view.schema_version in
-  validate_keeper_wake_body view.body
-;;
-
-let validate_keeper_wake_for_dispatch view =
-  let* () = keeper_wake_schema_version_error ~creation:false view.schema_version in
-  validate_keeper_wake_body view.body
-;;
+let validate_keeper_wake_for_creation view = validate_keeper_wake_body view.body
+let validate_keeper_wake_for_dispatch view = validate_keeper_wake_body view.body
 
 let validate_request_payload_for_creation_detailed ~payload =
   match payload with
@@ -278,19 +256,6 @@ let validate_request_payload_for_creation_detailed ~payload =
      | Some raw_kind ->
        (match classify_kind raw_kind with
         | Some Keeper_wake ->
-          let* schema_version =
-            match List.assoc_opt "schema_version" fields with
-            | Some (`Int value) -> Ok value
-            | Some _ ->
-              Error
-                (Creation_invalid_supported_payload
-                   ( Keeper_wake
-                   , keeper_wake_kind ^ " payload.schema_version must be an integer" ))
-            | None ->
-              Error
-                (Creation_invalid_supported_payload
-                   (Keeper_wake, keeper_wake_kind ^ " payload requires schema_version=1"))
-          in
           let* body =
             match List.assoc_opt "body" fields with
             | Some (`Assoc body) -> Ok body
@@ -303,7 +268,7 @@ let validate_request_payload_for_creation_detailed ~payload =
                 (Creation_invalid_supported_payload
                    (Keeper_wake, keeper_wake_kind ^ " payload requires object body"))
           in
-          validate_keeper_wake_for_creation { raw_kind; schema_version; body }
+          validate_keeper_wake_for_creation { raw_kind; body }
           |> Result.map_error (fun msg ->
             Creation_invalid_supported_payload (Keeper_wake, msg))
         | None -> Error (Creation_unsupported_kind raw_kind))
@@ -405,7 +370,6 @@ let known_kind_contract_to_yojson kind =
   | Keeper_wake ->
     `Assoc
       [ "kind", `String (known_kind_to_string kind)
-      ; "schema_versions", `List [ `Int 1 ]
       ; "dispatch_tool", `String (dispatch_tool_name kind)
       ; "creation_contract", `String "per_kind_validator_required"
       ; "dispatch_contract", `String "consumer_supported"

@@ -58,7 +58,6 @@ let automated id : Schedule_domain.actor =
 let keeper_wake_payload message =
   `Assoc
     [ "kind", `String Schedule_supported_kinds.keeper_wake
-    ; "schema_version", `Int 1
     ; ( "body"
       , `Assoc
           [ "keeper_name", `String "schedule-keeper"
@@ -115,12 +114,8 @@ let create_args
   =
   `Assoc
     ([ "due_at_unix", `Float 200.0
-     ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
-     ; ( "payload_body"
-       , `Assoc
-           [ "keeper_name", `String "schedule-keeper"
-           ; "message", `String message
-           ] )
+     ; "keeper_name", `String "schedule-keeper"
+     ; "message", `String message
      ; "requested_by_id", `String "operator"
      ; "scheduled_by_id", `String "scheduler-agent"
      ]
@@ -197,12 +192,17 @@ let test_flat_tool_surface () =
   check bool "create schema is closed" false
     (create_schema.input_schema |> member "additionalProperties" |> to_bool);
   (* Assert the fact -- which fields the schema makes mandatory -- rather than
-     the JSON shape it uses to say "none". The pre-TOML builder always emitted
+     the JSON shape it uses to say it. The pre-TOML builder always emitted
      [required] and defaulted it to [[]]; the TOML builder omits the key when
-     nothing is required. Both are legal JSON Schema and no reader in this
-     repo reads the key, so this test should not be the thing that decides
-     between them. It failed on the shape while the fact was unchanged. *)
-  check (list string) "create schema makes no field mandatory" []
+     nothing is required. Both are legal JSON Schema, so this test should not
+     be the thing that decides between them.
+
+     These two are what the runtime cannot proceed without. The schema said
+     nothing was mandatory while the runtime rejected a call missing either,
+     so a caller reading the declaration and sending [{}] was following it and
+     still refused. *)
+  check (list string) "create schema requires what the runtime requires"
+    [ "keeper_name"; "message" ]
     (required_names create_schema.input_schema);
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
@@ -270,28 +270,10 @@ let test_creation_boundary_owns_result_delivery_destination () =
     | Ok channel -> channel
     | Error detail -> fail detail
   in
-  let forged_channel =
-    match Keeper_continuation_channel.dashboard ~thread_id:"forged-thread" with
-    | Ok channel -> channel
-    | Error detail -> fail detail
-  in
-  let payload =
-    `Assoc
-      [ "kind", `String Schedule_supported_kinds.keeper_wake
-      ; "schema_version", `Int 1
-      ; ( "body"
-        , `Assoc
-            [ "keeper_name", `String "schedule-keeper"
-            ; "message", `String "return the result to the invoking thread"
-            ; ( "result_delivery"
-              , `Assoc
-                  [ "policy", `String "reply_to_origin"
-                  ; "channel", Keeper_continuation_channel.to_yojson forged_channel
-                  ] )
-            ; "result_delivery", `Assoc [ "policy", `String "none" ]
-            ] )
-      ]
-  in
+  (* A caller used to be able to send a result_delivery of its own inside the
+     payload envelope, and the boundary overwrote it. The envelope is gone, so
+     there is no argument that names a destination -- the route below comes
+     from the creating turn's continuation and nowhere else. *)
   let result =
     dispatch_exn
       ~continuation_channel:channel
@@ -300,7 +282,8 @@ let test_creation_boundary_owns_result_delivery_destination () =
       (`Assoc
         [ "schedule_id", `String "sched-owned-result-destination"
         ; "due_at_unix", `Float 200.0
-        ; "payload", payload
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "return the result to the invoking thread"
         ])
   in
   check bool "routed schedule creation succeeds" true
@@ -392,12 +375,8 @@ let test_create_accepts_explicit_iso8601_offset () =
       (`Assoc
         [ "schedule_id", `String schedule_id
         ; "due_at_iso", `String due_at_iso
-        ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
-        ; ( "payload_body"
-          , `Assoc
-              [ "keeper_name", `String "schedule-keeper"
-              ; "message", `String "run at nine in Korea"
-              ] )
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "run at nine in Korea"
         ])
   in
   let result =
@@ -469,7 +448,7 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
   check bool "neutral payload contract names the missing field" true
     (String_util.contains_substring
        (Tool_result.message result)
-       "payload_kind is required");
+       "keeper_name is required");
   check int "removed convenience input is not persisted" 0
     (List.length (Schedule_store.read_state config).schedules)
 ;;
@@ -481,12 +460,8 @@ let test_unregistered_wake_target_rejected () =
     `Assoc
       ([ "schedule_id", `String "sched-ghost-target"
        ; "due_at_unix", `Float 200.0
-       ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
-       ; ( "payload_body"
-         , `Assoc
-             [ "keeper_name", `String "ghost-keeper"
-             ; "message", `String "wake for a keeper that does not exist"
-             ] )
+       ; "keeper_name", `String "ghost-keeper"
+       ; "message", `String "wake for a keeper that does not exist"
        ; "requested_by_id", `String "operator"
        ; "scheduled_by_id", `String "scheduler-agent"
        ]
@@ -507,71 +482,88 @@ let test_unregistered_wake_target_rejected () =
     (List.length (Schedule_store.read_state config).schedules)
 ;;
 
-let test_unknown_payload_is_rejected_before_persistence () =
-  with_config
-  @@ fun config ->
-  let labels = [ "phase", "creation" ] in
-  let before =
-    Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_schedule_payload_unsupported_total
-      ~labels ()
+(* The creation tool no longer takes a kind -- the runtime stamps the one that
+   exists -- so an unsupported kind cannot arrive through it. The validator
+   still takes raw JSON and is still what a second producer would go through,
+   so its rejection is checked where it lives rather than through a caller
+   that can no longer express the input. *)
+let test_unknown_payload_kind_is_rejected_by_the_validator () =
+  let rejection =
+    Schedule_payload_projection.validate_request_payload_for_creation_detailed
+      ~payload:
+        (`Assoc [ "kind", `String "unknown.payload"; "body", `Assoc [] ])
   in
-  let result =
-    dispatch_exn config Tool_schemas_schedule.Create_request
-      (`Assoc
-        [ "schedule_id", `String "sched-unknown"
-        ; "due_at_unix", `Float 200.0
-        ; "payload_kind", `String "unknown.payload"
-        ; "payload_body", `Assoc []
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
-        ])
-  in
-  check bool "unknown payload rejected" false (Tool_result.is_success result);
-  check bool "typed error names unsupported kind" true
-    (String_util.contains_substring
-       (Tool_result.message result)
-       "unsupported schedule payload kind: unknown.payload");
-  check int "nothing persisted" 0
-    (List.length (Schedule_store.read_state config).schedules);
-  let after =
-    Otel_metric_store.metric_value_or_zero
-      Otel_metric_store.metric_schedule_payload_unsupported_total
-      ~labels ()
-  in
-  check (float 0.001) "unsupported metric increments" (before +. 1.0) after
+  match rejection with
+  | Ok () -> fail "unsupported kind was accepted"
+  | Error rejection ->
+    check bool "typed error names unsupported kind" true
+      (String_util.contains_substring
+         (Schedule_payload_projection.creation_rejection_message rejection)
+         "unsupported schedule payload kind: unknown.payload")
 ;;
 
 (* The body used to take anything: an unknown key was persisted at creation
    and then dropped by the consumer, which is how a live schedule ended up
-   carrying a channel_id no dispatch ever saw (#25689). *)
-let test_unknown_body_field_is_rejected_before_persistence () =
-  with_config
-  @@ fun config ->
-  let result =
-    dispatch_exn config Tool_schemas_schedule.Create_request
-      (`Assoc
-        [ "schedule_id", `String "sched-unknown-body-field"
-        ; "due_at_unix", `Float 200.0
-        ; "payload_kind", `String "masc.keeper_wake"
-        ; ( "payload_body"
-          , `Assoc
-              [ "keeper_name", `String "alpha"
-              ; "message", `String "wake up"
-              ; "channel_id", `String "C123"
-              ] )
-        ; "requested_by_id", `String "operator"
-        ; "scheduled_by_id", `String "scheduler-agent"
-        ])
+   carrying a channel_id no dispatch ever saw (#25689). The body is now built
+   by the runtime from declared arguments, so the same key arrives as an
+   undeclared argument and the tool's own [additional_properties = false] is
+   what refuses it.
+
+   Checked through [Tool_input_validation] rather than [Tool_schedule.dispatch]
+   because that is where the refusal happens on every path a caller can reach:
+   the MCP server runs it as a pre-hook, and the Keeper descriptor and plan
+   paths call it directly. [Tool_schedule.dispatch] is below that line -- the
+   test helper calls it with no validation in front, which no caller does. *)
+let test_unknown_field_is_rejected_before_persistence () =
+  let create_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Create_request).schema
   in
-  check bool "unknown body field rejected" false (Tool_result.is_success result);
-  check bool "the error names the field" true
-    (String_util.contains_substring (Tool_result.message result) "channel_id");
-  check int "nothing persisted" 0
-    (List.length (Schedule_store.read_state config).schedules)
+  let validated =
+    Tool_input_validation.validate_args
+      ~schema:create_schema.input_schema
+      ~name:"masc_schedule_create"
+      ~args:
+        (`Assoc
+          [ "schedule_id", `String "sched-unknown-body-field"
+          ; "due_at_unix", `Float 200.0
+          ; "keeper_name", `String "alpha"
+          ; "message", `String "wake up"
+          ; "channel_id", `String "C123"
+          ])
+      ()
+  in
+  match validated with
+  | Ok _ -> fail "an undeclared field was accepted"
+  | Error rejection ->
+    check bool "the error names the field" true
+      (String_util.contains_substring (Tool_result.message rejection) "channel_id")
 ;;
 
-let test_known_body_fields_still_create () =
+(* An empty call was schema-valid while the runtime refused it, and callers
+   sent one: 17 of the recorded masc_schedule_create calls carried no
+   arguments at all. Now the same boundary that runs before dispatch says
+   which two are missing. *)
+let test_empty_call_is_rejected_by_name () =
+  let create_schema : Masc_domain.tool_schema =
+    (schedule_definition Tool_schemas_schedule.Create_request).schema
+  in
+  match
+    Tool_input_validation.validate_args
+      ~schema:create_schema.input_schema
+      ~name:"masc_schedule_create"
+      ~args:(`Assoc [])
+      ()
+  with
+  | Ok _ -> fail "an empty call was accepted"
+  | Error rejection ->
+    let message = Tool_result.message rejection in
+    check bool "the error names keeper_name" true
+      (String_util.contains_substring message "keeper_name");
+    check bool "the error names message" true
+      (String_util.contains_substring message "message")
+;;
+
+let test_known_fields_still_create () =
   with_config
   @@ fun config ->
   let result =
@@ -579,14 +571,10 @@ let test_known_body_fields_still_create () =
       (`Assoc
         [ "schedule_id", `String "sched-known-body-fields"
         ; "due_at_unix", `Float 200.0
-        ; "payload_kind", `String "masc.keeper_wake"
-        ; ( "payload_body"
-          , `Assoc
-              [ "keeper_name", `String "alpha"
-              ; "message", `String "wake up"
-              ; "title", `String "a title"
-              ; "urgency", `String "normal"
-              ] )
+        ; "keeper_name", `String "alpha"
+        ; "message", `String "wake up"
+        ; "title", `String "a title"
+        ; "urgency", `String "normal"
         ; "requested_by_id", `String "operator"
         ; "scheduled_by_id", `String "scheduler-agent"
         ; "allow_unregistered_keeper", `Bool true
@@ -605,7 +593,7 @@ let test_payload_contracts_are_schema_only () =
   List.iter
     (fun contract ->
        let open Yojson.Safe.Util in
-       check int "contract field count" 5
+       check int "contract field count" 4
          (contract |> to_assoc |> List.length);
        check string "creation contract" "per_kind_validator_required"
          (contract |> member "creation_contract" |> to_string);
@@ -622,13 +610,9 @@ let test_keeper_wake_schema_validation () =
       (`Assoc
         [ "schedule_id", `String "sched-wake"
         ; "due_at_unix", `Float 200.0
-        ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
-        ; "payload_body"
-          , `Assoc
-              [ "keeper_name", `String "schedule-keeper"
-              ; "message", `String "run maintenance"
-              ; "urgency", `String "normal"
-              ]
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "run maintenance"
+        ; "urgency", `String "normal"
         ])
   in
   check bool "valid wake accepted" true (Tool_result.is_success valid);
@@ -637,13 +621,9 @@ let test_keeper_wake_schema_validation () =
       (`Assoc
         [ "schedule_id", `String "sched-wake-invalid"
         ; "due_at_unix", `Float 200.0
-        ; "payload_kind", `String Schedule_supported_kinds.keeper_wake
-        ; "payload_body"
-          , `Assoc
-              [ "keeper_name", `String "schedule-keeper"
-              ; "message", `String "run maintenance"
-              ; "urgency", `String "urgent-ish"
-              ]
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "run maintenance"
+        ; "urgency", `String "urgent-ish"
         ])
   in
   check bool "invalid urgency rejected" false (Tool_result.is_success invalid);
@@ -911,12 +891,14 @@ let () =
             test_removed_convenience_input_does_not_synthesize_payload
         ; test_case "unregistered wake target rejected" `Quick
             test_unregistered_wake_target_rejected
-        ; test_case "unknown payload rejected before persistence" `Quick
-            test_unknown_payload_is_rejected_before_persistence
-        ; test_case "unknown body field rejected before persistence" `Quick
-            test_unknown_body_field_is_rejected_before_persistence
-        ; test_case "every declared body field still creates" `Quick
-            test_known_body_fields_still_create
+        ; test_case "unknown payload kind rejected by the validator" `Quick
+            test_unknown_payload_kind_is_rejected_by_the_validator
+        ; test_case "unknown field rejected before persistence" `Quick
+            test_unknown_field_is_rejected_before_persistence
+        ; test_case "empty call rejected by name" `Quick
+            test_empty_call_is_rejected_by_name
+        ; test_case "every declared field still creates" `Quick
+            test_known_fields_still_create
         ; test_case "payload contracts are schema only" `Quick
             test_payload_contracts_are_schema_only
         ; test_case "keeper wake schema validation" `Quick

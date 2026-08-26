@@ -1275,17 +1275,13 @@ class MissionRun:
             {
                 "schedule_id": self.schedule_id,
                 "due_at_unix": due_at,
-                "payload_kind": "masc.keeper_wake",
-                "payload_schema_version": 1,
-                "payload_body": {
-                    "keeper_name": self.roles["coordinator"],
-                    "title": f"Scheduled collaboration checkpoint {self.marker}",
-                    "message": (
-                        f"Scheduled source {self.marker}: inspect Goal {self.goal_id} and "
-                        f"comment SCHEDULE_WAKE_OK on Board post {post_id}."
-                    ),
-                    "urgency": "normal",
-                },
+                "keeper_name": self.roles["coordinator"],
+                "title": f"Scheduled collaboration checkpoint {self.marker}",
+                "message": (
+                    f"Scheduled source {self.marker}: inspect Goal {self.goal_id} and "
+                    f"comment SCHEDULE_WAKE_OK on Board post {post_id}."
+                ),
+                "urgency": "normal",
                 "source": "operator_request",
                 "requested_by_id": "keeper-collaboration-harness",
                 "scheduled_by_id": "keeper-collaboration-harness",

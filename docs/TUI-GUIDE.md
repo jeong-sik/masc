@@ -420,6 +420,18 @@ returned, `✗` for one that returned an error, `·` for one the trace never saw
 finish, and `?` for one whose outcome the trace did not record. A finished call
 carries its server-recorded duration; an open call has none.
 
+Full tool detail also keeps a Keeper's recorded file change inside the turn
+that made it. The pane does not fetch file-change bodies in compact mode;
+`Ctrl-D` opens Full and performs that lazy read. A tool row joins a change only
+by the producer's canonical `execution_id` — provider call ids, paths,
+timestamps, and list position never authorize the join. The inline block names
+the resolved file address, added/removed row counts, producer-recorded old/new
+line ranges, and a bounded `diff` preview. At most three changes are expanded
+per tool block and each preview holds at most twelve rows; an omission names
+its exact count and points to Changes for the complete view. A historical row
+without line evidence keeps its diff but invents no coordinates. A Write names
+its recorded new body and range only, because previous content is unavailable.
+
 When an autonomous turn says something, its badge is `· auto` instead of the
 Keeper name used for a direct chat reply. A blank autonomous turn with no trace
 still draws one `·` row, so the turn is visible without pretending it answered

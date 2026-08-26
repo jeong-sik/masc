@@ -339,16 +339,16 @@ key = " OLLAMA_CLOUD_API_KEY "
         | None -> fail "expected credential")
      | _ -> fail "expected one provider")
 
-let test_runtime_toml_rejects_legacy_protocol_aliases () =
+let test_runtime_toml_rejects_unknown_protocol () =
   let content =
     {|
 [runtime]
-default = "legacy_openai_compat.test_model"
+default = "invalid_protocol.test_model"
 
-[providers.legacy_openai_compat]
-display-name = "Legacy OpenAI-Compatible"
-protocol = "openai-http"
-endpoint = "https://legacy-openai-compatible.example/v1"
+[providers.invalid_protocol]
+display-name = "Invalid protocol"
+protocol = "future-wire"
+endpoint = "https://invalid.example/v1"
 
 [models.test_model]
 api-name = "test-model"
@@ -356,20 +356,20 @@ max-context = 8192
 tools-support = true
 streaming = true
 
-[legacy_openai_compat.test_model]
+[invalid_protocol.test_model]
 max-concurrent = 1
 |}
   in
   match Runtime_toml.parse_string content with
-  | Ok _ -> fail "expected runtime TOML to reject legacy provider-letter alias"
+  | Ok _ -> fail "expected runtime TOML to reject an unknown protocol"
   | Error errors ->
-    check bool "rejects openai-http"
+    check bool "rejects unknown protocol"
       true
       (List.exists
          (fun (err : Runtime_toml.parse_error) ->
-            String.equal err.path "providers.legacy_openai_compat.protocol"
+            String.equal err.path "providers.invalid_protocol.protocol"
             && String.equal err.message
-                 "unknown protocol \"openai-http\": expected one of \
+                 "unknown protocol \"future-wire\": expected one of \
                   messages-cli, messages-http, openai-compatible-cli, \
                   openai-compatible-http, ollama-http, codex-app-server, \
                   claude-code, antigravity-cli")
@@ -2172,9 +2172,9 @@ let () =
             `Quick
             test_runtime_toml_rejects_wrong_typed_provider_connect_timeout
         ; test_case
-            "runtime TOML rejects legacy protocol aliases"
+            "runtime TOML rejects unknown protocol"
             `Quick
-            test_runtime_toml_rejects_legacy_protocol_aliases
+            test_runtime_toml_rejects_unknown_protocol
         ; test_case
             "runtime TOML editor protocol inventory is backend-owned"
             `Quick

@@ -24,7 +24,6 @@ type finalized_block = {
   stream_scope : int;
   provider_message_id : string option;
   raw_call_id : string;
-  raw_call_name : string;
   call : Keeper_chat_store.tool_call;
 }
 
@@ -338,7 +337,6 @@ let finalize_block t index =
         ; stream_scope = block.stream_scope
         ; provider_message_id = block.provider_message_id
         ; raw_call_id = block.raw_call_id
-        ; raw_call_name = block.raw_call_name
         ; call
         } )
       :: t.finalized

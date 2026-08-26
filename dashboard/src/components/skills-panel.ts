@@ -27,6 +27,7 @@ export interface SkillRow {
   description: string
   source: string
   body_bytes: number
+  diagnostics: string[]
   usage: SkillUsage | null
 }
 
@@ -43,6 +44,7 @@ export function mergeSkillRows(
     description: entry.description,
     source: `${entry.identity.source_id}/${entry.identity.package_id}`,
     body_bytes: entry.body_bytes,
+    diagnostics: entry.diagnostics ?? [],
     usage: byName.get(entry.identity.name) ?? null,
   }))
 }
@@ -156,7 +158,12 @@ export function SkillsPanel() {
           ${rows.map(
             row => html`
               <tr key=${row.name} data-testid=${`skill-row-${row.name}`}>
-                <td><strong>${row.name}</strong><div class="ss-muted">${row.description}</div></td>
+                <td>
+                  <strong>${row.name}</strong><div class="ss-muted">${row.description}</div>
+                  ${row.diagnostics.map(
+                    diagnostic => html`<div class="mt-1 text-3xs text-[var(--color-status-warn)]">⚠ ${diagnostic}</div>`,
+                  )}
+                </td>
                 <td>${kindLabel(row.usage)}</td>
                 <td class="mono">${row.usage?.kind === 'composition' ? row.usage.tool_name : '—'}</td>
                 <td>${usageLabel(row.usage, res.recent_window_rows)}</td>

@@ -107,5 +107,6 @@ val decode : directory_name:string -> string -> load_outcome
     [Unloadable], because the document cannot participate in discovery. *)
 
 val diagnostics : load_outcome -> diagnostic list
+val conformance_diagnostics : conformance -> diagnostic list
 val diagnostic_to_string : diagnostic -> string
 val conformance_to_string : conformance -> string

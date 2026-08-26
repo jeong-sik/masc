@@ -9,12 +9,13 @@ import {
   usageLabel,
 } from './skills-panel'
 
-function entry(name: string, body_bytes = 100): SkillSnapshotEntry {
+function entry(name: string, body_bytes = 100, diagnostics?: string[]): SkillSnapshotEntry {
   return {
     identity: { source_id: 'workspace', package_id: name, name },
     content_revision: 'sha',
     description: `about ${name}`,
     conformance: 'conformant',
+    diagnostics,
     body_bytes,
   }
 }
@@ -41,6 +42,17 @@ describe('mergeSkillRows', () => {
   it('renders the snapshot when the server reports no usage at all', () => {
     const rows = mergeSkillRows([entry('work-intake')], undefined)
     expect(rows.map(r => [r.name, r.usage])).toEqual([['work-intake', null]])
+  })
+
+  it('keeps diagnostics and accepts an older server that omits them', () => {
+    const rows = mergeSkillRows(
+      [entry('compatible', 100, ['name differs from directory']), entry('old-server')],
+      [],
+    )
+    expect(rows.map(r => r.diagnostics)).toEqual([
+      ['name differs from directory'],
+      [],
+    ])
   })
 })
 

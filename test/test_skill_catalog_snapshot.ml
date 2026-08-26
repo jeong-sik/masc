@@ -250,6 +250,53 @@ let test_public_projection_redacts_private_content () =
     (String_util.contains_substring public "/private/host/workspace")
 ;;
 
+let test_public_projection_exposes_conformance_diagnostics () =
+  let config =
+    parse_config (config_text (source_row ~id:"only" ~path:"skills"))
+  in
+  let mismatched =
+    candidate
+      ~directory:"directory-name"
+      (document
+         ~name:"declared-name"
+         ~description:"Keep a mismatched skill usable."
+         ~body:"body")
+  in
+  let public_json =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ mismatched ] ])
+    |> Snapshot.to_public_yojson
+  in
+  let public = Yojson.Safe.to_string public_json in
+  check
+    bool
+    "compatibility class is public"
+    true
+    (String_util.contains_substring public "runtime_compatible");
+  let diagnostics =
+    match public_json with
+    | `Assoc fields ->
+      (match List.assoc_opt "skills" fields with
+       | Some (`List [ `Assoc skill_fields ]) ->
+         (match List.assoc_opt "diagnostics" skill_fields with
+          | Some (`List values) ->
+            List.filter_map
+              (function
+                | `String value -> Some value
+                | _ -> None)
+              values
+          | _ -> fail "public skill has no diagnostics array")
+       | _ -> fail "public snapshot does not contain exactly one skill")
+    | _ -> fail "public snapshot is not an object"
+  in
+  check
+    (list string)
+    "the reason is public"
+    [ "SKILL.md name \"declared-name\" does not match directory \"directory-name\"" ]
+    diagnostics
+;;
+
 let test_public_projection_redacts_absolute_config_path () =
   let text =
     config_text
@@ -450,6 +497,8 @@ let () =
         ; test_case "exact duplicate" `Quick test_exact_duplicate_is_rejected
         ; test_case "public projection redaction" `Quick
             test_public_projection_redacts_private_content
+        ; test_case "public conformance diagnostics" `Quick
+            test_public_projection_exposes_conformance_diagnostics
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment

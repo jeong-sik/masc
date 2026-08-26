@@ -3,13 +3,14 @@ open Alcotest
 module Policy = Masc.Keeper_tool_approval_policy
 module Descriptor = Masc.Keeper_tool_descriptor
 
-let asks ~tool_name ~input =
-  match Policy.verdict_for ~tool_name ~input with
+let asks ?composition_plan_index ~tool_name ~input =
+  match Policy.verdict_for ?composition_plan_index ~tool_name ~input with
   | Policy.Ask _ -> true
   | Policy.Run _ -> false
 
-let because ~tool_name ~input =
-  Policy.verdict_because (Policy.verdict_for ~tool_name ~input)
+let because ?composition_plan_index ~tool_name ~input =
+  Policy.verdict_because
+    (Policy.verdict_for ?composition_plan_index ~tool_name ~input)
 
 let no_input = `Assoc []
 
@@ -100,40 +101,63 @@ let mentions haystack needle =
 ;;
 
 let with_index rows f =
-  let index = Index.shared () in
-  Index.forget_all index;
+  let index = Index.create () in
   List.iter
     (fun (composition, node_tools) -> Index.record index ~composition ~node_tools)
     rows;
-  Fun.protect ~finally:(fun () -> Index.forget_all index) f
+  f index
 ;;
 
 let test_a_plan_of_reads_runs_unasked () =
-  with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun () ->
+  with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun index ->
     check bool "a composition that only reads is not asked about" false
-      (asks ~tool_name:"keeper_compose_reading" ~input:no_input);
+      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_reading"
+         ~input:no_input);
     check bool "the reason counts the nodes it cleared" true
-      (String.length (because ~tool_name:"keeper_compose_reading" ~input:no_input) > 0))
+      (String.length
+         (because ~composition_plan_index:index
+            ~tool_name:"keeper_compose_reading" ~input:no_input)
+       > 0))
 ;;
 
 let test_one_writing_node_asks_and_names_itself () =
-  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun () ->
+  with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun index ->
     check bool "one node that changes something asks for the whole plan" true
-      (asks ~tool_name:"keeper_compose_mixed" ~input:no_input);
-    let reason = because ~tool_name:"keeper_compose_mixed" ~input:no_input in
+      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+         ~input:no_input);
+    let reason =
+      because ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+        ~input:no_input
+    in
     (* Without the node name the operator sees a composition name and has to
        go read the plan to learn why they are being asked. *)
     check bool "the reason names the node responsible" true
       (mentions reason "Write"))
 ;;
 
+let test_same_name_is_isolated_between_turn_indexes () =
+  let first_turn = Index.create () in
+  let second_turn = Index.create () in
+  let composition = "keeper_compose_same-name" in
+  Index.record first_turn ~composition ~node_tools:[ "Read" ];
+  Index.record second_turn ~composition ~node_tools:[ "Write" ];
+  check bool "first turn keeps its read-only plan" false
+    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input);
+  check bool "second turn sees its writing plan" true
+    (asks ~composition_plan_index:second_turn ~tool_name:composition ~input:no_input);
+  check bool "second writer did not mutate the first turn" false
+    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input)
+;;
+
 let test_an_unrecorded_name_is_still_unclassifiable () =
-  with_index [] (fun () ->
+  with_index [] (fun index ->
     check bool "a name that is not a composition keeps the old answer" true
-      (asks ~tool_name:"keeper_compose_never_declared" ~input:no_input);
+      (asks ~composition_plan_index:index
+         ~tool_name:"keeper_compose_never_declared" ~input:no_input);
     check string "and keeps the old reason"
       "no descriptor declares what this tool does"
-      (because ~tool_name:"keeper_compose_never_declared" ~input:no_input))
+      (because ~composition_plan_index:index
+         ~tool_name:"keeper_compose_never_declared" ~input:no_input))
 ;;
 
 (* keeper_plan_execute carries no catalog entry -- its nodes arrive in the
@@ -154,19 +178,19 @@ let plan_input tools =
 ;;
 
 let test_ad_hoc_plan_of_reads_runs_unasked () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     check bool "an ad-hoc plan of reads is not asked about" false
       (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Grep" ])))
 ;;
 
 let test_ad_hoc_plan_with_a_write_asks () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     check bool "an ad-hoc plan that writes is asked about" true
       (asks ~tool_name:"keeper_plan_execute" ~input:(plan_input [ "Read"; "Execute" ])));
 ;;
 
 let test_a_malformed_plan_is_asked_about () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     (* Not "a plan whose nodes are all reads". The tool will reject it too. *)
     check bool "a plan_execute call with no nodes field is asked about" true
       (asks ~tool_name:"keeper_plan_execute" ~input:no_input))
@@ -176,7 +200,7 @@ let test_a_malformed_plan_is_asked_about () =
    unasked today may start asking. Read directly and Read inside a plan must
    give the same answer. *)
 let test_no_direct_call_became_asked () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     let asked_now =
       Descriptor.public_names ()
       |> List.filter (fun tool_name -> asks ~tool_name ~input:no_input)
@@ -192,13 +216,13 @@ let test_no_direct_call_became_asked () =
 module Catalog = Masc.Keeper_tool_composition_catalog
 
 let test_reading_a_request_status_runs_unasked () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     check bool "reading the status of a request this keeper made is not asked about"
       false (asks ~tool_name:Catalog.status_tool_name ~input:no_input))
 ;;
 
 let test_cancelling_a_request_runs_unasked () =
-  with_index [] (fun () ->
+  with_index [] (fun _ ->
     check bool "cancelling a request inside masc is not asked about" false
       (asks ~tool_name:Catalog.cancel_tool_name ~input:no_input))
 ;;
@@ -234,6 +258,8 @@ let () =
             test_a_plan_of_reads_runs_unasked
         ; test_case "one writing node asks and names itself" `Quick
             test_one_writing_node_asks_and_names_itself
+        ; test_case "same name is isolated between turn indexes" `Quick
+            test_same_name_is_isolated_between_turn_indexes
         ; test_case "an unrecorded name is still unclassifiable" `Quick
             test_an_unrecorded_name_is_still_unclassifiable
         ; test_case "an ad-hoc plan of reads runs unasked" `Quick

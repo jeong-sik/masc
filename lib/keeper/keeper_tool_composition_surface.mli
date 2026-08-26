@@ -43,6 +43,9 @@ val make_tools
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
            as catalog entries; materialized by the same closure. The caller
            that loaded both catalogs refuses cross-source name collisions. *)
+  -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
+       (** The current turn's approval index. When present, every materialized
+           composition records its node tools for that exact gate. *)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

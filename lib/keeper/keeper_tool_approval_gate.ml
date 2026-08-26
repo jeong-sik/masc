@@ -5,9 +5,11 @@ module Mode = Keeper_tool_approval_mode
 type t =
   { pre_tool_use : Agent_core.Hooks.hook
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
+  ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
 let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
+  let composition_plan_index = Keeper_tool_composition_plan_index.create () in
   let pre_tool_use (event : Agent_core.Hooks.hook_event) =
     match event with
     | Agent_core.Hooks.PreToolUse { tool_name; input; _ } -> (
@@ -17,7 +19,9 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
         match Mode.resolve (Mode.shared ()) ~keeper_name with
         | Mode.Yolo -> Agent_core.Hooks.Continue
         | Mode.Auto -> (
-            match Policy.verdict_for ~tool_name ~input with
+            match
+              Policy.verdict_for ~composition_plan_index ~tool_name ~input
+            with
             | Policy.Run _ -> Agent_core.Hooks.Continue
             | Policy.Ask { because } ->
                 Agent_core.Hooks.ElicitToolApproval
@@ -75,4 +79,4 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
          { tool_call_id; outcome = label });
     decision
   in
-  { pre_tool_use; tool_approval }
+  { pre_tool_use; tool_approval; composition_plan_index }

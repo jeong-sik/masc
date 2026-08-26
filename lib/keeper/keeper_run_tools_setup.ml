@@ -317,6 +317,7 @@ let prepare_agent_setup
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
+      ?composition_plan_index
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
@@ -434,6 +435,7 @@ let prepare_agent_setup
       ?hitl_resolution
       ~skill_catalog
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
+      ?composition_plan_index
       ~turn_ctx_cell
       ()
   in

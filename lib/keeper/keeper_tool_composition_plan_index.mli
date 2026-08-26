@@ -15,10 +15,10 @@
 
     The bundle builder knows each plan at construction time ([Catalog.entry]
     carries it), so the write happens once per turn rather than once per call.
-    Writes overwrite by name: a turn that rebuilds the same catalog leaves the
-    same rows rather than appending. In memory only — the composition surface
-    is rebuilt from [SKILL.md] every turn, so a row that outlived the process
-    would describe a plan nobody loaded.
+    The index is owned by that turn's approval gate. It must not be shared:
+    concurrent turns can materialize the same composition name from different
+    workspace snapshots, and a process-global last writer would then decide
+    the first turn using the second turn's plan.
 
     [keeper_plan_execute] is deliberately absent. Its plan arrives in the tool
     input rather than from a catalog, so its caller reads the nodes from there
@@ -27,10 +27,6 @@
 type t
 
 val create : unit -> t
-
-val shared : unit -> t
-(** The instance the running process uses — the bundle builder writes it and
-    the approval policy reads it. *)
 
 val record : t -> composition:string -> node_tools:string list -> unit
 (** Declare that [composition] runs exactly [node_tools], in plan order.
@@ -43,9 +39,3 @@ val node_tools : t -> composition:string -> string list option
 (** The tools [composition] runs, or [None] when this name was never
     recorded — which for a caller means "not a composition I know", not "a
     composition that runs nothing". *)
-
-val forget_all : t -> unit
-(** Drop every row. For tests that need an empty index; the running process
-    does not call this, because a rebuild overwrites what it re-declares and
-    a name that disappears from the catalog also disappears from the bundle,
-    so nothing can reach a stale row through dispatch. *)

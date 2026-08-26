@@ -151,7 +151,8 @@ let extension_value_kind : Agent_core.Skill_document.extension_value -> string =
   | Mapping _ -> "mapping"
 ;;
 
-let materialize_composition_tool ~skill extensions =
+let materialize_composition_tool ~skill
+      (extensions : (string * Agent_core.Skill_document.extension_value) list) =
   match List.assoc_opt "disable-model-invocation" extensions with
   | Some _ -> Error (Removed_disable_model_invocation { skill })
   | None ->

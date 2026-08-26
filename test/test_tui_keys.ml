@@ -148,6 +148,57 @@ let test_help_documents_what_was_missing () =
   Alcotest.(check bool) "Logs documents only what is bound" false
     (List.mem "g / G" logs)
 
+(* The sheet opens on the reader's own surface. Without this the answer to
+   "what can I do here" sat behind nineteen other surfaces, in strip order,
+   and the reader had to search a reference for it. *)
+let test_the_sheet_opens_on_the_current_surface () =
+  List.iter
+    (fun (name, surface, expected) ->
+       match Masc_tui_keys.help_sections ~current:surface () with
+       | (title, keys) :: _ ->
+           Alcotest.(check bool)
+             (name ^ ": names the surface first")
+             true
+             (String.length title >= String.length expected
+              && String.equal (String.sub title 0 (String.length expected))
+                   expected);
+           (* The section has to be that surface's, not just titled like it. *)
+           Alcotest.(check (list (pair string string)))
+             (name ^ ": and carries its keys")
+             (List.map
+                (fun (b : Masc_tui_keys.binding) ->
+                   (b.key, Option.value b.help ~default:b.label))
+                (Masc_tui_keys.for_surface surface))
+             keys
+       | [] -> Alcotest.fail (name ^ ": no sections at all"))
+    [ ("Overview", Overview, "Overview")
+    ; ("Keepers", Keepers Keeper_list, "Keepers")
+    ; ("Chat", Keepers Keeper_message, "Chat")
+    ; ("Config", Config, "Config")
+    ]
+
+(* The Keepers sub-modes are one entry on the strip and three sections here.
+   Matching by ring position would hand a reader in the chat the roster's
+   keys, which is the drift this argument exists to prevent. *)
+let test_the_keeper_sub_modes_do_not_share_a_section () =
+  let first surface =
+    match Masc_tui_keys.help_sections ~current:surface () with
+    | (title, _) :: _ -> title
+    | [] -> "none"
+  in
+  Alcotest.(check bool)
+    "the roster and the chat open on different sections" false
+    (String.equal (first (Keepers Keeper_list)) (first (Keepers Keeper_message)))
+
+(* Asked without a surface, the sheet reads as it did before it knew where the
+   reader was: Global, then the strip's order. *)
+let test_without_a_surface_the_order_is_the_strips () =
+  match Masc_tui_keys.help_sections () with
+  | (title, _) :: (second, _) :: _ ->
+      Alcotest.(check string) "Global first" "Global" title;
+      Alcotest.(check string) "then the strip's first surface" "Overview" second
+  | _ -> Alcotest.fail "expected at least two sections"
+
 let () =
   Alcotest.run "masc_tui_keys"
     [ ( "table"
@@ -177,5 +228,11 @@ let () =
             test_system_logs_lost_the_keys_it_never_had
         ; Alcotest.test_case "help documents what was missing" `Quick
             test_help_documents_what_was_missing
+        ; Alcotest.test_case "the sheet opens on the current surface" `Quick
+            test_the_sheet_opens_on_the_current_surface
+        ; Alcotest.test_case "keeper sub-modes do not share a section" `Quick
+            test_the_keeper_sub_modes_do_not_share_a_section
+        ; Alcotest.test_case "without a surface the order is the strip's" `Quick
+            test_without_a_surface_the_order_is_the_strips
         ] )
     ]

@@ -48,6 +48,11 @@ val footer_hints_fusion_detail : scroll:int -> max_scroll:int -> string
 (** The Fusion detail footer. Separate from {!footer_hints} because it appends
     the live scroll position, which the static per-surface table cannot know. *)
 
-val help_sections : unit -> (string * (string * string) list) list
+val help_sections :
+  ?current:Masc_tui_types.surface -> unit -> (string * (string * string) list) list
+(** Sections for the help sheet. [current] puts that surface's own section
+    first and marks it, so the sheet opens on an answer rather than on a list
+    to search. Omitted, the order is the strip's, as it was before the sheet
+    knew where the reader was. *)
 (** The help overlay's sections: Global first, then one section per surface
     that declares bindings, titled with the strip's spelling. *)

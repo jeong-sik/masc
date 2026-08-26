@@ -8337,31 +8337,33 @@ let render_surface (state : state) =
    it. The rows come from Masc_tui_keys -- the same table the footers read --
    so the two displays cannot drift apart. A key added to the dispatch gets
    its row there, once. *)
-let help_sections : (string * (string * string) list) list =
-  Masc_tui_keys.help_sections ()
-
-let help_lines () =
-  let keys =
-    help_sections
-    |> List.concat_map (fun (title, entries) ->
-         (Ansi.bold ^ title ^ Ansi.reset)
-         :: List.map
-              (fun (key, action) ->
-                Printf.sprintf
-                  "  %s%-18s%s %s"
-                  Ansi.cyan
-                  key
-                  Ansi.reset
-                  action)
-              entries
-         @ [ "" ])
+let help_lines (state : state) =
+  let section (title, entries) =
+    (Ansi.bold ^ title ^ Ansi.reset)
+    :: List.map
+         (fun (key, action) ->
+           Printf.sprintf "  %s%-18s%s %s" Ansi.cyan key Ansi.reset action)
+         entries
+    @ [ "" ]
   in
-  [ Ansi.bold ^ "Slash commands" ^ Ansi.reset ]
-  @ List.map
-      (fun line -> "  " ^ Ansi.cyan ^ line ^ Ansi.reset)
-      Masc_tui_command.help_lines
-  @ [ "" ]
-  @ keys
+  let slash_commands =
+    (Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    :: List.map
+         (fun line -> "  " ^ Ansi.cyan ^ line ^ Ansi.reset)
+         Masc_tui_command.help_lines
+    @ [ "" ]
+  in
+  (* The first section is the reader's own surface, and it opens the sheet.
+     The eleven lines of slash commands used to sit above it and pushed the
+     answer past the fold; they are a reference and read as one here.
+
+     [help_sections] puts Global first where the surface has no section of its
+     own, so the head of this list is the most relevant thing either way and
+     nothing has to look for it by name. *)
+  match Masc_tui_keys.help_sections ~current:state.view () with
+  | [] -> slash_commands
+  | first :: rest ->
+      section first @ slash_commands @ List.concat_map section rest
 
 let context_ratio_bar ~width ~tokens ~maximum =
   let ratio =
@@ -8711,7 +8713,7 @@ let render_context_inspector state =
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  ( List.length (Masc_tui_help.sheet ~cols (help_lines ()))
+  ( List.length (Masc_tui_help.sheet ~cols (help_lines state))
   , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
@@ -8768,7 +8770,7 @@ let render_help (state : state) =
   framed_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
     ^ "Esc or ? to close" ^ Ansi.reset);
   framed_divider buf cols;
-  let lines = help_lines () in
+  let lines = help_lines state in
   let rendered_rows = Masc_tui_help.sheet ~cols lines in
   let content_height = framed_content_height ~rows in
   let scroll =

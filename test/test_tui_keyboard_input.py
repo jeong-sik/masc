@@ -5033,7 +5033,7 @@ def verification_request_row(task_id: str) -> dict[str, object]:
         "task_id": task_id,
         "task_title": f"finish {task_id}",
         "request_kind": "completion",
-        "request_summary": f"prove {task_id} is done",
+        "request_summary": "" if task_id == "task-901" else f"prove {task_id} is done",
         "submitted_by": "keeper-alpha",
         "created_at": "2026-08-25T14:00:00+09:00",
         "required_artifacts": ["diff"],
@@ -5094,10 +5094,11 @@ def note_editor_script() -> Iterator[str]:
 
 
 def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
-    """`a` arms and only the second `a` sends the approve; `x` collects a
-    reason through $EDITOR and sends the reject. Both assertions read the
-    recorded POST bodies -- the wire, not the paint -- and the frame between
-    the two presses proves the first one sent nothing.
+    """Enter explains what the request asks for and which evidence exists.
+    Then `a` arms and only the second `a` sends the approve; `x` collects a
+    reason through $EDITOR and sends the reject. The verdict assertions read
+    the recorded POST bodies -- the wire, not the paint -- and the frame
+    between the two presses proves the first one sent nothing.
     """
 
     def verdict_bodies() -> list[bytes]:
@@ -5118,6 +5119,30 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         wait_for_output(
             process, master_fd, output, b"task-901", start=0, timeout=3.0
         )
+        detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"HOW TO READ THIS",
+        )
+        detail_plain = CSI_RE.sub(b"", detail)
+        for needle in (
+            b"vr-task-901",
+            b"finish task-901",
+            b"completion",
+            b"No request summary was recorded",
+            b"review the diff",
+            b"REQUIRED ARTIFACTS (1)",
+            b"SUBMITTED EVIDENCE (1)",
+            b"diff",
+            b"left/Esc:list",
+        ):
+            if needle not in detail_plain:
+                raise AssertionError(
+                    f"Verification detail omitted {needle!r}: {detail_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b", b"task-901")
         send_and_wait(
             process,
             master_fd,
@@ -5134,6 +5159,11 @@ def verification_verdict_interaction(requests: HttpRequests) -> Interaction:
         approve_payload = json.loads(approve_body)
         if approve_payload != {"task_id": "task-901", "verdict": "approve"}:
             raise AssertionError(f"approve body: {approve_payload!r}")
+        # Let the approve completion and its queue reload settle before the
+        # editor temporarily gives up the alternate screen. Otherwise the
+        # redraw from that reload can race the terminal handoff and leave the
+        # editor wait with no frame to drain.
+        drain_until_quiet(process, master_fd, output)
         # Reject on the same row: the $EDITOR stub saves the reason form, so
         # the second verdict body carries it.
         read_available(master_fd, output)

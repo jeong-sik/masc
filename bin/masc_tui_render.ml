@@ -4140,7 +4140,7 @@ let render_system_logs (state : state) =
    who submitted it, and what would move it forward. Evidence counts rather
    than paths -- a row is a queue entry, and the paths belong to whoever opens
    the task. *)
-let render_verification (state : state) =
+let render_verification_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
@@ -4267,8 +4267,123 @@ let render_verification (state : state) =
    | None -> ());
   box_bottom buf cols;
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:
+         "j/k:move  PgUp/PgDn:page  right/Enter:details  a:approve  x:reject  r:refresh  Tab:next");
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
+
+let verification_detail_lines ~width
+    (request : Masc.Tui_decode.verification_request) =
+  let field label value =
+    ( Ansi.reset
+    , Printf.sprintf "  %-15s %s" label (Terminal_text.single_line value) )
+  in
+  let wrapped_block label text =
+    (Ansi.bold, "  " ^ label)
+    :: (Message_layout.wrap_body ~markdown:document_markdown
+          ~max_cells:(max 1 (width - 4))
+          ~sanitize:Keeper_chat.terminal_safe_text text
+        |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  in
+  let item_lines empty_label items =
+    match items with
+    | [] -> [ Ansi.dim, "    (" ^ empty_label ^ ")" ]
+    | _ ->
+        List.concat_map
+          (fun item ->
+             Message_layout.wrap_body ~max_cells:(max 1 (width - 6))
+               ~sanitize:Keeper_chat.terminal_safe_text item
+             |> List.mapi (fun index line ->
+                    Ansi.reset, (if index = 0 then "    - " else "      ") ^ line))
+          items
+  in
+  let summary =
+    if String.equal (String.trim request.vr_summary) "" then
+      "No request summary was recorded. Read the required artifacts and submitted evidence below."
+    else request.vr_summary
+  in
+  let next_action =
+    match request.vr_next_action with
+    | Some action when not (String.equal (String.trim action) "") -> action
+    | Some _ | None -> "No next action was recorded."
+  in
+  [ Ansi.bold, "  VERIFICATION REQUEST"
+  ; field "Request" request.vr_request_id
+  ; field "Task" request.vr_task_id
+  ; field "Title" request.vr_task_title
+  ; field "Kind" request.vr_kind
+  ; field "Submitted by" request.vr_submitted_by
+  ; field "Created" request.vr_created_at
+  ; Ansi.dim, ""
+  ]
+  @ wrapped_block "What is being judged" summary
+  @ [ Ansi.dim, "" ]
+  @ wrapped_block "What moves it forward" next_action
+  @ [ Ansi.dim, ""
+    ; Ansi.bold, "  HOW TO READ THIS"
+    ; ( Ansi.dim
+      , "    Required artifacts say what must exist. Submitted evidence says what the verifier can inspect now." )
+    ; Ansi.dim, ""
+    ; Ansi.bold
+    , Printf.sprintf "  REQUIRED ARTIFACTS (%d)"
+        (List.length request.vr_required_artifacts)
+    ]
+  @ item_lines "none required" request.vr_required_artifacts
+  @ [ Ansi.dim, ""
+    ; Ansi.bold
+    , Printf.sprintf "  SUBMITTED EVIDENCE (%d)"
+        (List.length request.vr_submitted_evidence)
+    ]
+  @ item_lines "none submitted" request.vr_submitted_evidence
+  @
+  match request.vr_evidence_error with
+  | None -> []
+  | Some detail ->
+      [ Ansi.dim, "" ]
+      @ wrapped_block "Evidence projection error" detail
+
+let render_verification_detail (state : state) request =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s"
+       (screen_title " MASC Verification \xe2\x96\xb8 details")
+       (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
+  box_divider buf cols;
+  let lines = verification_detail_lines ~width:(max 1 (cols - 4)) request in
+  let content_height = max 1 (rows - 6) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (scroll + index) with
+    | Some (style, line) -> box_line_styled buf cols ~style line
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (Printf.sprintf
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  a:approve  x:reject  r:refresh"
+            scroll max_scroll));
+  finish_surface state
+    ~clamped:(Verification_detail_scroll scroll)
+    ~surface_key:"verification-detail" ~rows:terminal_rows ~cols buf
+
+let render_verification (state : state) =
+  match state.verification_detail_request_id, state.verification with
+  | Some request_id, Some snapshot ->
+      (match
+         List.find_opt
+           (fun request ->
+              String.equal request.Masc.Tui_decode.vr_request_id request_id)
+           snapshot.Masc.Tui_decode.vs_requests
+       with
+       | Some request -> render_verification_detail state request
+       | None -> render_verification_list state)
+  | Some _, None | None, _ -> render_verification_list state
 
 (* What the harness decided, most recent first.
 

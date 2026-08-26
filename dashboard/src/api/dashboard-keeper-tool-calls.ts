@@ -83,6 +83,11 @@ export type ToolCallEntry = {
   output: string | ToolCallOutputBlob
   success: boolean
   duration_ms: number | null
+  // Which sandbox the call actually ran in, as the call itself recorded it.
+  // The keeper's current profile cannot answer for a past call: a keeper moved
+  // from local to docker keeps one trace file, so filtering by the keeper's
+  // setting mixes the two eras and reads a pre-move failure as a post-move one.
+  sandbox_profile?: string
   model?: string
   trace_id?: string
   session_id?: string
@@ -255,6 +260,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     input: raw.input,
     output: decodeToolCallOutput(raw.output),
     success: asBoolean(raw.success, false),
+    sandbox_profile: asString(raw.sandbox_profile),
     duration_ms: asNumber(raw.duration_ms) ?? null,
     model: asString(raw.model),
     trace_id: asString(raw.trace_id),

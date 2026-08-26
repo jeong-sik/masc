@@ -41,6 +41,88 @@ describe('KeeperToolCallInspector render', () => {
     vi.useRealTimers()
   })
 
+  // A keeper moved from local to docker keeps one trace, so the two eras sit in
+  // the same list. Reading a pre-move failure as a post-move one is the mistake
+  // this filter exists to stop, so the filter has to actually drop rows.
+  it('filters tool calls by the sandbox each one recorded', async () => {
+    const entry = (tool: string, sandbox: string) => ({
+      ts: 1_777_100_000,
+      keeper: 'code-reviewer',
+      tool,
+      input: {},
+      output: '{"ok":true}',
+      success: true,
+      duration_ms: 1,
+      sandbox_profile: sandbox,
+    })
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'code-reviewer',
+      count: 2,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [entry('BeforeTheMove', 'local'), entry('AfterTheMove', 'docker')],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="code-reviewer" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('BeforeTheMove')
+    expect(container.textContent).toContain('AfterTheMove')
+
+    // Offered from the data, so a third profile would appear here on its own.
+    const select = container.querySelector('select[aria-label="샌드박스 필터"]') as HTMLSelectElement | null
+    expect(select).not.toBeNull()
+    expect([...(select?.options ?? [])].map(o => o.value)).toEqual(['', 'docker', 'local'])
+
+    await act(async () => {
+      if (select) {
+        select.value = 'docker'
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('AfterTheMove')
+    expect(container.textContent).not.toContain('BeforeTheMove')
+  })
+
+  // One profile means nothing to choose between, and a select with a single
+  // option reads as a control that does not work.
+  it('leaves the sandbox filter out when every call ran in the same one', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'Execute',
+          input: {},
+          output: '{"ok":true}',
+          success: true,
+          duration_ms: 1,
+          sandbox_profile: 'docker',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('select[aria-label="샌드박스 필터"]')).toBeNull()
+  })
+
   it('surfaces copy actions for expanded tool call input and output', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

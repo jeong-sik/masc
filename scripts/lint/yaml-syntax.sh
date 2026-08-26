@@ -5,14 +5,9 @@
 # failures across all files, prints one ::error annotation per failing
 # file, and exits non-zero if any file failed (i.e. it does not
 # fail-fast — operators get the full list of broken files in a single
-# CI run). Run as a PR check so the same partial-fix shape cannot
-# reach main again.
+# CI run).
 #
-# Dependency: PyYAML. The .github/workflows/fundamental-check.yml
-# job that invokes this script installs it explicitly via
-# `python -m pip install pyyaml` so the gate does not silently rely
-# on whatever happens to be preinstalled on ubuntu-latest at the
-# moment.
+# Dependency: PyYAML. The consolidated CI lint job installs it explicitly.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"

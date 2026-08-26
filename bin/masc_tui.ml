@@ -2805,8 +2805,13 @@ let search_land state index =
   let follow scroll set_scroll =
     match scrolled_surface state state.view with
     | None -> ()
-    | Some { sc_count = _; sc_chrome } ->
-        let height = max 1 (surface_rows state - sc_chrome) in
+    | Some scrolled ->
+        (* Through [surface_body_height], not [rows - sc_chrome]. A surface that
+           gives half its rows to a preview says so in [sc_preview_keep], and a
+           height that ignores it lands the cursor under the preview while
+           [ensure_visible] reports the row as already on screen. Both movers
+           ask the same helper for the same reason. *)
+        let height = surface_body_height ~rows:(surface_rows state) scrolled in
         set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
   in
   match state.view with
@@ -2848,7 +2853,16 @@ let search_land state index =
         (* The tree pane windows itself around the cursor; no scroll
            follows. *)
         state.code_cursor <- index
-  | _ -> ()
+  (* Listed rather than caught. A surface becomes searchable by being added to
+     [surface_row_texts], which is exhaustive and will name the new variant at
+     compile time; this match has to move with it or the search finds a row and
+     then goes nowhere. A [_] here would let the two drift apart silently, and
+     the drift shows up as a search that quietly does nothing. *)
+  | Overview | Acting | Keepers Keeper_detail | Keepers Keeper_logs
+  | Keepers Keeper_calls | Keepers Keeper_message | Keepers Keeper_runtime_pick
+  | Board | Approvals | Planning | Schedules | Fusion | Changes | Config
+  | Resources | Tools ->
+      ()
 
 let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
@@ -3739,8 +3753,16 @@ let open_image state ~notice path =
       | Ok data when String.length data = 0 -> refuse "the file is empty"
       | Ok data ->
           let rows, columns = get_terminal_size () in
-          (* Two rows kept back: one names the file above the picture, one
-             says how to leave below it. *)
+          (* Three rows kept back, not the two this comment used to claim: the
+             name above the picture, the way out below it, and one more.
+             Counting what is drawn, the picture starts at row 2 and the way
+             out is written at row [rows], so [rows - 2] would already clear
+             it -- the third row is spare.
+             Left as it is on purpose. Some terminals scroll when an image
+             reaches the last row, and a spare row is the usual guard, but
+             nothing here records whether that is why. Naming it after a reason
+             that may not be the real one would put a guess in the code, so the
+             comment says what is true and stops there. *)
           let box =
             { Masc_tui_graphics.columns = max 1 (columns - 2)
             ; rows = max 1 (rows - 3)

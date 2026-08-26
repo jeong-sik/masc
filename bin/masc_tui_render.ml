@@ -3116,7 +3116,10 @@ let render_keeper_list (state : state) =
     (Printf.sprintf "%s%s%s%s%s\n" Ansi.gray Ansi.box_bl (draw_hline (cols - 2))
        Ansi.box_br Ansi.reset);
   Buffer.add_string buf
-    (keeper_action_hints ~offers_back:false state selected_reading ^ "\n");
+    (Message_layout.fit_width
+       (keeper_action_hints ~offers_back:false state selected_reading)
+       (max 1 cols)
+     ^ "\n");
 
   finish_surface state ~surface_key:"keeper-list" ~rows:terminal_rows
       ~cols buf
@@ -3817,6 +3820,15 @@ let render_keeper_detail (state : state) =
       if keeper_roster_pane_shown state ~cols then "  h/l pane" ^ footer
       else footer
     in
+    (* Cut to the terminal, the way every other footer is: [footer_line] takes
+       [~max_cells] and this one never did. The row is about 150 cells wide
+       across its fourteen hints, and the roster pane adds ten more in front,
+       so on any ordinary terminal the tail went past the edge. Autowrap is off
+       while a frame draws, so nothing moved -- the last hints were simply
+       dropped by the terminal, silently, with the keys still working.
+       [fit_width] counts cells rather than bytes and closes the style it cut
+       through. *)
+    let footer = Message_layout.fit_width footer (max 1 cols) in
     if not (keeper_roster_pane_shown state ~cols) then begin
       let scroll = keeper_detail_pane state k ~framed:false ~rows ~cols buf in
       Buffer.add_string buf (footer ^ "\n");

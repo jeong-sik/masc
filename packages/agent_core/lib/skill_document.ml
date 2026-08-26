@@ -309,6 +309,12 @@ let analyze_name name =
   normalized, List.rev violations
 ;;
 
+let canonical_name name =
+  match analyze_name name with
+  | canonical, [] -> Ok canonical
+  | _, violations -> Error violations
+;;
+
 let rec extension_value_of_yaml = function
   | `Null -> Null
   | `Bool value -> Boolean value

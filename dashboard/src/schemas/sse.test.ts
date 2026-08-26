@@ -479,9 +479,35 @@ describe('SSEMessageSchema', () => {
         tool_call_name: 'execute',
         args: '{"command":"ls"}',
         question: 'Run this command?',
+        because: 'process execution requires approval',
       }),
     )
     expect(r.success).toBe(true)
+  })
+
+  it('accepts an older tool approval request without because', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-old',
+        tool_call_name: 'execute',
+        args: '{}',
+        question: 'Run this command?',
+      }),
+    )
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects a non-string tool approval reason', () => {
+    const r = SSEMessageSchema.safeParse(
+      customEvent('KEEPER_TOOL_APPROVAL_REQUESTED', {
+        tool_call_id: 'tool-use-7',
+        tool_call_name: 'execute',
+        args: '{}',
+        question: 'Run this command?',
+        because: 42,
+      }),
+    )
+    expect(r.success).toBe(false)
   })
 
   it('accepts a settled tool approval', () => {

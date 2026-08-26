@@ -342,6 +342,15 @@ function optionalString(
     : fail(`ag_ui_event.value.${field}`, `Expected non-empty optional ${field}`)
 }
 
+function optionalText(
+  value: Record<string, unknown>,
+  field: string,
+): SafeParseResult<true> {
+  return value[field] === undefined || typeof value[field] === 'string'
+    ? ok(true)
+    : fail(`ag_ui_event.value.${field}`, `Expected optional string ${field}`)
+}
+
 function validateToolStreamOccurrence(
   value: Record<string, unknown>,
   path: string,
@@ -490,6 +499,7 @@ function validateKeeperCustomPayload(
       'tool_call_name',
       'args',
       'question',
+      'because',
     ],
     KEEPER_TOOL_APPROVAL_SETTLED: ['tool_call_id', 'outcome'],
     KEEPER_STREAM_MESSAGE_START: ['provider_message_id', 'model', 'usage'],
@@ -556,7 +566,8 @@ function validateKeeperCustomPayload(
       if (!toolCallName.success) return toolCallName
       const args = requiredString(value, 'args')
       if (!args.success) return args
-      return requiredString(value, 'question')
+      const question = requiredString(value, 'question')
+      return question.success ? optionalText(value, 'because') : question
     }
     case 'KEEPER_TOOL_APPROVAL_SETTLED': {
       const toolCallId = requiredString(value, 'tool_call_id')

@@ -679,6 +679,9 @@ export interface KeeperToolApprovalPending {
   toolName: string
   args: string
   question: string
+  // Policy-owned reason the call was held. Empty for an older emitter that
+  // predates the field; the card omits the reason row in that case.
+  because: string
   askedAtMs: number | null
   // Server-stated seconds until the wait retires itself. Null when unknown;
   // the view derives the remaining time from its own clock.

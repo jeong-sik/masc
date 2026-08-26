@@ -988,6 +988,7 @@ export function applyKeeperStreamEvent(
           toolName,
           args: event.value.args,
           question,
+          because: event.value.because ?? '',
           askedAtMs: Date.now(),
           timeoutSec: null,
           answering: false,

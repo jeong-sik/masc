@@ -194,6 +194,7 @@ describe('Keeper operation stream projection', () => {
         tool_call_name: 'Execute',
         args: '{"argv":["ls","-la"]}',
         question: 'Execute ls -la 를 실행할까요?',
+        because: 'process execution requires approval',
       },
     })).toBeNull()
 
@@ -201,6 +202,7 @@ describe('Keeper operation stream projection', () => {
     expect(pending).toBeDefined()
     expect(pending?.toolName).toBe('Execute')
     expect(pending?.question).toBe('Execute ls -la 를 실행할까요?')
+    expect(pending?.because).toBe('process execution requires approval')
     expect(pending?.args).toBe('{"argv":["ls","-la"]}')
     expect(pending?.settled).toBe(false)
     expect(pending?.answering).toBe(false)

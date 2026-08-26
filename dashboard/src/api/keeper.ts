@@ -161,6 +161,7 @@ export interface KeeperToolApprovalRow {
   tool: string
   args: string
   question: string
+  because: string
   asked_at: number | null
   timeout_sec: number | null
 }
@@ -183,6 +184,7 @@ export async function fetchKeeperToolApprovals(
       tool: asString(record.tool) ?? '',
       args: asString(record.args) ?? '',
       question: asString(record.question) ?? '',
+      because: asString(record.because) ?? '',
       asked_at: typeof record.asked_at === 'number' ? record.asked_at : null,
       timeout_sec: typeof record.timeout_sec === 'number' ? record.timeout_sec : null,
     }

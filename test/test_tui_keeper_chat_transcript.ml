@@ -436,7 +436,7 @@ let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
   let t = fresh () in
   feed t
     [ Live.Run_started
-    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; tool_started "c1" "Edit"
     ; Live.Approval_requested
         { call_id = "c1"
         ; tool_name = "Edit"

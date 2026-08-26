@@ -21,6 +21,7 @@ let domain_count_opt () =
 
 let submit_io_or_inline f =
   match Atomic.get pool, Eio_guard.execution_context () with
+  | Some _, _ when Executor_pool_ref.in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_io p f
   | Some _, Eio_guard.Non_eio
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio) -> f ()
@@ -28,6 +29,7 @@ let submit_io_or_inline f =
 
 let submit_cpu_or_inline f =
   match Atomic.get pool, Eio_guard.execution_context () with
+  | Some _, _ when Executor_pool_ref.in_worker_context () -> f ()
   | Some p, Eio_guard.Eio_fiber -> Domain_pool.submit_cpu p f
   | Some _, Eio_guard.Non_eio
   | None, (Eio_guard.Eio_fiber | Eio_guard.Non_eio) -> f ()

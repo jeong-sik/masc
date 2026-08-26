@@ -14,6 +14,16 @@
 
 let pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 
+let worker_depth = Domain.DLS.new_key (fun () -> 0)
+
+let in_worker_context () = Domain.DLS.get worker_depth > 0
+
+let with_worker_context f =
+  let previous = Domain.DLS.get worker_depth in
+  Domain.DLS.set worker_depth (previous + 1);
+  Fun.protect ~finally:(fun () -> Domain.DLS.set worker_depth previous) f
+;;
+
 let get () = Atomic.get pool
 
 let set p = Atomic.set pool (Some p)
@@ -56,14 +66,15 @@ let submit_strict ?(weight = 1.0) f =
   | Some p, Eio_guard.Eio_fiber ->
     (try
        Eio.Executor_pool.submit_exn p ~weight (fun () ->
-         Eio.Switch.run (fun _sw ->
-           try Ok (f ()) with
-           | Eio.Cancel.Cancelled _ as exn ->
-             let backtrace = Printexc.get_raw_backtrace () in
-             Printexc.raise_with_backtrace exn backtrace
-           | exn ->
-             let backtrace = Printexc.get_raw_backtrace () in
-             Error (Work_failed (exn, backtrace))))
+         with_worker_context (fun () ->
+           Eio.Switch.run (fun _sw ->
+             try Ok (f ()) with
+             | Eio.Cancel.Cancelled _ as exn ->
+               let backtrace = Printexc.get_raw_backtrace () in
+               Printexc.raise_with_backtrace exn backtrace
+             | exn ->
+               let backtrace = Printexc.get_raw_backtrace () in
+               Error (Work_failed (exn, backtrace)))))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in
@@ -80,7 +91,7 @@ let submit_or_inline ?(weight = 1.0) f =
   match Atomic.get pool, Eio_guard.execution_context () with
   | Some p, Eio_guard.Eio_fiber ->
       (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
-         Eio.Switch.run (fun _sw -> f ()))
+         with_worker_context (fun () -> Eio.Switch.run (fun _sw -> f ())))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

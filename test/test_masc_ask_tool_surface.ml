@@ -60,20 +60,30 @@ let every_dispatched_operation_has_a_schema () =
    The keeper this happened to is not named here. The rule does not depend on
    which name it was, and the identity guard forbids a live one in tracked
    source: an ordinary word eventually picks somebody's. *)
-let the_agent_alias_resolves_to_the_registered_name () =
-  Alcotest.(check (option string))
-    "the alias a Keeper runtime spawns under" (Some "orrery")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper-orrery-agent");
-  Alcotest.(check (option string))
-    "underscore spelling" (Some "orrery")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper_orrery_agent")
+let resolves = Masc.Mcp_tool_runtime_ask.asking_keeper_name
 
-let a_bare_name_is_left_alone () =
-  (* An operator and these tests call under the registry name itself. It is
-     not an alias, so it must pass through rather than resolve to nothing. *)
-  Alcotest.(check (option string))
-    "not an alias" None
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "orrery")
+let the_spellings_a_keeper_runtime_spawns_under () =
+  (* Four spellings reach the same registry row. The first fix here matched
+     only the first two by hand, so the other two stayed broken in exactly the
+     way the measurement had just found. *)
+  Alcotest.(check string) "the canonical agent alias" "orrery"
+    (resolves "keeper-orrery-agent");
+  Alcotest.(check string) "underscore spelling" "orrery"
+    (resolves "keeper_orrery_agent");
+  Alcotest.(check string) "the bare prefix form" "orrery" (resolves "keeper-orrery")
+
+let the_registry_name_passes_through () =
+  (* An operator and these tests call under the registry name itself. It has
+     to survive unchanged, or answering breaks for everyone who is not a
+     Keeper runtime. *)
+  Alcotest.(check string) "unchanged" "orrery" (resolves "orrery")
+
+let a_name_no_canonicaliser_knows_is_left_alone () =
+  (* Left alone on purpose: the registry check downstream is what refuses a
+     caller that is not a Keeper, and it can only name the caller if it is
+     handed the name the caller actually used. *)
+  Alcotest.(check string) "an ordinary client name" "codex-mcp-client"
+    (resolves "codex-mcp-client")
 
 (* Asking and reading back are two tools because they are two acts: one writes
    a question, the other only looks. Both have to be reachable, and the read
@@ -116,8 +126,11 @@ let () =
         ] );
       ( "who is asking",
         [
-          Alcotest.test_case "the agent alias resolves to the registered name" `Quick
-            the_agent_alias_resolves_to_the_registered_name;
-          Alcotest.test_case "a bare name is left alone" `Quick a_bare_name_is_left_alone;
+          Alcotest.test_case "the spellings a Keeper runtime spawns under" `Quick
+            the_spellings_a_keeper_runtime_spawns_under;
+          Alcotest.test_case "the registry name passes through" `Quick
+            the_registry_name_passes_through;
+          Alcotest.test_case "a name no canonicaliser knows is left alone" `Quick
+            a_name_no_canonicaliser_knows_is_left_alone;
         ] );
     ]

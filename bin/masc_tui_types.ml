@@ -1809,6 +1809,20 @@ let agenda_chrome_rows (state : state) =
   if state.agenda_open then 0 else Masc_tui_agenda.rows_taken (agenda state)
 ;;
 
+(* The rows a surface may draw in: the terminal's, less the composer's row and
+   less whatever the agenda strip took. One owner, because the frame subtracts
+   both before it lays the body out and a surface that measured only the
+   composer draws one row too many -- the frame then cuts its last row, which
+   is the footer. Every surface lost its key hints, version, base path and port
+   the moment a wake or a waiting keeper put the strip on screen. *)
+let surface_body_rows (state : state) ~terminal_rows =
+  max
+    1
+    (terminal_rows
+     - Masc_tui_composer.rows_for ~terminal_rows
+     - agenda_chrome_rows state)
+;;
+
 let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some { sc_count = count; sc_chrome = listing_chrome ~error; sc_preview_keep = None }

@@ -649,9 +649,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      Two readers of one number: the row the frame draws is the row the
      keypress stops short of. *)
   let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
-  let body_rows =
-    max 0 (rows - Composer.rows_for ~terminal_rows:rows - agenda_rows)
-  in
+  let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows:rows in
   let drawn = frame_lines buf in
   let body =
     if List.length drawn <= body_rows then
@@ -772,7 +770,7 @@ let render_overview (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -1012,7 +1010,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1164,7 +1162,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
    no second screen. This is that screen. *)
 let render_approval_detail (state : state) (row : approval_row) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let width = max 8 (cols - 6) in
   let fields =
@@ -1222,7 +1220,7 @@ let render_approvals (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -1644,7 +1642,7 @@ let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -1892,7 +1890,7 @@ let render_board_read (state : state) (list_post : board_post) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let footer =
     let pane_hint =
@@ -2000,7 +1998,7 @@ let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -2136,7 +2134,7 @@ let render_planning_detail (state : state)
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let status_color = planning_phase_color goal.pg_phase in
@@ -2255,7 +2253,7 @@ let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface lays
      out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -2469,7 +2467,7 @@ let schedule_detail_lines ~width (row : schedule_row) =
 
 let render_schedule_detail (state : state) (row : schedule_row) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
@@ -2811,7 +2809,7 @@ let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let inner = max 1 (framed_inner_width cols) in
   let readings = List.map (keeper_reading state) state.keepers in
@@ -3135,7 +3133,7 @@ let keeper_lane_row (columns : keeper_lane_columns)
     the six facts scannable together. *)
 let render_lanes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
   let buf = Buffer.create 4096 in
   let lanes =
@@ -3568,7 +3566,7 @@ let render_keeper_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
@@ -3627,7 +3625,7 @@ let render_keeper_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
 
   if state.keeper_cursor >= List.length state.keepers then begin
@@ -4459,7 +4457,7 @@ let render_system_logs (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let entries =
     match state.system_logs with None -> [] | Some s -> s.sys_entries
@@ -4560,7 +4558,7 @@ let render_system_logs (state : state) =
    the task. *)
 let render_verification_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let requests =
     match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
@@ -4762,7 +4760,7 @@ let verification_detail_lines ~width
 
 let render_verification_detail (state : state) request =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
@@ -4811,7 +4809,7 @@ let render_verification (state : state) =
    the gate is working when it may only be degrading quietly. *)
 let render_harness (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let verdicts =
     match state.harness with
@@ -4928,7 +4926,7 @@ let fusion_run_clock run =
 
 let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let runs =
     match state.fusion_runs with
@@ -5149,7 +5147,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
 
 let render_fusion_detail (state : state) run_id =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let detail =
     match state.fusion_detail with
@@ -5206,7 +5204,7 @@ let render_fusion_detail (state : state) run_id =
    own, and one that is not syncing is working from whatever was last pulled. *)
 let render_repositories (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let repos =
     match state.repositories with
@@ -5374,7 +5372,7 @@ let change_diff_halves (change : Masc.Tui_decode.file_change) =
 
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let before, after = change_diff_halves change in
   let diff_rows = Diff.rows ~before ~after in
@@ -5439,7 +5437,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
 
 let render_changes_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let changes =
     match state.changes with
@@ -5637,7 +5635,7 @@ let tree_diff_row_span ~width (row : Masc.Tui_decode.git_diff_row) =
 let render_changes_tree_diff (state : state)
     (change : Masc.Tui_decode.file_change) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let diff_rows =
     match state.changes_tree_diff with
@@ -5731,7 +5729,7 @@ let render_changes (state : state) =
    an operator acts on. *)
 let render_connectors (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let connectors =
     match state.connectors with
@@ -5912,7 +5910,7 @@ let render_runtime (state : state) =
       , runtime_status_width ) =
     runtime_column_widths cols
   in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let candidates =
     match state.runtime_surface with
@@ -6109,7 +6107,7 @@ let tool_domain_rule =
 
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let registered_tools =
     match state.tools_inventory with
@@ -6296,7 +6294,7 @@ let render_tools (state : state) =
    read as a quiet keeper. *)
 let render_keeper_calls (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let keeper_name =
     match List.nth_opt state.keepers state.keeper_cursor with
@@ -6483,7 +6481,7 @@ let render_keeper_calls (state : state) =
    it by the present. *)
 let render_acting (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let module Acting = Masc_tui_acting in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -6644,7 +6642,7 @@ let render_acting (state : state) =
     is choosing for and where that keeper points today in the header. *)
 let render_runtime_pick (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let keeper_name =
     Terminal_text.single_line_or ~default:"?" state.runtime_pick_keeper
@@ -6737,14 +6735,14 @@ let render_runtime_pick (state : state) =
 (* The file pane's usable rows: top gap, title, divider, bottom gap, and
    the footer. One owner — the dispatch keeps the cursor visible against the
    same number the renderer draws with. *)
-let code_pane_content_height () =
+let code_pane_content_height (state : state) =
   let terminal_rows, _ = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   framed_content_height ~rows
 
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
   let list_rows_budget = framed_content_height ~rows in
@@ -6875,7 +6873,7 @@ let render_code (state : state) =
        ^ (if state.code_focus_file = Right_pane then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    let content_height = code_pane_content_height () in
+    let content_height = code_pane_content_height state in
     (if notes_showing then
        match state.code_notes_error, state.code_notes with
        | Some detail, _ ->
@@ -7239,7 +7237,7 @@ let render_code (state : state) =
 
 let render_resources (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
   let list_rows_budget = framed_content_height ~rows in
@@ -7390,7 +7388,7 @@ let binary_age_text = function
    an operator chooses to hand the same text to [$EDITOR]. *)
 let render_prompts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let prompt_rows =
     match state.prompts_snapshot with
@@ -7524,7 +7522,7 @@ let chosen_mark = "\xe2\x9c\x93"
 
 let render_themes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   box_line buf cols
@@ -7580,7 +7578,7 @@ let render_themes (state : state) =
 
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   box_top buf cols;
   let path_note =
@@ -8032,12 +8030,12 @@ let context_inspector_content_lines state =
 
 let context_inspector_viewport state =
   let terminal_rows, _ = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   (List.length (context_inspector_content_lines state), framed_content_height ~rows)
 
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let keeper =
     Option.value ~default:"no Keeper" state.context_inspector_keeper
@@ -8087,9 +8085,9 @@ let render_context_inspector state =
 (* What the help overlay can show right now: the rows its sheet folds to at
    this width, and the height it draws them in. The key handler bounds its
    step against this, so a press that the frame cannot spend is not taken. *)
-let help_viewport () =
+let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   ( List.length (Masc_tui_help.sheet ~cols (help_lines ()))
   , framed_content_height ~rows )
 
@@ -8098,7 +8096,7 @@ let help_viewport () =
    what is highlighted is what will run. *)
 let render_palette (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 2048 in
   let matches = Masc_tui_types.palette_matches state in
   let total = List.length matches in
@@ -8141,7 +8139,7 @@ let render_palette (state : state) =
 
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   framed_top buf cols;
   framed_line buf cols (screen_title " Help" ^ "  " ^ Ansi.dim
@@ -8167,7 +8165,7 @@ let render_help (state : state) =
    [Masc_tui_scroll] exists to keep in one place. *)
 let agenda_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let lines =
     Agenda.overlay
       ~now:(Unix.gettimeofday ())
@@ -8186,7 +8184,7 @@ let agenda_viewport (state : state) =
    the same way they do on the strip. *)
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 2048 in
   framed_top buf cols;
   framed_line
@@ -8242,7 +8240,7 @@ let render (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
-  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
   else if state.palette_open then render_palette state

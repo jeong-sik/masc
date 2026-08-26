@@ -20,7 +20,8 @@ One use is identified by the tuple below. No name-only or body-text matching is
 allowed.
 
 ```text
-(workspace_key, session_id, turn_ref, skill_reference, skill_tool_use_id)
+(workspace_key, session_id, snapshot_revision, turn_ref, runtime_id,
+ skill_reference, skill_tool_use_id)
 ```
 
 `skill_reference` contains the source, package, canonical name, and exact
@@ -31,23 +32,25 @@ identifier that also appears on the provider-bound `ToolResult`.
 
 ```text
 Offered
-  -> Body_served
-       -> Body_delivered
+  -> Content_served (Body | Resource | Composition invocation)
+       -> Content_delivered
             -> Action_observed *
 ```
 
 - `Offered` is projected from the frozen turn snapshot and effective tool
   surface. It is not stored as a use.
-- `Body_served` is stored after the exact-reference handler has built a
-  successful body result. It records the result byte count and digest.
-- `Body_delivered` is stored only when a later provider request contains the
+- `Content_served` is stored only after the exact-reference handler has built a
+  provider-inline result. Body and resource record byte count and digest;
+  composition invocation is a distinct constructor, never an empty body.
+- `Content_delivered` is stored only when a later provider request contains the
   matching `ToolResult.tool_use_id`.
 - `Action_observed` records each later model-selected tool invocation in the
   same Keeper turn. It proves ordering and context availability, not an LLM's
   private causal reasoning.
 
-Failures remain explicit. A served body without a matching later request stays
-`Body_served`; it is never projected as delivered.
+Failures remain explicit. Served content without a matching later request stays
+served; it is never projected as delivered. Rejected delivery/action transitions
+are append-only typed observations and contribute to the displayed invalid count.
 
 ## Durable authority
 
@@ -71,6 +74,11 @@ The instruction body and bundled resources have separate observations.
   `[skills].resource-read-max-bytes` value are rejected before content or an
   activation is returned.
 - a resource result records its relative path and exact content digest.
+- the model-facing result content is the raw body/resource bytes. Exact reference,
+  path, byte count, and digest travel as typed metadata and ledger evidence, so
+  JSON envelope escaping cannot silently turn an accepted resource into a blob
+  marker. Content that cannot fit the shared provider-inline boundary is rejected
+  before activation recording.
 
 Resource bytes are read only on the resource call. They are not placed in the
 catalog snapshot or the initial Keeper prompt.
@@ -94,8 +102,8 @@ workspace, session, Keeper turn, runtime, and Skill reference:
 |---|---:|
 | offered exact Skills | at least 1 |
 | distinct `keeper_skill` invocations | at least 1 |
-| bodies served | equal to successful invocations |
-| bodies delivered to provider input | equal to bodies served |
+| bodies + resources served | equal to successful instruction invocations |
+| content delivered to provider input | equal to served content selected for proof |
 | later model-selected tool actions | at least 1 |
 | unmatched or invalid use transitions | 0 |
 | Dashboard decode errors | 0 |
@@ -108,5 +116,6 @@ The proof is repeated in three ways:
 3. a runtime A-to-B retry proves the same frozen Skill reference survives
    provider failover.
 
-Browser and TUI captures must display the exact source commit, runtime id,
-session id, turn reference, Skill revision, and the five counts above.
+Session totals are operational context, not a proof row. Browser and TUI captures
+must group proof counts by the same snapshot revision, turn reference, runtime id,
+and exact Skill reference, and also display source commit and session id.

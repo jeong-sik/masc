@@ -2727,14 +2727,40 @@ let keeper_runtime_label (runtime : keeper_runtime option) =
         (Tui_decode.keeper_phase_to_string row.kr_phase)
         (Terminal_text.single_line row.kr_runtime_id)
 
-let keeper_message_identity state keeper_name =
+(* Runtime ids are opaque identifiers, so a fixed-width surface keeps both
+   ends instead of sacrificing the distinguishing tail to a shared prefix.
+   Returning the unpadded id when it already fits lets a chat header spend the
+   remaining cells on context instead of blank padding. *)
+let fit_runtime_id width runtime_id =
+  if Message_layout.display_width runtime_id <= width then runtime_id
+  else Message_layout.fit_middle width runtime_id
+
+let keeper_runtime_cell ~width (runtime : keeper_runtime option) =
+  match runtime with
+  | None -> fit_width "\xe2\x80\x94" width
+  | Some row ->
+      let phase = Tui_decode.keeper_phase_to_string row.kr_phase ^ " " in
+      let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+      let phase_width = Message_layout.display_width phase in
+      if phase_width >= width then fit_width (keeper_runtime_label runtime) width
+      else
+        fit_width
+          (phase ^ fit_runtime_id (width - phase_width) runtime_id)
+          width
+
+let keeper_message_identity ~max_cells state keeper_name =
+  let fit_identity text =
+    if Message_layout.display_width text <= max_cells then text
+    else fit_width text max_cells
+  in
   match
     List.find_opt
       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
       state.keepers
   with
   | None ->
-      Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset
+      fit_identity
+        (Ansi.dim ^ "\xc3\x97 unavailable \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset)
   | Some keeper ->
       let reading = keeper_reading state keeper in
       let health = Keeper_control.health reading in
@@ -2746,17 +2772,32 @@ let keeper_message_identity state keeper_name =
       let status_color =
         keeper_action_color (Keeper_control.next_action reading)
       in
-      String.concat ""
-        [ status_color
-        ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
-        ; " "
-        ; keeper_health_word health
-        ; Ansi.reset
-        ; Ansi.dim
-        ; " \xc2\xb7 "
-        ; keeper_runtime_label runtime
-        ; Ansi.reset
-        ]
+      let status =
+        String.concat ""
+          [ status_color
+          ; keeper_state_glyph ~paused:reading.Keeper_control.paused ~health
+          ; " "
+          ; keeper_health_word health
+          ; Ansi.reset
+          ]
+      in
+      (match runtime with
+       | None ->
+           fit_identity
+             (status ^ Ansi.dim ^ " \xc2\xb7 \xe2\x80\x94" ^ Ansi.reset)
+       | Some row ->
+           let runtime_id = Terminal_text.single_line row.kr_runtime_id in
+           let prefix =
+             Printf.sprintf "%s%s \xc2\xb7 %s " status Ansi.dim
+               (Tui_decode.keeper_phase_to_string row.kr_phase)
+           in
+           let prefix_width = Message_layout.display_width prefix in
+           if prefix_width >= max_cells then
+             fit_width (prefix ^ runtime_id ^ Ansi.reset) max_cells
+           else
+             prefix
+             ^ fit_runtime_id (max_cells - prefix_width) runtime_id
+             ^ Ansi.reset)
 
 (* Two dispositions an operator needs before stopping anything: whether the
    keeper comes back by itself, and whether it takes turns without being
@@ -2832,7 +2873,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
         keeper.k_total_turns Ansi.reset
     ; (if columns.kcol_show_runtime then
          " " ^ Ansi.gray
-         ^ fit_width (keeper_runtime_label runtime) columns.kcol_runtime
+         ^ keeper_runtime_cell ~width:columns.kcol_runtime runtime
          ^ Ansi.reset
        else "")
     ; " "
@@ -4020,7 +4061,7 @@ let render_keeper_message (state : state) =
     let chat_cols =
       Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
     in
-    let header_base =
+    let header_base, mode_suffix =
       (* Both features put a mode indicator here: memory arrived on main
          (#30401) while this branch was open. Neither is dropped, but only a
          mode away from its default is spelled -- see
@@ -4080,13 +4121,38 @@ let render_keeper_message (state : state) =
         |> List.filter (fun item -> not (String.equal item ""))
         |> String.concat " · "
       in
-      Printf.sprintf "%s  %s%s"
-        (screen_title
-         (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
-        (keeper_message_identity state keeper_name)
-        (if String.equal modes ""
-         then ""
-         else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
+      let title =
+        screen_title
+          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name)
+      in
+      let identity_separator = "  " in
+      let mode_suffix =
+        if String.equal modes "" then ""
+        else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset
+      in
+      (* Modes describe an operator-selected projection, so cutting one can
+         make the pane lie about what it is hiding. Reserve them first, then
+         middle-fit only the opaque runtime id inside the identity budget. *)
+      let left_cells =
+        max 0
+          (framed_inner_width chat_cols
+          - Message_layout.display_width mode_suffix)
+      in
+      let title_cells = Message_layout.display_width title in
+      if title_cells + Message_layout.display_width identity_separator
+         >= left_cells
+      then fit_width title left_cells, mode_suffix
+      else
+        let identity_cells =
+          left_cells - title_cells
+          - Message_layout.display_width identity_separator
+        in
+        ( String.concat ""
+            [ title
+            ; identity_separator
+            ; keeper_message_identity ~max_cells:identity_cells state keeper_name
+            ]
+        , mode_suffix )
     in
     (* Context is an optional item on the existing row. It may be appended only
        when the whole item fits the chat box's own interior; [box_line] must
@@ -4102,18 +4168,25 @@ let render_keeper_message (state : state) =
             Observation_layout.context_header_item
               ~max_cells:
                 (max 0
-                   (chat_cols - 4
+                   (framed_inner_width chat_cols
                    - Message_layout.display_width header_base
-                   - Message_layout.display_width context_separator))
+                   - Message_layout.display_width context_separator
+                   - Message_layout.display_width mode_suffix))
               observation
         | Some _ | None -> None
     in
     let header =
       match context_item with
-      | None -> header_base
+      | None -> header_base ^ mode_suffix
       | Some item ->
           String.concat ""
-            [ header_base; context_separator; Ansi.dim; item; Ansi.reset ]
+            [ header_base
+            ; context_separator
+            ; Ansi.dim
+            ; item
+            ; Ansi.reset
+            ; mode_suffix
+            ]
     in
     if
       not

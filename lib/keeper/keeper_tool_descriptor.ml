@@ -2171,9 +2171,7 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
        ~readonly:true
-  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
-       masc_agent_update removed 2026-06-09 with the dead agent-status
-       surface) ────────── *)
+  (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries) ────────── *)
   ; (masc_agent_descriptor ~keeper_model_projection:Operator_only
         ~ordinary_execution_mode:Concurrent
         "card" "masc_agent_card"

@@ -19,7 +19,6 @@ include module type of struct include Workspace_task end
 include module type of struct include Workspace_task_schedule end
 include module type of struct include Workspace_query end
 include module type of struct include Workspace_gc end
-include module type of struct include Workspace_agent end
 (** {1 Workspace lifecycle (overrides)} *)
 
 (** Initialize MASC workspace with optional session binding.
@@ -41,4 +40,3 @@ module For_testing : sig
       label wire format is unchanged ([family_to_wire] / [kind_to_wire]
       are byte-for-byte compatible with the prior free-string values). *)
 end
-

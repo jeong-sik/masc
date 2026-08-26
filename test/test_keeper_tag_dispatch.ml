@@ -73,14 +73,14 @@ let test_resume_allowed () =
 
 let test_other_inline_blocked () =
   with_workspace (fun config ->
-    match dispatch_inline config "masc_agents" with
+    match dispatch_inline config "masc_get_metrics" with
     | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions MCP context" true
           (String_util.contains_substring (Tool_result.message tr) "requires MCP session context")
     | Some _tr ->
-        fail "masc_agents should remain blocked in keeper context"
+        fail "masc_get_metrics should remain blocked in keeper context"
     | None ->
-        fail "masc_agents returned None")
+        fail "masc_get_metrics returned None")
 
 let test_task_author_uses_keeper_name () =
   with_workspace (fun config ->

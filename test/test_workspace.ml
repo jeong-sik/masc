@@ -1147,9 +1147,6 @@ let test_heartbeat_nonexistent_agent () =
         (Workspace.heartbeat_message outcome)
   )
 
-(* test_get_agents_status removed (2026-06-09): get_agents_status deleted with
-   the dead agent-status surface. *)
-
 let test_fd_pressure_exn_classification () =
   Alcotest.(check bool)
     "EMFILE is resource pressure, not malformed JSON"
@@ -1170,10 +1167,6 @@ let test_fd_pressure_exn_classification () =
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
 (* ============================================================ *)
-
-(* Capability registration/discovery tests removed (2026-06-09):
-   Workspace.register_capabilities / find_agents_by_capability deleted with the
-   dead agent-status surface (.masc/agents/ producer had 0 call sites). *)
 
 (* Workspace_vote / Workspace_tempo removed — dead prod code (Epic #7261 Step 5 audit). *)
 
@@ -1324,9 +1317,6 @@ let test_many_tasks () =
     let tasks = Workspace.list_tasks config in
     Alcotest.(check bool) "20 tasks created" true (str_contains tasks "Task 20")
   )
-
-(* test_many_agents removed (2026-06-09): get_agents_status deleted with the
-   dead agent-status surface. *)
 
 (* ============================================================ *)
 (* Portal Advanced Tests                                        *)

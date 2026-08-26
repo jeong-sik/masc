@@ -9,9 +9,6 @@ open Masc_domain
 
 let agent_card_action_enum_strings = [ "get"; "refresh" ]
 
-(* masc_agents / masc_agent_update schemas removed (2026-06-09): the
-   agent-status surface they fronted read/wrote the dead .masc/agents/
-   registry (producer Workspace_eio.register_agent had 0 call sites). *)
 let schemas : tool_schema list = [
   {
     name = "masc_agent_fitness";

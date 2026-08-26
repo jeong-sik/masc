@@ -50,10 +50,9 @@ let working_agents config =
     module did the read→modify→write inline without holding any lock
     on that file — the enclosing [with_file_lock config backlog_path]
     only serializes backlog writers, not agent-state writers.  Sibling
-    writers in [Workspace_agent.update_agent_r] correctly take
+    Other task writers correctly take
     [with_file_lock_r config agent_file], so concurrent
-    [update_agent_r] or concurrent workspace_task transitions can race and
-    lose each other's updates.
+    workspace_task transitions cannot race and lose each other's updates.
 
     This helper centralises the pattern, takes [with_file_lock] on the
     agent file, and silently skips the write when the file is missing

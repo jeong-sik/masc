@@ -210,12 +210,45 @@ type effective_tool_surface =
     }
   | Effective_surface_warming of { ets_keeper_name : string }
 
+type skill_activation_origin =
+  | Skill_task_instruction of { sao_task_id : string }
+  | Skill_session_instruction
+  | Skill_task_composition of {
+      sao_task_id : string;
+      sao_tool_name : string;
+    }
+  | Skill_session_composition of { sao_tool_name : string }
+
+type skill_activation = {
+  sa_reference : Skill_reference.t;
+  sa_snapshot_revision : string;
+  sa_turn_ref : string;
+  sa_activated_at : string;
+  sa_origin : skill_activation_origin;
+}
+
+type skill_activation_projection =
+  | Skill_activations_available of {
+      sap_keeper_name : string;
+      sap_workspace_key : string;
+      sap_session_id : string;
+      sap_revision : string;
+      sap_activations : skill_activation list;
+    }
+  | Skill_activations_no_session of { sap_keeper_name : string }
+  | Skill_activations_unavailable of {
+      sap_keeper_name : string;
+      sap_reason : string;
+      sap_detail : string;
+    }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
   ts_effective : effective_tool_surface option;
+  ts_skill_activations : skill_activation_projection option;
 }
 
 (** A connector the gate can deliver through. *)

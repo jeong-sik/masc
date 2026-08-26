@@ -1405,7 +1405,7 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json ?effective tools =
+let tool_snapshot_json ?effective ?activations tools =
   `Assoc
     ([ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
@@ -1419,9 +1419,13 @@ let tool_snapshot_json ?effective tools =
     ; ("tool_usage", `Assoc [])
     ]
     @
-    match effective with
+    (match effective with
+     | None -> []
+     | Some value -> [ "effective_keeper_surface", value ])
+    @
+    match activations with
     | None -> []
-    | Some value -> [ "effective_keeper_surface", value ])
+    | Some value -> [ "skill_activations", value ])
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
@@ -1600,6 +1604,160 @@ let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
         (String.length ets_detail > 0)
   | Ok _ -> Alcotest.fail "expected an unavailable effective Keeper surface"
   | Error err -> Alcotest.failf "decode failed: %s" err
+
+let skill_activation_reference_json name revision =
+  `Assoc
+    [ ( "identity"
+      , `Assoc
+          [ "source_id", `String "project-masc"
+          ; "package_id", `String name
+          ; "name", `String name
+          ] )
+    ; "content_revision", `String (String.make 64 revision)
+    ]
+
+let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instruction" ])
+    ?(revision = 'a') () =
+  match skill_activation_reference_json "ocaml-coding" revision with
+  | `Assoc reference_fields ->
+      `Assoc
+        (reference_fields
+         @ [ "snapshot_revision", `String (String.make 64 'f')
+           ; "turn_ref", `String "trace-activation#7"
+           ; "activated_at", `String "2026-08-26T10:30:00Z"
+           ; "origin", origin
+           ])
+  | _ -> assert false
+
+let skill_activation_projection_json activations =
+  `Assoc
+    [ "status", `String "available"
+    ; "keeper_name", `String "codex-mcp-client"
+    ; ( "ledger"
+      , `Assoc
+          [ "schema", `String "masc.skill-activations/v1"
+          ; "workspace_key", `String (String.make 64 '1')
+          ; "session_id", `String "trace-activation"
+          ; "revision", `String (String.make 64 '2')
+          ; "activations", `List activations
+          ] )
+    ]
+
+let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
+  let task_origin =
+    `Assoc
+      [ "kind", `String "task_composition"
+      ; "task_id", `String "task-470"
+      ; "tool_name", `String "run-checks"
+      ]
+  in
+  let activations =
+    skill_activation_projection_json
+      [ skill_activation_json ~origin:task_origin ()
+      ; skill_activation_json ~revision:'b'
+          ~origin:
+            (`Assoc
+               [ "kind", `String "session_composition"
+               ; "tool_name", `String "summarize"
+               ])
+          ()
+      ]
+  in
+  match
+    Tui_decode.decode_tool_snapshot
+      (tool_snapshot_json ~activations [])
+  with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok
+      { Tui_decode.ts_skill_activations =
+          Some
+            (Tui_decode.Skill_activations_available
+               { sap_keeper_name
+               ; sap_session_id
+               ; sap_activations =
+                   [ { sa_reference
+                     ; sa_snapshot_revision
+                     ; sa_turn_ref
+                     ; sa_origin =
+                         Tui_decode.Skill_task_composition
+                           { sao_task_id; sao_tool_name }
+                     ; _
+                     }
+                   ; { sa_origin =
+                         Tui_decode.Skill_session_composition
+                           { sao_tool_name = session_tool }
+                     ; _
+                     }
+                   ]
+               ; _
+               });
+        _ } ->
+      Alcotest.(check string) "Keeper" "codex-mcp-client" sap_keeper_name;
+      Alcotest.(check string) "session" "trace-activation"
+        sap_session_id;
+      Alcotest.(check string) "exact reference"
+        (Yojson.Safe.to_string (skill_activation_reference_json "ocaml-coding" 'a'))
+        (Skill_reference.to_yojson sa_reference |> Yojson.Safe.to_string);
+      Alcotest.(check string) "snapshot revision" (String.make 64 'f')
+        sa_snapshot_revision;
+      Alcotest.(check string) "turn" "trace-activation#7"
+        sa_turn_ref;
+      Alcotest.(check string) "task" "task-470"
+        sao_task_id;
+      Alcotest.(check string) "task tool" "run-checks" sao_tool_name;
+      Alcotest.(check string) "session tool" "summarize" session_tool
+  | Ok _ -> Alcotest.fail "expected two typed Skill activation receipts"
+
+let test_decode_skill_activations_keeps_no_session_distinct () =
+  let activations =
+    `Assoc
+      [ "status", `String "no_session"
+      ; "keeper_name", `String "idle-keeper"
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  | Ok
+      { Tui_decode.ts_skill_activations =
+          Some (Tui_decode.Skill_activations_no_session { sap_keeper_name });
+        _ } ->
+      Alcotest.(check string) "Keeper" "idle-keeper" sap_keeper_name
+  | Ok _ -> Alcotest.fail "no_session was not kept distinct"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_skill_activations_does_not_hide_unavailable () =
+  let activations =
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "keeper_name", `String "broken-keeper"
+      ; "reason", `String "activation_ledger_unreadable"
+      ; "detail", `String "decode failed"
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  | Ok
+      { Tui_decode.ts_skill_activations =
+          Some
+            (Tui_decode.Skill_activations_unavailable
+               { sap_reason; sap_detail; _ });
+        _ } ->
+      Alcotest.(check string) "reason" "activation_ledger_unreadable" sap_reason;
+      Alcotest.(check string) "detail" "decode failed" sap_detail
+  | Ok _ -> Alcotest.fail "unavailable activation ledger was hidden"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
+let test_decode_skill_activations_rejects_cross_session_turn () =
+  let activation =
+    match skill_activation_json () with
+    | `Assoc fields ->
+        `Assoc
+          (("turn_ref", `String "different-trace#7")
+           :: List.remove_assoc "turn_ref" fields)
+    | other -> other
+  in
+  let activations = skill_activation_projection_json [ activation ] in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
@@ -2784,6 +2942,14 @@ let () =
           test_decode_effective_keeper_surface_rejects_legacy_skill_names;
         Alcotest.test_case "effective unavailable stays explicit" `Quick
           test_decode_effective_keeper_surface_does_not_hide_unavailable;
+        Alcotest.test_case "Skill activations keep exact receipt and origin" `Quick
+          test_decode_skill_activations_keeps_exact_receipt_and_origin;
+        Alcotest.test_case "Skill activations keep no session distinct" `Quick
+          test_decode_skill_activations_keeps_no_session_distinct;
+        Alcotest.test_case "Skill activation unavailable stays explicit" `Quick
+          test_decode_skill_activations_does_not_hide_unavailable;
+        Alcotest.test_case "Skill activation rejects cross-session turn" `Quick
+          test_decode_skill_activations_rejects_cross_session_turn;
       ] );
     ( "decode_connectors",
       [

@@ -158,6 +158,98 @@ for schedule_ledger_name in schedules.json schedules.json.last-good; do
 done
 ```
 
+### keeper chat 행이 읽기마다 버려질 때
+
+증상은 로그에 이 줄이 쏟아지는 것이다. 2026-08-27 에 30분짜리 로그 하나에서 **18,445 건** 나왔다.
+
+```
+[keeper_chat_store] persistence read drop (invalid_payload) path=<base>/.masc/keeper_chat/<name>.jsonl:
+  invalid delivery execution identity: tool_call transcript slot requires the same row execution_id
+```
+
+`keeper_chat_store.ml` 의 `validate_delivery_execution_identity` 는 transcript slot 이 `Tool_call` 이면 그 행에 같은 `execution_id` 가 있어야 한다고 요구한다. writer 가 그 필드를 쓰기 시작한 배포 이전 행에는 없으므로, 그 행들은 매 읽기마다 통째로 버려진다. 조용히 사라지는 게 아니라 WARN 을 쏟으면서 사라져서, 로그에서 진짜 문제를 찾기 어려워진다.
+
+먼저 이게 레거시 데이터 문제인지 확인한다. 배포 이후 행이 전부 필드를 갖고 있으면 writer 는 정상이고 옛 행만 은퇴 대상이다. 배포 이후 행에도 빠진 게 있으면 writer 쪽 결함이니 여기서 멈춘다.
+
+```bash
+python3 - <<'PY'
+import json, glob, datetime
+CUT = <배포 시각의 unix seconds>
+after_have = after_miss = before_miss = 0
+for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
+    for line in open(path):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        slot = row.get('transcript_slot')
+        kind = (slot.get('kind') if isinstance(slot, dict) else slot) or ''
+        if 'tool_call' not in str(kind):
+            continue
+        if (row.get('ts') or 0) < CUT:
+            if not row.get('execution_id'):
+                before_miss += 1
+        elif row.get('execution_id'):
+            after_have += 1
+        else:
+            after_miss += 1
+print('배포 이후 필드 있음 :', after_have)
+print('배포 이후 필드 없음 :', after_miss, '(0 이 아니면 writer 결함 — 은퇴하지 말고 조사)')
+print('배포 이전 필드 없음 :', before_miss, '(은퇴 대상)')
+PY
+```
+
+`after_miss` 가 0 이면 거절되는 행만 골라 archive 로 옮긴다. 남는 행은 전부 현재 계약을 만족하므로 부분 정리가 아니다. 파일 전체를 자르지는 않는다 — 그러면 아직 정상적으로 렌더되는 `accepted_user` / `terminal_assistant` 행까지 잃는다.
+
+```bash
+chat_retirement_archive='<base>/.masc/_archive/keeper-chat-pre-execution-id-<deployment-id>'
+if [ -e "$chat_retirement_archive" ]; then
+  echo "archive already exists: $chat_retirement_archive" >&2
+  exit 1
+fi
+mkdir -p "$chat_retirement_archive"
+cp -R '<base>/.masc/keeper_chat' "$chat_retirement_archive/keeper_chat"
+python3 - <<'PY'
+import json, glob, os
+kept = retired = 0
+for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
+    out = []
+    changed = False
+    for line in open(path):
+        text = line.rstrip('\n')
+        if not text.strip():
+            continue
+        try:
+            row = json.loads(text)
+        except Exception:
+            out.append(text); kept += 1; continue
+        slot = row.get('transcript_slot')
+        kind = (slot.get('kind') if isinstance(slot, dict) else slot) or ''
+        if 'tool_call' in str(kind) and not row.get('execution_id'):
+            retired += 1; changed = True
+        else:
+            out.append(text); kept += 1
+    if changed:
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as fh:
+            for text in out:
+                fh.write(text + '\n')
+        os.replace(tmp, path)
+print('kept', kept, 'retired', retired)
+PY
+```
+
+서버 정지 상태에서 돈다. 이 파일들은 append-only 이고 살아 있는 서버가 계속 쓰므로, 돌아가는 중에 rename 하면 그 사이 append 가 사라진다.
+
+기동 후 검증은 같은 WARN 이 0 인지 본다.
+
+```bash
+rg -c 'persistence read drop' <기동 로그>
+```
+
 ## 7. 기동
 
 provider key가 로드된 interactive shell에서 실행한다. launchd 경로(`com.jeong-sik.masc-main`)는 `~/.zshenv`를 읽지 않아 provider 크리덴셜이 조용히 사라진다.
@@ -203,3 +295,41 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 | hard cut 제거 필드를 디스크 meta가 아직 가짐 | 부팅 시 meta 폐기 — 카운터·과제 바인딩 손실 (08-23 사고, #29610 이후엔 자동 재생성) |
 | 포트 판정을 lsof exit code로 | 거짓 판정 — 출력 존재로 판정할 것 |
 | 사전 broadcast·장기 run 확인 생략 | 진행 중 사다리 run이 서버 다운에 노출, non-autoboot keeper 미복귀 (08-17 5회차 사고) |
+| 한 provider 의 model 행들이 `max-concurrent`를 서로 다르게 선언 | 그 endpoint 로 나가는 턴이 dispatch 전에 `Invalid_argument` 로 죽는다 (08-27 사고) |
+| `start-loopback.sh`가 기동 전 리빌드하는데 main 이 깨져 있음 | 서버가 안 올라온다. LKG 가 없으면 리빌드 우회 기동이 유일한 복구 경로 |
+
+### 한 endpoint 는 허용치 하나만 인정한다
+
+`Provider_admission` 은 `(kind, base_url, api-key identity)` 로 endpoint 를 식별하고 그 정체성에 `max_concurrent_requests` 하나만 인정한다. `runtime.toml` 의 `[<provider>.<model>]` 블록들이 같은 provider 를 가리키면서 값을 다르게 적으면, 그 endpoint 로 나가는 턴이 요청을 만들기도 전에 죽는다.
+
+```
+Invalid request: Invalid_argument("Provider_admission: conflicting
+max_concurrent_requests for openai_compat https://ollama.com/v1:
+one config declares 2, another declares 4. ...")
+```
+
+turn 로그에는 `internal_unhandled_exception` / `site=runtime_runner.execute` 로 올라오므로 provider 설정 문제로 보이지 않는다. 2026-08-27 에 `ollama_cloud` 10 개 레인이 1/2/4 로 흩어져 있어 taskmaster 턴이 이렇게 죽었고, 그걸 관측한 다른 keeper 가 taskmaster 를 내렸다.
+
+배포 전에 provider 별로 값이 하나인지 확인한다.
+
+```bash
+python3 - <<'PY'
+import re, collections
+text = open('<base>/.masc/config/runtime.toml').read()
+seen = collections.defaultdict(set)
+provider = None
+for line in text.splitlines():
+    header = re.match(r'\[([A-Za-z0-9_-]+)\.', line.strip())
+    if header:
+        provider = header.group(1)
+    value = re.match(r'max-concurrent\s*=\s*(\d+)', line.strip())
+    if value and provider:
+        seen[provider].add(int(value.group(1)))
+for name, values in sorted(seen.items()):
+    if len(values) > 1:
+        print('CONFLICT', name, sorted(values))
+print('checked', len(seen), 'providers')
+PY
+```
+
+같은 provider 의 서로 다른 endpoint 를 정말 원한다면 값을 맞추는 것 말고 정체성을 나누는 방법도 있다 (오류 메시지가 그렇게 말한다). 다만 그러면 `runtime.toml` 의 그 provider id 를 참조하는 모든 자리를 같이 옮겨야 한다.

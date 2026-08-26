@@ -586,6 +586,12 @@ type identity_provider =
             was never attached. An empty list is a third fact -- attached and
             offering nothing -- and reading it as "not attached" would tell an
             operator to consent again for no reason. *)
+      ; idp_also_on: string list
+        (** Which other Keepers hold this one. A Keeper attaches on its own
+            account -- the client is shared, the token is not -- so this is
+            the one question a single Keeper's tab cannot answer for itself,
+            and answering it by opening each Keeper in turn is how an
+            operator loses track of which account went where. *)
       }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 

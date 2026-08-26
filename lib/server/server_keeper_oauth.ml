@@ -176,12 +176,26 @@ let attached_tools_json ~base_path ~keeper =
                 [ "provider", `String id
                 ; "provider_label", `String provider.Provider.label
                 ; "attached", `Bool false
+                ; ( "also_on"
+                  , `List
+                      (List.map
+                         (fun name -> `String name)
+                         (Keeper_identity_tools.keepers_with ~base_path
+                            ~provider_id:provider.Provider.id
+                            ~excluding:keeper)) )
                 ]
             | Ok (Some catalog) ->
               `Assoc
                 [ "provider", `String id
                 ; "provider_label", `String provider.Provider.label
                 ; "attached", `Bool true
+                ; ( "also_on"
+                  , `List
+                      (List.map
+                         (fun name -> `String name)
+                         (Keeper_identity_tools.keepers_with ~base_path
+                            ~provider_id:provider.Provider.id
+                            ~excluding:keeper)) )
                 ; "discovered_at", `Float catalog.Keeper_identity_tools.discovered_at
                 ; ( "tools"
                   , `List

@@ -89,8 +89,8 @@ val instruction_names_for :
 
 val composition_entries : t -> Keeper_tool_composition_catalog.entry list
 (** The validated composition entries declared by composition skills, in
-    catalog (name) order. The tool surface materializes these exactly like
-    entries from [tool-compositions.toml]. *)
+    catalog (name) order. The tool surface materializes these directly from
+    the effective Skill snapshot. *)
 
 val surface_to_string : surface -> string
 (** ["instruction"] or ["composition"] — diagnostics and dashboard wire. *)

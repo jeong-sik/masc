@@ -1,14 +1,13 @@
 (** Parse one model-authored plan request into a validated
     {!Keeper_tool_plan.t}.
 
-    The JSON grammar mirrors the operator catalog grammar in
-    tool-compositions.toml: a plan is a list of nodes, each naming a canonical
-    tool, optional [after] edges, and an input template whose values are
-    literals, typed references into an earlier node's declared composable
-    output, objects, or arrays. Everything semantic (unknown tools, unbound
-    references, cycles, opaque-output references, pointer/schema mismatches)
-    is rejected by {!Keeper_tool_plan.create}; this module owns only the JSON
-    shape. *)
+    The JSON grammar mirrors the composition fence grammar in [SKILL.md]: a
+    plan is a list of nodes, each naming a canonical tool, optional [after]
+    edges, and an input template whose values are literals, typed references
+    into an earlier node's declared composable output, objects, or arrays.
+    Everything semantic (unknown tools, unbound references, cycles,
+    opaque-output references, pointer/schema mismatches) is rejected by
+    {!Keeper_tool_plan.create}; this module owns only the JSON shape. *)
 
 type template_error =
   | Template_not_an_object of { found : string }

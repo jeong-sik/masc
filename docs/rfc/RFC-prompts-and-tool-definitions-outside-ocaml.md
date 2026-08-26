@@ -3,7 +3,7 @@ rfc: "prompts-and-tool-definitions-outside-ocaml"
 title: "프롬프트와 도구 정의를 OCaml 밖으로 — 모델이 읽는 모든 글은 config 파일이 소유한다"
 status: Draft
 created: 2026-08-22
-updated: 2026-08-22
+updated: 2026-08-27
 author: claude
 supersedes: ["0057", "0182"]
 superseded_by: null
@@ -123,7 +123,7 @@ agent_core `agent_tools.ml` 531 (unknown-tool 힌트).
 | execution policy | 3곳: `Tool_catalog.explicit_metadata` 132행, descriptor `policy` + `execution`, `Board_tool_registry.operation_policy` |
 | permission | `Tool_catalog.explicit_metadata` 만 |
 | visibility | `Tool_catalog.visibility` + descriptor `keeper_model_projection` 4종 + `Tool_catalog_surfaces` + `Mcp_server_eio_tool_profile` 프로파일 3종 |
-| 이미 TOML 인 것 | `<config-root>/tool-compositions.toml` (9개 합성, `Keeper_tool_composition_catalog`) — 유일하게 살아 있는 TOML 도구 표면 |
+| 이미 파일 선언인 것 | `runtime.toml [[skills.sources]]` 아래 `SKILL.md` composition fence (`Keeper_tool_composition_catalog`) — 독립 `tool-compositions.toml` 경로는 삭제됨 |
 
 ### 1.3 프롬프트 조립과 대시보드
 

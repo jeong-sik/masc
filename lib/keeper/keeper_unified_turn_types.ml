@@ -48,6 +48,26 @@ let keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane ~execution_ru
     { reported_runtime_id = execution_runtime_id; deferred_next_runtime_id = "none" }
 ;;
 
+(** Whether the deferred lane a previous turn hinted at was the lane this turn
+    actually ran on.
+
+    [turn_state.degraded_retry_info] is seeded at [initial_turn_state] from the
+    [deferred_runtime_lane] argument and no path writes it afterwards, so its
+    presence means a deferred lane is pending — not that a retry ran. Reporting
+    presence as "applied" told an operator a retry had happened on turns where
+    none had, and attached a [fallback_reason] computed from the earlier turn's
+    failure to this turn's receipt.
+
+    [last_execution] carries the runtime this turn resolved to. Absent it,
+    nothing ran, so nothing was applied. *)
+let degraded_retry_applied_for_turn ~degraded_retry_info ~last_execution =
+  match degraded_retry_info, last_execution with
+  | ( Some (retry : Keeper_error_classify.degraded_retry)
+    , Some (execution : Keeper_turn_runtime_budget.runtime_execution) ) ->
+    String.equal retry.next_runtime execution.runtime_id
+  | Some _, None | None, _ -> false
+;;
+
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =

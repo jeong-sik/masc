@@ -56,7 +56,7 @@ val schema_tool_rows :
 
 val schema_tools :
   ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
-  ?instruction_skills:(Skill_reference.t * string * string) list ->
+  ?instruction_skills:instruction_skill list ->
   unit ->
   Agent_core.Tool.t list
 (** Handler-free materialization of the exact model-visible composition tool
@@ -127,7 +127,7 @@ val make_tools
 
 module For_testing : sig
   val instruction_skill_description :
-    (Skill_reference.t * string * string) list -> string
+    instruction_skill list -> string
 
   val make_instruction_skill_tool :
     config:Workspace.config ->

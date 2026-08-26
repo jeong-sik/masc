@@ -170,14 +170,26 @@ let schema_tool ~name ~description ~input_schema =
 
 let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
 
+type instruction_skill =
+  { reference : Skill_reference.t
+  ; description : string
+  ; body : string
+  ; resource_location : resource_location option
+  }
+
+and resource_location =
+  { source_root : string
+  ; directory : string
+  }
+
 let instruction_skill_description instruction_skills =
   let listed =
     instruction_skills
-    |> List.map (fun (reference, description, _body) ->
+    |> List.map (fun skill ->
          Printf.sprintf
            "%s: %s"
-           (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
-           description)
+           (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+           skill.description)
     |> String.concat "\n"
   in
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
@@ -1150,18 +1162,6 @@ let make_request_control_tool
    for the tool are not, and the model-prose ratchet is what says so. *)
 let skill_reference_input_schema = skill_tool_schema.input_schema
 
-type instruction_skill =
-  { reference : Skill_reference.t
-  ; description : string
-  ; body : string
-  ; resource_location : resource_location option
-  }
-
-and resource_location =
-  { source_root : string
-  ; directory : string
-  }
-
 let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
 ;;
@@ -1177,19 +1177,6 @@ let merge_instruction_skills ~task ~global =
        else selected @ [ skill ])
     task
     global
-;;
-
-let instruction_skill_description instruction_skills =
-  let listed =
-    instruction_skills
-    |> List.map (fun skill ->
-         Printf.sprintf
-           "%s: %s"
-           (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
-           skill.description)
-    |> String.concat "\n"
-  in
-  skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
 let instruction_skill_schema_tool ~instruction_skills =

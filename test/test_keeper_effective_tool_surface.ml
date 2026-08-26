@@ -126,7 +126,11 @@ let instruction_entries snapshot references =
   | Ok selection ->
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
-         selected.reference, selected.skill.description, selected.skill.body)
+         Keeper_tool_composition_surface.instruction_skill
+           ~reference:selected.reference
+           ~description:selected.skill.description
+           ~body:selected.skill.body
+           ())
       selection.selected
 ;;
 

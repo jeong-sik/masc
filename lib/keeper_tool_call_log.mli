@@ -155,6 +155,10 @@ val committed_revision : unit -> int
     durable tool-call append. Readers use it to invalidate derived caches
     without making the persistence owner depend on a dashboard module. *)
 
+type record_kind =
+  | Tool_call
+  | Composition_run
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->
@@ -162,6 +166,7 @@ val log_call :
   output_text:string ->
   success:bool ->
   duration_ms:float ->
+  ?record_kind:record_kind ->
   ?model:string ->
   ?agent_name:string ->
   ?turn_kind:Turn_record.turn_kind ->
@@ -201,6 +206,9 @@ val log_call :
   unit ->
   unit
 (** [log_call ...] persists a single tool call record with full I/O.
+    [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
+    terminal aggregate for a composition and must not be interpreted as a
+    second physical invocation.
     [execution_id] is the RFC-0233 canonical join key minted once at the
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the

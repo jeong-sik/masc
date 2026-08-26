@@ -153,6 +153,7 @@ module Sgr = struct
   let bold = style "\027[1m"
   let dim = style "\027[2m"
   let underline = style "\027[4m"
+  let no_underline = style "\027[24m"
 
   let red = style "\027[31m"
   let green = style "\027[32m"
@@ -348,9 +349,14 @@ module Syntax = struct
   let diff_added_bg = Sgr.bg_added
   let diff_removed_bg = Sgr.bg_removed
 
-  (* The same two answers in the foreground, for a diff drawn inside running
-     prose. A background paints the row to its full width, which inside a
-     chat fence draws a band across the pane for every changed line. *)
+  (* Both fixed diff backgrounds are dark xterm cube entries. Their row text
+     therefore uses the light end of the same fixed palette instead of the
+     terminal's default foreground, which may be black on a light theme. *)
+  let diff_row_foreground = style "\027[38;5;255m"
+
+  (* The same two answers in the foreground, for compact readings that do not
+     paint a whole row. Full-row diff surfaces and chat fences use the
+     backgrounds above. *)
   let diff_added = Sgr.green
   let diff_removed = Sgr.red
 end

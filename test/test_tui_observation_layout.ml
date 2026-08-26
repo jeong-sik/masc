@@ -121,8 +121,19 @@ let test_context_header_item_is_measured_and_atomic () =
   let measured = observed ~ratio:0.5 ~maximum:200 () in
   check (option string) "exact fit" (Some "Context 50% used")
     (Layout.context_header_item ~max_cells:16 measured);
-  check (option string) "wide fit" (Some "Context 50% used")
+  (* The key travels with the figure where there is room for it: this line was
+     the only place the pane said how full the context is, and there was no
+     way in from it. *)
+  check (option string) "wide enough carries the way in"
+    (Some "Context 50% used \xc2\xb7 ^X")
     (Layout.context_header_item ~max_cells:40 measured);
+  check (option string) "exactly wide enough" (Some "Context 50% used \xc2\xb7 ^X")
+    (Layout.context_header_item ~max_cells:21 measured);
+  (* The figure is what the line is for. One cell short of the key it drops
+     the key, not the number. *)
+  check (option string) "one cell short of the key keeps the figure"
+    (Some "Context 50% used")
+    (Layout.context_header_item ~max_cells:20 measured);
   check (option string) "one cell short omits the whole item" None
     (Layout.context_header_item ~max_cells:15 measured);
   check (option string) "partial measurement is omitted" None

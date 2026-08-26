@@ -47,5 +47,8 @@ let name_window ~selected ~frame ~width name =
 
 let shown ~hidden ~cols = (not hidden) && cols >= threshold_cols
 
+let toggle_hidden ~hidden ~cols =
+  if cols < threshold_cols then None else Some (not hidden)
+
 let content_cols ~hidden ~cols =
   if shown ~hidden ~cols then cols - pane_cols else cols

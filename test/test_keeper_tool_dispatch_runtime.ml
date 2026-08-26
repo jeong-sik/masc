@@ -5611,11 +5611,16 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
              | Error error ->
                failf "materialized composition failed: %s" error.Agent_core.Types.message);
             let rows =
-              Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
+              Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:2 ()
             in
             let committed_row =
-              match rows with
-              | [ row ] ->
+              match
+                List.find_opt
+                  (fun row ->
+                     Safe_ops.json_string_opt "composition_node_id" row = Some "time")
+                  rows
+              with
+              | Some row ->
                check
                  (option string)
                  "committed nested row is immediately readable"
@@ -5640,12 +5645,39 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                   | `Assoc fields -> List.mem_assoc "result_bytes" fields
                   | _ -> false);
                row
-              | _ -> fail "expected one synchronously committed nested action row"
+              | None -> fail "expected a synchronously committed nested action row"
             in
+            let summary_row =
+              match
+                List.find_opt
+                  (fun row ->
+                     Safe_ops.json_string_opt "tool" row
+                     = Some Masc.Keeper_skill_usage.composition_run_summary_tool_name)
+                  rows
+              with
+              | Some row -> row
+              | None -> fail "expected a durable composition run summary"
+            in
+            check
+              (option bool)
+              "run summary records terminal success"
+              (Some true)
+              (Safe_ops.json_bool_opt "success" summary_row);
+            check bool
+              "run summary records total duration"
+              true
+              (match Safe_ops.json_float_opt "duration_ms" summary_row with
+               | Some duration_ms -> Float.compare duration_ms 0.0 >= 0
+               | None -> false);
+            check
+              (option string)
+              "run summary joins the node run"
+              (Safe_ops.json_string_opt "composition_run_id" committed_row)
+              (Safe_ops.json_string_opt "composition_run_id" summary_row);
             check
               int
               "durable revision advances before refresh"
-              (revision_before + 1)
+              (revision_before + 2)
               (Masc.Keeper_tool_call_log.committed_revision ());
             let committed_refresh =
               List.find_map
@@ -5686,6 +5718,16 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
               "commit refresh has a distinct event type"
               (Some "keeper_tool_call_evidence_committed")
               (Safe_ops.json_string_opt "type" committed_refresh);
+            check
+              (option bool)
+              "commit refresh carries node success"
+              (Safe_ops.json_bool_opt "success" committed_row)
+              (Safe_ops.json_bool_opt "success" committed_refresh);
+            check
+              (option (float 0.000_001))
+              "commit refresh carries node duration"
+              (Safe_ops.json_float_opt "duration_ms" committed_row)
+              (Safe_ops.json_float_opt "duration_ms" committed_refresh);
             List.iter
               (fun field ->
                  check
@@ -6213,7 +6255,7 @@ let test_async_composition_binds_params_into_durable_status () =
        (match Agent_core.Tool.execution_mode status_tool ~input:`Null with
         | Agent_core.Tool_contract.Concurrent -> ()
         | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
-       let request_id =
+       let request_id, composition_run_id =
          match
            Agent_core.Tool.execute
              ~invocation:
@@ -6229,8 +6271,11 @@ let test_async_composition_binds_params_into_durable_status () =
              "async acceptance mode"
              "async"
              Yojson.Safe.Util.(member "execution" payload |> to_string);
-           Yojson.Safe.Util.(member "request_id" payload |> to_string)
+           ( Yojson.Safe.Util.(member "request_id" payload |> to_string)
+           , Yojson.Safe.Util.(member "composition_run_id" payload |> to_string) )
        in
+       check bool "async acceptance exposes run identity" true
+         (String.trim composition_run_id <> "");
        let rec await_terminal () =
          match
            Masc.Keeper_msg_async.poll

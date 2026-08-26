@@ -5503,6 +5503,14 @@ def keeper_lanes_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            keeper_row_selected(b"beta"),
+        )
         unread = tab_until(process, master_fd, output, b"MASC Lanes")
         if b"(not loaded)" not in unread or b"(not loaded yet)" not in unread:
             raise AssertionError(
@@ -5547,17 +5555,11 @@ def keeper_lanes_interaction(
         if b"keeper lanes load failed" not in failed:
             raise AssertionError(f"Lanes hid the load error: {failed!r}")
 
+        # Lane order intentionally differs from the canonical roster, whose
+        # cursor still points at beta. Detail navigation must join kl_keeper
+        # to k_name; copying either numeric cursor would open beta for alpha.
         fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
             [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="executing",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
-                ),
                 keeper_lane_row(
                     "beta",
                     phase="new_phase",
@@ -5566,6 +5568,15 @@ def keeper_lanes_interaction(
                     runtime_state=None,
                     selected_model=None,
                     diagnosis=None,
+                ),
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
                 ),
             ]
         )
@@ -5576,27 +5587,27 @@ def keeper_lanes_interaction(
             b"r",
             b"new_phase",
         )
-        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
-        if banded_alpha.search(populated) is None:
+        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
+        if banded_beta.search(populated) is None:
             raise AssertionError(
                 f"Lanes did not band the cursor row: {populated!r}"
             )
+        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
         send_and_wait(
             process,
             master_fd,
             output,
             b"j",
-            re.compile(rb"\x1b\[7m[^\x1b\n]*beta"),
+            banded_alpha,
         )
-        send_and_wait(process, master_fd, output, b"k", banded_alpha)
+        send_and_wait(process, master_fd, output, b"k", banded_beta)
         # "/" arms the row search on any surface with row texts: the footer
         # shows the query, typing jumps the cursor live, Enter keeps the
         # query for n. The list itself never narrows.
-        send_and_wait(process, master_fd, output, b"/", b"/  j/k:scroll")
-        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
-        send_and_wait(process, master_fd, output, b"bet", banded_beta)
-        send_and_wait(process, master_fd, output, b"\rk", banded_alpha)
-        send_and_wait(process, master_fd, output, b"n", banded_beta)
+        send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+        send_and_wait(process, master_fd, output, b"alp", banded_alpha)
+        send_and_wait(process, master_fd, output, b"\rk", banded_beta)
+        send_and_wait(process, master_fd, output, b"n", banded_alpha)
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",
@@ -5638,6 +5649,62 @@ def keeper_lanes_interaction(
             raise AssertionError(
                 "Lanes discarded the prior reading after refresh failure: "
                 f"{stale_plain!r}"
+            )
+
+        # A later successful reading can shrink the list. The old numeric
+        # cursor was 1; retaining it would leave no selected row and make the
+        # advertised detail key a no-op. The logical alpha selection survives
+        # at its new index 0.
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                )
+            ]
+        )
+        shrunk = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"MASC Lanes (1 keepers)",
+        )
+        if banded_alpha.search(shrunk) is None:
+            raise AssertionError(
+                "successful lane shrink left no selected Keeper row: "
+                f"{shrunk!r}"
+            )
+        right_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[C",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        if b"Name: alpha" not in CSI_RE.sub(b"", right_detail):
+            raise AssertionError(
+                "Right did not open the selected lane's existing Keeper detail: "
+                f"{right_detail!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Lanes")
+        enter_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        if b"Name: alpha" not in CSI_RE.sub(b"", enter_detail):
+            raise AssertionError(
+                "Enter did not preserve the lane-to-Keeper selection: "
+                f"{enter_detail!r}"
             )
         os.write(master_fd, b"q")
 
@@ -5883,9 +5950,9 @@ def enter_outside_changes_interaction(
 ) -> None:
     """Enter pressed off the Changes surface must not arm its diff view.
 
-    The widened Enter arm sent Acting/Lanes/Approvals/Schedules/Verify/Harness
-    into the Changes handler; with changes loaded, coming back to Changes then
-    drew a diff nobody opened.
+    The widened Enter arm sent Acting/Approvals/Schedules/Verify/Harness into
+    the Changes handler; with changes loaded, coming back to Changes then drew
+    a diff nobody opened. Lanes now owns Enter, so this no-op guard uses Acting.
     """
     populated = tab_until(process, master_fd, output, b"masc:lib/example.ml")
     populated_plain = CSI_RE.sub(b"", populated).decode("utf-8")
@@ -5893,23 +5960,23 @@ def enter_outside_changes_interaction(
         raise AssertionError(
             f"Changes did not draw the fixture row as a list: {populated_plain!r}"
         )
-    lanes = tab_until(process, master_fd, output, b"MASC Lanes")
-    if b"MASC Lanes" not in lanes:
-        raise AssertionError(f"did not reach Lanes: {lanes!r}")
+    acting = tab_until(process, master_fd, output, b"MASC Acting")
+    if b"MASC Acting" not in acting:
+        raise AssertionError(f"did not reach Acting: {acting!r}")
     os.write(master_fd, b"\r")
     back = tab_until(process, master_fd, output, b"masc:lib/example.ml")
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
     if "Turn" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
-            f"Lanes armed a view it does not own: {back_plain!r}"
+            f"Acting armed a view it does not own: {back_plain!r}"
         )
     # What says a diff is open is the diff view's own frame, not a pair of
     # counts: the marked row previews its diff under the list now, so "-1 +1"
     # is what an unopened list looks like.
     if "esc closes" in back_plain:
         raise AssertionError(
-            "returning to Changes drew a diff nobody opened; Enter on Lanes "
+            "returning to Changes drew a diff nobody opened; Enter on Acting "
             f"reached the Changes handler: {back_plain!r}"
         )
     os.write(master_fd, b"q")
@@ -6703,6 +6770,31 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     target = fusion_run("fusion-target-501", keeper="beta")
     new = fusion_run("fusion-new-501", keeper="gamma")
     fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/planning"] = (
+        200,
+        {
+            "goals": [
+                {
+                    "id": "goal-ssim-501",
+                    "title": "raise SSIM to 0.95",
+                    "phase": "executing",
+                    "priority": 1,
+                    "metric": "SSIM",
+                    "target_value": "0.95",
+                    "proof": {"state": "unreviewed"},
+                }
+            ],
+            "rollup": {"active": 1, "verifying": 0, "done": 0, "dropped": 0},
+            "backlog": {
+                "todo": 1,
+                "claimed": 0,
+                "running": 0,
+                "done": 0,
+                "cancelled": 0,
+            },
+            "generated_at": "2026-08-27T00:00:00Z",
+        },
+    )
     fixtures["/api/v1/dashboard/harness-health"] = (
         200,
         {
@@ -6736,6 +6828,39 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     return fixtures, initial_runs
 
 
+def seed_goal_linked_task(base_path: str) -> None:
+    """Write the task the harness verdict judges, and the goal it serves.
+
+    Tasks come off the local backlog and the goal link lives in its own
+    registry -- the task record carries no goal on purpose. Both have to be on
+    disk before the TUI starts or the chain has a hole at its middle hop.
+    """
+    tasks_dir = os.path.join(base_path, ".masc", "tasks")
+    os.makedirs(tasks_dir, exist_ok=True)
+    with open(os.path.join(tasks_dir, "backlog.json"), "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "tasks": [
+                    {
+                        "id": "task-linked-501",
+                        "title": "linked Harness task",
+                        "status": "todo",
+                        "priority": 1,
+                        "created_at": "2026-08-27T00:00:00Z",
+                        "updated_at": "2026-08-27T00:00:00Z",
+                    }
+                ],
+                "last_updated": "2026-08-27T00:00:00Z",
+                "version": 1,
+            },
+            handle,
+        )
+    with open(
+        os.path.join(tasks_dir, "goal_task_links.json"), "w", encoding="utf-8"
+    ) as handle:
+        json.dump({"goal-ssim-501": ["task-linked-501"]}, handle)
+
+
 def fusion_list_detail_interaction(
     fixtures: HttpFixtures,
     initial_runs: GatedHttpResponse,
@@ -6749,8 +6874,16 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        harness = tab_until(process, master_fd, output, b"task-linked-501")
-        harness_plain = CSI_RE.sub(b"", harness)
+        tab_until(process, master_fd, output, b"task-linked-501")
+        # The row can land in a frame drawn before the column headers are
+        # repainted, so the headers are what this waits on rather than the row:
+        # the assertions below are about the whole list, not one line of it.
+        wait_for_output(
+            process, master_fd, output, b"Evaluator", start=0, timeout=5.0
+        )
+        harness_plain = CSI_RE.sub(
+            b"", frame_containing(bytes(output), b"Evaluator")
+        )
         for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
             if needle not in harness_plain:
                 raise AssertionError(
@@ -6766,6 +6899,10 @@ def fusion_list_detail_interaction(
             process, master_fd, output, b"\r", b"HARNESS VERDICT"
         )
         verdict_plain = CSI_RE.sub(b"", verdict)
+        # The verdict names a task; the task names its goals; a goal declares
+        # the metric it is measured by. All three were present and none of them
+        # met on a screen, so a verdict said "approve" without saying what it
+        # was approving towards.
         for needle in (
             b"linked Harness task",
             b"Agent",
@@ -6779,6 +6916,18 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Harness detail omitted {needle!r}: {verdict_plain!r}"
                 )
+        # The verdict names a task, the task names its goals, and a goal
+        # declares its metric. All three were present before and none of them
+        # met on a screen. Whichever way the chain resolves, the detail has to
+        # say so rather than drawing nothing -- "not linked" and "not in this
+        # backlog" are different facts and both are answers.
+        if not any(
+            marker in verdict_plain
+            for marker in (b"TOWARDS", b"Towards")
+        ):
+            raise AssertionError(
+                f"the verdict says nothing about what it aims at: {verdict_plain!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
         read_available(master_fd, output)
         start = len(output)
@@ -7471,6 +7620,10 @@ def run_keyboard_regression(executable: str) -> None:
         ),
         refresh=0.05,
         http_fixtures=fusion_fixtures,
+        # The harness verdict in these fixtures judges task-linked-501. Seeding
+        # that task and the goal it serves is what lets the detail say what the
+        # verdict was aiming at, rather than naming a task and stopping.
+        prepare_workspace=seed_goal_linked_task,
     )
     run_terminal_scenario(
         executable,

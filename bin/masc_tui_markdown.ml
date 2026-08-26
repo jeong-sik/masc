@@ -201,7 +201,10 @@ let inline_segments text =
           else literal ()
       | '[' -> (
           (* [label](target). Both halves are kept: a terminal cannot follow a
-             link, so hiding the target loses the only usable half. *)
+             link, so hiding the target loses the only usable half. The target
+             keeps its parentheses and a separating space; colour is not a
+             delimiter, and copied or NO_COLOR text must not collapse the two
+             halves into [labeltarget]. *)
           match find_char text ~from:(index + 1) ']' with
           | Some close_label
             when starts_at text (close_label + 1) "(" -> (
@@ -216,7 +219,7 @@ let inline_segments text =
                       (close_target - close_label - 2)
                   in
                   emit label kind_link_text;
-                  emit target kind_link_target;
+                  emit (" (" ^ target ^ ")") kind_link_target;
                   walk (close_target + 1))
           | Some _ | None -> literal ())
       | _ -> literal ()
@@ -508,12 +511,47 @@ let wrap_pieces ~max_cells pieces =
   flush ();
   List.rev !rows
 
+let diff_row_span palette pieces =
+  let non_empty = List.filter (fun (text, _) -> String.length text > 0) pieces in
+  match non_empty with
+  | (_, kind) :: rest
+    when (String.equal kind kind_code_diff_added
+          || String.equal kind kind_code_diff_removed)
+         && List.for_all (fun (_, other) -> String.equal kind other) rest ->
+      Some (span_of_palette palette kind)
+  | _ -> None
+
+let fill_styled_row ~width (opening, closing) text =
+  let remaining = max 0 (width - Layout.display_width text) in
+  opening ^ text ^ String.make remaining ' ' ^ closing
+
+(* One lexed row. Two regimes, and the diff check comes first.
+
+   The diff lexer gives an added or removed row one typed kind from edge to
+   edge. That row span includes the gutter and fills the available width;
+   every hard-split chunk repeats it, so a narrow pane cannot turn the tail of
+   a changed line back into ordinary code. No source-prefix check belongs
+   here: the lexer remains the authority for what is a changed row.
+
+   Every other row wraps as pieces ([wrap_pieces]), so a long code line keeps
+   its per-token colours across the wrap instead of falling back to a
+   single-span cell split. *)
 let styled_code_rows palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
-  wrap_pieces ~max_cells:body_width pieces
-  |> List.map (fun row ->
-       gutter ^ String.concat "" (List.map (styled_piece palette) row))
+  let plain = String.concat "" (List.map fst pieces) in
+  let cells = Layout.display_width plain in
+  match diff_row_span palette pieces with
+  | Some span ->
+      let chunks =
+        if cells <= body_width then [ plain ]
+        else Layout.split_cells ~max_cells:body_width plain
+      in
+      List.map (fun chunk -> fill_styled_row ~width span (gutter ^ chunk)) chunks
+  | None ->
+      wrap_pieces ~max_cells:body_width pieces
+      |> List.map (fun row ->
+           gutter ^ String.concat "" (List.map (styled_piece palette) row))
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))

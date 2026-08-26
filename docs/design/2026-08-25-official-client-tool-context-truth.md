@@ -163,8 +163,8 @@ Hierarchy를 다시 제품 기능으로 만들지는 않는다. parent field를 
 - Task authoring: skill name은 non-empty single path segment여야 한다.
 - task create 시 존재하는 `SKILL.md`와 name agreement를 확인한다.
 - 기존 task의 skill이 이후 삭제될 수 있으므로 turn admission에서도 typed error를 낸다.
-- instruction skill을 읽으라는 prompt가 있으면 effective surface에 `Read`가 있어야 한다.
-  없다면 prompt만 내보내지 말고 surface conflict로 실패한다.
+- instruction skill을 읽으라는 prompt가 있으면 effective surface에 `keeper_skill`이 있어야
+  한다. 본문은 이 전용 도구가 카탈로그에서 직접 서빙한다.
 - 모든 unrelated skill을 매 turn 실패시키는 global coupling은 별도 task로 측정 후 결정한다.
 
 ### D7. TUI refuses mixed workspace truth
@@ -207,7 +207,7 @@ clamp 없이 typed unavailable; live `analyst`의 `831.1%`가 다시 나타나�
 
 - selected Keeper effective surface API와 decoder/render를 추가한다.
 - global catalog와 effective surface를 명시적으로 분리한다.
-- composition skill tools와 instruction skill/readability conflict를 포함한다.
+- composition skill tools와 instruction skill의 전용 `keeper_skill` 표면을 포함한다.
 
 **Completion trigger**: 서로 다른 `tools.groups/native/skills` fixture 두 Keeper가 서로 다른
 tool rows와 서로 다른 digest를 보이며, runtime bundle의 actual names와 projection names가

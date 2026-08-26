@@ -131,6 +131,17 @@ let context_summary = function
 let context_header_item ~max_cells observation =
   match context_summary observation with
   | Context_measured { ratio; _ } ->
-      let item = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
-      if max_cells >= cells item then Some item else None
+      (* The key travels with the number. This line was the only place the
+         pane said how full the context is, and there was no way in from it:
+         the breakdown lived behind [/context], which is in [/help] and
+         nowhere a reader looking at this figure would find it.
+
+         Dropped first when the header runs out of room -- the figure is what
+         the line is for, and a reader who has met the key once does not need
+         it printed again. *)
+      let figure = Printf.sprintf "Context %.0f%% used" (ratio *. 100.0) in
+      let with_key = figure ^ " \xc2\xb7 ^X" in
+      if max_cells >= cells with_key then Some with_key
+      else if max_cells >= cells figure then Some figure
+      else None
   | Context_partial _ | Context_unavailable _ -> None

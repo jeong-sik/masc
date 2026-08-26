@@ -4,6 +4,7 @@ import {
   fetchAttachedProviders,
   isAttachable,
   refreshIdentityTools,
+  setIdentityClient,
   startIdentityLogin,
   type AttachedProvider,
   type IdentityLoginStarted,
@@ -30,6 +31,13 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
   const [actionError, setActionError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  // Which provider's own-app form is open, and what has been typed into it.
+  // Held per provider rather than globally so switching rows does not carry
+  // one provider's client id onto another.
+  const [ownApp, setOwnApp] = useState<string | null>(null)
+  const [ownId, setOwnId] = useState('')
+  const [ownSecret, setOwnSecret] = useState('')
+  const [ownSaved, setOwnSaved] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -56,6 +64,29 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
       // A pop-up blocker is the common case, so the link stays on the page
       // below rather than this being the only way through.
       window.open(answer.authorize_url, '_blank', 'noreferrer')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const saveOwnApp = async (providerId: string) => {
+    setBusy(providerId)
+    setActionError(null)
+    setOwnSaved(null)
+    try {
+      const answer = await setIdentityClient(providerId, ownId, ownSecret)
+      // Cleared on the way out. A secret left in a field is a secret in the
+      // page for as long as the tab is open.
+      setOwnId('')
+      setOwnSecret('')
+      setOwnApp(null)
+      setOwnSaved(
+        answer.has_client_secret
+          ? `${answer.provider_label} 앱을 저장했어요 (비밀키 포함)`
+          : `${answer.provider_label} 앱을 저장했어요 (비밀키 없음)`,
+      )
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -121,11 +152,47 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
                         onClick=${() => setExpanded(current => current === provider.provider ? null : provider.provider)}
                       >${expanded === provider.provider ? '접기' : '도구 보기'}</button>
                     `}
+                    <button
+                      type="button"
+                      class="kcf-btn ghost"
+                      onClick=${() => {
+                        setOwnApp(current => current === provider.provider ? null : provider.provider)
+                        setOwnId('')
+                        setOwnSecret('')
+                      }}
+                    >${ownApp === provider.provider ? '접기' : '내 앱 쓰기'}</button>
                   </div>
+                  ${ownApp === provider.provider && html`
+                    <div class="mt-1 flex flex-col gap-1">
+                      <p class="text-3xs text-[var(--color-fg-muted)]">
+                        Slack, GitHub, Figma 처럼 앱을 직접 만들어야 하는 서비스에 씁니다. 이 값은 Keeper 하나가 아니라 이 masc 전체가 씁니다.
+                      </p>
+                      <input
+                        class="kcf-input mono"
+                        type="text"
+                        placeholder="client id"
+                        value=${ownId}
+                        onInput=${(event: Event) => setOwnId((event.target as HTMLInputElement).value)}
+                      />
+                      <input
+                        class="kcf-input mono"
+                        type="password"
+                        placeholder="client secret (없으면 비워 두세요)"
+                        value=${ownSecret}
+                        onInput=${(event: Event) => setOwnSecret((event.target as HTMLInputElement).value)}
+                      />
+                      <button
+                        type="button"
+                        class="kcf-btn save self-start"
+                        disabled=${busy !== null || ownId.trim() === ''}
+                        onClick=${() => void saveOwnApp(provider.provider)}
+                      >저장</button>
+                    </div>
+                  `}
                   ${expanded === provider.provider && html`
                     <ul class="mt-1 list-none pl-0 text-3xs text-[var(--color-fg-muted)]">
                       ${(provider.tools ?? []).map(name => html`
-                        <li key=${name} class="mono">atlassian_${name}</li>
+                        <li key=${name} class="mono">${provider.provider}_${name}</li>
                       `)}
                     </ul>
                   `}
@@ -138,6 +205,7 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
           </div>
         `}
         ${actionError && html`<p class="text-2xs text-[var(--color-status-err)]">${actionError}</p>`}
+        ${ownSaved && html`<p class="text-2xs text-[var(--color-fg-muted)]">${ownSaved}</p>`}
         ${started && html`
           <p class="text-2xs text-[var(--color-fg-muted)]">
             새 창이 열리지 않았다면

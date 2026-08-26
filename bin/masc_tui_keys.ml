@@ -23,7 +23,7 @@ let global =
   ; b Meta ":" "command palette"
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "?" "this help"
-  ; b Meta "Ctrl-B" "show or hide the keeper roster beside a surface"
+  ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Meta "q" "quit"
   ]
@@ -107,7 +107,11 @@ let for_surface = function
   | Keepers Keeper_runtime_pick ->
       [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
   | Lanes ->
-      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
+      [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      ; b Act "Right / Enter" "detail" ~help:"open the selected Keeper"
+      ; b Act "Esc" "overview"
+      ]
+      @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"

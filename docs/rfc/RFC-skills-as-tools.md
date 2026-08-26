@@ -20,11 +20,11 @@ masc 는 도구 합성 DAG 실행기를 이미 갖고 있다. 그런데 그 위 
 500건을 만들었다. 모델은 문법이 아니라 **이름과 설명이 붙은 능력**을 고른다.
 
 이 RFC 는 그 관측을 설계로 승격한다. `SKILL.md` 파일 하나가 능력 하나를 선언한다 —
-지시문이면 task 라우팅(RFC skills-declared-not-discovered)과 `Read` 로 keeper 에게
+지시문이면 task 라우팅(RFC skills-declared-not-discovered)과 `keeper_skill`로 keeper 에게
 닿고, 합성이 담겼으면 `keeper_compose_<name>` 도구로 표면화된다. Skill 이 Tool 이
 되고(합성 스킬), Tool 이 Skill 을 갖고(도구 도움말의 md 외부화), Async 와 Parallel 은
-스킬 선언의 실행 모드가 된다. 지시 스킬은 도구 스키마 표면(현재 상한 85,000 B)을
-0 B 쓴다 — 새 능력의 비용이 스키마 표면에서 프롬프트 한 줄로 이동한다.
+스킬 선언의 실행 모드가 된다. 지시 스킬 본문은 매 턴 싣지 않고, 이름과 설명만 담은
+고정 `keeper_skill` 도구를 통해 필요할 때 읽는다.
 
 ## 1. 관측
 
@@ -215,9 +215,12 @@ type t = private
 - 스킬 본문 읽기는 `keeper_skill(name)` 호출로 `tool_calls` 스토어에 기록되고, 그
   `name` 인자로 스킬별 사용량을 집계한다.
 - 합성 실행은 기존 `composition_run_id` 노드 텔레메트리 + SSE
-  (`keeper_tool_call_evidence_committed`) 를 그대로 쓴다.
+  (`keeper_tool_call_evidence_committed`) 를 그대로 쓰며 SSE도 노드의 성공·duration을
+  보존한다. inline/async 모두 `record_kind=composition_run` 종결 행을 남기고 async는
+  durable settlement만 종결로 인정한다.
 - 대시보드: `/api/v1/skills` (카탈로그: name, description, kind, source file, 최근 사용
-  횟수) + Skills 패널. 합성 스킬 상세에서 노드 실행 흐름(run 별 node_result)을 보인다.
+  횟수와 완료 성공/실패 횟수) + Skills 패널. 합성 스킬 상세에서 노드 실행 흐름(run 별
+  node_result)을 보인다.
 
 ### 2.7 하드 컷 — `tool-compositions.toml` 은 삭제한다
 

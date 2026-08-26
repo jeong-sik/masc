@@ -584,11 +584,11 @@ let assoc_string key json =
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
-let assert_policy_validation_payload ~label result =
+let assert_policy_validation_payload ?(reason = "invalid_args") ~label result =
   let data = Tool_result.data result in
   Alcotest.(check string)
     (label ^ " reason")
-    "invalid_args"
+    reason
     (assoc_string "reason" data);
   Alcotest.(check string)
     (label ^ " failure_class payload")
@@ -994,13 +994,77 @@ let test_validate_args_tool_execute_rejects_empty_object_with_policy_class () =
   | Error result ->
     let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
+      "empty Execute is told the arguments did not arrive"
+      true
+      (string_contains msg "empty input object");
+    Alcotest.(check bool)
       "empty Execute mentions exact-one-of"
       true
       (string_contains msg "exactly one of");
-    assert_policy_validation_payload ~label:"empty Execute" result
+    assert_policy_validation_payload
+      ~reason:"empty_args_required"
+      ~label:"empty Execute"
+      result
   | Ok forwarded ->
     Alcotest.failf
       "expected empty tool_execute args to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
+
+(* Empty input on a schema that declares required fields gets the dedicated
+   reason, so the masc#29337-family failure (arguments lost on the wire) is
+   countable fleet-wide instead of blending into generic invalid_args. *)
+let test_validate_args_empty_object_on_plain_required_schema () =
+  let schema =
+    make_schema ~required:[ "query" ] [ "query", "string"; "limit", "integer" ]
+  in
+  match
+    Tool_input_validation.validate_args ~schema ~name:"__empty_args_required" ~args:(`Assoc []) ()
+  with
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "message says the arguments did not arrive"
+      true
+      (string_contains msg "empty input object");
+    Alcotest.(check bool)
+      "message names the missing required field"
+      true
+      (string_contains msg "query");
+    assert_policy_validation_payload
+      ~reason:"empty_args_required"
+      ~label:"empty plain-required"
+      result
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected empty args on a required schema to fail, got %s"
+      (Yojson.Safe.to_string forwarded)
+
+(* An all-optional schema still accepts an empty object — the dedicated
+   rejection must not swallow legitimate no-arg calls. *)
+let test_validate_args_empty_object_on_all_optional_schema_passes () =
+  let schema = make_schema [ "query", "string"; "limit", "integer" ] in
+  match
+    Tool_input_validation.validate_args ~schema ~name:"__empty_args_optional" ~args:(`Assoc []) ()
+  with
+  | Ok _ -> ()
+  | Error result ->
+    Alcotest.failf
+      "expected empty args on an all-optional schema to pass, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* Partial args on a required schema keep the generic invalid_args path —
+   only a fully empty input means the arguments never arrived. *)
+let test_validate_args_partial_object_keeps_invalid_args_reason () =
+  let schema = make_schema ~required:[ "query" ] [ "query", "string" ] in
+  let args = `Assoc [ "limit", `Int 5 ] in
+  match
+    Tool_input_validation.validate_args ~schema ~name:"__partial_args" ~args ()
+  with
+  | Error result ->
+    assert_policy_validation_payload ~label:"partial args" result
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected partial args missing a required field to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
 let test_validate_args_tool_execute_rejects_cmd_string () =
@@ -1663,11 +1727,14 @@ let test_validation_telemetry_emits_otel_event () =
     ~enabled:true
     ~emit_event:(fun ~name ~attrs -> events := (name, attrs) :: !events)
     (fun () ->
+       (* A typed-value mismatch keeps this on the generic invalid_args path;
+          an empty object would now take the dedicated empty_args_required
+          rejection, which is not what this telemetry test is about. *)
        match
          Tool_input_validation.validate_args
            ~schema
            ~name:tool
-           ~args:(`Assoc [])
+           ~args:(`Assoc [ "path", `Int 42 ])
            ()
        with
        | Error _ -> ()
@@ -2339,6 +2406,12 @@ let () =
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects empty args with class" `Quick
         test_validate_args_tool_execute_rejects_empty_object_with_policy_class;
+      Alcotest.test_case "empty args on required schema get dedicated reason" `Quick
+        test_validate_args_empty_object_on_plain_required_schema;
+      Alcotest.test_case "empty args on all-optional schema pass" `Quick
+        test_validate_args_empty_object_on_all_optional_schema_passes;
+      Alcotest.test_case "partial args keep generic invalid_args reason" `Quick
+        test_validate_args_partial_object_keeps_invalid_args_reason;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
       Alcotest.test_case "tool_execute rejects command string" `Quick

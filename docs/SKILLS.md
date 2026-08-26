@@ -60,9 +60,8 @@ task 가 스킬을 지정하면 current-task 블록에 이름 한 줄이 실리�
 keeper 가 task 를 둘 이상 들고 있으면(Claimed/InProgress) current task 는 reconcile 이
 고른 하나이고, 두 번째 task 를 claim 해도 바뀌지 않는다. 그래서 나머지 보유 task 가
 지명한 스킬은 `Skills Named by Tasks You Hold` 블록에 task 별로 한 줄씩 따로 실린다
-(직접 메시지 턴도 같다). 턴 admission 도 같은 집합을 검사한다: 보유 task 가 카탈로그에
-없는 스킬을 지명하거나, 지시 스킬을 지명했는데 `Read` 가 없으면 turn 은 typed config
-error 로 거부된다.
+(직접 메시지 턴도 같다). 턴 admission도 같은 집합의 이름이 카탈로그에 있는지 검사한다.
+지시 본문은 전용 `keeper_skill`이 서빙하므로 파일시스템 `Read` 도구 유무와는 무관하다.
 
 ### 합성 스킬 (composition) — Skill as a Tool
 
@@ -132,10 +131,12 @@ error로 거부한다. 반면 이름 불일치·한계 초과·확장 키는 `ru
 ## 5. 관측
 
 - `GET /api/v1/skills` — 발행 스냅샷의 이름·설명·conformance·diagnostics와, 턴 파서가
-  만든 종류·합성 도구 이름/실행 모드·최근 사용량을 함께 돌려준다.
+  만든 종류·합성 도구 이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
 - 합성 실행은 노드 단위로 `tool_calls` 스토어에 남는다 (`composition_tool`,
   `composition_run_id`, `composition_node_id`) — SSE
-  `keeper_tool_call_evidence_committed` 로도 흐른다.
+  `keeper_tool_call_evidence_committed` 로도 흐른다. 이벤트에는 `success`, `disposition`,
+  `duration_ms`가 포함된다. run 전체는 `record_kind=composition_run` 종결 행으로 별도
+  기록되며 async는 durable settlement 이후에만 종결된다.
 
 ## 6. 배포 주의 — #30208~#30220 창
 

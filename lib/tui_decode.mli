@@ -10,6 +10,13 @@ type task = {
   title : string;
   status : Masc_domain.task_status;
   priority : int;
+  goal_ids : string list;
+      (** Goals this task is linked to, from the goal-task registry.
+          The task record itself carries no goal: the registry is the source
+          of truth, so a screen that reads only the backlog cannot say which
+          goal a task serves. Empty when nothing links it, and empty when the
+          registry could not be read -- the two are told apart by
+          {!Masc_tui_types.tasks_goal_link_error}, not by guessing here. *)
 }
 
 type keeper = {
@@ -866,8 +873,15 @@ type context_observation =
   | Context_unavailable of context_unavailable_reason
 
 val decode_agent : Yojson.Safe.t -> (agent, string) result
-val task_of_domain : Masc_domain.task -> task
-val active_tasks_of_domain : Masc_domain.task list -> task list
+val task_of_domain : ?goal_ids:string list -> Masc_domain.task -> task
+
+val active_tasks_of_domain
+  :  ?goals_for_task:(string -> string list)
+  -> Masc_domain.task list
+  -> task list
+(** [goals_for_task] answers which goals a task id is linked to. Omitted, every
+    task comes back with no goals -- which is what a caller that has not read
+    the goal-task registry can honestly say. *)
 val decode_task : Yojson.Safe.t -> (task, string) result
 val keeper_of_meta : Keeper_meta_contract.keeper_meta -> keeper
 val decode_keeper : Yojson.Safe.t -> (keeper, string) result

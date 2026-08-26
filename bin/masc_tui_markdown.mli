@@ -55,8 +55,10 @@ type palette = {
   code_comment : span;
   code_number : span;
   code_diff_added : span;
-      (** A ["```diff"] fence's added line. Whole-line, not token-shaped. *)
-  code_diff_removed : span;  (** The same fence's removed line. *)
+      (** A ["```diff"] fence's added line. Applied to the code gutter,
+          source, and padding through the available row width. Every hard-split
+          chunk carries the same span. *)
+  code_diff_removed : span;  (** The same fence's removed row. *)
   code_type : span;  (** Also JSON object keys: a field name reads as one. *)
 }
 
@@ -100,9 +102,11 @@ val render : palette:palette -> width:int -> string -> string list
     Fenced code keeps its own line breaks — wrapping a diff at a word boundary
     destroys the alignment that made it worth fencing — and is hard-split only
     where a line is wider than the row. Every split chunk is a separate terminal
-    row; concatenating them recovers the complete source line. A tagged fence
-    also draws a header containing its language, and a closed tagged fence draws
-    a closing border. Everything else wraps at spaces.
+    row; concatenating them recovers the complete source line. Typed added and
+    removed diff rows fill each such row, including the code gutter and trailing
+    cells, with their whole-line span. A tagged fence also draws a header
+    containing its language, and a closed tagged fence draws a closing border.
+    Everything else wraps at spaces.
 
     A fence whose tag names a language this module lexes — [ocaml], [ml],
     [bash] or friends, [json] — has its body tokenised whole: reserved words
@@ -117,4 +121,7 @@ val render : palette:palette -> width:int -> string -> string list
 val inline_segments : string -> (string * string) list
 (** The inline parse alone, as [(text, kind)] pairs where kind is one of
     ["plain"], ["strong"], ["emphasis"], ["code"], ["link_text"] or
-    ["link_target"]. Exposed so the marker handling can be read directly. *)
+    ["link_target"]. A Markdown link keeps its label as ["link_text"] and a
+    printable [" (target)"] as ["link_target"], so the two remain distinct in
+    copied and NO_COLOR text. Exposed so the marker handling can be read
+    directly. *)

@@ -14,6 +14,8 @@ type skill =
 
 type t = skill list
 
+type named_skill_error = Missing_named_skill of { name : string }
+
 type error =
   | Definition_rejected of
       { directory : string
@@ -183,17 +185,31 @@ let of_documents documents =
 
 let skills catalog = catalog
 
-let has_instruction_skill catalog =
-  List.exists
+let find catalog name =
+  List.find_opt (fun skill -> String.equal skill.name name) catalog
+;;
+
+let instruction_entries catalog =
+  List.filter_map
     (fun skill ->
        match skill.surface with
-       | Instruction -> true
-       | Composition _ -> false)
+       | Instruction -> Some (skill.name, skill.description, skill.body)
+       | Composition _ -> None)
     catalog
 ;;
 
-let find catalog name =
-  List.find_opt (fun skill -> String.equal skill.name name) catalog
+let instruction_names_for catalog names =
+  let rec resolve instruction_names = function
+    | [] -> Ok (List.rev instruction_names)
+    | name :: rest ->
+      (match find catalog name with
+       | None -> Error (Missing_named_skill { name })
+       | Some skill ->
+         (match skill.surface with
+          | Instruction -> resolve (name :: instruction_names) rest
+          | Composition _ -> resolve instruction_names rest))
+  in
+  resolve [] names
 ;;
 
 let composition_entries catalog =

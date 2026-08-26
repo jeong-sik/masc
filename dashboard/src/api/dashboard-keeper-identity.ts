@@ -74,3 +74,34 @@ export async function startIdentityLogin(
     { provider: providerId },
   )
 }
+
+export interface OwnAppRecorded {
+  provider: string
+  provider_label: string
+  client_id: string
+  /** Whether a secret is on file. Never the secret itself: the answer to
+   *  "did that save" is a yes, not a credential travelling back through
+   *  every log and proxy on the way. */
+  has_client_secret: boolean
+}
+
+/** Record an app the operator made themselves.
+ *
+ *  For a provider whose authorization server registers no client for a
+ *  stranger -- Slack, GitHub and Figma all publish one app per operator --
+ *  this is the only road in. One per provider for the whole install, not per
+ *  Keeper, which is why the path carries no Keeper name. */
+export async function setIdentityClient(
+  providerId: string,
+  clientId: string,
+  clientSecret: string,
+): Promise<OwnAppRecorded> {
+  await ensureDevToken()
+  return post<OwnAppRecorded>('/api/v1/keepers/oauth/client', {
+    provider: providerId,
+    client_id: clientId,
+    // Sent as given. An empty string is the operator saying this app has no
+    // secret, and the server reads it that way.
+    client_secret: clientSecret,
+  })
+}

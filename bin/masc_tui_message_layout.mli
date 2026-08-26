@@ -245,7 +245,8 @@ val message_viewport_supported :
   terminal_rows:int -> terminal_cols:int -> status_rows:int -> bool
 (** Whether the full chat frame plus its final newline fits without terminal
     scrolling. Unsupported viewports render a compact resize gate and suppress
-    message editing. *)
+    message editing. The width gate also reserves enough framed content for a
+    four-cell body and a shortened source with two identifying tail cells. *)
 
 val wrap_words : max_cells:int -> string -> string list
 (** Wrap a plain single-line string at spaces using a terminal-cell budget.

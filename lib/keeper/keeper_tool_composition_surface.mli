@@ -22,7 +22,7 @@ val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 val schema_tools :
   ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
-  ?include_instruction_skill:bool ->
+  ?instruction_skills:(string * string * string) list ->
   unit ->
   Agent_core.Tool.t list
 (** Handler-free materialization of the exact model-visible composition tool
@@ -65,6 +65,9 @@ val make_tools
   -> Agent_core.Tool.t list
 
 module For_testing : sig
+  val instruction_skill_description :
+    (string * string * string) list -> string
+
   val status_result :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->

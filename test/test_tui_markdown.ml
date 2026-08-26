@@ -60,6 +60,13 @@ let tagged_fence ?(width = 40) language body =
   let footer = "<cb>\xe2\x94\x94" ^ horizontal (width - 1) ^ "</cb>" in
   header :: body @ [ footer ]
 
+let tagged_band ~width opening closing content =
+  opening ^ content
+  ^ String.make
+      (max 0 (width - Masc_tui_message_layout.display_width content))
+      ' '
+  ^ closing
+
 let segments_testable =
   Alcotest.(list (pair string string))
 
@@ -90,7 +97,7 @@ let test_inline_closers_restore_the_ambient_row () =
   in
   check_rows "strong, code, and both link spans restore the row"
     [ "<b>bold<restore> <c>code<restore> \
-       <a>docs<restore><u>https://x<restore>"
+       <a>docs<restore> <u>(https://x)<restore>"
     ]
     (render ~width:80 ~palette:restoring
        "**bold** `code` [docs](https://x)");
@@ -132,8 +139,21 @@ let test_underscore_emphasis_still_works_between_words () =
 let test_link_keeps_both_halves () =
   Alcotest.(check segments_testable)
     "label and target"
-    [ ("see ", "plain"); ("the PR", "link_text"); ("https://x/1", "link_target") ]
+    [ ("see ", "plain")
+    ; ("the PR", "link_text")
+    ; (" (https://x/1)", "link_target")
+    ]
     (Markdown.inline_segments "see [the PR](https://x/1)")
+
+let test_plain_link_keeps_a_printable_boundary () =
+  check_rows "plain link"
+    [ "read docs (https://example.invalid/path) next" ]
+    (render ~width:80 ~palette:Markdown.plain_palette
+       "read [docs](https://example.invalid/path) next");
+  check_rows "target wraps with its opening parenthesis"
+    [ "docs"; "(https://x)" ]
+    (render ~width:11 ~palette:Markdown.plain_palette
+       "[docs](https://x)")
 
 let test_inline_segments_names_each_marker () =
   Alcotest.(check segments_testable)
@@ -337,24 +357,88 @@ let test_fenced_code_keeps_its_line_breaks () =
    keeper's pasted patch rides, so both read as arriving and leaving instead of
    one wall of code. *)
 let test_diff_fence_colours_each_line_by_its_first_cell () =
+  let band = tagged_band ~width:40 in
   check_rows "diff"
     (tagged_fence "diff"
        [ "\xe2\x94\x82 <m>@@ -1,2 +1,2 @@</m>"
-       ; "\xe2\x94\x82 <->- [constraint] use the old endpoint</->"
-       ; "\xe2\x94\x82 <+>+ [fact] the probe uses HTTP/2</+>"
+       ; band "<->" "</->" "\xe2\x94\x82 - [constraint] use the old endpoint"
+       ; band "<+>" "</+>" "\xe2\x94\x82 + [fact] the probe uses HTTP/2"
        ; "\xe2\x94\x82 <c> unchanged</c>"
        ])
     (render
        "```diff\n@@ -1,2 +1,2 @@\n- [constraint] use the old endpoint\n+ [fact] the probe uses HTTP/2\n unchanged\n```")
 
+(* A source line can become several terminal rows in a narrow pane. The
+   lexer still named the whole source line as added, so every chunk keeps the
+   same full-width band, including the chunk that no longer carries [+]. *)
+let test_diff_fence_keeps_the_band_after_a_hard_split () =
+  let width = 10 in
+  let band = tagged_band ~width in
+  check_rows "split diff band"
+    (tagged_fence ~width "diff"
+       [ band "<+>" "</+>" "\xe2\x94\x82 +abcdefg"
+       ; band "<+>" "</+>" "\xe2\x94\x82 hijk"
+       ])
+    (render ~width "```diff\n+abcdefghijk\n```")
+
+(* With every styling span empty, the source markers remain the colourless
+   terminal's signal. Padding is layout, not a second semantic cue. *)
+let test_plain_diff_keeps_its_markers_without_colour () =
+  let width = 12 in
+  check_rows "colourless diff markers"
+    [ "\xe2\x94\x8c\xe2\x94\x80 diff \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+    ; "| -gone     "
+    ; "| +here     "
+    ; "\xe2\x94\x94\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+    ]
+    (render ~width ~palette:Markdown.plain_palette
+       "```diff\n-gone\n+here\n```")
+
+(* Bare-link dressing runs after Markdown. Its closer must not reset the row:
+   doing so would end this background after the URL and leave both the tail
+   and the width-filling spaces outside the band. *)
+let test_bare_link_closer_keeps_the_diff_band_open () =
+  let width = 48 in
+  let background = "\027[48;5;22m" in
+  let foreground = "\027[38;5;255m" in
+  let reset = "\027[0m" in
+  let palette =
+    { tagged with
+      code_diff_added = (background ^ foreground, reset)
+    }
+  in
+  let changed =
+    match
+      render ~width ~palette
+        "```diff\n+see https://example.test/x then tail\n```"
+    with
+    | [ _header; changed; _footer ] -> changed
+    | rows ->
+        Alcotest.failf "expected one diff row between its borders, got %d"
+          (List.length rows)
+  in
+  let link_open = "\027[4m\027[34m" in
+  let link_restore = "\027[24m\027[39m" in
+  let dressed =
+    Masc_tui_message_layout.dress_bare_links ~open_style:link_open
+      ~close_style:link_restore changed
+  in
+  check_rows "link keeps the enclosing band"
+    [ tagged_band ~width (background ^ foreground) reset
+        ("\xe2\x94\x82 +see " ^ link_open ^ "https://example.test/x"
+         ^ link_restore ^ " then tail")
+    ]
+    [ dressed ]
+
 (* A file header is not the change under it. Left plain, a green [+++] does not
    sit directly above the first added line reading as part of it. *)
 let test_diff_fence_leaves_file_headers_plain () =
+  let band = tagged_band ~width:40 in
   check_rows "diff headers"
     (tagged_fence "diff"
        [ "\xe2\x94\x82 <c>--- a/one.ml</c>"
        ; "\xe2\x94\x82 <c>+++ b/one.ml</c>"
-       ; "\xe2\x94\x82 <+>+added</+>"
+       ; band "<+>" "</+>" "\xe2\x94\x82 +added"
        ])
     (render "```diff\n--- a/one.ml\n+++ b/one.ml\n+added\n```")
 
@@ -591,6 +675,8 @@ let () =
             test_underscore_emphasis_still_works_between_words
         ; Alcotest.test_case "a link keeps both halves" `Quick
             test_link_keeps_both_halves
+        ; Alcotest.test_case "a plain link keeps its boundary" `Quick
+            test_plain_link_keeps_a_printable_boundary
         ; Alcotest.test_case "segments name each marker" `Quick
             test_inline_segments_names_each_marker
         ] )
@@ -645,6 +731,12 @@ let () =
             test_untagged_fence_stays_single_span
         ; Alcotest.test_case "a diff colours by line" `Quick
             test_diff_fence_colours_each_line_by_its_first_cell
+        ; Alcotest.test_case "a split diff keeps its band" `Quick
+            test_diff_fence_keeps_the_band_after_a_hard_split
+        ; Alcotest.test_case "a colourless diff keeps its markers" `Quick
+            test_plain_diff_keeps_its_markers_without_colour
+        ; Alcotest.test_case "a bare link keeps the diff band open" `Quick
+            test_bare_link_closer_keeps_the_diff_band_open
         ; Alcotest.test_case "a diff leaves file headers plain" `Quick
             test_diff_fence_leaves_file_headers_plain
         ; Alcotest.test_case "an unknown language means no colour" `Quick

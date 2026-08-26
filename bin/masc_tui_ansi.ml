@@ -371,24 +371,24 @@ let ctx_bar ratio width =
    side-by-side panes still need it: a border is what separates an overlay
    from the surface under it, and two panes from each other. *)
 
+(* The box's measurements live in [Masc_tui_frame] so the helpers that draw
+   it and the callers that measure against it read one set. *)
+let framed_rule_width cols = Masc_tui_frame.rule_width ~cols
+let framed_inner_width cols = Masc_tui_frame.inner_width ~cols
+let framed_chrome_rows = Masc_tui_frame.chrome_rows
+let framed_content_height ~rows = Masc_tui_frame.content_height ~rows
+
 let framed_top buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset)
+    Ansi.gray Ansi.box_tl (draw_hline (framed_rule_width cols)) Ansi.box_tr Ansi.reset)
 
 let framed_bottom buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset)
+    Ansi.gray Ansi.box_bl (draw_hline (framed_rule_width cols)) Ansi.box_br Ansi.reset)
 
 let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
-
-(* Cells a row's content gets inside the frame: two of border and two of
-   padding. Every helper below already spelled [cols - 4] itself, and a
-   caller that lays a row out before handing it over has to measure against
-   the same number -- the agenda panel's right-hand column was cut on the way
-   through here because it had been laid out against the terminal instead. *)
-let framed_inner_width cols = max 0 (cols - 4)
+    Ansi.gray Ansi.box_l (draw_hline (framed_rule_width cols)) Ansi.box_r Ansi.reset)
 
 let framed_line buf cols content =
   let inner = framed_inner_width cols in
@@ -414,7 +414,7 @@ let framed_empty buf cols =
 (* Full-screen surfaces draw without the outer box: the terminal edge is
    already the frame, and a border around everything separates nothing (the
    clutter audit's first offender). Every helper keeps its old geometry --
-   one row per call, content width [cols - 4] -- so no surface's row budget
+   one row per call, content width {!framed_inner_width} -- so no surface's row budget
    or wrap math moves. *)
 
 let box_top buf _cols = Buffer.add_char buf '\n'
@@ -422,10 +422,10 @@ let box_bottom buf _cols = Buffer.add_char buf '\n'
 
 let box_divider buf cols =
   Buffer.add_string buf
-    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (cols - 2)) Ansi.reset)
+    (Printf.sprintf " %s%s%s \n" Ansi.gray (draw_hline (framed_rule_width cols)) Ansi.reset)
 
 (* Rows keep the framed geometry -- two margin cells each side, content
-   width [cols - 4] -- and still span the full [cols], so anything that
+   width {!framed_inner_width} -- and still span the full [cols], so anything that
    measures a row (the PTY suite does) reads the same width either way. *)
 let box_line buf cols content =
   let inner = framed_inner_width cols in
@@ -439,7 +439,7 @@ let box_line_styled buf cols ~style content =
 
 (* The selected row of a borderless list: one reverse-video band across the
    full row, box_line's geometry (two margin cells each side, content width
-   [cols - 4]). Reverse survives NO_COLOR by contract, so this is also the
+   {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the
    selection signal a colourless terminal keeps. Content must carry no SGR
    of its own -- an inner reset would cut the band short; callers fold a
    styled row with [Masc_tui_theme.strip_sgr] first. *)

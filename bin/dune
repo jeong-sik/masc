@@ -303,6 +303,11 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_frame)
+ (wrapped false)
+ (modules masc_tui_frame))
+
+(library
  (name masc_tui_agenda)
  (wrapped false)
  (modules masc_tui_agenda)
@@ -618,6 +623,7 @@
  (package masc)
  (libraries
   masc_tui_agenda
+  masc_tui_frame
   masc_tui_attachment
   masc_tui_keys
   masc_tui_theme

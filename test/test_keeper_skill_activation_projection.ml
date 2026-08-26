@@ -105,6 +105,15 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
              ~absolute_turn:1)
+        ~runtime_id:"test.runtime"
+        ~skill_tool_use_id:"call-projection"
+        ~agent_core_turn:0
+        ~served_content:
+          (Ledger.Skill_body
+             { bytes = String.length "projection body"
+             ; sha256 =
+                 Digestif.SHA256.(digest_string "projection body" |> to_hex)
+             })
         ~activated_at:"2026-08-26T00:00:00Z"
         ~origin:Ledger.Session_instruction
     with
@@ -126,6 +135,15 @@ let activation_count json =
   |> List.length
 ;;
 
+let summary_count field json =
+  let open Yojson.Safe.Util in
+  json
+  |> member "skill_activations"
+  |> member "summary"
+  |> member field
+  |> to_int
+;;
+
 let test_dashboard_projection_is_live_outside_inventory_cache () =
   with_workspace @@ fun config ->
   let keeper_name = "projection-keeper" in
@@ -136,6 +154,8 @@ let test_dashboard_projection_is_live_outside_inventory_cache () =
       config
   in
   check int "empty live ledger" 0 (activation_count before);
+  check int "empty invocation summary" 0
+    (summary_count "instruction_invocations" before);
   record_one config meta;
   let after =
     Server_dashboard_http_runtime_info.dashboard_tools_http_json
@@ -143,7 +163,15 @@ let test_dashboard_projection_is_live_outside_inventory_cache () =
       config
   in
   check int "same cached inventory gets fresh activation ledger" 1
-    (activation_count after)
+    (activation_count after);
+  check int "one exact invocation" 1
+    (summary_count "instruction_invocations" after);
+  check int "one body served" 1
+    (summary_count "skill_bodies_served" after);
+  check int "no inferred delivery" 0
+    (summary_count "instruction_deliveries" after);
+  check int "strict ledger has no invalid transitions" 0
+    (summary_count "invalid_transitions" after)
 ;;
 
 let test_corrupt_ledger_is_unavailable_not_empty () =

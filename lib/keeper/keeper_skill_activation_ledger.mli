@@ -11,16 +11,57 @@ type origin =
       }
   | Session_composition of { tool_name : string }
 
+type delivery =
+  { agent_core_turn : int
+  ; delivered_at : string
+  }
+
+type action =
+  { tool_use_id : string
+  ; tool_name : string
+  ; agent_core_turn : int
+  ; observed_at : string
+  }
+
+type served_content =
+  | Skill_body of
+      { bytes : int
+      ; sha256 : string
+      }
+  | Skill_resource of
+      { relative_path : string
+      ; bytes : int
+      ; sha256 : string
+      }
+
 type activation = private
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; skill_tool_use_id : string
+  ; agent_core_turn : int
+  ; served_content : served_content
+  ; delivery : delivery option
+  ; actions : action list
   ; activated_at : string
   ; origin : origin
   }
 
 type t
+
+type summary =
+  { instruction_invocations : int
+  ; skill_bodies_served : int
+  ; skill_resources_served : int
+  ; instruction_deliveries : int
+  ; instruction_actions_observed : int
+  ; composition_invocations : int
+  ; composition_deliveries : int
+  ; composition_actions_observed : int
+  ; invalid_transitions : int
+  }
 
 type record_outcome =
   | Recorded of activation
@@ -50,8 +91,22 @@ type decode_error =
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
+  | Invalid_runtime_id
+  | Invalid_skill_tool_use_id
+  | Invalid_agent_core_turn of int
+  | Invalid_served_content_kind of string
+  | Invalid_served_content_path of string
+  | Invalid_served_content_bytes of int
+  | Invalid_served_content_sha256 of Skill_reference.revision_error
+  | Invalid_delivery_agent_core_turn of int
+  | Invalid_delivery_time of string
+  | Invalid_action_tool_use_id_field
+  | Invalid_action_tool_name_field of string
+  | Invalid_action_agent_core_turn of int
+  | Invalid_action_time of string
+  | Duplicate_action_tool_use_id
   | Invalid_activated_at of string
-  | Duplicate_exact_activation
+  | Duplicate_skill_tool_use_id
   | Session_id_mismatch
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
@@ -61,6 +116,18 @@ type store_error =
   | Lock_failed of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
+  | Invocation_id_collision of string
+  | Invalid_delivery_order of
+      { skill_tool_use_id : string
+      ; activation_turn : int
+      ; delivery_turn : int
+      }
+  | Conflicting_delivery of string
+  | Action_before_delivery of string
+  | Invalid_action_tool_use_id
+  | Invalid_action_tool_name of string
+  | Invalid_action_turn of int
+  | Invalid_action_observed_at of string
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
@@ -74,12 +141,18 @@ val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val workspace_key : t -> string
 val session_id : t -> Keeper_id.Trace_id.t
+val summarize : t -> summary
+val summary_to_yojson : summary -> Yojson.Safe.t
 
 val make_activation :
   identity:Skill_reference.identity ->
   content_revision:Skill_reference.content_revision ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
   turn_ref:Ids.Turn_ref.t ->
+  runtime_id:string ->
+  skill_tool_use_id:string ->
+  agent_core_turn:int ->
+  served_content:served_content ->
   activated_at:string ->
   origin:origin ->
   (activation, decode_error) result
@@ -106,6 +179,32 @@ val record :
   trace_id:Keeper_id.Trace_id.t ->
   activation ->
   (t * record_outcome, store_error) result
-(** Record by exact [(identity, content_revision)] key. Repeating the same
-    activation is idempotent; same-name Skills from another source/package or
-    revision remain distinct. *)
+(** Record one exact Agent Core invocation. Re-observing the same
+    [skill_tool_use_id] is idempotent only when every persisted field agrees.
+    A later invocation of the same Skill remains a distinct activation. *)
+
+val observe_delivery :
+  config:Workspace.config ->
+  trace_id:Keeper_id.Trace_id.t ->
+  turn_ref:Ids.Turn_ref.t ->
+  tool_result_ids:string list ->
+  agent_core_turn:int ->
+  delivered_at:string ->
+  (t * string list, store_error) result
+(** Mark exact Skill results that are present in a later provider request.
+    Unrelated tool-result ids are ignored. The returned ids are the matching
+    Skill invocations, including an idempotently re-observed delivery. *)
+
+val observe_action :
+  config:Workspace.config ->
+  trace_id:Keeper_id.Trace_id.t ->
+  turn_ref:Ids.Turn_ref.t ->
+  active_skill_tool_use_ids:string list ->
+  action_tool_use_id:string ->
+  tool_name:string ->
+  agent_core_turn:int ->
+  observed_at:string ->
+  (t * int, store_error) result
+(** Attach one later model-selected tool invocation to every exact delivered
+    Skill id in [active_skill_tool_use_ids]. The count is the number of Skill
+    activations updated; repeating the same action id is idempotent. *)

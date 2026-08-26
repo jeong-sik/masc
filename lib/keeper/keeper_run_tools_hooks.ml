@@ -80,6 +80,7 @@ type ctx =
       (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) option
   ; on_tool_stream_observation :
       (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
+  ; skill_activation_context : Keeper_skill_activation_recorder.t
   ; tools : Agent_core.Tool.t list
   }
 
@@ -93,6 +94,26 @@ let project_model_input ~base_path ~gate_replay_evidence messages =
   | None -> Ok messages
   | Some evidence ->
     Keeper_gate_replay.project_model_input ~base_path evidence messages
+;;
+
+let trailing_tool_result_ids messages =
+  match List.rev messages with
+  | { Agent_core.Types.role = Tool; content; _ } :: _ ->
+    List.filter_map
+      (function
+        | Agent_core.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+        | Text _
+        | Thinking _
+        | ReasoningDetails _
+        | RedactedThinking _
+        | ToolUse _
+        | Image _
+        | Document _
+        | Audio _ -> None)
+      content
+  | { role = (User | System | Assistant); _ } :: _
+  | [] ->
+    []
 ;;
 
 let relative_path_has_segment_prefix prefix raw =
@@ -269,6 +290,7 @@ let assemble_hooks
        mutex gives those effects one order without introducing a process-global
        gate or serializing tool execution itself. *)
     let serialize_tool_observer = create_tool_observer_serialization () in
+    let active_skill_tool_use_ids = ref [] in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
         ~config
@@ -393,6 +415,44 @@ let assemble_hooks
     in
     let before_turn_hook : Agent_core.Hooks.hooks =
       { Agent_core.Hooks.empty with
+        pre_tool_use =
+          Some
+            (fun event ->
+              match event with
+              | Agent_core.Hooks.PreToolUse { invocation; tool_name; _ }
+                when not
+                       (String.equal
+                          tool_name
+                          Keeper_tool_composition_catalog.skill_tool_name) ->
+                if !active_skill_tool_use_ids <> []
+                then
+                  (match
+                     Keeper_skill_activation_recorder.observe_action
+                       ~config
+                       ctx.skill_activation_context
+                       ~active_skill_tool_use_ids:!active_skill_tool_use_ids
+                       ~invocation
+                       ~tool_name
+                   with
+                   | Ok _ -> ()
+                   | Error error ->
+                     Log.Keeper.warn
+                       "Skill action observation failed for keeper=%s tool=%s error=%s"
+                       meta.name
+                       tool_name
+                       (Keeper_skill_activation_recorder.error_to_string error));
+                Agent_core.Hooks.Continue
+              | Agent_core.Hooks.PreToolUse _
+              | BeforeTurn _
+              | BeforeTurnParams _
+              | AfterTurn _
+              | PostToolUse _
+              | PostToolUseFailure _
+              | OnStop _
+              | OnError _
+              | OnToolError _ ->
+                Agent_core.Hooks.Continue)
+      ;
         before_turn_params =
           Some
             (fun event ->
@@ -401,6 +461,29 @@ let assemble_hooks
                   { turn; current_params; messages; last_tool_results; _ } ->
                 let hook_t0 = Time_compat.now () in
                 acc.current_turn <- turn;
+                let tool_result_ids = trailing_tool_result_ids messages in
+                (* A delivered Skill can only inform tool choices made from this
+                   exact provider request. Do not carry causal candidates into a
+                   later Agent Core turn. *)
+                active_skill_tool_use_ids := [];
+                (if tool_result_ids <> []
+                 then
+                   match
+                     Keeper_skill_activation_recorder.observe_delivery
+                       ~config
+                       ctx.skill_activation_context
+                       ~tool_result_ids
+                       ~agent_core_turn:turn
+                   with
+                   | Ok delivered ->
+                     active_skill_tool_use_ids :=
+                       List.sort_uniq String.compare delivered
+                   | Error error ->
+                     Log.Keeper.warn
+                       "Skill delivery observation failed for keeper=%s turn=%d error=%s"
+                       meta.name
+                       turn
+                       (Keeper_skill_activation_recorder.error_to_string error));
                 (* Reset the in-turn FSM before this hook writes the next agent-core
                    turn's runtime, policy, and prompt phases. *)
                 Keeper_registry.mark_agent_core_turn_started

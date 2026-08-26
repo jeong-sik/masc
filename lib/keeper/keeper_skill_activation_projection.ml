@@ -38,6 +38,8 @@ let to_yojson = function
       [ "status", `String "available"
       ; "keeper_name", `String keeper_name
       ; "ledger", Keeper_skill_activation_ledger.to_yojson ledger
+      ; ( "summary"
+        , Keeper_skill_activation_ledger.(summary_to_yojson (summarize ledger)) )
       ]
   | No_session { keeper_name } ->
     `Assoc

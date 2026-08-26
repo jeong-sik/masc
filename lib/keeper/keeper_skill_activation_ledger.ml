@@ -12,11 +12,40 @@ type origin =
       }
   | Session_composition of { tool_name : string }
 
+type delivery =
+  { agent_core_turn : int
+  ; delivered_at : string
+  }
+
+type action =
+  { tool_use_id : string
+  ; tool_name : string
+  ; agent_core_turn : int
+  ; observed_at : string
+  }
+
+type served_content =
+  | Skill_body of
+      { bytes : int
+      ; sha256 : string
+      }
+  | Skill_resource of
+      { relative_path : string
+      ; bytes : int
+      ; sha256 : string
+      }
+
 type activation =
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; skill_tool_use_id : string
+  ; agent_core_turn : int
+  ; served_content : served_content
+  ; delivery : delivery option
+  ; actions : action list
   ; activated_at : string
   ; origin : origin
   }
@@ -26,6 +55,18 @@ type t =
   ; session_id : Keeper_id.Trace_id.t
   ; activations : activation list
   ; revision : ledger_revision
+  }
+
+type summary =
+  { instruction_invocations : int
+  ; skill_bodies_served : int
+  ; skill_resources_served : int
+  ; instruction_deliveries : int
+  ; instruction_actions_observed : int
+  ; composition_invocations : int
+  ; composition_deliveries : int
+  ; composition_actions_observed : int
+  ; invalid_transitions : int
   }
 
 type record_outcome =
@@ -56,8 +97,22 @@ type decode_error =
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
+  | Invalid_runtime_id
+  | Invalid_skill_tool_use_id
+  | Invalid_agent_core_turn of int
+  | Invalid_served_content_kind of string
+  | Invalid_served_content_path of string
+  | Invalid_served_content_bytes of int
+  | Invalid_served_content_sha256 of Skill_reference.revision_error
+  | Invalid_delivery_agent_core_turn of int
+  | Invalid_delivery_time of string
+  | Invalid_action_tool_use_id_field
+  | Invalid_action_tool_name_field of string
+  | Invalid_action_agent_core_turn of int
+  | Invalid_action_time of string
+  | Duplicate_action_tool_use_id
   | Invalid_activated_at of string
-  | Duplicate_exact_activation
+  | Duplicate_skill_tool_use_id
   | Session_id_mismatch
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
@@ -67,6 +122,18 @@ type store_error =
   | Lock_failed of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
+  | Invocation_id_collision of string
+  | Invalid_delivery_order of
+      { skill_tool_use_id : string
+      ; activation_turn : int
+      ; delivery_turn : int
+      }
+  | Conflicting_delivery of string
+  | Action_before_delivery of string
+  | Invalid_action_tool_use_id
+  | Invalid_action_tool_name of string
+  | Invalid_action_turn of int
+  | Invalid_action_observed_at of string
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
@@ -88,8 +155,22 @@ let decode_error_code = function
   | Invalid_tool_name _ -> "invalid_tool_name"
   | Invalid_turn_ref _ -> "invalid_turn_ref"
   | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
+  | Invalid_runtime_id -> "invalid_runtime_id"
+  | Invalid_skill_tool_use_id -> "invalid_skill_tool_use_id"
+  | Invalid_agent_core_turn _ -> "invalid_agent_core_turn"
+  | Invalid_served_content_kind _ -> "invalid_served_content_kind"
+  | Invalid_served_content_path _ -> "invalid_served_content_path"
+  | Invalid_served_content_bytes _ -> "invalid_served_content_bytes"
+  | Invalid_served_content_sha256 _ -> "invalid_served_content_sha256"
+  | Invalid_delivery_agent_core_turn _ -> "invalid_delivery_agent_core_turn"
+  | Invalid_delivery_time _ -> "invalid_delivery_time"
+  | Invalid_action_tool_use_id_field -> "invalid_action_tool_use_id"
+  | Invalid_action_tool_name_field _ -> "invalid_action_tool_name"
+  | Invalid_action_agent_core_turn _ -> "invalid_action_agent_core_turn"
+  | Invalid_action_time _ -> "invalid_action_time"
+  | Duplicate_action_tool_use_id -> "duplicate_action_tool_use_id"
   | Invalid_activated_at _ -> "invalid_activated_at"
-  | Duplicate_exact_activation -> "duplicate_exact_activation"
+  | Duplicate_skill_tool_use_id -> "duplicate_skill_tool_use_id"
   | Session_id_mismatch -> "session_id_mismatch"
   | Workspace_key_mismatch -> "workspace_key_mismatch"
   | Invalid_ledger_revision _ -> "invalid_ledger_revision"
@@ -100,6 +181,14 @@ let store_error_code = function
   | Lock_failed _ -> "lock_failed"
   | Read_failed _ -> "read_failed"
   | Decode_failed error -> "decode_failed." ^ decode_error_code error
+  | Invocation_id_collision _ -> "invocation_id_collision"
+  | Invalid_delivery_order _ -> "invalid_delivery_order"
+  | Conflicting_delivery _ -> "conflicting_delivery"
+  | Action_before_delivery _ -> "action_before_delivery"
+  | Invalid_action_tool_use_id -> "invalid_action_tool_use_id"
+  | Invalid_action_tool_name _ -> "invalid_action_tool_name"
+  | Invalid_action_turn _ -> "invalid_action_turn"
+  | Invalid_action_observed_at _ -> "invalid_action_observed_at"
   | Write_failed _ -> "write_failed"
   | Readback_mismatch -> "readback_mismatch"
 ;;
@@ -109,12 +198,31 @@ let store_error_to_string = function
   | Read_failed error ->
     "read failed: " ^ Fs_compat.owned_regular_file_read_error_to_string error
   | Decode_failed _ -> "decode failed"
+  | Invocation_id_collision tool_use_id ->
+    "Skill invocation id collision: " ^ tool_use_id
+  | Invalid_delivery_order { skill_tool_use_id; activation_turn; delivery_turn } ->
+    Printf.sprintf
+      "Skill delivery precedes its activation: id=%s activation_turn=%d delivery_turn=%d"
+      skill_tool_use_id
+      activation_turn
+      delivery_turn
+  | Conflicting_delivery tool_use_id ->
+    "Skill delivery observation conflicts with its durable receipt: " ^ tool_use_id
+  | Action_before_delivery tool_use_id ->
+    "Skill action was observed before body delivery: " ^ tool_use_id
+  | Invalid_action_tool_use_id -> "Skill action tool_use_id is empty"
+  | Invalid_action_tool_name tool_name ->
+    "Skill action tool name is invalid: " ^ tool_name
+  | Invalid_action_turn turn ->
+    Printf.sprintf "Skill action Agent Core turn is invalid: %d" turn
+  | Invalid_action_observed_at value ->
+    "Skill action observation time is invalid: " ^ value
   | Write_failed error ->
     "write failed: " ^ Keeper_fs.durable_write_error_to_string error
   | Readback_mismatch -> "readback mismatch"
 ;;
 
-let schema = "masc.skill-activations/v1"
+let schema = "masc.skill-activations/v2"
 let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let revision ledger = ledger.revision
@@ -122,11 +230,100 @@ let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 
-let make_activation
+let empty_summary =
+  { instruction_invocations = 0
+  ; skill_bodies_served = 0
+  ; skill_resources_served = 0
+  ; instruction_deliveries = 0
+  ; instruction_actions_observed = 0
+  ; composition_invocations = 0
+  ; composition_deliveries = 0
+  ; composition_actions_observed = 0
+  ; invalid_transitions = 0
+  }
+;;
+
+let summarize ledger =
+  List.fold_left
+    (fun summary activation ->
+       let delivered =
+         match activation.delivery with
+         | Some _ -> 1
+         | None -> 0
+       in
+       let actions = List.length activation.actions in
+       match activation.origin with
+       | Task_instruction _
+       | Session_instruction ->
+         let skill_bodies_served, skill_resources_served =
+           match activation.served_content with
+           | Skill_body _ -> summary.skill_bodies_served + 1, summary.skill_resources_served
+           | Skill_resource _ ->
+             summary.skill_bodies_served, summary.skill_resources_served + 1
+         in
+         { summary with
+           instruction_invocations = summary.instruction_invocations + 1
+         ; skill_bodies_served
+         ; skill_resources_served
+         ; instruction_deliveries = summary.instruction_deliveries + delivered
+         ; instruction_actions_observed =
+             summary.instruction_actions_observed + actions
+         }
+       | Task_composition _
+       | Session_composition _ ->
+         { summary with
+           composition_invocations = summary.composition_invocations + 1
+         ; composition_deliveries = summary.composition_deliveries + delivered
+         ; composition_actions_observed =
+             summary.composition_actions_observed + actions
+         })
+    empty_summary
+    ledger.activations
+;;
+
+let summary_to_yojson summary =
+  `Assoc
+    [ "instruction_invocations", `Int summary.instruction_invocations
+    ; "skill_bodies_served", `Int summary.skill_bodies_served
+    ; "skill_resources_served", `Int summary.skill_resources_served
+    ; "instruction_deliveries", `Int summary.instruction_deliveries
+    ; "instruction_actions_observed", `Int summary.instruction_actions_observed
+    ; "composition_invocations", `Int summary.composition_invocations
+    ; "composition_deliveries", `Int summary.composition_deliveries
+    ; "composition_actions_observed", `Int summary.composition_actions_observed
+    ; "invalid_transitions", `Int summary.invalid_transitions
+    ]
+;;
+
+let validate_served_content = function
+  | Skill_body { bytes; sha256 } ->
+    if bytes < 0
+    then Error (Invalid_served_content_bytes bytes)
+    else
+      Skill_reference.validate_revision_string sha256
+      |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
+  | Skill_resource { relative_path; bytes; sha256 } ->
+    let* () =
+      Skill_resource_path.of_string relative_path
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> Invalid_served_content_path relative_path)
+    in
+    if bytes < 0
+    then Error (Invalid_served_content_bytes bytes)
+    else
+      Skill_reference.validate_revision_string sha256
+      |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
+;;
+
+let make_activation_evidence
       ~(identity : Skill_reference.identity)
       ~content_revision
       ~snapshot_revision
       ~turn_ref
+      ~runtime_id
+      ~skill_tool_use_id
+      ~agent_core_turn
+      ~served_content
       ~activated_at
       ~origin
   =
@@ -151,6 +348,22 @@ let make_activation
   in
   let* () = origin_valid in
   let* () =
+    if String.equal (String.trim runtime_id) ""
+    then Error Invalid_runtime_id
+    else Ok ()
+  in
+  let* () =
+    if String.equal (String.trim skill_tool_use_id) ""
+    then Error Invalid_skill_tool_use_id
+    else Ok ()
+  in
+  let* () =
+    if agent_core_turn < 0
+    then Error (Invalid_agent_core_turn agent_core_turn)
+    else Ok ()
+  in
+  let* () = validate_served_content served_content in
+  let* () =
     if String.equal trace_id "" || Ids.Turn_ref.absolute_turn turn_ref <= 0
     then Error (Invalid_turn_ref (Ids.Turn_ref.to_string turn_ref))
     else Ok ()
@@ -165,9 +378,40 @@ let make_activation
     ; content_revision
     ; snapshot_revision
     ; turn_ref
+    ; runtime_id
+    ; skill_tool_use_id
+    ; agent_core_turn
+    ; served_content
+    ; delivery = None
+    ; actions = []
     ; activated_at
     ; origin
     }
+;;
+
+let make_activation
+      ~identity
+      ~content_revision
+      ~snapshot_revision
+      ~turn_ref
+      ~runtime_id
+      ~skill_tool_use_id
+      ~agent_core_turn
+      ~served_content
+      ~activated_at
+      ~origin
+  =
+  make_activation_evidence
+    ~identity
+    ~content_revision
+    ~snapshot_revision
+    ~turn_ref
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~served_content
+    ~activated_at
+    ~origin
 ;;
 
 let origin_to_yojson = function
@@ -191,6 +435,38 @@ let origin_to_yojson = function
       ]
 ;;
 
+let delivery_to_yojson (delivery : delivery) =
+  `Assoc
+    [ "agent_core_turn", `Int delivery.agent_core_turn
+    ; "delivered_at", `String delivery.delivered_at
+    ]
+;;
+
+let action_to_yojson (action : action) =
+  `Assoc
+    [ "tool_use_id", `String action.tool_use_id
+    ; "tool_name", `String action.tool_name
+    ; "agent_core_turn", `Int action.agent_core_turn
+    ; "observed_at", `String action.observed_at
+    ]
+;;
+
+let served_content_to_yojson = function
+  | Skill_body { bytes; sha256 } ->
+    `Assoc
+      [ "kind", `String "skill_body"
+      ; "bytes", `Int bytes
+      ; "sha256", `String sha256
+      ]
+  | Skill_resource { relative_path; bytes; sha256 } ->
+    `Assoc
+      [ "kind", `String "skill_resource"
+      ; "relative_path", `String relative_path
+      ; "bytes", `Int bytes
+      ; "sha256", `String sha256
+      ]
+;;
+
 let activation_to_yojson activation =
   `Assoc
     [ "identity", Skill_reference.identity_to_yojson activation.identity
@@ -202,6 +478,15 @@ let activation_to_yojson activation =
           (Skill_catalog_snapshot.snapshot_revision_to_string
              activation.snapshot_revision) )
     ; "turn_ref", Ids.Turn_ref.to_yojson activation.turn_ref
+    ; "runtime_id", `String activation.runtime_id
+    ; "skill_tool_use_id", `String activation.skill_tool_use_id
+    ; "agent_core_turn", `Int activation.agent_core_turn
+    ; "served_content", served_content_to_yojson activation.served_content
+    ; ( "delivery"
+      , match activation.delivery with
+        | Some delivery -> delivery_to_yojson delivery
+        | None -> `Null )
+    ; "actions", `List (List.map action_to_yojson activation.actions)
     ; "activated_at", `String activation.activated_at
     ; "origin", origin_to_yojson activation.origin
     ]
@@ -253,6 +538,12 @@ let string_field field fields =
   match List.assoc_opt field fields with
   | Some (`String value) -> Ok value
   | Some _ | None -> Error (Missing_string { field })
+;;
+
+let int_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) -> Ok value
+  | Some _ | None -> Error (Expected_object { field })
 ;;
 
 let exact_fields ~object_name ~allowed fields =
@@ -346,6 +637,95 @@ let decode_origin json =
   | kind -> Error (Invalid_origin_kind kind)
 ;;
 
+let decode_delivery = function
+  | `Null -> Ok None
+  | json ->
+    let* fields = object_field "delivery" json in
+    let* () =
+      exact_fields
+        ~object_name:"delivery"
+        ~allowed:[ "agent_core_turn"; "delivered_at" ]
+        fields
+    in
+    let* agent_core_turn = int_field "agent_core_turn" fields in
+    let* delivered_at = string_field "delivered_at" fields in
+    let* () =
+      if agent_core_turn < 0
+      then Error (Invalid_delivery_agent_core_turn agent_core_turn)
+      else Ok ()
+    in
+    let* () =
+      Time_codec.parse_rfc3339 delivered_at
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> Invalid_delivery_time delivered_at)
+    in
+    Ok (Some { agent_core_turn; delivered_at })
+;;
+
+let decode_action json =
+  let* fields = object_field "action" json in
+  let* () =
+    exact_fields
+      ~object_name:"action"
+      ~allowed:[ "tool_use_id"; "tool_name"; "agent_core_turn"; "observed_at" ]
+      fields
+  in
+  let* tool_use_id = string_field "tool_use_id" fields in
+  let* tool_name = string_field "tool_name" fields in
+  let* agent_core_turn = int_field "agent_core_turn" fields in
+  let* observed_at = string_field "observed_at" fields in
+  let* () =
+    if String.equal (String.trim tool_use_id) ""
+    then Error Invalid_action_tool_use_id_field
+    else Ok ()
+  in
+  let* () =
+    if Safe_identifier.is_portable_name tool_name
+    then Ok ()
+    else Error (Invalid_action_tool_name_field tool_name)
+  in
+  let* () =
+    if agent_core_turn < 0
+    then Error (Invalid_action_agent_core_turn agent_core_turn)
+    else Ok ()
+  in
+  let* () =
+    Time_codec.parse_rfc3339 observed_at
+    |> Result.map ignore
+    |> Result.map_error (fun _ -> Invalid_action_time observed_at)
+  in
+  Ok { tool_use_id; tool_name; agent_core_turn; observed_at }
+;;
+
+let decode_served_content json =
+  let* fields = object_field "served_content" json in
+  let* kind = string_field "kind" fields in
+  let* () =
+    let allowed =
+      match kind with
+      | "skill_body" -> [ "kind"; "bytes"; "sha256" ]
+      | "skill_resource" ->
+        [ "kind"; "relative_path"; "bytes"; "sha256" ]
+      | observed -> []
+    in
+    match allowed with
+    | [] -> Error (Invalid_served_content_kind kind)
+    | allowed -> exact_fields ~object_name:"served_content" ~allowed fields
+  in
+  let* bytes = int_field "bytes" fields in
+  let* sha256 = string_field "sha256" fields in
+  let* served_content =
+    match kind with
+    | "skill_body" -> Ok (Skill_body { bytes; sha256 })
+    | "skill_resource" ->
+      let* relative_path = string_field "relative_path" fields in
+      Ok (Skill_resource { relative_path; bytes; sha256 })
+    | observed -> Error (Invalid_served_content_kind observed)
+  in
+  let* () = validate_served_content served_content in
+  Ok served_content
+;;
+
 let decode_activation ~expected_trace_id json =
   let* fields = object_field "activation" json in
   let* () =
@@ -356,6 +736,12 @@ let decode_activation ~expected_trace_id json =
         ; "content_revision"
         ; "snapshot_revision"
         ; "turn_ref"
+        ; "runtime_id"
+        ; "skill_tool_use_id"
+        ; "agent_core_turn"
+        ; "served_content"
+        ; "delivery"
+        ; "actions"
         ; "activated_at"
         ; "origin"
         ]
@@ -391,6 +777,42 @@ let decode_activation ~expected_trace_id json =
     then Ok ()
     else Error Turn_ref_session_mismatch
   in
+  let* runtime_id = string_field "runtime_id" fields in
+  let* skill_tool_use_id = string_field "skill_tool_use_id" fields in
+  let* agent_core_turn = int_field "agent_core_turn" fields in
+  let* served_content_json =
+    match List.assoc_opt "served_content" fields with
+    | Some value -> Ok value
+    | None -> Error (Expected_object { field = "served_content" })
+  in
+  let* served_content = decode_served_content served_content_json in
+  let* delivery_json =
+    match List.assoc_opt "delivery" fields with
+    | Some value -> Ok value
+    | None -> Error (Expected_object { field = "delivery" })
+  in
+  let* delivery = decode_delivery delivery_json in
+  let* actions =
+    match List.assoc_opt "actions" fields with
+    | Some (`List values) ->
+      List.fold_left
+        (fun result value ->
+           let* reversed = result in
+           let* action = decode_action value in
+           Ok (action :: reversed))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object { field = "actions" })
+  in
+  let rec ensure_unique_actions = function
+    | [] -> Ok ()
+    | action :: rest ->
+      if List.exists (fun other -> String.equal action.tool_use_id other.tool_use_id) rest
+      then Error Duplicate_action_tool_use_id
+      else ensure_unique_actions rest
+  in
+  let* () = ensure_unique_actions actions in
   let* activated_at = string_field "activated_at" fields in
   let* () =
     Time_codec.parse_rfc3339 activated_at
@@ -403,20 +825,39 @@ let decode_activation ~expected_trace_id json =
     | None -> Error (Expected_object { field = "origin" })
   in
   let* origin = decode_origin origin_json in
-  make_activation
+  let* activation =
+    make_activation_evidence
     ~identity
     ~content_revision
     ~snapshot_revision
     ~turn_ref
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~served_content
     ~activated_at
     ~origin
+  in
+  (match delivery with
+   | Some observed when observed.agent_core_turn <= activation.agent_core_turn ->
+     Error
+       (Invalid_delivery_agent_core_turn observed.agent_core_turn)
+   | Some observed ->
+     (match
+        List.find_opt
+          (fun (action : action) ->
+             action.agent_core_turn < observed.agent_core_turn)
+          actions
+      with
+      | Some (action : action) ->
+        Error (Invalid_action_agent_core_turn action.agent_core_turn)
+      | None -> Ok { activation with delivery; actions })
+   | None when actions <> [] -> Error (Invalid_delivery_agent_core_turn (-1))
+   | None -> Ok { activation with delivery; actions })
 ;;
 
 let exact_key_equal left right =
-  Skill_reference.equal_identity left.identity right.identity
-  && Skill_reference.equal_content_revision
-       left.content_revision
-       right.content_revision
+  String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
 
 let of_projection_yojson json =
@@ -467,7 +908,7 @@ let of_projection_yojson json =
     | [] -> Ok ()
     | activation :: rest ->
       if List.exists (exact_key_equal activation) rest
-      then Error Duplicate_exact_activation
+      then Error Duplicate_skill_tool_use_id
       else ensure_unique rest
   in
   let* () = ensure_unique activations in
@@ -532,6 +973,30 @@ let load ~config ~trace_id =
     read_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
 ;;
 
+let persist_locked ~ownership_root ~trace_id session_dir activations =
+  let next =
+    make
+      ~workspace_key:(workspace_key_of_root ownership_root)
+      ~session_id:trace_id
+      activations
+  in
+  let path = ledger_path session_dir in
+  let* () =
+    Keeper_fs.save_json_durable_atomic
+      ~ownership_root
+      ~pretty:false
+      path
+      (to_yojson next)
+    |> Result.map_error (fun error -> Write_failed error)
+  in
+  let* readback =
+    read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+  in
+  if String.equal readback.revision next.revision
+  then Ok readback
+  else Error Readback_mismatch
+;;
+
 let record ~config ~trace_id activation =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
@@ -544,27 +1009,146 @@ let record ~config ~trace_id activation =
     in
     let* current = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     match List.find_opt (exact_key_equal activation) current.activations with
-    | Some existing -> Ok (current, Already_recorded existing)
+    | Some existing
+      when Yojson.Safe.equal
+             (activation_to_yojson existing)
+             (activation_to_yojson activation) ->
+      Ok (current, Already_recorded existing)
+    | Some _ -> Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
-      let next =
-        make
-          ~workspace_key:(workspace_key_of_root ownership_root)
-          ~session_id:trace_id
+      let* readback =
+        persist_locked
+          ~ownership_root
+          ~trace_id
+          session_dir
           (current.activations @ [ activation ])
       in
-      let path = ledger_path session_dir in
-      let* () =
-        Keeper_fs.save_json_durable_atomic
-          ~ownership_root
-          ~pretty:false
-          path
-          (to_yojson next)
-        |> Result.map_error (fun error -> Write_failed error)
-      in
-      let* readback =
-        read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
-      in
-      if String.equal readback.revision next.revision
-      then Ok (readback, Recorded activation)
-      else Error Readback_mismatch)
+      Ok (readback, Recorded activation))
+;;
+
+let observe_delivery
+      ~config
+      ~trace_id
+      ~turn_ref
+      ~tool_result_ids
+      ~agent_core_turn
+      ~delivered_at
+  =
+  with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+    let* () =
+      Time_codec.parse_rfc3339 delivered_at
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> Invalid_delivery_time delivered_at)
+      |> Result.map_error (fun error -> Decode_failed error)
+    in
+    let* current =
+      read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+    in
+    let requested = List.sort_uniq String.compare tool_result_ids in
+    let* reversed, matched, changed =
+      List.fold_left
+        (fun result activation ->
+           let* reversed, matched, changed = result in
+           if not (List.mem activation.skill_tool_use_id requested)
+           then Ok (activation :: reversed, matched, changed)
+           else if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
+           then Error (Conflicting_delivery activation.skill_tool_use_id)
+           else if agent_core_turn <= activation.agent_core_turn
+           then
+             Error
+               (Invalid_delivery_order
+                  { skill_tool_use_id = activation.skill_tool_use_id
+                  ; activation_turn = activation.agent_core_turn
+                  ; delivery_turn = agent_core_turn
+                  })
+           else
+             let matched = activation.skill_tool_use_id :: matched in
+             match activation.delivery with
+             | None ->
+               let delivery = Some { agent_core_turn; delivered_at } in
+               Ok ({ activation with delivery } :: reversed, matched, true)
+             | Some delivery when delivery.agent_core_turn = agent_core_turn ->
+               Ok (activation :: reversed, matched, changed)
+             | Some _ -> Error (Conflicting_delivery activation.skill_tool_use_id))
+        (Ok ([], [], false))
+        current.activations
+    in
+    let activations = List.rev reversed in
+    let matched = List.rev matched in
+    if not changed
+    then Ok (current, matched)
+    else
+      let* stored = persist_locked ~ownership_root ~trace_id session_dir activations in
+      Ok (stored, matched))
+;;
+
+let observe_action
+      ~config
+      ~trace_id
+      ~turn_ref
+      ~active_skill_tool_use_ids
+      ~action_tool_use_id
+      ~tool_name
+      ~agent_core_turn
+      ~observed_at
+  =
+  if String.equal (String.trim action_tool_use_id) ""
+  then Error Invalid_action_tool_use_id
+  else if not (Safe_identifier.is_portable_name tool_name)
+  then Error (Invalid_action_tool_name tool_name)
+  else if agent_core_turn < 0
+  then Error (Invalid_action_turn agent_core_turn)
+  else
+    match Time_codec.parse_rfc3339 observed_at with
+    | Error _ -> Error (Invalid_action_observed_at observed_at)
+    | Ok _ ->
+      with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+        let* current =
+          read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
+        in
+        let active = List.sort_uniq String.compare active_skill_tool_use_ids in
+        let action = { tool_use_id = action_tool_use_id; tool_name; agent_core_turn; observed_at } in
+        let* reversed, added =
+          List.fold_left
+            (fun result activation ->
+               let* reversed, added = result in
+               if not (List.mem activation.skill_tool_use_id active)
+               then Ok (activation :: reversed, added)
+               else if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
+               then Error (Action_before_delivery activation.skill_tool_use_id)
+               else
+                 match activation.delivery with
+                 | None -> Error (Action_before_delivery activation.skill_tool_use_id)
+                 | Some delivery when agent_core_turn < delivery.agent_core_turn ->
+                   Error (Action_before_delivery activation.skill_tool_use_id)
+                 | Some _ ->
+                   (match
+                      List.find_opt
+                        (fun known -> String.equal known.tool_use_id action_tool_use_id)
+                        activation.actions
+                    with
+                    | Some known
+                      when String.equal known.tool_name action.tool_name
+                           && known.agent_core_turn = action.agent_core_turn ->
+                      Ok (activation :: reversed, added)
+                    | Some _ -> Error (Invocation_id_collision action_tool_use_id)
+                    | None ->
+                      let activation =
+                        { activation with actions = activation.actions @ [ action ] }
+                      in
+                      Ok (activation :: reversed, added + 1)))
+            (Ok ([], 0))
+            current.activations
+        in
+        if added = 0
+        then Ok (current, 0)
+        else
+          let* stored =
+            persist_locked
+              ~ownership_root
+              ~trace_id
+              session_dir
+              (List.rev reversed)
+          in
+          Ok (stored, added))
 ;;

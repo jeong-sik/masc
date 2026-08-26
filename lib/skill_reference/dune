@@ -4,5 +4,5 @@
  (name masc_skill_reference)
  (public_name masc.skill_reference)
  (wrapped false)
- (modules skill_reference)
+ (modules skill_reference skill_resource_path)
  (libraries digestif masc.skill_config yojson))

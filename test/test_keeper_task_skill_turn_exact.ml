@@ -88,6 +88,14 @@ let resolve_one snapshot reference =
   | Error error -> fail (Selection.error_to_string error)
 ;;
 
+let instruction_skill reference (skill : Masc.Keeper_skill_catalog.skill) =
+  Masc.Keeper_tool_composition_surface.instruction_skill
+    ~reference
+    ~description:skill.description
+    ~body:skill.body
+    ()
+;;
+
 let test_shadow_reference_selects_shadow_not_effective_winner () =
   let config =
     config
@@ -113,7 +121,23 @@ let test_shadow_reference_selects_shadow_not_effective_winner () =
 ;;
 
 let run_skill_tool tool input =
-  match tool.Agent_core.Tool.handler (Agent_core.Tool.Execution_env.create ()) input with
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"task-skill-turn-exact"
+      ~turn:0
+      ~schedule:
+        { planned_index = 0
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:(Agent_core.Tool.completion tool)
+  in
+  match
+    tool.Agent_core.Tool.handler
+      (Agent_core.Tool.Execution_env.create ~invocation ())
+      input
+  with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error error -> error.Agent_core.Llm_provider.Types.message
 ;;
@@ -135,12 +159,12 @@ let test_exact_reference_consumer_rejects_name_fallback () =
   let tool =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-      ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
+      ~instruction_skills:[ instruction_skill reference selected.skill ]
       ()
   in
   let schema_tool =
     Masc.Keeper_tool_composition_surface.instruction_skill_schema_tool
-      ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
+      ~instruction_skills:[ instruction_skill reference selected.skill ]
   in
   check string
     "executable and effective-surface descriptions match"
@@ -159,12 +183,11 @@ let test_exact_reference_consumer_rejects_name_fallback () =
   let failing_tool =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-      ~record_activation:(fun observed ->
+      ~record_activation:(fun ~invocation:_ ~content:_ observed ->
         incr activation_attempts;
         ignore observed;
         Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
-      ~instruction_skills:
-        [ reference, selected.skill.description, selected.skill.body ]
+      ~instruction_skills:[ instruction_skill reference selected.skill ]
       ()
   in
   let failed_output =
@@ -194,6 +217,77 @@ let test_resolved_body_stays_frozen_after_new_snapshot () =
     snapshot config [ [ "guide", document ~name:"guide" ~description:"guide" "LATER_BODY" ] ]
   in
   check string "turn keeps captured body" "FROZEN_BODY" selected.skill.body
+;;
+
+let test_resource_is_read_only_when_exact_file_is_requested () =
+  let source_root = Filename.temp_dir "keeper-skill-resource-" "" in
+  let skill_root = Filename.concat source_root "guide" in
+  let references = Filename.concat skill_root "references" in
+  Fs_compat.mkdir_p references;
+  let resource = Filename.concat references "PROOF.md" in
+  Fs_compat.save_file resource "DEFERRED_RESOURCE";
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree source_root)
+    (fun () ->
+       let config = config (source_row ~id:"only" ~path:"skills") in
+       let skill_snapshot =
+         snapshot
+           config
+           [ [ "guide", document ~name:"guide" ~description:"guide" "BODY" ] ]
+       in
+       let source_id =
+         match config.sources with
+         | [ source ] -> source.id
+         | _ -> fail "expected one source"
+       in
+       let reference =
+         exact_reference
+           skill_snapshot
+           ~source_id
+           ~package_id:"guide"
+           ~name:"guide"
+       in
+       let selected = resolve_one skill_snapshot reference in
+       let instruction =
+         Masc.Keeper_tool_composition_surface.instruction_skill
+           ~resource_location:
+             Masc.Keeper_tool_composition_surface.{ source_root; directory = "guide" }
+           ~reference
+           ~description:selected.skill.description
+           ~body:selected.skill.body
+           ()
+       in
+       let tool =
+         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+           ~instruction_skills:[ instruction ]
+           ()
+       in
+       let input =
+         match Reference.to_yojson reference with
+         | `Assoc fields ->
+           `Assoc (("file", `String "references/PROOF.md") :: fields)
+         | _ -> assert false
+       in
+       let output = run_skill_tool tool input in
+       check bool
+         "requested resource is returned"
+         true
+         (String_util.contains_substring output "DEFERRED_RESOURCE");
+       check bool
+         "resource receipt has digest"
+         true
+         (String_util.contains_substring output "sha256");
+       let escaped =
+         match Reference.to_yojson reference with
+         | `Assoc fields -> `Assoc (("file", `String "../OUTSIDE.md") :: fields)
+         | _ -> assert false
+       in
+       let escaped_output = run_skill_tool tool escaped in
+       check bool
+         "parent traversal never reaches the resource reader"
+         false
+         (String_util.contains_substring escaped_output "DEFERRED_RESOURCE"))
 ;;
 
 let test_revision_mismatch_is_typed_before_tool_projection () =
@@ -238,6 +332,8 @@ let () =
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick
             test_resolved_body_stays_frozen_after_new_snapshot
+        ; test_case "resource read is exact and deferred" `Quick
+            test_resource_is_read_only_when_exact_file_is_requested
         ; test_case "revision mismatch remains typed" `Quick
             test_revision_mismatch_is_typed_before_tool_projection
         ] )

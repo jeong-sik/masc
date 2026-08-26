@@ -73,9 +73,16 @@ let snapshot_revision =
 ;;
 
 let activation_result ?(trace = "trace-one") ?(source = "workspace")
-      ?(package = "review") ?(name = "review") ?(revision = 'a')
-      ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
-      ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" }) () =
+    ?(package = "review") ?(name = "review") ?(revision = 'a')
+    ?(runtime_id = "test.runtime") ?skill_tool_use_id ?(agent_core_turn = 0)
+    ?(body = "skill body")
+    ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
+    ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" }) () =
+  let skill_tool_use_id =
+    Option.value
+      ~default:(Printf.sprintf "call-%s-%c" source revision)
+      skill_tool_use_id
+  in
   Ledger.make_activation
     ~identity:
       (Skill_catalog_snapshot.make_identity
@@ -85,12 +92,20 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ~content_revision:(content_revision revision)
     ~snapshot_revision
     ~turn_ref:(Ids.Turn_ref.make ~trace_id:trace ~absolute_turn)
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~served_content:
+      (Ledger.Skill_body
+         { bytes = String.length body
+         ; sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+         })
     ~activated_at
     ~origin
 ;;
 
-let activation ?trace ?source ?package ?name ?revision ?absolute_turn ?activated_at
-      ?origin () =
+let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_use_id
+      ?agent_core_turn ?body ?absolute_turn ?activated_at ?origin () =
   match
     activation_result
       ?trace
@@ -98,6 +113,10 @@ let activation ?trace ?source ?package ?name ?revision ?absolute_turn ?activated
       ?package
       ?name
       ?revision
+      ?runtime_id
+      ?skill_tool_use_id
+      ?agent_core_turn
+      ?body
       ?absolute_turn
       ?activated_at
       ?origin
@@ -159,6 +178,27 @@ let test_same_name_different_identity_or_revision_is_distinct () =
   | Ok ledger -> check int "three exact activations" 3 (List.length (Ledger.activations ledger))
 ;;
 
+let test_same_skill_different_invocations_are_distinct () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~skill_tool_use_id:"call-first" ()
+    ; activation ~skill_tool_use_id:"call-second" ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "distinct invocation was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    check int "two invocation activations" 2
+      (List.length (Ledger.activations ledger))
+;;
+
 let test_session_origins_roundtrip () =
   with_session @@ fun config trace_id _session_dir ->
   let values =
@@ -188,6 +228,80 @@ let test_session_origins_roundtrip () =
        ] ->
        check string "composition tool" "keeper_compose_review" tool_name
      | _ -> fail "session origins did not survive durable roundtrip")
+;;
+
+let test_delivery_and_later_action_form_one_exact_chain () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:0 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let delivered, matching_ids =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_result_ids:[ "unrelated"; "call-skill" ]
+        ~agent_core_turn:1
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "one matching Skill result" [ "call-skill" ] matching_ids;
+  let activation =
+    match Ledger.activations delivered with
+    | [ activation ] -> activation
+    | _ -> fail "delivery changed activation cardinality"
+  in
+  (match activation.delivery with
+   | Some delivery -> check int "delivery round" 1 delivery.agent_core_turn
+   | None -> fail "matching provider input did not record delivery");
+  let with_action, added =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_tool_use_id:"call-action"
+        ~tool_name:"keeper_time_now"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:02Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "one Skill linked to the action" 1 added;
+  (match Ledger.activations with_action with
+   | [ { actions = [ action ]; _ } ] ->
+     check string "later action id" "call-action" action.tool_use_id;
+     check string "later action tool" "keeper_time_now" action.tool_name
+   | _ -> fail "later action was not attached to the exact Skill invocation");
+  let summary = Ledger.summarize with_action in
+  check int "one instruction invocation" 1 summary.instruction_invocations;
+  check int "one body served" 1 summary.skill_bodies_served;
+  check int "one delivery" 1 summary.instruction_deliveries;
+  check int "one later action" 1 summary.instruction_actions_observed;
+  check int "zero invalid transitions" 0 summary.invalid_transitions;
+  let _, repeated =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_tool_use_id:"call-action"
+        ~tool_name:"keeper_time_now"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:03Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "repeated action observation is idempotent" 0 repeated
 ;;
 
 let test_corrupt_ledger_is_typed () =
@@ -253,7 +367,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v1"
+      [ "schema", `String "masc.skill-activations/v2"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
@@ -267,7 +381,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       ~expected_trace_id:trace
       json
   with
-  | Error Ledger.Duplicate_exact_activation -> ()
+  | Error Ledger.Duplicate_skill_tool_use_id -> ()
   | Error _ -> fail "duplicate exact key returned wrong decoder error"
   | Ok _ -> fail "duplicate exact key was accepted"
 ;;
@@ -415,10 +529,14 @@ let () =
     [ ( "session ledger"
       , [ test_case "empty, durable record, idempotent readback" `Quick
             test_empty_record_and_idempotent_readback
-        ; test_case "exact identity and revision form the dedupe key" `Quick
+        ; test_case "exact identities and revisions remain distinct" `Quick
             test_same_name_different_identity_or_revision_is_distinct
+        ; test_case "same Skill keeps distinct invocation activations" `Quick
+            test_same_skill_different_invocations_are_distinct
         ; test_case "session origins survive durable roundtrip" `Quick
             test_session_origins_roundtrip
+        ; test_case "delivery and later action share one exact chain" `Quick
+            test_delivery_and_later_action_form_one_exact_chain
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
         ; test_case "copied ledger is bound to its trace" `Quick
             test_copied_ledger_is_rejected_by_session_identity

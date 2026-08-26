@@ -1150,17 +1150,46 @@ let make_request_control_tool
    for the tool are not, and the model-prose ratchet is what says so. *)
 let skill_reference_input_schema = skill_tool_schema.input_schema
 
+type instruction_skill =
+  { reference : Skill_reference.t
+  ; description : string
+  ; body : string
+  ; resource_location : resource_location option
+  }
+
+and resource_location =
+  { source_root : string
+  ; directory : string
+  }
+
+let instruction_skill ?resource_location ~reference ~description ~body () =
+  { reference; description; body; resource_location }
+;;
+
 let merge_instruction_skills ~task ~global =
   List.fold_left
-    (fun selected ((reference, _, _) as skill) ->
+    (fun selected skill ->
        if
          List.exists
-           (fun (known, _, _) -> Skill_reference.equal reference known)
+           (fun known -> Skill_reference.equal skill.reference known.reference)
            selected
        then selected
        else selected @ [ skill ])
     task
     global
+;;
+
+let instruction_skill_description instruction_skills =
+  let listed =
+    instruction_skills
+    |> List.map (fun skill ->
+         Printf.sprintf
+           "%s: %s"
+           (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+           skill.description)
+    |> String.concat "\n"
+  in
+  skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
 let instruction_skill_schema_tool ~instruction_skills =
@@ -1190,6 +1219,36 @@ let activation_failure ?reference ~tool_name ~start_time error =
     (Keeper_skill_activation_recorder.error_to_string error)
 ;;
 
+type skill_input_error =
+  | Invalid_skill_reference
+  | Invalid_resource_path of Skill_resource_path.error
+
+let skill_reference_and_resource_path input =
+  match input with
+  | `Assoc fields ->
+    let reference_json =
+      `Assoc (List.filter (fun (field, _) -> not (String.equal field "file")) fields)
+    in
+    (match Skill_reference.of_yojson reference_json with
+     | Error _ -> Error Invalid_skill_reference
+     | Ok reference ->
+       (match List.assoc_opt "file" fields with
+        | None -> Ok (reference, None)
+        | Some (`String value) ->
+          Skill_resource_path.of_string value
+          |> Result.map (fun resource_path -> reference, Some resource_path)
+          |> Result.map_error (fun error -> Invalid_resource_path error)
+        | Some _ -> Error (Invalid_resource_path Skill_resource_path.Empty)))
+  | _ ->
+    Error Invalid_skill_reference
+;;
+
+let load_instruction_resource location relative_path =
+  let skill_root = Filename.concat location.source_root location.directory in
+  let path = Skill_resource_path.append_to ~root:skill_root relative_path in
+  Fs_compat.load_owned_regular_file ~ownership_root:location.source_root path
+;;
+
 let make_instruction_skill_tool
       ~(config : Workspace.config)
       ?record_activation
@@ -1204,7 +1263,7 @@ let make_instruction_skill_tool
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
-    (fun _execution_env input ->
+    (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
@@ -1212,47 +1271,103 @@ let make_instruction_skill_tool
       with
       | Error rejection -> rejection
       | Ok _ ->
-        (match Skill_reference.of_yojson input with
-         | Error _ ->
+        (match Agent_core.Tool.Execution_env.invocation execution_env with
+         | None ->
+           Tool_result.runtime_err
+             ~tool_name:name
+             ~start_time
+             "keeper_skill execution requires Agent-Core invocation identity"
+         | Some invocation ->
+        (match skill_reference_and_resource_path input with
+         | Error Invalid_skill_reference ->
            Tool_result.make_err
              ~tool_name:name
              ~class_:Tool_result.Workflow_rejection
              ~start_time
              "keeper_skill requires one canonical exact Skill reference"
-         | Ok asked ->
+         | Error (Invalid_resource_path error) ->
+           Tool_result.make_err
+             ~tool_name:name
+             ~class_:Tool_result.Workflow_rejection
+             ~start_time
+             (Skill_resource_path.error_to_string error)
+         | Ok (asked, resource_path) ->
            (match
               List.find_opt
-                (fun (reference, _, _) -> Skill_reference.equal reference asked)
+                (fun skill -> Skill_reference.equal skill.reference asked)
                 instruction_skills
             with
-            | Some (reference, _, body) ->
-              (match record_activation with
-               | Some record ->
-                 (match record reference with
-                  | Error error ->
-                    activation_failure
-                      ~reference
+            | Some skill ->
+              let reference = skill.reference in
+              let skill_tool_use_id =
+                Agent_core.Tool_contract.Invocation.tool_use_id invocation
+              in
+              let success data =
+                Tool_result.make_ok ~tool_name:name ~start_time
+                  ~data:(`Assoc (("reference", Skill_reference.to_yojson reference)
+                                 :: ("skill_tool_use_id", `String skill_tool_use_id)
+                                 :: data))
+                  ()
+              in
+              let record_and_return ~content data =
+                match record_activation with
+                | Some record ->
+                  (match record ~invocation ~content reference with
+                   | Error error ->
+                     activation_failure
+                       ~reference
+                       ~tool_name:name
+                       ~start_time
+                       error
+                   | Ok
+                       ( Activation_ledger.Recorded _
+                       | Activation_ledger.Already_recorded _ ) ->
+                     success data)
+                | None -> success data
+              in
+              (match resource_path with
+               | None ->
+                 record_and_return
+                   ~content:(Keeper_skill_activation_recorder.Body skill.body)
+                   [ "body", `String skill.body ]
+               | Some relative_path ->
+                 (match skill.resource_location with
+                  | None ->
+                    Tool_result.runtime_err
                       ~tool_name:name
                       ~start_time
-                      error
-                  | Ok
-                      ( Activation_ledger.Recorded _
-                      | Activation_ledger.Already_recorded _ ) ->
-                    Tool_result.make_ok ~tool_name:name ~start_time
-                      ~data:
-                        (`Assoc
-                           [ "reference", Skill_reference.to_yojson reference
-                           ; "body", `String body
-                           ])
-                      ())
-               | None ->
-                 Tool_result.make_ok ~tool_name:name ~start_time
-                   ~data:
-                     (`Assoc
-                        [ "reference", Skill_reference.to_yojson reference
-                        ; "body", `String body
-                        ])
-                   ())
+                      "the frozen Skill snapshot has no resolved resource root"
+                  | Some location ->
+                    (match load_instruction_resource location relative_path with
+                     | Error error ->
+                       Tool_result.runtime_err
+                         ~tool_name:name
+                         ~start_time
+                         (Fs_compat.owned_regular_file_read_error_to_string error)
+                     | Ok None ->
+                       Tool_result.make_err
+                         ~tool_name:name
+                         ~class_:Tool_result.Workflow_rejection
+                         ~start_time
+                         (Printf.sprintf
+                            "the Skill carries no resource %S"
+                            (Skill_resource_path.to_string relative_path))
+                     | Ok (Some contents) ->
+                       let relative_path_text =
+                         Skill_resource_path.to_string relative_path
+                       in
+                       let sha256 =
+                         Digestif.SHA256.(digest_string contents |> to_hex)
+                       in
+                       record_and_return
+                         ~content:
+                           (Keeper_skill_activation_recorder.Resource
+                              { relative_path; contents })
+                         [ "file", `String relative_path_text
+                         ; "bytes", `Int (String.length contents)
+                         ; "sha256", `String sha256
+                         ; "contents", `String contents
+                         ])))
             | (* A reference the frozen catalog does not carry is the caller's
                  error and says so with the exact references it does carry,
                  rather than an empty
@@ -1268,10 +1383,10 @@ let make_instruction_skill_tool
                     | skills ->
                       String.concat ", "
                         (List.map
-                           (fun (reference, _, _) ->
-                              Skill_reference.to_yojson reference
+                           (fun skill ->
+                              Skill_reference.to_yojson skill.reference
                               |> Yojson.Safe.to_string)
-                           skills))))))
+                           skills)))))))
 ;;
 
 module For_testing = struct
@@ -1409,7 +1524,7 @@ let make_tools
                  | Ok plan ->
                    (match record_composition_activation with
                     | Some record ->
-                      (match record ~tool_name with
+                      (match record ~invocation:parent_invocation ~tool_name with
                        | Error error ->
                          activation_failure ~tool_name ~start_time error
                        | Ok
@@ -1475,7 +1590,7 @@ let make_tools
                match record_composition_activation with
                | None -> Ok ()
                | Some record ->
-                 (match record ~tool_name with
+                 (match record ~invocation:parent_invocation ~tool_name with
                   | Error error -> Error error
                   | Ok
                       ( Activation_ledger.Recorded _

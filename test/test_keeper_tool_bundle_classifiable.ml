@@ -282,6 +282,7 @@ let with_bundle_tools ?(record_activations = true) f =
          match
            Keeper_skill_activation_recorder.make
              ~trace_id
+             ~runtime_id:"test.runtime"
              ~turn_ref:
                (Ids.Turn_ref.make
                   ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
@@ -318,7 +319,12 @@ let with_bundle_tools ?(record_activations = true) f =
            ~identity_tools:(identity_tools ~base_path:dir)
            ~composition_plan_index
            ~task_instruction_skills:
-             [ reference, "what the gate reads", "body" ]
+             [ Keeper_tool_composition_surface.instruction_skill
+                 ~reference
+                 ~description:"what the gate reads"
+                 ~body:"body"
+                 ()
+             ]
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
            ()
@@ -336,8 +342,25 @@ let with_bundle f =
 
 (* The handler is the tool. Reading only its schema would let a tool that
    answers nothing pass for one that works. *)
-let run_tool (tool : Agent_core.Tool.t) input =
-  match tool.handler (Agent_core.Tool.Execution_env.create ()) input with
+let run_tool ?(tool_use_id = "bundle-instruction-activation")
+      (tool : Agent_core.Tool.t) input =
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id
+      ~turn:0
+      ~schedule:
+        { planned_index = 0
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:(Agent_core.Tool.completion tool)
+  in
+  match
+    tool.handler
+      (Agent_core.Tool.Execution_env.create ~invocation ())
+      input
+  with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error err -> err.Agent_core.Llm_provider.Types.message
 ;;
@@ -469,6 +492,14 @@ let test_the_skill_tool_serves_the_body () =
       let served = run_tool tool (Skill_reference.to_yojson reference) in
       check bool "asking by exact reference returns the body" true
         (contains ~needle:"body" served);
+      let served_again =
+        run_tool
+          ~tool_use_id:"bundle-instruction-activation-second"
+          tool
+          (Skill_reference.to_yojson reference)
+      in
+      check bool "second invocation also returns the body" true
+        (contains ~needle:"body" served_again);
       let ledger =
         match
           Keeper_skill_activation_ledger.load
@@ -480,10 +511,11 @@ let test_the_skill_tool_serves_the_body () =
           fail (Keeper_skill_activation_ledger.store_error_to_string error)
       in
       (match Keeper_skill_activation_ledger.activations ledger with
-       | [ activation ] ->
-         assert_exact_activation snapshot reference activation
+       | [ first; second ] ->
+         assert_exact_activation snapshot reference first;
+         assert_exact_activation snapshot reference second
        | activations ->
-         failf "expected one instruction activation, got %d"
+         failf "expected two instruction activations, got %d"
            (List.length activations));
       let stale =
         Skill_reference.make

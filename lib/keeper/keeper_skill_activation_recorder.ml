@@ -2,9 +2,17 @@ open Result.Syntax
 
 module Ledger = Keeper_skill_activation_ledger
 
+type instruction_content =
+  | Body of string
+  | Resource of
+      { relative_path : Skill_resource_path.t
+      ; contents : string
+      }
+
 type t =
   { trace_id : Keeper_id.Trace_id.t
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; task_scope : recorded_task_scope
   }
@@ -23,7 +31,7 @@ type error =
   | Activation_rejected of Ledger.decode_error
   | Store_failed of Ledger.store_error
 
-let make ~trace_id ~turn_ref ~snapshot_revision ~task_scope =
+let make ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_scope =
   let scope =
     match task_scope with
     | Keeper_task_skill_turn.No_task -> Ok No_task
@@ -40,7 +48,8 @@ let make ~trace_id ~turn_ref ~snapshot_revision ~task_scope =
   then Error Turn_scope_mismatch
   else
     Result.map
-      (fun task_scope -> { trace_id; turn_ref; snapshot_revision; task_scope })
+      (fun task_scope ->
+         { trace_id; turn_ref; runtime_id; snapshot_revision; task_scope })
       scope
 ;;
 
@@ -62,13 +71,28 @@ let composition_origin context ~tool_name reference =
     else Ledger.Session_composition { tool_name }
 ;;
 
-let record ~config context ~origin reference =
+let evidence ~relative_path contents =
+  let bytes = String.length contents in
+  let sha256 = Digestif.SHA256.(digest_string contents |> to_hex) in
+  match relative_path with
+  | None -> Ledger.Skill_body { bytes; sha256 }
+  | Some relative_path ->
+    Ledger.Skill_resource
+      { relative_path = Skill_resource_path.to_string relative_path; bytes; sha256 }
+;;
+
+let record ~config context ~invocation ~served_content ~origin reference =
   let* activation =
     Ledger.make_activation
       ~identity:reference.Skill_reference.identity
       ~content_revision:reference.content_revision
       ~snapshot_revision:context.snapshot_revision
       ~turn_ref:context.turn_ref
+      ~runtime_id:context.runtime_id
+      ~skill_tool_use_id:
+        (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+      ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+      ~served_content
       ~activated_at:(Masc_domain.now_iso ())
       ~origin
     |> Result.map_error (fun error -> Activation_rejected error)
@@ -78,14 +102,53 @@ let record ~config context ~origin reference =
   |> Result.map_error (fun error -> Store_failed error)
 ;;
 
-let record_instruction ~config context reference =
+let record_instruction ~config context ~invocation ~content reference =
   let origin = instruction_origin context reference in
-  record ~config context ~origin reference
+  let served_content =
+    match content with
+    | Body body -> evidence ~relative_path:None body
+    | Resource { relative_path; contents } ->
+      evidence ~relative_path:(Some relative_path) contents
+  in
+  record ~config context ~invocation ~served_content ~origin reference
 ;;
 
-let record_composition ~config context ~tool_name reference =
+let record_composition ~config context ~invocation ~tool_name reference =
   let origin = composition_origin context ~tool_name reference in
-  record ~config context ~origin reference
+  let served_content = evidence ~relative_path:None "" in
+  record ~config context ~invocation ~served_content ~origin reference
+;;
+
+let observe_delivery ~config context ~tool_result_ids ~agent_core_turn =
+  Ledger.observe_delivery
+    ~config
+    ~trace_id:context.trace_id
+    ~turn_ref:context.turn_ref
+    ~tool_result_ids
+    ~agent_core_turn
+    ~delivered_at:(Masc_domain.now_iso ())
+  |> Result.map snd
+  |> Result.map_error (fun error -> Store_failed error)
+;;
+
+let observe_action
+      ~config
+      context
+      ~active_skill_tool_use_ids
+      ~invocation
+      ~tool_name
+  =
+  Ledger.observe_action
+    ~config
+    ~trace_id:context.trace_id
+    ~turn_ref:context.turn_ref
+    ~active_skill_tool_use_ids
+    ~action_tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+    ~tool_name
+    ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+    ~observed_at:(Masc_domain.now_iso ())
+  |> Result.map snd
+  |> Result.map_error (fun error -> Store_failed error)
 ;;
 
 let error_code = function

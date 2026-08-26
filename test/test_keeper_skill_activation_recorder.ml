@@ -44,6 +44,19 @@ let snapshot_revision =
   | Error _ -> fail "invalid snapshot revision fixture"
 ;;
 
+let invocation tool_use_id =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn:0
+    ~schedule:
+      { planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_core.Tool_contract.Serial
+      }
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+;;
+
 let reference ?(package = "review") ?(name = "review") revision =
   Skill_reference.make
     ~identity:
@@ -69,6 +82,7 @@ let make_context ~trace_id ~task_scope =
   match
     Recorder.make
       ~trace_id
+      ~runtime_id:"test.runtime"
       ~turn_ref:
         (Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
@@ -91,13 +105,21 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
         (Keeper_task_skill_turn.Task
            { task_id = "task-007"; references = [ task_reference ] })
   in
-  (match Recorder.record_instruction ~config context task_reference with
+  (match
+     Recorder.record_instruction
+       ~config
+       context
+       ~invocation:(invocation "call-task")
+       ~content:(Recorder.Body "task body")
+       task_reference
+   with
    | Ok _ -> ()
    | Error error -> fail (Recorder.error_to_string error));
   (match
      Recorder.record_composition
        ~config
        context
+       ~invocation:(invocation "call-composition")
        ~tool_name:"keeper_compose_global"
        session_reference
    with
@@ -124,6 +146,7 @@ let test_invalid_task_scope_fails_closed () =
   match
     Recorder.make
       ~trace_id
+      ~runtime_id:"test.runtime"
       ~turn_ref:
         (Ids.Turn_ref.make ~trace_id:"trace-recorder" ~absolute_turn:1)
       ~snapshot_revision
@@ -137,11 +160,48 @@ let test_invalid_task_scope_fails_closed () =
   | Ok _ -> fail "invalid Task scope was accepted"
 ;;
 
+let test_resource_receipt_keeps_path_size_and_digest () =
+  with_session @@ fun config trace_id ->
+  let reference = reference 'a' in
+  let context =
+    make_context ~trace_id ~task_scope:Keeper_task_skill_turn.No_task
+  in
+  let relative_path =
+    match Skill_resource_path.of_string "references/PROOF.md" with
+    | Ok path -> path
+    | Error error -> fail (Skill_resource_path.error_to_string error)
+  in
+  (match
+     Recorder.record_instruction
+       ~config
+       context
+       ~invocation:(invocation "call-resource")
+       ~content:(Recorder.Resource { relative_path; contents = "RESOURCE_BYTES" })
+       reference
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Recorder.error_to_string error));
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match Ledger.activations ledger with
+     | [ { served_content = Ledger.Skill_resource observed; _ } ] ->
+       check string "relative path" "references/PROOF.md" observed.relative_path;
+       check int "exact bytes" 14 observed.bytes;
+       check
+         string
+         "exact digest"
+         "4891552b0a1e3de55b9f5cfdf1f06508210fcbcdae3e5133a40a82aba9920b8b"
+         observed.sha256
+     | _ -> fail "resource invocation was not recorded as a resource")
+;;
+
 let test_turn_scope_mismatch_is_rejected_before_recording () =
   let trace = trace_id "trace-recorder" in
   match
     Recorder.make
       ~trace_id:trace
+      ~runtime_id:"test.runtime"
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:1)
       ~snapshot_revision
       ~task_scope:Keeper_task_skill_turn.No_task
@@ -159,6 +219,8 @@ let () =
             test_task_and_session_origins_are_derived_from_exact_refs
         ; test_case "invalid Task scope fails closed" `Quick
             test_invalid_task_scope_fails_closed
+        ; test_case "resource receipt is exact" `Quick
+            test_resource_receipt_keeps_path_size_and_digest
         ; test_case "turn scope mismatch is rejected" `Quick
             test_turn_scope_mismatch_is_rejected_before_recording
         ] )

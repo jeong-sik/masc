@@ -1657,6 +1657,17 @@ let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instructi
         (reference_fields
          @ [ "snapshot_revision", `String (String.make 64 'f')
            ; "turn_ref", `String "trace-activation#7"
+           ; "runtime_id", `String "test.runtime"
+           ; "skill_tool_use_id", `String (Printf.sprintf "call-%c" revision)
+           ; "agent_core_turn", `Int 0
+           ; ( "served_content"
+             , `Assoc
+                 [ "kind", `String "skill_body"
+                 ; "bytes", `Int 12
+                 ; "sha256", `String (String.make 64 'c')
+                 ] )
+           ; "delivery", `Null
+           ; "actions", `List []
            ; "activated_at", `String "2026-08-26T10:30:00Z"
            ; "origin", origin
            ])
@@ -1680,7 +1691,7 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v1"
+          [ "schema", `String "masc.skill-activations/v2"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision

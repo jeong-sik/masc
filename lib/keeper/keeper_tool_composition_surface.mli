@@ -26,6 +26,26 @@ type 'evidence schema_tool_origin =
   | Async_status
   | Async_cancel
 
+type instruction_skill =
+  { reference : Skill_reference.t
+  ; description : string
+  ; body : string
+  ; resource_location : resource_location option
+  }
+
+and resource_location =
+  { source_root : string
+  ; directory : string
+  }
+
+val instruction_skill :
+  ?resource_location:resource_location ->
+  reference:Skill_reference.t ->
+  description:string ->
+  body:string ->
+  unit ->
+  instruction_skill
+
 val schema_tool_rows :
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
@@ -45,24 +65,24 @@ val schema_tools :
     without constructing turn sandboxes or executable handlers. *)
 
 val merge_instruction_skills :
-  task:(Skill_reference.t * string * string) list ->
-  global:(Skill_reference.t * string * string) list ->
-  (Skill_reference.t * string * string) list
+  task:instruction_skill list ->
+  global:instruction_skill list ->
+  instruction_skill list
 (** Preserve Task-selected order, then append globally discoverable exact
     entries that are not already selected. *)
 
 val instruction_skill_schema_tool :
-  instruction_skills:(Skill_reference.t * string * string) list ->
+  instruction_skills:instruction_skill list ->
   Agent_core.Tool.t
 (** Handler-free [keeper_skill] schema with the same exact Available
     description used by the executable tool. *)
 
 val make_tools
-  :  ?instruction_skills:(Skill_reference.t * string * string) list
-       (** Instruction skills this keeper carries, as (exact reference,
-           description, body). Present ones get
+  :  ?instruction_skills:instruction_skill list
+       (** Instruction skills this keeper carries. Present ones get
            {!Keeper_tool_composition_catalog.skill_tool_name}, which serves a
-           frozen body only for a canonical exact-reference input. *)
+           frozen body or one deferred bundled resource for a canonical
+           exact-reference input. *)
   -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
        (** Composition entries declared by skills
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
@@ -72,12 +92,15 @@ val make_tools
        (** The current turn's approval index. When present, every materialized
            composition records its node tools for that exact gate. *)
   -> ?record_instruction_activation:
-       (Skill_reference.t ->
+       (invocation:Agent_core.Tool_contract.Invocation.t ->
+        content:Keeper_skill_activation_recorder.instruction_content ->
+        Skill_reference.t ->
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
   -> ?record_composition_activation:
-       (tool_name:string ->
+       (invocation:Agent_core.Tool_contract.Invocation.t ->
+        tool_name:string ->
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
@@ -109,11 +132,13 @@ module For_testing : sig
   val make_instruction_skill_tool :
     config:Workspace.config ->
     ?record_activation:
-      (Skill_reference.t ->
+      (invocation:Agent_core.Tool_contract.Invocation.t ->
+       content:Keeper_skill_activation_recorder.instruction_content ->
+       Skill_reference.t ->
        ( Keeper_skill_activation_ledger.record_outcome
        , Keeper_skill_activation_recorder.error )
          result) ->
-    instruction_skills:(Skill_reference.t * string * string) list ->
+    instruction_skills:instruction_skill list ->
     unit ->
     Agent_core.Tool.t
 

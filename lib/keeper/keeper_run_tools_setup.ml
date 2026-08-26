@@ -306,14 +306,26 @@ let prepare_agent_setup
   let task_instruction_skills =
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
-         ( selected.reference
-         , selected.skill.description
-         , selected.skill.body ))
+         let resource_location =
+           match selected.skill.provenance with
+           | Some { source_root = Some source_root; directory; _ } ->
+             Some Keeper_tool_composition_surface.{ source_root; directory }
+           | Some { source_root = None; _ }
+           | None ->
+             None
+         in
+         Keeper_tool_composition_surface.instruction_skill
+           ?resource_location
+           ~reference:selected.reference
+           ~description:selected.skill.description
+           ~body:selected.skill.body
+           ())
        task_skill_selection.selected
   in
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
       ~trace_id:meta.runtime.trace_id
+      ~runtime_id:runtime_id_string
       ~turn_ref:
         (Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -643,6 +655,7 @@ let prepare_agent_setup
     ; on_runtime_attempt
     ; tool_result_commit_required
     ; on_tool_stream_observation
+    ; skill_activation_context
     ; on_tool_result_ready
     ; tools
     }

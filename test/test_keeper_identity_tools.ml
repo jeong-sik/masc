@@ -100,7 +100,7 @@ let test_never_attached_is_not_an_error () =
      failure that never happened. *)
   let base_path = temp_base () in
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok None -> ()
@@ -112,7 +112,7 @@ let test_an_unreadable_catalog_is_not_no_tools () =
   let dir =
     Filename.concat
       (Filename.concat (Filename.concat base_path ".masc") "identity")
-      (Filename.concat "catalogs" "kidsnote")
+      (Filename.concat "catalogs" "identity-tools-fixture")
   in
   let rec ensure path =
     if not (Sys.file_exists path) then (
@@ -123,7 +123,7 @@ let test_an_unreadable_catalog_is_not_no_tools () =
   Out_channel.with_open_bin (Filename.concat dir "atlassian.json") (fun oc ->
       Out_channel.output_string oc "{ this is not json");
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Error _ -> ()
@@ -132,10 +132,10 @@ let test_an_unreadable_catalog_is_not_no_tools () =
 
 let test_a_written_catalog_comes_back () =
   let base_path = temp_base () in
-  write_catalog ~base_path ~keeper_name:"kidsnote"
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture"
     [ tool "getJiraIssue"; tool "searchIssues" ];
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
@@ -155,14 +155,15 @@ let test_names_are_namespaced_by_provider () =
      the prefix the model is handed two tools with one name and no way to
      mean either. *)
   let base_path = temp_base () in
-  write_catalog ~base_path ~keeper_name:"kidsnote" [ tool "search" ];
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture" [ tool "search" ];
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"kidsnote"
+        Identity_tools.agent_tools ~base_path
+          ~keeper_name:"identity-tools-fixture"
           ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "prefixed" [ "atlassian_search" ]
@@ -177,14 +178,16 @@ let test_a_schema_that_cannot_be_projected_is_reported () =
     { Mcp_client.name = "weird"; description = "";
       input_schema = `String "not a schema" }
   in
-  write_catalog ~base_path ~keeper_name:"kidsnote" [ tool "fine"; bad ];
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture"
+    [ tool "fine"; bad ];
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"kidsnote"
+        Identity_tools.agent_tools ~base_path
+          ~keeper_name:"identity-tools-fixture"
           ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "the usable one is offered"
@@ -198,14 +201,16 @@ let test_a_keeper_with_no_token_gets_a_refusal_not_a_crash () =
      read when one is called. A Keeper whose credential was deleted has to
      get an answer, not an exception. *)
   let base_path = temp_base () in
-  write_catalog ~base_path ~keeper_name:"kidsnote" [ tool "getJiraIssue" ];
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture"
+    [ tool "getJiraIssue" ];
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) -> (
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"kidsnote"
+        Identity_tools.agent_tools ~base_path
+          ~keeper_name:"identity-tools-fixture"
           ~provider:(provider ()) catalog
       in
       match offering.Identity_tools.offered with
@@ -248,12 +253,13 @@ let bearer sent =
 
 let single_tool ~base_path ~post =
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"identity-tools-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) -> (
       let offering =
-        Identity_tools.agent_tools ~post ~base_path ~keeper_name:"kidsnote"
+        Identity_tools.agent_tools ~post ~base_path
+          ~keeper_name:"identity-tools-fixture"
           ~provider:(provider ()) catalog
       in
       match offering.Identity_tools.offered with
@@ -280,7 +286,8 @@ let test_this_process_env_is_not_a_keepers_credential () =
     (Masc.Env_keeper_scrub.is_allowed "ATLASSIAN_ACCESS_TOKEN");
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
-  write_catalog ~base_path ~keeper_name:"kidsnote" [ tool "getJiraIssue" ];
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture"
+    [ tool "getJiraIssue" ];
   let post, sent = recording_transport () in
   match Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []) with
   | Ok _ ->
@@ -299,9 +306,10 @@ let test_the_projected_token_is_the_one_sent () =
      is the Keeper's own projected credential. *)
   let base_path = temp_base () in
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
-  write_catalog ~base_path ~keeper_name:"kidsnote" [ tool "getJiraIssue" ];
+  write_catalog ~base_path ~keeper_name:"identity-tools-fixture"
+    [ tool "getJiraIssue" ];
   (match
-     Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+     Projection.set_env_entry ~base_path ~keeper_name:"identity-tools-fixture"
        ~scope:Projection.Keeper_secret ~name:"ATLASSIAN_ACCESS_TOKEN"
        ~value:"the-keepers-token"
    with

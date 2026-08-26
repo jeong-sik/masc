@@ -813,9 +813,14 @@ jobs:
     steps:
       - name: Free disk space
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
-        # Android SDK (~9 GB), .NET (~1.6 GB), GHC/Haskell (~1 GB) and the
-        # CodeQL bundle (~5 GB) that this OCaml build never uses. Removing them
-        # reclaims about 15 GB and prevents the recurring "No space left on
+        # Android SDK (~9 GB), .NET (~1.6 GB), GHC/Haskell (~1 GB), CodeQL
+        # (~5 GB), Swift, Boost, Miniconda and Vcpkg that this OCaml build never
+        # uses. Private-repository runners have a 72 GB root device rather than
+        # the 145 GB device observed on public-repository runs; the original
+        # cleanup left only 38 GB there, while a cold full build plus its opam
+        # switch needs more than that (masc#22954 recurrence, 2026-08-26).
+        # Removing the additional toolchains preserves enough cold-build headroom
+        # and prevents the recurring "No space left on
         # device" failures in this job (heavy dune build, _build artifacts and
         # test runners exceed the default free space; runs 28638901622 /
         # 28644587505 / 28652695346 all died this way on 2026-07-03). This is a
@@ -832,6 +837,10 @@ jobs:
           sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
           sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
           sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/swift & cleanup_pids+=("$!")
+          sudo rm -rf /usr/local/share/boost & cleanup_pids+=("$!")
+          sudo rm -rf /usr/share/miniconda & cleanup_pids+=("$!")
+          sudo rm -rf /usr/local/share/vcpkg & cleanup_pids+=("$!")
           sudo docker image prune --all --force & cleanup_pids+=("$!")
           for cleanup_pid in "${cleanup_pids[@]}"; do
             wait "${cleanup_pid}" || true
@@ -900,6 +909,8 @@ jobs:
           # compile independently. The root dune env is the warning-as-error
           # SSOT, so this one cacheable rule graph is authoritative for all
           # three surfaces.
+          echo "Disk immediately before build:"
+          df -h /
           opam exec -- dune build --root . @default @check @install &
           build_pid=$!
 
@@ -910,6 +921,7 @@ jobs:
               elapsed=$((elapsed + 60))
               if kill -0 "${build_pid}" 2>/dev/null; then
                 echo "[ci-heartbeat] dune build still running (${elapsed}s elapsed)"
+                df -h /
               fi
             done
           ) &

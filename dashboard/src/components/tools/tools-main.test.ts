@@ -1,7 +1,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DashboardKeeperWaitingInventory, DashboardScheduledAutomationProjection } from '../../api'
+import type {
+  DashboardKeeperWaitingInventory,
+  DashboardScheduledAutomationProjection,
+  DashboardToolsResponse,
+} from '../../api'
 
 type MockToolsResponse = {
   generated_at?: string
@@ -77,23 +81,25 @@ vi.mock('../tool-executor/tool-executor', () => ({
 
 import { Tools } from './tools-main'
 
-function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
+function waitingInventoryFixture(
+  keeperNames: string[] = ['sangsu'],
+): DashboardKeeperWaitingInventory {
   return {
     schema: 'masc.dashboard.keeper_waiting_inventory.v3',
     source: 'server_keeper_waiting_inventory',
     keeper_count_known: true,
-    keeper_count: 1,
-    waiting_keeper_count: 1,
-    row_count: 1,
+    keeper_count: keeperNames.length,
+    waiting_keeper_count: keeperNames.length,
+    row_count: keeperNames.length,
     global_row_count: 0,
-    keepers: [
-      {
-        keeper_name: 'sangsu',
+    keepers: keeperNames.map(keeperName =>
+      ({
+        keeper_name: keeperName,
         state: 'waiting',
         waiting_count: 1,
         waiting_on: [
           {
-            keeper_name: 'sangsu',
+            keeper_name: keeperName,
             source: 'event_queue_pending',
             waiting_on: 'bootstrap',
             what: '기동 직후 첫 턴',
@@ -101,10 +107,71 @@ function waitingInventoryFixture(): DashboardKeeperWaitingInventory {
             next_action: 'keeper_drain_event_queue',
           },
         ],
-      },
-    ],
+      })),
     global_waiting_on: [],
   }
+}
+
+function keeperReceiptFixture(
+  keeperName: string,
+  sessionId = 'trace-one',
+): DashboardToolsResponse {
+  const reference = {
+    identity: {
+      source_id: 'project-masc',
+      package_id: 'ocaml-coding',
+      name: 'ocaml-coding',
+    },
+    content_revision: 'a'.repeat(64),
+  }
+  return {
+    tool_inventory: { count: 0, tools: [] },
+    tool_usage: {
+      total_calls: 0,
+      distinct_tools_called: 0,
+      top_20: [],
+      never_called_count: 0,
+      registered_count: 0,
+    },
+    effective_keeper_surface: {
+      status: 'available',
+      keeper_name: keeperName,
+      runtime_id: 'openai.codex',
+      official_client_kind: 'codex',
+      native_posture: 'read',
+      tool_groups: [],
+      current_task_id: 'task-001',
+      instruction_skills: [reference],
+      composition_skills: [],
+      count: 2,
+      tools: [],
+      tool_surface_sha256: 'b'.repeat(64),
+    },
+    skill_activations: {
+      status: 'available',
+      keeper_name: keeperName,
+      ledger: {
+        schema: 'masc.skill-activations/v1',
+        session_id: sessionId,
+        revision: 'c'.repeat(64),
+        activations: [
+          {
+            ...reference,
+            snapshot_revision: 'd'.repeat(64),
+            turn_ref: `${sessionId}#1`,
+            activated_at: '2026-08-26T00:00:00Z',
+            origin: { kind: 'task_instruction', task_id: 'task-001' },
+          },
+        ],
+      },
+    },
+  }
+}
+
+function selectKeeper(container: HTMLElement, keeperName: string): void {
+  const selector = container.querySelector('select') as HTMLSelectElement
+  selector.value = keeperName
+  selector.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
 async function flush(): Promise<void> {
@@ -289,62 +356,11 @@ describe('Tools', () => {
       },
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
-    const reference = {
-      identity: {
-        source_id: 'project-masc',
-        package_id: 'ocaml-coding',
-        name: 'ocaml-coding',
-      },
-      content_revision: 'a'.repeat(64),
-    }
-    mocks.fetchDashboardTools.mockResolvedValue({
-      tool_inventory: { count: 0, tools: [] },
-      tool_usage: {
-        total_calls: 0,
-        distinct_tools_called: 0,
-        top_20: [],
-        never_called_count: 0,
-        registered_count: 0,
-      },
-      effective_keeper_surface: {
-        status: 'available',
-        keeper_name: 'sangsu',
-        runtime_id: 'openai.codex',
-        official_client_kind: 'codex',
-        native_posture: 'read',
-        tool_groups: [],
-        current_task_id: 'task-001',
-        instruction_skills: [reference],
-        composition_skills: [],
-        count: 2,
-        tools: [],
-        tool_surface_sha256: 'b'.repeat(64),
-      },
-      skill_activations: {
-        status: 'available',
-        keeper_name: 'sangsu',
-        ledger: {
-          schema: 'masc.skill-activations/v1',
-          session_id: 'trace-one',
-          revision: 'c'.repeat(64),
-          activations: [
-            {
-              ...reference,
-              snapshot_revision: 'd'.repeat(64),
-              turn_ref: 'trace-one:1',
-              activated_at: '2026-08-26T00:00:00Z',
-              origin: { kind: 'task_instruction', task_id: 'task-001' },
-            },
-          ],
-        },
-      },
-    })
+    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('sangsu'))
 
     render(html`<${Tools} />`, container)
     await flush()
-    const selector = container.querySelector('select') as HTMLSelectElement
-    selector.value = 'sangsu'
-    selector.dispatchEvent(new Event('change', { bubbles: true }))
+    selectKeeper(container, 'sangsu')
     await flush()
 
     expect(mocks.fetchDashboardTools).toHaveBeenCalledWith(expect.objectContaining({
@@ -353,5 +369,86 @@ describe('Tools', () => {
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
     expect(container.textContent).toContain('Task instruction · task-001')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
+  })
+
+  it('fails loudly when one Keeper projection is omitted', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const partial = keeperReceiptFixture('sangsu')
+    delete partial.skill_activations
+    mocks.fetchDashboardTools.mockResolvedValue(partial)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain('Server response omitted skill_activations')
+    expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('rejects a receipt belonging to another Keeper', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('other-keeper'))
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain(
+      'effective_keeper_surface belongs to other-keeper, not sangsu',
+    )
+    expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('does not render a late receipt after the selected Keeper changes', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(['alpha', 'beta']),
+    }
+    let resolveAlpha: ((value: DashboardToolsResponse) => void) | undefined
+    let resolveBeta: ((value: DashboardToolsResponse) => void) | undefined
+    mocks.fetchDashboardTools.mockImplementation(({ keeperName }: { keeperName: string }) =>
+      new Promise<DashboardToolsResponse>(resolve => {
+        if (keeperName === 'alpha') resolveAlpha = resolve
+        if (keeperName === 'beta') resolveBeta = resolve
+      }))
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'alpha')
+    await flush()
+    selectKeeper(container, 'beta')
+    await flush()
+
+    resolveBeta?.(keeperReceiptFixture('beta', 'trace-beta'))
+    await flush()
+    expect(container.textContent).toContain('session trace-beta')
+
+    resolveAlpha?.(keeperReceiptFixture('alpha', 'trace-alpha'))
+    await flush()
+    expect(container.textContent).toContain('session trace-beta')
+    expect(container.textContent).not.toContain('session trace-alpha')
   })
 })

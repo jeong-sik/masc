@@ -254,6 +254,25 @@ let test_instruction_skill_does_not_require_a_named_read_tool () =
       (List.length surface.instruction_skills)
 ;;
 
+let test_global_instruction_is_present_in_receipt () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  match
+    project
+      ~tool_groups:None
+      ~task_skill_references:[]
+      ~native_posture:Runtime_native_tools.Native_read
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    check string
+      "global instruction receipt is exact"
+      (Skill_reference.list_to_yojson
+         [ reference_by_name (skill_snapshot ()) "guide" ]
+       |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+       |> Yojson.Safe.to_string)
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
@@ -268,6 +287,8 @@ let () =
             test_external_composition_preserves_snapshot_provenance
         ; test_case "instruction Skill is independent of a named Read tool" `Quick
             test_instruction_skill_does_not_require_a_named_read_tool
+        ; test_case "global instruction is present in receipt" `Quick
+            test_global_instruction_is_present_in_receipt
         ] )
     ]
 ;;

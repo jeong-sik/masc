@@ -113,11 +113,6 @@ let project
            selected.reference, selected.skill.description, selected.skill.body)
         task_selection.selected
     in
-    let instruction_skills =
-      List.map
-        (fun (selected : Keeper_task_skill_turn.selected) -> selected.reference)
-        task_selection.selected
-    in
     let global_instruction_skills =
       Keeper_skill_catalog.skills skill_catalog
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
@@ -133,6 +128,9 @@ let project
       Keeper_tool_composition_surface.merge_instruction_skills
         ~task:task_instruction_skills
         ~global:global_instruction_skills
+    in
+    let instruction_skills =
+      List.map (fun (reference, _, _) -> reference) readable_instruction_skills
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog

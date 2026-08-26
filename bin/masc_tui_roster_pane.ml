@@ -52,3 +52,14 @@ let toggle_hidden ~hidden ~cols =
 
 let content_cols ~hidden ~cols =
   if shown ~hidden ~cols then cols - pane_cols else cols
+
+(* A pane that is not drawn cannot hold a keypress.
+
+   Focus beside the detail is a stored preference, and on its own it is not
+   the answer: the reader can put the roster away with Ctrl-B, and the
+   terminal can be too narrow to draw it. Either way the detail is the only
+   pane on screen. Trusting the preference sent arrows to a cursor nobody
+   could see -- and with the selection already at the end of the roster,
+   moved nothing at all, which reads as a dead key. *)
+let arrows_go_left ~hidden ~cols ~preferring_left =
+  preferring_left && shown ~hidden ~cols

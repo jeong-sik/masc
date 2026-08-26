@@ -1450,6 +1450,10 @@ let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
         | Some { kind = Keeper_chat_events.Sse_stream_incomplete; _ } -> ()
         | Some _ -> fail "incomplete stream recorded the wrong first quarantine kind"
         | None -> fail "incomplete stream did not quarantine the finalized tool");
+       let terminalized =
+         translate ~stream_scope:0 failed.bridge_state
+           (MessageDelta { stop_reason = Some EndTurn; usage = None })
+       in
        let late_events =
          [ ContentBlockDelta
              { index = 0; delta = InputJsonDelta {|{"late":true}|} }
@@ -1470,7 +1474,7 @@ let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
               check int "late event is suppressed after first quarantine" 0
                 (List.length rejected.chat_events);
               rejected.bridge_state)
-           failed.bridge_state late_events
+           terminalized.bridge_state late_events
        in
        let fallback =
          Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
@@ -1496,6 +1500,54 @@ let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
                 occurrence.stream_scope = 1 && occurrence.block_index = 0
               | _ -> false)
             fresh.chat_events))
+
+let test_keeper_stream_bridge_terminal_quarantine_is_write_once () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-terminal-quarantine" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope:0 state event
+       in
+       let started =
+         translate (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-terminal"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate started.bridge_state (ContentBlockStop { index = 0 })
+       in
+       let terminal =
+         translate finalized.bridge_state
+           (MessageDelta { stop_reason = Some EndTurn; usage = None })
+       in
+       let first_late =
+         translate terminal.bridge_state
+           (ContentBlockDelta
+              { index = 0; delta = InputJsonDelta {|{"late":true}|} })
+       in
+       (match first_late.chat_events with
+        | [ Keeper_chat_events.Agent_core_stream_protocol_error
+                { kind = Keeper_chat_events.Stream_event_after_terminal
+                ; quarantined_occurrence = Some occurrence
+                ; _
+                }
+          ] ->
+          check int "terminal quarantine scope" 0 occurrence.stream_scope;
+          check int "terminal quarantine block" 0 occurrence.block_index
+        | _ -> fail "first terminal violation did not quarantine exactly once");
+       let second_late =
+         translate first_late.bridge_state (ContentBlockStop { index = 0 })
+       in
+       check int "second terminal violation is frozen" 0
+         (List.length second_late.chat_events))
 
 let test_keeper_stream_bridge_quarantines_transport_failed_scope () =
   let open Agent_core.Types in
@@ -3435,6 +3487,8 @@ let () =
             test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool;
           test_case "stream bridge freezes late events after incomplete" `Quick
             test_keeper_stream_bridge_freezes_late_events_after_incomplete;
+          test_case "stream bridge terminal quarantine is write-once" `Quick
+            test_keeper_stream_bridge_terminal_quarantine_is_write_once;
           test_case "stream bridge quarantines transport-failed scope" `Quick
             test_keeper_stream_bridge_quarantines_transport_failed_scope;
           test_case "stream bridge terminalizes conflicting message tool" `Quick

@@ -97,6 +97,7 @@ let claude_failure_status = function
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
+  | Turn_failed_with_observation _
   | Quota_blocked _
   (* Same reading as [codex_failure_status]: [probe_subscription] measures
      "the official CLI login without submitting a model turn"

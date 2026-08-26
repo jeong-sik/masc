@@ -172,6 +172,11 @@ type error =
       ; response_emitted : bool
       }
   | Turn_failed of string
+  | Turn_failed_with_observation of
+      { detail : string
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
+      }
   | Stopped_by_host of host_stop
   | Quota_blocked of
       { api_error_status : int option
@@ -205,6 +210,8 @@ let error_to_string = function
       response_emitted
       message
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
+  | Turn_failed_with_observation { detail; _ } ->
+    "Claude Code turn failed: " ^ detail
   | Stopped_by_host (Repeated_tool_call { tool_name; repeated_count }) ->
     Printf.sprintf
       "Claude Code stopped after repeated tool call: tool=%s count=%d"
@@ -241,6 +248,7 @@ let error_kind = function
   | Turn_transport_interrupted _ -> "turn_transport_interrupted"
   | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
+  | Turn_failed_with_observation _ -> "turn_failed"
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
@@ -893,7 +901,12 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          unrelated 400s and every other terminal rejection still retain the
          provider's sentence instead of collapsing to the status code
          (#28071). *)
-      Error (Turn_failed (terminal_failure_detail ()))
+      Error
+        (Turn_failed_with_observation
+           { detail = terminal_failure_detail ()
+           ; tool_effect_attempted
+           ; response_emitted
+           })
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
     else Ok (turn_id, result, usage)

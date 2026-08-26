@@ -1,0 +1,36 @@
+# Atlassian (Jira, Confluence) — OAuth 2.0 authorization code with PKCE.
+#
+# Atlassian issues no credential that acts as the app itself: 3LO is user
+# delegation, and the JWT bearer grant is Connect-only and still impersonates
+# a user. So a Keeper's Atlassian identity is a person's, and which person is
+# whoever approves the consent screen for that Keeper.
+#
+# https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
+
+id = "atlassian"
+label = "Atlassian"
+authorize_url = "https://auth.atlassian.com/authorize"
+token_url = "https://auth.atlassian.com/oauth/token"
+
+# `audience` is Atlassian's own parameter, not part of the OAuth spec: the
+# authorize call has to name the API the token is for.
+audience = "api.atlassian.com"
+
+# `offline_access` is what makes a refresh token come back. Without it the
+# access token expires and the Keeper needs a human again within the hour.
+scopes = [
+  "offline_access",
+  "read:jira-work",
+  "write:jira-work",
+]
+
+# Where the two halves land in the Keeper's own secret projection. The access
+# token is an env entry because that is what a tool call reads; the refresh
+# token is a file entry because nothing should carry it in an environment.
+access_token_env = "ATLASSIAN_ACCESS_TOKEN"
+refresh_token_file = "atlassian/refresh_token"
+
+# Renew this many seconds before the access token's stated expiry. Atlassian
+# access tokens live one hour; ten minutes of margin covers a turn that starts
+# just under the wire.
+renew_before_sec = 600

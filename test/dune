@@ -3301,6 +3301,8 @@
 
 (include stanzas/test_keeper_ask_store.inc)
 
+(include stanzas/test_keeper_oauth_identity.inc)
+
 (include stanzas/test_masc_ask_tool_surface.inc)
 
 (include stanzas/test_tui_ask_projection.inc)

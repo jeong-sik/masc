@@ -134,8 +134,7 @@ value = {}
 
 디코드 규칙:
 
-- 파일 한 장의 frontmatter 계약(필수 `name`/`description`, 모르는 키 무시, 디렉토리
-  이름 일치)은 **`Skill_definition` 이 단독 소유한다** (RFC
+- 파일 한 장의 frontmatter 계약은 **`Agent_core.Skill_document`가 단독 소유한다** (RFC
   skills-declared-not-discovered §4.1). 카탈로그 레이어(`Keeper_skill_catalog`)는
   frontmatter 를 직접 읽지 않고 그 위에서 합성 감지와 카탈로그 조립만 한다 —
   같은 SKILL.md 를 읽는 파서는 저장소에 하나다.
@@ -144,14 +143,16 @@ value = {}
   2개 이상이면 기동 오류. block 의 내용은 **기존
   `Keeper_tool_composition_catalog.parse` 가 그대로 읽는다** — 새 문법은 없고, kind
   선언과 실체가 어긋나는 상태 자체가 표현 불가능하다.
-- 실패는 전부 기동 오류다(fail-closed, 기존 TOML 정책과 동일). 단 skills 디렉토리가
-  없거나 비어 있는 것은 오류가 아니라 "스킬 0개" 다 — 섹션 미주입, 정상 부팅.
+- 구조적으로 읽을 수 없는 문서와 composition/fence 오류는 fail-closed다. 이름 불일치,
+  유효한 디렉토리 이름으로 복구 가능한 선언 이름, 길이 초과, 확장 키는
+  `Runtime_compatible diagnostics`로 로드한다. skills 디렉토리가 없거나 비어 있는
+  것은 오류가 아니라 "스킬 0개"다.
 
 ### 2.2 표면 — 스킬 하나가 두 얼굴을 갖는다
 
 ```ocaml
 type surface =
-  | Instruction                                    (* task 라우팅 + Read *)
+  | Instruction                                    (* task 라우팅 + keeper_skill *)
   | Composition of Keeper_tool_composition_catalog.entry
     (* 위에 더해 keeper_compose_<name> 도구로 승격 *)
 ```
@@ -205,13 +206,14 @@ type t = private
 - 합성 스킬의 `execution = "async"` 는 기존 durable broker 로 그대로 흐른다.
   status/cancel 도구, "정적 read-only 노드만" 제약도 그대로다 — 이 제약은 게이트가 아니라
   effect 재실행 안전이다.
-- 병렬성은 이미 plan 의 성질이다(의존 없는 노드는 동시 실행). 스킬은 그 plan 에
+- 병렬성은 plan과 descriptor의 성질이다. 같은 dependency layer에서 `Ordinary
+  Concurrent`인 노드만 묶고 `Ordinary Serial`/`Terminal`은 직렬 실행한다. 스킬은 plan에
   이름·설명·파라미터를 붙여 모델이 실제로 고르게 만든다. §1.1 이 근거다.
 
 ### 2.6 관측성
 
-- 스킬 본문 읽기는 `Read` 호출이므로 `tool_calls` 스토어에 자동 기록된다 — 스킬별
-  사용은 경로(`.masc/skills/<name>/`)로 추가 생산자 없이 집계된다.
+- 스킬 본문 읽기는 `keeper_skill(name)` 호출로 `tool_calls` 스토어에 기록되고, 그
+  `name` 인자로 스킬별 사용량을 집계한다.
 - 합성 실행은 기존 `composition_run_id` 노드 텔레메트리 + SSE
   (`keeper_tool_call_evidence_committed`) 를 그대로 쓴다.
 - 대시보드: `/api/v1/skills` (카탈로그: name, description, kind, source file, 최근 사용
@@ -244,7 +246,7 @@ skills 디렉토리 하나가 된다. 마이그레이션 코드·호환 reader �
 |---|---|---|
 | 1 | 병합 (#30177) | 이 RFC |
 | 2 | 병합 (#30183) | `Keeper_skill_catalog`: fenced composition 감지 + 카탈로그 조립 |
-| 2b | 병합 (#30189, 병렬 세션) | `Skill_definition` 파서 + `task.skills` 라우팅 + current-task 한 줄 |
+| 2b | 병합 (#30189, 병렬 세션) | `Agent_core.Skill_document` 파서 + `task.skills` 라우팅 + current-task 한 줄 |
 | 3 | 병합 (#30205) | 파싱 SSOT 통합: 카탈로그가 한 파서에 위임 |
 | 4 | 병합 (#30208) | 스킬 디렉토리 스캔 + 합성 스킬 → make_tools 배선 |
 | 5 | 병합 (#30215) | `[[compositions.params]]` + input schema 생성 |
@@ -261,19 +263,20 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
 
 - 지시 스킬 N개는 도구 스키마 표면을 0 B 늘린다. 합성 스킬만 도구가 된다.
   `test_keeper_tool_schema_bytes` 상한 85,000 B 유지.
-- 깨진 SKILL.md(frontmatter 필수 키 누락, name 불일치, fenced block 문법 오류, block
-  2개 이상)는 각각 파일·위치를 가리키는 기동 오류다 — 테스트로 고정.
+- 구조적으로 읽을 수 없는 SKILL.md와 fenced block/plan 오류는 파일을 가리키는 기동
+  오류다. name 불일치·복구 가능한 선언 이름·길이 초과·확장 키는 사용 가능하며
+  conformance diagnostics로 관측된다 — 양쪽 경로 모두 테스트로 고정.
 - `mission-snapshot`/`background-snapshot` 이 SKILL.md 로 이전된 뒤 도구 이름·발행 스키마가
   이전과 동일하다(스키마 diff 테스트).
 - 파라미터 합성: `[[compositions.params]]` 선언이 input schema 에 반영되고, 라이브에서
   인자 있는 호출이 `tool_calls` 에 기록된다.
-- 라이브 실측: task 가 지정한 스킬을 keeper 가 `Read` 로 실제로 열고, 합성 스킬 실행이
+- 라이브 실측: task 가 지정한 스킬을 keeper 가 `keeper_skill`로 실제로 열고, 합성 스킬 실행이
   대시보드에서 보인다(스크린샷 + `tool_calls` 발췌).
 
 ## 6. 기존 RFC 와의 관계
 
 - **RFC skills-declared-not-discovered (#30156, 구현 #30189)**: 같은 파일 형식의 아랫층.
-  그 RFC 가 파일 한 장의 파싱(`Skill_definition`)과 지시 스킬의 task 라우팅을 소유하고,
+  그 RFC 가 파일 한 장의 파싱(`Agent_core.Skill_document`)과 지시 스킬의 task 라우팅을 소유하고,
   이 RFC 는 그 위에서 합성 스킬의 도구 승격과 파라미터를 소유한다. 초안에 있던
   `keeper_skill` 도구·`## Skills` 전역 섹션·`config/skills` 임베드는 그 설계에 맞춰
   제거했다 (§2.2).
@@ -294,9 +297,8 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
   (`name` ≤64자·소문자/숫자/하이픈·디렉터리명 일치, `description` ≤1024자, `license`,
   `compatibility`, `metadata`, 실험적 `allowed-tools`). 3단계 progressive disclosure
   (메타 ~100토큰 상시 / 본문 <5k 토큰 / 참조 파일 필요 시). 채택 클라이언트 40+
-  (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc 의 미정합 하나:
-  지시 스킬 이름에 스펙의 문자 집합(소문자·하이픈)을 아직 강제하지 않는다 —
-  합성 스킬은 카탈로그 이름 규칙으로 이미 강제된다.
+  (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc는 휴대성을 위해
+  복구 가능한 스펙 편차를 거부하지 않고 `runtime_compatible` 진단으로 노출한다.
 - **Anthropic Tool Search Tool (GA)**: `defer_loading: true` 도구는 컨텍스트에서
   빠지고 검색 시 `tool_reference` 로 인라인 확장(캐시 보존). 공식 수치 ~55k 토큰의
   85%+ 절감, 도구 30–50개 초과 시 선택 정확도 저하. 커스텀 검색 도구가

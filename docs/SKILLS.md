@@ -1,8 +1,9 @@
 # Skills — SKILL.md 로 능력을 선언한다
 
 masc 의 스킬은 파일 하나로 선언되는 능력이다. `<base_path>/.masc/skills/<name>/SKILL.md`
-한 장이 스킬 하나이고, 서버는 **턴 시작마다** 이 디렉토리를 다시 읽는다 — 파일을 고치면
-다음 턴부터 반영되고, 재시작은 필요 없다.
+한 장이 스킬 하나다. Keeper 턴은 **턴 시작마다** 이 디렉토리를 다시 읽으므로 파일을
+고치면 다음 턴부터 반영된다. `/api/v1/skills`는 별도의 발행 스냅샷이므로 부팅 또는
+runtime config 재적용 때 갱신된다.
 
 관련 RFC: `docs/rfc/RFC-skills-as-tools.md` (합성·도구 승격),
 `#30156` skills-declared-not-discovered (task 라우팅). 파서는
@@ -24,11 +25,13 @@ description: Walk the release checklist before shipping.
 2. Check CI.
 ```
 
-- `name` 과 `description` 은 필수다. `name` 은 **디렉토리 이름과 정확히 같아야** 한다 —
-  task 가 스킬을 디렉토리 이름으로 가리키기 때문이다.
-- 그 밖의 frontmatter 키는 Agent Skills 표준대로 무시한다. `metadata.openclaw` 같은
-  다른 런타임의 네임스페이스가 있어도 그대로 동작한다 — 공개된 스킬 파일을 수정 없이
-  설치할 수 있다.
+- Agent Skills 표준상 `name`과 `description`은 필수이고 `name`은 디렉토리 이름과
+  같아야 한다. MASC는 복구 가능한 편차를 `runtime_compatible`로 로드한다: `name`이
+  없거나 선언 이름이 잘못됐어도 디렉토리 이름이 유효하면 그 이름을 쓰며, 이름 불일치·
+  길이 초과·확장 키는 진단으로 남긴다. 양쪽 이름이 모두 잘못됐거나 `description`이
+  없거나 frontmatter 구조를 읽을 수 없을 때만 문서를 거부한다.
+- `metadata.openclaw` 같은 다른 런타임의 네임스페이스도 문서를 막지는 않는다. 편차의
+  정확한 이유는 `/api/v1/skills`와 Monitor › Skills에 표시된다.
 - 무시하지 **않는** 확장 키가 하나 있다: `disable-model-invocation: true`. 합성 fence 가
   있어도 그 스킬은 `keeper_compose_<name>` 도구로 승격되지 않는다 — 파일은 정상 로드되고
   `keeper_skill` 로 본문을 읽는 것도 그대로다. 절차를 파일로 남기되 모델이 스스로
@@ -98,7 +101,8 @@ name = "query"
 ```
 ````
 
-- 의존 없는 노드는 동시에 실행된다. 순서는 `after` 와 `output` 참조에서만 나온다.
+- 같은 dependency layer의 노드 중 descriptor가 `Ordinary Concurrent`인 것만 묶여
+  실행된다. `Ordinary Serial`과 `Terminal` 노드는 의존이 없어도 각자 직렬 batch다.
 - input template 의 `kind` 는 `literal` / `output` / `param` / `object` / `array` 다.
 - `execution = "inline"` 은 결과를 그 자리에서 돌려주고, `"async"` 는 durable broker 로
   넘긴 뒤 `keeper_composition_status` / `keeper_composition_cancel` 로 조회·취소한다.
@@ -120,15 +124,15 @@ name = "query"
 
 ## 4. 오류는 턴을 막는다
 
-깨진 SKILL.md (필수 키 누락, 이름 불일치, fence 문법 오류, 중복 스킬)는 그 턴을
-typed config error 로 거부한다 — 조용히 빠지는 스킬은 없다. `SKILL.md` 가 없는
-디렉토리는 스킬이 아니므로 그냥 건너뛴다.
+구조적으로 읽을 수 없는 frontmatter, 유효한 runtime 이름이 전혀 없는 문서,
+`description` 누락, fence 문법/합성 plan 오류, 중복 스킬은 그 턴을 typed config
+error로 거부한다. 반면 이름 불일치·한계 초과·확장 키는 `runtime_compatible` 진단이며
+턴을 막지 않는다. `SKILL.md`가 없는 디렉토리는 스킬이 아니므로 그냥 건너뛴다.
 
 ## 5. 관측
 
-- `GET /api/v1/skills` — 턴 시작과 같은 로드를 JSON 으로: 이름·설명·종류·합성이면
-  도구 이름/실행 모드/파라미터까지. 디렉토리가 깨져 있으면 턴을 막는 오류 문자열
-  그대로를 돌려준다.
+- `GET /api/v1/skills` — 발행 스냅샷의 이름·설명·conformance·diagnostics와, 턴 파서가
+  만든 종류·합성 도구 이름/실행 모드·최근 사용량을 함께 돌려준다.
 - 합성 실행은 노드 단위로 `tool_calls` 스토어에 남는다 (`composition_tool`,
   `composition_run_id`, `composition_node_id`) — SSE
   `keeper_tool_call_evidence_committed` 로도 흐른다.

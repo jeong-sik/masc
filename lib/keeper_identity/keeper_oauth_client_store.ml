@@ -5,11 +5,15 @@ type credentials = {
   client_secret : string option;
 }
 
-(* The provider's id is one path component -- checked when the declaration
-   is read, and the record is private -- so this joins without checking
-   again. *)
+(* Keyed by the provider's client group rather than its id: a client belongs
+   to an authorization server, and the eight Google Workspace resources sit
+   behind one. The group is one path component -- checked when the
+   declaration is read, and the record is private -- so this joins without
+   checking again. *)
 let entry_path ~dir ~(provider : Keeper_oauth_provider.t) name =
-  Filename.concat (Filename.concat dir provider.Keeper_oauth_provider.id) name
+  Filename.concat
+    (Filename.concat dir provider.Keeper_oauth_provider.client_group)
+    name
 ;;
 
 let file_path ~dir ~provider = entry_path ~dir ~provider "client_id"

@@ -1,0 +1,33 @@
+# Gmail's remote MCP server, one of the eight Google Workspace publishes.
+#
+# https://developers.google.com/workspace/guides/configure-mcp-servers
+#
+# Google registers no client for a stranger, so this needs an app you make:
+# a Google Cloud project with an OAuth 2.0 client, its redirect URI set to
+# this masc's /api/v1/keepers/oauth/callback, and its id and secret posted to
+# /api/v1/keepers/oauth/client. One app serves all eight -- they share a
+# client_group, so entering it once is entering it for every one.
+#
+# Measured 2026-08-27: the endpoint answers an initialize without a token,
+# publishes its protected-resource document where RFC 9728 computes it, and
+# names accounts.google.com, which offers S256 and asks for the secret in the
+# form body. It names 5 scopes, all of which are asked for.
+
+id = "gmail"
+client_group = "google"
+label = "Gmail"
+mcp_url = "https://gmailmcp.googleapis.com/mcp/v1"
+
+access_token_env = "GMAIL_ACCESS_TOKEN"
+expires_at_env = "GMAIL_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.google/gmail_refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600
+
+# Google issues a refresh token only when the authorize call asks to keep
+# working while the operator is away. masc refuses an exchange that comes
+# back without one, so without this every login would fail at the last step.
+[authorize_params]
+access_type = "offline"

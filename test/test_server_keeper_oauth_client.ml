@@ -124,6 +124,38 @@ let test_the_listing_says_whether_an_app_is_on_file () =
   check Alcotest.bool "without claiming it for another provider" false
     (has "figma" (Oauth.declarations_json ~base_path))
 
+let test_one_google_app_answers_for_all_of_them () =
+  (* Google publishes eight MCP resources behind one accounts.google.com,
+     and one Cloud project's app serves them all. Keyed by provider id, an
+     operator would type the same client id and secret eight times and send
+     the secret over the wire eight times to say one thing. *)
+  let base_path = base_path () in
+  match
+    Oauth.set_client ~base_path ~provider_id:"googlesheets"
+      ~client_id:"one-cloud-project" ~client_secret:(Some "s3cret")
+  with
+  | Error message -> Alcotest.failf "set_client failed: %s" message
+  | Ok _ ->
+    let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
+    let seen id =
+      match Store.load ~dir ~provider:(provider_or_fail id) with
+      | Ok (Some credentials) -> Some credentials.Store.client_id
+      | Ok None -> None
+      | Error message -> Alcotest.failf "reading %s back failed: %s" id message
+    in
+    List.iter
+      (fun id ->
+        check
+          (Alcotest.option Alcotest.string)
+          (id ^ " reads the same app")
+          (Some "one-cloud-project") (seen id))
+      [ "gmail"; "googledrive"; "googlecalendar"; "googlecontacts" ];
+    (* And no further than the group: a provider behind another
+       authorization server has nothing on file. *)
+    check
+      (Alcotest.option Alcotest.string)
+      "slack is untouched" None (seen "slack")
+
 let () =
   Alcotest.run "server_keeper_oauth_client"
     [ ( "recording an operator's own app",
@@ -141,5 +173,7 @@ let () =
             test_an_undeclared_provider_is_refused;
           Alcotest.test_case "the listing says whether an app is on file"
             `Quick test_the_listing_says_whether_an_app_is_on_file;
+          Alcotest.test_case "one Google app answers for all of them" `Quick
+            test_one_google_app_answers_for_all_of_them;
         ] );
     ]

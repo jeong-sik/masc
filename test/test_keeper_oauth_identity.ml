@@ -661,6 +661,38 @@ let test_a_header_without_the_parameter_is_not_a_location () =
         (Keeper_oauth_discovery.error_to_string other)
   | Ok _ -> Alcotest.fail "a header with no location was read as one"
 
+let test_a_terminating_slash_in_the_issuer_is_removed () =
+  (* RFC 8414 3.1. Every Google Workspace MCP server names its authorization
+     server as "https://accounts.google.com/", and measured 2026-08-27 the
+     URL built with that slash left on answers 404 while the one without
+     answers 200 -- so this is the difference between reaching Google at all
+     and not. *)
+  let asked = ref [] in
+  let get ~url =
+    asked := url :: !asked;
+    if String.equal url "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
+    then
+      Ok
+        ( 200,
+          {|{"resource":"https://mcp.example.com/mcp","authorization_servers":["https://as.example.com/"]}|}
+        )
+    else Ok (404, "not found")
+  in
+  let _ =
+    Keeper_oauth_discovery.discover ~get ~ask:no_header
+      ~mcp_url:"https://mcp.example.com/mcp" ()
+  in
+  Alcotest.(check bool)
+    "asked without the terminating slash" true
+    (List.mem
+       "https://as.example.com/.well-known/oauth-authorization-server"
+       !asked);
+  Alcotest.(check bool)
+    "and not with it" false
+    (List.mem
+       "https://as.example.com/.well-known/oauth-authorization-server/"
+       !asked)
+
 let test_discovery_refuses_a_plaintext_server () =
   match
     Keeper_oauth_discovery.discover ~get:(fun ~url:_ -> Ok (200, "{}"))
@@ -1156,6 +1188,8 @@ let () =
             test_discovery_names_a_server_that_publishes_nothing;
           Alcotest.test_case "names a resource with no authorization server"
             `Quick test_discovery_names_a_resource_with_no_authorization_server;
+          Alcotest.test_case "a terminating slash in the issuer is removed"
+            `Quick test_a_terminating_slash_in_the_issuer_is_removed;
           Alcotest.test_case "the server says where its metadata is" `Quick
             test_the_server_says_where_its_metadata_is;
           Alcotest.test_case "no header falls back to the computed URL" `Quick

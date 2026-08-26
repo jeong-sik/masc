@@ -144,9 +144,29 @@ let test_composition_skill_materializes_entry () =
       (contains ~needle:"```toml composition" skill.Skill_catalog.body)
 ;;
 
+(* A folder whose name disagrees with the frontmatter's still loads. The
+   Agent Skills specification makes [name] required and says it "Must match
+   the parent directory name", so such a document is not strictly conforming;
+   [Skill_document] keeps it on the runtime-compatible path instead of losing
+   the skill over a rename, and records [Name_mismatch] against it.
+
+   The directory is what the runtime answers to. Two folders can declare the
+   same [name] and only one can sit at a given path, so the path is the
+   identity that cannot collide -- which is why [runtime_name] returns the
+   directory here and not the declared name.
+
+   What is missing is the telling: [parse_skill] returns a [skill] with no
+   room for diagnostics, so the [Name_mismatch] that [Skill_document]
+   computed stops at this boundary and no operator ever sees which skill was
+   renamed out from under its frontmatter. Asserted below as it stands, not
+   as it should be. *)
 let test_directory_name_mismatch_is_runtime_compatible () =
   let skill = parsed ~directory:"another-name" instruction_document in
-  check string "declared name remains authoritative" "release-checklist" skill.name
+  check string "the directory is the identity the runtime answers to"
+    "another-name" skill.name;
+  check string "the document itself still loads"
+    "Walk the release checklist before shipping."
+    skill.Skill_catalog.description
 ;;
 
 let test_missing_required_frontmatter_rejected () =

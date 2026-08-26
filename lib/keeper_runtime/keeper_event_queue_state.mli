@@ -129,17 +129,6 @@ val peek_when :
 val select_when :
   ready:(Keeper_event_queue.stimulus -> bool) -> t -> pending_selection option
 
-val connector_attention_conversation_batch :
-  primary:pending_selection -> t -> pending_selection list
-(** [connector_attention_conversation_batch ~primary state] returns every
-    OTHER pending entry in [state] whose payload is [Connector_attention]
-    and whose channel is the same conversation
-    ({!Keeper_continuation_channel.same_conversation}) as [primary]'s
-    channel, in their existing FIFO order (RFC-0377). [[]] when [primary]
-    is not itself a [Connector_attention] selection, or no other pending
-    entry shares its conversation. A pure read like {!select_when}: it does
-    not remove anything from [state]. *)
-
 val validate_pending_selection :
   selection:pending_selection ->
   t ->

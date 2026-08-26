@@ -361,6 +361,7 @@ let test_transient_intake_retains_pending_source_and_blocks_dispatch () =
     false
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:true
+       ~consumed_stimulus_count:intake.consumed_stimulus_count
        ~event_queue_intake_error:intake.event_queue_intake_error);
   let queued =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with
@@ -485,14 +486,21 @@ let test_transient_head_does_not_block_the_entry_behind_it () =
        trailing_post_id consumed.Keeper_event_queue.post_id
    | other ->
      failf "expected exactly one consumed stimulus, got %d" (List.length other));
-  check bool "a cycle that consumed an entry reports no intake error" true
-    (Option.is_none intake.event_queue_intake_error);
+  (match intake.event_queue_intake_error with
+   | Some (Keeper_heartbeat_stimulus_intake.Transient_board_read unavailable) ->
+     check string "the retained error still names the transient head"
+       head_post_id unavailable.post_id
+   | Some error ->
+     failf "expected transient Board retry, got %s"
+       (Keeper_heartbeat_stimulus_intake.event_queue_intake_error_to_string error)
+   | None -> fail "the transient head error disappeared after trailing admission");
   check
     bool
     "provider dispatch proceeds on the entry that could be rendered"
     true
     (Keeper_heartbeat_loop.should_run_turn_after_event_intake
        ~scheduled:true
+       ~consumed_stimulus_count:intake.consumed_stimulus_count
        ~event_queue_intake_error:intake.event_queue_intake_error);
   let queued =
     match Keeper_registry_event_queue.snapshot_result ~base_path meta.name with

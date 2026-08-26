@@ -65,10 +65,13 @@ val heartbeat_event_intake :
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   heartbeat_event_intake
 
-(** Source-authority gate applied after world scheduling. A selected stimulus
-    whose intake failed must remain pending and cannot reach the provider. *)
+(** Source-authority gate applied after world scheduling. A durable selection
+    failure blocks dispatch. A transient Board read remains pending but does
+    not suppress other sources already admitted from the same snapshot; when
+    it is the only source, no turn is dispatched. *)
 val should_run_turn_after_event_intake :
   scheduled:bool ->
+  consumed_stimulus_count:int ->
   event_queue_intake_error:
     Keeper_heartbeat_stimulus_intake.event_queue_intake_error option ->
   bool
@@ -143,18 +146,6 @@ val record_crashed_cycle_failure :
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)
 
-type failed_source_disposition =
-  | Preserve_for_deferred_runtime
-  | Defer_to_queue_tail
-  | Quarantine_source of { detail : string }
-
-val failed_source_disposition :
-  Keeper_unified_turn.turn_failure -> failed_source_disposition
-(** Pure liveness policy for one failed source turn. Only transcript integrity
-    corruption pauses the Keeper. A frozen successor runtime retains the exact
-    source, transient failures move it behind independent work, and deterministic
-    failures quarantine that source with its durable receipt. *)
-
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
@@ -162,28 +153,18 @@ type connector_attention_outcome =
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_quarantine of { detail : string }
-  | Batch_defer of { reason : string }
   | Batch_no_action
 
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
-(** RFC-0377: the single queue action ([Batch_ack_completed] /
-    [Batch_quarantine] / [Batch_defer] / [Batch_no_action]) a turn's
-    [cycle_outcome] implies for every stimulus admitted into that turn — the
-    primary selection plus any Connector_attention batch companions. The
-    caller applies the returned action uniformly to every admitted
-    selection ([List.for_all]/[List.iter] over
-    [heartbeat_event_intake.consumed_selections]); this function decides
-    only *what* to do, never *to which* selection, so a batch of any size
-    shares one disposition by construction. Pure: composes the route ->
-    [connector_attention_outcome] mapping with {!failed_source_disposition},
-    both already pure. *)
+(** The single queue action a turn's [cycle_outcome] implies for every
+    admitted stimulus. Completed turns ACK the whole batch; every incomplete,
+    failed, cancelled, or checkpointed outcome leaves the whole batch pending.
+    Provider/runtime failure is not authority to discard input. *)
 
 type connector_attention_settlement =
   | Settle_resolved
   | Settle_ignored
-  | Settle_quarantined of { detail : string }
   | Settle_pending_in_queue
 
 val connector_attention_settlement_of_disposition :
@@ -271,4 +252,3 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
 end
-

@@ -80,15 +80,12 @@ val select_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
 
-val connector_attention_conversation_batch_result :
+val pending_selections_result :
   base_path:string ->
   string ->
-  primary:Keeper_event_queue_state.pending_selection ->
   (Keeper_event_queue_state.pending_selection list, string) result
-(** Every OTHER pending [Connector_attention] entry for [primary]'s
-    conversation, in arrival order (RFC-0377). [[]] when [primary] is not a
-    [Connector_attention] selection. See
-    {!Keeper_event_queue_state.connector_attention_conversation_batch}. *)
+(** Read every exact pending selection in durable queue order without
+    consuming it. *)
 
 val validate_pending_selection_result :
   base_path:string ->

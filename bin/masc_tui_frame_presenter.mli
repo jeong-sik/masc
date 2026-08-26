@@ -7,6 +7,7 @@ type cursor =
 
 type frame = {
   surface_key : string;
+  compact_frame : bool;
   terminal_rows : int;
   terminal_cols : int;
   cursor : cursor;
@@ -17,6 +18,11 @@ type t
 
 val create : synchronized_output:bool -> unit -> t
 val invalidate : t -> unit
+val last_frame_is_compact : t -> bool
+(** Whether the last successfully presented frame was the compact fallback.
+    Before the first frame and after invalidation this is conservatively
+    [true], so input cannot act on a surface the terminal has not shown. *)
+
 val setup : t -> write:(string -> unit) -> flush:(unit -> unit) -> unit
 (** Take the alternate screen and discard the cached screen, so the next
     [present] paints every row. Call before the first frame, and again after

@@ -1693,6 +1693,7 @@ def wheel_scrolls_and_clicks_do_not(
     wait_for_output(
         process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
     )
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     # An SGR wheel report moves the cursor exactly as the arrow key does.
     send_and_wait(
@@ -1734,6 +1735,7 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    os.write(master_fd, b"\x1b[200~hidden compact paste\x1b[201~")
     os.write(master_fd, b"x\r")
     wait_for_terminal_input_consumed(slave_fd)
     resize_and_wait(
@@ -1756,7 +1758,11 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25h",
     )
-    if b"q2Qx" in restored_message_patch or b"(sending " in restored_message_patch:
+    if (
+        b"hidden compact paste" in restored_message_patch
+        or b"q2Qx" in restored_message_patch
+        or b"(sending " in restored_message_patch
+    ):
         raise AssertionError(
             "compact viewport accepted hidden message input: "
             f"{restored_message_patch!r}"
@@ -1769,16 +1775,64 @@ def wheel_scrolls_and_clicks_do_not(
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+
+    # Wait until the process is back inside its input read, then resize and
+    # send one surface shortcut without waiting for the compact frame. The
+    # SIGWINCH lands after the loop's first resize poll; input must consume
+    # that pending resize before it can act on the old normal frame.
+    drain_until_quiet(process, master_fd, output)
+    os.killpg(process.pid, signal.SIGSTOP)
+    wait_for_stop(
+        process,
+        master_fd,
+        output,
+        timeout=2.0,
+        description="compact resize/input race control point",
+    )
+    read_available(master_fd, output)
+    compact_race_start = len(output)
+    fcntl.ioctl(
+        master_fd,
+        termios.TIOCSWINSZ,
+        struct.pack("HHHH", 14, 100, 0, 0),
+    )
+    os.write(master_fd, b"2")
+    os.killpg(process.pid, signal.SIGCONT)
+    wait_for_terminal_input_consumed(slave_fd)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"terminal too small",
+        start=compact_race_start,
+        timeout=3.0,
+    )
     resize_and_wait(
         process,
         master_fd,
         output,
-        rows=8,
+        rows=30,
+        columns=100,
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        # The agenda strip takes one of these fourteen rows. The renderer
+        # therefore shows a thirteen-row compact frame; the input gate must
+        # measure the same body rather than route this hidden `2`.
+        rows=14,
         columns=100,
         needle=b"terminal too small",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    os.write(master_fd, b"2")
+    wait_for_terminal_input_consumed(slave_fd)
     resize_and_wait(
         process,
         master_fd,
@@ -1811,7 +1865,79 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[D",
+        b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+    )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Keepers")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[A",
+        keeper_row_selected(b"alpha"),
+    )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    os.write(master_fd, b"\x1b[B")
+    wait_for_terminal_input_consumed(slave_fd)
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=keeper_row_selected(b"alpha"),
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    # The fallback says q quits. A hidden search prompt must not reclaim it.
     os.write(master_fd, b"q")
+    wait_for_terminal_input_consumed(slave_fd)
+
+
+def compact_input_gate_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-awaiting-compact-gate",
+                    "tool": "Execute",
+                    "args": "{}",
+                    "question": "Run the compact-gate probe?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+    return fixtures
 
 
 def select_keeper_row(
@@ -7899,6 +8025,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="wheel scrolls, clicks do not",
         interact=wheel_scrolls_and_clicks_do_not,
+        http_fixtures=compact_input_gate_http_fixtures(),
     )
     run_terminal_scenario(
         executable,

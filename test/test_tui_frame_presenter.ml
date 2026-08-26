@@ -27,9 +27,11 @@ let contains text needle =
   in
   needle_length = 0 || loop 0
 
-let frame ?(surface_key = "overview") ?(cursor = Presenter.Hidden)
+let frame ?(surface_key = "overview") ?(compact_frame = false)
+    ?(cursor = Presenter.Hidden)
     ?(rows = 4) ?(cols = 40) lines : Presenter.frame =
   { surface_key;
+    compact_frame;
     terminal_rows = rows;
     terminal_cols = cols;
     cursor;
@@ -59,6 +61,31 @@ let test_first_frame_and_identical_frame () =
   present presenter captured initial;
   check int "identical frame writes nothing" 0 (List.length captured.writes);
   check int "identical frame does not flush" 0 captured.flushes
+
+let test_input_gate_follows_the_last_presented_frame () =
+  let presenter = Presenter.create ~synchronized_output:false () in
+  let captured = sink () in
+  let same_frame = frame [ "same bytes" ] in
+  check bool "input waits for the first frame" true
+    (Presenter.last_frame_is_compact presenter);
+  present presenter captured same_frame;
+  check bool "normal frame exposes its surface" false
+    (Presenter.last_frame_is_compact presenter);
+  reset_sink captured;
+  present presenter captured { same_frame with compact_frame = true };
+  check bool "metadata-only compact transition redraws" true
+    (contains (output captured) "\027[2J");
+  check bool "compact frame hides its surface" true
+    (Presenter.last_frame_is_compact presenter);
+  reset_sink captured;
+  present presenter captured same_frame;
+  check bool "metadata-only normal transition redraws" true
+    (contains (output captured) "\027[2J");
+  check bool "a new normal frame restores surface input" false
+    (Presenter.last_frame_is_compact presenter);
+  Presenter.invalidate presenter;
+  check bool "an invalidated frame is not trusted for input" true
+    (Presenter.last_frame_is_compact presenter)
 
 let test_only_changed_row_is_written () =
   let presenter = Presenter.create ~synchronized_output:true () in
@@ -153,10 +180,14 @@ let test_write_failure_keeps_snapshot_untrusted () =
     with Failure _ -> true
   in
   check bool "write failure is propagated" true raised;
+  check bool "write failure blocks input until a retry" true
+    (Presenter.last_frame_is_compact presenter);
   reset_sink captured;
   present presenter captured (frame [ "after" ]);
   check bool "write failure forces a full retry" true
     (contains (output captured) "\027[2J");
+  check bool "successful write retry restores input" false
+    (Presenter.last_frame_is_compact presenter);
   let flush_raised =
     try
       Presenter.present presenter ~invalidate_before:false ~write:(fun _ -> ())
@@ -166,10 +197,14 @@ let test_write_failure_keeps_snapshot_untrusted () =
     with Failure _ -> true
   in
   check bool "flush failure is propagated" true flush_raised;
+  check bool "flush failure blocks input until a retry" true
+    (Presenter.last_frame_is_compact presenter);
   reset_sink captured;
   present presenter captured (frame [ "after flush" ]);
   check bool "flush failure also forces a full retry" true
-    (contains (output captured) "\027[2J")
+    (contains (output captured) "\027[2J");
+  check bool "successful flush retry restores input" false
+    (Presenter.last_frame_is_compact presenter)
 
 let test_sync_fallback_and_visible_cursor_are_explicit () =
   let presenter = Presenter.create ~synchronized_output:false () in
@@ -254,6 +289,8 @@ let () =
       , [ test_case "first and identical frames" `Quick
             test_first_frame_and_identical_frame
         ; test_case "one changed row" `Quick test_only_changed_row_is_written
+        ; test_case "input follows the presented frame" `Quick
+            test_input_gate_follows_the_last_presented_frame
         ; test_case "shorter and removed rows" `Quick
             test_shorter_content_clears_stale_rows
         ; test_case "style-only row change" `Quick

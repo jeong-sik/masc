@@ -7772,12 +7772,14 @@ let main () =
           | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
           | Error detail -> add_event state "error" detail))
   in
+  let consume_resize_request () =
+    if Atomic.exchange resize_requested false then
+      invalidate_frame_for_resize frame_presenter render_schedule
+  in
   let run_loop () =
     while true do
       request_console_write_repair render_schedule;
-      if Atomic.exchange resize_requested false then begin
-        invalidate_frame_for_resize frame_presenter render_schedule
-      end;
+      consume_resize_request ();
       (* A second Ctrl-C while the first still stands ends the session; a lone
          one only says so. The notice is an event rather than a footer line
          because it has to survive the frame the operator is looking at, and
@@ -7804,6 +7806,10 @@ let main () =
           ~maximum:maximum_input_wait_seconds
       in
       let input = read_input ~timeout:input_timeout input_reader () in
+      (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
+         this input sees the old frame; the next loop would be one key too
+         late. *)
+      consume_resize_request ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -7830,10 +7836,18 @@ let main () =
           | Some (Key name) -> Some name
           | Some (Pasted _) | Some (Graphics_reply _) | None -> None
       in
+      (* Async agenda state can change the usable row budget after the last
+         paint. Read the compact marker from that paint, not from the newer
+         state. An invalidated or not-yet-painted frame stays compact until
+         presentation succeeds, so its hidden surface cannot consume input. *)
+      let compact_viewport =
+        Frame_presenter.last_frame_is_compact frame_presenter
+      in
       (match input with
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
-       | Some (Pasted paste) when not dismissed_image ->
+       | Some (Pasted paste)
+         when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The
               filesystem is the check that keeps this from touching text that
               merely looks like a path: an existing file is what the operator
@@ -7858,10 +7872,7 @@ let main () =
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      let terminal_rows, terminal_columns = get_terminal_size () in
-      let compact_viewport =
-        Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
-      in
+      let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
       in
@@ -7917,10 +7928,11 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some _
          when quit_key
-              && Option.is_none state.search
-              && not
-                   (state.view = Board
-                   && state.board_mode = Board_compose) ->
+              && (compact_viewport
+                 || (Option.is_none state.search
+                    && not
+                         (state.view = Board
+                         && state.board_mode = Board_compose))) ->
            if state.quit_armed then raise Break
            else begin
              state.quit_armed <- true;
@@ -7950,6 +7962,10 @@ let main () =
                 state.roster_pane_hidden <- hidden;
                 if hidden then state.keeper_message_focus <- Right_pane;
                 Render_schedule.request render_schedule Render_schedule.Force)
+       (* The compact fallback owns every remaining key. Put this before every
+          modal and surface branch: those states are hidden, and a question,
+          search cursor, or draft must not move behind the fallback. *)
+       | Some _ when compact_viewport -> ()
        (* Answering is modal. A question needs a key per choice, and this
           surface already spent its arrows and its y/n on the approval queue,
           so the keys have to come from somewhere. Quit and the chrome
@@ -7983,7 +7999,7 @@ let main () =
        (* [/context] is modal: the summary and exact prompt text must not leak
           keys into the composer underneath. The quit confirmation and chrome
           toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open && not compact_viewport ->
+       | Some k when state.context_inspector_open ->
            let prompt_blocks () =
              match state.context_inspector_reading with
              | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
@@ -8107,7 +8123,7 @@ let main () =
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       | Some k when state.help_open && not compact_viewport ->
+       | Some k when state.help_open ->
            (match k with
             | "?" | "esc" ->
                 state.help_open <- false;
@@ -8127,7 +8143,7 @@ let main () =
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
-       | Some k when state.agenda_open && not compact_viewport ->
+       | Some k when state.agenda_open ->
            (match k with
             | ";" | "esc" ->
                 state.agenda_open <- false;
@@ -8144,7 +8160,7 @@ let main () =
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
-       | Some k when state.palette_open && not compact_viewport ->
+       | Some k when state.palette_open ->
            let close () =
              state.palette_open <- false;
              state.palette_query <- "";
@@ -8271,8 +8287,7 @@ let main () =
        (* Row search: typing moves the surface's row cursor live to the
           first match from the top; Enter keeps the query for n/N, Esc keeps
           nothing. The list itself never narrows -- see [search] in types. *)
-       | Some k
-         when Option.is_some state.search && not compact_viewport ->
+       | Some k when Option.is_some state.search ->
            let query = Option.value state.search ~default:"" in
            (match k with
             | "esc" -> state.search <- None
@@ -8293,11 +8308,10 @@ let main () =
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
        | Some "/"
-         when Option.is_some (surface_row_texts state state.view)
-              && not compact_viewport ->
+         when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
        | Some (("[" | "]") as bracket)
-         when state.view = Keepers Keeper_detail && not compact_viewport ->
+         when state.view = Keepers Keeper_detail ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
               the pane's title row draws. Non-Info tabs read over HTTP on
               entry; the stamped keeper name keeps a slow answer from being
@@ -8331,18 +8345,15 @@ let main () =
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
-       | Some (("[" | "]") as bracket)
-         when state.view = Changes && not compact_viewport ->
+       | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
-       | Some (("[" | "]") as bracket)
-         when state.view = Tools && not compact_viewport ->
+       | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_github
-              && not compact_viewport ->
+              && state.detail_tab = Detail_github ->
            (match selected_keeper state with
             | Some keeper ->
                 state.github_identity_view <-
@@ -8355,7 +8366,6 @@ let main () =
        | Some digit
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
-              && not compact_viewport
               && String.length digit = 1
               && digit.[0] >= '1'
               && digit.[0] <= '9' -> (
@@ -8380,8 +8390,7 @@ let main () =
            | Some _, (Some _ | None) | None, _ -> ())
        | Some "R"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
+              && state.detail_tab = Detail_identity -> (
            match (selected_keeper state, state.identity_view) with
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name ->
@@ -8398,7 +8407,7 @@ let main () =
                  launch_identity_refresh state ~mailbox:async_messages
                    ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
-       | Some "\r" when state.view = Resources && not compact_viewport ->
+       | Some "\r" when state.view = Resources ->
            (match
               Option.bind state.resources_list (fun rows ->
                   List.nth_opt rows state.resources_cursor)
@@ -8407,9 +8416,9 @@ let main () =
                 state.resource_focus <- Right_pane;
                 launch_resource_read state ~mailbox:async_messages ~uri
             | None -> ())
-       | Some "J" when state.view = Resources && not compact_viewport ->
+       | Some "J" when state.view = Resources ->
            state.resource_scroll <- state.resource_scroll + 1
-       | Some "K" when state.view = Resources && not compact_viewport ->
+       | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
@@ -8417,7 +8426,6 @@ let main () =
            let after = Option.value (search_row_cursor state) ~default:0 in
            search_jump state ~query:state.search_last ~after
              ~backwards:(String.equal direction "N")
-       | Some _ when compact_viewport -> ()
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -8541,13 +8549,13 @@ let main () =
                   cycle_surface state ~mailbox:async_messages
                     ~backwards:(k = "shift-tab")
               | _ -> ())
-       | Some "?" when not compact_viewport ->
+       | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ";" when not compact_viewport ->
+       | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
-       | Some ":" when not compact_viewport ->
+       | Some ":" ->
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
@@ -9758,8 +9766,7 @@ let main () =
           the cursor is the only way to reach a row. *)
        | Some "\r" | Some "\n"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
+              && state.detail_tab = Detail_identity -> (
            match (selected_keeper state, state.identity_view) with
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
@@ -10361,7 +10368,7 @@ let main () =
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
-       | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
+       | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
@@ -10465,12 +10472,11 @@ let main () =
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
-         when state.view = Config && state.config_pane = Config_prompts
-              && not compact_viewport ->
+         when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()
-       | Some "b" when state.view = Connectors && not compact_viewport ->
+       | Some "b" when state.view = Connectors ->
            handle_connector_bind ()
-       | Some "u" when state.view = Connectors && not compact_viewport ->
+       | Some "u" when state.view = Connectors ->
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with

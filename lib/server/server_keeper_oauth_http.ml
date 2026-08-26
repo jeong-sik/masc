@@ -82,13 +82,19 @@ let handle_callback request reqd =
 ;;
 
 (* What an operator can attach a Keeper to. Names and labels of files that
-   ship with the binary -- nothing about any Keeper -- so it reads like the
-   rest of the operator snapshot. *)
+   ship with the binary, plus whether this install already has a client for
+   each -- nothing about any Keeper -- so it reads like the rest of the
+   operator snapshot. *)
 let handle_providers request reqd =
   Server_auth.with_public_read
-    (fun _state req reqd ->
+    (fun state req reqd ->
       Http.Response.json_value ~compress:true ~request:req
-        (`Assoc [ "providers", Server_keeper_oauth.declarations_json () ])
+        (`Assoc
+          [ ( "providers"
+            , Server_keeper_oauth.declarations_json
+                ~base_path:
+                  (Mcp_server.workspace_config state).Workspace.base_path )
+          ])
         reqd)
     request reqd
 ;;
@@ -115,9 +121,48 @@ let handle_attached_tools request reqd =
     request reqd
 ;;
 
+(* Recording an app an operator made themselves. Admin, because what it
+   writes is what redeems a code: an id that is not theirs would send the
+   consent somewhere else. Not scoped to a Keeper -- the client belongs to
+   the install, the same as one this server registered. *)
+let handle_set_client request reqd =
+  Server_auth.with_admin_auth
+    (fun state req reqd ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      Http.Request.read_body_async reqd (fun body_str ->
+        let answer =
+          match Yojson.Safe.from_string body_str with
+          | exception Yojson.Json_error detail -> Error detail
+          | `Assoc pairs ->
+            let field key =
+              match List.assoc_opt key pairs with
+              | Some (`String value) -> Some value
+              | Some _ | None -> None
+            in
+            (match field "provider" with
+             | None -> Error "provider is required"
+             | Some provider_id ->
+               (match field "client_id" with
+                | None -> Error "client_id is required"
+                | Some client_id ->
+                  Server_keeper_oauth.set_client ~base_path ~provider_id
+                    ~client_id ~client_secret:(field "client_secret")))
+          | _ -> Error "the request body is not an object"
+        in
+        match answer with
+        | Error message ->
+          Http.Response.json_value ~compress:true ~request:req
+            (`Assoc [ "error", `String message ])
+            reqd
+        | Ok payload ->
+          Http.Response.json_value ~compress:true ~request:req payload reqd))
+    request reqd
+;;
+
 let add_routes router =
   router
   |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
   |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
   |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
+  |> Http.Router.post "/api/v1/keepers/oauth/client" handle_set_client
 ;;

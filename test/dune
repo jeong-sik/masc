@@ -3355,6 +3355,7 @@
 
 (include stanzas/test_keeper_ask_store.inc)
 
+(include stanzas/test_server_keeper_oauth_client.inc)
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 

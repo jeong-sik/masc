@@ -75,20 +75,6 @@ let ollama_cloud_seed_cases =
     ; thinking = true
     ; vision = false
     }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-devstral-2-123b"
-    ; api_name = "devstral-2:123b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = false
-    }
-  ; { runtime_id = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
-    ; api_name = "devstral-small-2:24b"
-    ; context = 262144
-    ; tools = true
-    ; thinking = false
-    ; vision = true
-    }
   ; { runtime_id = "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
     ; api_name = "gemini-3-flash-preview"
     ; context = 1048576

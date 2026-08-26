@@ -282,7 +282,7 @@
  (name masc_tui_keeper_chat_queue)
  (wrapped false)
  (modules masc_tui_keeper_chat_queue)
- (libraries))
+ (libraries masc_tui_keeper_chat_projection))
 
 (library
  (name masc_tui_keeper_chat_history)

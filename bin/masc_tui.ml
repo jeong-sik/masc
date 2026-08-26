@@ -825,16 +825,10 @@ let own_typed_messages (state : state) =
            && String.equal entry.me_keeper_name target)
     |> List.map (fun entry -> entry.me_text)
   in
-  (* Newest last, same as [sent], so one walk crosses both without a seam.
-     A line leaves the queue and enters the history in the same step it is
-     dispatched, so it is in exactly one of the two lists at any moment. *)
-  let queued =
-    Chat_queue.waiting state.msg_queued
-    |> List.filter (fun (queued_keeper, _) ->
-           String.equal queued_keeper target)
-    |> List.map snd
-  in
-  sent @ queued
+  (* The queue is not walked here any more. A queued line enters the history
+     when it is typed, not when it is dispatched, so it is already in [sent] --
+     concatenating the queue would put the newest line in the walk twice. *)
+  sent
 
 let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
@@ -876,6 +870,20 @@ let recall_newer (state : state) =
    forward must not replace what they just wrote with a draft from before it. *)
 let forget_recall (state : state) = state.msg_recall_at <- None
 
+(* A queued line is drawn in the conversation, so cancelling one or pulling it
+   back into the composer has to take its row with it. The row is found by the
+   request's own id and not by its text: two identical lines to one keeper are
+   two requests, and dropping "the row that reads like this" would take
+   whichever came first. *)
+let forget_queued_history (state : state) (request : Keeper_chat.request) =
+  state.msg_history <-
+    List.filter
+      (fun entry ->
+        not
+          (String.equal entry.me_request_id request.Keeper_chat.request_id
+           && match entry.me_role with Message_user _ -> true | _ -> false))
+      state.msg_history
+;;
 
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
@@ -1011,21 +1019,28 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          dispatched. *)
       (match Chat_queue.take_newest state.msg_queued with
        | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some ((queued_keeper, _), rest) ->
+       | Some (request, rest) ->
          state.msg_queued <- rest;
+         forget_queued_history state request;
          add_event state "info"
            (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text queued_keeper)));
+              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name)));
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
          the edit: fix it and Enter queues it again. *)
       (match Chat_queue.take_newest state.msg_queued with
        | None -> ()
-       | Some ((_, text), rest) ->
+       | Some (request, rest) ->
          state.msg_queued <- rest;
+         forget_queued_history state request;
+         (* The attachments come back with the text. They were staged for this
+            line and taken when it was queued, so leaving them behind would
+            hand the operator a draft whose images had quietly gone. *)
+         state.msg_attachments <-
+           request.Keeper_chat.attachments @ state.msg_attachments;
          Buffer.clear state.msg_input;
-         Buffer.add_string state.msg_input text);
+         Buffer.add_string state.msg_input request.Keeper_chat.message);
       true
     end else if c = Some 22 then begin
       (* Ctrl-V: the clipboard's image, staged for the next message. The key
@@ -3175,11 +3190,22 @@ let launch_keeper_request state ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
-let queue_keeper_message state ~keeper_name text =
-  match Chat_queue.push state.msg_queued ~keeper_name text with
+let queue_keeper_message state request =
+  match Chat_queue.push state.msg_queued request with
   | Error _ as error -> error
   | Ok (queue, waiting) ->
       state.msg_queued <- queue;
+      (* The line takes its place in the conversation now rather than when it
+         is dispatched. The operator pressed Enter and has to see that it
+         landed somewhere; until this, a queued line lived only in a row
+         beneath the conversation and the pane above it looked as though
+         nothing had been typed.
+
+         [append_user_history_once] is the same call dispatch makes and is
+         keyed on the request id, so when this request does go out the row it
+         already has is the row it keeps -- there is no second copy to
+         reconcile. *)
+      append_user_history_once state request;
       Ok waiting
 ;;
 
@@ -3224,18 +3250,30 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
               ()
           in
           launch_keeper_request state ~mailbox request
-      | Queues_behind request -> (
+      | Queues_behind blocking -> (
           (* A turn to this keeper is already running. Hold the line rather than
              refusing it: the operator pressed Enter meaning "send this next",
-             and the turn settling is what "next" is. *)
-          match queue_keeper_message state ~keeper_name:target text with
+             and the turn settling is what "next" is.
+
+             The request is built here, the same way the sending branch builds
+             it, so what waits is what will be sent -- identity and staged
+             attachments included. Building it at dispatch instead is what sent
+             an image with whichever line happened to go next. *)
+          let request =
+            Keeper_chat.create_request
+              ~attachments:(take_pending_attachments state)
+              ~keeper_name:target
+              ~message:text
+              ()
+          in
+          match queue_keeper_message state request with
           | Error detail -> add_event state "error" detail
           | Ok waiting ->
               clear_current_message_draft state;
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.Keeper_chat.request_id waiting)))
+                   blocking.Keeper_chat.request_id waiting)))
 ;;
 
 let drain_queued_message state ~base_path ~mailbox =
@@ -3256,19 +3294,32 @@ let drain_queued_message state ~base_path ~mailbox =
         Option.is_none (inflight_for state keeper_name))
     with
     | None -> ()
-    | Some ((keeper_name, text), rest) ->
+    | Some (request, rest) ->
+        let keeper_name = request.Keeper_chat.keeper_name in
         if keeper_available_for_new_message state keeper_name
         then (
           state.msg_queued <- rest;
-          start_keeper_message ~keeper_name state ~base_path ~mailbox text;
+          (* The request that waited is the request that goes. It was built
+             when the operator pressed Enter, so dispatch neither re-reads the
+             staged attachments nor mints a second identity for a line the
+             conversation already shows. *)
+          launch_keeper_request state ~mailbox request;
           next ())
         else (
           (* The keeper this was written to is no longer registered. Sending it
              would fail; holding it would leave a count reporting work that
              never moves. Say what is being let go, and let it go. *)
+          let dropped =
+            Chat_queue.waiting state.msg_queued
+            |> List.filter (fun (queued : Keeper_chat.request) ->
+                   String.equal queued.Keeper_chat.keeper_name keeper_name)
+          in
           let before = Chat_queue.length state.msg_queued in
           state.msg_queued <-
             Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
+          (* Their rows go with them: a line left in the conversation for a
+             keeper that will never receive it reads as sent. *)
+          List.iter (forget_queued_history state) dropped;
           add_event state "error"
             (Printf.sprintf
                "Keeper %s is no longer registered; %d queued message(s) for it \

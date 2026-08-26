@@ -213,7 +213,11 @@ let test_take_newest_returns_last_and_keeps_order () =
   (* [fun q -> match …] in a [|>] chain swallows the rest of the chain into
      the match, so the stages are a plain application instead. *)
   let push_ok queue keeper text =
-    match Masc_tui_keeper_chat_queue.push queue ~keeper_name:keeper text with
+    let request =
+      Masc_tui_keeper_chat_projection.create_request ~attachments:[]
+        ~keeper_name:keeper ~message:text ()
+    in
+    match Masc_tui_keeper_chat_queue.push queue request with
     | Ok (next, _) -> next
     | Error detail -> failf "push failed: %s" detail
   in
@@ -226,58 +230,134 @@ let test_take_newest_returns_last_and_keeps_order () =
   in
   match Masc_tui_keeper_chat_queue.take_newest queue with
   | None -> failf "take_newest returned None with three waiting"
-  | Some ((keeper, text), rest) ->
-      check string "newest pair is the last pushed" "c" keeper;
-      check string "newest text is the last pushed" "third" text;
+  | Some (newest, rest) ->
+      check string "newest request is the last pushed" "c"
+        newest.Masc_tui_keeper_chat_projection.keeper_name;
+      check string "newest text is the last pushed" "third"
+        newest.Masc_tui_keeper_chat_projection.message;
       check int "drain order of the rest is untouched" 2
         (Masc_tui_keeper_chat_queue.length rest);
       (match
          Masc_tui_keeper_chat_queue.take_first_sendable rest
            ~sendable:(fun _ -> true)
        with
-       | Some (("a", "first"), remaining) ->
-           check bool "oldest still drains first" true
+       | Some (oldest, remaining) ->
+           check string "oldest still drains first" "a"
+             oldest.Masc_tui_keeper_chat_projection.keeper_name;
+           check (list string) "and what is left keeps its order" [ "second" ]
              (Masc_tui_keeper_chat_queue.waiting remaining
-              = [ ("b", "second") ])
-       | _ -> failf "oldest no longer drains first after take_newest")
+              |> List.map (fun (r : Masc_tui_keeper_chat_projection.request) ->
+                     r.Masc_tui_keeper_chat_projection.message))
+       | None -> failf "oldest no longer drains first after take_newest")
 ;;
 
-(* The pane draws one row per waiting line. The row budget that sizes the
-   history has to count those rows: the frame presenter drops whatever runs
-   past the last terminal row, so a pane that came out taller by the number of
-   waiting lines loses its bottom and the prompt slides out from under the
-   caret. That was the bug -- the queue rows were drawn and never counted. *)
-let test_the_row_budget_counts_the_queue () =
-  let n =
+(* The queue no longer has rows of its own beneath the conversation: a waiting
+   line is drawn in the conversation, in its place in the order, from the
+   moment it is typed.
+
+   What still has to hold is that the budget and the pane agree about it.
+   Counting rows nothing draws is the same defect as drawing rows nothing
+   counts, and the second one shipped: #29818 rewrote the in-flight block and
+   took the queue rows out with it, leaving the count behind, so every line
+   typed during a turn cost a row of conversation and put nothing in its
+   place.
+
+   Asserted as an equality rather than as "both at least once". The contract is
+   that the two sides move together; "neither draws nor counts" satisfies it
+   exactly as "both do", and requiring a count would pin the old design rather
+   than the rule it existed for. *)
+let test_the_budget_and_the_pane_agree_about_queue_rows () =
+  let counted =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_types.ml"
       ~binding_name:"keeper_message_status_rows"
       ~callee:"Masc_tui_keeper_chat_queue.waiting"
   in
-  if n < 1 then
-    failf
-      "keeper_message_status_rows must count the rows the pane draws for \
-       waiting lines; Masc_tui_keeper_chat_queue.waiting is called %d time(s)"
-      n
-;;
-
-(* The other half of the budget check above. Counting rows nothing draws is
-   the same defect as drawing rows nothing counts, and it is the one that
-   actually shipped: #29818 rewrote the in-flight block and took the queue
-   rows out with it, leaving the count. Both halves are asserted so neither
-   side can move alone. *)
-let test_the_pane_draws_the_queue_it_counts () =
-  let n =
+  let drawn =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui_render.ml"
       ~binding_name:"render_keeper_message"
       ~callee:"Masc_tui_keeper_chat_queue.waiting"
   in
+  if counted <> drawn then
+    failf
+      "the row budget and the pane disagree about the queue: \
+       keeper_message_status_rows walks it %d time(s), render_keeper_message \
+       %d time(s)"
+      counted drawn
+;;
+
+(* A queued line is shown as queued. Drawn like a sent one it would be the same
+   silence that made a refused send look like a sent one -- the operator has to
+   be able to tell which of their own messages has actually gone. The queue is
+   the only place that fact lives, so the pane asks it rather than carrying a
+   second copy that can drift. *)
+let test_the_pane_marks_what_is_still_waiting () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui_render.ml"
+      ~binding_name:"render_keeper_message"
+      ~callee:"Masc_tui_keeper_chat_queue.holds"
+  in
   if n < 1 then
     failf
-      "render_keeper_message must draw the waiting lines the row budget \
-       reserves for it; Masc_tui_keeper_chat_queue.waiting is called %d \
-       time(s)"
+      "render_keeper_message must ask the queue which rows are still waiting; \
+       Masc_tui_keeper_chat_queue.holds is called %d time(s)"
+      n
+;;
+
+(* Staged attachments belong to the line they were staged for. They used to be
+   taken at dispatch, so an image attached while a line waited went out with
+   whichever line happened to go next -- and the operator had no way to see
+   that it had. Both branches of the send take them now: the one that sends
+   immediately and the one that queues. *)
+let test_a_queued_line_takes_its_attachments_when_it_is_typed () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"start_keeper_message"
+      ~callee:"take_pending_attachments"
+  in
+  if n < 2 then
+    failf
+      "both the sending and the queueing branch must take the staged \
+       attachments where the line is written; take_pending_attachments is \
+       called %d time(s) in start_keeper_message"
+      n
+;;
+
+(* The operator pressed Enter, so the line belongs in the conversation now --
+   not when the turn ahead of it settles. Keyed on the request id through the
+   same call dispatch makes, so the row a queued line already has is the row it
+   keeps when it finally goes out; there is no second copy to reconcile. *)
+let test_queueing_puts_the_line_in_the_conversation () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"queue_keeper_message"
+      ~callee:"append_user_history_once"
+  in
+  if n < 1 then
+    failf
+      "queue_keeper_message must put the queued line in the conversation; \
+       append_user_history_once is called %d time(s)"
+      n
+;;
+
+(* And taking it back takes the row with it. A cancelled line left in the
+   conversation reads as sent -- the exact confusion the row was added to
+   end. *)
+let test_cancel_and_edit_take_the_row_with_them () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"handle_message_key"
+      ~callee:"forget_queued_history"
+  in
+  if n < 2 then
+    failf
+      "cancel (Ctrl-K) and edit (Ctrl-P) must each drop the queued line's row; \
+       forget_queued_history is called %d time(s) in handle_message_key"
       n
 ;;
 
@@ -340,21 +420,28 @@ let test_the_pane_draws_every_row_into_its_own_buffer () =
          (List.map (fun (n, text) -> Printf.sprintf "line %d: %s" n text) rows))
 ;;
 
-(* A line waiting for the next turn is the newest thing the operator typed.
-   The arrows walked [msg_history], which is only written on dispatch, so the
-   walk stepped straight over it: the queued line could be neither read back
-   nor pulled into the composer. *)
-let test_the_arrow_walk_includes_the_queue () =
+(* A line waiting for the next turn is the newest thing the operator typed, and
+   the arrows have to hand it back. They walk [msg_history], which once was
+   written only on dispatch -- so the walk stepped straight over a queued line
+   and it could be neither read back nor pulled into the composer.
+
+   It is written when the line is typed now, so one walk covers both and the
+   queue is not walked alongside it. That is what this pins: walking both would
+   put the newest line in the arrows twice. The other half -- that a queued
+   line reaches the history at all -- is
+   [test_queueing_puts_the_line_in_the_conversation]. *)
+let test_the_arrow_walk_does_not_repeat_the_queue () =
   let n =
     Ast_grep.count_calls_in_value_binding
       ~module_path:"bin/masc_tui.ml"
       ~binding_name:"own_typed_messages"
       ~callee:"Chat_queue.waiting"
   in
-  if n < 1 then
+  if n <> 0 then
     failf
-      "own_typed_messages must offer the waiting lines to the arrows; \
-       Chat_queue.waiting is called %d time(s)"
+      "own_typed_messages must not walk the queue as well: a queued line is \
+       already in the history it walks, so concatenating the queue shows the \
+       newest line twice; Chat_queue.waiting is called %d time(s)"
       n
 ;;
 
@@ -428,14 +515,20 @@ let () =
             test_the_header_names_only_unusual_modes
         ; test_case "chat shortcuts reach visibility state" `Quick
             test_chat_shortcuts_reach_visibility_state
-        ; test_case "the row budget counts the queue" `Quick
-            test_the_row_budget_counts_the_queue
-        ; test_case "the pane draws the queue it counts" `Quick
-            test_the_pane_draws_the_queue_it_counts
+        ; test_case "the budget and the pane agree about queue rows" `Quick
+            test_the_budget_and_the_pane_agree_about_queue_rows
+        ; test_case "the pane marks what is still waiting" `Quick
+            test_the_pane_marks_what_is_still_waiting
+        ; test_case "queueing puts the line in the conversation" `Quick
+            test_queueing_puts_the_line_in_the_conversation
+        ; test_case "a queued line takes its attachments when it is typed" `Quick
+            test_a_queued_line_takes_its_attachments_when_it_is_typed
+        ; test_case "cancel and edit take the row with them" `Quick
+            test_cancel_and_edit_take_the_row_with_them
         ; test_case "the pane draws every row into its own buffer" `Quick
             test_the_pane_draws_every_row_into_its_own_buffer
-        ; test_case "the arrow walk includes the queue" `Quick
-            test_the_arrow_walk_includes_the_queue
+        ; test_case "the arrow walk does not repeat the queue" `Quick
+            test_the_arrow_walk_does_not_repeat_the_queue
         ; test_case "both readers share one disposition" `Quick
             test_both_readers_share_one_disposition
         ; test_case "the calls table says what came back" `Quick

@@ -84,6 +84,10 @@ type post =
 
 val complete :
   ?post:post ->
+  ?client_secret:string ->
+      (** Sent in the form body when registration returned one. Absent rather
+          than empty when it did not: a server that issued no secret refuses
+          a redemption carrying an empty one. *)
   discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
   pending:pending ->
@@ -98,6 +102,7 @@ val complete :
 
 val refresh :
   ?post:post ->
+  ?client_secret:string ->
   discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
   refresh_token:string ->

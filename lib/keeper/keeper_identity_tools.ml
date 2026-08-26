@@ -300,14 +300,18 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
             ~provider
         with
         | Error message -> Error message
-        | Ok (Some client_id) -> Ok client_id
+        | Ok (Some credentials) -> Ok credentials
         | Ok None ->
           Error "this install has no registered client; attach a keeper first"
       in
       let* tokens =
         Result.map_error Keeper_oauth_flow.exchange_error_to_string
           (Keeper_oauth_flow.refresh ?post:token_post ~discovered
-             ~client_id:configured_client_id ~refresh_token ~now ())
+             ~client_id:
+               configured_client_id.Keeper_oauth_client_store.client_id
+             ?client_secret:
+               configured_client_id.Keeper_oauth_client_store.client_secret
+             ~refresh_token ~now ())
       in
       let* () = store_tokens ~base_path ~keeper_name ~provider tokens in
       Ok tokens.Keeper_oauth_flow.access_token)

@@ -863,6 +863,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
               no-effect fact so failover is allowed for that narrow case. *)
            (match error with
             | Runtime_claude_code.Turn_failed_with_observation
+                { tool_effect_attempted = false; response_emitted = false; _ }
+            | Runtime_claude_code.Quota_blocked
                 { tool_effect_attempted = false; response_emitted = false; _ } ->
               Atomic.set
                 effect_disposition

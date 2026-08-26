@@ -12,7 +12,7 @@ type instruction_content =
 type t =
   { trace_id : Keeper_id.Trace_id.t
   ; turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
+  ; runtime_id : unit -> string option
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; task_scope : recorded_task_scope
   }
@@ -26,6 +26,7 @@ and recorded_task_scope =
 
 type error =
   | Turn_scope_mismatch
+  | Runtime_attempt_missing
   | Invalid_task_id of string
   | Composition_reference_missing of { tool_name : string }
   | Activation_rejected of Ledger.decode_error
@@ -82,13 +83,18 @@ let evidence ~relative_path contents =
 ;;
 
 let record ~config context ~invocation ~served_content ~origin reference =
+  let* runtime_id =
+    match context.runtime_id () with
+    | Some runtime_id -> Ok runtime_id
+    | None -> Error Runtime_attempt_missing
+  in
   let* activation =
     Ledger.make_activation
       ~identity:reference.Skill_reference.identity
       ~content_revision:reference.content_revision
       ~snapshot_revision:context.snapshot_revision
       ~turn_ref:context.turn_ref
-      ~runtime_id:context.runtime_id
+      ~runtime_id
       ~skill_tool_use_id:
         (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
       ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
@@ -153,6 +159,7 @@ let observe_action
 
 let error_code = function
   | Turn_scope_mismatch -> "turn_scope_mismatch"
+  | Runtime_attempt_missing -> "runtime_attempt_missing"
   | Invalid_task_id _ -> "invalid_task_id"
   | Composition_reference_missing _ -> "composition_reference_missing"
   | Activation_rejected _ -> "activation_rejected"
@@ -162,6 +169,8 @@ let error_code = function
 let error_to_string = function
   | Turn_scope_mismatch ->
     "Skill activation turn reference does not belong to the Keeper trace"
+  | Runtime_attempt_missing ->
+    "Skill activation arrived before a concrete runtime attempt was selected"
   | Invalid_task_id task_id ->
     Printf.sprintf "Skill activation Task id is invalid: %s" task_id
   | Composition_reference_missing { tool_name } ->
@@ -178,6 +187,7 @@ let error_to_yojson error =
       Some (Ledger.decode_error_code cause)
     | Store_failed cause -> Some (Ledger.store_error_code cause)
     | Turn_scope_mismatch
+    | Runtime_attempt_missing
     | Invalid_task_id _
     | Composition_reference_missing _ ->
       None

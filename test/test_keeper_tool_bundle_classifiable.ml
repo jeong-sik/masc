@@ -282,7 +282,7 @@ let with_bundle_tools ?(record_activations = true) f =
          match
            Keeper_skill_activation_recorder.make
              ~trace_id
-             ~runtime_id:"test.runtime"
+             ~runtime_id:(fun () -> Some "test.runtime")
              ~turn_ref:
                (Ids.Turn_ref.make
                   ~trace_id:(Keeper_id.Trace_id.to_string trace_id)

@@ -11,6 +11,7 @@ type instruction_content =
 
 type error =
   | Turn_scope_mismatch
+  | Runtime_attempt_missing
   | Invalid_task_id of string
   | Composition_reference_missing of { tool_name : string }
   | Activation_rejected of Keeper_skill_activation_ledger.decode_error
@@ -19,11 +20,13 @@ type error =
 val make :
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
-  runtime_id:string ->
+  runtime_id:(unit -> string option) ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
   task_scope:Keeper_task_skill_turn.task_scope ->
   (t, error) result
-(** Capture the immutable facts used by every Skill call in one turn. *)
+(** Capture the immutable facts used by every Skill call in one turn. The
+    runtime provider resolves the concrete candidate selected for the active
+    attempt; recording fails before that selection exists. *)
 
 val record_instruction :
   config:Workspace.config ->

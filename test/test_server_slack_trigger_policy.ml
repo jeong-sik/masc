@@ -326,6 +326,54 @@ let slack_message ?(user_name = Some "operator") ~ts () =
    Driven through [submit_event] rather than the recorder underneath it: the
    collapse was in the handler, and a test that called past it stayed green
    with the collapse restored. *)
+(* The directory holds names in memory for an hour and loses them on restart,
+   so the same person arrives named and then not -- one channel had twelve of
+   each from one human. A name seen once is written down and spoken for the
+   messages that arrive without one.
+
+   Two submissions through the real path: the first carries a name, the second
+   carries none. *)
+let test_a_name_seen_once_is_remembered () =
+  with_temp_base (fun () ->
+    match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+    | Error detail -> fail detail
+    | Ok _ ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let ingress =
+        Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) ()
+      in
+      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_
+          ~metadata:_ ~content:_ =
+        Gate_protocol.Reply
+          { content = "queued"; structured = None; stats = None
+          ; message_request = None }
+      in
+      let submit ~user_name ~ts =
+        G.For_testing.submit_event ~team_id:"T123" ~deliver:(fun () -> ())
+          ingress ~dispatch_for_delivery:(fun _ -> dispatch)
+          ~clock:(Eio.Stdenv.clock env)
+          ~base_dir:(Env_config_core.base_path ())
+          (slack_message ~user_name ~ts ())
+      in
+      submit ~user_name:(Some "Vincent") ~ts:"1710000000.000001";
+      submit ~user_name:None ~ts:"1710000000.000002";
+      let names =
+        Keeper_external_attention.pending_for_keeper
+          ~base_path:(Env_config_core.base_path ())
+          ~keeper_name:"luna" ~limit:10 ()
+        |> List.map (fun item ->
+             item.Keeper_external_attention.actor
+               .Keeper_external_attention.display_name)
+      in
+      check int "both messages were recorded" 2 (List.length names);
+      check (list (option string))
+        "the message with no name speaks the one seen before"
+        [ Some "Vincent"; Some "Vincent" ]
+        names)
+;;
+
 let test_a_missing_author_name_is_not_replaced_by_the_id () =
   with_temp_base (fun () ->
     match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
@@ -544,6 +592,8 @@ let () =
             test_bound_message_queues_exact_slack_ts
         ; test_case "a missing author name is not replaced by the id" `Quick
             test_a_missing_author_name_is_not_replaced_by_the_id
+        ; test_case "a name seen once is remembered" `Quick
+            test_a_name_seen_once_is_remembered
         ; test_case "binding store failure does not enqueue" `Quick
             test_binding_store_failure_does_not_enqueue
         ] )

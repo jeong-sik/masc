@@ -3,6 +3,7 @@
 module Provider = Keeper_oauth_provider
 module Session = Keeper_oauth_session
 module Store = Keeper_oauth_client_store
+module Declarations = Keeper_oauth_declarations
 
 let ( let* ) = Result.bind
 
@@ -37,12 +38,11 @@ let redirect_uri () =
 ;;
 
 let provider_of_id provider_id =
-  let key = Filename.concat "identity" (provider_id ^ ".toml") in
-  match Embedded_config.read key with
+  match Declarations.find provider_id with
   | None -> Error (Printf.sprintf "no identity provider is declared as %S" provider_id)
-  | Some contents ->
-    Result.map_error Provider.error_to_string
-      (Provider.load ~file_name:provider_id ~contents)
+  | Some (Declarations.Declared provider) -> Ok provider
+  | Some (Declarations.Unreadable { problem; _ }) ->
+    Error (Printf.sprintf "the %S declaration cannot be read: %s" provider_id problem)
 ;;
 
 (* Where this install keeps what it registered. Beside the workspace rather
@@ -51,43 +51,18 @@ let identity_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
 ;;
 
-type declaration =
-  | Declared of { id : string; label : string }
-  | Unreadable of { id : string; problem : string }
-
-let identity_prefix = "identity/"
-
-let declarations () =
-  Embedded_config.file_list
-  |> List.filter_map (fun key ->
-       if String.starts_with ~prefix:identity_prefix key
-          && Filename.check_suffix key ".toml"
-       then (
-         let id = Filename.remove_extension (Filename.basename key) in
-         (* A file that cannot be read is listed with what is wrong with it.
-            Dropping it would show an operator a shorter list and no reason
-            for the provider they came looking for being absent. *)
-         match Embedded_config.read key with
-         | None -> Some (Unreadable { id; problem = "the file is not readable" })
-         | Some contents ->
-           (match Provider.load ~file_name:id ~contents with
-            | Ok provider -> Some (Declared { id; label = provider.Provider.label })
-            | Error err -> Some (Unreadable { id; problem = Provider.error_to_string err })))
-       else None)
-  |> List.sort (fun left right ->
-       let name = function Declared { id; _ } | Unreadable { id; _ } -> id in
-       String.compare (name left) (name right))
-;;
-
 let declarations_json () =
   `List
     (List.map
        (function
-         | Declared { id; label } ->
-           `Assoc [ "id", `String id; "label", `String label ]
-         | Unreadable { id; problem } ->
+         | Declarations.Declared provider ->
+           `Assoc
+             [ "id", `String provider.Provider.id
+             ; "label", `String provider.Provider.label
+             ]
+         | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])
-       (declarations ()))
+       (Declarations.all ()))
 ;;
 
 let start ~base_path ~keeper ~provider_id ~now =
@@ -117,11 +92,67 @@ let start ~base_path ~keeper ~provider_id ~now =
       ])
 ;;
 
+let refresh_tools ~base_path ~keeper ~provider_id ~now =
+  let* provider = provider_of_id provider_id in
+  let* catalog =
+    Keeper_identity_tools.refresh ~base_path ~keeper_name:keeper ~provider ~now ()
+  in
+  Ok
+    (`Assoc
+      [ "keeper", `String keeper
+      ; "provider", `String catalog.Keeper_identity_tools.provider_id
+      ; "provider_label", `String catalog.Keeper_identity_tools.provider_label
+      ; "discovered_at", `Float catalog.Keeper_identity_tools.discovered_at
+      ; ( "tools"
+        , `List
+            (List.map
+               (fun (tool : Mcp_client.tool) -> `String tool.Mcp_client.name)
+               catalog.Keeper_identity_tools.tools) )
+      ])
+;;
+
+let attached_tools_json ~base_path ~keeper =
+  `List
+    (List.map
+       (fun declaration ->
+         let id = Declarations.id_of declaration in
+         match declaration with
+         | Declarations.Unreadable { problem; _ } ->
+           `Assoc [ "provider", `String id; "problem", `String problem ]
+         | Declarations.Declared provider ->
+           (match
+              Keeper_identity_tools.load ~base_path ~keeper_name:keeper
+                ~provider_id:provider.Provider.id
+            with
+            | Error problem ->
+              `Assoc [ "provider", `String id; "problem", `String problem ]
+            | Ok None ->
+              `Assoc
+                [ "provider", `String id
+                ; "provider_label", `String provider.Provider.label
+                ; "attached", `Bool false
+                ]
+            | Ok (Some catalog) ->
+              `Assoc
+                [ "provider", `String id
+                ; "provider_label", `String provider.Provider.label
+                ; "attached", `Bool true
+                ; "discovered_at", `Float catalog.Keeper_identity_tools.discovered_at
+                ; ( "tools"
+                  , `List
+                      (List.map
+                         (fun (tool : Mcp_client.tool) -> `String tool.Mcp_client.name)
+                         catalog.Keeper_identity_tools.tools) )
+                ]))
+       (Declarations.all ()))
+;;
+
 type attached = {
   keeper : string;
   provider_id : string;
   provider_label : string;
   expires_at : float;
+  tool_discovery : (int, string) result;
 }
 
 let finish ~base_path ~state ~code ~now =
@@ -155,10 +186,19 @@ let finish ~base_path ~state ~code ~now =
     set_env ~name:provider.Provider.expires_at_env
       ~value:(Printf.sprintf "%.0f" finished.Session.expires_at)
   in
+  (* The credentials are on disk by now, so this can fail without undoing
+     the attachment. Its outcome is carried rather than logged: the operator
+     is looking at a page right now. *)
+  let tool_discovery =
+    Result.map
+      (fun catalog -> List.length catalog.Keeper_identity_tools.tools)
+      (Keeper_identity_tools.refresh ~base_path ~keeper_name ~provider ~now ())
+  in
   Ok
     { keeper = keeper_name
     ; provider_id = provider.Provider.id
     ; provider_label = provider.Provider.label
     ; expires_at = finished.Session.expires_at
+    ; tool_discovery
     }
 ;;

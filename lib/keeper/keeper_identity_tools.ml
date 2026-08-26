@@ -1,0 +1,278 @@
+(** See keeper_identity_tools.mli. *)
+
+module Provider = Keeper_oauth_provider
+
+type catalog = {
+  provider_id : string;
+  provider_label : string;
+  discovered_at : float;
+  tools : Mcp_client.tool list;
+}
+
+let ( let* ) = Result.bind
+
+let catalog_path ~base_path ~keeper_name ~provider_id =
+  let identity_dir =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
+  in
+  Filename.concat
+    (Filename.concat
+       (Filename.concat identity_dir "catalogs")
+       (Workspace_utils.safe_filename keeper_name))
+    (provider_id ^ ".json")
+;;
+
+let tool_to_json (tool : Mcp_client.tool) =
+  `Assoc
+    [ "name", `String tool.Mcp_client.name
+    ; "description", `String tool.Mcp_client.description
+    ; "input_schema", tool.Mcp_client.input_schema
+    ]
+;;
+
+let tool_of_json json =
+  let member key =
+    match json with
+    | `Assoc pairs -> List.assoc_opt key pairs
+    | _ -> None
+  in
+  match member "name", member "description", member "input_schema" with
+  | Some (`String name), Some (`String description), Some input_schema ->
+    Some { Mcp_client.name; description; input_schema }
+  | _ -> None
+;;
+
+let catalog_to_json catalog =
+  `Assoc
+    [ "provider_id", `String catalog.provider_id
+    ; "provider_label", `String catalog.provider_label
+    ; "discovered_at", `Float catalog.discovered_at
+    ; "tools", `List (List.map tool_to_json catalog.tools)
+    ]
+;;
+
+let catalog_of_json json =
+  let member key =
+    match json with
+    | `Assoc pairs -> List.assoc_opt key pairs
+    | _ -> None
+  in
+  match member "provider_id", member "provider_label", member "tools" with
+  | Some (`String provider_id), Some (`String provider_label), Some (`List rows) ->
+    let discovered_at =
+      match member "discovered_at" with
+      | Some (`Float value) -> value
+      | Some (`Int value) -> float_of_int value
+      | Some _ | None -> 0.0
+    in
+    (* A row this build cannot read is a written catalog disagreeing with the
+       code that reads it, which is worth saying rather than quietly
+       offering a shorter list. *)
+    let tools = List.map tool_of_json rows in
+    if List.exists Option.is_none tools
+    then Error "the written catalog carries a tool this build cannot read"
+    else Ok { provider_id; provider_label; discovered_at; tools = List.filter_map Fun.id tools }
+  | _ -> Error "the written catalog is missing provider_id, provider_label or tools"
+;;
+
+let load ~base_path ~keeper_name ~provider_id =
+  let path = catalog_path ~base_path ~keeper_name ~provider_id in
+  match In_channel.with_open_bin path In_channel.input_all with
+  | contents ->
+    (match Yojson.Safe.from_string contents with
+     | json -> Result.map Option.some (catalog_of_json json)
+     | exception Yojson.Json_error detail -> Error detail)
+  | exception Sys_error _ when not (Sys.file_exists path) -> Ok None
+  | exception Sys_error message -> Error message
+;;
+
+let rec ensure_dir path =
+  if String.equal path "" || String.equal path "." || String.equal path "/"
+     || Sys.file_exists path
+  then ()
+  else (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then ensure_dir parent;
+    try Unix.mkdir path 0o700 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+let save ~base_path ~keeper_name catalog =
+  let path =
+    catalog_path ~base_path ~keeper_name ~provider_id:catalog.provider_id
+  in
+  let temp = path ^ ".tmp" in
+  try
+    ensure_dir (Filename.dirname path);
+    Out_channel.with_open_bin temp (fun oc ->
+      Out_channel.output_string oc (Yojson.Safe.to_string (catalog_to_json catalog)));
+    Unix.rename temp path;
+    Ok ()
+  with
+  | Unix.Unix_error (err, fn, arg) ->
+    Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
+  | Sys_error message -> Error message
+;;
+
+(* The Keeper's own projection, which is the same array its runtime would be
+   handed. A variable of this name in masc's own environment cannot reach it:
+   [Env_keeper_scrub] inherits an exact closed set of process keys and a
+   provider credential is not in it. That is where the guarantee lives, not
+   here -- an earlier version of this passed an empty host env and claimed
+   the credit, and removing that changed nothing. *)
+let projected_env_value ~base_path ~keeper_name ~name =
+  let* env =
+    Keeper_secret_projection.local_env_for_keeper ~base_path
+      ~keeper_name ()
+  in
+  match env with
+  | None -> Error "this keeper has no secret projection"
+  | Some entries ->
+    let prefix = name ^ "=" in
+    let found =
+      Array.to_list entries
+      |> List.find_map (fun entry ->
+           if String.length entry >= String.length prefix
+              && String.equal (String.sub entry 0 (String.length prefix)) prefix
+           then
+             Some
+               (String.sub entry (String.length prefix)
+                  (String.length entry - String.length prefix))
+           else None)
+    in
+    (match found with
+     | Some value when String.trim value <> "" -> Ok value
+     | Some _ | None ->
+       Error
+         (Printf.sprintf "this keeper has no %s; attach it to the provider first"
+            name))
+;;
+
+let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
+  let* access_token =
+    projected_env_value ~base_path ~keeper_name
+      ~name:provider.Provider.access_token_env
+  in
+  let* client =
+    Result.map_error Mcp_client.error_to_string
+      (Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ())
+  in
+  let* tools =
+    Result.map_error Mcp_client.error_to_string (Mcp_client.list_tools ?post client)
+  in
+  let catalog =
+    { provider_id = provider.Provider.id
+    ; provider_label = provider.Provider.label
+    ; discovered_at = now
+    ; tools
+    }
+  in
+  let* () = save ~base_path ~keeper_name catalog in
+  Ok catalog
+;;
+
+type offering = {
+  offered : Agent_core.Tool.t list;
+  unusable : (string * string) list;
+}
+
+let model_tool_name ~(provider : Provider.t) ~remote_name =
+  Printf.sprintf "%s_%s" provider.Provider.id remote_name
+;;
+
+let failed ~recoverable ~error_class message =
+  Error { Agent_core.Types.message; recoverable; error_class }
+;;
+
+let result_of_call answer =
+  match answer with
+  | Ok (result : Mcp_client.tool_result) ->
+    if result.Mcp_client.is_error
+    then
+      (* The tool ran and said no. The model can try other arguments, and
+         nothing about that is this process's failure. *)
+      failed ~recoverable:true ~error_class:(Some Agent_core.Types.Unknown)
+        result.Mcp_client.text
+    else Ok { Agent_core.Types.content = result.Mcp_client.text; _meta = None }
+  | Error (Mcp_client.Unauthorized _) ->
+    (* Not something the model can fix by trying again. Whoever attached
+       this Keeper has to attach it again. *)
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
+      "this keeper's credential for that service is no longer accepted; attach \
+       it again"
+  | Error (Mcp_client.Transport detail) ->
+    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) detail
+  | Error ((Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _) as err) ->
+    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
+      (Mcp_client.error_to_string err)
+;;
+
+let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~remote_name
+      arguments =
+  match
+    projected_env_value ~base_path ~keeper_name
+      ~name:provider.Provider.access_token_env
+  with
+  | Error message ->
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
+      message
+  | Ok access_token ->
+    (match
+       Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
+     with
+     | Error err -> result_of_call (Error err)
+     | Ok client ->
+       result_of_call (Mcp_client.call_tool ?post client ~name:remote_name ~arguments))
+;;
+
+let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
+  List.fold_left
+    (fun acc (tool : Mcp_client.tool) ->
+      let name = model_tool_name ~provider ~remote_name:tool.Mcp_client.name in
+      match
+        Agent_core.Types.tool_schema_of_input_schema ~name
+          ~description:tool.Mcp_client.description
+          ~input_schema:tool.Mcp_client.input_schema ()
+      with
+      | Error detail ->
+        { acc with unusable = (name, detail) :: acc.unusable }
+      | Ok schema ->
+        let projected =
+          Agent_core.Base.Tool.of_schema schema
+            (Agent_core.Base.Tool.ignoring_execution_env
+               (handler ?post ~base_path ~keeper_name ~provider
+                  ~remote_name:tool.Mcp_client.name))
+        in
+        { acc with offered = projected :: acc.offered })
+    { offered = []; unusable = [] }
+    catalog.tools
+  |> fun acc ->
+  { offered = List.rev acc.offered; unusable = List.rev acc.unusable }
+;;
+
+let for_turn ~base_path ~keeper_name =
+  List.fold_left
+    (fun acc declaration ->
+      match declaration with
+      (* A declaration nobody can read is not this Keeper's problem to
+         solve, but a turn that silently offered fewer tools because of it
+         would leave nobody able to tell. *)
+      | Keeper_oauth_declarations.Unreadable { id; problem } ->
+        { acc with unusable = (id, problem) :: acc.unusable }
+      | Keeper_oauth_declarations.Declared provider ->
+        (match
+           load ~base_path ~keeper_name ~provider_id:provider.Provider.id
+         with
+         (* Never attached. Nothing to offer and nothing wrong. *)
+         | Ok None -> acc
+         | Error problem ->
+           { acc with unusable = (provider.Provider.id, problem) :: acc.unusable }
+         | Ok (Some catalog) ->
+           let offering = agent_tools ~base_path ~keeper_name ~provider catalog in
+           { offered = acc.offered @ offering.offered
+           ; unusable = List.rev_append offering.unusable acc.unusable
+           }))
+    { offered = []; unusable = [] }
+    (Keeper_oauth_declarations.all ())
+  |> fun acc -> { acc with unusable = List.rev acc.unusable }
+;;

@@ -42,6 +42,12 @@ module Safe_ops = Safe_ops
 module Tool_board = Board_tool
 module Transport_metrics = Masc.Transport_metrics
 module Server_mcp_transport_http = Server_mcp_transport_http
+module Server_mcp_transport_http_conn = Server_mcp_transport_http_conn
+
+let () =
+  Masc.Shutdown_hooks.register_sse_cleanup (fun () ->
+    let closed = Sse.close_all_clients () in
+    closed, Server_mcp_transport_http_conn.active_session_count ())
 
 
 (* ============================================ *)
@@ -687,7 +693,7 @@ let run_cmd host port cli_base_path =
               "[Shutdown] Phase 1/4 NOTIFY: sent to %d SSE clients (%.2fs) [active conn: %d, ws: %d]"
               (Sse.client_count ())
               (Unix.gettimeofday () -. t_phase)
-              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
 
             Eio.Time.sleep clock shutdown_cfg.notify_delay_s;
@@ -714,7 +720,7 @@ let run_cmd host port cli_base_path =
             Log.Server.info "[Shutdown] Phase 2/4 HOOKS: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
             (* Phase 3: Board flush with 2s timeout *)
             let t_phase = Unix.gettimeofday () in
@@ -737,7 +743,7 @@ let run_cmd host port cli_base_path =
             Log.Server.info "[Shutdown] Phase 3/4 BOARD: done (%.2fs, total=%.1fs) [active conn: %d, ws: %d]"
               (now -. t_phase)
               (now -. t_shutdown_start)
-              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
 
             (* Phase 4: Return normally — Eio.Fiber.first will cancel
@@ -745,7 +751,7 @@ let run_cmd host port cli_base_path =
             Log.Server.info
               "[Shutdown] Phase 4/4 CANCEL: server cancel (total=%.1fs) [active conn: %d, ws: %d]"
               (Unix.gettimeofday () -. t_shutdown_start)
-              (Server_mcp_transport_http_sse.active_session_count ())
+              (Server_mcp_transport_http_conn.active_session_count ())
               (Server_mcp_transport_ws.session_count ());
             ()
             in
@@ -767,7 +773,7 @@ let run_cmd host port cli_base_path =
                 Log.Server.warn "shutdown: SSE close error: %s"
                   (Printexc.to_string exn));
             Log.Server.info "MASC MCP: Server stopped, waiting for background fibers... [active conn: %d, ws: %d]"
-            (Server_mcp_transport_http_sse.active_session_count ())
+            (Server_mcp_transport_http_conn.active_session_count ())
             (Server_mcp_transport_ws.session_count ());
             (* Failing the switch cancels all remaining background fibers.
                Returning normally would leave non-daemon background loops

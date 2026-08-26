@@ -28,7 +28,7 @@ masc runs four streaming transports today (SSE, WebSocket, gRPC, WebRTC). Each h
 
 ### 1.1 Silent eviction at the SSE 200-client cap
 
-`server_mcp_transport_http_sse.ml` enforces a `max_clients = 200` cap by evicting the oldest connection. The eviction **closes the connection without sending a close frame**: from the client's perspective, the connection just drops mid-stream with no indication of *why*. Clients that auto-reconnect race with the cap and may flap; clients that don't reconnect miss subsequent events silently.
+`server_mcp_transport_http_conn.ml` enforces a `max_clients = 200` cap by evicting the oldest connection. The eviction **closes the connection without sending a close frame**: from the client's perspective, the connection just drops mid-stream with no indication of *why*. Clients that auto-reconnect race with the cap and may flap; clients that don't reconnect miss subsequent events silently.
 
 This is the transport-layer analog of [[RFC-0098]]'s silent-failure problem: a server policy decision (eviction) is invisible to the client.
 

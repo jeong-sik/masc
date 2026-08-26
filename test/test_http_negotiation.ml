@@ -388,9 +388,9 @@ let test_sse_guard_knobs_come_from_the_config_module () =
     (Conn.sse_connect_max_in_window ())
 ;;
 
-let test_sse_guard_registry_is_shared_with_cleanup_loop () =
+let test_sse_guard_registry_has_one_owner () =
   let module Transport = Server_mcp_transport_http in
-  let module Cleanup_view = Server_mcp_transport_http_sse in
+  let module Registry = Server_mcp_transport_http_conn in
   let session_id = "shared-sse-guard-registry" in
   match Transport.check_sse_connect_guard session_id with
   | Error (reason, retry_after_s) ->
@@ -398,8 +398,8 @@ let test_sse_guard_registry_is_shared_with_cleanup_loop () =
         (Sse_reject_reason.to_label reason)
         retry_after_s
   | Ok () ->
-      check int "cleanup keeps fresh guard entries" 0
-        (Cleanup_view.reap_stale_guards ());
+      check int "registry keeps fresh guard entries" 0
+        (Registry.reap_stale_guards ());
       (match Transport.check_sse_connect_guard session_id with
       | Error (Sse_reject_reason.Session_cooldown, retry_after_s) ->
           check bool "cooldown stays positive" true (retry_after_s > 0.0)
@@ -412,7 +412,7 @@ let test_sse_guard_registry_is_shared_with_cleanup_loop () =
 
 let test_preserve_guard_keeps_ag_ui_cooldown () =
   let module Transport = Server_mcp_transport_http in
-  let module Cleanup_view = Server_mcp_transport_http_sse in
+  let module Registry = Server_mcp_transport_http_conn in
   let session_id = "ag-ui-preserve-guard" in
   match Transport.check_sse_connect_guard session_id with
   | Error (reason, retry_after_s) ->
@@ -420,7 +420,7 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
         (Sse_reject_reason.to_label reason)
         retry_after_s
   | Ok () ->
-      Cleanup_view.stop_sse_session_preserve_guard session_id;
+      Registry.stop_sse_session_preserve_guard session_id;
       (match Transport.check_sse_connect_guard session_id with
       | Ok () -> fail "expected preserved guard to enforce reconnect cooldown"
       | Error (reason, retry_after_s) ->
@@ -428,7 +428,7 @@ let test_preserve_guard_keeps_ag_ui_cooldown () =
             "session_cooldown"
             (Sse_reject_reason.to_label reason);
           check bool "preserved retry-after is positive" true (retry_after_s > 0.0));
-      ignore (Cleanup_view.reap_stale_guards ())
+      ignore (Registry.reap_stale_guards ())
 
 (* task-534: the SSE reconnect guard's documented disable semantics are
    "[<= 0]" — negative {e and} zero both disable (mli of
@@ -544,8 +544,8 @@ let () =
             test_a_required_meta_field_is_rejected_as_invalid_params;
         test_case "2026 headers omit session id" `Quick
           test_stateless_headers_do_not_emit_session_id;
-        test_case "sse guard registry is shared" `Quick
-          test_sse_guard_registry_is_shared_with_cleanup_loop;
+        test_case "sse guard registry has one owner" `Quick
+          test_sse_guard_registry_has_one_owner;
         test_case "preserve guard keeps cooldown" `Quick
           test_preserve_guard_keeps_ag_ui_cooldown;
         test_case "sse guard knobs come from the config module" `Quick

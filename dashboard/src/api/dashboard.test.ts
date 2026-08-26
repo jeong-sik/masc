@@ -3233,6 +3233,51 @@ describe('runtime.toml raw config API', () => {
     },
   ]
 
+  function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+  }
+
+  function applicationRecord(payload: Record<string, unknown>): Record<string, unknown> {
+    if (!isUnknownRecord(payload.application)) {
+      throw new Error('committed fixture application is not an object')
+    }
+    return payload.application
+  }
+
+  function committedPayload(payload: Record<string, unknown>): Record<string, unknown> {
+    const application = isUnknownRecord(payload.application) ? payload.application : {}
+    return {
+      ...payload,
+      state: 'committed',
+      commit: {
+        source_revision: 'runtime-source-revision',
+        order: '7',
+        durability: 'durable',
+      },
+      application: {
+        operation: 'test_write',
+        routing: { status: 'applied', requires_restart: false, applied_at: null },
+        keeper_overlay: {
+          status: 'not_configured',
+          requires_restart: false,
+          applied_at: null,
+          configured_count: 0,
+          pending_keys: [],
+          applied_keys: [],
+          preempted_keys: [],
+        },
+        ...application,
+        skills: {
+          state: 'published',
+          input_source_revision: 'runtime-source-revision',
+          snapshot_revision: 'skill-snapshot-revision',
+          catalog_revision: 'skill-catalog-revision',
+          config_state: 'configured',
+        },
+      },
+    }
+  }
+
   it('fetches and normalizes the raw runtime.toml source', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
@@ -3325,7 +3370,7 @@ describe('runtime.toml raw config API', () => {
   it('posts the full raw TOML source through source_text', async () => {
     const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
+      new Response(JSON.stringify(committedPayload({
         ok: true,
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
@@ -3344,7 +3389,7 @@ describe('runtime.toml raw config API', () => {
           },
         },
         provider_protocols: providerProtocols,
-      }), {
+      })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3364,7 +3409,116 @@ describe('runtime.toml raw config API', () => {
     expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
     expect(result.application?.routing.status).toBe('applied')
     expect(result.application?.keeper_overlay.status).toBe('pending_restart')
+    expect(result.state).toBe('committed')
+    expect(result.commit).toEqual({
+      source_revision: 'runtime-source-revision',
+      order: '7',
+      durability: 'durable',
+    })
+    expect(result.application.skills).toMatchObject({
+      state: 'published',
+      snapshot_revision: 'skill-snapshot-revision',
+      catalog_revision: 'skill-catalog-revision',
+    })
     expect(result.source_text).toBe(sourceText)
+  })
+
+  it('rejects a write response that drops the Skill application receipt', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      ok: true,
+      state: 'committed',
+      path: '/tmp/.masc/config/runtime.toml',
+      source_text: '[runtime]\n',
+      provider_protocols: providerProtocols,
+      commit: {
+        source_revision: 'runtime-source-revision',
+        order: '8',
+        durability: 'durable',
+      },
+      application: {
+        operation: 'raw_save',
+        routing: { status: 'applied', requires_restart: false, applied_at: null },
+        keeper_overlay: {
+          status: 'not_configured',
+          requires_restart: false,
+          applied_at: null,
+          configured_count: 0,
+          pending_keys: [],
+          applied_keys: [],
+          preempted_keys: [],
+        },
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
+  })
+
+  it.each(['routing', 'keeper_overlay'] as const)(
+    'rejects a committed write response without %s application evidence',
+    async (missingField) => {
+      const payload = committedPayload({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: '[runtime]\n',
+        provider_protocols: providerProtocols,
+      })
+      const application = applicationRecord(payload)
+      delete application[missingField]
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })))
+
+      await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
+    },
+  )
+
+  it.each([
+    {
+      label: 'published source revision',
+      skills: {
+        state: 'published',
+        input_source_revision: 'different-source-revision',
+        snapshot_revision: 'skill-snapshot-revision',
+        catalog_revision: 'skill-catalog-revision',
+        config_state: 'configured',
+      },
+    },
+    {
+      label: 'superseded commit order',
+      skills: { state: 'superseded', commit_order: '6', applied_order: '9' },
+    },
+    {
+      label: 'retired source revision',
+      skills: { state: 'workspace_retired', input_source_revision: null },
+    },
+    {
+      label: 'open config state',
+      skills: {
+        state: 'published',
+        input_source_revision: 'runtime-source-revision',
+        snapshot_revision: 'skill-snapshot-revision',
+        catalog_revision: 'skill-catalog-revision',
+        config_state: 'future',
+      },
+    },
+  ])('rejects a causally or structurally inconsistent $label receipt', async ({ skills }) => {
+    const payload = committedPayload({
+      ok: true,
+      path: '/tmp/.masc/config/runtime.toml',
+      file_name: 'runtime.toml',
+      source_text: '[runtime]\n',
+      provider_protocols: providerProtocols,
+    })
+    const application = applicationRecord(payload)
+    application.skills = skills
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(saveRuntimeTomlConfig('[runtime]\n')).rejects.toThrow(/적용 영수증/)
   })
 
   it('previews Keeper setting validation before raw save', async () => {
@@ -3403,14 +3557,14 @@ describe('runtime.toml raw config API', () => {
   it('posts runtime routing patches without client-side TOML text', async () => {
     const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
+      new Response(JSON.stringify(committedPayload({
         ok: true,
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
-      }), {
+      })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3433,14 +3587,14 @@ describe('runtime.toml raw config API', () => {
   it('posts ordered media failover routing patches', async () => {
     const sourceText = '[runtime]\nmedia_failover = ["rt-a", "rt-b"]\n'
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
+      new Response(JSON.stringify(committedPayload({
         ok: true,
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
-      }), {
+      })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3463,14 +3617,14 @@ describe('runtime.toml raw config API', () => {
   it('posts runtime assignment patches without client-side TOML text', async () => {
     const sourceText = '[runtime.assignments]\nsangsu = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
+      new Response(JSON.stringify(committedPayload({
         ok: true,
         path: '/tmp/.masc/config/runtime.toml',
         file_name: 'runtime.toml',
         source_text: sourceText,
         reloaded: true,
         provider_protocols: providerProtocols,
-      }), {
+      })), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),

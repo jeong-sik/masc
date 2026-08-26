@@ -690,6 +690,12 @@
  (modules masc_tui_terminal_title)
  (libraries masc_tui_types))
 
+(library
+ (name masc_tui_runtime_config_receipt)
+ (wrapped false)
+ (modules masc_tui_runtime_config_receipt)
+ (libraries yojson))
+
 (executable
  (name masc_tui)
  (modules
@@ -729,6 +735,7 @@
   masc_tui_types
   masc_tui_terminal_profile
   masc_tui_terminal_title
+  masc_tui_runtime_config_receipt
   masc.runtime
   ;; masc_tui_render names Fusion_types directly to label a run's topology.
   ;; Tui_decode carries the type through fur_topology, but dune does not open a

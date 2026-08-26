@@ -1,6 +1,7 @@
 import { h, render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 const SAMPLE = `[fusion]
 enabled = true
@@ -36,10 +37,21 @@ const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) =
   file_name: 'runtime.toml',
   source_text: over.source_text ?? SAMPLE,
   reloaded: over.reloaded ?? false,
+  provider_protocols: [],
 })
 
+const committedCfg = (over: { source_text?: string } = {}) =>
+  committedRuntimeTomlConfigFixture({
+    ...cfg({
+      ok: true,
+      reloaded: true,
+      source_text: over.source_text,
+    }),
+    path: '/tmp/.masc/config/runtime.toml',
+  })
+
 const fetchMock = vi.fn()
-const saveMock = vi.fn()
+const saveMock = vi.fn<typeof import('../api/dashboard').saveRuntimeTomlConfig>()
 const runtimeRefreshMock = vi.fn(async () => undefined)
 // The panel now also reads the typed policy projection. Default it to "no
 // config" so the existing cases keep exercising the editor alone; cases that
@@ -148,7 +160,7 @@ describe('FusionSettingsPanel', () => {
 
   it('save posts the applied runtime.toml text (min_answered in the preset table)', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(cfg({ ok: true, reloaded: true }))
+    saveMock.mockResolvedValue(committedCfg())
     await mount()
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
@@ -159,7 +171,7 @@ describe('FusionSettingsPanel', () => {
 
   it('edits the active flat preset panel runtimes and judge runtime', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_RUNTIME_OPTIONS }))
-    saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
+    saveMock.mockImplementation(async (sourceText: string) => committedCfg({ source_text: sourceText }))
     await mount()
 
     const add = q('[data-testid="fusion-panel-runtime-add"]') as HTMLSelectElement
@@ -179,14 +191,11 @@ describe('FusionSettingsPanel', () => {
     expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
   })
 
-  it('surfaces a backend validation rejection (ok=false) instead of claiming success', async () => {
+  it('surfaces the strict API rejection instead of claiming success', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue({
-      ...cfg({ ok: false }),
-      message: 'Runtime config validation failed',
-      reason: 'min_answered exceeds preset panel count',
-      issues: [{ key: 'fusion.presets.trio.min_answered', message: 'must be <= 2' }],
-    })
+    saveMock.mockRejectedValue(new Error(
+      'fusion.presets.trio.min_answered: must be <= 2',
+    ))
     await mount()
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')).not.toBeNull())
@@ -197,9 +206,7 @@ describe('FusionSettingsPanel', () => {
 
   it('uses the selected preset existing min_answered when default_preset changes', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE_WITH_DUO }))
-    saveMock.mockResolvedValue(cfg({
-      ok: true,
-      reloaded: false,
+    saveMock.mockResolvedValue(committedCfg({
       source_text: SAMPLE_WITH_DUO.replace('default_preset = "trio"', 'default_preset = "duo"'),
     }))
     await mount()
@@ -220,11 +227,12 @@ describe('FusionSettingsPanel', () => {
 
   it('does not claim reload when backend saved without reload', async () => {
     fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
-    saveMock.mockResolvedValue(cfg({ ok: true, reloaded: false }))
+    saveMock.mockResolvedValue(committedCfg())
     await mount()
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-saved"]')).not.toBeNull())
-    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toBe('저장됨')
+    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toContain('Skill catalog 게시됨')
+    expect(q('[data-testid="fusion-settings-saved"]')?.textContent).toContain('파일 내구성 확인됨')
   })
 
   it('does not POST whitespace-only default_preset values', async () => {
@@ -317,7 +325,7 @@ default_preset = "trio"
 min_answered = 2
 `
     fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
-    saveMock.mockImplementation(async (sourceText: string) => cfg({ ok: true, reloaded: true, source_text: sourceText }))
+    saveMock.mockImplementation(async (sourceText: string) => committedCfg({ source_text: sourceText }))
     await mount()
 
     ;(q('[data-testid="fusion-settings-save"]') as HTMLButtonElement).click()

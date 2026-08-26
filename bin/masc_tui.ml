@@ -1296,7 +1296,9 @@ type async_msg =
         string )
       result
   | Runtime_assignment_set of
-      string * string option * (unit, string) result
+      string
+      * string option
+      * (Masc_tui_http.runtime_config_commit_receipt, string) result
       (** keeper, the runtime it was pointed at ([None] = back to default),
           and whether the server took it. *)
   | Keeper_chat_approval_answered of
@@ -6669,12 +6671,14 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
-      | Ok () ->
+      | Ok receipt ->
           add_event state "system"
-            (match runtime_id with
-             | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
-             | None ->
-                 Printf.sprintf "%s is back on the default runtime" keeper_name);
+            ((match runtime_id with
+              | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
+              | None ->
+                  Printf.sprintf "%s is back on the default runtime" keeper_name)
+             ^ " · "
+             ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
           (* The assignment table just changed under the picker; re-read it
              rather than patching a local copy the server may disagree with. *)
           launch_runtime_catalog_load state ~mailbox
@@ -7667,8 +7671,10 @@ let main () =
                 Masc_tui_http.post_runtime_config_raw ~host ~port
                   ~source_text:edited
               with
-              | Ok _ ->
-                add_event state "system" "runtime.toml saved";
+              | Ok receipt ->
+                add_event state "system"
+                  ("runtime.toml saved · "
+                   ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in

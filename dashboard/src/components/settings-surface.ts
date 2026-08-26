@@ -15,6 +15,7 @@ import type {
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
+  CommittedRuntimeTomlConfig,
   RuntimeDefaultsResponse,
   RuntimeResolvedResponse,
 } from '../api/dashboard.js'
@@ -53,6 +54,7 @@ import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
+import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import { StatusChip } from './common/status-chip'
@@ -1352,8 +1354,9 @@ export function SettingsSurface() {
     if (runtimeRoutingStatus === 'saving') return
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
+    let receipt: CommittedRuntimeTomlConfig
     try {
-      await patchRuntimeRouting(lane, runtimeId)
+      receipt = await patchRuntimeRouting(lane, runtimeId)
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(errorToString(err))
@@ -1362,10 +1365,10 @@ export function SettingsSurface() {
     try {
       await finishRuntimeRoutingWrite()
       setRuntimeRoutingStatus('saved')
-      setRuntimeRoutingMessage('runtime.toml routing 저장됨')
+      setRuntimeRoutingMessage(`runtime.toml routing 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
     } catch (err) {
       setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+      setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
     }
   }
 
@@ -1373,8 +1376,9 @@ export function SettingsSurface() {
     if (runtimeRoutingStatus === 'saving') return
     setRuntimeRoutingStatus('saving')
     setRuntimeRoutingMessage('')
+    let receipt: CommittedRuntimeTomlConfig
     try {
-      await patchRuntimeMediaFailover(runtimeIds)
+      receipt = await patchRuntimeMediaFailover(runtimeIds)
     } catch (err) {
       setRuntimeRoutingStatus('error')
       setRuntimeRoutingMessage(errorToString(err))
@@ -1383,10 +1387,10 @@ export function SettingsSurface() {
     try {
       await finishRuntimeRoutingWrite()
       setRuntimeRoutingStatus('saved')
-      setRuntimeRoutingMessage('runtime.toml media_failover 저장됨')
+      setRuntimeRoutingMessage(`runtime.toml media_failover 저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)}`)
     } catch (err) {
       setRuntimeRoutingStatus('error')
-      setRuntimeRoutingMessage(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+      setRuntimeRoutingMessage(`저장됨 · ${runtimeConfigCommitReceiptNotice(receipt)} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
     }
   }
 

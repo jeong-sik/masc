@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { committedRuntimeTomlConfigFixture } from '../lib/runtime-config-receipt.test-fixture'
 
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeTomlConfig: vi.fn(),
@@ -171,27 +172,26 @@ describe('RuntimeTomlEditor', () => {
     apiMocks.saveRuntimeTomlConfig.mockReset()
     runtimeRefreshMock.refreshRuntimeConfigConsumers.mockClear()
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
-    apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) => ({
-      ...richConfig,
-      source_text: `${richConfig.source_text}\n[runtime.assignments]\nsangsu = ${JSON.stringify(runtimeId ?? 'runpod_mtp.qwen')}\n`,
-      reloaded: true,
-    }))
+    apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) =>
+      committedRuntimeTomlConfigFixture({
+        ...richConfig,
+        source_text: `${richConfig.source_text}\n[runtime.assignments]\nsangsu = ${JSON.stringify(runtimeId ?? 'runpod_mtp.qwen')}\n`,
+      }))
     apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => {
       const sourceText = richConfig.source_text.replace(
         'default = "runpod_mtp.qwen"',
         lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
       )
-      return {
+      return committedRuntimeTomlConfigFixture({
         ...richConfig,
         source_text: sourceText,
-        reloaded: true,
-      }
+      })
     })
-    apiMocks.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
-      ...baseConfig,
-      source_text: sourceText,
-      reloaded: true,
-    }))
+    apiMocks.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) =>
+      committedRuntimeTomlConfigFixture({
+        ...baseConfig,
+        source_text: sourceText,
+      }))
   })
 
   afterEach(() => {
@@ -277,7 +277,8 @@ describe('RuntimeTomlEditor', () => {
 
     await waitFor(() => {
       expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledWith(nextSource)
-      expect(container.textContent).toContain('적용됨')
+      expect(container.textContent).toContain('Skill catalog 게시됨')
+      expect(container.textContent).toContain('파일 내구성 확인됨')
     })
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)

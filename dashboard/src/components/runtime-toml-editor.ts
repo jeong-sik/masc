@@ -6,6 +6,7 @@ import {
   patchRuntimeAssignment,
   patchRuntimeRouting,
   saveRuntimeTomlConfig,
+  type CommittedRuntimeTomlConfig,
   type RuntimeTomlConfig,
   type RuntimeRoutingLane,
 } from '../api/dashboard'
@@ -24,6 +25,7 @@ import {
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
+import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -199,13 +201,10 @@ export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps =
 
   const dirty = config !== null && draft !== config.source_text
 
-  async function adoptSavedRuntimeConfig(saved: RuntimeTomlConfig) {
+  async function adoptSavedRuntimeConfig(saved: CommittedRuntimeTomlConfig) {
     setConfig(saved)
     setDraft(saved.source_text)
-    const keeperOverlay = saved.application?.keeper_overlay
-    const applicationNotice = keeperOverlay?.requires_restart
-      ? `라우팅 적용됨 · Keeper 설정 ${keeperOverlay.pending_keys.length}개 재시작 대기`
-      : '적용됨'
+    const applicationNotice = runtimeConfigCommitReceiptNotice(saved)
     try {
       await refreshRuntimeConfigConsumers()
       setNotice(applicationNotice)

@@ -2749,6 +2749,11 @@
   %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
+ (name test_tui_runtime_config_receipt)
+ (modules test_tui_runtime_config_receipt)
+ (libraries alcotest masc_tui_runtime_config_receipt yojson))
+
+(test
  (name test_tui_chat_queue_wiring)
  (modules test_tui_chat_queue_wiring)
  (libraries

@@ -1,4 +1,4 @@
-# RFC-OAS-039: Synchronous exact-tool approval before execution
+# RFC-AC-039: Synchronous exact-tool approval before execution
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-28 |
 | Target | `agent_sdk` |
-| Related | [[RFC-OAS-025]] (forced tool-use enforcement boundary) |
+| Related | [[RFC-AC-025]] (forced tool-use enforcement boundary) |
 
 ## 0. Summary
 

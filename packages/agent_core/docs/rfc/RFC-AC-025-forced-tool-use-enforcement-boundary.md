@@ -1,4 +1,4 @@
-# RFC-OAS-025: Forced-Tool-Use Enforcement Boundary
+# RFC-AC-025: Forced-Tool-Use Enforcement Boundary
 
 | Field | Value |
 |---|---|
@@ -87,6 +87,6 @@ No consumer should scrape free text or repair JSON into a synthetic tool call.
 
 ## 6. Relationship to the current standard
 
-RFC-OAS-029 S4.2 is the corresponding tool-dispatch invariant: `Text` is not
-`ToolUse`. RFC-OAS-025 records the completed ownership decision; it is no longer
+RFC-AC-029 S4.2 is the corresponding tool-dispatch invariant: `Text` is not
+`ToolUse`. RFC-AC-025 records the completed ownership decision; it is no longer
 an option analysis or implementation backlog.

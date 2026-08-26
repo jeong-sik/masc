@@ -1,4 +1,4 @@
-# RFC-OAS-026: Transport Liveness Carrier (stream-idle deadline through the transport boundary)
+# RFC-AC-026: Transport Liveness Carrier (stream-idle deadline through the transport boundary)
 
 | | |
 |---|---|
@@ -7,7 +7,7 @@
 | Created | 2026-06-09 |
 | Target | `agent_sdk` (oas) + masc consumer |
 | Invariant | I2 (the only legitimate timeout is the provider transport idle/connect timeout; no heuristic per-turn/wall-clock deadlines as control flow) |
-| Sibling | RFC-OAS-019 (stream-lifecycle-aggregation), RFC-OAS-020 (ttft-instrumentation) |
+| Sibling | RFC-AC-019 (stream-lifecycle-aggregation), RFC-AC-020 (ttft-instrumentation) |
 | Audit source | `/Users/dancer/me/.tmp/masc-fiber-audit-2026-06-09/DIAGNOSIS.md` §3 (S1), §5, §F1 |
 
 ## 0. Summary
@@ -256,7 +256,7 @@ The exact failure form (raise vs `Error` return vs a startup assertion that a cl
 | `lib/llm_provider/complete.ml:1671-1690` | `Some t` arm: write `stream_idle_timeout_s` into the request record. |
 | `lib/llm_provider/complete.ml:1726-1737` | `make_http_transport.complete_stream`: read only `req.stream_idle_timeout_s`; no construction-time timeout fallback. |
 | `lib/llm_provider/transport_openai_compat.ml:67-80` | No signature change; forwards `req` (now carrying the field). Verify no `{ config; messages; tools }` literal needs the new field — there is one literal at complete.ml dispatch; the compiler enumerates all. |
-| `lib/sdk_version.ml` | Bumped by release-please (RFC-OAS-010); minor `feat`. |
+| `lib/sdk_version.ml` | Bumped by release-please (RFC-AC-010); minor `feat`. |
 
 Compiler enumeration: every `{ Llm_transport.config = …; … }` record literal must now supply `stream_idle_timeout_s`. `rg 'Llm_transport.config =' lib/ test/ bin/` and `rg '{ config =' lib/llm_provider` enumerate them. Each is updated with the value it has in scope, or `stream_idle_timeout_s = None` if it has none. This is the Parse-don't-validate payoff — the compiler, not a reviewer, finds every construction site.
 
@@ -343,7 +343,7 @@ Rejected. It pulls the clock capability into the pure data record (§8.2) and co
 
 - The field is `float option`; existing record literals updated to `None` preserve current behaviour. Downstream consumers using `{ req with … }` (masc) compile unchanged.
 - Breaking only for code that constructs `completion_request` from a positional/exhaustive literal — within OAS, enumerated and fixed by the compiler (§5.1). masc has one consumer and it uses functional update (§5.2), so masc does not break.
-- Release-please entry: `feat(transport): carry stream_idle_timeout_s on completion_request (RFC-OAS-026)` → minor bump `0.205.0`.
+- Release-please entry: `feat(transport): carry stream_idle_timeout_s on completion_request (RFC-AC-026)` → minor bump `0.205.0`.
 - Release note (SDK-surface only):
   > Starting `agent_sdk` 0.205.0, `Llm_transport.completion_request` carries an optional `stream_idle_timeout_s`. When set (and a clock is available to the transport), a streaming read that stalls mid-stream beyond the deadline raises `Http_client.TimeoutError` instead of blocking until the provider closes the socket. The built-in HTTP transport and any transport that forwards the request inherit this automatically. Consumers constructing `completion_request` literals must add the field (`None` preserves prior behaviour).
 
@@ -368,7 +368,7 @@ The DIAGNOSIS forensic measured the incident stall at 1772s ≈ the 1800s watchd
 
 ### 10.3 Telemetry volume
 
-The armed path emits a `Telemetry_event.Timeout` on each stall (complete.ml:1505). At the configured 120s idle this is rare; no expected volume regression. Cross-ref RFC-OAS-019 (the stream-summary already emits a terminal classification).
+The armed path emits a `Telemetry_event.Timeout` on each stall (complete.ml:1505). At the configured 120s idle this is rare; no expected volume regression. Cross-ref RFC-AC-019 (the stream-summary already emits a terminal classification).
 
 ## 11. Open items
 

@@ -1,4 +1,4 @@
-# RFC-OAS-037: Separate the first-event (TTFT/prefill) timeout from the inter-token idle timeout
+# RFC-AC-037: Separate the first-event (TTFT/prefill) timeout from the inter-token idle timeout
 
 | | |
 |---|---|
@@ -6,7 +6,7 @@
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
 | Target | `agent_sdk` (oas) |
-| Related | [[RFC-OAS-020]] (TTFT instrumentation), [[RFC-OAS-026]] (transport-liveness-carrier), masc [[RFC-0345]] (stream-idle fail-safe floor) |
+| Related | [[RFC-AC-020]] (TTFT instrumentation), [[RFC-AC-026]] (transport-liveness-carrier), masc [[RFC-0345]] (stream-idle fail-safe floor) |
 
 ## 0. Summary
 
@@ -41,7 +41,7 @@ Using one short `stream_idle_timeout_s` for both makes the first case a false po
 
 **Option A — dedicated first-event budget (recommended).**
 Add a `first_event_timeout_s : float option` bounding the `Awaiting_first_event` (and `Awaiting_first_delta`) phase, distinct from `stream_idle_timeout_s` which applies only AFTER the first event. `first_event_timeout_s` is a longer, single conservative bound (a truly dead connection still fails; a slow prefill survives). When unset, the first-event phase falls back to `body_timeout_s` (total) rather than the short idle value.
-- Pro: clean separation; TTFT telemetry already exists (RFC-OAS-020) to inform the value; each phase bounded by the right concept.
+- Pro: clean separation; TTFT telemetry already exists (RFC-AC-020) to inform the value; each phase bounded by the right concept.
 - Con: one more knob; callers threading it (default `None` → body_timeout fallback keeps current callers behaving no worse than an unset idle timeout).
 
 **Option B — idle timeout applies only after the first event.**

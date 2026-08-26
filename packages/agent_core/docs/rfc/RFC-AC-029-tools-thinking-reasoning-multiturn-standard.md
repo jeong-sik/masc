@@ -1,4 +1,4 @@
-# RFC-OAS-029: Tools / Thinking / Reasoning / Multi-turn usage standard
+# RFC-AC-029: Tools / Thinking / Reasoning / Multi-turn usage standard
 
 | | |
 |---|---|
@@ -6,8 +6,8 @@
 | Author | jeong-sik (audit: adversarial multi-agent sweep, 2026-06-29) |
 | Created | 2026-06-29 |
 | Target | `agent_sdk` (oas) — `lib/llm_provider/`, `lib/api_*.ml` and `lib/streaming.ml` (removed 2026-07-21; see `lib/llm_provider/`), `lib/*tool*.ml`, `docs/design/provider-reasoning-dialects.md` |
-| Keystone dependency | RFC-OAS-023 (capability axis reshape) — the GLM/MiniMax dialect work lands there; see §5 |
-| Supplements | RFC-OAS-018 (catalog externalization), RFC-OAS-025 (forced-tool-use enforcement boundary) |
+| Keystone dependency | RFC-AC-023 (capability axis reshape) — the GLM/MiniMax dialect work lands there; see §5 |
+| Supplements | RFC-AC-018 (catalog externalization), RFC-AC-025 (forced-tool-use enforcement boundary) |
 | Boundary | OAS exposes typed provider facts; MASC consumes them. OAS MUST NOT depend on MASC. See §6 |
 
 ## 0. Summary (요약)
@@ -165,10 +165,10 @@ Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-a
 
 ## 5. Remediation backlog + sequencing
 
-RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M reshape(workaround gate planned; reviewer-enforced until it is versioned); **Direct** = 순수 삭제/dedup/위임(시그니처 트리거 없음). 키스톤은 **RFC-OAS-023**.
+RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M reshape(workaround gate planned; reviewer-enforced until it is versioned); **Direct** = 순수 삭제/dedup/위임(시그니처 트리거 없음). 키스톤은 **RFC-AC-023**.
 
 ### 먼저 (keystone, 가장 많이 unblock)
-1. **RFC-OAS-023 — GLM typed dialect reshape.** GLM-ness를 typed kind/capability로 1회 승격, `replay_policy`와 `Thinking_object`-style thinking-control variant 부여, 그 다음 2중/3중 thinking builder(S2.1)와 2중 `clear_thinking` helper(S9.2) 통합. 이 reshape 하나가 `D1-glm-replay-hardcoded-heuristic`(P1), `D6`(P2), GLM-row doc gap(P1×4), GLM effort/tool_choice/caps drift를 닫고 `is_glm_request` string fork를 제거한다. `D1-dup-thinking-builder-glm-drift`가 *re-drift 없이* 고쳐지려면 통합 builder가 string이 아니라 typed GLM dialect로 switch해야 하므로 이게 선행조건.
+1. **RFC-AC-023 — GLM typed dialect reshape.** GLM-ness를 typed kind/capability로 1회 승격, `replay_policy`와 `Thinking_object`-style thinking-control variant 부여, 그 다음 2중/3중 thinking builder(S2.1)와 2중 `clear_thinking` helper(S9.2) 통합. 이 reshape 하나가 `D1-glm-replay-hardcoded-heuristic`(P1), `D6`(P2), GLM-row doc gap(P1×4), GLM effort/tool_choice/caps drift를 닫고 `is_glm_request` string fork를 제거한다. `D1-dup-thinking-builder-glm-drift`가 *re-drift 없이* 고쳐지려면 통합 builder가 string이 아니라 typed GLM dialect로 switch해야 하므로 이게 선행조건.
 2. **thinking-request builder 통합 (D1-dup, P1)** — (1) 직후/내부. `thinking_request_fields` 하나로. GLM clear_thinking drift는 agent_sdk 경로의 live wire-byte 정합성 버그.
 3. **content_type stream-boundary policy completion (D3-finalize, P1, partial)** — GLM과 독립, streaming blast radius 최대. Current branch ancestry already converts the wire `content_type` to `block_kind`, handles `Unknown_block` explicitly, and routes `SSEUnknownEventType`/parse failures to typed stream errors. Remaining work is narrower: decide and test the final parse/finalize policy for unknown content-block kinds that currently preserve visible text or omit empty blocks, and make that boundary fail closed if S6.1 chooses fail-closed over forward-compatible rendering.
 
@@ -202,8 +202,8 @@ telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` �
 단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/9 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Enable_thinking`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(OAS catalog가 단일 SSOT) 또는 OAS variant 집합에 대한 exhaustive drift 테스트. 이는 OAS 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
 
 ## 7. Relationships
-- **RFC-OAS-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.
+- **RFC-AC-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.
 - **`Agent_tools.find_in_index` contract** — S4의 exact registered-name 기반.
-- **RFC-OAS-018** (catalog externalization) — S1.2/S9.1의 catalog-as-SSOT 기반.
-- **RFC-OAS-025** (forced-tool-use enforcement boundary) — S5의 기반.
+- **RFC-AC-018** (catalog externalization) — S1.2/S9.1의 catalog-as-SSOT 기반.
+- **RFC-AC-025** (forced-tool-use enforcement boundary) — S5의 기반.
 - **CLAUDE.md 워크어라운드 거부 기준** — S10.2/§4.4의 enforcement 원천.

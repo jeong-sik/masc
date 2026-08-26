@@ -1,4 +1,4 @@
-# RFC-OAS-018: Provider/Model Catalog Externalization
+# RFC-AC-018: Provider/Model Catalog Externalization
 
 | | |
 |---|---|
@@ -7,7 +7,7 @@
 | Created | 2026-05-12 |
 | Target | `agent_sdk` (oas) |
 | Supersedes | PR #1536 (`refactor/ollama-endpoint-constant`, closed as antipattern reinforcement) |
-| Sibling | RFC-OAS-015 (mutable cleanup), RFC-OAS-016 (mcp optional), RFC-OAS-017 (coordinator-shape leak) |
+| Sibling | RFC-AC-015 (mutable cleanup), RFC-AC-016 (mcp optional), RFC-AC-017 (coordinator-shape leak) |
 
 ## 0. Summary
 
@@ -114,7 +114,7 @@ SDK 핵심 가정:
 - **G1**: 기존 240 사이트 *그대로*. 새 catalog path 가 read-side 에 옵션적으로 합류. 모든 기존 test green.
 
 ### Phase 2 — Catalog primary, prefix dispatch deprecated
-- `Capabilities.for_model_id` 의 prefix 갈래를 `[@@deprecated "RFC-OAS-018 Phase 2"]`.
+- `Capabilities.for_model_id` 의 prefix 갈래를 `[@@deprecated "RFC-AC-018 Phase 2"]`.
 - 새 `Catalog_only.for_model_id` 가 production primary.
 - 기존 `pricing_for_model` zero-default 제거 (PR #1539 의 `unpriced_model` 길과 통합 → `result` 반환).
 - **G2**: Phase 1 fallback path 가 *read-only*. 새 코드는 catalog 만 사용 (lint).
@@ -171,17 +171,17 @@ esac
 
 ## 7. Open questions
 
-- Catalog 파일 위치: `$XDG_CONFIG_HOME/oas/catalog.toml` 우선, fallback `./oas-catalog.toml`. RFC-OAS-016 (MCP optional config) 와 같은 convention 채택.
+- Catalog 파일 위치: `$XDG_CONFIG_HOME/oas/catalog.toml` 우선, fallback `./oas-catalog.toml`. RFC-AC-016 (MCP optional config) 와 같은 convention 채택.
 - Size token (`27b`, `31b`) → `params_millions : int option` 으로 일반화. 모델별 사이즈 variant 는 catalog entry id 로 표현.
-- Multi-generation drift (같은 `claude-haiku-4-5` 가 시점에 따라 capability 변경) → 본 RFC scope 밖, RFC-OAS-019 후보.
+- Multi-generation drift (같은 `claude-haiku-4-5` 가 시점에 따라 capability 변경) → 본 RFC scope 밖, RFC-AC-019 후보.
 - Catalog hot-reload (server 재기동 없이 reload) → Phase 4 후 별도 RFC.
 
 ## 8. Non-blocking dependencies
 
 - PR #1539 (`max_cost_usd` unpriced model fail-closed) — Phase 2 에서 typed `Unknown_model` 로 흡수, 그 전까지는 호환.
-- RFC-OAS-016 (mcp optional) — 외부화 패턴 동일, coherent.
-- RFC-OAS-017 (coordinator-shape) — 직접 의존성 없음.
-- RFC-OAS-015 (mutable cleanup) — 직접 의존성 없음.
+- RFC-AC-016 (mcp optional) — 외부화 패턴 동일, coherent.
+- RFC-AC-017 (coordinator-shape) — 직접 의존성 없음.
+- RFC-AC-015 (mutable cleanup) — 직접 의존성 없음.
 
 ## 9. Verification / Exit criteria
 
@@ -197,6 +197,6 @@ esac
 
 - CLAUDE.md §Workaround Rejection Bar — signatures #2 (string classifier) + #3 (N-of-M)
 - `lib/agent/agent_tools.mli` — exact registered-name lookup contract
-- RFC-OAS-015 — mutable cleanup phased precedent
-- RFC-OAS-016 — mcp optional dependency (외부화 패턴 자매)
+- RFC-AC-015 — mutable cleanup phased precedent
+- RFC-AC-016 — mcp optional dependency (외부화 패턴 자매)
 - 측정 명령: `rg '"(qwen[^"]*|llama-?[0-9][^"]*|gemma-?[0-9][^"]*|claude-[a-z]+-[0-9][^"]*|gpt-[0-9][^"]*|deepseek[^"]*|kimi-[^"]*)"' lib/ | wc -l` → 240 (2026-05-12 main `8d8402f6`)

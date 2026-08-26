@@ -5,11 +5,6 @@
  (modules test_keeper_effective_tool_surface)
  (libraries masc masc_test_deps alcotest masc.skill_config masc.skill_snapshot))
 
-(test
- (name test_task_skill_reference)
- (modules test_task_skill_reference)
- (libraries masc.task_handlers masc alcotest unix fs_compat masc_string_util))
-
 (env
  (_
   (env-vars
@@ -3384,6 +3379,20 @@
   masc.skill_snapshot
   masc.skill_config
   unix))
+
+(test
+ (name test_task_skill_published_resolution)
+ (modules test_task_skill_published_resolution)
+ (libraries
+  alcotest
+  eio_main
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.skill_snapshot_service
+  unix
+  yojson))
 
 (test
  (name test_keeper_skill_activation_ledger)

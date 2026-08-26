@@ -2078,7 +2078,7 @@ let test_runtime_config_validation_rejects_uncapped_keeper_candidate () =
       | Sys_error _ -> ())
     (fun () ->
        match Runtime.save_config_text ~runtime_config_path:path content with
-       | Ok () ->
+       | Ok _receipt ->
          fail "uncapped Keeper lane candidate must fail runtime config validation"
        | Error detail ->
          check bool "typed config diagnostic names the cap" true
@@ -2148,7 +2148,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
   (match
      attempt (content ~bound:"" ~agent_core_cap:declared_agent_core_cap)
    with
-   | Ok () -> ()
+   | Ok _receipt -> ()
    | Error detail ->
      failf
        "an official-client Keeper runtime with no max-prompt-bytes must load: %s"
@@ -2161,7 +2161,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
           ~bound:"max-prompt-bytes = 131072\n"
           ~agent_core_cap:declared_agent_core_cap)
    with
-   | Ok () -> ()
+   | Ok _receipt -> ()
    | Error detail -> failf "a declared seed bound must still load: %s" detail);
   (* Control. The Agent_core half of this validator must still reject, or the
      two assertions above would also pass with the whole check deleted. The
@@ -2169,7 +2169,7 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
      syntactically plausible but unconsumed table would satisfy a bare key
      substring while startup stayed stuck. *)
   match attempt (content ~bound:"" ~agent_core_cap:"") with
-  | Ok () ->
+  | Ok _receipt ->
     fail "an Agent_core Keeper runtime with no max-request-body-bytes must be rejected"
   | Error detail ->
     check bool "the diagnostic names the Agent_core key" true
@@ -2222,7 +2222,7 @@ let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
       | Sys_error _ -> ())
     (fun () ->
        match Runtime.save_config_text ~runtime_config_path:path content with
-       | Ok () -> ()
+       | Ok _receipt -> ()
        | Error detail ->
          failf
            "uncapped dormant lane must not block unrelated Keeper routing: %s"
@@ -3534,13 +3534,13 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path baseline with
      | Error detail -> failf "baseline exact save failed: %s" detail
-     | Ok () -> ());
+     | Ok _receipt -> ());
     let stable_registry = registry_exn () in
     let degraded = content ~default:"local.libr" "missing-slot" in
     (match Runtime.save_config_text ~runtime_config_path:path degraded with
      | Error detail ->
        failf "optional unbound exact target must not reject raw save: %s" detail
-     | Ok () -> ());
+     | Ok _receipt -> ());
     check string "degraded save commits file" degraded (Fs_compat.load_file path);
     check string "degraded save commits runtime cache" "local.libr"
       (Runtime.get_default_runtime_id ());
@@ -3560,7 +3560,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       ~finally:(fun () -> Unix.rmdir failed_path)
       (fun () ->
          (match Runtime.save_config_text ~runtime_config_path:failed_path replacement with
-          | Ok () -> fail "directory target must reject atomic runtime save"
+          | Ok _receipt -> fail "directory target must reject atomic runtime save"
           | Error detail ->
             check bool "write failure is surfaced" true
               (String_util.contains_substring detail "save_file_atomic"));
@@ -3579,7 +3579,7 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
               after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
-     | Ok () -> ());
+     | Ok _receipt -> ());
     check string "valid save commits file" replacement (Fs_compat.load_file path);
     check string "valid save commits runtime cache" "local.chat"
       (Runtime.get_default_runtime_id ());

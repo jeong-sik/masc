@@ -257,7 +257,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
          failed_runtime_toml
      with
      | Error _ -> ()
-     | Ok () -> Alcotest.fail "published runtime save unexpectedly replaced a directory");
+     | Ok _receipt -> Alcotest.fail "published runtime save unexpectedly replaced a directory");
     let after_failed_save =
       match Registry.current () with
       | Ok registry -> registry

@@ -281,9 +281,76 @@ let keeper_setting_payload source_text =
     , Keeper_runtime_config.overlay_application_to_yojson doc )
 ;;
 
-let runtime_config_application_json ~operation ~routing_applied_at overlay =
+let skill_config_state_label snapshot =
+  match Skill_catalog_snapshot.config_state snapshot with
+  | Configured _ -> "configured"
+  | Config_rejected _ -> "rejected"
+  | Config_unreadable _ -> "unreadable"
+;;
+
+let skill_application_json = function
+  | Error _ -> `Assoc [ "state", `String "invalid_workspace" ]
+  | Ok (Server_skill_snapshot_runtime.Superseded { commit_order; applied_order }) ->
+    `Assoc
+      [ "state", `String "superseded"
+      ; ( "commit_order"
+        , `String (Runtime.config_commit_order_to_string commit_order) )
+      ; ( "applied_order"
+        , `String (Runtime.config_commit_order_to_string applied_order) )
+      ]
+  | Ok (Server_skill_snapshot_runtime.Applied { input_source_revision; publication }) ->
+    let input_revision =
+      `String (Runtime.config_source_revision_to_string input_source_revision)
+    in
+    let ready state snapshot =
+      `Assoc
+        [ "state", `String state
+        ; "input_source_revision", input_revision
+        ; ( "snapshot_revision"
+          , `String
+              (Skill_catalog_snapshot.snapshot_revision snapshot
+               |> Skill_catalog_snapshot.snapshot_revision_to_string) )
+        ; ( "catalog_revision"
+          , `String
+              (Skill_catalog_snapshot.catalog_revision snapshot
+               |> Skill_catalog_snapshot.catalog_revision_to_string) )
+        ; "config_state", `String (skill_config_state_label snapshot)
+        ]
+    in
+    (match publication with
+     | Workspace_retired ->
+       `Assoc
+         [ "state", `String "workspace_retired"
+         ; "input_source_revision", input_revision
+         ]
+     | Published snapshot -> ready "published" snapshot
+     | Unchanged snapshot -> ready "unchanged" snapshot)
+;;
+
+let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
   `Assoc
-    [ "operation", `String operation
+    [ ( "source_revision"
+      , `String
+          (Runtime.config_source_revision_to_string
+             receipt.observation.source_revision) )
+    ; ( "order"
+      , `String (Runtime.config_commit_order_to_string receipt.order) )
+    ; ( "durability"
+      , `String
+          (match receipt.durability with
+           | Runtime.Durable -> "durable"
+           | Durability_unconfirmed _ -> "unconfirmed") )
+    ]
+;;
+
+let runtime_config_application_json
+      ?skill_application
+      ~operation
+      ~routing_applied_at
+      overlay
+  =
+  `Assoc
+    ([ "operation", `String operation
     ; ( "routing"
       , `Assoc
           [ "status", `String (if Option.is_some routing_applied_at then "applied" else "active")
@@ -295,23 +362,44 @@ let runtime_config_application_json ~operation ~routing_applied_at overlay =
           ] )
     ; "keeper_overlay", overlay
     ]
+     @ match skill_application with
+       | None -> []
+       | Some application -> [ "skills", skill_application_json application ])
 ;;
 
-let runtime_config_raw_json ~path ~source_text ~operation ~routing_applied_at =
+let runtime_config_raw_json
+      ?commit
+      ?skill_application
+      ~path
+      ~source_text
+      ~operation
+      ~routing_applied_at
+      ()
+  =
   let validation, keeper_settings, overlay = keeper_setting_payload source_text in
   `Assoc
-    [ ("ok", `Bool true)
+    ([ ("ok", `Bool true)
     ; ("path", `String path)
     ; ("file_name", `String "runtime.toml")
     ; ("source_text", `String source_text)
     ; ( "application"
-      , runtime_config_application_json ~operation ~routing_applied_at overlay )
+      , runtime_config_application_json
+          ?skill_application
+          ~operation
+          ~routing_applied_at
+          overlay )
     ; "validation", validation
     ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
     ; "keeper_settings", keeper_settings
     ; ( "provider_protocols"
       , `List (List.map runtime_editor_protocol_json Runtime_toml.editor_protocols) )
     ]
+     @ match commit with
+       | None -> []
+       | Some receipt ->
+         [ "state", `String "committed"
+         ; "commit", runtime_config_commit_json receipt
+         ])
 
 (* Line count for the audit [lines] metric. [String.split_on_char '\n'] counts a
    trailing newline as an extra empty line ("a\nb\n" -> 3 elements), so count
@@ -503,7 +591,17 @@ let respond_keeper_validation_error ~request reqd report =
     reqd
 ;;
 
-let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome () =
+let audit_runtime_config_write
+      state
+      agent_name
+      ?path
+      ?receipt
+      ?skill_application
+      ~operation
+      ~text
+      ~outcome
+      ()
+  =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
@@ -517,7 +615,14 @@ let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome 
             @ runtime_config_write_operation_details operation
             @ [ ("bytes", `Int (String.length text))
               ; ("lines", `Int (runtime_config_line_count text))
-              ]))
+              ]
+            @ (match receipt with
+               | None -> []
+               | Some commit -> [ "commit", runtime_config_commit_json commit ])
+            @ (match skill_application with
+               | None -> []
+               | Some application ->
+                 [ "skills", skill_application_json application ])))
       ~outcome
       ()
   with
@@ -527,24 +632,36 @@ let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome 
       "runtime.toml audit log failed: %s"
       (Printexc.to_string exn)
 
-let respond_runtime_config_reload state agent_name ~operation request reqd =
-  match Runtime.load_config_text () with
-  | Ok (path, saved_text) ->
-    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-    ignore (Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path);
-    audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
-      ~outcome:Audit_log.Success ();
-    Http.Response.json_value ~compress:true ~request
-      (runtime_config_raw_json
-         ~path
-         ~source_text:saved_text
-         ~operation:(runtime_config_write_operation_label operation)
-         ~routing_applied_at:(Some (Masc_domain.now_iso ())))
+let respond_runtime_config_commit
+      state
+      agent_name
+      ~operation
+      ~receipt
+      request
       reqd
-  | Error msg ->
-    respond_dashboard_error
-      ~status:(runtime_config_path_error_status msg)
-      ~request reqd msg
+  =
+  let observation = receipt.Runtime.observation in
+  let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+  let response_json =
+    Eio.Cancel.protect (fun () ->
+      let skill_application =
+        Server_skill_snapshot_runtime.apply_commit ~base_path receipt
+      in
+      audit_runtime_config_write state agent_name ~path:observation.path
+        ~receipt ~skill_application ~operation ~text:observation.source_text
+        ~outcome:Audit_log.Success ();
+      runtime_config_raw_json
+        ~commit:receipt
+        ~skill_application
+        ~path:observation.path
+        ~source_text:observation.source_text
+        ~operation:(runtime_config_write_operation_label operation)
+        ~routing_applied_at:(Some (Masc_domain.now_iso ()))
+        ())
+  in
+  Http.Response.json_value ~compress:true ~request
+    response_json
+    reqd
 
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -1103,14 +1220,15 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/runtime/config/raw" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun _state _agent_name req reqd ->
-           match Runtime.load_config_text () with
-           | Ok (path, source_text) ->
+           match Runtime.load_config_observation () with
+           | Ok observation ->
              Http.Response.json_value ~compress:true ~request:req
                (runtime_config_raw_json
-                  ~path
-                  ~source_text
+                  ~path:observation.path
+                  ~source_text:observation.source_text
                   ~operation:"read"
-                  ~routing_applied_at:None)
+                  ~routing_applied_at:None
+                  ())
                reqd
            | Error msg ->
              respond_dashboard_error
@@ -1222,9 +1340,9 @@ let add_routes ~sw ~clock router =
                        ~operation:Runtime_config_raw_save ~text:source_text
                        ~outcome:(Audit_log.Failure msg) ();
                      respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                   | Ok () ->
-                     respond_runtime_config_reload state agent_name
-                       ~operation:Runtime_config_raw_save req reqd))
+                   | Ok receipt ->
+                     respond_runtime_config_commit state agent_name
+                       ~operation:Runtime_config_raw_save ~receipt req reqd))
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->
@@ -1242,10 +1360,10 @@ let add_routes ~sw ~clock router =
                     ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
                     ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
-                    req reqd)
+                    ~receipt req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
@@ -1261,11 +1379,11 @@ let add_routes ~sw ~clock router =
                     ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
                     ~operation:
                       (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-                    req reqd)
+                    ~receipt req reqd)
              | Ok (Runtime_route_runtime_ids (lane, _)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  (Printf.sprintf
@@ -1293,10 +1411,10 @@ let add_routes ~sw ~clock router =
                     ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
                     ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
-                    req reqd)
+                    ~receipt req reqd)
              | Ok (keeper_name, None) ->
                (match Runtime.clear_runtime_id_for_keeper ~keeper_name () with
                 | Error msg ->
@@ -1305,10 +1423,10 @@ let add_routes ~sw ~clock router =
                     ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
+                | Ok receipt ->
+                  respond_runtime_config_commit state agent_name
                     ~operation:(Runtime_config_assignment (keeper_name, None))
-                    req reqd)
+                    ~receipt req reqd)
            )
          ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders

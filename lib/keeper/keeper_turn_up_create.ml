@@ -255,6 +255,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~keeper_name:p.name
             ~runtime_id
             ()
+          |> Result.map ignore
       in
       (match runtime_assignment_result with
        | Error e ->

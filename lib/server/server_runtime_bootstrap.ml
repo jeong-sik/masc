@@ -642,6 +642,7 @@ let startup_failure_disposition ~state_ready =
 
 type owner_initialization_error =
   | Runtime_config_path_unavailable
+  | Runtime_config_read_failed of string
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Runtime_default_initialization_failed of Runtime.strict_init_error
@@ -676,6 +677,8 @@ type activated_owner_state =
 let owner_initialization_error_to_string = function
   | Runtime_config_path_unavailable ->
     "no runtime config path; cannot initialize the default Runtime"
+  | Runtime_config_read_failed detail ->
+    "runtime config observation failed: " ^ detail
   | Run_registry_already_installed `Fusion ->
     "Fusion run registry already has a process owner"
   | Run_registry_already_installed `Verification ->
@@ -925,7 +928,13 @@ let initialize_owner_state_blocking
       raise (Owner_initialization_failed Runtime_config_path_unavailable)
     | Some config_path -> config_path
   in
-  (match Runtime.init_default_degraded_report ~config_path:runtime_config_path with
+  let runtime_config_observation =
+    match Runtime.load_config_observation ~runtime_config_path () with
+    | Ok observation -> observation
+    | Error detail ->
+      raise (Owner_initialization_failed (Runtime_config_read_failed detail))
+  in
+  (match Runtime.init_default_degraded_observation runtime_config_observation with
    | Ok Runtime.Initialized ->
      Log.Server.info
        "Runtime default initialized: %s"
@@ -941,7 +950,11 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Runtime_default_initialization_failed error)));
-  (match Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path with
+  (match
+     Server_skill_snapshot_runtime.refresh_from_observation
+       ~base_path
+       runtime_config_observation
+   with
    | Error error ->
      Log.Server.error
        "Skill snapshot workspace rejected at boot: %s"

@@ -6743,12 +6743,6 @@ let main () =
              add_event state "system"
                "q: press again to quit, or any other key to stay"
            end
-       | Some k
-         when not
-                (Masc_tui_types.workspace_identity_allows_surface_key
-                   state.workspace_identity
-                   k) ->
-           ()
        (* Above the modals on purpose: the reason to reach for this is to copy
           something already on the screen, and the help overlay is one of the
           screens worth copying from. *)

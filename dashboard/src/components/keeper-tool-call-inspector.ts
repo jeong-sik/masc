@@ -890,6 +890,7 @@ function ToolCallDossier({ entries, response }: { entries: readonly ToolCallEntr
 export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) {
   const resource = useManagedAsyncResource<ToolCallsResponse | null>(null)
   const filterTool = useSignal('')
+  const filterSandbox = useSignal('')
 
   const loadToolCalls = useCallback((signal: AbortSignal) =>
     fetchKeeperToolCalls(keeperName, 100, { signal }), [keeperName])
@@ -916,9 +917,17 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const response = resource.state.value.data
   const allEntries = response?.entries ?? []
   const filter = filterTool.value.toLowerCase()
-  const filtered = !filter
-    ? allEntries
-    : allEntries.filter(entry => entry.tool.toLowerCase().includes(filter))
+  const sandbox = filterSandbox.value
+  // Offered from what the calls actually carry rather than a fixed pair. The
+  // server's profile type is closed today, but a list written here would keep
+  // showing two options after a third one starts arriving -- the new calls
+  // would simply be unreachable, which reads as "there are none".
+  const sandboxOptions = [...new Set(
+    allEntries.map(entry => entry.sandbox_profile).filter((p): p is string => !!p),
+  )].sort()
+  const filtered = allEntries.filter(entry =>
+    (!filter || entry.tool.toLowerCase().includes(filter))
+    && (!sandbox || entry.sandbox_profile === sandbox))
 
   // Reverse to show newest first
   const sorted = [...filtered].reverse()
@@ -931,9 +940,17 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
     return html`<div class="text-xs text-[var(--color-status-err)] p-4 v2-monitoring-panel" role="alert">${resource.state.value.error}</div>`
   }
 
-  const entries = allEntries
+  // The summary reads the filtered set, not everything fetched. A success rate
+  // computed across both sides of a filter answers a question nobody asked: a
+  // keeper moved from local to docker keeps one trace, and 88 failures from
+  // before the move read as the new sandbox's record. The list and the numbers
+  // above it have to describe the same calls.
+  const entries = filtered
 
-  if (entries.length === 0) {
+  // Emptiness is still asked of the fetch. "This keeper has no tool calls" and
+  // "no call matches what you picked" are different answers, and the filters
+  // are only reachable from the second one.
+  if (allEntries.length === 0) {
     return html`
       <div class="p-4 v2-monitoring-panel">
         <div class="text-xs text-[var(--color-fg-muted)]">도구 호출 데이터 없음</div>
@@ -968,6 +985,16 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}
         />
+        ${sandboxOptions.length > 1 ? html`
+        <select
+          aria-label="샌드박스 필터"
+          class="bg-[var(--bg-deep)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1 text-xs font-mono"
+          value=${filterSandbox.value}
+          onChange=${(e: Event) => { filterSandbox.value = (e.target as HTMLSelectElement).value }}
+        >
+          <option value="">샌드박스 전체</option>
+          ${sandboxOptions.map(option => html`<option value=${option}>${option}</option>`)}
+        </select>` : null}
       </div>
 
       <div class="border border-[var(--color-border-default)] rounded-[var(--r-1)] overflow-hidden max-h-[500px] overflow-y-auto v2-monitoring-panel">

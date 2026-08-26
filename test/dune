@@ -3267,6 +3267,7 @@
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
 (include stanzas/test_tui_image_ref.inc)
+(include stanzas/test_tui_link_label.inc)
 
 (test
  (name test_tui_terminal_probe)

@@ -1169,6 +1169,57 @@ let test_a_continuation_survives_the_renderer_cut () =
   | _ -> failwith "expected two rows"
 ;;
 
+(* Two readers, one rule. The pane underlines a bare URL and something else
+   names what it points at, and a URL that ended in one place for the
+   underline and another for the name would underline text the name had not
+   read -- or name a link the reader never saw as one. Asserted by dressing
+   the text and taking back exactly what was dressed. *)
+let substrings_between ~opening ~closing text =
+  let length = String.length text in
+  let find needle from =
+    let needle_length = String.length needle in
+    let rec go index =
+      if index + needle_length > length then None
+      else if String.equal (String.sub text index needle_length) needle then
+        Some index
+      else go (index + 1)
+    in
+    go from
+  in
+  let opening_length = String.length opening in
+  let rec go from found =
+    match find opening from with
+    | None -> List.rev found
+    | Some start -> (
+        match find closing (start + opening_length) with
+        | None -> List.rev found
+        | Some stop ->
+            go
+              (stop + String.length closing)
+              (String.sub text (start + opening_length)
+                 (stop - start - opening_length)
+              :: found))
+  in
+  go 0 []
+
+let test_the_two_link_readers_agree () =
+  List.iter
+    (fun (name, text) ->
+      let dressed =
+        Layout.dress_bare_links ~open_style:"<a>" ~close_style:"</a>" text
+      in
+      check (list string)
+        (name ^ ": dressed exactly what bare_urls names")
+        (Layout.bare_urls text)
+        (substrings_between ~opening:"<a>" ~closing:"</a>" dressed))
+    [ ("prose around them",
+       "see https://github.com/o/r/pull/1, and (http://x.test/y) then done")
+    ; ("none at all", "nothing to follow here")
+    ; ("two in a row", "https://a.test/one https://a.test/two")
+    ; ("closed by punctuation", "the evidence (https://a.test/x).")
+    ; ("at the very end", "read https://a.test/z")
+    ]
+
 (* The margin is paid for out of the body, not out of the frame. A row that
    drew its own width plus a margin would spill past the border it sits in. *)
 let test_the_margin_comes_out_of_the_body () =
@@ -1337,6 +1388,8 @@ let () =
             test_a_second_message_from_one_speaker_stays_blank
         ; test_case "a continuation survives the renderer cut" `Quick
             test_a_continuation_survives_the_renderer_cut
+        ; test_case "the two link readers agree" `Quick
+            test_the_two_link_readers_agree
         ; test_case "the margin comes out of the body" `Quick
             test_the_margin_comes_out_of_the_body
         ; test_case "scrolling measures the mode it draws" `Quick

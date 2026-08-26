@@ -56,6 +56,13 @@ let with_temp_base f =
       (Printf.sprintf "masc-23924-terminal-event-%d-%06x" (Unix.getpid ()) (Random.bits ()))
   in
   Unix.mkdir base 0o755;
+  (* [get_temp_dir_name] hands back the path with its symlinks intact, and on
+     macOS that is [/var/folders/...] for a directory whose real path is
+     [/private/var/folders/...]. The code under test resolves what it is given,
+     so an unresolved base makes every identity comparison fail on that string
+     alone. Resolve once here, where the directory is created, rather than at
+     each comparison. *)
+  let base = try Unix.realpath base with Unix.Unix_error _ -> base in
   Fun.protect ~finally:(fun () -> rm_rf base) (fun () -> f base)
 ;;
 

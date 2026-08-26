@@ -24,6 +24,14 @@ let delta_to_string : Live.delta -> string = function
         question
   | Live.Approval_settled { call_id; outcome } ->
       Printf.sprintf "approval_settled(%s,%s)" call_id outcome
+  | Live.Accepted { admission; queue_length } ->
+      let admission =
+        match admission with
+        | Live.Queued -> "queued"
+        | Live.Running -> "running"
+        | Live.Settled -> "settled"
+      in
+      Printf.sprintf "accepted(%s,%d)" admission queue_length
   | Live.Checkpoint -> "checkpoint"
   | Live.External_effect_completed -> "external_effect_completed"
   | Live.Run_failed { message } -> Printf.sprintf "run_failed(%s)" message
@@ -110,6 +118,20 @@ let expected_coding_turn =
   ]
 
 (* ── Feed drivers ────────────────────────────────────────────────── *)
+
+(* The acceptance event carries no runId: the server sends it before there is
+   a run. Built here rather than through [custom] so the fixture is the shape
+   the server actually writes. *)
+let accepted ?(operation_id = "op-1") ~state ~queued_count () =
+  event "CUSTOM"
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"
+    ; ( "value"
+      , `Assoc
+          [ "operation_id", `String operation_id
+          ; "state", `String state
+          ; "queued_count", `Int queued_count
+          ] )
+    ]
 
 let feed_whole body =
   let decoder = Live.create () in
@@ -323,6 +345,46 @@ let test_the_settled_event_carries_its_outcome () =
     [ Live.Approval_settled { call_id = "c1"; outcome = "timed_out" } ]
     (feed_whole body)
 
+(* The acceptance is what the pane has to answer "why has this not started"
+   with. Before it, a wait of minutes and a wait of seconds look the same. *)
+let test_acceptance_states_are_read () =
+  let deltas state = feed_whole (sse (accepted ~state ~queued_count:2 ())) in
+  check (list delta) "queued keeps its place in the queue"
+    [ Live.Accepted { admission = Live.Queued; queue_length = 2 } ]
+    (deltas "Queued");
+  check (list delta) "running has started"
+    [ Live.Accepted { admission = Live.Running; queue_length = 2 } ]
+    (deltas "Running");
+  (* One admission for the three terminal words: the pane draws them the same,
+     and keeping them apart here would be a distinction nothing reads. *)
+  List.iter
+    (fun state ->
+      check (list delta) ("a finished operation is settled: " ^ state)
+        [ Live.Accepted { admission = Live.Settled; queue_length = 2 } ]
+        (deltas state))
+    [ "Succeeded"; "Failed"; "Cancelled" ]
+
+(* An unknown state is reported rather than folded into one of the three. A
+   reader that guessed would draw a queue position for a word it did not
+   understand. *)
+let test_unknown_acceptance_state_is_reported () =
+  check (list delta) "the unknown word is named"
+    [ Live.Undecodable
+        "KEEPER_CHAT_OPERATION_ACCEPTED has an unknown state: Vanished"
+    ]
+    (feed_whole (sse (accepted ~state:"Vanished" ~queued_count:1 ())))
+
+let test_acceptance_missing_fields_are_named () =
+  let value fields = event "CUSTOM"
+    [ "name", `String "KEEPER_CHAT_OPERATION_ACCEPTED"; "value", `Assoc fields ]
+  in
+  check (list delta) "a missing state names itself"
+    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no state" ]
+    (feed_whole (sse (value [ "queued_count", `Int 1 ])));
+  check (list delta) "a missing queued_count names itself"
+    [ Live.Undecodable "KEEPER_CHAT_OPERATION_ACCEPTED has no queued_count" ]
+    (feed_whole (sse (value [ "state", `String "Queued" ])))
+
 let () =
   run "tui_keeper_chat_live"
     [ ( "deltas"
@@ -335,6 +397,14 @@ let () =
             test_args_snapshot_replaces_rather_than_appends
         ; test_case "checkpoint and external effect are drawn" `Quick
             test_checkpoint_and_external_effect_are_drawn
+        ] )
+    ; ( "acceptance"
+      , [ test_case "the three states are read" `Quick
+            test_acceptance_states_are_read
+        ; test_case "an unknown state is reported" `Quick
+            test_unknown_acceptance_state_is_reported
+        ; test_case "missing fields name themselves" `Quick
+            test_acceptance_missing_fields_are_named
         ] )
     ; ( "held calls"
       , [ test_case "an approval request is read whole" `Quick

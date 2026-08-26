@@ -463,9 +463,7 @@ let test_loader_scans_the_skills_directory () =
             0
             (List.length (Skill_catalog.skills catalog))
         | Error _ -> fail "missing skills directory did not load as empty");
-       let skills_dir =
-         Masc.Keeper_run_tools_setup.skills_dir_of_base_path ~base_path
-       in
+       let skills_dir = Filename.concat (Filename.concat base_path ".masc") "skills" in
        Unix.mkdir (Filename.dirname skills_dir) 0o755;
        Unix.mkdir skills_dir 0o755;
        let skill_dir = Filename.concat skills_dir "release-checklist" in
@@ -486,6 +484,24 @@ let test_loader_scans_the_skills_directory () =
              fail
                (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
         | Error _ -> fail "valid skills directory failed to load");
+       let agents_root = Filename.concat base_path ".agents" in
+       let agents_skills = Filename.concat agents_root "skills" in
+       Unix.mkdir agents_root 0o755;
+       Unix.mkdir agents_skills 0o755;
+       let agent_skill_dir = Filename.concat agents_skills "agent-review" in
+       Unix.mkdir agent_skill_dir 0o755;
+       write_file
+         (Filename.concat agent_skill_dir "SKILL.md")
+         "---\nname: agent-review\ndescription: Review through the configured Agent Skills source.\n---\n\n# Agent review\n";
+       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
+        | Ok catalog ->
+          check
+            (list string)
+            "turn consumes the configured multi-source snapshot"
+            [ "agent-review"; "release-checklist" ]
+            (Skill_catalog.skills catalog
+             |> List.map (fun skill -> skill.Skill_catalog.name))
+        | Error _ -> fail "configured .agents skill source did not reach the turn");
        (* A missing description, not a missing name: the directory supplies a
           name, so that is no longer the defect a broken install shows. *)
        write_file

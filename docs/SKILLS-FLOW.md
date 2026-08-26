@@ -10,14 +10,15 @@ status: reference
 
 ## 0. 한 눈에
 
-스킬은 `<base>/.masc/skills/<name>/SKILL.md` 파일 하나로 선언한다. 본문에
+스킬은 `runtime.toml`의 `[[skills.sources]]` 아래 `<name>/SKILL.md` 파일 하나로 선언한다. 본문에
 ```` ```toml composition ```` fence가 있으면 **합성 스킬**(도구가 된다), 없으면
 **지시 스킬**(`keeper_skill` 도구로 본문을 읽는다). 같은 카탈로그를 세 곳이 읽는다:
 턴 시작(도구 표면 조립), 프롬프트(지명된 스킬 안내), 대시보드(`/api/v1/skills`).
 
 ```mermaid
 flowchart TD
-  F["SKILL.md 파일<br/>&lt;base&gt;/.masc/skills/&lt;name&gt;/"] --> P
+  F["SKILL.md 파일<br/>configured skills source/&lt;name&gt;/"] --> SNAP
+  SNAP["Skill_catalog_snapshot<br/>source precedence + immutable bytes"] --> P
 
   subgraph parse["파싱 (한 곳의 권위)"]
     P["Agent_core.Skill_document.decode<br/>frontmatter 계약 + 이름 판정"] --> S
@@ -72,25 +73,28 @@ fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클
 전체가 `Error`다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/
 plan 오류·중복 스킬은 turn-blocking이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
 `Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
-디렉터리는 스킬이 아니므로 조용히 건너뛴다(`keeper_run_tools_setup.ml`의
-`Exact_missing → Keeper_skill_catalog.empty`).
+디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
 
 ## 2. 카탈로그를 읽는 세 소비자
 
 카탈로그 로드는 `Keeper_run_tools_setup.load_skill_catalog`
-(`lib/keeper/keeper_run_tools_setup.ml:120`) 하나로 통일된다.
-`skills_dir_of_base_path = <base>/.masc/skills`. 세 소비자가 같은 로드를 쓴다:
+하나로 통일된다. 이 함수는 `Skill_catalog_snapshot_service`를 refresh한 뒤
+`effective_entries`의 정확한 bytes를 Keeper 카탈로그로 만든다. `/api/v1/skills`도 같은
+publisher를 refresh하므로 세 소비자가 source 우선순위까지 같은 로드를 쓴다:
 
 ```mermaid
 sequenceDiagram
   participant Turn as 키퍼 턴
   participant Setup as keeper_run_tools_setup
+  participant Snap as skill_catalog_snapshot
   participant Cat as Keeper_skill_catalog
   participant Surface as keeper_tool_composition_surface
   participant Model as 모델(LLM)
 
   Turn->>Setup: prepare_agent_setup
-  Setup->>Cat: load_skill_catalog ~base_path
+  Setup->>Snap: refresh configured sources
+  Snap-->>Setup: effective_entries + exact source_text
+  Setup->>Cat: of_documents
   Setup->>Setup: validate_held_task_skill_admission
   Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_composition_entries

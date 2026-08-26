@@ -51,6 +51,15 @@ type speaker =
      Slack and Discord into the operator's own words. *)
   | Unresolved of { id : string option }
 
+(* The store owns this closed vocabulary. Missing and unknown stay separate
+   readings here so neither can fall through to [Operator]: only the producer's
+   exact owner authority permits the pane to say that the reader wrote a row. *)
+type speaker_authority =
+  | Speaker_authority_owner
+  | Speaker_authority_external
+  | Speaker_authority_missing
+  | Speaker_authority_unknown
+
 type kind =
   | Addressed_to_keeper of
       { speaker : speaker
@@ -99,6 +108,13 @@ let string_field fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> Some value
   | Some _ | None -> None
+
+let speaker_authority fields =
+  match List.assoc_opt "speaker_authority" fields with
+  | Some (`String "owner") -> Speaker_authority_owner
+  | Some (`String "external") -> Speaker_authority_external
+  | None | Some `Null -> Speaker_authority_missing
+  | Some _ -> Speaker_authority_unknown
 
 let float_field fields name =
   match List.assoc_opt name fields with
@@ -602,9 +618,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
       let turn_id = turn_id_of_fields fields in
       match string_field fields "role" with
       | Some "user" ->
-          (* [speaker_name] and [surface] are what the server already sends;
-             reading them is the whole difference between "you" and the 23
-             other authors that share this role. A surface this build cannot
+          (* [speaker_name], [speaker_authority], and [surface] are independent
+             facts the server already sends. Authority decides whether an
+             unnamed author is the operator; surface says only where it arrived
+             and cannot stand in for identity. A surface this build cannot
              decode is dropped to [None] rather than guessed at. *)
           let speaker_id = string_field fields "speaker_id" in
           let speaker =
@@ -616,12 +633,10 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                    && not (Option.equal String.equal (Some name) speaker_id) ->
                 Named name
             | Some _ | None ->
-                (* Only a row with no surface is the operator's own. A row that
-                   came in from Slack or Discord has an author this build could
-                   not name, which is not the same as the reader. *)
-                (match List.assoc_opt "surface" fields with
-                 | None | Some `Null -> Operator
-                 | Some _ -> Unresolved { id = speaker_id })
+                (match speaker_authority fields with
+                 | Speaker_authority_owner -> Operator
+                 | Speaker_authority_external | Speaker_authority_missing
+                 | Speaker_authority_unknown -> Unresolved { id = speaker_id })
           in
           let surface =
             match List.assoc_opt "surface" fields with

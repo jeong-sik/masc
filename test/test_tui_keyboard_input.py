@@ -4900,7 +4900,16 @@ def message_origin_history_fixture() -> HttpResponse:
                 "content": "operator-body-neutral",
                 "ts": 1787348490.3,
                 "speaker_name": "vincent",
+                "speaker_authority": "owner",
                 "surface": {"kind": "dashboard"},
+            },
+            {
+                "id": "origin-external",
+                "role": "user",
+                "content": "external-body-neutral",
+                "ts": 1787348490.8,
+                "speaker_id": "U09L0RHPW7P",
+                "speaker_authority": "external",
             },
             {
                 "id": "origin-keeper",
@@ -5053,6 +5062,10 @@ def message_origin_badge_interaction(
         (
             b"\xe2\x97\x8f\\s+(?:TURN \xc2\xb7 )?alpha {2}keeper-body-neutral",
             "Keeper mark, origin, and separated body",
+        ),
+        (
+            b"\xe2\x96\xb6\\s+\xe2\x80\xa6L0RHPW7P {2}external-body-neutral",
+            "external authority without a surface stays outside YOU",
         ),
     ):
         if re.search(pattern, plain_frame) is None:

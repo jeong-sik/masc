@@ -3,7 +3,8 @@ open Alcotest
 module History = Masc_tui_keeper_chat_history
 module Transcript = Masc_tui_keeper_chat_transcript
 
-let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface content =
+let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?speaker_authority
+    ?surface content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String "user"
@@ -16,6 +17,9 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface content =
      @ (match speaker_id with
         | None -> []
         | Some id -> [ "speaker_id", `String id ])
+     @ (match speaker_authority with
+        | None -> []
+        | Some authority -> [ "speaker_authority", `String authority ])
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
@@ -122,11 +126,16 @@ let decode json =
   | Ok decoded -> decoded
   | Error detail -> failf "expected a decode, got %s" detail
 
+let decoded_speaker json =
+  match (decode (`List [ json ])).History.rows with
+  | [ { History.kind = History.Addressed_to_keeper { speaker; _ }; _ } ] -> speaker
+  | rows -> failf "expected one addressed row, got %d" (List.length rows)
+
 let test_roles_map_to_what_the_pane_draws () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"user" "고쳐줘"
+         [ addressed ~ts:1.0 ~speaker_authority:"owner" "고쳐줘"
          ; row ~ts:2.0 ~role:"assistant" "고쳤어요"
          ; row ~ts:3.0 ~role:"assistant" ~kind:"transport_failure" "slack 5xx"
          ])
@@ -232,8 +241,8 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
-  check string "an unnamed row is still the operator" "you"
-    (label (addressed "hello"));
+  check string "an unnamed owner is the operator" "you"
+    (label (addressed ~speaker_authority:"owner" "hello"));
   check string "the dashboard is an operator surface, so it adds nothing"
     "vincent"
     (label (addressed ~speaker_name:"vincent" ~surface:(surface "dashboard" []) "hi"));
@@ -320,9 +329,9 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
-  (* And a row with no surface at all is still the operator's own: this pane
-     and the dashboard send without one. *)
-  check string "an unnamed row with no surface is still you" "you"
+  (* Surface absence is not operator authority. Only the closed owner field
+     above permits the pane to say [you]. *)
+  check string "an unnamed row with no authority is not you" "someone"
     (label (addressed "typed here"));
   check string "a gate goes by its channel label" "hookbot \xc2\xb7 ops-room"
     (label
@@ -337,11 +346,37 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
        (addressed ~speaker_name:"someone" ~surface:(surface "telepathy" []) "?"))
 ;;
 
+(* The store's closed authority field decides whether an unnamed row is the
+   person reading this pane. Surface is deliberately absent in every case: it
+   says where a row arrived, not who spoke. Missing and future labels fail
+   closed to unresolved instead of borrowing the operator's identity. *)
+let test_speaker_authority_decides_whether_unnamed_is_you () =
+  (match
+     decoded_speaker
+       (addressed ~speaker_authority:"owner" "typed by the operator")
+   with
+   | History.Operator -> ()
+   | History.Named _ | History.Unresolved _ -> fail "owner was not the operator");
+  let check_unresolved label expected_id row =
+    match decoded_speaker row with
+    | History.Unresolved { id } -> check (option string) label expected_id id
+    | History.Operator -> failf "%s was guessed to be the operator" label
+    | History.Named name -> failf "%s was guessed to be %S" label name
+  in
+  check_unresolved "external authority" (Some "U09L0RHPW7P")
+    (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
+       "external message");
+  check_unresolved "missing authority" None (addressed "missing authority message");
+  check_unresolved "unknown authority" (Some "future-user")
+    (addressed ~speaker_id:"future-user" ~speaker_authority:"delegate"
+       "future message")
+;;
+
 let test_consecutive_tool_rows_become_one_block () =
   let decoded =
     decode
       (`List
-         [ row ~ts:1.0 ~role:"user" "봐줘"
+         [ addressed ~ts:1.0 ~speaker_authority:"owner" "봐줘"
          ; row ~ts:2.0 ~role:"tool" ~tool_call_name:"read_file"
              "{\"file_path\":\"lib/a.ml\"}"
          ; row ~ts:3.0 ~role:"tool" ~tool_call_name:"edit_file"
@@ -894,6 +929,8 @@ let () =
             test_autonomous_trace_rows_keep_the_turn_ref
         ; test_case "an addressed row is labelled by who sent it" `Quick
             test_an_addressed_row_is_labelled_by_who_sent_it
+        ; test_case "speaker authority decides whether unnamed is you" `Quick
+            test_speaker_authority_decides_whether_unnamed_is_you
         ; test_case "consecutive tool rows become one block" `Quick
             test_consecutive_tool_rows_become_one_block
         ; test_case "history keeps producer tool-call identity" `Quick

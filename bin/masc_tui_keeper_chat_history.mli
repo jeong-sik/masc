@@ -65,14 +65,15 @@ end
     all as "you" told the operator they had said things they had never seen. *)
 type speaker =
   | Operator
-      (** The row named no author, which is a person typing at an operator
-          surface: this pane or the dashboard. *)
+      (** An unnamed author whose persisted [speaker_authority] is exactly
+          ["owner"]. Surface presence is not identity authority. *)
   | Named of string  (** The author the server named. *)
   | Unresolved of { id : string option }
       (** An author the producer could not name: [speaker_name] was absent or
-          repeated [speaker_id]. Kept apart from {!Operator}, which means the
-          person reading this pane wrote it -- folding the two turned messages
-          that arrived from Slack and Discord into the reader's own words. *)
+          repeated [speaker_id], and the persisted authority was ["external"],
+          missing, or unknown. Kept apart from {!Operator}, which means the
+          person reading this pane wrote it -- neither a surface nor an
+          unreadable authority is permission to make that claim. *)
 
 (** What one row of the transcript is. *)
 type kind =
@@ -147,11 +148,11 @@ type decoded =
   }
 
 val addressed_label : speaker -> Surface.t option -> string
-(** The name to draw beside an {!Addressed_to_keeper} row. An unnamed operator
-    row is ["you"], the way it always read. A named author is drawn, and a
-    surface that is not an operator's own is appended — ["<keeper> · agent"],
-    ["<operator> · slack"] — so a fleet broadcast and a direct message do not
-    look alike. *)
+(** The name to draw beside an {!Addressed_to_keeper} row. Only an unnamed
+    author with persisted owner authority is ["you"]. A named author is drawn,
+    and a surface that is not an operator's own is appended —
+    ["<keeper> · agent"], ["<operator> · slack"] — so a fleet broadcast and a
+    direct message do not look alike. *)
 
 (** One page of rows older than a cursor, from
     [GET /keepers/<name>/chat/history/page?before=<ts>].

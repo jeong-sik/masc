@@ -1,4 +1,5 @@
-(** [Masc_tui_keeper_chat_history.Surface] mirrors [Surface_ref.t].
+(** [Masc_tui_keeper_chat_history] mirrors [Surface_ref.t] and the persisted
+    speaker-authority vocabulary.
 
     The TUI chat-history decoder is a small library with no [masc] dependency,
     so it cannot name the server's type and keeps its own copy of the
@@ -95,6 +96,54 @@ let test_dashboard_decodes_but_adds_no_badge () =
     (History.addressed_label (History.Named "vincent") (decoded_surface dashboard))
 ;;
 
+(* Drive the real authority serializer rather than repeating its wire labels in
+   this contract test. Adding a server constructor also makes [authority_name]
+   non-exhaustive, so the TUI mirror cannot silently treat it as the owner. *)
+let authority_name : Masc.Keeper_chat_store.speaker_authority -> string = function
+  | Masc.Keeper_chat_store.Owner -> "Owner"
+  | Masc.Keeper_chat_store.External -> "External"
+;;
+
+let decoded_speaker authority =
+  let payload =
+    `List
+      [ `Assoc
+          [ "id", `String "row"
+          ; "role", `String "user"
+          ; "content", `String "hello"
+          ; "ts", `Float 1.0
+          ; ( "speaker_authority"
+            , `String (Masc.Keeper_chat_store.authority_label authority) )
+          ]
+      ]
+  in
+  match History.rows_of_json payload with
+  | Error detail -> failf "decode failed: %s" detail
+  | Ok { History.rows = [ row ]; _ } ->
+    (match row.History.kind with
+     | History.Addressed_to_keeper { speaker; _ } -> speaker
+     | History.Said_by_keeper | History.Autonomous_reply
+     | History.Delivery_failed _ | History.Tool_calls _
+     | History.Reasoning _ | History.Memory_activity ->
+       failf "expected an addressed row")
+  | Ok _ -> failf "expected exactly one row"
+;;
+
+let test_every_server_speaker_authority_decodes () =
+  List.iter
+    (fun authority ->
+      let name = authority_name authority in
+      match authority, decoded_speaker authority with
+      | Masc.Keeper_chat_store.Owner, History.Operator -> ()
+      | Masc.Keeper_chat_store.External, History.Unresolved { id = None } -> ()
+      | Masc.Keeper_chat_store.Owner, (History.Named _ | History.Unresolved _)
+      | Masc.Keeper_chat_store.External, (History.Operator | History.Named _) ->
+        failf "%s authority decoded to the wrong speaker" name
+      | Masc.Keeper_chat_store.External, History.Unresolved { id = Some id } ->
+        failf "External authority invented speaker id %S" id)
+    [ Masc.Keeper_chat_store.Owner; Masc.Keeper_chat_store.External ]
+;;
+
 let () =
   run
     "tui_chat_surface_mirror"
@@ -103,6 +152,8 @@ let () =
             test_every_server_surface_decodes
         ; test_case "dashboard decodes without a badge" `Quick
             test_dashboard_decodes_but_adds_no_badge
+        ; test_case "every speaker authority decodes" `Quick
+            test_every_server_speaker_authority_decodes
         ] )
     ]
 ;;

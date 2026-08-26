@@ -66,6 +66,18 @@
     "keeper_composition_status",
     "tool_execute"
   ],
+  "keeper_required_skill_identities": [
+    {
+      "source_id": "project-masc",
+      "package_id": "mission-snapshot",
+      "name": "mission-snapshot"
+    },
+    {
+      "source_id": "project-masc",
+      "package_id": "background-snapshot",
+      "name": "background-snapshot"
+    }
+  ],
   "missions": [
     {
       "id": "RW01",

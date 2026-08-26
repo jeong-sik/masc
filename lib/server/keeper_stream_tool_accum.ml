@@ -824,9 +824,10 @@ let on_event t (evt : Agent_core.Types.sse_event) =
          live bridge voids this index (Tool_start_missing_identity)
          until its terminator, so a later valid start at the same index must
          not resurrect it as a fresh block. *)
-      (ignore
-         (invalidate_header_conflict t ~index
-            ~detail:"malformed tool-use block header conflicts with occupied index");
+      (let (_ : bool) =
+         invalidate_header_conflict t ~index
+           ~detail:"malformed tool-use block header conflicts with occupied index"
+       in
        invalidate_current_scope t)
     else
       let conflicted =

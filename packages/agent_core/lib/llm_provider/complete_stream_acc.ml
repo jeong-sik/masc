@@ -15,7 +15,8 @@ let resolve_event acc event =
 ;;
 
 let accumulate_event acc event =
-  ignore (resolve_event acc event)
+  let (_ : Types.stream_event_resolution) = resolve_event acc event in
+  ()
 ;;
 
 let finalize_stream_acc acc =

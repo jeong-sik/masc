@@ -1566,7 +1566,10 @@ let process_single_turn ~user_row_origin ~submission
     (* The live bridge consumes the same raw event next and is the sole SSE
        protocol-error producer. Drain the durable collector's matching audit
        records without publishing a duplicate assistant diagnostic. *)
-    ignore (Keeper_stream_tool_accum.take_protocol_errors worker_tool_accum)
+    let _drained_protocol_errors =
+      Keeper_stream_tool_accum.take_protocol_errors worker_tool_accum
+    in
+    ()
   in
   let on_tool_stream_observation observation =
     let result =

@@ -37,7 +37,10 @@ val read_orphaned_nonterminal_tasks :
 val drop_archive_tasks :
   Workspace_utils_backend_setup.config -> ids:string list -> unit
 
-(** Next task number = [max(existing backlog ids, archive ids) + 1].
-    Returns [1] when both backlog and archive are empty. *)
+(** Next task number =
+    [max(existing backlog ids, archive ids, durable event task ids) + 1].
+    Event history remains authoritative after a workspace state restore, so
+    omitting it can alias a new task onto an older lifecycle. Returns [1] when
+    all three sources are empty. *)
 val next_task_number :
   Workspace_utils_backend_setup.config -> backlog -> int

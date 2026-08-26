@@ -2627,6 +2627,29 @@ let test_task_id_to_int_only_prefix () =
   | Some _ -> Alcotest.fail "Expected None"
 ;;
 
+let test_next_task_number_includes_durable_event_history () =
+  with_test_env (fun config ->
+    let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
+    let month_dir = Filename.concat events_dir "2026-08" in
+    Fs_compat.mkdir_p month_dir;
+    let path = Filename.concat month_dir "26.jsonl" in
+    let lines =
+      [ `Assoc [ "type", `String "task_transition"; "task", `String "task-537" ]
+      ; `Assoc
+          [ "type", `String "task_completion_verdict"
+          ; "task_id", `String "task-538"
+          ]
+      ]
+      |> List.map Yojson.Safe.to_string
+      |> String.concat "\n"
+    in
+    Fs_compat.save_file path (lines ^ "\n");
+    Alcotest.(check int)
+      "durable history high-water mark"
+      539
+      (Workspace.next_task_number config (Workspace.read_backlog config)))
+;;
+
 (* ============================================================ *)
 (* Update Agent Tests                                            *)
 (* ============================================================ *)
@@ -3372,6 +3395,10 @@ let () =
         ; Alcotest.test_case "invalid prefix" `Quick test_task_id_to_int_invalid_prefix
         ; Alcotest.test_case "empty" `Quick test_task_id_to_int_empty
         ; Alcotest.test_case "only prefix" `Quick test_task_id_to_int_only_prefix
+        ; Alcotest.test_case
+            "durable history high-water mark"
+            `Quick
+            test_next_task_number_includes_durable_event_history
         ] )
     ; (* === Archive === *)
       "archive", [ Alcotest.test_case "append tasks" `Quick test_append_archive_tasks ]

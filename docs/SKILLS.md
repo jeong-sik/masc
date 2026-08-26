@@ -36,9 +36,10 @@ description: Walk the release checklist before shipping.
   존재와 표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지
   않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark
   외부 fence로 감싼다.
-- 실험적 `allowed-tools`도 MASC에서 거부한다. 표준의 이 필드는 도구 제한이 아니라
-  사전 승인 힌트인데 MASC의 승인 정책과 결합돼 있지 않다. 읽고 무시하거나 API에 노출해
-  허용된 권한처럼 보이게 하지 않는다. 모든 도구 호출은 기존 MASC 승인 게이트를 따른다.
+- 실험적 `allowed-tools`는 읽되 아무 동작도 하지 않고 공개 projection에도 싣지 않는다.
+  표준의 이 필드는 도구 제한이 아니라 구현체별 사전 승인 힌트다. 이를 이유로 표준 스킬
+  전체를 거부하지도, MASC 권한처럼 표시하지도 않는다. 모든 도구 호출은 기존 MASC 승인
+  게이트만 따른다.
 - 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다

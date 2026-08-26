@@ -518,12 +518,17 @@ export interface DashboardSkillReference {
   content_revision: string
 }
 
+export type DashboardToolDelivery =
+  | { status: 'delivered' }
+  | { status: 'suppressed'; reason: 'runtime_tools_unsupported' }
+
 export type DashboardEffectiveKeeperSurface =
   | {
       status: 'available'
       keeper_name: string
       runtime_id: string
       official_client_kind: string
+      tool_delivery: DashboardToolDelivery
       native_posture: string | null
       tool_groups: string[]
       current_task_id: string | null

@@ -58,6 +58,13 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
       <div class="text-xs text-[var(--color-fg-muted)]">
         ${surface.runtime_id} · ${surface.official_client_kind} · ${surface.count} tools
       </div>
+      ${surface.tool_delivery.status === 'suppressed'
+        ? html`<div class="text-xs text-[var(--color-status-warn)]" data-testid="skill-tool-delivery-suppressed">
+            Tool delivery suppressed · ${surface.tool_delivery.reason}
+          </div>`
+        : html`<div class="text-xs text-[var(--color-status-good)]">
+            Tool delivery active
+          </div>`}
       <div class="grid gap-1">
         ${references.length === 0
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">No readable Skills</span>`

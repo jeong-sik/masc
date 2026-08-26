@@ -130,6 +130,7 @@ let test_openai_extended () =
 let test_lookup_mimo_v25_pro () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"mimo"
       ~model_id:"mimo-v2.5-pro"
@@ -175,6 +176,7 @@ let test_lookup_mimo_v25_pro () =
 let test_lookup_mimo_v25_multimodal () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"mimo"
       ~model_id:"mimo-v2.5"
@@ -436,6 +438,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
      | None -> fail "should match Kimi K2.7 highspeed route");
     (match
        Capabilities.for_provider_model_id
+         ~wire:(Some Provider_kind.OpenAI_compat)
          ~allow_bare_fallback:false
          ~provider_label:"ollama_cloud"
          ~model_id:"kimi-k2.7-code"
@@ -449,11 +452,12 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
        (* 2026-08-15 (closes #28749): this row is served through ollama_cloud's
           OpenAI-compat /v1/chat/completions, which cannot encode Ollama's
           native think toggle — same defect class as qwen3.5:397b (#28748).
-          Live overlay probe (agent-core-models-overlay.toml, 2026-08-04): reasoning
-          is inherent, no request-side control wire. *)
+          The row no longer states that itself; the wire asked for above does,
+          and on this one the control is reasoning_effort. Sending nothing is
+          not thinking off here: Ollama enables it by itself (ollama#14820). *)
        check_thinking_control
-         "provider-qualified Ollama Cloud Kimi has no request control"
-         Capabilities.No_thinking_control
+         "provider-qualified Ollama Cloud Kimi rides the /v1 effort control"
+         Capabilities.Reasoning_effort
          cloud.thinking_control_format;
        let cloud_dialect = Reasoning_dialect.of_capabilities cloud in
        (match cloud_dialect.streaming with
@@ -496,6 +500,7 @@ let test_lookup_provider_m_dashscope_gguf_name () =
 let test_lookup_provider_m_qwen3_mtp_explicit_provider () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"vllm-qwen3-mtp"
       ~model_id:"qwen36-35b-a3b-mtp"
@@ -559,6 +564,7 @@ let test_lookup_runpod_rtxa6000_gemma4_coder_catalog () =
   in
   (match
      Capabilities.for_provider_model_id
+       ~wire:None
        ~allow_bare_fallback:false
        ~provider_label:"runpod_rtxa6000"
        ~model_id:"gemma4-coder-fable5-q4km"
@@ -604,6 +610,7 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
   in
   (match
      Capabilities.for_provider_model_id
+       ~wire:None
        ~allow_bare_fallback:true
        ~provider_label:"ollama"
        ~model_id
@@ -618,6 +625,7 @@ let test_lookup_local_ollama_gemma4_e2b_qat_catalog () =
 let test_lookup_deepseek_v4_flash () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"deepseek"
       ~model_id:"deepseek-v4-flash"
@@ -641,6 +649,7 @@ let test_lookup_deepseek_v4_flash () =
 let test_lookup_deepseek_v4_pro () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"deepseek"
       ~model_id:"deepseek-v4-pro"
@@ -716,6 +725,7 @@ let test_lookup_minimax_m3_official_chat_dialect () =
 let test_lookup_grok () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"xai"
       ~model_id:"grok-4.3"
@@ -846,6 +856,7 @@ let test_ollama_cloud_current_catalog_resolves () =
     (fun (model_id, context, vision) ->
        match
          Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -863,6 +874,7 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
     (fun model_id ->
        match
          Capabilities.for_provider_model_id
+           ~wire:(Some Provider_kind.OpenAI_compat)
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -879,8 +891,8 @@ let test_ollama_cloud_v1_vendor_models_resolve_exact_capabilities () =
            false
            c.supports_reasoning_budget;
          check_thinking_control
-           (model_id ^ " inherent thinking has no request control")
-           Capabilities.No_thinking_control
+           (model_id ^ " reasoning rides the /v1 effort control")
+           Capabilities.Reasoning_effort
            c.thinking_control_format;
          check bool (model_id ^ " json mode") true c.supports_response_format_json;
          check
@@ -917,6 +929,7 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
     (fun (model_id, expected_json) ->
        match
          Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -959,6 +972,7 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
      declaration and an effort level to encode anything. *)
   match
     Capabilities.for_provider_model_id
+      ~wire:(Some Provider_kind.OpenAI_compat)
       ~allow_bare_fallback:false
       ~provider_label:"ollama_cloud"
       ~model_id:"qwen3.5:397b"
@@ -973,8 +987,8 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
       false
       c.supports_reasoning_budget;
     check_thinking_control
-      "qwen3.5:397b inherent thinking has no request control"
-      Capabilities.No_thinking_control
+      "qwen3.5:397b reasoning rides the /v1 effort control"
+      Capabilities.Reasoning_effort
       c.thinking_control_format
 ;;
 
@@ -994,6 +1008,7 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
     (fun model_id ->
        match
          Capabilities.for_provider_model_id
+           ~wire:(Some Provider_kind.OpenAI_compat)
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -1008,8 +1023,8 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
            false
            c.supports_reasoning_budget;
          check_thinking_control
-           (model_id ^ " inherent thinking has no request control")
-           Capabilities.No_thinking_control
+           (model_id ^ " reasoning rides the /v1 effort control")
+           Capabilities.Reasoning_effort
            c.thinking_control_format;
          let dialect = Reasoning_dialect.of_capabilities c in
          (match dialect.streaming with
@@ -1017,6 +1032,74 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
           | Reasoning_dialect.Delta_field field ->
             failf "%s reasoning delta field drifted: %s" model_id field
           | _ -> failf "%s should stream reasoning on a delta field" model_id))
+    [ "kimi-k2.7-code"; "minimax-m3"; "deepseek-v4-flash"; "deepseek-v4-pro" ]
+;;
+
+(* The same provider over its other wire. [[providers]] ollama_cloud declares
+   identity_kinds = ["ollama", "openai_compat"], and a deployment may point it
+   at either. The rows above resolve for the native wire the provider entry
+   names; resolved for the OpenAI-compatible one they must not hand back a
+   control that wire cannot encode.
+
+   Without this, a request carrying no control is not a request with thinking
+   off -- Ollama turns reasoning on by itself (ollama#14820) -- and one
+   carrying the native toggle is refused before dispatch as
+   Enable_not_encodable. Both were observed live on 2026-08-27. *)
+let test_ollama_cloud_v1_wire_resolves_the_effort_control () =
+  List.iter
+    (fun model_id ->
+       match
+         Capabilities.for_provider_model_id
+           ~wire:(Some Provider_kind.OpenAI_compat)
+           ~allow_bare_fallback:false
+           ~provider_label:"ollama_cloud"
+           ~model_id
+       with
+       | None -> failf "ollama_cloud/%s should resolve on the /v1 wire" model_id
+       | Some c ->
+         check_thinking_control
+           (model_id ^ " /v1 wire carries the effort control")
+           Capabilities.Reasoning_effort
+           c.thinking_control_format;
+         (* Measured against https://ollama.com/v1 on 2026-08-27. The endpoint
+            names this set itself when refusing a value outside it. *)
+         check
+           (list string)
+           (model_id ^ " declares the ladder the endpoint accepts")
+           [ "none"; "low"; "medium"; "high"; "max" ]
+           (match c.accepted_reasoning_efforts with
+            | Some efforts -> List.map Reasoning_effort.to_string efforts
+            | None -> []))
+    [ "kimi-k2.7-code"; "minimax-m3"; "deepseek-v4-flash"; "deepseek-v4-pro" ]
+;;
+
+(* The wire argument selects a base; it must not select a row. Asking for the
+   native wire has to keep answering exactly as before, or every deployment
+   that reaches ollama_cloud natively changes underneath. *)
+let test_ollama_cloud_native_wire_is_unchanged () =
+  List.iter
+    (fun model_id ->
+       let native =
+         Capabilities.for_provider_model_id
+           ~wire:(Some Provider_kind.Ollama)
+           ~allow_bare_fallback:false
+           ~provider_label:"ollama_cloud"
+           ~model_id
+       in
+       let unspecified =
+         Capabilities.for_provider_model_id
+           ~wire:None
+           ~allow_bare_fallback:false
+           ~provider_label:"ollama_cloud"
+           ~model_id
+       in
+       match native, unspecified with
+       | Some n, Some u ->
+         check_thinking_control
+           (model_id ^ " native wire matches an unspecified wire")
+           n.thinking_control_format
+           u.thinking_control_format
+       | _ -> failf "ollama_cloud/%s should resolve on both" model_id)
     [ "kimi-k2.7-code"; "minimax-m3"; "deepseek-v4-flash"; "deepseek-v4-pro" ]
 ;;
 
@@ -1041,6 +1124,7 @@ let test_ollama_cloud_grouped_rows_follow_exact_output_contract () =
     (fun (model_id, expected_json) ->
        match
          Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -1059,6 +1143,7 @@ let test_ollama_cloud_grouped_rows_follow_exact_output_contract () =
 let test_ollama_cloud_kimi_preserves_historical_reasoning () =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"ollama_cloud"
       ~model_id:"kimi-k2.7-code"
@@ -1090,6 +1175,7 @@ let test_ollama_cloud_structured_output_is_disabled_by_provider_contract () =
     (fun (model_id, structured_output) ->
        match
          Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label:"ollama_cloud"
            ~model_id
@@ -1125,6 +1211,7 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
   let cloud_glm =
     match
       for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label:"ollama_cloud"
         ~model_id:"glm-5.1"
@@ -1146,6 +1233,7 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
   let cloud_glm52 =
     match
       for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label:"ollama_cloud"
         ~model_id:"glm-5.2"
@@ -1169,6 +1257,7 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
   let cloud_kimi =
     match
       for_provider_model_id
+        ~wire:(Some Provider_kind.OpenAI_compat)
         ~allow_bare_fallback:false
         ~provider_label:"ollama_cloud"
         ~model_id:"kimi-k2.7-code"
@@ -1187,10 +1276,14 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
     (bare_kimi.preserve_thinking_control_format = Always_preserved_thinking);
   (* 2026-08-15 (closes #28749): ollama_cloud serves this through the
      OpenAI-compat /v1 path, which cannot encode Ollama's native think toggle
-     — same defect class as qwen3.5:397b (#28748). *)
+     — same defect class as qwen3.5:397b (#28748). The transport is now named
+     in the lookup above rather than flattened into the row, and on that
+     transport the control is reasoning_effort. Note this same test resolves
+     glm-5.1/glm-5.2 without naming a wire and still expects the native
+     toggle: the wire selects a base, it does not rewrite a row. *)
   check_thinking_control
-    "cloud Kimi has no request control on this transport"
-    No_thinking_control
+    "cloud Kimi rides the /v1 effort control"
+    Reasoning_effort
     cloud_kimi.thinking_control_format;
   check
     (option int)
@@ -1250,6 +1343,7 @@ let frontier_capabilities route model_id =
   | Direct_model -> Capabilities.for_model_id model_id
   | Provider_qualified provider_label ->
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label
       ~model_id
@@ -1894,6 +1988,7 @@ thinking_control_token = "<|provider|>"
            Model_catalog.set_global catalog;
            (match
               Capabilities.for_provider_model_id
+                ~wire:None
                 ~allow_bare_fallback:false
                 ~provider_label:" ACME "
                 ~model_id:" EXACT-MODEL "
@@ -1906,6 +2001,7 @@ thinking_control_token = "<|provider|>"
              "provider-scoped model prefix extension is absent"
              None
              (Capabilities.for_provider_model_id
+                ~wire:None
                 ~allow_bare_fallback:false
                 ~provider_label:"acme"
                 ~model_id:"exact-model-preview");
@@ -2767,12 +2863,14 @@ let test_openai_compat_reasoning_records_have_explicit_control () =
     ; "dashscope", Some Capabilities.dashscope_capabilities
     ; ( "mimo-v2.5-pro"
       , Capabilities.for_provider_model_id
+          ~wire:None
           ~allow_bare_fallback:false
           ~provider_label:"mimo"
           ~model_id:"mimo-v2.5-pro" )
     ; "dashscope-3.5", Capabilities.for_model_id "dashscope-3.5-35b-a3b"
     ; ( "deepseek-v4-flash"
       , Capabilities.for_provider_model_id
+          ~wire:None
           ~allow_bare_fallback:false
           ~provider_label:"deepseek"
           ~model_id:"deepseek-v4-flash" )
@@ -2948,6 +3046,14 @@ let () =
             "ollama cloud kimi/deepseek/minimax have no control wire"
             `Quick
             test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire
+        ; test_case
+            "ollama cloud /v1 wire resolves the effort control"
+            `Quick
+            test_ollama_cloud_v1_wire_resolves_the_effort_control
+        ; test_case
+            "ollama cloud native wire is unchanged"
+            `Quick
+            test_ollama_cloud_native_wire_is_unchanged
         ; test_case
             "ollama cloud grouped rows follow exact-output contract"
             `Quick

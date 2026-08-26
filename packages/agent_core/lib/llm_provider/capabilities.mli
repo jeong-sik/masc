@@ -247,9 +247,15 @@ val for_model_id_catalog : string -> capabilities option
     colon, or dot-qualified candidates, and does not apply family/prefix
     matching inside the provider scope. When the exact pair is absent,
     [allow_bare_fallback] controls whether this falls back to a
-    provider-independent {!for_model_id} row. *)
+    provider-independent {!for_model_id} row.
+
+    [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
+    one. It selects the base a matched row is laid over for a provider whose
+    wires differ in what a request can express; the row lookup is unaffected.
+    Omitting it resolves against the wire the provider entry names. *)
 val for_provider_model_id
-  :  allow_bare_fallback:bool
+  :  wire:Provider_kind.t option
+  -> allow_bare_fallback:bool
   -> provider_label:string
   -> model_id:string
   -> capabilities option
@@ -280,6 +286,18 @@ val for_model_id : string -> capabilities option
 
     @since 0.170.9 *)
 val capabilities_for_provider_label : string -> capabilities option
+
+val capabilities_for_provider_label_on_wire
+  :  wire:Provider_kind.t option
+  -> string
+  -> capabilities option
+(** {!capabilities_for_provider_label}, told which wire it resolves for.
+
+    A provider may be reachable over more than one wire ([[providers]] carries
+    [identity_kinds]). Where those wires differ in what a request can express,
+    the label alone cannot answer. Labels whose answer does not depend on the
+    wire, and any label on the wire its provider entry names, resolve exactly
+    as {!capabilities_for_provider_label}. *)
 
 (** Capabilities preset for a canonical {!Provider_kind.t}.
 

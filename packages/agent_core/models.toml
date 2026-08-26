@@ -486,7 +486,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -501,7 +500,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -523,7 +521,6 @@ supports_extended_thinking = true
 # 2026-08-04 live probe: message keys ['role','content','reasoning']). This row
 # just carried the buggy default forward in the embedded catalog. Closes #28749.
 supports_reasoning_budget = false
-thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 # DeepSeek function calling with thinking requires the intermediate
 # assistant's reasoning to be passed back on every request of a tool-call
@@ -551,7 +548,6 @@ supports_extended_thinking = true
 # Same correction as deepseek-v4-flash above; see that row's comment. Confirmed
 # by the live overlay's deepseek-v4-pro row (2026-08-04 live probe).
 supports_reasoning_budget = false
-thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 # Same tool-call replay contract as the deepseek-v4-flash row above.
 reasoning_replay = "drop_without_tool_preserve_with_tool"
@@ -606,7 +602,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
@@ -672,7 +667,6 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 # Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
 # thinking is inherent on the OpenAI-compatible wire, not an /api/chat think toggle.
-thinking_control_format = "none"
 supports_response_format_json = true
 supports_structured_output = false
 supports_multimodal_inputs = true
@@ -690,7 +684,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_response_format_json = true
 supports_multimodal_inputs = true
 supports_image_input = true
@@ -707,7 +700,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -722,7 +714,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -737,7 +728,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -752,7 +742,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -767,7 +756,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -782,7 +770,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -797,7 +784,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 # Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
 # recommended on all turns). Without this, the base replay policy is no_replay.
 reasoning_replay = "preserve_always"
@@ -821,7 +807,6 @@ supports_extended_thinking = true
 # (2026-08-15, closes #28749); confirmed by the live overlay's kimi-k2.6 row
 # (2026-08-04 live probe: message keys ['role','content','reasoning']).
 supports_reasoning_budget = false
-thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 # Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
 # recommended on all turns). Without this, the base replay policy is no_replay.
@@ -846,7 +831,6 @@ supports_extended_thinking = true
 # Same correction as kimi-k2.6 above; confirmed by the live overlay's
 # kimi-k2.7-code row (2026-08-04 live probe, same field shape).
 supports_reasoning_budget = false
-thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 # Kimi K2.7-code docs: Preserved Thinking is always-on (keep reasoning_content of
 # every historical assistant message) and thinking cannot be disabled.
@@ -868,7 +852,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -883,7 +866,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -898,7 +880,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -917,7 +898,6 @@ supports_extended_thinking = true
 # reasoning_streaming_format was already correct here — only the control-wire
 # axis and the coupled budget flag were wrong.
 supports_reasoning_budget = false
-thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
 supports_image_input = true
@@ -1018,7 +998,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1033,7 +1012,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1048,7 +1026,6 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -1095,7 +1072,6 @@ supports_extended_thinking = true
 supports_reasoning_budget = false
 # Authenticated 2026-07-27 /api/show and /v1/chat/completions probes:
 # json_object returned bare JSON; json_schema returned fenced, unconstrained JSON.
-thinking_control_format = "none"
 supports_response_format_json = true
 supports_structured_output = false
 supports_multimodal_inputs = true
@@ -1131,7 +1107,6 @@ supports_extended_thinking = true
 # a concrete effort level. supports_reasoning_budget follows the same correction
 # (no budget wire on /v1) already applied to the four confirmed siblings above.
 supports_reasoning_budget = false
-thinking_control_format = "none"
 # reasoning_streaming_format mirrors config/runtime.toml's ollama-cloud-qwen3-5-397b
 # fix (#28680, 2026-08-14), and matches the ollama_cloud fixture in
 # test_streaming.ml ("reasoning_content" delta on a qwen3.5:397b chunk).

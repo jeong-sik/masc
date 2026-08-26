@@ -561,6 +561,40 @@ let ollama_cloud_capabilities =
   }
 ;;
 
+(* The same provider over its other wire. [[providers]] ollama_cloud declares
+   identity_kinds = ["ollama", "openai_compat"], and a deployment may point it
+   at either; the preset above describes the native /api/chat one it names in
+   [kind].
+
+   On the OpenAI-compatible wire the native [think] toggle does not exist, so
+   [Ollama_think] encodes nothing and a request carrying no control is not a
+   request with thinking off -- Ollama turns reasoning on by itself: "Ollama
+   auto-enables thinking for capable models when no reasoning_effort is
+   provided" (ollama#14820, docs.ollama.com/api/openai-compatibility).
+
+   The control this wire does have is [reasoning_effort]. The ladder was
+   measured against https://ollama.com/v1 on 2026-08-27 with
+   deepseek-v4-flash:0731, gemma4:31b, nemotron-3-ultra and kimi-k3:
+   none/low/medium/high/max all answered, and minimal/xhigh were refused by
+   the endpoint, which names the legal set in its own error -- 'invalid
+   reasoning value: ... (must be "high", "medium", "low", "max", or "none")'.
+
+   Structured output stays fail-closed for the same reason as the native
+   preset: the Cloud contract has not changed. *)
+let ollama_cloud_v1_capabilities =
+  { ollama_cloud_capabilities with
+    thinking_control_format = Reasoning_effort
+  ; accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.None_
+        ; Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.Max
+        ]
+  }
+;;
+
 let dashscope_capabilities =
   { openai_compat_chat_extended_capabilities with
     supports_tool_choice = true
@@ -724,6 +758,29 @@ let capabilities_for_provider_label label =
      | "ollama_cloud" -> Some ollama_cloud_capabilities
      | "nvidia" -> Some provider_l_capabilities
      | _ -> None)
+;;
+
+(** The same lookup, told which wire it is resolving for.
+
+    A label names a provider, and a provider may be reachable over more than
+    one wire ([[providers]] carries [identity_kinds] for exactly that). Where
+    the two wires differ in what a request can express, the label alone cannot
+    answer and the caller's resolved {!Provider_kind.t} decides.
+
+    Only [ollama_cloud] is such a label today. Every other label answers the
+    same on any wire, so they fall through to {!capabilities_for_provider_label}
+    unchanged, and so does [ollama_cloud] on the wire its provider entry names.
+
+    This does not move the catalog key. Model rows stay qualified by the
+    provider label ([provider_name = "ollama_cloud"]); what varies is the base
+    those rows are laid over. Keying the rows themselves on the wire would
+    collapse every OpenAI-compatible endpoint onto one label, which is the
+    2026-07-15 boot-gate wipeout (runtime_adapter.ml:443-452). *)
+let capabilities_for_provider_label_on_wire ~(wire : Provider_kind.t option) label =
+  let normalized = String.lowercase_ascii (String.trim label) in
+  match normalized, wire with
+  | "ollama_cloud", Some Provider_kind.OpenAI_compat -> Some ollama_cloud_v1_capabilities
+  | _ -> capabilities_for_provider_label label
 ;;
 
 let%test "capabilities_of_kind aliases the same presets as the label classifier" =
@@ -931,12 +988,12 @@ let overrides_of_manifest_entry (entry : Capability_manifest.entry) =
   }
 ;;
 
-let apply_declarative_capability_overrides overrides =
+let apply_declarative_capability_overrides ~wire overrides =
   let base =
     match overrides.base_label with
     | None -> default_capabilities
     | Some label ->
-      (match capabilities_for_provider_label label with
+      (match capabilities_for_provider_label_on_wire ~wire label with
        | Some c -> c
        | None -> default_capabilities)
   in
@@ -1107,7 +1164,7 @@ let apply_declarative_capability_overrides overrides =
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
-  entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides
+  entry |> overrides_of_manifest_entry |> apply_declarative_capability_overrides ~wire:None
 ;;
 
 let%test "apply_manifest_entry applies thinking_control_format (Agent Core contract)" =
@@ -1218,8 +1275,8 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   }
 ;;
 
-let apply_catalog_entry (entry : Model_catalog.model_entry) : capabilities =
-  entry |> overrides_of_catalog_entry |> apply_declarative_capability_overrides
+let apply_catalog_entry ~wire (entry : Model_catalog.model_entry) : capabilities =
+  entry |> overrides_of_catalog_entry |> apply_declarative_capability_overrides ~wire
 ;;
 
 (** Look up capabilities for [model_id] in the loaded model catalog only.
@@ -1238,7 +1295,7 @@ let for_model_id_catalog model_id =
   match Model_catalog.global () with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry entry)
+     | Some entry -> Some (apply_catalog_entry ~wire:None entry)
      | None -> None)
   | None -> None
 ;;
@@ -1261,7 +1318,7 @@ let for_model_id model_id =
   match Model_catalog.global () with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry entry)
+     | Some entry -> Some (apply_catalog_entry ~wire:None entry)
      | None ->
        (match Capability_manifest.global () with
         | Some manifest -> for_model_id_with_manifest manifest model_id
@@ -1272,21 +1329,27 @@ let for_model_id model_id =
      | None -> for_model_id_catalog model_id)
 ;;
 
-let for_provider_model_id_catalog ~(provider_label : string) ~(model_id : string) =
+let for_provider_model_id_catalog ~wire ~(provider_label : string) ~(model_id : string) =
   match Model_catalog.global () with
   | None -> None
   | Some catalog ->
     Option.map
-      apply_catalog_entry
+      (apply_catalog_entry ~wire)
       (Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id)
 ;;
 
+(* [wire] is the caller's resolved provider kind, passed when it knows one. It
+   selects the base a matched row is laid over for labels whose two wires
+   differ; the row lookup itself is unaffected. Callers that omit it get the
+   wire the provider entry names, which is what every caller did before the
+   argument existed. *)
 let for_provider_model_id
+      ~wire
       ~(allow_bare_fallback : bool)
       ~(provider_label : string)
       ~(model_id : string)
   =
-  match for_provider_model_id_catalog ~provider_label ~model_id with
+  match for_provider_model_id_catalog ~wire ~provider_label ~model_id with
   | Some _ as caps -> caps
   | None -> if allow_bare_fallback then for_model_id model_id else None
 ;;
@@ -1325,6 +1388,7 @@ let%test "for_model_id glm-4.5 has reasoning" =
 let%test "for_provider_model_id glm-4-flash basic" =
   match
     for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:true
       ~provider_label:"glm"
       ~model_id:"glm-4-flash"
@@ -1499,7 +1563,7 @@ let%test "named tool choice needs its own declaration, not a sibling override" =
     ; supports_tool_choice = Some true
     }
   in
-  let derived = apply_catalog_entry entry in
+  let derived = apply_catalog_entry ~wire:None entry in
   let base =
     match capabilities_for_provider_label "openai_chat" with
     | Some c -> c
@@ -1518,7 +1582,7 @@ let%test "named tool choice honours an explicit declaration" =
     ; supports_named_tool_choice = Some true
     }
   in
-  (apply_catalog_entry entry).supports_named_tool_choice
+  (apply_catalog_entry ~wire:None entry).supports_named_tool_choice
 ;;
 
 let%test "named tool choice cannot outlive tool choice" =
@@ -1532,7 +1596,7 @@ let%test "named tool choice cannot outlive tool choice" =
     ; supports_named_tool_choice = Some true
     }
   in
-  not (apply_catalog_entry entry).supports_named_tool_choice
+  not (apply_catalog_entry ~wire:None entry).supports_named_tool_choice
 ;;
 
 let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =

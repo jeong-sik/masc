@@ -73,9 +73,16 @@ let snapshot_revision =
 ;;
 
 let activation_result ?(trace = "trace-one") ?(source = "workspace")
-      ?(package = "review") ?(name = "review") ?(revision = 'a')
-      ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
-      ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" }) () =
+    ?(package = "review") ?(name = "review") ?(revision = 'a')
+    ?(runtime_id = "test.runtime") ?skill_tool_use_id ?(agent_core_turn = 0)
+    ?(body = "skill body")
+    ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
+    ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" }) () =
+  let skill_tool_use_id =
+    Option.value
+      ~default:(Printf.sprintf "call-%s-%c" source revision)
+      skill_tool_use_id
+  in
   Ledger.make_activation
     ~identity:
       (Skill_catalog_snapshot.make_identity
@@ -85,12 +92,16 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ~content_revision:(content_revision revision)
     ~snapshot_revision
     ~turn_ref:(Ids.Turn_ref.make ~trace_id:trace ~absolute_turn)
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~body
     ~activated_at
     ~origin
 ;;
 
-let activation ?trace ?source ?package ?name ?revision ?absolute_turn ?activated_at
-      ?origin () =
+let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_use_id
+      ?agent_core_turn ?body ?absolute_turn ?activated_at ?origin () =
   match
     activation_result
       ?trace
@@ -98,6 +109,10 @@ let activation ?trace ?source ?package ?name ?revision ?absolute_turn ?activated
       ?package
       ?name
       ?revision
+      ?runtime_id
+      ?skill_tool_use_id
+      ?agent_core_turn
+      ?body
       ?absolute_turn
       ?activated_at
       ?origin
@@ -157,6 +172,27 @@ let test_same_name_different_identity_or_revision_is_distinct () =
   match Ledger.load ~config ~trace_id with
   | Error error -> fail ("ledger readback failed: " ^ Ledger.store_error_to_string error)
   | Ok ledger -> check int "three exact activations" 3 (List.length (Ledger.activations ledger))
+;;
+
+let test_same_skill_different_invocations_are_distinct () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~skill_tool_use_id:"call-first" ()
+    ; activation ~skill_tool_use_id:"call-second" ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "distinct invocation was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    check int "two invocation activations" 2
+      (List.length (Ledger.activations ledger))
 ;;
 
 let test_session_origins_roundtrip () =
@@ -253,7 +289,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v1"
+      [ "schema", `String "masc.skill-activations/v2"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
@@ -267,7 +303,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       ~expected_trace_id:trace
       json
   with
-  | Error Ledger.Duplicate_exact_activation -> ()
+  | Error Ledger.Duplicate_skill_tool_use_id -> ()
   | Error _ -> fail "duplicate exact key returned wrong decoder error"
   | Ok _ -> fail "duplicate exact key was accepted"
 ;;
@@ -415,8 +451,10 @@ let () =
     [ ( "session ledger"
       , [ test_case "empty, durable record, idempotent readback" `Quick
             test_empty_record_and_idempotent_readback
-        ; test_case "exact identity and revision form the dedupe key" `Quick
+        ; test_case "exact identities and revisions remain distinct" `Quick
             test_same_name_different_identity_or_revision_is_distinct
+        ; test_case "same Skill keeps distinct invocation activations" `Quick
+            test_same_skill_different_invocations_are_distinct
         ; test_case "session origins survive durable roundtrip" `Quick
             test_session_origins_roundtrip
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed

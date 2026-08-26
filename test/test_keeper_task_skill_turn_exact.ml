@@ -118,7 +118,23 @@ let test_shadow_reference_selects_shadow_not_effective_winner () =
 ;;
 
 let run_skill_tool tool input =
-  match tool.Agent_core.Tool.handler (Agent_core.Tool.Execution_env.create ()) input with
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"task-skill-turn-exact"
+      ~turn:0
+      ~schedule:
+        { planned_index = 0
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:(Agent_core.Tool.completion tool)
+  in
+  match
+    tool.Agent_core.Tool.handler
+      (Agent_core.Tool.Execution_env.create ~invocation ())
+      input
+  with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error error -> error.Agent_core.Llm_provider.Types.message
 ;;
@@ -182,7 +198,7 @@ let test_disabled_explicit_reference_is_readable_without_global_discovery () =
   let failing_tool =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
-      ~record_activation:(fun observed ->
+      ~record_activation:(fun ~invocation:_ ~body:_ observed ->
         incr activation_attempts;
         ignore observed;
         Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)

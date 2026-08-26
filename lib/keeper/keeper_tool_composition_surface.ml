@@ -924,7 +924,7 @@ let make_request_control_tool
     ~name
     ~description
     ~input_schema:request_id_input_schema
-    (fun _execution_env input ->
+    (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args
@@ -1020,7 +1020,7 @@ let make_instruction_skill_tool
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
-    (fun _execution_env input ->
+    (fun execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
@@ -1028,6 +1028,13 @@ let make_instruction_skill_tool
       with
       | Error rejection -> rejection
       | Ok _ ->
+        (match Agent_core.Tool.Execution_env.invocation execution_env with
+         | None ->
+           Tool_result.runtime_err
+             ~tool_name:name
+             ~start_time
+             "keeper_skill execution requires Agent-Core invocation identity"
+         | Some invocation ->
         (match Skill_reference.of_yojson input with
          | Error _ ->
            Tool_result.make_err
@@ -1042,9 +1049,22 @@ let make_instruction_skill_tool
                 instruction_skills
             with
             | Some (reference, _, body) ->
+              let skill_tool_use_id =
+                Agent_core.Tool_contract.Invocation.tool_use_id invocation
+              in
+              let success () =
+                Tool_result.make_ok ~tool_name:name ~start_time
+                  ~data:
+                    (`Assoc
+                       [ "reference", Skill_reference.to_yojson reference
+                       ; "skill_tool_use_id", `String skill_tool_use_id
+                       ; "body", `String body
+                       ])
+                  ()
+              in
               (match record_activation with
                | Some record ->
-                 (match record reference with
+                 (match record ~invocation ~body reference with
                   | Error error ->
                     activation_failure
                       ~reference
@@ -1054,21 +1074,8 @@ let make_instruction_skill_tool
                   | Ok
                       ( Activation_ledger.Recorded _
                       | Activation_ledger.Already_recorded _ ) ->
-                    Tool_result.make_ok ~tool_name:name ~start_time
-                      ~data:
-                        (`Assoc
-                           [ "reference", Skill_reference.to_yojson reference
-                           ; "body", `String body
-                           ])
-                      ())
-               | None ->
-                 Tool_result.make_ok ~tool_name:name ~start_time
-                   ~data:
-                     (`Assoc
-                        [ "reference", Skill_reference.to_yojson reference
-                        ; "body", `String body
-                        ])
-                   ())
+                    success ())
+               | None -> success ())
             | (* A reference the frozen catalog does not carry is the caller's
                  error and says so with the exact references it does carry,
                  rather than an empty
@@ -1087,7 +1094,7 @@ let make_instruction_skill_tool
                            (fun (reference, _, _) ->
                               Skill_reference.to_yojson reference
                               |> Yojson.Safe.to_string)
-                           skills))))))
+                           skills)))))))
 ;;
 
 module For_testing = struct
@@ -1219,7 +1226,7 @@ let make_tools
                  | Ok plan ->
                    (match record_composition_activation with
                     | Some record ->
-                      (match record ~tool_name with
+                      (match record ~invocation:parent_invocation ~tool_name with
                        | Error error ->
                          activation_failure ~tool_name ~start_time error
                        | Ok
@@ -1285,7 +1292,7 @@ let make_tools
                match record_composition_activation with
                | None -> Ok ()
                | Some record ->
-                 (match record ~tool_name with
+                 (match record ~invocation:parent_invocation ~tool_name with
                   | Error error -> Error error
                   | Ok
                       ( Activation_ledger.Recorded _

@@ -5,6 +5,7 @@ module Ledger = Keeper_skill_activation_ledger
 type t =
   { trace_id : Keeper_id.Trace_id.t
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; task_scope : recorded_task_scope
   }
@@ -23,7 +24,7 @@ type error =
   | Activation_rejected of Ledger.decode_error
   | Store_failed of Ledger.store_error
 
-let make ~trace_id ~turn_ref ~snapshot_revision ~task_scope =
+let make ~trace_id ~turn_ref ~runtime_id ~snapshot_revision ~task_scope =
   let scope =
     match task_scope with
     | Keeper_task_skill_turn.No_task -> Ok No_task
@@ -40,7 +41,8 @@ let make ~trace_id ~turn_ref ~snapshot_revision ~task_scope =
   then Error Turn_scope_mismatch
   else
     Result.map
-      (fun task_scope -> { trace_id; turn_ref; snapshot_revision; task_scope })
+      (fun task_scope ->
+         { trace_id; turn_ref; runtime_id; snapshot_revision; task_scope })
       scope
 ;;
 
@@ -62,13 +64,18 @@ let composition_origin context ~tool_name reference =
     else Ledger.Session_composition { tool_name }
 ;;
 
-let record ~config context ~origin reference =
+let record ~config context ~invocation ~body ~origin reference =
   let* activation =
     Ledger.make_activation
       ~identity:reference.Skill_reference.identity
       ~content_revision:reference.content_revision
       ~snapshot_revision:context.snapshot_revision
       ~turn_ref:context.turn_ref
+      ~runtime_id:context.runtime_id
+      ~skill_tool_use_id:
+        (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+      ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+      ~body
       ~activated_at:(Masc_domain.now_iso ())
       ~origin
     |> Result.map_error (fun error -> Activation_rejected error)
@@ -78,14 +85,14 @@ let record ~config context ~origin reference =
   |> Result.map_error (fun error -> Store_failed error)
 ;;
 
-let record_instruction ~config context reference =
+let record_instruction ~config context ~invocation ~body reference =
   let origin = instruction_origin context reference in
-  record ~config context ~origin reference
+  record ~config context ~invocation ~body ~origin reference
 ;;
 
-let record_composition ~config context ~tool_name reference =
+let record_composition ~config context ~invocation ~tool_name reference =
   let origin = composition_origin context ~tool_name reference in
-  record ~config context ~origin reference
+  record ~config context ~invocation ~body:"" ~origin reference
 ;;
 
 let error_code = function

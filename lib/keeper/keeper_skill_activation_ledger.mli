@@ -16,6 +16,11 @@ type activation = private
   ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; skill_tool_use_id : string
+  ; agent_core_turn : int
+  ; body_bytes : int
+  ; body_sha256 : string
   ; activated_at : string
   ; origin : origin
   }
@@ -50,8 +55,13 @@ type decode_error =
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
+  | Invalid_runtime_id
+  | Invalid_skill_tool_use_id
+  | Invalid_agent_core_turn of int
+  | Invalid_body_bytes of int
+  | Invalid_body_sha256 of Skill_reference.revision_error
   | Invalid_activated_at of string
-  | Duplicate_exact_activation
+  | Duplicate_skill_tool_use_id
   | Session_id_mismatch
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
@@ -61,6 +71,7 @@ type store_error =
   | Lock_failed of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
+  | Invocation_id_collision of string
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
@@ -80,6 +91,10 @@ val make_activation :
   content_revision:Skill_reference.content_revision ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
   turn_ref:Ids.Turn_ref.t ->
+  runtime_id:string ->
+  skill_tool_use_id:string ->
+  agent_core_turn:int ->
+  body:string ->
   activated_at:string ->
   origin:origin ->
   (activation, decode_error) result
@@ -106,6 +121,6 @@ val record :
   trace_id:Keeper_id.Trace_id.t ->
   activation ->
   (t * record_outcome, store_error) result
-(** Record by exact [(identity, content_revision)] key. Repeating the same
-    activation is idempotent; same-name Skills from another source/package or
-    revision remain distinct. *)
+(** Record one exact Agent Core invocation. Re-observing the same
+    [skill_tool_use_id] is idempotent only when every persisted field agrees.
+    A later invocation of the same Skill remains a distinct activation. *)

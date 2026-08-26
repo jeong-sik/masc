@@ -880,6 +880,14 @@
  (libraries alcotest ast_grep))
 
 (test
+ (name test_keeper_turn_sandbox_profile_gate)
+ (modules test_keeper_turn_sandbox_profile_gate)
+ (deps
+  %{workspace_root}/lib/keeper/keeper_unified_turn.ml
+  %{workspace_root}/lib/keeper/keeper_turn.ml)
+ (libraries alcotest ast_grep))
+
+(test
  (name test_tool_call_log_requeue_on_failure)
  (modules test_tool_call_log_requeue_on_failure)
  (deps %{workspace_root}/lib/keeper_tool_call_log.ml)

@@ -25,6 +25,42 @@ let load_profile_defaults ~base_path ~keeper_name =
     keeper_name
   |> Result.map_error (profile_load_error ~keeper_name)
 
+(* [effective_meta_of_profile_defaults] already names the keeper and the
+   allowed values in its message, so this only picks the field the operator
+   has to edit. *)
+let profile_overlay_error detail =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
+       { field = "keeper.sandbox_profile"; detail })
+
+(* The meta a turn runs with is the registry entry's meta with the keeper TOML
+   overlaid. Durable keeper JSON does not carry the config half of
+   [keeper_meta] at all -- [Keeper_meta_json_parse] fills those eleven fields
+   with placeholders and the store never writes them back -- so
+   [entry.meta.sandbox_profile] is always the decoder's [Local] and the TOML
+   is the only thing that can say [docker].
+
+   Both turn entry points used to spell the overlay themselves, and
+   [Keeper_unified_turn.run_keeper_cycle] spelled only the first half: it
+   loaded [profile_defaults] for the runtime builder and then ran the turn on
+   the un-overlaid [entry.meta]. Every heartbeat turn therefore dispatched
+   [Execute] to the host while its keeper TOML declared [docker] (#30982).
+   Returning both halves together is what makes that omission unspellable --
+   a caller cannot hold the defaults without the meta they belong to. *)
+let turn_profile_and_meta ~base_path ~(entry_meta : keeper_meta) :
+    (Keeper_types_profile.keeper_profile_defaults * keeper_meta, Agent_core.Error.t) result =
+  match load_profile_defaults ~base_path ~keeper_name:entry_meta.name with
+  | Error _ as error -> error
+  | Ok profile_defaults ->
+    (match
+       Keeper_meta_contract.effective_meta_of_profile_defaults
+         profile_defaults
+         entry_meta
+     with
+     | Ok meta -> Ok (profile_defaults, meta)
+     | Error detail ->
+       Error (profile_overlay_error detail))
+
 let build_runtime_execution
       ~(meta : keeper_meta)
       ~(runtime_id : string)

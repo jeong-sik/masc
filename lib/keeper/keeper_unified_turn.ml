@@ -420,7 +420,23 @@ let run_keeper_cycle
       ; deferred_runtime_lane = None
       }
   | Ok { entry; publication_recovery } ->
-  let meta = entry.meta in
+  match
+    Keeper_unified_turn_pre_dispatch.turn_profile_and_meta
+      ~base_path:config.base_path
+      ~entry_meta:entry.meta
+  with
+  | Error error ->
+    Error
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
+      ; source_disposition = Follow_failure_route
+      ; deferred_runtime_lane = None
+      }
+  | Ok (entry_profile_defaults, meta) ->
   let channel = turn_decision.channel in
   (* TurnComplete bracket — the cycle_completed flag is set to true on the
      [Ok updated_meta] return at the end of this function; an [Error _]
@@ -555,18 +571,14 @@ let run_keeper_cycle
             in scope so the retry-loop block below can also call the
             extracted builder with the same defaults. *)
          let effective_runtime_runtime_name = effective_runtime_id in
+         (* The snapshot is the one already overlaid onto [meta] above. Loading
+            it a second time here is what let the two halves disagree: the
+            reload fed the runtime builder while [meta] stayed un-overlaid. *)
          let profile_and_execution =
-           match
-             Keeper_unified_turn_pre_dispatch.load_profile_defaults
-               ~base_path:config.base_path
-               ~keeper_name:meta.name
-           with
-           | Error _ as error -> error
-           | Ok profile_defaults ->
-             Keeper_unified_turn_pre_dispatch.build_runtime_execution
-               ~meta
-               ~runtime_id:effective_runtime_runtime_name
-             |> Result.map (fun execution -> profile_defaults, execution)
+           Keeper_unified_turn_pre_dispatch.build_runtime_execution
+             ~meta
+             ~runtime_id:effective_runtime_runtime_name
+           |> Result.map (fun execution -> entry_profile_defaults, execution)
          in
          (match profile_and_execution
           with

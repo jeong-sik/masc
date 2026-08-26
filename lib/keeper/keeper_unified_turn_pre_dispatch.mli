@@ -18,6 +18,23 @@ val load_profile_defaults :
     child or inherited base TOML returns [Config InvalidConfig]; prompt-only
     and genuinely absent profiles remain valid empty/default snapshots. *)
 
+val turn_profile_and_meta :
+     base_path:string
+  -> entry_meta:Keeper_meta_contract.keeper_meta
+  -> ( Keeper_types_profile.keeper_profile_defaults
+       * Keeper_meta_contract.keeper_meta
+     , Agent_core.Error.t )
+     result
+(** The profile snapshot plus the meta a turn runs with: the registry entry's
+    meta with that snapshot overlaid.
+
+    Durable keeper JSON carries no config fields, so [entry_meta] always holds
+    the decoder's placeholder [sandbox_profile = Local] and the keeper TOML is
+    the only source that can say [docker]. Loading the defaults without
+    applying them ran every heartbeat turn's [Execute] on the host against a
+    [docker] declaration (#30982); returning the pair keeps the two halves
+    from drifting apart again. *)
+
 val build_runtime_execution
   :  meta:Keeper_meta_contract.keeper_meta
   -> runtime_id:string

@@ -194,6 +194,7 @@ Re-run them on your own root before treating any of them as a target.
 
 | Document | Use |
 |---|---|
+| [`docs/KEEPER-IDENTITY-MANUAL.md`](KEEPER-IDENTITY-MANUAL.md) | attaching work services to a Keeper |
 | [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md) | The full Keeper TOML field contract |
 | [`docs/TUI-GUIDE.md`](TUI-GUIDE.md) | Terminal UI surfaces and keys |
 | [`docs/ENV-CONTRACT.md`](ENV-CONTRACT.md) | Environment variables the runtime reads |

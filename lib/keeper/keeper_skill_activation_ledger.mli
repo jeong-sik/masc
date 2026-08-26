@@ -23,6 +23,17 @@ type action =
   ; observed_at : string
   }
 
+type served_content =
+  | Skill_body of
+      { bytes : int
+      ; sha256 : string
+      }
+  | Skill_resource of
+      { relative_path : string
+      ; bytes : int
+      ; sha256 : string
+      }
+
 type activation = private
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
@@ -31,8 +42,7 @@ type activation = private
   ; runtime_id : string
   ; skill_tool_use_id : string
   ; agent_core_turn : int
-  ; body_bytes : int
-  ; body_sha256 : string
+  ; served_content : served_content
   ; delivery : delivery option
   ; actions : action list
   ; activated_at : string
@@ -72,8 +82,10 @@ type decode_error =
   | Invalid_runtime_id
   | Invalid_skill_tool_use_id
   | Invalid_agent_core_turn of int
-  | Invalid_body_bytes of int
-  | Invalid_body_sha256 of Skill_reference.revision_error
+  | Invalid_served_content_kind of string
+  | Invalid_served_content_path of string
+  | Invalid_served_content_bytes of int
+  | Invalid_served_content_sha256 of Skill_reference.revision_error
   | Invalid_delivery_agent_core_turn of int
   | Invalid_delivery_time of string
   | Invalid_action_tool_use_id_field
@@ -126,7 +138,7 @@ val make_activation :
   runtime_id:string ->
   skill_tool_use_id:string ->
   agent_core_turn:int ->
-  body:string ->
+  served_content:served_content ->
   activated_at:string ->
   origin:origin ->
   (activation, decode_error) result

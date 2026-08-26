@@ -3375,6 +3375,7 @@
  (modules test_keeper_task_skill_turn_exact)
  (libraries
   alcotest
+  fs_compat
   masc
   masc.agent_core
   masc.skill_config

@@ -393,7 +393,22 @@ let make_tool_bundle_for_descriptors
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
            match skill.reference, skill.surface with
            | Some reference, Keeper_skill_catalog.Instruction ->
-             Some (reference, skill.description, skill.body)
+             let resource_location =
+               match skill.provenance with
+               | Some { source_root = Some source_root; directory; _ } ->
+                 Some
+                   Keeper_tool_composition_surface.{ source_root; directory }
+               | Some { source_root = None; _ }
+               | None ->
+                 None
+             in
+             Some
+               (Keeper_tool_composition_surface.instruction_skill
+                  ?resource_location
+                  ~reference
+                  ~description:skill.description
+                  ~body:skill.body
+                  ())
            | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
              None)
     in
@@ -413,12 +428,12 @@ let make_tool_bundle_for_descriptors
     in
     let record_instruction_activation =
       Option.map
-        (fun context ~invocation ~body reference ->
+        (fun context ~invocation ~content reference ->
            Keeper_skill_activation_recorder.record_instruction
              ~config
              context
              ~invocation
-             ~body
+             ~content
              reference)
         skill_activation_context
     in
@@ -537,6 +552,8 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?skill_catalog
+      ?identity_tools
+      ?composition_plan_index
       ?task_instruction_skills
       ?skill_activation_context
       ?turn_ctx_cell
@@ -552,6 +569,8 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?skill_catalog
+    ?identity_tools
+    ?composition_plan_index
     ?task_instruction_skills
     ?skill_activation_context
     ~allow_unrecorded_skill_surface:false

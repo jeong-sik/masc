@@ -95,7 +95,11 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~body
+    ~served_content:
+      (Ledger.Skill_body
+         { bytes = String.length body
+         ; sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+         })
     ~activated_at
     ~origin
 ;;

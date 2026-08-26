@@ -2,6 +2,13 @@ open Result.Syntax
 
 module Ledger = Keeper_skill_activation_ledger
 
+type instruction_content =
+  | Body of string
+  | Resource of
+      { relative_path : Skill_resource_path.t
+      ; contents : string
+      }
+
 type t =
   { trace_id : Keeper_id.Trace_id.t
   ; turn_ref : Ids.Turn_ref.t
@@ -64,7 +71,17 @@ let composition_origin context ~tool_name reference =
     else Ledger.Session_composition { tool_name }
 ;;
 
-let record ~config context ~invocation ~body ~origin reference =
+let evidence ~relative_path contents =
+  let bytes = String.length contents in
+  let sha256 = Digestif.SHA256.(digest_string contents |> to_hex) in
+  match relative_path with
+  | None -> Ledger.Skill_body { bytes; sha256 }
+  | Some relative_path ->
+    Ledger.Skill_resource
+      { relative_path = Skill_resource_path.to_string relative_path; bytes; sha256 }
+;;
+
+let record ~config context ~invocation ~served_content ~origin reference =
   let* activation =
     Ledger.make_activation
       ~identity:reference.Skill_reference.identity
@@ -75,7 +92,7 @@ let record ~config context ~invocation ~body ~origin reference =
       ~skill_tool_use_id:
         (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
       ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
-      ~body
+      ~served_content
       ~activated_at:(Masc_domain.now_iso ())
       ~origin
     |> Result.map_error (fun error -> Activation_rejected error)
@@ -85,14 +102,21 @@ let record ~config context ~invocation ~body ~origin reference =
   |> Result.map_error (fun error -> Store_failed error)
 ;;
 
-let record_instruction ~config context ~invocation ~body reference =
+let record_instruction ~config context ~invocation ~content reference =
   let origin = instruction_origin context reference in
-  record ~config context ~invocation ~body ~origin reference
+  let served_content =
+    match content with
+    | Body body -> evidence ~relative_path:None body
+    | Resource { relative_path; contents } ->
+      evidence ~relative_path:(Some relative_path) contents
+  in
+  record ~config context ~invocation ~served_content ~origin reference
 ;;
 
 let record_composition ~config context ~invocation ~tool_name reference =
   let origin = composition_origin context ~tool_name reference in
-  record ~config context ~invocation ~body:"" ~origin reference
+  let served_content = evidence ~relative_path:None "" in
+  record ~config context ~invocation ~served_content ~origin reference
 ;;
 
 let observe_delivery ~config context ~tool_result_ids ~agent_core_turn =

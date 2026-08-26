@@ -319,7 +319,12 @@ let with_bundle_tools ?(record_activations = true) f =
            ~identity_tools:(identity_tools ~base_path:dir)
            ~composition_plan_index
            ~task_instruction_skills:
-             [ reference, "what the gate reads", "body" ]
+             [ Keeper_tool_composition_surface.instruction_skill
+                 ~reference
+                 ~description:"what the gate reads"
+                 ~body:"body"
+                 ()
+             ]
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
            ()

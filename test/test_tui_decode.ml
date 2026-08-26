@@ -1660,8 +1660,12 @@ let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instructi
            ; "runtime_id", `String "test.runtime"
            ; "skill_tool_use_id", `String (Printf.sprintf "call-%c" revision)
            ; "agent_core_turn", `Int 0
-           ; "body_bytes", `Int 12
-           ; "body_sha256", `String (String.make 64 'c')
+           ; ( "served_content"
+             , `Assoc
+                 [ "kind", `String "skill_body"
+                 ; "bytes", `Int 12
+                 ; "sha256", `String (String.make 64 'c')
+                 ] )
            ; "delivery", `Null
            ; "actions", `List []
            ; "activated_at", `String "2026-08-26T10:30:00Z"

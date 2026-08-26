@@ -108,7 +108,12 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
         ~runtime_id:"test.runtime"
         ~skill_tool_use_id:"call-projection"
         ~agent_core_turn:0
-        ~body:"projection body"
+        ~served_content:
+          (Ledger.Skill_body
+             { bytes = String.length "projection body"
+             ; sha256 =
+                 Digestif.SHA256.(digest_string "projection body" |> to_hex)
+             })
         ~activated_at:"2026-08-26T00:00:00Z"
         ~origin:Ledger.Session_instruction
     with

@@ -26,6 +26,7 @@ let catalog_capabilities ?provider_label model_id =
     | None -> Llm_provider.Capabilities.for_model_id model_id
     | Some provider_label ->
       Llm_provider.Capabilities.for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label
         ~model_id

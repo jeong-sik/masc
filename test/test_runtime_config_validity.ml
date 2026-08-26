@@ -404,6 +404,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
     (fun provider_label ->
        match
          Llm_provider.Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label
            ~model_id:runpod_model_id
@@ -419,6 +420,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_mtp () =
        let name = "RunPod qwen3.6 gate " ^ provider_label in
        match
          Llm_provider.Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label
            ~model_id:runpod_model_id
@@ -457,6 +459,7 @@ let test_deployment_agent_core_model_catalog_covers_glm_streaming_reasoning () =
        let label = provider_label ^ "/" ^ model_id in
        match
          Llm_provider.Capabilities.for_provider_model_id
+           ~wire:None
            ~allow_bare_fallback:false
            ~provider_label
            ~model_id
@@ -500,6 +503,7 @@ let test_deployment_agent_core_model_catalog_covers_live_runpod_rtxa6000_gemma (
        entry.max_context_tokens);
   match
     Llm_provider.Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"runpod_rtxa6000"
       ~model_id
@@ -549,6 +553,7 @@ let test_deployment_agent_core_model_catalog_covers_local_gemma4_e2b_qat () =
         | Some _ | None -> None));
   match
     Llm_provider.Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"ollama"
       ~model_id
@@ -603,6 +608,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
       "chat_template_kwargs_preserve_thinking";
     match
       Llm_provider.Capabilities.for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label:provider_name
         ~model_id
@@ -624,6 +630,7 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
       "preserve_always";
     match
       Llm_provider.Capabilities.for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label:provider_name
         ~model_id
@@ -749,6 +756,7 @@ let test_deployment_agent_core_model_catalog_modality_priorities_resolve () =
              Llm_provider.Capabilities.for_model_id_catalog entry.id_prefix
            | Some provider_label ->
              Llm_provider.Capabilities.for_provider_model_id
+               ~wire:None
                ~allow_bare_fallback:false
                ~provider_label
                ~model_id:entry.id_prefix
@@ -1014,6 +1022,7 @@ let test_kimi_for_coding_declares_the_reasoning_it_returns () =
   with_deployment_agent_core_model_catalog @@ fun _catalog ->
   match
     Llm_provider.Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label:"kimi_code"
       ~model_id:"kimi-for-coding"

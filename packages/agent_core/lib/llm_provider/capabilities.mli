@@ -245,11 +245,18 @@ val for_model_id_catalog : string -> capabilities option
     [provider_name] and complete normalized [id_prefix] equal [provider_label]
     and [model_id], respectively. AGENT_CORE never rewrites either value into slash,
     colon, or dot-qualified candidates, and does not apply family/prefix
-    matching inside the provider scope. When the exact pair is absent,
-    [allow_bare_fallback] controls whether this falls back to a
-    provider-independent {!for_model_id} row. *)
+    matching inside the provider scope. When the exact pair is absent, a
+    catalog-declared provider base for [wire] is used first;
+    [allow_bare_fallback] controls only the subsequent fallback to a
+    provider-independent {!for_model_id} row.
+
+    [wire] is the caller's resolved {!Provider_kind.t}, supplied when it knows
+    one. It selects the base a matched row is laid over for a provider whose
+    wires differ in what a request can express; the row lookup is unaffected.
+    Passing [None] resolves against the provider entry's default base. *)
 val for_provider_model_id
-  :  allow_bare_fallback:bool
+  :  wire:Provider_kind.t option
+  -> allow_bare_fallback:bool
   -> provider_label:string
   -> model_id:string
   -> capabilities option

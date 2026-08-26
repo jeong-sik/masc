@@ -315,11 +315,13 @@ let agent_core_thinking_control_format = function
     row unchanged; an absent runtime capability block remains absent and is
     rejected later by the normal startup gate. *)
 let model_capabilities_override_of_model_spec
+      ~(wire : Llm_provider.Provider_kind.t)
       ~(provider_id : string)
       (spec : Runtime_schema.model_spec)
   =
   match
     Llm_provider.Capabilities.for_provider_model_id
+      ~wire:(Some wire)
       ~allow_bare_fallback:false
       ~provider_label:provider_id
       ~model_id:spec.api_name
@@ -411,14 +413,17 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
   : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
-  let model_capabilities_override =
-    model_capabilities_override_of_model_spec ~provider_id:provider.id spec
-  in
   match provider.transport with
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
     (match provider_kind_for_http_provider ?registry_entry provider with
      | Ok kind ->
+       let model_capabilities_override =
+         model_capabilities_override_of_model_spec
+           ~wire:kind
+           ~provider_id:provider.id
+           spec
+       in
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
@@ -487,6 +492,12 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?repeat_penalty
   | Cli _ ->
     (match provider_kind_of_cli_provider provider with
      | Ok kind ->
+       let model_capabilities_override =
+         model_capabilities_override_of_model_spec
+           ~wire:kind
+           ~provider_id:provider.id
+           spec
+       in
        Ok
          (Llm_provider.Provider_config.make
             ~kind

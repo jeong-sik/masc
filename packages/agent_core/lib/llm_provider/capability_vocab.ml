@@ -674,6 +674,7 @@ let base_label_values =
   ; "cohere"
   ; "mimo"
   ; "ollama_cloud"
+  ; "ollama_cloud_v1"
   ; "nvidia"
   ]
 ;;

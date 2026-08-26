@@ -561,6 +561,40 @@ let ollama_cloud_capabilities =
   }
 ;;
 
+(* The same provider over its other wire. [[providers]] ollama_cloud declares
+   identity_kinds = ["ollama", "openai_compat"], and a deployment may point it
+   at either; the preset above describes the native /api/chat one it names in
+   [kind].
+
+   On the OpenAI-compatible wire the native [think] toggle does not exist, so
+   [Ollama_think] encodes nothing and a request carrying no control is not a
+   request with thinking off -- Ollama turns reasoning on by itself: "Ollama
+   auto-enables thinking for capable models when no reasoning_effort is
+   provided" (ollama#14820, docs.ollama.com/api/openai-compatibility).
+
+   The control this wire does have is [reasoning_effort]. The ladder was
+   measured against https://ollama.com/v1 on 2026-08-27 with
+   deepseek-v4-flash:0731, gemma4:31b, nemotron-3-ultra and kimi-k3:
+   none/low/medium/high/max all answered, and minimal/xhigh were refused by
+   the endpoint, which names the legal set in its own error -- 'invalid
+   reasoning value: ... (must be "high", "medium", "low", "max", or "none")'.
+
+   Structured output stays fail-closed for the same reason as the native
+   preset: the Cloud contract has not changed. *)
+let ollama_cloud_v1_capabilities =
+  { ollama_cloud_capabilities with
+    thinking_control_format = Reasoning_effort
+  ; accepted_reasoning_efforts =
+      Some
+        [ Reasoning_effort.None_
+        ; Reasoning_effort.Low
+        ; Reasoning_effort.Medium
+        ; Reasoning_effort.High
+        ; Reasoning_effort.Max
+        ]
+  }
+;;
+
 let dashscope_capabilities =
   { openai_compat_chat_extended_capabilities with
     supports_tool_choice = true
@@ -722,6 +756,7 @@ let capabilities_for_provider_label label =
      | "cohere" -> Some openai_compat_chat_capabilities
      | "mimo" -> Some mimo_capabilities
      | "ollama_cloud" -> Some ollama_cloud_capabilities
+     | "ollama_cloud_v1" -> Some ollama_cloud_v1_capabilities
      | "nvidia" -> Some provider_l_capabilities
      | _ -> None)
 ;;
@@ -970,7 +1005,8 @@ let apply_declarative_capability_overrides overrides =
     | Some n -> Some n
     | None -> base_val
   in
-  { base with
+  let capabilities =
+    { base with
     max_context_tokens =
       override_int_opt base.max_context_tokens overrides.max_context_tokens
   ; serving_constraint =
@@ -1103,7 +1139,13 @@ let apply_declarative_capability_overrides overrides =
             warn_unknown_capability_value ~field:"reasoning_replay" s;
             base.reasoning_replay_override)
        | None -> base.reasoning_replay_override)
-  }
+    }
+  in
+  if
+    (not capabilities.supports_reasoning)
+    || capabilities.thinking_control_format = No_thinking_control
+  then { capabilities with accepted_reasoning_efforts = None }
+  else capabilities
 ;;
 
 let apply_manifest_entry (entry : Capability_manifest.entry) : capabilities =
@@ -1218,8 +1260,35 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   }
 ;;
 
-let apply_catalog_entry (entry : Model_catalog.model_entry) : capabilities =
-  entry |> overrides_of_catalog_entry |> apply_declarative_capability_overrides
+let provider_base_label ~catalog ~wire provider_label =
+  match Model_catalog.provider_entry_for_label catalog provider_label with
+  | None -> None
+  | Some provider ->
+    (match Option.bind wire (fun kind -> List.assoc_opt kind provider.capabilities_base_by_identity_kind) with
+     | Some _ as base -> base
+     | None -> provider.capabilities_base)
+;;
+
+let apply_catalog_entry ~catalog ~wire (entry : Model_catalog.model_entry) : capabilities =
+  let overrides = overrides_of_catalog_entry entry in
+  let base_label =
+    match entry.provider_name with
+    | None -> overrides.base_label
+    | Some provider_label ->
+      (match
+         Option.bind wire (fun kind ->
+           Option.bind
+             (Model_catalog.provider_entry_for_label catalog provider_label)
+             (fun provider ->
+                List.assoc_opt kind provider.capabilities_base_by_identity_kind))
+       with
+       | Some _ as wire_base -> wire_base
+       | None ->
+         (match overrides.base_label with
+          | Some _ as model_base -> model_base
+          | None -> provider_base_label ~catalog ~wire:None provider_label))
+  in
+  apply_declarative_capability_overrides { overrides with base_label }
 ;;
 
 (** Look up capabilities for [model_id] in the loaded model catalog only.
@@ -1238,7 +1307,7 @@ let for_model_id_catalog model_id =
   match Model_catalog.global () with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry entry)
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
      | None -> None)
   | None -> None
 ;;
@@ -1261,7 +1330,7 @@ let for_model_id model_id =
   match Model_catalog.global () with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
-     | Some entry -> Some (apply_catalog_entry entry)
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire:None entry)
      | None ->
        (match Capability_manifest.global () with
         | Some manifest -> for_model_id_with_manifest manifest model_id
@@ -1272,21 +1341,30 @@ let for_model_id model_id =
      | None -> for_model_id_catalog model_id)
 ;;
 
-let for_provider_model_id_catalog ~(provider_label : string) ~(model_id : string) =
+let for_provider_model_id_catalog ~wire ~(provider_label : string) ~(model_id : string) =
   match Model_catalog.global () with
   | None -> None
   | Some catalog ->
-    Option.map
-      apply_catalog_entry
-      (Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id)
+    (match Model_catalog.lookup_for_provider catalog ~provider_name:provider_label ~model_id with
+     | Some entry -> Some (apply_catalog_entry ~catalog ~wire entry)
+     | None ->
+       Option.bind
+         (provider_base_label ~catalog ~wire provider_label)
+         capabilities_for_provider_label)
 ;;
 
+(* [wire] is the caller's resolved provider kind, passed when it knows one. It
+   selects the base a matched row is laid over for labels whose two wires
+   differ; the row lookup itself is unaffected. Callers that omit it get the
+   wire the provider entry names, which is what every caller did before the
+   argument existed. *)
 let for_provider_model_id
+      ~wire
       ~(allow_bare_fallback : bool)
       ~(provider_label : string)
       ~(model_id : string)
   =
-  match for_provider_model_id_catalog ~provider_label ~model_id with
+  match for_provider_model_id_catalog ~wire ~provider_label ~model_id with
   | Some _ as caps -> caps
   | None -> if allow_bare_fallback then for_model_id model_id else None
 ;;
@@ -1325,6 +1403,7 @@ let%test "for_model_id glm-4.5 has reasoning" =
 let%test "for_provider_model_id glm-4-flash basic" =
   match
     for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:true
       ~provider_label:"glm"
       ~model_id:"glm-4-flash"
@@ -1499,7 +1578,7 @@ let%test "named tool choice needs its own declaration, not a sibling override" =
     ; supports_tool_choice = Some true
     }
   in
-  let derived = apply_catalog_entry entry in
+  let derived = apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry in
   let base =
     match capabilities_for_provider_label "openai_chat" with
     | Some c -> c
@@ -1518,7 +1597,7 @@ let%test "named tool choice honours an explicit declaration" =
     ; supports_named_tool_choice = Some true
     }
   in
-  (apply_catalog_entry entry).supports_named_tool_choice
+  (apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry).supports_named_tool_choice
 ;;
 
 let%test "named tool choice cannot outlive tool choice" =
@@ -1532,7 +1611,8 @@ let%test "named tool choice cannot outlive tool choice" =
     ; supports_named_tool_choice = Some true
     }
   in
-  not (apply_catalog_entry entry).supports_named_tool_choice
+  not
+    (apply_catalog_entry ~catalog:Model_catalog.empty ~wire:None entry).supports_named_tool_choice
 ;;
 
 let qwen3_family_test_entry id_prefix : Model_catalog.model_entry =

@@ -358,6 +358,7 @@ let[@warning "-32"] test_config kind task =
 let[@warning "-32"] catalog_declares_image_task provider_label model_id =
   match
     Capabilities.for_provider_model_id
+      ~wire:None
       ~allow_bare_fallback:false
       ~provider_label
       ~model_id

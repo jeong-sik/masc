@@ -84,6 +84,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; api_key_env : string
   ; default_model : string option
   ; capabilities_base : string option
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
   ; identity_hosts : string list
   }
 
@@ -98,6 +99,10 @@ val empty : t
 val of_model_entries : model_entry list -> t
 val model_entries : t -> model_entry list
 val provider_entries : t -> provider_entry list
+
+val provider_entry_for_label : t -> string -> provider_entry option
+(** Resolve a provider id or alias to its canonical catalog entry. Wire-kind
+    labels are not aliases and never resolve through this function. *)
 
 (** Parse and validate a model catalog from an in-memory TOML value. [source]
     is included in syntax-error diagnostics. This is the typed boundary for

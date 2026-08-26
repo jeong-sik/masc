@@ -75,7 +75,7 @@ let test_preview_keeps_nearby_context_and_states_omission () =
   check (list string) "nearest context surrounds the changed middle"
     [ " c"; " d"; "-old"; "+new"; " e" ]
     (render preview);
-  check int "the missing rows are counted" 4 omitted
+  check int "the missing rows are counted" 5 omitted
 ;;
 
 let test_preview_gives_changed_rows_the_budget_first () =

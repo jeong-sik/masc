@@ -26,10 +26,10 @@ let row ?(standing = Agenda.Coming) ?(recurrence = "every 3600s") at_iso who wha
 ;;
 
 let edgar = row "2026-08-26T02:45:00Z" "keeper:edgar.a.poe" "진행 상황 체크"
-let sweep = row "2026-08-26T03:14:04Z" "keeper:sangsu" "hourly board sweep"
+let sweep = row "2026-08-26T03:14:04Z" "keeper:quill" "hourly board sweep"
 
 let done_earlier =
-  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "keeper:taskmaster" "정기 보드 스윕"
+  row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "keeper:orrery" "정기 보드 스윕"
 ;;
 
 (* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
@@ -117,7 +117,7 @@ let test_the_earliest_coming_row_wins () =
   | None -> fail "there is a wake to draw"
   | Some s ->
     check bool "the 11:45 check, not the 12:14 sweep" true (contains ~needle:"11:45" s.clock);
-    check bool "and not the finished 10:00 row" false (contains ~needle:"taskmaster" s.clock)
+    check bool "and not the finished 10:00 row" false (contains ~needle:"orrery" s.clock)
 ;;
 
 let test_the_clock_is_local () =
@@ -247,7 +247,7 @@ let test_settled_rows_do_not_reach_the_panel () =
     bool
     "the finished row is not on it"
     false
-    (contains ~needle:"taskmaster" (joined lines))
+    (contains ~needle:"orrery" (joined lines))
 ;;
 
 let test_wakes_are_earliest_first () =
@@ -302,7 +302,7 @@ let test_rows_fit_the_width_they_were_given () =
         [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
             "keeper:edgar.a.poe" "진행 상황 체크"
         ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
-            "keeper:taskmaster" "정기 백로그 감사, 목표 진척, agent fitness 점검"
+            "keeper:orrery" "정기 백로그 감사, 목표 진척, agent fitness 점검"
         ]
       ~awaiting:[ ask "lane-smith" "Execute" ]
   in

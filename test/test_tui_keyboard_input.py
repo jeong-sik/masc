@@ -2783,6 +2783,11 @@ def approval_selection_identity_interaction(
         ):
             raise AssertionError(f"fixture did not select approval B: {selected!r}")
 
+        # An ask names what it is asking about, so the row under the cursor is
+        # followable. The kind is read from the typed target, not matched as
+        # text: this one targets keeper beta.
+        copy_reference(process, master_fd, output, b"masc://keepers/beta")
+
         fixtures[
             "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
         ] = approval_selection_snapshot([approval_new, *initial_items])
@@ -5608,6 +5613,10 @@ def keeper_lanes_interaction(
         send_and_wait(process, master_fd, output, b"alp", banded_alpha)
         send_and_wait(process, master_fd, output, b"\rk", banded_beta)
         send_and_wait(process, master_fd, output, b"n", banded_alpha)
+        # A lane names its keeper, so the row under the cursor is followable.
+        # This surface answered None before, which left Ctrl-] doing nothing on
+        # a screen that had the id in hand.
+        copy_reference(process, master_fd, output, b"masc://keepers/alpha")
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",

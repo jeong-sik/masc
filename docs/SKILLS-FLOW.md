@@ -61,16 +61,12 @@ flowchart LR
   Q -->|"2+"| ERR2["Error<br/>Multiple_compositions"]
   COM --> NM{"fence name<br/>= 스킬 이름?"}
   NM -->|"아니오"| ERR3["Error<br/>Composition_name_mismatch"]
-  NM -->|"예"| MI{"masc-composition-<br/>tool?"}
-  MI -->|"false"| HID["승격 없음<br/>지시 스킬처럼 남는다"]
-  MI -->|"없음 / true"| OK["keeper_compose_&lt;name&gt; 로 승격"]
+  NM -->|"예"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
 
-fence 개수가 유일한 갈림길은 아니다. frontmatter `masc-composition-tool: false`는
-합성이 정상 파싱되고 스킬도 로드되지만 **모델이 볼 수 있는 도구로는 안 올린다** — 절차를
-파일로 남기되 dedicated composition tool만 숨기는 손잡이다. 값은 boolean이어야 하며
-다른 타입은 조용히 승격 허용으로 되돌아가지 않고 카탈로그 오류가 된다. 다른 클라이언트의
-`disable-model-invocation`과 의미가 다르므로 그 레거시 키는 명시적으로 거부한다.
+fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
+`disable-model-invocation`은 둘 다 명시적으로 거부한다. composition 선언을 남겨 놓고
+도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
 
 **실패와 편차는 다르다**: `of_documents`가 문서를 실제로 파싱하지 못하면 카탈로그
 전체가 `Error`다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/

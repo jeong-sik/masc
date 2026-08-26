@@ -39,10 +39,9 @@ type error =
       ; declared : string
       }
   | Removed_allowed_tools of { skill : string }
-  | Removed_disable_model_invocation of { skill : string }
-  | Invalid_masc_composition_tool of
+  | Removed_invocation_policy of
       { skill : string
-      ; actual : string
+      ; field : string
       }
   | Duplicate_skill of { name : string }
 
@@ -142,27 +141,17 @@ let composition_of_block ~skill block =
        Error (Not_exactly_one_composition { skill; count = List.length entries }))
 ;;
 
-let extension_value_kind : Agent_core.Skill_document.extension_value -> string = function
-  | Null -> "null"
-  | Boolean _ -> "boolean"
-  | Number _ -> "number"
-  | Text _ -> "string"
-  | Sequence _ -> "sequence"
-  | Mapping _ -> "mapping"
-;;
-
-let materialize_composition_tool ~skill
+let reject_invocation_policy ~skill
       (extensions : (string * Agent_core.Skill_document.extension_value) list) =
-  match List.assoc_opt "disable-model-invocation" extensions with
-  | Some _ -> Error (Removed_disable_model_invocation { skill })
-  | None ->
-    (match List.assoc_opt "masc-composition-tool" extensions with
-     | None | Some (Boolean true) -> Ok true
-     | Some (Boolean false) -> Ok false
-     | Some value ->
-       Error
-         (Invalid_masc_composition_tool
-            { skill; actual = extension_value_kind value }))
+  match
+    List.find_opt
+      (fun (field, _) ->
+         String.equal field "disable-model-invocation"
+         || String.equal field "masc-composition-tool")
+      extensions
+  with
+  | None -> Ok ()
+  | Some (field, _) -> Error (Removed_invocation_policy { skill; field })
 ;;
 
 let parse_skill ~directory content =
@@ -181,9 +170,9 @@ let parse_skill ~directory content =
     (match allowed_tools with
      | Some _ -> Error (Removed_allowed_tools { skill = name })
      | None ->
-       (match materialize_composition_tool ~skill:name extensions with
+       (match reject_invocation_policy ~skill:name extensions with
      | Error _ as error -> error
-     | Ok materialize_tool ->
+     | Ok () ->
        (match composition_blocks body with
      | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
      | Ok [] -> Ok { name; description; body; conformance; surface = Instruction }
@@ -191,14 +180,7 @@ let parse_skill ~directory content =
        (match composition_of_block ~skill:name block with
         | Error _ as error -> error
         | Ok entry ->
-          (* [masc-composition-tool: false] suppresses only the dedicated
-             composition tool. The body remains task-readable through
-             [keeper_skill]; the key names that exact MASC behavior instead
-             of borrowing another client's broader invocation policy. *)
-          let surface =
-            if materialize_tool then Composition entry else Instruction
-          in
-          Ok { name; description; body; conformance; surface })
+          Ok { name; description; body; conformance; surface = Composition entry })
      | Ok blocks ->
        Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))))
 ;;
@@ -304,14 +286,10 @@ let error_to_string = function
     Printf.sprintf
       "skill %S: allowed-tools is unsupported; MASC approval policy is authoritative"
       skill
-  | Removed_disable_model_invocation { skill } ->
+  | Removed_invocation_policy { skill; field } ->
     Printf.sprintf
-      "skill %S: disable-model-invocation is not a MASC composition policy; use masc-composition-tool: false"
+      "skill %S: %s is unsupported; the composition fence alone determines the surface"
       skill
-  | Invalid_masc_composition_tool { skill; actual } ->
-    Printf.sprintf
-      "skill %S: masc-composition-tool must be boolean, got %s"
-      skill
-      actual
+      field
   | Duplicate_skill { name } -> "duplicate skill name: " ^ name
 ;;

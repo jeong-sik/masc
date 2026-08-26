@@ -1,7 +1,7 @@
 (** task-1734 / task-1735 — confidentiality guards for the workspace
     file read routes ([/api/v1/workspace/file], [/git/blame], [/git/diff]).
 
-    Two axes, both routed through [resolve_workspace_path]:
+    Two axes, both routed through [resolve_workspace_file]:
 
     - B1 (secret denylist): a request whose path contains a confidential
       component ([.env], [.masc]*, [credentials]*, [.git], [.ssh]) is
@@ -74,23 +74,23 @@ let paths nodes = List.map path_of_node nodes
 (* Alcotest testable for the resolution variant so failures print the
    actual constructor instead of an opaque bool. *)
 let resolution_tag = function
-  | W.Path_ok _ -> "ok"
-  | W.Path_rejected W.Path_traversal -> "rejected:traversal"
-  | W.Path_rejected (W.Confidential_component c) -> "rejected:confidential:" ^ c
-  | W.Path_rejected W.Symlink_escape -> "rejected:symlink_escape"
+  | Ok _ -> "ok"
+  | Error W.Path_traversal -> "rejected:traversal"
+  | Error (W.Confidential_component c) -> "rejected:confidential:" ^ c
+  | Error W.Symlink_escape -> "rejected:symlink_escape"
 ;;
 
-let is_ok = function W.Path_ok _ -> true | _ -> false
+let is_ok = function Ok _ -> true | Error _ -> false
 let is_confidential = function
-  | W.Path_rejected (W.Confidential_component _) -> true
+  | Error (W.Confidential_component _) -> true
   | _ -> false
 ;;
 let is_symlink_escape = function
-  | W.Path_rejected W.Symlink_escape -> true
+  | Error W.Symlink_escape -> true
   | _ -> false
 ;;
 let is_traversal = function
-  | W.Path_rejected W.Path_traversal -> true
+  | Error W.Path_traversal -> true
   | _ -> false
 ;;
 
@@ -117,10 +117,9 @@ let test_confidential_reads_rejected () =
     List.iter (fun (p, _) -> touch (Filename.concat base p)) confidential_examples;
     List.iter
       (fun (p, label) ->
-        let got = W.resolve_workspace_path base p in
+        let got = W.For_testing.resolve_workspace_file base p in
         check bool ("confidential rejected: " ^ label) true (is_confidential got);
-        (* The rejection must not be a silent fallthrough to Path_ok. *)
-        check bool ("not Path_ok: " ^ label) false (is_ok got))
+        check bool ("not accepted: " ^ label) false (is_ok got))
       confidential_examples)
 ;;
 
@@ -131,7 +130,7 @@ let test_confidential_case_insensitive () =
     List.iter
       (fun p ->
         check bool ("case-insensitive rejected: " ^ p) true
-          (is_confidential (W.resolve_workspace_path base p)))
+          (is_confidential (W.For_testing.resolve_workspace_file base p)))
       [ ".ENV"; ".Env.Local"; "Credentials.TOML"; ".SSH/id_rsa" ])
 ;;
 
@@ -141,7 +140,7 @@ let test_normal_source_file_allowed () =
       [ "lib/main.ml"; "README.md"; "src/deep/nested/thing.ts" ];
     List.iter
       (fun rel ->
-        let got = W.resolve_workspace_path base rel in
+        let got = W.For_testing.resolve_workspace_file base rel in
         check
           string
           ("normal file allowed: " ^ rel)
@@ -154,7 +153,7 @@ let test_parent_traversal_rejected () =
     List.iter
       (fun p ->
         check bool ("traversal rejected: " ^ p) true
-          (is_traversal (W.resolve_workspace_path base p)))
+          (is_traversal (W.For_testing.resolve_workspace_file base p)))
       [ "../etc/passwd"; "a/../../b"; ".."; "lib/./../.." ])
 ;;
 
@@ -173,12 +172,12 @@ let test_symlink_escape_rejected () =
         close_out oc;
         let link = Filename.concat base "evil" in
         Unix.symlink outside link;
-        let got = W.resolve_workspace_path base "evil" in
+        let got = W.For_testing.resolve_workspace_file base "evil" in
         check
           string
           "escaping symlink rejected"
           "rejected:symlink_escape" (resolution_tag got);
-        check bool "escaping symlink not Path_ok" false (is_ok got)))
+        check bool "escaping symlink not accepted" false (is_ok got)))
 ;;
 
 let test_symlink_escape_via_dir_rejected () =
@@ -194,7 +193,7 @@ let test_symlink_escape_via_dir_rejected () =
       (fun () ->
         touch (Filename.concat outside_dir "secret");
         Unix.symlink outside_dir (Filename.concat base "link");
-        let got = W.resolve_workspace_path base "link/secret" in
+        let got = W.For_testing.resolve_workspace_file base "link/secret" in
         check bool "escape through symlinked dir rejected" true
           (is_symlink_escape got)))
 ;;
@@ -203,7 +202,7 @@ let test_symlink_to_confidential_target_rejected () =
   with_temp_dir (fun base ->
     touch (Filename.concat base ".env");
     Unix.symlink (Filename.concat base ".env") (Filename.concat base "public_link");
-    let got = W.resolve_workspace_path base "public_link" in
+    let got = W.For_testing.resolve_workspace_file base "public_link" in
     check
       string
       "in-base symlink to confidential target rejected"
@@ -216,7 +215,7 @@ let test_internal_symlink_allowed () =
        legitimate editor scenario and does not escape the base. *)
     touch (Filename.concat base "real.ml");
     Unix.symlink (Filename.concat base "real.ml") (Filename.concat base "link.ml");
-    let got = W.resolve_workspace_path base "link.ml" in
+    let got = W.For_testing.resolve_workspace_file base "link.ml" in
     check
       string
       "internal symlink allowed"

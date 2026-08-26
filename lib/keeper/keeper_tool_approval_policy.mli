@@ -15,7 +15,7 @@ type verdict =
 val verdict_because : verdict -> string
 
 val verdict_for :
-  ?composition_plan_index:Keeper_tool_composition_plan_index.t ->
+  composition_plan_index:Keeper_tool_composition_plan_index.t option ->
   tool_name:string ->
   input:Yojson.Safe.t ->
   verdict
@@ -46,7 +46,7 @@ val verdict_for :
     reading the questions. *)
 
 val classifies :
-  ?composition_plan_index:Keeper_tool_composition_plan_index.t ->
+  composition_plan_index:Keeper_tool_composition_plan_index.t option ->
   tool_name:string ->
   bool
 (** Whether this build can place [tool_name] at all.

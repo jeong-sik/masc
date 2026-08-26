@@ -145,12 +145,14 @@ val handle_keeper_tool_approval_mode_get :
     A keeper absent from the list is [auto]. *)
 
 val handle_keeper_tool_approval_mode_set :
+  actor:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
     [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
     keeper is registered, and sets the in-memory stance the approval gate
     consults per call. The stance does not survive a restart — deliberately:
-    [yolo] runs every tool call unasked. *)
+    [yolo] runs every tool call unasked. [actor] is the authenticated
+    operator who changed the stance and is recorded in the change log. *)
 
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit

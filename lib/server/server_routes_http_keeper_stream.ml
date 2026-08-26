@@ -370,7 +370,7 @@ let handle_keeper_tool_approval_mode_get _state request reqd =
        ])
 ;;
 
-let handle_keeper_tool_approval_mode_set state request reqd =
+let handle_keeper_tool_approval_mode_set ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let parsed =
@@ -410,9 +410,10 @@ let handle_keeper_tool_approval_mode_set state request reqd =
           ~keeper_name
           mode;
         Log.Keeper.info
-          "keeper_tool_approval_mode: keeper=%s mode=%s"
+          "keeper_tool_approval_mode: keeper=%s mode=%s actor=%s"
           keeper_name
-          (Keeper_tool_approval_mode.mode_to_string mode);
+          (Keeper_tool_approval_mode.mode_to_string mode)
+          actor;
         respond_json_value_with_cors ~status:`OK request reqd
           (`Assoc
              [ ("keeper", `String keeper_name)

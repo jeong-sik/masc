@@ -257,6 +257,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                ~keeper_name:p.name
                ~runtime_id
                ()
+             |> Result.map ignore
          in
          (match runtime_assignment_result with
           | Error err ->

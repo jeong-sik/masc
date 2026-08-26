@@ -7,9 +7,25 @@ type lookup =
   | Uninitialized
   | Ready of Skill_catalog_snapshot.t
 
-val refresh_from_runtime_file :
+type commit_application =
+  | Applied of
+      { input_source_revision : Runtime.config_source_revision
+      ; publication : Skill_catalog_snapshot_service.publication
+      }
+  | Superseded of
+      { commit_order : Runtime.config_commit_order
+      ; applied_order : Runtime.config_commit_order
+      }
+
+val refresh_from_observation :
   base_path:string ->
+  Runtime.config_observation ->
   (Skill_catalog_snapshot_service.publication, error) result
+
+val apply_commit :
+  base_path:string ->
+  Runtime.config_commit_receipt ->
+  (commit_application, error) result
 
 val lookup : base_path:string -> (lookup, error) result
 

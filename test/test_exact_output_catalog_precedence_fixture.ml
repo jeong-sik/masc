@@ -426,7 +426,7 @@ let test_offline_runtime_save_converges_by_write_stage () =
        in
        require_registry_unpublished "offline baseline";
        (match Runtime.save_config_text ~runtime_config_path:path config_a with
-        | Ok () -> ()
+        | Ok _receipt -> ()
         | Error error -> Alcotest.failf "offline durable save failed: %s" error);
        Alcotest.(check string)
          "offline durable file converges to A"
@@ -449,16 +449,13 @@ let test_offline_runtime_save_converges_by_write_stage () =
               raise Injected_parent_sync_failure)
             config_b
         with
+        | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+        | Ok { durability = Runtime.Durable; _ } ->
+          Alcotest.fail "offline injected parent sync reported durable"
         | Error error ->
-          Alcotest.(check bool)
-            "offline after-rename reports durability uncertainty"
-            true
-            (String.starts_with
-               ~prefix:
-                 "runtime config replacement is visible, but parent-directory \
-                  durability is unconfirmed"
-               error)
-        | Ok () -> Alcotest.fail "offline injected parent sync returned success");
+          Alcotest.failf
+            "offline visible replacement was reported as uncommitted: %s"
+            error);
        Alcotest.(check bool)
          "offline parent sync observes unpublished registry"
          true
@@ -476,7 +473,7 @@ let test_offline_runtime_save_converges_by_write_stage () =
        Unix.mkdir failed_path 0o755;
        (match Runtime.save_config_text ~runtime_config_path:failed_path config_a with
         | Error _ -> ()
-        | Ok () -> Alcotest.fail "offline before-rename failure returned success");
+        | Ok _receipt -> Alcotest.fail "offline before-rename failure returned success");
        Alcotest.(check string)
          "offline before-rename preserves cache B"
          "replacement_provider.alternate"
@@ -515,7 +512,7 @@ let test_runtime_after_rename_converges_state () =
             "runtime baseline publication failed: %s"
             (Registry.publication_error_to_string error));
        (match Runtime.save_config_text ~runtime_config_path:path config_a with
-        | Ok () -> ()
+        | Ok _receipt -> ()
         | Error error -> Alcotest.failf "runtime baseline save failed: %s" error);
        let baseline = current_registry "runtime baseline registry unavailable" in
        Alcotest.(check string)
@@ -534,16 +531,13 @@ let test_runtime_after_rename_converges_state () =
               raise Injected_parent_sync_failure)
             config_b
         with
+        | Ok { durability = Runtime.Durability_unconfirmed _; _ } -> ()
+        | Ok { durability = Runtime.Durable; _ } ->
+          Alcotest.fail "injected parent sync failure reported durable"
         | Error error ->
-          Alcotest.(check bool)
-            "after-rename failure reports durability uncertainty"
-            true
-            (String.starts_with
-               ~prefix:
-                 "runtime config replacement is visible, but parent-directory \
-                  durability is unconfirmed"
-               error)
-        | Ok () -> Alcotest.fail "injected parent sync failure returned success");
+          Alcotest.failf
+            "visible replacement was reported as uncommitted: %s"
+            error);
        Alcotest.(check bool)
          "parent sync observes the private registry fence"
          true

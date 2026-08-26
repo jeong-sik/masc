@@ -244,7 +244,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0389 | Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다 | Draft | - |
 | 0390 | Official client 네이티브 도구를 keeper 별로 켜고 끈다 | Draft | - |
 | 0391 | Shell IR 세미콜론(;) 순차 실행 커맨드 체이닝 지원 | Draft | - |
-| 0392 | OAuth 교환이 필요한 서비스에 대한 Keeper 신원 | Draft | - |
+| 0392 | Keeper 신원을 provider 로 매개변수화 — provider 추가가 OCaml 을 늘리지 않는다 | Draft | - |
 | RFC-a-language-server-the-keeper-can-ask | A language server the Keeper can ask | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

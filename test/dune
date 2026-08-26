@@ -3232,3 +3232,8 @@
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))
+
+(test
+ (name test_task_skill_provision)
+ (modules test_task_skill_provision)
+ (libraries masc.masc_workspace masc alcotest unix fs_compat))

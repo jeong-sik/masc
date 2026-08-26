@@ -144,6 +144,14 @@ let claim_task_r config ~agent_name ~task_id ()
                   with
                   | Workspace_task_lifecycle.Worker_claim status ->
                     let t = clear_reclaim_decision t in
+                    let _ =
+                      if t.skills <> [] then
+                        Task_skill_provision.provision_skills
+                          ~base_path:config.base_path
+                          ~keeper_name:agent_name
+                          t.skills
+                      else Ok ()
+                    in
                     `Claimed_ok, { t with task_status = status } :: acc
                   | Workspace_task_lifecycle.Held_pending_verdict { verification_id } ->
                     `Pending_verdict verification_id, t :: acc

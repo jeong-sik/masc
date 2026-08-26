@@ -326,6 +326,12 @@ let claim_next_r
                (fun (t : task) ->
                   if t.id = task.id
                   then (
+                    if t.skills <> [] then
+                      ignore
+                        (Task_skill_provision.provision_skills
+                           ~base_path:config.base_path
+                           ~keeper_name:agent_name
+                           t.skills);
                     let t = Workspace_task.clear_reclaim_decision t in
                     { t with task_status = claimed_status })
                   else t)

@@ -33,6 +33,7 @@
   task_cache_invariant
   workspace_task_cleanup
   workspace_task_claim
+  task_skill_provision
   workspace_task_create
   workspace_task_lifecycle
   workspace_task_receipts

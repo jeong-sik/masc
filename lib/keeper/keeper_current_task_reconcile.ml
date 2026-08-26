@@ -49,7 +49,8 @@ let owned_active_tasks_snapshot_for_meta ~(config : Workspace.config)
           match task.task_status with
           | Masc_domain.Claimed { assignee; _ }
           | Masc_domain.InProgress { assignee; _ }
-            when String.equal assignee meta.agent_name ->
+            when String.equal assignee meta.agent_name
+                 || String.equal assignee meta.name ->
             task_id_of_owned_active_task ~keeper_name:meta.name task
             |> Option.map (fun task_id -> { task_id; task })
           | Masc_domain.Claimed _

@@ -260,25 +260,41 @@ let validate_current_task_skill_admission
        in
        (match instruction_skills [] task.skills with
         | Error _ as error -> error
-        | Ok [] -> Ok ()
         | Ok names ->
-          let surface =
-            Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
+          let ( let* ) = Result.bind in
+          let* () =
+            if names <> [] then
+              let surface =
+                Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
+              in
+              let has_read =
+                Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
+                |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+                |> List.mem "Read"
+              in
+              if has_read
+              then Ok ()
+              else
+                Error
+                  (skill_catalog_config_error
+                     (Printf.sprintf
+                        "current task %s instruction skills [%s] require the model-visible Read tool"
+                        task_id
+                        (String.concat ", " names)))
+            else Ok ()
           in
-          let has_read =
-            Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-            |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-            |> List.mem "Read"
-          in
-          if has_read
-          then Ok ()
-          else
-            Error
-              (skill_catalog_config_error
-                 (Printf.sprintf
-                    "current task %s instruction skills [%s] require the model-visible Read tool"
-                    task_id
-                    (String.concat ", " names)))))
+          if task.skills <> [] then
+            Task_skill_provision.provision_skills
+              ~base_path:config.base_path
+              ~keeper_name:meta.name
+              task.skills
+            |> Result.map_error (fun detail ->
+                 skill_catalog_config_error
+                   (Printf.sprintf
+                      "current task %s skills provisioning failed: %s"
+                      task_id
+                      detail))
+          else Ok ()))
 ;;
 
 let prepare_agent_setup

@@ -29,6 +29,13 @@ val verdict_for :
     asked about makes the whole plan asked about, and the reason names that
     node.
 
+    A tool from a work service this Keeper is attached to is judged by what
+    that service said: [annotations.readOnlyHint] on its own listing, carried
+    to here through {!Keeper_identity_tool_index}. A service that said
+    nothing leaves the call asked about -- silence is not permission, and
+    writing to somebody else's Jira unasked is the outcome that has to stay
+    unreachable.
+
     A call whose descriptor says this input only reads runs without asking,
     whatever its group. Reading a file to answer a question is the bulk of
     what a keeper does, and an operator asked about every read would stop

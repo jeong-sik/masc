@@ -41,9 +41,10 @@ let temp_base () =
   Unix.mkdir path 0o700;
   path
 
-let tool name =
+let tool ?read_only name =
   {
     Mcp_client.name;
+    read_only;
     description = "does " ^ name;
     input_schema =
       `Assoc
@@ -66,10 +67,14 @@ let write_catalog ~base_path ~keeper_name tools =
             (List.map
                (fun (t : Mcp_client.tool) ->
                  `Assoc
-                   [ ("name", `String t.Mcp_client.name);
-                     ("description", `String t.Mcp_client.description);
-                     ("input_schema", t.Mcp_client.input_schema)
-                   ])
+                   ([ ("name", `String t.Mcp_client.name);
+                      ("description", `String t.Mcp_client.description);
+                      ("input_schema", t.Mcp_client.input_schema)
+                    ]
+                    @
+                    match t.Mcp_client.read_only with
+                    | Some value -> [ ("read_only", `Bool value) ]
+                    | None -> []))
                tools) )
       ]
   in
@@ -239,7 +244,7 @@ let test_a_schema_that_cannot_be_projected_is_reported () =
      an operator ends up reading code to find out what happened. *)
   let base_path = temp_base () in
   let bad =
-    { Mcp_client.name = "weird"; description = "";
+    { Mcp_client.name = "weird"; description = ""; read_only = None;
       input_schema = `String "not a schema" }
   in
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "fine"; bad ];
@@ -383,6 +388,79 @@ let test_the_projected_token_is_the_one_sent () =
       check str "and the tool's answer comes back" "PK-1"
         output.Agent_core.Types.content
 
+(* ── the approval policy ─────────────────────────────────────────────── *)
+
+module Policy = Masc.Keeper_tool_approval_policy
+module Index = Masc.Keeper_identity_tool_index
+
+let offer ~base_path tools =
+  write_catalog ~base_path ~keeper_name:"kidsnote" tools;
+  match
+    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+      ~provider_id:"atlassian"
+  with
+  | Ok (Some catalog) ->
+      Identity_tools.agent_tools ~base_path ~keeper_name:"kidsnote"
+        ~provider:(provider ()) catalog
+  | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
+
+let test_the_policy_can_place_an_attached_tool () =
+  (* The bundle gate walks every tool a Keeper is handed through this. A tool
+     it cannot place asks its operator a question with no reason they can act
+     on, which is what four composition tools did before they were
+     classified. *)
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  check Alcotest.bool "classifiable" true
+    (Policy.classifies ~tool_name:"atlassian_getJiraIssue")
+
+let test_a_read_only_tool_runs_unasked () =
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
+  with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+      Alcotest.failf "asked about a read the service declared: %s" because
+
+let test_a_writing_tool_is_asked_about () =
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
+  with
+  | Policy.Ask _ -> ()
+  | Policy.Run { because } ->
+      Alcotest.failf "ran a write to somebody else's Jira unasked: %s" because
+
+let test_silence_is_not_permission () =
+  (* A service that annotates nothing leaves the operator deciding. Worse
+     than deciding once, better than writing unasked. *)
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool "somethingUnannotated" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_somethingUnannotated"
+      ~input:(`Assoc [])
+  with
+  | Policy.Ask { because } ->
+      check Alcotest.bool "and the reason names the silence" true
+        (Str.string_match (Str.regexp ".*did not say") because 0)
+  | Policy.Run { because } ->
+      Alcotest.failf "an unannotated tool ran unasked: %s" because
+
+let test_a_name_from_no_service_stays_unknown () =
+  (* The index answering "never recorded" must not read as "may write". A
+     name masc has never heard of is still the unclassifiable case, and
+     folding the two would let this arm swallow every unknown tool. *)
+  Index.forget_all (Index.shared ());
+  check Alcotest.bool "not classifiable" false
+    (Policy.classifies ~tool_name:"atlassian_neverOffered")
+
 let () =
   Alcotest.run "keeper_identity_tools"
     [ ( "the written catalog",
@@ -396,6 +474,18 @@ let () =
             test_a_real_sized_token_is_storable;
           Alcotest.test_case "a real-sized token survives the projection"
             `Quick test_a_real_sized_token_survives_the_projection;
+        ] );
+      ( "the approval policy",
+        [ Alcotest.test_case "the policy can place an attached tool" `Quick
+            test_the_policy_can_place_an_attached_tool;
+          Alcotest.test_case "a read-only tool runs unasked" `Quick
+            test_a_read_only_tool_runs_unasked;
+          Alcotest.test_case "a writing tool is asked about" `Quick
+            test_a_writing_tool_is_asked_about;
+          Alcotest.test_case "silence is not permission" `Quick
+            test_silence_is_not_permission;
+          Alcotest.test_case "a name from no service stays unknown" `Quick
+            test_a_name_from_no_service_stays_unknown;
         ] );
       ( "the tool surface",
         [ Alcotest.test_case "names are namespaced by provider" `Quick

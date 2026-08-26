@@ -1224,10 +1224,25 @@ let fetch_keeper_github_identity ~(host : string) ~(port : int)
       (Printf.sprintf "/api/v1/keepers/%s/github-identity"
          (percent_encode_path_segment keeper_name))
 
-(** GET /api/v1/keepers/oauth/providers — what a Keeper can be attached to. *)
-let fetch_oauth_providers ~(host : string) ~(port : int) :
+(** GET /api/v1/keepers/oauth/attached-tools — every declared service and
+    what it currently offers this Keeper. *)
+let fetch_attached_tools ~(host : string) ~(port : int) ~(keeper_name : string) :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/keepers/oauth/providers"
+  get_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/oauth/attached-tools?keeper=%s"
+         (percent_encode_path_segment keeper_name))
+
+(** POST /api/v1/keepers/:name/identity-refresh — ask an attached service
+    again what tools it has. *)
+let post_keeper_identity_refresh ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(provider_id : string) :
+    (Yojson.Safe.t, string) result =
+  post_json ~host ~port
+    ~path:
+      (Printf.sprintf "/api/v1/keepers/%s/identity-refresh"
+         (percent_encode_path_segment keeper_name))
+    ~body:(Yojson.Safe.to_string (`Assoc [ "provider", `String provider_id ]))
 
 (** POST /api/v1/keepers/:name/oauth-login — begin attaching this Keeper to
     [provider_id]. Answers with the URL the operator has to open; nothing is

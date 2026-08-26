@@ -24,10 +24,18 @@ let catalog_path ~base_path ~keeper_name ~provider_id =
 
 let tool_to_json (tool : Mcp_client.tool) =
   `Assoc
-    [ "name", `String tool.Mcp_client.name
-    ; "description", `String tool.Mcp_client.description
-    ; "input_schema", tool.Mcp_client.input_schema
-    ]
+    ([ "name", `String tool.Mcp_client.name
+     ; "description", `String tool.Mcp_client.description
+     ; "input_schema", tool.Mcp_client.input_schema
+     ]
+     @
+     (* Written only when the server said something. An absent key and a
+        [false] are different facts and the approval policy treats them the
+        same way for now, but flattening them here would lose the
+        difference for good. *)
+     match tool.Mcp_client.read_only with
+     | Some value -> [ "read_only", `Bool value ]
+     | None -> [])
 ;;
 
 let tool_of_json json =
@@ -38,7 +46,12 @@ let tool_of_json json =
   in
   match member "name", member "description", member "input_schema" with
   | Some (`String name), Some (`String description), Some input_schema ->
-    Some { Mcp_client.name; description; input_schema }
+    let read_only =
+      match member "read_only" with
+      | Some (`Bool value) -> Some value
+      | Some _ | None -> None
+    in
+    Some { Mcp_client.name; description; input_schema; read_only }
   | _ -> None
 ;;
 
@@ -237,6 +250,14 @@ let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
       | Error detail ->
         { acc with unusable = (name, detail) :: acc.unusable }
       | Ok schema ->
+        (* The policy runs mid-turn with only a name, so what the service
+           said about this tool has to be somewhere it can reach. Recorded
+           before the tool is handed out, not after: a tool the model could
+           call while the row was missing would be asked about with a reason
+           nobody can act on. *)
+        Keeper_identity_tool_index.record
+          (Keeper_identity_tool_index.shared ())
+          ~tool_name:name ~read_only:tool.Mcp_client.read_only;
         let projected =
           Agent_core.Base.Tool.of_schema schema
             (Agent_core.Base.Tool.ignoring_execution_env

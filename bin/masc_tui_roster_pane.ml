@@ -22,7 +22,12 @@ let name_window ~selected ~frame ~width name =
   let width = max 0 width in
   let cells = Masc_tui_message_layout.display_width name in
   if (not selected) || cells <= width || width < 3 then
-    Masc_tui_message_layout.fit_width name width
+    (* A row the cursor is not on still has to be identifiable. [fit_width]
+       kept the head and dropped the tail, so every keeper sharing a prefix
+       read the same -- "rw-e0-r9-20260820-revi~" says nothing the next one
+       does not. Dropping the middle keeps both the family and the deciding
+       end. The cursor row still scrolls the whole name below. *)
+    Masc_tui_message_layout.fit_middle width name
   else
     (* Edge ellipses remain fixed while the name moves behind them. They say
        which side still contains text without turning the identity itself into

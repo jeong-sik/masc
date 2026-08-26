@@ -478,6 +478,41 @@ let fit_name column label =
     "…" ^ String.make pad ' ' ^ kept
   else String.make (column - cells) ' ' ^ label
 
+(* Keep both ends of [label] in [column] cells, dropping the middle.
+
+   [fit_width] keeps the head and [fit_name] keeps the tail; an identifier
+   needs both. Keeper names share long prefixes and differ in their tail --
+   [fit_name] says so above -- but a name cut to its tail alone no longer says
+   which family it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
+   "rw-e0-r9-20260820-revi~" loses exactly the part that distinguishes it,
+   and to "…0820-revision-audit" loses exactly the part that groups it.
+
+   The tail gets two thirds of the budget because it is the deciding end. As
+   [column] shrinks the head's third reaches zero and this degrades into
+   [fit_name]'s shape, which is the right thing to lose last.
+
+   Left-aligned and padded to [column], so this is a drop-in where
+   [fit_width] was cutting identifiers. *)
+let fit_middle column label =
+  if column <= 0 then ""
+  else
+    let pieces = display_pieces label in
+    let cells = pieces_width pieces in
+    if cells <= column then label ^ String.make (column - cells) ' '
+    else if column = 1 then "…"
+    else
+      let usable = column - 1 in
+      let head_cells = usable / 3 in
+      let tail_cells = usable - head_cells in
+      let head, head_width, saw_ansi =
+        cell_prefix_of_pieces label pieces head_cells
+      in
+      let tail = cell_suffix_of_pieces label pieces tail_cells in
+      let tail_width = pieces_width (display_pieces tail) in
+      let reset = if saw_ansi then "\x1B[0m" else "" in
+      let used = head_width + 1 + tail_width in
+      head ^ reset ^ "…" ^ tail ^ String.make (max 0 (column - used)) ' '
+
 (* One glyph per speaker, from the vocabulary the Keepers roster and Acting
    already use. Colour carries this distinction better, and NO_COLOR takes
    colour away, so the mark is what still answers "who said this" on a pane

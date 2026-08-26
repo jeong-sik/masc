@@ -111,6 +111,86 @@ let test_bracketed_paste_is_opaque () =
   ignore (palette result)
 ;;
 
+(* DECSET 996 asks and 2031 reports again on a theme switch, both replying as
+   [CSI ? 997 ; n n]. A multiplexer passes these through where it answers no
+   OSC colour query, so this is the only thing that ever arrives there. *)
+let theme_mode_reply parameter = Printf.sprintf "\x1b[?997;%dn" parameter
+
+let mode_to_string = function
+  | Masc_tui_terminal_palette.Dark -> "dark"
+  | Masc_tui_terminal_palette.Light -> "light"
+;;
+
+let theme_mode result =
+  match result.Masc_tui_terminal_probe.theme_mode with
+  | None -> "none"
+  | Some mode -> mode_to_string mode
+;;
+
+let test_a_theme_mode_reply_is_read_and_not_typed () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("a" ^ theme_mode_reply 1 ^ "b")
+  in
+  check string "the page is read" "dark" (theme_mode result);
+  check string "the reply never reaches the composer" "ab" result.replay;
+  let light =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (theme_mode_reply 2)
+  in
+  check string "light too" "light" (theme_mode light);
+  (* A parameter this does not know is not a dark page. *)
+  let unknown =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      (theme_mode_reply 9)
+  in
+  check string "an unknown parameter says nothing" "none" (theme_mode unknown)
+;;
+
+(* Every other private-parameter sequence is the reader's, and holding one
+   while it might have been the reply must not eat it. *)
+let test_other_private_sequences_replay_whole () =
+  List.iter
+    (fun sequence ->
+      let result =
+        Masc_tui_terminal_probe.decode ~palette_requested:true
+          ("x" ^ sequence ^ "y")
+      in
+      check string
+        (Printf.sprintf "%S survives" sequence)
+        ("x" ^ sequence ^ "y")
+        result.replay;
+      check string "and says nothing about the page" "none" (theme_mode result))
+    [ "\x1b[?1h"          (* an application-cursor-keys set *)
+    ; "\x1b[?2004l"       (* bracketed paste off *)
+    ; "\x1b[?997;1m"      (* right parameters, wrong final byte *)
+    ; "\x1b[?6n"          (* a cursor position request *)
+    ]
+;;
+
+(* A sequence that never ends is the reader's input too. *)
+let test_an_unfinished_private_sequence_is_not_swallowed () =
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true "before\x1b[?997;1"
+  in
+  check string "the unfinished bytes come back" "before\x1b[?997;1"
+    result.replay;
+  check string "and no page was read" "none" (theme_mode result)
+;;
+
+(* Paste keeps the first claim on every byte it wants, even when what is
+   pasted looks exactly like the reply. *)
+let test_a_pasted_theme_reply_stays_pasted_text () =
+  let paste = "\x1b[200~" ^ theme_mode_reply 2 ^ "\x1b[201~" in
+  let result =
+    Masc_tui_terminal_probe.decode ~palette_requested:true
+      ("before" ^ paste ^ "after")
+  in
+  check string "pasted bytes survive" ("before" ^ paste ^ "after")
+    result.replay;
+  check string "and are not read as the page" "none" (theme_mode result)
+;;
+
 let test_unknown_and_incomplete_sequences_replay () =
   let unknown_osc = osc_bell "99;not-ours" in
   let unknown_apc = "\x1b_Gi=7;OK\x1b\\" in
@@ -256,6 +336,16 @@ let () =
             test_rgba_requires_and_ignores_a_valid_alpha
         ; test_case "process authority preserves None" `Quick
             test_process_palette_preserves_none
+        ] )
+    ; ( "theme mode"
+      , [ test_case "a reply is read and not typed" `Quick
+            test_a_theme_mode_reply_is_read_and_not_typed
+        ; test_case "other private sequences replay whole" `Quick
+            test_other_private_sequences_replay_whole
+        ; test_case "an unfinished one is not swallowed" `Quick
+            test_an_unfinished_private_sequence_is_not_swallowed
+        ; test_case "a pasted reply stays pasted text" `Quick
+            test_a_pasted_theme_reply_stays_pasted_text
         ] )
     ; ( "replay"
       , [ test_case "ASCII UTF-8 and ESC replay exactly" `Quick

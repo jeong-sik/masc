@@ -22,11 +22,7 @@ OVERLAY = REPO / "config" / "agent-core-models-overlay.toml"
 RUNTIME = REPO / "config" / "runtime.toml"
 
 Model = tuple[str, str]
-KNOWN_PROVIDER_BASE_FALLBACKS: dict[Model, str] = {
-    ("ollama_cloud", "rnj-1:8b"): (
-        "#31066: add the exact 32K text/tools row and remove this debt entry"
-    )
-}
+KNOWN_PROVIDER_BASE_FALLBACKS: dict[Model, str] = {}
 
 
 def read_toml(path: pathlib.Path) -> dict[str, object]:

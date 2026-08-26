@@ -680,16 +680,22 @@ let test_deployment_agent_core_model_catalog_preserve_axes_resolve () =
 
 let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
   with_deployment_agent_core_model_catalog @@ fun catalog ->
-  check
-    (option string)
-    "runtime-local alias is not promoted to the AGENT_CORE catalog"
-    None
-    (Option.map
-       (fun (entry : Llm_provider.Model_catalog.model_entry) -> entry.id_prefix)
-       (Llm_provider.Model_catalog.lookup_for_provider
-          catalog
-          ~provider_name:"ollama_cloud"
-          ~model_id:"rnj-1:8b"));
+  (match
+     Llm_provider.Model_catalog.lookup_for_provider
+       catalog
+       ~provider_name:"ollama_cloud"
+       ~model_id:"rnj-1:8b"
+   with
+   | None -> fail "expected exact Ollama Cloud rnj-1:8b catalog row"
+   | Some entry ->
+     check string "rnj exact model" "rnj-1:8b" entry.id_prefix;
+     check (option string) "rnj exact provider" (Some "ollama_cloud")
+       entry.provider_name;
+     check (option int) "rnj context" (Some 32768) entry.max_context_tokens;
+     check (option bool) "rnj tools" (Some true) entry.supports_tools;
+     check (option bool) "rnj reasoning" (Some false) entry.supports_reasoning;
+     check (option bool) "rnj image input" (Some false)
+       entry.supports_image_input);
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
@@ -718,7 +724,7 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
            then
              check
                bool
-               "runtime-local alias uses the typed Provider_config override"
+               "runtime wire controls refine the exact catalog row"
                true
                (Option.is_some
                   (agent_core_provider_config runtime).model_capabilities_override))

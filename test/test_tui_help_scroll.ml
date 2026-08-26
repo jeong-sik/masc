@@ -30,16 +30,17 @@ let test_narrow_terminal_draws_one_line_per_row () =
   check_int "an 80-column terminal draws every line on its own row" 76
     (List.length sheet)
 
+(* The frame's rows, asked of the module that draws it. *)
 let test_content_height_leaves_room_for_the_frame () =
   check_int "a 43-row viewport draws 38 rows of sheet" 38
-    (Masc_tui_help.content_height ~rows:43);
+    (Masc_tui_frame.content_height ~rows:43);
   check_int "a viewport smaller than the frame still draws one row" 1
-    (Masc_tui_help.content_height ~rows:2)
+    (Masc_tui_frame.content_height ~rows:2)
 
 (* What the key handler and the drawing both do now. *)
 let viewport ~cols ~rows lines =
   ( List.length (Masc_tui_help.sheet ~cols lines)
-  , Masc_tui_help.content_height ~rows )
+  , Masc_tui_frame.content_height ~rows )
 
 let test_holding_j_does_not_bank_presses () =
   let count, height = viewport ~cols:120 ~rows:30 (lines 76) in

@@ -2887,6 +2887,11 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_frame)
+ (modules test_tui_frame)
+ (libraries alcotest masc_tui_frame))
+
+(test
  (name test_tui_agenda)
  (modules test_tui_agenda)
  (deps
@@ -3082,7 +3087,7 @@
 (test
  (name test_tui_help_scroll)
  (modules test_tui_help_scroll)
- (libraries alcotest masc_tui_help masc_tui_scroll))
+ (libraries alcotest masc_tui_frame masc_tui_help masc_tui_scroll))
 
 (test
  (name test_tui_planning_detail)

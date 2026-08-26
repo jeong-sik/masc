@@ -23,7 +23,7 @@ let global =
   ; b Meta ":" "command palette"
   ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "?" "this help"
-  ; b Meta "Ctrl-B" "show or hide the keeper roster beside a surface"
+  ; b Meta "Ctrl-B" "show or hide a visible keeper roster pane"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"
   ; b Meta "q" "quit"
   ]

@@ -29,6 +29,16 @@ let test_hiding_wins_on_a_wide_terminal () =
   check_bool "the reader's answer decides when there is room" false
     (Pane.shown ~hidden:true ~cols:wide)
 
+let test_toggle_changes_only_a_visible_preference () =
+  Alcotest.(check (option bool)) "wide can hide" (Some true)
+    (Pane.toggle_hidden ~hidden:false ~cols:wide);
+  Alcotest.(check (option bool)) "wide can show" (Some false)
+    (Pane.toggle_hidden ~hidden:true ~cols:wide);
+  Alcotest.(check (option bool)) "narrow visible preference is untouched" None
+    (Pane.toggle_hidden ~hidden:false ~cols:narrow);
+  Alcotest.(check (option bool)) "narrow hidden preference is untouched" None
+    (Pane.toggle_hidden ~hidden:true ~cols:narrow)
+
 let test_hiding_survives_a_resize () =
   (* The decision is carried, not recomputed: every width answers the same
      while it stands. *)
@@ -112,6 +122,8 @@ let () =
             test_a_narrow_terminal_keeps_it_away
         ; Alcotest.test_case "hiding wins on a wide terminal" `Quick
             test_hiding_wins_on_a_wide_terminal
+        ; Alcotest.test_case "toggle changes only a visible preference" `Quick
+            test_toggle_changes_only_a_visible_preference
         ; Alcotest.test_case "hiding survives a resize" `Quick
             test_hiding_survives_a_resize
         ; Alcotest.test_case "the threshold is the first width that shows"

@@ -394,7 +394,8 @@
 (library
  (name masc_tui_frame_presenter)
  (wrapped false)
- (modules masc_tui_frame_presenter))
+ (modules masc_tui_frame_presenter)
+ (libraries masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_profile)

@@ -1,8 +1,8 @@
 # Capability Manifest
 
-OAS supports an **external JSON capability manifest** that lets operators and
+agent_core supports an **external JSON capability manifest** that lets operators and
 model deployers describe the capabilities of custom, quantized, or future
-model variants without requiring an OAS code change.
+model variants without requiring an agent_core code change.
 
 Provider connection metadata is handled separately by
 [`docs/provider-catalog.md`](provider-catalog.md). Use the provider catalog for
@@ -19,7 +19,7 @@ catalog row for the same model prefix.
 ## Priority
 
 ```
-Explicit model catalog override or embedded OAS model catalog row (prefix match)
+Explicit model catalog override or embedded agent_core model catalog row (prefix match)
     ↓ miss
 Explicitly installed manifest entry (prefix match)
     ↓ miss
@@ -28,7 +28,7 @@ No declaration (`Capabilities.for_model_id` returns `None`)
 
 ## Quick Start
 
-Create `~/.config/oas/caps.json` (or any path):
+Create `~/.config/agent_core/caps.json` (or any path):
 
 ```json
 {
@@ -50,7 +50,7 @@ Load and install it during application bootstrap:
 
 ```ocaml
 let manifest =
-  match Capability_manifest.load_file "/home/app/.config/oas/caps.json" with
+  match Capability_manifest.load_file "/home/app/.config/agent_core/caps.json" with
   | Ok manifest -> manifest
   | Error message -> failwith message
 in
@@ -118,7 +118,7 @@ must update the parser and this schema together.
 ### Base presets
 
 The `base` field names a provider preset from
-`Capabilities.capabilities_for_provider_label`.  When `base` is absent, OAS uses
+`Capabilities.capabilities_for_provider_label`.  When `base` is absent, agent_core uses
 `default_capabilities` (all flags false, no limits).  Unrecognised `base` values
 are rejected when the manifest is parsed.
 
@@ -201,7 +201,7 @@ Capability_manifest.set_global manifest
   and the first entry whose `id_prefix` is a prefix of the requested model ID
   is used.  If you need priority control (e.g. a general prefix and a more
   specific one), place the more-specific entry earlier in the list.
-- OAS never discovers a manifest from the process environment. File selection,
+- agent_core never discovers a manifest from the process environment. File selection,
   reload policy, and error handling belong to the embedding application.
 - `load_file` returns an explicit `Result`; install only a successfully parsed
   manifest with `set_global`.

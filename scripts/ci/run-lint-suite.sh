@@ -118,7 +118,9 @@ blocking_pr_lints() {
   local base="$1"
   run_lint "Fun.protect finalizer guard" \
     python3 scripts/ci/check-fun-protect-finally-guard.py --base "${base}" --head HEAD
-  run_lint "ignore() justification (new sites)" \
+  run_lint "ignore justification self-test" \
+    python3 scripts/test-lint-ignore-without-comment.py
+  run_lint "ignore justification (new sites)" \
     bash scripts/ci/check-ignore-without-comment-diff.sh --base "${base}" --head HEAD
   run_lint "Stale-base revert guard self-test (RFC-0235)" \
     python3 scripts/ci/test_check_stale_base_revert.py

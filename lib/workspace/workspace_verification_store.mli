@@ -128,6 +128,15 @@ val snapshot_submitted_evidence_json :
     is set by the projection cap. Bare and absolute references are persisted as
     a payload-free typed invalid-reference item. *)
 
+val artifact_reference_size :
+  base_path:string -> worker:string -> string -> int option
+(** Real byte size of an artifact reference, measured on the same validated
+    descriptor the snapshot reads, without materializing content. [None] for
+    non-artifact references, invalid paths, and files that cannot be read —
+    the snapshot layer owns those failure shapes. Used by the
+    keeper_task_done boundary to refuse oversized evidence before it stalls
+    a completion authority (task-540). *)
+
 val submitted_evidence_identity_lines :
   Yojson.Safe.t -> (string list, string) result
 (** Project a persisted [submitted_evidence] snapshot into one identity line

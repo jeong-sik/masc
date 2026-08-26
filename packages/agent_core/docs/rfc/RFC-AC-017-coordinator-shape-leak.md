@@ -1,4 +1,4 @@
-# RFC-OAS-017: Coordinator-Shape Leak in the Public SDK Surface
+# RFC-AC-017: Coordinator-Shape Leak in the Public SDK Surface
 
 | Field | Value |
 |---|---|
@@ -12,7 +12,7 @@
 
 This RFC tracked accidental coordinator-shaped SDK surface area. The current
 SDK keeps runtime protocol and proof surfaces generic and removes the old
-domain-specific projection/schema layer from OAS.
+domain-specific projection/schema layer from agent_core.
 
 ## Current State
 
@@ -20,7 +20,7 @@ domain-specific projection/schema layer from OAS.
 - The public runtime protocol no longer exports the old projection event family.
 - Runtime output schema catalogs no longer list the removed projection schema.
 - Downstream product domains must publish their own domain events instead of
-  using OAS as a shared-state or UI-event substrate.
+  using agent_core as a shared-state or UI-event substrate.
 
 ## Acceptance
 

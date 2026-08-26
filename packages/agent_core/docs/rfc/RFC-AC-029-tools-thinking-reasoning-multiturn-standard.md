@@ -1,14 +1,14 @@
-# RFC-OAS-029: Tools / Thinking / Reasoning / Multi-turn usage standard
+# RFC-AC-029: Tools / Thinking / Reasoning / Multi-turn usage standard
 
 | | |
 |---|---|
 | Status | Draft |
 | Author | jeong-sik (audit: adversarial multi-agent sweep, 2026-06-29) |
 | Created | 2026-06-29 |
-| Target | `agent_sdk` (oas) — `lib/llm_provider/`, `lib/api_*.ml` and `lib/streaming.ml` (removed 2026-07-21; see `lib/llm_provider/`), `lib/*tool*.ml`, `docs/design/provider-reasoning-dialects.md` |
-| Keystone dependency | RFC-OAS-023 (capability axis reshape) — the GLM/MiniMax dialect work lands there; see §5 |
-| Supplements | RFC-OAS-018 (catalog externalization), RFC-OAS-025 (forced-tool-use enforcement boundary) |
-| Boundary | OAS exposes typed provider facts; MASC consumes them. OAS MUST NOT depend on MASC. See §6 |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/api_*.ml` and `lib/streaming.ml` (removed 2026-07-21; see `lib/llm_provider/`), `lib/*tool*.ml`, `docs/design/provider-reasoning-dialects.md` |
+| Keystone dependency | RFC-AC-023 (capability axis reshape) — the GLM/MiniMax dialect work lands there; see §5 |
+| Supplements | RFC-AC-018 (catalog externalization), RFC-AC-025 (forced-tool-use enforcement boundary) |
+| Boundary | agent_core exposes typed provider facts; MASC consumes them. agent_core MUST NOT depend on MASC. See §6 |
 
 ## 0. Summary (요약)
 
@@ -22,7 +22,7 @@ OAS의 Tools / Thinking / Reasoning / Multi-turn 처리는 **코어는 견고하
 
 ### 1.1 Do not regress (검증된 모범)
 - `stop_reason_wire.ml` — wire finish가 typed `wire_finish` + `has_tool_blocks:bool`를 거쳐 매핑되고, `reconcile`은 `Types.stop_reason`에 대해 total(새 variant는 컴파일 깨짐), unknown finish는 raw string을 보존한 채 typed `Unknown`으로 fail-closed. `#2222` infinite-Thinking P0가 cap/string workaround가 아니라 여기서 올바르게 고쳐졌다.
-- `Agent_tools` tool lookup — 등록된 이름을 exact match하고 consumer-등록 alias만 별도 경계에서 해석한다. OAS core에 builtin tool catalog는 없다.
+- `Agent_tools` tool lookup — 등록된 이름을 exact match하고 consumer-등록 alias만 별도 경계에서 해석한다. agent_core core에 builtin tool catalog는 없다.
 - `reasoning_dialect.ml` / `capabilities.ml`의 dialect 축 — `thinking_control_format`, `preserve_thinking_control_format`, `toggle_wire`, `gemini_family`, `anthropic_thinking_control`, `replay_policy` 모두 closed sum, 대체로 exhaustive. `#2228`은 loose toggle match를 typed preserve 축 추가로 *닫은* 진짜 hardening이다 (workaround 아님).
 - Cost는 `annotate_response_cost`로 기록만 되고 `lib/`에서 동작을 gate하지 않는다 — budget 경계가 올바르다. (goal: budget/cost/turn은 집계만.)
 
@@ -124,15 +124,15 @@ closed in the current branch ancestry. The recovery and standalone tool-pair
 repair modules were deleted; they are retained here only as historical evidence,
 not as current files or open backlog items.
 
-### 3b. Doc-currency drifts (official 2026-06-29 docs vs OAS)
+### 3b. Doc-currency drifts (official 2026-06-29 docs vs agent_core)
 
-| Sev | Provider / field | OAS now | Official | Standard |
+| Sev | Provider / field | agent_core now | Official | Standard |
 |---|---|---|---|---|
 | P1 | **GLM dialect** (recurs ×4 sources) | Kimi `No_thinking_control` | Z.AI docs show top-level `thinking:{type,clear_thinking}`, `reasoning_content`, GLM-5.2 `reasoning_effort` (default `max`), and ordered unmodified replay when `clear_thinking=false` | S1.4, S3.2 |
 | P1 | **MiniMax M2/M3** (recurs) | catalog rows exist, but replay/tool-choice semantics are not sourced row-by-row here | audit artifact claims always-on thinking/replay and restricted `tool_choice`, but this PR has no independent official source capture yet; treat implementation as blocked until refreshed | S1.4 |
 | P1 | **Anthropic `thinking.display`** | never emitted | audit artifact reports default `omitted`/`summarized` drift; official source capture required before implementation | S8.3 |
 | P1 | **Anthropic tool_choice vs thinking** | forced tool_choice unguarded | `any`/`{tool,name}` ⇒ 400 when thinking active | S5.1 |
-| P1 | **OpenAI `reasoning_effort` enum** | `Minimal\|Low\|Medium\|High\|XHigh`, no `None` | official docs say accepted values are model-dependent and can include `none`, `minimal`, `low`, `medium`, `high`, `xhigh`; OAS needs vocabulary + model subset, not one provider-wide enum | S2.3 |
+| P1 | **OpenAI `reasoning_effort` enum** | `Minimal\|Low\|Medium\|High\|XHigh`, no `None` | official docs say accepted values are model-dependent and can include `none`, `minimal`, `low`, `medium`, `high`, `xhigh`; agent_core needs vocabulary + model subset, not one provider-wide enum | S2.3 |
 | P1 | **OpenAI replay policy** | Responses `previous_response_id`, encrypted reasoning-item replay, `function_call`, and `function_call_output` manual replay are implemented; Chat Completions vs Responses matrix remains incomplete | reasoning items MUST replay with tool-call outputs (Responses) or `previous_response_id` | S3.2 |
 | P2 | Gemini `thoughtSignature` | "soft preserve", summaries/signatures conflated | hard 400 if not echoed; parallel = first part only; signatures ≠ summaries | S3.2, S6.5 |
 | P2 | Gemini `thinkingLevel` matrix | `supports_minimal:bool` only | low/medium/high; medium absent on gemini-3-pro; minimal Flash-only | S1.3 |
@@ -144,7 +144,7 @@ Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-a
 
 ### 3c. Provider-currency evidence (checked 2026-06-29 12:36 KST)
 
-| Claim | Source / command | OAS mapping | Confidence / uncertainty |
+| Claim | Source / command | agent_core mapping | Confidence / uncertainty |
 |---|---|---|---|
 | OpenAI `reasoning.effort` and Responses replay are model-dependent typed facts, not a provider-wide enum. | [OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning) — checked by browser fetch on 2026-06-29 12:36 KST. | `Reasoning_effort.t`, replay policy, Responses `phase` handling. | High. Uncertainty: exact accepted effort subset remains model-specific and must live in catalog/capability metadata. |
 | Anthropic forced-tool limitation and thinking-block replay are provider/model facts. | [Claude extended thinking guide](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) — checked by browser fetch on 2026-06-29 12:36 KST. | forced `tool_choice` capability, replay policy. | High. Uncertainty: partner-platform differences still need catalog rows. |
@@ -165,10 +165,10 @@ Full per-finding verify reasoning and source URLs: audit artifact `wf_ad6e7c0c-a
 
 ## 5. Remediation backlog + sequencing
 
-RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M reshape(workaround gate planned; reviewer-enforced until it is versioned); **Direct** = 순수 삭제/dedup/위임(시그니처 트리거 없음). 키스톤은 **RFC-OAS-023**.
+RFC 컬럼: **RFC** = dialect/capability *type shape* 변경 또는 N-of-M reshape(workaround gate planned; reviewer-enforced until it is versioned); **Direct** = 순수 삭제/dedup/위임(시그니처 트리거 없음). 키스톤은 **RFC-AC-023**.
 
 ### 먼저 (keystone, 가장 많이 unblock)
-1. **RFC-OAS-023 — GLM typed dialect reshape.** GLM-ness를 typed kind/capability로 1회 승격, `replay_policy`와 `Thinking_object`-style thinking-control variant 부여, 그 다음 2중/3중 thinking builder(S2.1)와 2중 `clear_thinking` helper(S9.2) 통합. 이 reshape 하나가 `D1-glm-replay-hardcoded-heuristic`(P1), `D6`(P2), GLM-row doc gap(P1×4), GLM effort/tool_choice/caps drift를 닫고 `is_glm_request` string fork를 제거한다. `D1-dup-thinking-builder-glm-drift`가 *re-drift 없이* 고쳐지려면 통합 builder가 string이 아니라 typed GLM dialect로 switch해야 하므로 이게 선행조건.
+1. **RFC-AC-023 — GLM typed dialect reshape.** GLM-ness를 typed kind/capability로 1회 승격, `replay_policy`와 `Thinking_object`-style thinking-control variant 부여, 그 다음 2중/3중 thinking builder(S2.1)와 2중 `clear_thinking` helper(S9.2) 통합. 이 reshape 하나가 `D1-glm-replay-hardcoded-heuristic`(P1), `D6`(P2), GLM-row doc gap(P1×4), GLM effort/tool_choice/caps drift를 닫고 `is_glm_request` string fork를 제거한다. `D1-dup-thinking-builder-glm-drift`가 *re-drift 없이* 고쳐지려면 통합 builder가 string이 아니라 typed GLM dialect로 switch해야 하므로 이게 선행조건.
 2. **thinking-request builder 통합 (D1-dup, P1)** — (1) 직후/내부. `thinking_request_fields` 하나로. GLM clear_thinking drift는 agent_sdk 경로의 live wire-byte 정합성 버그.
 3. **content_type stream-boundary policy completion (D3-finalize, P1, partial)** — GLM과 독립, streaming blast radius 최대. Current branch ancestry already converts the wire `content_type` to `block_kind`, handles `Unknown_block` explicitly, and routes `SSEUnknownEventType`/parse failures to typed stream errors. Remaining work is narrower: decide and test the final parse/finalize policy for unknown content-block kinds that currently preserve visible text or omit empty blocks, and make that boundary fail closed if S6.1 chooses fail-closed over forward-compatible rendering.
 
@@ -195,15 +195,15 @@ append/result 경계에서 보장한다. 삭제된 `tool_use_recovery` 대신 pr
 telemetry gate나 lenient repair를 추가하지 말고, `Text` → `ToolUse` 승격 금지를
 유지한다.
 
-## 6. Boundary note (OAS ↔ MASC)
+## 6. Boundary note (agent_core ↔ MASC)
 
-경계는 대체로 올바르다: MASC는 `Llm_provider.Capabilities`를 typed로 직접 소비하고(`runtime_wire_overlay.ml: agent_capabilities_of_llm_capabilities`가 OAS variant를 verbatim 통과) model 이름 string-match로 reasoning을 결정하지 않는다. OAS는 MASC를 모른다.
+경계는 대체로 올바르다: MASC는 `Llm_provider.Capabilities`를 typed로 직접 소비하고(`runtime_wire_overlay.ml: agent_capabilities_of_llm_capabilities`가 agent_core variant를 verbatim 통과) model 이름 string-match로 reasoning을 결정하지 않는다. OAS는 MASC를 모른다.
 
-단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/9 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Enable_thinking`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(OAS catalog가 단일 SSOT) 또는 OAS variant 집합에 대한 exhaustive drift 테스트. 이는 OAS 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
+단 하나의 경계 부채(MASC측, 정보용): `masc lib/runtime/runtime_schema.ml`이 자체 `thinking_control_format`를 **재선언(5/9 variant, `Thinking_object_adaptive`/`Thinking_object_only`/`Enable_thinking`/`Ollama_think` 누락)** 한다. parse는 unknown에서 fail-closed(silent 아님)지만, OAS에 새 variant가 추가돼도 MASC 컴파일이 깨지지 않아 drift 무방비다. 게다가 그 필드는 wire 경로에서 읽히지 않아 운영자 TOML 설정이 inert no-op(의도-침묵)이다. **P2 SSOT 부채(데이터 경로는 안전).** 해결: 필드 삭제(agent_core catalog가 단일 SSOT) 또는 agent_core variant 집합에 대한 exhaustive drift 테스트. 이는 agent_core 변경이 아니라 MASC 후속 작업이며, 본 RFC의 S9.1을 경계 너머로 확장한 사례로 기록한다. Tracking issue: [jeong-sik/masc#22654](https://github.com/jeong-sik/masc/issues/22654).
 
 ## 7. Relationships
-- **RFC-OAS-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.
+- **RFC-AC-023** (capability axis reshape) — GLM/MiniMax dialect 작업과 model×transport two-record가 여기 land. 본 RFC는 그 작업이 만족해야 할 표준을 정의한다.
 - **`Agent_tools.find_in_index` contract** — S4의 exact registered-name 기반.
-- **RFC-OAS-018** (catalog externalization) — S1.2/S9.1의 catalog-as-SSOT 기반.
-- **RFC-OAS-025** (forced-tool-use enforcement boundary) — S5의 기반.
+- **RFC-AC-018** (catalog externalization) — S1.2/S9.1의 catalog-as-SSOT 기반.
+- **RFC-AC-025** (forced-tool-use enforcement boundary) — S5의 기반.
 - **CLAUDE.md 워크어라운드 거부 기준** — S10.2/§4.4의 enforcement 원천.

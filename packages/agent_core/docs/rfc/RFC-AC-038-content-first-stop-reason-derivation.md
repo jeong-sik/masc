@@ -1,16 +1,16 @@
-# RFC-OAS-038: Content-first stop_reason derivation (consolidate the reconcile case-pile)
+# RFC-AC-038: Content-first stop_reason derivation (consolidate the reconcile case-pile)
 
 | | |
 |---|---|
 | Status | Draft |
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
-| Target | `agent_sdk` (oas) |
-| Related | [[RFC-OAS-035]] (openai-compat thinking-token / empty-completion failclose), oas#2728 (EndTurn+tool-blocks patch — the motivating instance this RFC consolidates) |
+| Target | `agent_sdk` (agent_core) |
+| Related | [[RFC-AC-035]] (openai-compat thinking-token / empty-completion failclose) (EndTurn+tool-blocks patch — the motivating instance this RFC consolidates) |
 
 ## 0. Summary
 
-`Stop_reason_wire.reconcile` (and the parallel `of_finish` non-streaming path) reconciles a provider's `finish_reason` CLAIM against the OBSERVED content (whether tool_use blocks are present) by enumerating per-finish-reason upgrade cases. Each new provider that mislabels tool calls adds a case (`UnmatchedToolCalls`+blocks → StopToolUse; `Unknown`+blocks → StopToolUse; and oas#2728 adds `EndTurn`+blocks → StopToolUse). This is claim-first-with-exceptions and accretes. This RFC replaces it with a single content-first rule: when tool_use blocks are present and the finish_reason is not a truncation/terminal reason, the effective stop_reason is `StopToolUse`. One rule, total over all finish_reasons (including future/unknown ones), derived in ONE place shared by both the streaming (`reconcile`) and non-streaming (`of_finish`) paths.
+`Stop_reason_wire.reconcile` (and the parallel `of_finish` non-streaming path) reconciles a provider's `finish_reason` CLAIM against the OBSERVED content (whether tool_use blocks are present) by enumerating per-finish-reason upgrade cases. Each new provider that mislabels tool calls adds a case (`UnmatchedToolCalls`+blocks → StopToolUse; `Unknown`+blocks → StopToolUse; and adds `EndTurn`+blocks → StopToolUse). This is claim-first-with-exceptions and accretes. This RFC replaces it with a single content-first rule: when tool_use blocks are present and the finish_reason is not a truncation/terminal reason, the effective stop_reason is `StopToolUse`. One rule, total over all finish_reasons (including future/unknown ones), derived in ONE place shared by both the streaming (`reconcile`) and non-streaming (`of_finish`) paths.
 
 ## 1. Problem (evidence)
 
@@ -21,8 +21,8 @@
   | Unknown _ when has_tool_blocks -> StopToolUse
   | (StopToolUse | EndTurn | MaxTokens | ... ) -> sr
   ```
-  Each case is a reaction to a specific provider inconsistency. oas#2728 had to ADD `EndTurn when has_tool_blocks -> StopToolUse` because a provider labels complete tool_calls `finish_reason=stop`. The next mislabeling provider needs the next case.
-- Duplication smell: the non-streaming OpenAI parser (`backend_openai_parse.ml:386`) calls `of_finish` DIRECTLY, not through `reconcile`. So the same upgrade logic lives in TWO places (`of_finish`'s `Stop` arm and `reconcile`'s arms) that must be kept in sync by hand — oas#2728 had to patch both. A `%test` asserts parity, but parity-by-test is weaker than parity-by-construction.
+  Each case is a reaction to a specific provider inconsistency. had to ADD `EndTurn when has_tool_blocks -> StopToolUse` because a provider labels complete tool_calls `finish_reason=stop`. The next mislabeling provider needs the next case.
+- Duplication smell: the non-streaming OpenAI parser (`backend_openai_parse.ml:386`) calls `of_finish` DIRECTLY, not through `reconcile`. So the same upgrade logic lives in TWO places (`of_finish`'s `Stop` arm and `reconcile`'s arms) that must be kept in sync by hand — had to patch both. A `%test` asserts parity, but parity-by-test is weaker than parity-by-construction.
 - The design conflates two authorities: the provider's `finish_reason` (a claim, unreliable across providers) and the response content (tool_use blocks — authoritative, since a tool_use block only exists because the model requested a tool call).
 
 ## 2. Non-goals
@@ -57,9 +57,7 @@ else
 - Exhaustive `match` (no catch-all): a NEW `stop_reason` variant forces a compile-time decision about which set it joins — the accretion becomes compiler-enforced, not silent.
 - BOTH `reconcile` and `of_finish` are defined in terms of this ONE predicate (of_finish maps the wire finish_reason then applies it; reconcile applies it post-accumulation). Parity is by construction; the `%test` becomes a redundant guard, not the sole guarantee.
 
-### 3.3 Relationship to oas#2728
-
-oas#2728 (the `EndTurn`+blocks patch, pending) is the motivating instance. This RFC SUPERSEDES its ad-hoc arm addition with the consolidated predicate. Sequencing: land oas#2728 first (it unblocks the live dangling-tool_use root now); this RFC's refactor folds it into the rule as a follow-up so the codebase does not carry a growing case list.
+### 3.3 Relationship to (the `EndTurn`+blocks patch, pending) is the motivating instance. This RFC SUPERSEDES its ad-hoc arm addition with the consolidated predicate. Sequencing: land first (it unblocks the live dangling-tool_use root now); this RFC's refactor folds it into the rule as a follow-up so the codebase does not carry a growing case list.
 
 ## 4. Acceptance
 
@@ -70,7 +68,7 @@ oas#2728 (the `EndTurn`+blocks patch, pending) is the motivating instance. This 
 
 ## 5. Blast radius
 
-- `lib/llm_provider/stop_reason_wire.ml` (`reconcile`, `of_finish`, new shared predicate), `.mli` docs. No wire-format change. Behavior change vs today: `Refusal`/`ContentFilter`/`StopSequence`/etc. + blocks are now EXPLICITLY terminal (they already were `-> sr`, so no change); the only behavior addition is the oas#2728 `EndTurn`+blocks case, already reviewed there.
+- `lib/llm_provider/stop_reason_wire.ml` (`reconcile`, `of_finish`, new shared predicate), `.mli` docs. No wire-format change. Behavior change vs today: `Refusal`/`ContentFilter`/`StopSequence`/etc. + blocks are now EXPLICITLY terminal (they already were `-> sr`, so no change); the only behavior addition is the `EndTurn`+blocks case, already reviewed there.
 
 ## 6. Workaround-rejection self-check
 

@@ -53,7 +53,7 @@ let read_verdict_json (json : Yojson.Safe.t)
       (Printf.sprintf "unsupported schema_version: %d (expected 1)"
          schema_version)
   else
-    (* RFC-OAS-002 lists all_passed, coverage and layer_results beside
+    (* RFC-AC-002 lists all_passed, coverage and layer_results beside
        schema_version in the report's required set, so a report missing one is
        damaged. Defaulting them turned that into a passing-shaped verdict with
        no layers, which reads on the dashboard exactly like a run that had

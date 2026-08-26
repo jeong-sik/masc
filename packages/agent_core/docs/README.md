@@ -5,10 +5,9 @@ status: reference
 # Agent Core specifications
 
 `packages/agent_core/` was imported into MASC by `eaddf336b6` (#27619), which
-brought 589 `.ml`/`.mli` files across. The specifications that govern that code
-stayed in `jeong-sik/oas`, which is now `archived: true` — so between #27619 and
-this directory there was no in-tree spec for the imported subtree, and RFC
-discovery over `docs/rfc/` returned nothing for it.
+brought 589 `.ml`/`.mli` files across without the specifications that govern
+that code — so RFC discovery over `docs/rfc/` returned nothing for the imported
+subtree.
 
 These files are those specifications, moved to sit beside the code they govern.
 

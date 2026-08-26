@@ -319,7 +319,7 @@ let decide_clock_for_idle
                }))
      | None, Some first_event ->
        (* The first-event (TTFT/prefill) bound has the same clock dependency
-          as the idle bound (RFC-OAS-037): AGENT_CORE arms it only when a
+          as the idle bound (RFC-AC-037): AGENT_CORE arms it only when a
           clock is present, so a missing clock would silently disarm it. *)
        Error
          (Agent_core.Error.Config

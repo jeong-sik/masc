@@ -1429,7 +1429,7 @@ type keeper_summary =
 
 let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let owner_lifecycle = owner_lifecycle ~keeper_name in
-  let lifecycle_read_errors =
+  let lifecycle_read_errors () =
     match owner_lifecycle with
     | Runnable
     | Recoverable
@@ -1439,20 +1439,36 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
     | Lifecycle_unknown detail ->
       [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
   in
-  match load_state_result ~base_path ~keeper_name with
-  | Ok state ->
+  match load_state_result_with_primary_detail ~base_path ~keeper_name with
+  | Ok (state, primary_detail) ->
     let pending = State.pending state in
     let pending_oldest = queue_oldest_arrived_at pending in
     let outbox = State.transition_outbox state in
+    let primary_read_errors =
+      match primary_detail with
+      | None -> []
+      | Some detail ->
+        diagnose_snapshot_read_error ~base_path ~keeper_name detail
+        |> List.map (fun error -> error.message)
+    in
+    let lifecycle_read_errors =
+      if
+        Keeper_event_queue.is_empty pending
+        && outbox = []
+        && primary_read_errors = []
+      then []
+      else lifecycle_read_errors ()
+    in
     { keeper_name
     ; owner_lifecycle
     ; pending_count = Keeper_event_queue.length pending
     ; pending_oldest
     ; outbox_count = List.length outbox
-    ; counts_complete = lifecycle_read_errors = []
-    ; read_errors = lifecycle_read_errors
+    ; counts_complete = lifecycle_read_errors = [] && primary_read_errors = []
+    ; read_errors = lifecycle_read_errors @ primary_read_errors
     }
   | Error message ->
+    let lifecycle_read_errors = lifecycle_read_errors () in
     let read_errors =
       diagnose_snapshot_read_error ~base_path ~keeper_name message
       |> List.map (fun error -> error.message)

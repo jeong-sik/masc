@@ -132,7 +132,7 @@ let provided =
    appears in an instruction line" fails on a path that has nothing to do with
    the operator's CLI. The prose above still names them; a test that cannot
    distinguish the two things should not claim to. *)
-let deliberately_absent = [ "docker"; "playwright"; "ttyd"; "md5" ]
+let deliberately_absent = [ "docker"; "playwright"; "ttyd"; "md5"; "actionlint" ]
 
 let test_provided_tools_are_installed () =
   let set = tokens (instruction_lines (read_file dockerfile_path)) in
@@ -203,6 +203,16 @@ let measured_usage =
   ; "md5", 4
   ; "zsh", 3
   ; "fd", 2
+    (* Read out of the container exec failures rather than command-position
+       frequency: these are the commands a docker keeper actually could not
+       start, enumerated from the live traces of the three keepers already on
+       that profile.
+
+       dune 4, /bin/zsh 1, actionlint 1, and one _build/.../*.exe that is the
+       consequence of dune failing rather than a tool of its own. Every one is
+       classified above -- dune and zsh are shipped now, actionlint is refused
+       with a reason. *)
+  ; "actionlint", 1
   ]
 ;;
 

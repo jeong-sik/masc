@@ -134,6 +134,12 @@ RUN npm install --global --no-fund --no-audit pnpm@10.31.0 \
 #               means several hundred MB of image for one keeper's workflow.
 #   ttyd        8 uses, not packaged for this base. TUI PTY work needs its own
 #               answer.
+#   actionlint  One exec failure in the container logs and 9 mentions. It lints
+#               .github/workflows, which CI already does on every push, so a
+#               keeper running it locally duplicates a gate rather than
+#               unblocking work. Host-only (homebrew). Left out on purpose: if a
+#               keeper needs workflow validation before pushing, the answer is
+#               to say so, not to grow the image by one binary per habit.
 #   md5         macOS spelling. `md5sum` is present but prints a different
 #               format, so a symlink would produce output that parses wrong --
 #               worse than the command being absent.

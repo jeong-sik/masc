@@ -1,27 +1,23 @@
-type package_id = string
+type package_id = Skill_reference.package_id
 
-type package_id_error =
+type package_id_error = Skill_reference.package_id_error =
   | Empty_package_id
   | Current_directory_package_id
   | Parent_directory_package_id
   | Package_id_contains_separator
   | Package_id_contains_nul
 
-type content_revision = string
+type content_revision = Skill_reference.content_revision
 type config_source_revision = string
 type config_revision = string
 type catalog_revision = string
 type snapshot_revision = string
 
-type revision_error =
+type revision_error = Skill_reference.revision_error =
   | Invalid_revision_length of { actual : int }
   | Invalid_revision_character of { index : int; found : char }
 
-type identity =
-  { source_id : Skill_source_config.source_id
-  ; package_id : package_id
-  ; name : string
-  }
+type identity = Skill_reference.identity
 
 type source_operation =
   | Inspect_source
@@ -121,23 +117,18 @@ type build_error =
   | Unexpected_source_scan of Skill_source_config.source_id
   | Source_scan_config_mismatch of Skill_source_config.source_id
 
-let package_id_of_directory directory =
-  if String.equal directory ""
-  then Error Empty_package_id
-  else if String.equal directory "."
-  then Error Current_directory_package_id
-  else if String.equal directory ".."
-  then Error Parent_directory_package_id
-  else if String.contains directory '/'
-  then Error Package_id_contains_separator
-  else if String.contains directory '\000'
-  then Error Package_id_contains_nul
-  else Ok directory
-;;
+type reference_resolution_error =
+  | Identity_not_found of identity
+  | Content_revision_mismatch of
+      { identity : identity
+      ; requested : content_revision
+      ; observed : content_revision
+      }
 
-let package_id_to_string package_id = package_id
-let make_identity ~source_id ~package_id ~name = { source_id; package_id; name }
-let content_revision_to_string revision = revision
+let package_id_of_directory = Skill_reference.package_id_of_directory
+let package_id_to_string = Skill_reference.package_id_to_string
+let make_identity = Skill_reference.make_identity
+let content_revision_to_string = Skill_reference.content_revision_to_string
 let config_source_revision_to_string revision = revision
 let config_revision_to_string revision = revision
 let catalog_revision_to_string revision = revision
@@ -145,23 +136,10 @@ let snapshot_revision_to_string revision = revision
 let equal_snapshot_revision = String.equal
 
 let revision_of_string value =
-  let expected_length = 64 in
-  let actual = String.length value in
-  if actual <> expected_length
-  then Error (Invalid_revision_length { actual })
-  else
-    let rec validate index =
-      if index = actual
-      then Ok value
-      else
-        match value.[index] with
-        | '0' .. '9' | 'a' .. 'f' -> validate (index + 1)
-        | found -> Error (Invalid_revision_character { index; found })
-    in
-    validate 0
+  Result.map (fun () -> value) (Skill_reference.validate_revision_string value)
 ;;
 
-let content_revision_of_string value = revision_of_string value
+let content_revision_of_string = Skill_reference.content_revision_of_string
 let snapshot_revision_of_string value = revision_of_string value
 
 let digest_fields fields =
@@ -178,23 +156,16 @@ let digest_fields fields =
   Digestif.SHA256.(to_hex (digest_string (Buffer.contents buffer)))
 ;;
 
-let content_revision source_text = digest_fields [ "skill_document", source_text ]
+let content_revision = Skill_reference.content_revision_of_source_text
 let config_source_revision source_text = digest_fields [ "skill_config_source", source_text ]
 
 let identity_key (identity : identity) =
   ( Skill_source_config.source_id_to_string identity.source_id
-  , identity.package_id
+  , Skill_reference.package_id_to_string identity.package_id
   , identity.name )
 ;;
 
-let identity_to_yojson (identity : identity) =
-  `Assoc
-    [ ( "source_id"
-      , `String (Skill_source_config.source_id_to_string identity.source_id) )
-    ; "package_id", `String identity.package_id
-    ; "name", `String identity.name
-    ]
-;;
+let identity_to_yojson = Skill_reference.identity_to_yojson
 
 let source_operation_to_string = function
   | Inspect_source -> "inspect_source"
@@ -300,7 +271,7 @@ let rejection_to_private_yojson (rejection : rejection) =
       , `String (Skill_source_config.source_id_to_string rejection.source_id) )
     ; ( "package_id"
       , match rejection.package_id with
-        | Some package_id -> `String package_id
+        | Some package_id -> `String (package_id_to_string package_id)
         | None -> `Null )
     ; "directory", `String rejection.directory
     ; "reason", rejection_reason_to_private_yojson rejection.reason
@@ -311,7 +282,7 @@ let entry_to_private_yojson (entry : entry) =
   `Assoc
     [ "identity", identity_to_yojson entry.identity
     ; "source_index", `Int entry.source_index
-    ; "content_revision", `String entry.content_revision
+    ; "content_revision", `String (content_revision_to_string entry.content_revision)
     ; ( "conformance"
       , `String (Agent_core.Skill_document.conformance_to_string entry.conformance) )
     ]
@@ -393,7 +364,7 @@ let build_entries sources =
                         }
                         :: rejections )
                     | Loaded { document; conformance } ->
-                      let identity = { source_id; package_id; name = document.name } in
+                      let identity = make_identity ~source_id ~package_id ~name:document.name in
                       let key = identity_key identity in
                       (match Hashtbl.find_opt exact key with
                        | Some first_directory ->
@@ -563,6 +534,27 @@ let find_exact snapshot identity =
   List.find_opt (fun entry -> identity_key entry.identity = key) snapshot.entries
 ;;
 
+let entry_reference (entry : entry) =
+  Skill_reference.make
+    ~identity:entry.identity
+    ~content_revision:entry.content_revision
+;;
+
+let resolve_reference snapshot (reference : Skill_reference.t) =
+  match find_exact snapshot reference.identity with
+  | None -> Error (Identity_not_found reference.identity)
+  | Some entry ->
+    if Skill_reference.equal_content_revision entry.content_revision reference.content_revision
+    then Ok entry
+    else
+      Error
+        (Content_revision_mismatch
+           { identity = reference.identity
+           ; requested = reference.content_revision
+           ; observed = entry.content_revision
+           })
+;;
+
 let find_effective_by_name snapshot name =
   List.find_opt
     (fun entry -> String.equal entry.identity.name name)
@@ -605,7 +597,7 @@ let source_to_public_yojson (scan : source_scan) =
 let entry_to_public_yojson (entry : entry) =
   `Assoc
     [ "identity", identity_to_yojson entry.identity
-    ; "content_revision", `String entry.content_revision
+    ; "content_revision", `String (content_revision_to_string entry.content_revision)
     ; "description", `String entry.document.description
     ; ( "conformance"
       , `String (Agent_core.Skill_document.conformance_to_string entry.conformance) )
@@ -639,7 +631,7 @@ let rejection_to_public_yojson (rejection : rejection) =
       , `String (Skill_source_config.source_id_to_string rejection.source_id) )
     ; ( "package_id"
       , match rejection.package_id with
-        | Some package_id -> `String package_id
+        | Some package_id -> `String (package_id_to_string package_id)
         | None -> `Null )
     ; "reason", reason
     ]

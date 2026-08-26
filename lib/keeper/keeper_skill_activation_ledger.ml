@@ -11,8 +11,8 @@ type origin =
       }
 
 type activation =
-  { identity : Skill_catalog_snapshot.identity
-  ; content_revision : Skill_catalog_snapshot.content_revision
+  { identity : Skill_reference.identity
+  ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
   ; activated_at : string
@@ -44,8 +44,8 @@ type decode_error =
   | Unsupported_schema of string
   | Invalid_source_id of string
   | Invalid_skill_name of string
-  | Invalid_package_id of Skill_catalog_snapshot.package_id_error
-  | Invalid_content_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_package_id of Skill_reference.package_id_error
+  | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
   | Invalid_origin_kind of string
   | Invalid_task_id of string
@@ -83,7 +83,7 @@ let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
 
 let make_activation
-      ~(identity : Skill_catalog_snapshot.identity)
+      ~(identity : Skill_reference.identity)
       ~content_revision
       ~snapshot_revision
       ~turn_ref
@@ -145,11 +145,10 @@ let origin_to_yojson = function
 
 let activation_to_yojson activation =
   `Assoc
-    [ "identity", Skill_catalog_snapshot.identity_to_yojson activation.identity
+    [ "identity", Skill_reference.identity_to_yojson activation.identity
     ; ( "content_revision"
       , `String
-          (Skill_catalog_snapshot.content_revision_to_string
-             activation.content_revision) )
+          (Skill_reference.content_revision_to_string activation.content_revision) )
     ; ( "snapshot_revision"
       , `String
           (Skill_catalog_snapshot.snapshot_revision_to_string
@@ -246,10 +245,10 @@ let decode_identity json =
     |> Result.map_error (fun _ -> Invalid_source_id source)
   in
   let* package_id =
-    Skill_catalog_snapshot.package_id_of_directory package
+    Skill_reference.package_id_of_directory package
     |> Result.map_error (fun error -> Invalid_package_id error)
   in
-  Ok (Skill_catalog_snapshot.make_identity ~source_id ~package_id ~name)
+  Ok (Skill_reference.make_identity ~source_id ~package_id ~name)
 ;;
 
 let decode_origin json =
@@ -305,7 +304,7 @@ let decode_activation ~expected_trace_id json =
   let* identity = decode_identity identity_json in
   let* content = string_field "content_revision" fields in
   let* content_revision =
-    Skill_catalog_snapshot.content_revision_of_string content
+    Skill_reference.content_revision_of_string content
     |> Result.map_error (fun error -> Invalid_content_revision error)
   in
   let* snapshot = string_field "snapshot_revision" fields in
@@ -349,18 +348,10 @@ let decode_activation ~expected_trace_id json =
 ;;
 
 let exact_key_equal left right =
-  let left_identity = left.identity in
-  let right_identity = right.identity in
-  String.equal
-    (Skill_source_config.source_id_to_string left_identity.source_id)
-    (Skill_source_config.source_id_to_string right_identity.source_id)
-  && String.equal
-       (Skill_catalog_snapshot.package_id_to_string left_identity.package_id)
-       (Skill_catalog_snapshot.package_id_to_string right_identity.package_id)
-  && String.equal left_identity.name right_identity.name
-  && String.equal
-       (Skill_catalog_snapshot.content_revision_to_string left.content_revision)
-       (Skill_catalog_snapshot.content_revision_to_string right.content_revision)
+  Skill_reference.equal_identity left.identity right.identity
+  && Skill_reference.equal_content_revision
+       left.content_revision
+       right.content_revision
 ;;
 
 let of_yojson ~expected_workspace_root ~expected_trace_id json =

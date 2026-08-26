@@ -3203,9 +3203,15 @@
  (libraries
   alcotest
   masc.skill_snapshot
+  masc.skill_reference
   masc.skill_config
   masc.string_util
   yojson))
+
+(test
+ (name test_skill_reference)
+ (modules test_skill_reference)
+ (libraries alcotest masc.skill_config masc.skill_reference yojson))
 
 (test
  (name test_skill_catalog_snapshot_service)

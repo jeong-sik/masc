@@ -6486,6 +6486,9 @@ let bracketed_paste_disable = "\x1b[?2004l"
    calls, and that ends the session either way. *)
 let apply_raw_mode new_term =
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+  (* See the note above: the [tcsetattr] on the line before just succeeded on
+     this descriptor, so a refusal here is a hangup between the two calls, and
+     that ends the session either way. *)
   ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
 ;;
 
@@ -6600,6 +6603,9 @@ let main () =
        return. *)
     if old_literal_next >= 0
     then
+      (* See {!Masc_tui_termios.literal_next}: [-1] already ruled out the
+         descriptor that is not a terminal, so what is left is a terminal going
+         away while it is being handed back -- nothing to hand it back to. *)
       ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
   in
 

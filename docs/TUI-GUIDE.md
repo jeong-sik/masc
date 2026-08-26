@@ -235,20 +235,24 @@ Every keeper under `.masc/keepers/`, sorted by name.
 
 ```
  MASC Keepers (10)  10:55:25
-    HEALTH       KEEPER             A P TURNS LIFECYCLE / MODEL   TASK
- >  ● healthy    adm-race-cf-001    A P   498 running claude-opus task-471
-    ● idle       analyst            A -   237 paused  kimi-k2.5    task-464
+    HEALTH       KEEPER             A P TURNS LIFECYCLE / RUNTIME              TASK
+ >  ● healthy    adm-race-cf-001    A P   498 running anthropic.claude-opus-5  task-471
+    ● idle       analyst            A -   237 paused kimi.kimi-k2.5             task-464
   j/k move  p pause  w wake  s shutdown  g yolo  c chat  right/enter detail
 ```
 
 The metadata list needs no server, so names, turn counts, and tasks stay
-readable while the runtime is down. `HEALTH`, `LIFECYCLE / MODEL`, and lifecycle
+readable while the runtime is down. `HEALTH`, `LIFECYCLE / RUNTIME`, and lifecycle
 actions come from `GET /api/v1/gate/keepers`; an unread live roster is shown as
 `- unread` rather than guessed from metadata. The status glyph is the primary
 colour cue. `healthy` answers whether the heartbeat/readiness checks are good;
 `running` answers whether the Keeper process exists. They are separate axes,
-so `healthy` and `running` on the same row is expected. Phase and model stay neutral so an ordinary row does not turn into
-a strip of competing colours.
+so `healthy` and `running` on the same row is expected. The runtime cell joins
+that phase to the producer's full canonical `runtime_id`; the TUI does not split
+the opaque id to guess a model. If the fixed-width column cannot hold a long id,
+it keeps both the shared head and distinguishing tail around a middle ellipsis.
+Phase and runtime identity stay neutral so an ordinary row does not turn into a
+strip of competing colours.
 
 `g` toggles the selected Keeper's tool gate. The footer names the action that
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
@@ -365,7 +369,7 @@ turn runs. `Esc` returns to the roster when chat opened there, and to detail
 when chat opened from detail.
 
 ```
- Message to: sangsu  ● active · running claude-opus-5  (port 8935)
+ Message to: sangsu  ● active · running anthropic.claude-opus-5  (port 8935)
    [14:35:01] From [you             ] tui-019...
      hello, how are you?
    [14:35:03] From [sangsu          ] tui-019...
@@ -375,7 +379,10 @@ when chat opened from detail.
 ```
 
 The header joins the selected Keeper's published status with its typed runtime
-phase and model, using the same roster reading as the Keepers table. While no
+phase and producer-owned canonical `runtime_id`, using the same roster reading
+as the Keepers table. It never derives a model by parsing the id. In a narrow
+split pane, only the displayed id is middle-fitted so active reasoning and tool
+visibility modes remain truthful in the header. While no
 turn is starting or running, `Ctrl-G` selects the next readable Keeper and
 wraps at the end of the roster. Each Keeper keeps its own draft. Every history
 GET carries a load generation, so a response that finishes after the operator

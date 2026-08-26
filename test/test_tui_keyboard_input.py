@@ -1007,7 +1007,11 @@ def overview_event_http_fixtures() -> HttpFixtures:
     }
 
 
-def keeper_runtime_http_fixtures() -> HttpFixtures:
+def keeper_runtime_http_fixtures(
+    *,
+    alpha_runtime_id: str = "anthropic.claude-opus-5",
+    beta_runtime_id: str = "anthropic.claude-sonnet-4",
+) -> HttpFixtures:
     fixtures = overview_event_http_fixtures()
     fixtures["/api/v1/gate/keepers?detailed=true"] = (
         200,
@@ -1026,7 +1030,7 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "keepalive_running": True,
                     "autoboot_enabled": True,
                     "proactive_enabled": True,
-                    "runtime_id": "anthropic.claude-opus-5",
+                    "runtime_id": alpha_runtime_id,
                 },
                 {
                     "runtime_class": "keeper",
@@ -1038,7 +1042,7 @@ def keeper_runtime_http_fixtures() -> HttpFixtures:
                     "keepalive_running": True,
                     "autoboot_enabled": True,
                     "proactive_enabled": False,
-                    "runtime_id": "anthropic.claude-sonnet-4",
+                    "runtime_id": beta_runtime_id,
                 },
             ],
         },
@@ -1637,6 +1641,39 @@ def keeper_runtime_phase_and_identity_interaction(
         master_fd,
         output,
         b"paused anthropic.claude-sonnet-4",
+        start=0,
+        timeout=3.0,
+    )
+    os.write(master_fd, b"q")
+
+
+def keeper_long_runtime_identity_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=140,
+        needle=b"MASC Overview",
+    )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"2",
+        b"running antigrav\xe2\x80\xa6.gemini-3-7-flash",
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"\xe2\x80\xa6on.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -4502,6 +4539,14 @@ def chat_visibility_modes_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=30,
+            columns=110,
+            needle=b"MASC Overview",
+        )
         send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
         select_keeper_row(process, master_fd, output, b"alpha")
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
@@ -4512,6 +4557,14 @@ def chat_visibility_modes_interaction() -> Interaction:
             output,
             b"m",
             "\u2717 Tools 2".encode(),
+        )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"anthropic.claude-opus-5",
+            start=pane_start,
+            timeout=5.0,
         )
         wait_for_output(
             process,
@@ -4545,9 +4598,23 @@ def chat_visibility_modes_interaction() -> Interaction:
         if b"2 reasoning steps, content withheld" not in full:
             raise AssertionError(f"full reasoning did not restore content: {full!r}")
 
+        tools_start = len(output)
         tools = send_and_wait(
-            process, master_fd, output, b"\x04", b"masc_task_history"
+            process,
+            master_fd,
+            output,
+            b"\x04",
+            b"reasoning:full tools:full",
         )
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"masc_task_history",
+            start=tools_start,
+            timeout=5.0,
+        )
+        tools += bytes(output[tools_start:])
         for needle in (b"masc_task_history", b"tool_execute"):
             if needle not in tools:
                 raise AssertionError(
@@ -7179,6 +7246,10 @@ def run_keyboard_regression(executable: str) -> None:
     board_detail_fixtures, b_failure = board_detail_isolation_http_fixtures()
     missing_target_fixtures, late_b = board_missing_target_http_fixtures()
     message_switch_fixtures, alpha_history = keeper_message_switch_http_fixtures()
+    chat_visibility_fixtures = keeper_runtime_http_fixtures()
+    chat_visibility_fixtures["/api/v1/keepers/alpha/chat/history"] = (
+        autonomous_turn_history_fixture()
+    )
     lanes_fixtures = keeper_runtime_http_fixtures()
     lanes_gate = GatedHttpResponse(keeper_lanes_response([]))
     lanes_fixtures[KEEPER_LANES_PATH] = lanes_gate
@@ -7289,9 +7360,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="Keeper chat visibility modes",
         interact=chat_visibility_modes_interaction(),
-        http_fixtures={
-            "/api/v1/keepers/alpha/chat/history": autonomous_turn_history_fixture(),
-        },
+        http_fixtures=chat_visibility_fixtures,
     )
     run_terminal_scenario(
         executable,
@@ -7649,6 +7718,15 @@ def run_keyboard_regression(executable: str) -> None:
         description="Keeper phase and runtime identity",
         interact=keeper_runtime_phase_and_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(),
+    )
+    run_terminal_scenario(
+        executable,
+        description="Keeper long runtime identities remain distinguishable",
+        interact=keeper_long_runtime_identity_interaction,
+        http_fixtures=keeper_runtime_http_fixtures(
+            alpha_runtime_id="antigravity_subscription.gemini-3-7-flash",
+            beta_runtime_id="antigravity_subscription.claude-sonnet-4",
+        ),
     )
     run_terminal_scenario(
         executable,

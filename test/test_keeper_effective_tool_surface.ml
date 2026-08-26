@@ -222,16 +222,11 @@ let test_projection_names_equal_turn_surface_authority () =
       (Skill_catalog_snapshot.snapshot_revision_to_string
          surface.skill_snapshot_revision);
     let instruction_entries = task_instruction_skills in
-    let schema_tool =
-      Keeper_tool_composition_surface.schema_tools
+    let tool =
+      Keeper_tool_composition_surface.instruction_skill_schema_tool
         ~instruction_skills:instruction_entries
-        ()
-      |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
-        String.equal tool.schema.name "keeper_skill")
     in
-    (match schema_tool with
-     | None -> fail "schema-only surface omitted keeper_skill"
-     | Some tool ->
+    (
        check string "projection carries the exact Available list"
          (Keeper_tool_composition_surface.For_testing.instruction_skill_description
             instruction_entries)
@@ -241,27 +236,19 @@ let test_projection_names_equal_turn_surface_authority () =
          | Some input_schema -> input_schema
          | None -> fail "keeper_skill omitted its required input schema"
        in
-       let actual_names =
-         match
-           input_schema
-           |> Yojson.Safe.Util.member "properties"
-           |> Yojson.Safe.Util.member "name"
-           |> Yojson.Safe.Util.member "enum"
-         with
-         | `List values ->
-           List.map
-             (function
-               | `String value -> value
-               | value ->
-                 failf "keeper_skill name enum contains %s"
-                   (Yojson.Safe.to_string value))
-             values
-         | value ->
-           failf "keeper_skill name enum is %s" (Yojson.Safe.to_string value)
+       let required =
+         input_schema
+         |> Yojson.Safe.Util.member "required"
+         |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string
        in
-       check (list string) "schema enumerates the readable skill names"
-         (List.map (fun (name, _, _) -> name) instruction_entries)
-         actual_names)
+       check (list string) "schema requires the canonical exact reference"
+         [ "identity"; "content_revision" ] required;
+       check bool "name-only input is absent" true
+         (input_schema
+          |> Yojson.Safe.Util.member "properties"
+          |> Yojson.Safe.Util.member "name"
+          = `Null))
 ;;
 
 let test_external_composition_preserves_snapshot_provenance () =

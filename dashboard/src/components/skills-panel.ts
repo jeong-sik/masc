@@ -36,7 +36,7 @@ function referenceKey(identity: SkillIdentity, contentRevision: string): string 
 
 export function mergeSkillRows(
   entries: readonly SkillSnapshotEntry[],
-  surfaces: readonly SkillSurface[] = [],
+  surfaces: readonly SkillSurface[],
 ): SkillRow[] {
   const byReference = new Map<string, SkillSurface>()
   for (const surface of surfaces) {
@@ -45,16 +45,23 @@ export function mergeSkillRows(
       surface,
     )
   }
-  return entries.map(entry => ({
-    identity: entry.identity,
-    content_revision: entry.content_revision,
-    name: entry.identity.name,
-    description: entry.description,
-    source: `${entry.identity.source_id}/${entry.identity.package_id}`,
-    body_bytes: entry.body_bytes,
-    diagnostics: entry.diagnostics ?? [],
-    surface: byReference.get(referenceKey(entry.identity, entry.content_revision)) ?? null,
-  }))
+  return entries.map(entry => {
+    const surface = byReference.get(referenceKey(entry.identity, entry.content_revision)) ?? null
+    return {
+      identity: entry.identity,
+      content_revision: entry.content_revision,
+      name: entry.identity.name,
+      description: entry.description,
+      source: `${entry.identity.source_id}/${entry.identity.package_id}`,
+      body_bytes: entry.body_bytes,
+      diagnostics: [...new Set([...(entry.diagnostics ?? []), ...(surface?.diagnostics ?? [])])],
+      surface,
+    }
+  })
+}
+
+export function skillRowKey(row: SkillRow): string {
+  return referenceKey(row.identity, row.content_revision)
 }
 
 function compareText(left: string, right: string): number {
@@ -170,7 +177,7 @@ export function SkillsPanel() {
         <tbody>
           ${rows.map(
             row => html`
-              <tr key=${row.name} data-testid=${`skill-row-${row.name}`}>
+              <tr key=${skillRowKey(row)} data-testid=${`skill-row-${row.name}`}>
                 <td>
                   <strong>${row.name}</strong><div class="ss-muted">${row.description}</div>
                   ${row.diagnostics.map(

@@ -1,4 +1,3 @@
-import hashlib
 import importlib.util
 import inspect
 import json
@@ -39,6 +38,34 @@ def load_acceptance_module():
 
 
 acceptance = load_acceptance_module()
+
+
+def skill_identity(name, *, source_id="fixture", package_id=None):
+    return {
+        "source_id": source_id,
+        "package_id": package_id or name,
+        "name": name,
+    }
+
+
+def skill_reference(name, revision, *, source_id="fixture", package_id=None):
+    return {
+        "identity": skill_identity(
+            name,
+            source_id=source_id,
+            package_id=package_id,
+        ),
+        "content_revision": revision,
+    }
+
+
+def published_skill(name, revision, *, source_id="fixture", package_id=None):
+    return skill_reference(
+        name,
+        revision,
+        source_id=source_id,
+        package_id=package_id,
+    )
 
 
 class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
@@ -127,66 +154,136 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             ),
             47,
         )
+        self.assertEqual(
+            catalog["keeper_required_skill_identities"],
+            [
+                skill_identity(
+                    "mission-snapshot",
+                    source_id="project-masc",
+                ),
+                skill_identity(
+                    "background-snapshot",
+                    source_id="project-masc",
+                ),
+            ],
+        )
 
-    def test_composition_preflight_reads_required_tools_from_exact_surface(self):
+    def test_required_exact_reference_resolves_from_snapshot(self):
+        required_identity = skill_identity("mission-snapshot")
+        required_reference = skill_reference("mission-snapshot", "a" * 64)
         report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
+                "snapshot": {"skills": [published_skill("mission-snapshot", "a" * 64)]},
                 "surfaces": [
                     {
-                        "reference": {
-                            "identity": {
-                                "source_id": "fixture",
-                                "package_id": "mission-snapshot",
-                                "name": "mission-snapshot",
-                            },
-                            "content_revision": "a" * 64,
-                        },
+                        "reference": required_reference,
                         "kind": "composition",
-                        "tool_name": "keeper_compose_mission-snapshot",
+                        "tool_name": "display-name-is-not-acceptance-authority",
                     }
                 ],
             },
-            required_tools=["Read", "keeper_compose_mission-snapshot"],
+            required_skill_identities=[required_identity],
             skills_url="http://127.0.0.1:8935/api/v1/skills",
         )
 
         self.assertEqual(report["status"], "ok")
-        self.assertEqual(
-            report["required_tools"], ["keeper_compose_mission-snapshot"]
-        )
-        self.assertEqual(report["missing_tools"], [])
+        self.assertEqual(report["required_skill_references"], [required_reference])
+        self.assertEqual(report["missing_skill_references"], [])
 
     def test_composition_preflight_fails_on_unavailable_surface(self):
+        required_identity = skill_identity("broken")
+        required_reference = skill_reference("broken", "b" * 64)
         report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
+                "snapshot": {"skills": [published_skill("broken", "b" * 64)]},
                 "surfaces": [
                     {
-                        "reference": {
-                            "identity": {
-                                "source_id": "fixture",
-                                "package_id": "broken",
-                                "name": "broken",
-                            },
-                            "content_revision": "b" * 64,
-                        },
+                        "reference": required_reference,
                         "kind": "unavailable",
                         "error": "composition rejected",
                     }
                 ],
             },
-            required_tools=["keeper_compose_mission-snapshot"],
+            required_skill_identities=[required_identity],
             skills_url="http://127.0.0.1:8935/api/v1/skills",
         )
 
         self.assertEqual(report["status"], "surface_unavailable")
+        self.assertEqual(report["missing_skill_references"], [required_reference])
         self.assertEqual(
-            report["missing_tools"], ["keeper_compose_mission-snapshot"]
+            report["required_unavailable_surfaces"],
+            [{"reference": required_reference, "error": "composition rejected"}],
         )
+
+    def test_composition_preflight_rejects_same_name_at_another_revision(self):
+        required_identity = skill_identity("mission-snapshot")
+        required_reference = skill_reference("mission-snapshot", "a" * 64)
+        other_revision = skill_reference("mission-snapshot", "b" * 64)
+
+        report = acceptance.composition_surface_status(
+            skills={
+                "state": "ready",
+                "snapshot": {"skills": [published_skill("mission-snapshot", "a" * 64)]},
+                "surfaces": [
+                    {
+                        "reference": other_revision,
+                        "kind": "composition",
+                        "tool_name": "keeper_compose_mission-snapshot",
+                    }
+                ],
+            },
+            required_skill_identities=[required_identity],
+            skills_url="http://127.0.0.1:8935/api/v1/skills",
+        )
+
+        self.assertEqual(report["status"], "missing_surfaces")
+        self.assertEqual(report["required_skill_references"], [required_reference])
+        self.assertEqual(report["missing_skill_references"], [required_reference])
+        self.assertEqual(report["installed_skill_references"], [other_revision])
+
+    def test_unrelated_unavailable_is_observed_without_blocking(self):
+        required_identity = skill_identity("mission-snapshot")
+        required_reference = skill_reference("mission-snapshot", "a" * 64)
+        unrelated_reference = skill_reference("unrelated", "c" * 64)
+
+        report = acceptance.composition_surface_status(
+            skills={
+                "state": "ready",
+                "snapshot": {
+                    "skills": [
+                        published_skill("mission-snapshot", "a" * 64),
+                        published_skill("unrelated", "c" * 64),
+                    ]
+                },
+                "surfaces": [
+                    {
+                        "reference": required_reference,
+                        "kind": "composition",
+                        "tool_name": "keeper_compose_mission-snapshot",
+                    },
+                    {
+                        "reference": unrelated_reference,
+                        "kind": "unavailable",
+                        "error": "unrelated composition rejected",
+                    },
+                ],
+            },
+            required_skill_identities=[required_identity],
+            skills_url="http://127.0.0.1:8935/api/v1/skills",
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(report["required_unavailable_surfaces"], [])
         self.assertEqual(
             report["unavailable_surfaces"],
-            [{"name": "broken", "error": "composition rejected"}],
+            [
+                {
+                    "reference": unrelated_reference,
+                    "error": "unrelated composition rejected",
+                }
+            ],
         )
 
     def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):

@@ -481,6 +481,21 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
     if catalog.get("minimum_keeper_count") != len(roles):
         raise AcceptanceError("minimum_keeper_count must equal the five-role fleet")
+    required_skill_identities = catalog.get("keeper_required_skill_identities")
+    if not isinstance(required_skill_identities, list) or not required_skill_identities:
+        raise AcceptanceError("catalog must declare keeper_required_skill_identities")
+    required_identity_keys: list[tuple[str, str, str]] = []
+    for index, identity in enumerate(required_skill_identities):
+        required_identity_keys.append(
+            canonical_skill_identity_key(
+                identity,
+                context=f"keeper_required_skill_identities[{index}]",
+            )
+        )
+    if len(set(required_identity_keys)) != len(required_identity_keys):
+        raise AcceptanceError(
+            "keeper_required_skill_identities must not contain duplicates"
+        )
     approaches = catalog.get("execution_approaches")
     if (
         catalog.get("approaches_apply_to_each_mission") is not True
@@ -838,67 +853,185 @@ def read_skills(url: str, token: str, timeout: float) -> dict[str, Any]:
     return value
 
 
-def composition_surface_status(
-    *, skills: dict[str, Any], required_tools: Iterable[str], skills_url: str
-) -> dict[str, Any]:
-    """Check campaign compositions against the exact parser surface.
+def canonical_skill_identity_key(value: Any, *, context: str) -> tuple[str, str, str]:
+    if not isinstance(value, dict):
+        raise AcceptanceError(f"{context} must be an object")
+    expected_fields = {"source_id", "package_id", "name"}
+    if set(value) != expected_fields:
+        raise AcceptanceError(
+            f"{context} must contain exactly {sorted(expected_fields)}"
+        )
+    fields = tuple(value[field] for field in ("source_id", "package_id", "name"))
+    if not all(isinstance(field, str) and field for field in fields):
+        raise AcceptanceError(f"{context} fields must be non-empty strings")
+    return fields
 
-    The deleted tool-compositions fixture was a second catalog authority and
-    only happened to contain the same names as the mission requirements. The
-    mission catalog already declares its required keeper_compose_* tools, and
-    /api/v1/skills reports the exact snapshot a Keeper turn consumes.
+
+def canonical_skill_reference_key(
+    value: Any, *, context: str
+) -> tuple[str, str, str, str]:
+    if not isinstance(value, dict):
+        raise AcceptanceError(f"{context} must be an object")
+    if set(value) != {"identity", "content_revision"}:
+        raise AcceptanceError(
+            f"{context} must contain exactly identity and content_revision"
+        )
+    identity_key = canonical_skill_identity_key(
+        value.get("identity"), context=f"{context}.identity"
+    )
+    content_revision = value.get("content_revision")
+    if not isinstance(content_revision, str) or not content_revision:
+        raise AcceptanceError(f"{context}.content_revision must be a non-empty string")
+    return (*identity_key, content_revision)
+
+
+def skill_identity_json(key: tuple[str, str, str]) -> dict[str, str]:
+    source_id, package_id, name = key
+    return {
+        "source_id": source_id,
+        "package_id": package_id,
+        "name": name,
+    }
+
+
+def skill_reference_json(key: tuple[str, str, str, str]) -> dict[str, Any]:
+    source_id, package_id, name, content_revision = key
+    return {
+        "identity": skill_identity_json((source_id, package_id, name)),
+        "content_revision": content_revision,
+    }
+
+
+def composition_surface_status(
+    *,
+    skills: dict[str, Any],
+    required_skill_identities: Iterable[dict[str, Any]],
+    skills_url: str,
+) -> dict[str, Any]:
+    """Resolve campaign identities once, then compare exact SkillReferences.
+
+    The mission catalog owns the stable identities that this campaign needs.
+    The published snapshot pins each identity to its content revision. Surface
+    availability is then decided only by the canonical four-field reference;
+    tool names and name prefixes are display data, not acceptance authority.
     """
-    required = sorted(
-        tool for tool in required_tools if tool.startswith("keeper_compose_")
+    required_identity_keys = sorted(
+        canonical_skill_identity_key(
+            identity, context=f"required_skill_identities[{index}]"
+        )
+        for index, identity in enumerate(required_skill_identities)
+    )
+    snapshot = skills.get("snapshot")
+    snapshot_rows = snapshot.get("skills") if isinstance(snapshot, dict) else None
+    published_rows = snapshot_rows if isinstance(snapshot_rows, list) else []
+    published_by_identity: dict[tuple[str, str, str], tuple[str, str, str, str]] = {}
+    ambiguous_published_identities: set[tuple[str, str, str]] = set()
+    invalid_published_references: list[str] = []
+    for index, row in enumerate(published_rows):
+        if not isinstance(row, dict):
+            invalid_published_references.append(
+                f"snapshot.skills[{index}] is not an object"
+            )
+            continue
+        reference = {
+            "identity": row.get("identity"),
+            "content_revision": row.get("content_revision"),
+        }
+        try:
+            reference_key = canonical_skill_reference_key(
+                reference, context=f"snapshot.skills[{index}]"
+            )
+        except AcceptanceError as error:
+            invalid_published_references.append(str(error))
+            continue
+        identity_key = reference_key[:3]
+        if identity_key in ambiguous_published_identities:
+            continue
+        previous = published_by_identity.get(identity_key)
+        if previous is not None and previous != reference_key:
+            invalid_published_references.append(
+                "snapshot publishes more than one revision for "
+                + json.dumps(skill_identity_json(identity_key), sort_keys=True)
+            )
+            published_by_identity.pop(identity_key)
+            ambiguous_published_identities.add(identity_key)
+            continue
+        published_by_identity[identity_key] = reference_key
+
+    required_reference_keys = {
+        published_by_identity[identity]
+        for identity in required_identity_keys
+        if identity in published_by_identity
+    }
+    unresolved_identity_keys = sorted(
+        set(required_identity_keys) - set(published_by_identity)
     )
     surfaces = skills.get("surfaces")
     surface_rows = surfaces if isinstance(surfaces, list) else []
-    installed = sorted(
-        {
-            row["tool_name"]
-            for row in surface_rows
-            if isinstance(row, dict)
-            and row.get("kind") == "composition"
-            and isinstance(row.get("tool_name"), str)
-        }
+    installed_reference_keys: set[tuple[str, str, str, str]] = set()
+    unavailable_by_reference: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    invalid_surface_references: list[str] = []
+    for index, row in enumerate(surface_rows):
+        if not isinstance(row, dict):
+            invalid_surface_references.append(f"surfaces[{index}] is not an object")
+            continue
+        try:
+            reference_key = canonical_skill_reference_key(
+                row.get("reference"), context=f"surfaces[{index}].reference"
+            )
+        except AcceptanceError as error:
+            invalid_surface_references.append(str(error))
+            continue
+        if row.get("kind") == "composition":
+            installed_reference_keys.add(reference_key)
+        elif row.get("kind") == "unavailable":
+            unavailable_by_reference[reference_key] = {
+                "reference": skill_reference_json(reference_key),
+                "error": row.get("error"),
+            }
+
+    required_unavailable_keys = sorted(
+        required_reference_keys & set(unavailable_by_reference)
     )
-
-    def surface_name(row: dict[str, Any]) -> str | None:
-        reference = row.get("reference")
-        if not isinstance(reference, dict):
-            return None
-        identity = reference.get("identity")
-        if not isinstance(identity, dict):
-            return None
-        name = identity.get("name")
-        return name if isinstance(name, str) else None
-
-    unavailable = [
-        {
-            "name": surface_name(row),
-            "error": row.get("error"),
-        }
-        for row in surface_rows
-        if isinstance(row, dict) and row.get("kind") == "unavailable"
-    ]
-    missing = sorted(set(required) - set(installed))
+    missing_reference_keys = sorted(required_reference_keys - installed_reference_keys)
     snapshot_state = skills.get("state")
     if snapshot_state != "ready":
         status = "snapshot_not_ready"
-    elif unavailable:
+    elif unresolved_identity_keys:
+        status = "required_identity_not_published"
+    elif required_unavailable_keys:
         status = "surface_unavailable"
-    elif missing:
-        status = "missing_tools"
+    elif missing_reference_keys:
+        status = "missing_surfaces"
     else:
         status = "ok"
     return {
         "status": status,
         "skills_url": skills_url,
         "snapshot_state": snapshot_state,
-        "required_tools": required,
-        "installed_tools": installed,
-        "missing_tools": missing,
-        "unavailable_surfaces": unavailable,
+        "required_skill_identities": [
+            skill_identity_json(key) for key in required_identity_keys
+        ],
+        "required_skill_references": [
+            skill_reference_json(key) for key in sorted(required_reference_keys)
+        ],
+        "installed_skill_references": [
+            skill_reference_json(key) for key in sorted(installed_reference_keys)
+        ],
+        "missing_skill_references": [
+            skill_reference_json(key) for key in missing_reference_keys
+        ],
+        "unresolved_required_skill_identities": [
+            skill_identity_json(key) for key in unresolved_identity_keys
+        ],
+        "unavailable_surfaces": [
+            unavailable_by_reference[key] for key in sorted(unavailable_by_reference)
+        ],
+        "required_unavailable_surfaces": [
+            unavailable_by_reference[key] for key in required_unavailable_keys
+        ],
+        "invalid_published_references": invalid_published_references,
+        "invalid_surface_references": invalid_surface_references,
     }
 
 
@@ -941,7 +1074,7 @@ def preflight(
     skills = read_skills(skills_url, token, timeout)
     composition_surfaces = composition_surface_status(
         skills=skills,
-        required_tools=catalog["keeper_required_tools"],
+        required_skill_identities=catalog["keeper_required_skill_identities"],
         skills_url=skills_url,
     )
     result = {
@@ -969,8 +1102,11 @@ def preflight(
         raise AcceptanceError(
             "composition surfaces are not ready for this campaign: "
             f"status={composition_surfaces['status']} "
-            f"missing={composition_surfaces.get('missing_tools')} "
-            f"unavailable={composition_surfaces.get('unavailable_surfaces')} — "
+            f"missing={composition_surfaces.get('missing_skill_references')} "
+            "required_unavailable="
+            f"{composition_surfaces.get('required_unavailable_surfaces')} "
+            "unresolved="
+            f"{composition_surfaces.get('unresolved_required_skill_identities')} — "
             f"inspect {composition_surfaces['skills_url']}"
         )
     return client, health, result

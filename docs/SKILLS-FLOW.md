@@ -70,20 +70,19 @@ fence 개수가 유일한 갈림길이다. `masc-composition-tool`, 다른 클�
 선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부
 fence로 감싼다.
 
-**실패와 편차는 다르다**: 카탈로그 조립의 유일한 진입점인
-`partition_documents`는 잘못된 문서만 표면에서 제외하고 모든 rejection을 별도로
-돌려준다. 그 이름을 task가 지명하면 admission에서 typed missing으로 막힌다. 구조 오류·
-사용 가능한 runtime 이름 부재·`description` 누락·fence/plan 오류·중복 스킬은 해당
-문서의 rejection이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
-`Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
-디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
+**실패와 편차는 다르다**: `Skill_catalog_snapshot`이 source scan 결과와 진단을 먼저
+불변 snapshot으로 발행하고, `Keeper_skill_catalog.of_snapshot`이 그 snapshot을 runtime
+surface로 한 번 투영한다. 잘못된 composition은 임의로 버리거나 turn 전체를 실패시키지
+않고 frozen Instruction과 typed projection diagnostic으로 남는다. 그 exact reference를
+task가 지명했는데 snapshot에서 해소되지 않을 때만 admission이 typed error를 반환한다.
+SKILL.md가 없는 디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
 
 ## 2. 카탈로그를 읽는 세 소비자
 
-카탈로그 로드는 `Keeper_run_tools_setup.load_skill_catalog`
-하나로 통일된다. 이 함수는 `Skill_catalog_snapshot_service`를 refresh한 뒤
-`effective_entries`의 정확한 bytes를 Keeper 카탈로그로 만든다. `/api/v1/skills`도 같은
-publisher를 refresh하므로 세 소비자가 source 우선순위까지 같은 로드를 쓴다:
+카탈로그의 권위는 `Skill_catalog_snapshot_service`가 발행한 snapshot 하나다. turn
+orchestrator가 turn 경계에서 snapshot을 고정하고 `prepare_agent_setup ~skill_snapshot`에
+전달한다. setup, prompt, effective surface, `/api/v1/skills`는 이 snapshot 또는 그 exact
+reference를 소비한다. 각 소비자가 파일을 다시 scan/refresh하지 않는다:
 
 ```mermaid
 sequenceDiagram
@@ -94,26 +93,27 @@ sequenceDiagram
   participant Surface as keeper_tool_composition_surface
   participant Model as 모델(LLM)
 
-  Turn->>Setup: prepare_agent_setup
-  Setup->>Snap: refresh configured sources
-  Snap-->>Setup: effective_entries + exact source_text
-  Setup->>Cat: partition_documents
+  Turn->>Snap: turn 경계에서 published snapshot 고정
+  Snap-->>Turn: snapshot_revision + exact source_text
+  Turn->>Setup: prepare_agent_setup ~skill_snapshot
+  Setup->>Cat: of_snapshot
   Setup->>Setup: validate_held_task_skill_admission
   Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
-  Setup->>Surface: make_tools ~instruction_skills ~skill_composition_entries
+  Setup->>Surface: make_tools ~instruction_skills ~skill_compositions
   Surface-->>Model: 합성 → keeper_compose_&lt;name&gt;<br/>지시 → keeper_skill (표면에 노출)
 ```
 
 ### 2a. 턴 시작 — 도구 표면
 
-`prepare_agent_setup`(`keeper_run_tools_setup.ml`)이 카탈로그를 로드하고
+`prepare_agent_setup`(`keeper_run_tools_setup.ml`)이 전달받은 frozen snapshot을 투영하고
 `validate_held_task_skill_admission`으로 **보유한 모든 task**(current + 나머지
 Claimed/InProgress, task-364 수리)가 지명한 스킬을 검사한다: 카탈로그에 없는 스킬만
 config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
 `Keeper_tool_composition_surface.make_tools`가:
 
-- 합성 스킬 → `keeper_compose_<name>` 도구(`keeper_tool_composition_catalog.ml:116`,
-  `tool_name_prefix = "keeper_compose_"`).
+- 합성 스킬 → exact `composition_skill { reference; entry }` closure가 만드는
+  `keeper_compose_<name>` 도구. activation recorder는 도구 이름에서 reference를 역추론하지
+  않는다.
 - 지시 스킬 → `keeper_skill` 도구 하나(`make_instruction_skill_tool`,
   `keeper_tool_composition_surface.ml:959`). 본문은 이 도구가 서빙한다(#30635 이후
   파일시스템 프로비저닝 불필요).
@@ -132,17 +132,18 @@ config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read
   소유에서 reconcile되고 이미 current가 있으면 유지되므로, 두 번째 task를 claim해도
   그 스킬이 current 블록에 안 실린다. 그래서 별도 블록으로 뽑는다.
 
-두 블록 모두 **이름과 도구만** 싣는다(본문 X). 본문은 tens of KB가 될 수 있어 매 턴
-싣기보다 `keeper_skill`로 필요할 때 읽는 게 싸다.
+두 블록 모두 canonical exact reference를 싣는다(본문 X). Keeper는 그 객체를 그대로
+`keeper_skill`에 전달한다. 이름-only fallback은 없다. 본문은 매 턴 prompt에 넣지 않고
+필요할 때 읽는다.
 
 ### 2c. 대시보드 — GET /api/v1/skills
 
 `lib/server/server_routes_http_routes_activity.ml`. 발행된 워크스페이스 스냅샷
-(`masc.skill-snapshot/v1`, `lib/skill_snapshot`)을 그대로 투영하고, 그 옆에 **사용
-횟수와 완료 성공/실패 횟수**를 붙인다: `effective_entries`마다 턴과 같은 파서(`parse_skill`)로 종류·도구
-이름을 정하고, tool-call 로그 꼬리 N행(`Keeper_skill_usage`)에서 합성은 도구 이름으로,
-지시는 `keeper_skill`의 `name` 인자로 센다. 스냅샷의 conformance diagnostics도
-같이 돌려 대시보드 Monitor › Skills 패널이 경고로 표시한다.
+(`masc.skill-snapshot/v1`, `lib/skill_snapshot`)과 `Keeper_skill_catalog.of_snapshot`의
+exact surface를 함께 투영한다. join key는 source/package/name/content revision 전체이며,
+instruction/composition/unavailable과 typed projection diagnostics를 표시한다. 사용 증거는
+별도 session activation ledger의 exact activation/delivery/action 기록에서 읽는다. 이름,
+tool prefix, 최근 로그 행 수로 사용 횟수를 재구성하지 않는다.
 
 ## 3. 실행과 관측
 
@@ -150,7 +151,7 @@ config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read
 flowchart TD
   M["모델이 도구 호출"] --> K{"어느 도구?"}
   K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
-  K -->|"keeper_skill(name)"| IR["지시 본문 반환<br/>keeper_skill 호출로 기록"]
+  K -->|"keeper_skill(exact reference[, file])"| IR["지시 본문/리소스 원문 반환<br/>exact activation 기록"]
   CR --> EV["tool_calls 스토어<br/>노드 행 + composition_run 종결 행"]
   IR --> EV
   EV --> SSE["SSE keeper_tool_call_evidence_committed"]
@@ -170,8 +171,7 @@ flowchart TD
 
 ## 4. 라이브 배치
 
-파일은 공유 경로 `<base>/.masc/skills/<name>/SKILL.md`에 산다(현재 6개:
-background-snapshot, ci-red-attribution, mission-snapshot, tui-pty-scenario,
-turn-opening, work-intake). 서버는 발행 스냅샷을 `masc.skill-snapshot/v1`으로 투영하며,
-새 배치 후에는 `/health`의 `binary_commit`이 실행 중 바이너리를 가리킨다(런타임 파일
-플립은 실행 중 바이너리 기준으로 판단한다.
+파일 위치와 우선순위는 `<base>/.masc/config/runtime.toml`의
+`[[skills.sources]]`만이 정한다. source 수나 Skill 이름을 코드·문서에 고정하지 않는다.
+서버는 발행 snapshot revision을 API/effective surface에 투영하며, 새 배치 후에는
+`/health`의 `binary_commit`과 snapshot revision을 함께 확인한다.

@@ -40,9 +40,10 @@ description: Walk the release checklist before shipping.
   MASC는 이 필드를 받아 놓고 무시하지 않는다. 스킬을 명시적으로 거부하며, 모든 도구
   호출은 기존 MASC 승인 게이트만 따른다.
 - 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
-  제외된 이름을 task가 지명한 경우에만 admission이 typed missing 오류로 막는다. 정확한
-  파싱 오류는 `/api/v1/skills`의 `rejections` 또는 `usage.kind = "unparsed"`에 남는다.
-- 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
+  제외된 exact reference를 task가 지명한 경우에만 admission이 typed 오류를 반환한다.
+  정확한 파싱 오류는 `/api/v1/skills`의 `rejections`와 exact surface diagnostic에 남는다.
+- 본문은 frozen snapshot bytes로 보존된다. Keeper는 `keeper_skill`에 canonical exact
+  reference를 전달해 본문을 받는다.
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다
 

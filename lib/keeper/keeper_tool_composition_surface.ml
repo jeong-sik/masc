@@ -250,47 +250,6 @@ let schema_tool_rows ?(skill_compositions = []) () =
   else composition_tools @ [ plan_execute_tool ]
 ;;
 
-let schema_tools ?(skill_composition_entries = [])
-      ?(instruction_skills = []) () =
-  let composition_tools =
-    List.map schema_tool_of_entry skill_composition_entries
-  in
-  let plan_execute_tool =
-    schema_tool
-      ~name:plan_execute_tool_name
-      ~description:plan_execute_description
-      ~input_schema:plan_execute_input_schema
-  in
-  let instruction_tools =
-    if instruction_skills <> []
-    then
-      [ schema_tool
-          ~name:Catalog.skill_tool_name
-          ~description:(instruction_skill_description instruction_skills)
-          ~input_schema:skill_tool_schema.input_schema
-      ]
-    else []
-  in
-  let composition_tools = composition_tools @ instruction_tools in
-  if
-    List.exists
-      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
-      skill_composition_entries
-  then
-    composition_tools
-    @ [ plan_execute_tool
-      ; schema_tool
-          ~name:Catalog.status_tool_name
-          ~description:Tool_schemas_composition_control.status_schema.description
-          ~input_schema:Tool_schemas_composition_control.status_schema.input_schema
-      ; schema_tool
-          ~name:Catalog.cancel_tool_name
-          ~description:Tool_schemas_composition_control.cancel_schema.description
-          ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
-      ]
-  else composition_tools @ [ plan_execute_tool ]
-;;
-
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
   `Assoc
     [ "planned_index", `Int schedule.planned_index

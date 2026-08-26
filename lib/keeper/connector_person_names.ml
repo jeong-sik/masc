@@ -36,28 +36,6 @@ let report_read_drop ~reason ~path ~detail =
     ~path
     ~detail
 
-(* Append-only, last line wins. A rename is a new line rather than a rewrite,
-   so a crash mid-write costs the newest name and not the file. *)
-let remember ~base_dir ~connector ~(id : string) ~(name : string) () =
-  if String.trim id = "" || String.trim name = "" then ()
-  else
-    try
-      ignore (Keeper_fs.ensure_dir (people_dir base_dir));
-      let line =
-        Yojson.Safe.to_string
-          (`Assoc
-            [ ("id", `String id)
-            ; ("name", `String name)
-            ; ("ts", `Float (Time_compat.now ()))
-            ])
-      in
-      Fs_compat.append_file (people_path ~base_dir ~connector) (line ^ "\n")
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Keeper.warn "connector_person_names: append failed for %s: %s"
-        (sanitize_name connector) (Printexc.to_string exn)
-
 let parse_row ~file_path line =
   try
     match Yojson.Safe.from_string line with
@@ -72,24 +50,100 @@ let parse_row ~file_path line =
       report_read_drop ~reason:Read_drop_reason.Invalid_payload ~path:file_path
         ~detail:"row is not a JSON object";
       None
-  with exn ->
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
     report_read_drop ~reason:Read_drop_reason.Json_syntax_error ~path:file_path
       ~detail:(Printexc.to_string exn);
     None
 
+(* One process reads each connector directory once. Successful live lookups
+   are much more frequent than renames; without this cache, every message
+   appended the same pair and every fallback rescanned the growing history.
+   The mutex also makes the shared connector append a single physical row. *)
+let directories : (string, (string, string) Hashtbl.t) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let directories_mu = Stdlib.Mutex.create ()
+
+let with_directories_lock f =
+  Stdlib.Mutex.lock directories_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock directories_mu) f
+;;
+
+let load_directory file_path =
+  let directory = Hashtbl.create 32 in
+  if Sys.file_exists file_path
+  then (
+    try
+      Fs_compat.load_file file_path
+      |> String.split_on_char '\n'
+      |> List.iter (fun line ->
+        if String.trim line <> ""
+        then
+          match parse_row ~file_path line with
+          | Some (id, name) -> Hashtbl.replace directory id name
+          | None -> ())
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Sys_error detail ->
+      report_read_drop
+        ~reason:Read_drop_reason.Entry_load_error
+        ~path:file_path
+        ~detail);
+  directory
+;;
+
+let directory_for_path file_path =
+  match Hashtbl.find_opt directories file_path with
+  | Some directory -> directory
+  | None ->
+    let directory = load_directory file_path in
+    Hashtbl.add directories file_path directory;
+    directory
+;;
+
+(* Append-only, last line wins, but only a changed name earns a row. A rename
+   is a new row rather than a rewrite, so a crash mid-write costs the newest
+   name and not the directory. *)
+let remember ~base_dir ~connector ~(id : string) ~(name : string) () =
+  let id = String.trim id in
+  let name = String.trim name in
+  if String.equal id "" || String.equal name ""
+  then ()
+  else
+    with_directories_lock (fun () ->
+      let file_path = people_path ~base_dir ~connector in
+      let directory = directory_for_path file_path in
+      match Hashtbl.find_opt directory id with
+      | Some known when String.equal known name -> ()
+      | Some _ | None ->
+        (try
+           ignore (Keeper_fs.ensure_dir (people_dir base_dir));
+           let line =
+             Yojson.Safe.to_string
+               (`Assoc
+                 [ "id", `String id
+                 ; "name", `String name
+                 ; "ts", `Float (Time_compat.now ())
+                 ])
+           in
+           Fs_compat.append_file file_path (line ^ "\n");
+           Hashtbl.replace directory id name
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Log.Keeper.warn "connector_person_names: append failed for %s: %s"
+             (sanitize_name connector) (Printexc.to_string exn)))
+;;
+
 let recall ~base_dir ~connector ~(id : string) =
-  let file_path = people_path ~base_dir ~connector in
-  match Fs_compat.load_file file_path with
-  | exception Sys_error _ -> None
-  | contents ->
-    (* Last line wins, so the scan keeps the newest match rather than
-       stopping at the first. *)
-    String.split_on_char '\n' contents
-    |> List.fold_left
-         (fun found line ->
-           if String.trim line = "" then found
-           else
-             match parse_row ~file_path line with
-             | Some (row_id, name) when String.equal row_id id -> Some name
-             | Some _ | None -> found)
-         None
+  let id = String.trim id in
+  if String.equal id ""
+  then None
+  else
+    with_directories_lock (fun () ->
+      let file_path = people_path ~base_dir ~connector in
+      directory_for_path file_path |> fun directory -> Hashtbl.find_opt directory id)
+;;

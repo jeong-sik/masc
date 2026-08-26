@@ -54,6 +54,20 @@ let test_the_newest_name_wins () =
   check (option string) "the rename is what comes back" (Some "Vince")
     (Names.recall ~base_dir ~connector:"slack" ~id:"U1")
 
+let test_repeating_a_name_does_not_grow_the_log () =
+  with_temp_base @@ fun base_dir ->
+  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  let path =
+    Filename.concat base_dir ".masc/connector_people/slack.jsonl"
+  in
+  let rows =
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+  in
+  check int "one durable row for one observed name" 1 (List.length rows)
+
 (* An empty name is the absence this store exists to answer. Recording it
    would let a blank overwrite a name and then be spoken as one. *)
 let test_a_blank_is_not_an_answer () =
@@ -75,6 +89,8 @@ let () =
         ; test_case "connectors do not share names" `Quick
             test_connectors_do_not_share_names
         ; test_case "the newest name wins" `Quick test_the_newest_name_wins
+        ; test_case "repeating a name does not grow the log" `Quick
+            test_repeating_a_name_does_not_grow_the_log
         ; test_case "a blank is not an answer" `Quick
             test_a_blank_is_not_an_answer
         ] )

@@ -16,7 +16,10 @@
 val remember :
   base_dir:string -> connector:string -> id:string -> name:string -> unit -> unit
 (** Record what this id was called. Blank ids and blank names are ignored --
-    an empty name is the absence this store exists to answer, not an answer. *)
+    an empty name is the absence this store exists to answer, not an answer.
+    Repeating the current name does not append another durable row. *)
 
 val recall : base_dir:string -> connector:string -> id:string -> string option
-(** The most recent name recorded for this id, or [None] where none was. *)
+(** The most recent name recorded for this id, or [None] where none was. Each
+    connector file is loaded once per process; fallback cost does not grow per
+    message with the append history. *)

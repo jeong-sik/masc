@@ -79,9 +79,13 @@ let ad_hoc_plan_nodes input =
   | _ -> None
 ;;
 
-let rec verdict_for ?composition_plan_index ~tool_name ~input =
+(* The trailing unit is what lets [?composition_plan_index] be left out.
+   Every other argument is labelled, so without it nothing marks the
+   application as finished and each call reads as a function still waiting
+   for the optional. *)
+let rec verdict_for ?composition_plan_index ~tool_name ~input () =
   match descriptor_for tool_name with
-  | None -> verdict_for_undescribed ?composition_plan_index ~tool_name ~input
+  | None -> verdict_for_undescribed ?composition_plan_index ~tool_name ~input ()
   | Some descriptor -> (
       match Descriptor.readonly_for_input descriptor ~input with
       | Some true ->
@@ -200,7 +204,7 @@ and verdict_of_nodes node_tools =
             (List.length node_tools)
       }
 
-and verdict_for_undescribed ?composition_plan_index ~tool_name ~input =
+and verdict_for_undescribed ?composition_plan_index ~tool_name ~input () =
   match undescribed_kind ?composition_plan_index tool_name with
   | Control verdict -> verdict
   | Attached_service (Some true) ->
@@ -230,7 +234,7 @@ and verdict_for_undescribed ?composition_plan_index ~tool_name ~input =
     Ask { because = unclassifiable_because }
 ;;
 
-let classifies ?composition_plan_index ~tool_name =
+let classifies ?composition_plan_index ~tool_name () =
   match descriptor_for tool_name with
   | Some _ -> true
   | None ->

@@ -3,14 +3,28 @@ open Alcotest
 module Policy = Masc.Keeper_tool_approval_policy
 module Descriptor = Masc.Keeper_tool_descriptor
 
-let asks ?composition_plan_index ~tool_name ~input =
-  match Policy.verdict_for ?composition_plan_index ~tool_name ~input with
+(* Two helpers rather than one with an optional. [verdict_for] ends in a
+   unit so its own optional can be erased; a helper that kept the optional
+   and ended in a labelled argument could not, and would put a trailing unit
+   on every call in this file for the third of them that pass an index. *)
+let verdict ?composition_plan_index ~tool_name ~input () =
+  Policy.verdict_for ?composition_plan_index ~tool_name ~input ()
+
+let asks ~tool_name ~input =
+  match verdict ~tool_name ~input () with
   | Policy.Ask _ -> true
   | Policy.Run _ -> false
 
-let because ?composition_plan_index ~tool_name ~input =
-  Policy.verdict_because
-    (Policy.verdict_for ?composition_plan_index ~tool_name ~input)
+let asks_with ~composition_plan_index ~tool_name ~input =
+  match verdict ~composition_plan_index ~tool_name ~input () with
+  | Policy.Ask _ -> true
+  | Policy.Run _ -> false
+
+let because ~tool_name ~input =
+  Policy.verdict_because (verdict ~tool_name ~input ())
+
+let because_with ~composition_plan_index ~tool_name ~input =
+  Policy.verdict_because (verdict ~composition_plan_index ~tool_name ~input ())
 
 let no_input = `Assoc []
 
@@ -111,11 +125,11 @@ let with_index rows f =
 let test_a_plan_of_reads_runs_unasked () =
   with_index [ "keeper_compose_reading", [ "Read"; "Grep" ] ] (fun index ->
     check bool "a composition that only reads is not asked about" false
-      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_reading"
+      (asks_with ~composition_plan_index:index ~tool_name:"keeper_compose_reading"
          ~input:no_input);
     check bool "the reason counts the nodes it cleared" true
       (String.length
-         (because ~composition_plan_index:index
+         (because_with ~composition_plan_index:index
             ~tool_name:"keeper_compose_reading" ~input:no_input)
        > 0))
 ;;
@@ -123,10 +137,10 @@ let test_a_plan_of_reads_runs_unasked () =
 let test_one_writing_node_asks_and_names_itself () =
   with_index [ "keeper_compose_mixed", [ "Read"; "Write"; "Grep" ] ] (fun index ->
     check bool "one node that changes something asks for the whole plan" true
-      (asks ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+      (asks_with ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
          ~input:no_input);
     let reason =
-      because ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
+      because_with ~composition_plan_index:index ~tool_name:"keeper_compose_mixed"
         ~input:no_input
     in
     (* Without the node name the operator sees a composition name and has to
@@ -142,21 +156,21 @@ let test_same_name_is_isolated_between_turn_indexes () =
   Index.record first_turn ~composition ~node_tools:[ "Read" ];
   Index.record second_turn ~composition ~node_tools:[ "Write" ];
   check bool "first turn keeps its read-only plan" false
-    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input);
+    (asks_with ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input);
   check bool "second turn sees its writing plan" true
-    (asks ~composition_plan_index:second_turn ~tool_name:composition ~input:no_input);
+    (asks_with ~composition_plan_index:second_turn ~tool_name:composition ~input:no_input);
   check bool "second writer did not mutate the first turn" false
-    (asks ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input)
+    (asks_with ~composition_plan_index:first_turn ~tool_name:composition ~input:no_input)
 ;;
 
 let test_an_unrecorded_name_is_still_unclassifiable () =
   with_index [] (fun index ->
     check bool "a name that is not a composition keeps the old answer" true
-      (asks ~composition_plan_index:index
+      (asks_with ~composition_plan_index:index
          ~tool_name:"keeper_compose_never_declared" ~input:no_input);
     check string "and keeps the old reason"
       "no descriptor declares what this tool does"
-      (because ~composition_plan_index:index
+      (because_with ~composition_plan_index:index
          ~tool_name:"keeper_compose_never_declared" ~input:no_input))
 ;;
 

@@ -18,6 +18,7 @@ val verdict_for :
   ?composition_plan_index:Keeper_tool_composition_plan_index.t ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  unit ->
   verdict
 (** Decide about one call.
 
@@ -48,6 +49,7 @@ val verdict_for :
 val classifies :
   ?composition_plan_index:Keeper_tool_composition_plan_index.t ->
   tool_name:string ->
+  unit ->
   bool
 (** Whether this build can place [tool_name] at all.
 

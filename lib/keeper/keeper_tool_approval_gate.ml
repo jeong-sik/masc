@@ -20,7 +20,7 @@ let create ~registry ~publish ~clock ~keeper_name ~timeout_sec =
         | Mode.Yolo -> Agent_core.Hooks.Continue
         | Mode.Auto -> (
             match
-              Policy.verdict_for ~composition_plan_index ~tool_name ~input
+              Policy.verdict_for ~composition_plan_index ~tool_name ~input ()
             with
             | Policy.Run _ -> Agent_core.Hooks.Continue
             | Policy.Ask { because } ->

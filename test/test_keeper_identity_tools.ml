@@ -416,14 +416,14 @@ let test_the_policy_can_place_an_attached_tool () =
   let base_path = temp_base () in
   let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
   check Alcotest.bool "classifiable" true
-    (Policy.classifies ~tool_name:"atlassian_getJiraIssue")
+    (Policy.classifies ~tool_name:"atlassian_getJiraIssue" ())
 
 let test_a_read_only_tool_runs_unasked () =
   Index.forget_all (Index.shared ());
   let base_path = temp_base () in
   let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
   match
-    Policy.verdict_for ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc []) ()
   with
   | Policy.Run _ -> ()
   | Policy.Ask { because } ->
@@ -434,7 +434,7 @@ let test_a_writing_tool_is_asked_about () =
   let base_path = temp_base () in
   let _ = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
   match
-    Policy.verdict_for ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
+    Policy.verdict_for ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc []) ()
   with
   | Policy.Ask _ -> ()
   | Policy.Run { because } ->
@@ -448,7 +448,7 @@ let test_silence_is_not_permission () =
   let _ = offer ~base_path [ tool "somethingUnannotated" ] in
   match
     Policy.verdict_for ~tool_name:"atlassian_somethingUnannotated"
-      ~input:(`Assoc [])
+      ~input:(`Assoc []) ()
   with
   | Policy.Ask { because } ->
       check Alcotest.bool "and the reason names the silence" true
@@ -462,7 +462,7 @@ let test_a_name_from_no_service_stays_unknown () =
      folding the two would let this arm swallow every unknown tool. *)
   Index.forget_all (Index.shared ());
   check Alcotest.bool "not classifiable" false
-    (Policy.classifies ~tool_name:"atlassian_neverOffered")
+    (Policy.classifies ~tool_name:"atlassian_neverOffered" ())
 
 (* ── renewal ─────────────────────────────────────────────────────────── *)
 

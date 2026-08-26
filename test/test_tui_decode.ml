@@ -1516,8 +1516,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `String "read"
       ; "tool_groups", `List [ `String "filesystem" ]
+      ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
       ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
+      ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
       ; "count", `Int 1
       ; ( "tools"
@@ -1573,8 +1575,10 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `Null
       ; "tool_groups", `List []
+      ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ `String "legacy-name" ]
       ; "composition_skills", `List []
+      ; "skills_left_out", `List []
       ; "count", `Int 0
       ; "tools", `List []
       ; "tool_surface_sha256", `Null
@@ -1620,8 +1624,10 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
             ] )
       ; "native_posture", `Null
       ; "tool_groups", `List []
+      ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List []
       ; "composition_skills", `List []
+      ; "skills_left_out", `List []
       ; "count", `Int 0
       ; "tools", `List []
       ; "tool_surface_sha256", `Null
@@ -1652,7 +1658,18 @@ let skill_activation_reference_json name revision =
     ; "content_revision", `String (String.make 64 revision)
     ]
 
-let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instruction" ])
+let skill_activation_json
+    ?(invocation =
+      `Assoc
+        [ "kind", `String "instruction"
+        ; "origin", `Assoc [ "kind", `String "session_instruction" ]
+        ; ( "served_content"
+          , `Assoc
+              [ "kind", `String "skill_body"
+              ; "bytes", `Int 12
+              ; "sha256", `String (String.make 64 'c')
+              ] )
+        ])
     ?(revision = 'a') () =
   match skill_activation_reference_json "ocaml-coding" revision with
   | `Assoc reference_fields ->
@@ -1663,16 +1680,10 @@ let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instructi
            ; "runtime_id", `String "test.runtime"
            ; "skill_tool_use_id", `String (Printf.sprintf "call-%c" revision)
            ; "agent_core_turn", `Int 0
-           ; ( "served_content"
-             , `Assoc
-                 [ "kind", `String "skill_body"
-                 ; "bytes", `Int 12
-                 ; "sha256", `String (String.make 64 'c')
-                 ] )
+           ; "invocation", invocation
            ; "delivery", `Null
            ; "actions", `List []
            ; "activated_at", `String "2026-08-26T10:30:00Z"
-           ; "origin", origin
            ])
   | _ -> assert false
 
@@ -1684,6 +1695,7 @@ let skill_activation_projection_json activations =
       [ "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "activations", `List activations
+      ; "transition_rejections", `List []
       ]
     |> Yojson.Safe.to_string
     |> Digestif.SHA256.digest_string
@@ -1694,29 +1706,35 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v2"
+          [ "schema", `String "masc.skill-activations/v3"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
           ; "activations", `List activations
+          ; "transition_rejections", `List []
           ] )
     ]
 
 let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
-  let task_origin =
+  let task_invocation =
     `Assoc
-      [ "kind", `String "task_composition"
-      ; "task_id", `String "task-470"
+      [ "kind", `String "composition"
+      ; ( "origin"
+        , `Assoc
+            [ "kind", `String "task_composition"
+            ; "task_id", `String "task-470"
+            ] )
       ; "tool_name", `String "run-checks"
       ]
   in
   let activations =
     skill_activation_projection_json
-      [ skill_activation_json ~origin:task_origin ()
+      [ skill_activation_json ~invocation:task_invocation ()
       ; skill_activation_json ~revision:'b'
-          ~origin:
+          ~invocation:
             (`Assoc
-               [ "kind", `String "session_composition"
+               [ "kind", `String "composition"
+               ; "origin", `Assoc [ "kind", `String "session_composition" ]
                ; "tool_name", `String "summarize"
                ])
           ()
@@ -1745,14 +1763,16 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
         | _ -> Alcotest.fail "expected two canonical activation rows"
       in
       let sao_task_id, sao_tool_name =
-        match first.origin with
-        | Keeper_skill_activation_ledger.Task_composition
-            { task_id; tool_name } -> task_id, tool_name
+        match first.invocation with
+        | Keeper_skill_activation_ledger.Composition_invocation
+            { origin = Task_composition { task_id }; tool_name } ->
+          task_id, tool_name
         | _ -> Alcotest.fail "expected task composition origin"
       in
       let session_tool =
-        match second.origin with
-        | Keeper_skill_activation_ledger.Session_composition { tool_name } ->
+        match second.invocation with
+        | Keeper_skill_activation_ledger.Composition_invocation
+            { origin = Session_composition; tool_name } ->
           tool_name
         | _ -> Alcotest.fail "expected session composition origin"
       in

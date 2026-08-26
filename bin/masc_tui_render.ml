@@ -7256,16 +7256,18 @@ let tool_domain_rule_cells = 21
 let tool_domain_rule =
   String.concat "" (List.init tool_domain_rule_cells (fun _ -> Ansi.box_h))
 
-let skill_activation_origin_text = function
+let skill_instruction_origin_text = function
   | Masc.Keeper_skill_activation_ledger.Task_instruction { task_id } ->
       "task_instruction task=" ^ Keeper_id.Task_id.to_string task_id
   | Masc.Keeper_skill_activation_ledger.Session_instruction ->
       "session_instruction"
+
+let skill_composition_origin_text ~tool_name = function
   | Masc.Keeper_skill_activation_ledger.Task_composition
-      { task_id; tool_name } ->
+      { task_id } ->
       Printf.sprintf "task_composition task=%s tool=%s"
         (Keeper_id.Task_id.to_string task_id) tool_name
-  | Masc.Keeper_skill_activation_ledger.Session_composition { tool_name } ->
+  | Masc.Keeper_skill_activation_ledger.Session_composition ->
       "session_composition tool=" ^ tool_name
 
 let skill_served_content_text = function
@@ -7274,6 +7276,15 @@ let skill_served_content_text = function
   | Masc.Keeper_skill_activation_ledger.Skill_resource
       { relative_path; bytes; sha256 } ->
       Printf.sprintf "resource=%s bytes=%d sha256=%s" relative_path bytes sha256
+
+let skill_invocation_text = function
+  | Masc.Keeper_skill_activation_ledger.Instruction_invocation
+      { origin; served_content } ->
+    skill_instruction_origin_text origin, skill_served_content_text served_content
+  | Masc.Keeper_skill_activation_ledger.Composition_invocation
+      { origin; tool_name } ->
+    ( skill_composition_origin_text ~tool_name origin
+    , "composition invocation tool=" ^ tool_name )
 
 let skill_delivery_text = function
   | None -> "pending"
@@ -7355,6 +7366,7 @@ let render_tools (state : state) =
                    ets_tool_delivery;
                    ets_native_posture;
                    ets_tool_groups;
+                   ets_skill_snapshot_revision;
                    ets_skill_resource_read_max_bytes;
                    ets_instruction_skills;
                    ets_skills_left_out;
@@ -7425,6 +7437,9 @@ let render_tools (state : state) =
             (Terminal_text.single_line instruction)
             (Terminal_text.single_line composition);
           Ansi.dim,
+          "   skill snapshot="
+          ^ Terminal_text.single_line ets_skill_snapshot_revision;
+          Ansi.dim,
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         (* Said on this surface because this is the one that answers "what can
@@ -7445,25 +7460,6 @@ let render_tools (state : state) =
                   left_out)
         @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
-  in
-  let offered_instruction_skills =
-    match state.tools_inventory with
-    | Some
-        { Masc.Tui_decode.ts_effective =
-            Some
-              (Masc.Tui_decode.Effective_surface_available
-                 { ets_instruction_skills; _ });
-          _ } ->
-        Some (List.length ets_instruction_skills)
-    | None
-    | Some { ts_effective = None; _ }
-    | Some
-        { ts_effective =
-            Some
-              (Masc.Tui_decode.Effective_surface_unavailable _
-              | Masc.Tui_decode.Effective_surface_warming _);
-          _ } ->
-        None
   in
   let activation_lines =
     match state.tools_inventory with
@@ -7504,9 +7500,47 @@ let render_tools (state : state) =
         let summary =
           Masc.Keeper_skill_activation_ledger.summarize sap_ledger
         in
+        let scoped_summaries =
+          Masc.Keeper_skill_activation_ledger.summarize_by_scope sap_ledger
+        in
+        let scoped_lines =
+          List.concat_map
+            (fun (scoped : Masc.Keeper_skill_activation_ledger.scoped_summary) ->
+               let exact =
+                 Skill_reference.to_yojson scoped.scope.reference
+                 |> Yojson.Safe.to_string
+               in
+               let scoped_summary = scoped.summary in
+               [ Ansi.dim,
+                 "   proof exact=" ^ Terminal_text.single_line exact
+               ; Ansi.dim,
+                 Printf.sprintf
+                   "     snapshot=%s keeper_turn=%s runtime=%s"
+                   (Skill_catalog_snapshot.snapshot_revision_to_string
+                      scoped.scope.snapshot_revision
+                    |> Terminal_text.single_line)
+                   (Ids.Turn_ref.to_string scoped.scope.turn_ref
+                    |> Terminal_text.single_line)
+                   (Terminal_text.single_line scoped.scope.runtime_id)
+               ; Ansi.dim,
+                 Printf.sprintf
+                   "     invoked=%d bodies=%d resources=%d delivered=%d actions=%d composition=%d/%d/%d invalid=%d"
+                   scoped_summary.instruction_invocations
+                   scoped_summary.skill_bodies_served
+                   scoped_summary.skill_resources_served
+                   scoped_summary.instruction_deliveries
+                   scoped_summary.instruction_actions_observed
+                   scoped_summary.composition_invocations
+                   scoped_summary.composition_deliveries
+                   scoped_summary.composition_actions_observed
+                   scoped_summary.invalid_transitions
+               ])
+            scoped_summaries
+        in
         let receipt_lines =
           List.concat_map
             (fun (activation : Masc.Keeper_skill_activation_ledger.activation) ->
+               let origin, served = skill_invocation_text activation.invocation in
                let exact_reference =
                  Skill_reference.make
                    ~identity:activation.identity
@@ -7524,8 +7558,7 @@ let render_tools (state : state) =
                    (Terminal_text.single_line activation.activated_at)
                ; Ansi.dim,
                  "       served "
-                 ^ (skill_served_content_text activation.served_content
-                    |> Terminal_text.single_line)
+                 ^ Terminal_text.single_line served
                ; Ansi.dim,
                  "       delivered "
                  ^ (skill_delivery_text activation.delivery
@@ -7537,16 +7570,10 @@ let render_tools (state : state) =
                     |> Terminal_text.single_line)
                    (Ids.Turn_ref.to_string activation.turn_ref
                     |> Terminal_text.single_line)
-                   (skill_activation_origin_text activation.origin
-                    |> Terminal_text.single_line)
+                   (Terminal_text.single_line origin)
                ]
                @ skill_action_lines activation.actions)
             sap_activations
-        in
-        let offered =
-          match offered_instruction_skills with
-          | Some count -> string_of_int count
-          | None -> "unknown"
         in
         [ Ansi.bold,
           Printf.sprintf " Skill Use — %s (%d receipts)"
@@ -7554,8 +7581,7 @@ let render_tools (state : state) =
             (List.length sap_activations)
         ; Ansi.bold,
           Printf.sprintf
-            "   offered=%s invoked=%d bodies=%d resources=%d delivered=%d actions=%d invalid=%d"
-            offered
+            "   session totals: invoked=%d bodies=%d resources=%d delivered=%d actions=%d invalid=%d"
             summary.instruction_invocations
             summary.skill_bodies_served
             summary.skill_resources_served
@@ -7581,6 +7607,7 @@ let render_tools (state : state) =
           ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger
              |> Terminal_text.single_line)
         ]
+        @ scoped_lines
         @ receipt_lines
   in
   let catalog_lines =

@@ -258,14 +258,7 @@ let test_a_keeper_is_offered_all_four () =
    surviving it with anything to append. *)
 let test_the_boot_projection_keeps_all_four () =
   let module TD = Masc.Keeper_tool_descriptor in
-  let empty_catalog =
-    match Masc.Keeper_skill_catalog.of_documents [] with
-    | Ok catalog -> catalog
-    | Error error ->
-      Alcotest.fail
-        ("empty skill catalog was rejected: "
-        ^ Masc.Keeper_skill_catalog.error_to_string error)
-  in
+  let empty_catalog = Masc.Keeper_skill_catalog.empty in
   let projected =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
         ~identity_tool_names:[]

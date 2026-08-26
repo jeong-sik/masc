@@ -1,6 +1,7 @@
 type tool_origin =
   | Descriptor of { group : string }
-  | Composition_skill of { source : string }
+  | Composition_skill of
+      { provenance : Keeper_skill_catalog.provenance option }
   | Composition_plan
   | Composition_control
 
@@ -63,26 +64,29 @@ let descriptor_rows descriptors =
     descriptors
 ;;
 
-let composition_origin name =
-  match Keeper_tool_composition_catalog.skill_source_of_tool_name name with
-  | Some source -> Composition_skill { source }
-  | None when
-      String.equal name Keeper_tool_composition_surface.plan_execute_tool_name ->
-    Composition_plan
-  | None -> Composition_control
-;;
-
 let composition_rows skill_catalog =
-  Keeper_tool_composition_surface.schema_tools
-    ~skill_composition_entries:
-      (Keeper_skill_catalog.composition_entries skill_catalog)
+  let skill_compositions =
+    Keeper_skill_catalog.compositions skill_catalog
+    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
+      composition.entry, composition.provenance)
+  in
+  Keeper_tool_composition_surface.schema_tool_rows
+    ~skill_compositions
     ()
-  |> List.map (fun (schema_tool : Agent_core.Tool.t) ->
+  |> List.map (fun (origin, (schema_tool : Agent_core.Tool.t)) ->
     let name = schema_tool.schema.name in
-    { name; origin = composition_origin name }, schema_tool)
+    let origin =
+      match origin with
+      | Keeper_tool_composition_surface.Declared_composition provenance ->
+        Composition_skill { provenance }
+      | Keeper_tool_composition_surface.Plan_execute -> Composition_plan
+      | Keeper_tool_composition_surface.Async_status
+      | Keeper_tool_composition_surface.Async_cancel -> Composition_control
+    in
+    { name; origin }, schema_tool)
 ;;
 
-let validate_task_skills ~task_skill_names ~skill_catalog ~model_tool_names =
+let validate_task_skills ~task_skill_names ~skill_catalog =
   let rec loop instruction = function
     | [] -> Ok (List.rev instruction)
     | name :: rest ->
@@ -96,17 +100,7 @@ let validate_task_skills ~task_skill_names ~skill_catalog ~model_tool_names =
           | Keeper_skill_catalog.Composition _ -> loop instruction rest
           | Keeper_skill_catalog.Instruction -> loop (name :: instruction) rest))
   in
-  match loop [] task_skill_names with
-  | Error _ as error -> error
-  | Ok instruction_skills ->
-    if instruction_skills <> [] && not (List.mem "Read" model_tool_names)
-    then
-      Error
-        ( "instruction_skill_unreadable"
-        , Printf.sprintf
-            "instruction skills [%s] require the model-visible Read tool"
-            (String.concat ", " instruction_skills) )
-    else Ok instruction_skills
+  loop [] task_skill_names
 ;;
 
 let project
@@ -126,9 +120,8 @@ let project
   let rows = descriptor_rows descriptors @ composition_rows skill_catalog in
   let tools = List.map fst rows in
   let schema_tools = List.map snd rows in
-  let model_tool_names = List.map (fun row -> row.name) tools in
   match
-    validate_task_skills ~task_skill_names ~skill_catalog ~model_tool_names
+    validate_task_skills ~task_skill_names ~skill_catalog
   with
   | Error _ as error -> error
   | Ok instruction_skills ->
@@ -223,6 +216,21 @@ let unavailable keeper_name (reason, detail) =
   Unavailable { keeper_name; reason; detail }
 ;;
 
+let published_skill_catalog ~base_path =
+  match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
+  | Error error ->
+    Error
+      ( "skill_snapshot_invalid_workspace"
+      , Config_dir_resolver.canonical_base_path_error_to_string error )
+  | Ok None ->
+    Error ("skill_snapshot_not_registered", "Skill snapshot is not registered")
+  | Ok (Some workspace) ->
+    (match Skill_catalog_snapshot_service.current ~workspace with
+     | None ->
+       Error ("skill_snapshot_uninitialized", "Skill snapshot is not published")
+     | Some snapshot -> Ok (Keeper_skill_catalog.of_snapshot snapshot |> fst))
+;;
+
 let resolve ~config ~keeper_name =
   match Keeper_meta_store.read_meta config keeper_name with
   | Error detail -> unavailable keeper_name ("keeper_meta_unreadable", detail)
@@ -235,11 +243,8 @@ let resolve ~config ~keeper_name =
     (match task_skills config current_task_id with
      | Error error -> unavailable keeper_name error
      | Ok task_skill_names ->
-       (match Keeper_run_tools_setup.load_skill_catalog ~base_path:config.base_path with
-        | Error error ->
-          unavailable
-            keeper_name
-            ("skill_catalog_unreadable", Agent_core.Error.to_string error)
+       (match published_skill_catalog ~base_path:config.base_path with
+        | Error error -> unavailable keeper_name error
         | Ok skill_catalog ->
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
@@ -275,9 +280,14 @@ let string_list values = `List (List.map (fun value -> `String value) values)
 let origin_to_yojson = function
   | Descriptor { group } ->
     `Assoc [ "kind", `String "descriptor"; "group", `String group ]
-  | Composition_skill { source } ->
+  | Composition_skill { provenance } ->
     `Assoc
-      [ "kind", `String "composition_skill"; "skill_source", `String source ]
+      [ "kind", `String "composition_skill"
+      ; ( "skill_provenance"
+        , match provenance with
+          | Some provenance -> Keeper_skill_catalog.provenance_to_yojson provenance
+          | None -> `Null )
+      ]
   | Composition_plan -> `Assoc [ "kind", `String "composition_plan" ]
   | Composition_control -> `Assoc [ "kind", `String "composition_control" ]
 ;;

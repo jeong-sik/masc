@@ -587,6 +587,10 @@ let run_keeper_invocation_turn_admitted_inner
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             let world_observation = direct_turn_observation ~config:ctx.config meta in
+            let skill_snapshot =
+              Keeper_agent_run.capture_skill_snapshot
+                ~base_path:ctx.config.base_path
+            in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
@@ -718,6 +722,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~build_turn_prompt
 		                                ~user_message:message
 		                                ~turn_kind:Turn_record.Direct
+		                                ~skill_snapshot
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation

@@ -97,99 +97,6 @@ let gate_causal_initial
     ]
 ;;
 
-let skill_catalog_config_error detail =
-  Agent_core.Error.Config
-    (Agent_core.Error.InvalidConfig { field = "skills"; detail })
-;;
-
-let skill_catalog_io_error ~op ~path exn =
-  Agent_core.Error.Io
-    (Agent_core.Error.FileOpFailed
-       { op; path; detail = Printexc.to_string exn })
-;;
-
-let skills_dir_of_base_path ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
-;;
-
-(* A directory under skills/ that carries no SKILL.md is not a skill and is
-   skipped: in the Agent Skills layout the file is the declaration, and a
-   half-installed directory should not take the whole tool surface down. A
-   SKILL.md that exists but fails to parse is a config error — the operator
-   declared a skill and masc cannot honour it. *)
-let load_skill_catalog ~base_path =
-  let skills_dir = skills_dir_of_base_path ~base_path in
-  match
-    try Ok (Fs_compat.exact_path_kind skills_dir) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (skill_catalog_io_error ~op:"inspect" ~path:skills_dir exn)
-  with
-  | Error _ as error -> error
-  | Ok Fs_compat.Exact_missing -> Ok Keeper_skill_catalog.empty
-  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
-    (match
-       try Ok (List.sort String.compare (Fs_compat.read_dir skills_dir)) with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Error (skill_catalog_io_error ~op:"read_dir" ~path:skills_dir exn)
-     with
-     | Error _ as error -> error
-     | Ok entries ->
-       let rec collect documents = function
-         | [] -> Ok (List.rev documents)
-         | entry :: rest ->
-           let skill_md =
-             Filename.concat (Filename.concat skills_dir entry) "SKILL.md"
-           in
-           (match
-              try Ok (Fs_compat.exact_path_kind skill_md) with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn ->
-                Error (skill_catalog_io_error ~op:"inspect" ~path:skill_md exn)
-            with
-            | Error _ as error -> error
-            | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
-              (match
-                 try Ok (Fs_compat.load_file skill_md) with
-                 | Eio.Cancel.Cancelled _ as exn -> raise exn
-                 | exn ->
-                   Error (skill_catalog_io_error ~op:"read" ~path:skill_md exn)
-               with
-               | Error _ as error -> error
-               | Ok contents -> collect ((entry, contents) :: documents) rest)
-            | Ok
-                ( Fs_compat.Exact_missing
-                | Fs_compat.Exact_unknown
-                | Fs_compat.Exact_kind
-                    ( Unix.S_DIR
-                    | Unix.S_CHR
-                    | Unix.S_BLK
-                    | Unix.S_LNK
-                    | Unix.S_FIFO
-                    | Unix.S_SOCK ) ) -> collect documents rest)
-       in
-       (match collect [] entries with
-        | Error _ as error -> error
-        | Ok documents ->
-          (match Keeper_skill_catalog.of_documents documents with
-           | Ok catalog -> Ok catalog
-           | Error error ->
-             Error
-               (skill_catalog_config_error
-                  (Keeper_skill_catalog.error_to_string error)))))
-  | Ok
-      (Fs_compat.Exact_kind
-        ( Unix.S_REG
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_LNK
-        | Unix.S_FIFO
-        | Unix.S_SOCK )) ->
-    Error (skill_catalog_config_error "skills path is not a directory")
-  | Ok Fs_compat.Exact_unknown ->
-    Error (skill_catalog_config_error "skills path kind is unavailable")
-;;
-
 let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   let descriptor_names =
     model_visible_descriptors
@@ -219,68 +126,6 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
      :: (descriptor_names @ composition_names @ control_names))
 ;;
 
-let validate_current_task_skill_admission
-      ~(config : Workspace.config)
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~skill_catalog
-  =
-  match meta.current_task_id with
-  | None -> Ok ()
-  | Some current_task_id ->
-    let task_id = Keeper_id.Task_id.to_string current_task_id in
-    (match
-       Workspace.get_tasks_safe config
-       |> List.find_opt (fun (task : Masc_domain.task) ->
-         String.equal task.id task_id)
-     with
-     | None ->
-       Error
-         (skill_catalog_config_error
-            (Printf.sprintf
-               "current task %S is missing while resolving declared skills"
-               task_id))
-     | Some task ->
-       let rec instruction_skills acc = function
-         | [] -> Ok (List.rev acc)
-         | name :: rest ->
-           (match Keeper_skill_catalog.find skill_catalog name with
-            | None ->
-              Error
-                (skill_catalog_config_error
-                   (Printf.sprintf
-                      "current task %s declares missing skill %S"
-                      task_id
-                      name))
-            | Some skill ->
-              (match skill.surface with
-               | Keeper_skill_catalog.Instruction ->
-                 instruction_skills (name :: acc) rest
-               | Keeper_skill_catalog.Composition _ ->
-                 instruction_skills acc rest))
-       in
-       (match instruction_skills [] task.skills with
-        | Error _ as error -> error
-        | Ok [] -> Ok ()
-        | Ok names ->
-          let surface =
-            Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups
-          in
-          let has_read =
-            Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-            |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-            |> List.mem "Read"
-          in
-          if has_read
-          then Ok ()
-          else
-            Error
-              (skill_catalog_config_error
-                 (Printf.sprintf
-                    "current task %s instruction skills [%s] require the model-visible Read tool"
-                    task_id
-                    (String.concat ", " names)))))
-;;
-
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -303,6 +148,7 @@ let prepare_agent_setup
       ~(is_retry : bool)
       ~(config_root : string)
       ~(runtime_config_path : string option)
+      ~(skill_snapshot : Skill_catalog_snapshot.t)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -327,8 +173,18 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
-  let* () = validate_current_task_skill_admission ~config ~meta ~skill_catalog in
+  let skill_catalog, skill_projection_diagnostics =
+    Keeper_skill_catalog.of_snapshot skill_snapshot
+  in
+  List.iter
+    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+       Log.Keeper.warn
+         "Skill composition projection omitted for keeper=%s identity=%s error=%s"
+         meta.name
+         (Yojson.Safe.to_string
+            (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
+         (Keeper_skill_catalog.error_to_string diagnostic.error))
+    skill_projection_diagnostics;
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -597,5 +453,6 @@ let prepare_agent_setup
     ~runtime_id_string ~is_retry
     ~config_root ~runtime_config_path
     ~trajectory_acc
+    ~skill_projection_diagnostics
     ?gate_replay_evidence:model_message.replay_evidence
     ?runtime_manifest_context ?runtime_manifest_append ()

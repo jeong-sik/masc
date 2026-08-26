@@ -2,6 +2,44 @@ open Alcotest
 
 module Skill_catalog = Masc.Keeper_skill_catalog
 module Catalog = Masc.Keeper_tool_composition_catalog
+module Snapshot = Skill_catalog_snapshot
+
+let snapshot_of_document ~directory source_text =
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+[[skills.sources]]
+id = "fixture"
+anchor = "base-path"
+path = "skills"
+access = "read-write"
+|}
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "Skill source fixture config was rejected"
+  in
+  let source =
+    match config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "Skill source fixture did not contain exactly one source"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let scan : Snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Snapshot.Source_ready { resolved_path = "/workspace/skills"; candidates = 1 }
+    ; candidates = [ Snapshot.Candidate_document { directory; source_text } ]
+    }
+  in
+  match Snapshot.configured ~config [ scan ] with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "Skill snapshot fixture was rejected"
+;;
 
 let instruction_document =
   {|---
@@ -75,6 +113,15 @@ value = {}
 |}
 ;;
 
+let disable_model_invocation document =
+  String.concat
+    "\n"
+    (match String.split_on_char '\n' document with
+     | delimiter :: name :: rest ->
+       delimiter :: name :: "disable-model-invocation: true" :: rest
+     | [] | [ _ ] -> fail "Skill fixture has no frontmatter")
+;;
+
 let parsed ~directory document =
   match Skill_catalog.parse_skill ~directory document with
   | Ok skill -> skill
@@ -144,9 +191,41 @@ let test_composition_skill_materializes_entry () =
       (contains ~needle:"```toml composition" skill.Skill_catalog.body)
 ;;
 
+let test_disable_model_invocation_is_orthogonal_to_surface () =
+  let instruction =
+    parsed
+      ~directory:"release-checklist"
+      (disable_model_invocation instruction_document)
+  in
+  check bool "instruction is model-hidden" false instruction.model_invocable;
+  let composition =
+    parsed
+      ~directory:"time-memory-query"
+      (disable_model_invocation composition_document)
+  in
+  check bool "composition is model-hidden" false composition.model_invocable;
+  check
+    string
+    "composition remains structurally typed"
+    "composition"
+    (Skill_catalog.surface_to_string composition.surface);
+  let catalog =
+    match
+      Skill_catalog.of_documents
+        [ ( "time-memory-query"
+          , disable_model_invocation composition_document )
+        ]
+    with
+    | Ok catalog -> catalog
+    | Error error -> fail (Skill_catalog.error_to_string error)
+  in
+  check int "hidden composition has no model tool" 0
+    (List.length (Skill_catalog.composition_entries catalog))
+;;
+
 let test_directory_name_mismatch_is_runtime_compatible () =
   let skill = parsed ~directory:"another-name" instruction_document in
-  check string "declared name remains authoritative" "release-checklist" skill.name
+  check string "directory name remains authoritative" "another-name" skill.name
 ;;
 
 let test_missing_required_frontmatter_rejected () =
@@ -180,6 +259,27 @@ let test_multiple_blocks_rejected () =
     check string "skill" "doubled" skill;
     check int "count" 2 count
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
+;;
+
+let test_malformed_composition_is_diagnostic_only () =
+  let malformed =
+    "---\nname: broken\ndescription: Invalid composition fixture.\n---\n\n```toml composition\n[[compositions]]\n"
+  in
+  let snapshot = snapshot_of_document ~directory:"broken" malformed in
+  let catalog, diagnostics = Skill_catalog.of_snapshot snapshot in
+  check int "malformed composition is not invocable" 0
+    (List.length (Skill_catalog.skills catalog));
+  match diagnostics with
+  | [ diagnostic ] ->
+    (match diagnostic.Skill_catalog.error with
+     | Skill_catalog.Unterminated_composition_block { skill } ->
+       check string "typed diagnostic retains skill" "broken" skill
+     | error ->
+       fail
+         ("unexpected projection diagnostic: "
+          ^ Skill_catalog.error_to_string error))
+  | diagnostics ->
+    failf "expected one projection diagnostic, got %d" (List.length diagnostics)
 ;;
 
 let test_composition_name_must_match_skill () =
@@ -262,76 +362,6 @@ let test_of_documents_sorts_and_rejects_duplicates () =
   | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let write_file path content =
-  let channel = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out channel)
-    (fun () -> output_string channel content)
-;;
-
-let rec remove_tree path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path
-      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-      Unix.rmdir path)
-    else Unix.unlink path
-;;
-
-let test_loader_scans_the_skills_directory () =
-  let base_path = Filename.temp_file "keeper-skill-loader" "" in
-  Unix.unlink base_path;
-  Unix.mkdir base_path 0o755;
-  Fun.protect
-    ~finally:(fun () -> remove_tree base_path)
-    (fun () ->
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
-          check
-            int
-            "missing skills dir loads an empty catalog"
-            0
-            (List.length (Skill_catalog.skills catalog))
-        | Error _ -> fail "missing skills directory did not load as empty");
-       let skills_dir =
-         Masc.Keeper_run_tools_setup.skills_dir_of_base_path ~base_path
-       in
-       Unix.mkdir (Filename.dirname skills_dir) 0o755;
-       Unix.mkdir skills_dir 0o755;
-       let skill_dir = Filename.concat skills_dir "release-checklist" in
-       Unix.mkdir skill_dir 0o755;
-       write_file (Filename.concat skill_dir "SKILL.md") instruction_document;
-       Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
-       write_file (Filename.concat skills_dir "README.md") "not a skill\n";
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
-          (match Skill_catalog.skills catalog with
-           | [ skill ] ->
-             check
-               string
-               "the SKILL.md-carrying directory is the only skill"
-               "release-checklist"
-               skill.Skill_catalog.name
-           | skills ->
-             fail
-               (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
-        | Error _ -> fail "valid skills directory failed to load");
-       (* A missing description, not a missing name: the directory supplies a
-          name, so that is no longer the defect a broken install shows. *)
-       write_file
-         (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
-         "---\nname: half-installed\n---\n";
-       match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Error
-           (Agent_core.Error.Config
-             (Agent_core.Error.InvalidConfig { field = "skills"; detail })) ->
-         check bool "detail names the defect" true (String.length detail > 0)
-       | Ok _ | Error _ ->
-         fail "broken SKILL.md did not return a typed config error")
-;;
-
 let skill_catalog_of documents =
   match Skill_catalog.of_documents documents with
   | Ok catalog -> catalog
@@ -380,6 +410,10 @@ let () =
             `Quick
             test_composition_skill_materializes_entry
         ; test_case
+            "model invocation policy is orthogonal to Skill surface"
+            `Quick
+            test_disable_model_invocation_is_orthogonal_to_surface
+        ; test_case
             "directory name mismatch remains runtime-compatible"
             `Quick
             test_directory_name_mismatch_is_runtime_compatible
@@ -396,6 +430,10 @@ let () =
             `Quick
             test_multiple_blocks_rejected
         ; test_case
+            "malformed snapshot composition is diagnostic-only"
+            `Quick
+            test_malformed_composition_is_diagnostic_only
+        ; test_case
             "composition name must equal the skill name"
             `Quick
             test_composition_name_must_match_skill
@@ -403,10 +441,6 @@ let () =
             "of_documents sorts by name and rejects duplicates"
             `Quick
             test_of_documents_sorts_and_rejects_duplicates
-        ; test_case
-            "loader scans the skills directory"
-            `Quick
-            test_loader_scans_the_skills_directory
         ; test_case
             "composition skill joins the model projection"
             `Quick

@@ -3,7 +3,7 @@
 (test
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
- (libraries masc masc_test_deps alcotest))
+ (libraries masc masc_test_deps alcotest masc.skill_config masc.skill_snapshot))
 
 (test
  (name test_task_skill_reference)
@@ -725,7 +725,7 @@
   test_operator_surface_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.tool_spawn))
+  masc.embedded_config masc.tool_spawn masc.skill_config masc.skill_snapshot))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly

@@ -188,39 +188,59 @@ let schema_tool ~name ~description ~input_schema =
     (fun _ _ -> invalid_arg "schema-only Keeper tool cannot execute")
 ;;
 
-let schema_tools ?(skill_composition_entries = []) () =
+type 'evidence schema_tool_origin =
+  | Declared_composition of 'evidence
+  | Plan_execute
+  | Async_status
+  | Async_cancel
+
+let schema_tool_of_entry (entry : Catalog.entry) =
+  schema_tool
+    ~name:(Catalog.tool_name entry)
+    ~description:(entry_description entry)
+    ~input_schema:(Catalog.input_schema_of_params entry.params)
+;;
+
+let schema_tool_rows ?(skill_compositions = []) () =
   let composition_tools =
     List.map
-      (fun (entry : Catalog.entry) ->
-         schema_tool
-           ~name:(Catalog.tool_name entry)
-           ~description:(entry_description entry)
-           ~input_schema:(Catalog.input_schema_of_params entry.params))
-      skill_composition_entries
+      (fun (entry, evidence) ->
+         Declared_composition evidence, schema_tool_of_entry entry)
+      skill_compositions
   in
   let plan_execute_tool =
-    schema_tool
-      ~name:plan_execute_tool_name
-      ~description:plan_execute_description
-      ~input_schema:plan_execute_input_schema
+    ( Plan_execute
+    , schema_tool
+        ~name:plan_execute_tool_name
+        ~description:plan_execute_description
+        ~input_schema:plan_execute_input_schema )
   in
   if
     List.exists
-      (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
-      skill_composition_entries
+      (fun ((entry : Catalog.entry), _) -> entry.execution = Catalog.Async)
+      skill_compositions
   then
     composition_tools
     @ [ plan_execute_tool
-      ; schema_tool
-          ~name:Catalog.status_tool_name
-          ~description:status_description
-          ~input_schema:request_id_input_schema
-      ; schema_tool
-          ~name:Catalog.cancel_tool_name
-          ~description:cancel_description
-          ~input_schema:request_id_input_schema
+      ; ( Async_status
+        , schema_tool
+            ~name:Catalog.status_tool_name
+            ~description:status_description
+            ~input_schema:request_id_input_schema )
+      ; ( Async_cancel
+        , schema_tool
+            ~name:Catalog.cancel_tool_name
+            ~description:cancel_description
+            ~input_schema:request_id_input_schema )
       ]
   else composition_tools @ [ plan_execute_tool ]
+;;
+
+let schema_tools ?(skill_composition_entries = []) () =
+  skill_composition_entries
+  |> List.map (fun entry -> entry, ())
+  |> fun skill_compositions -> schema_tool_rows ~skill_compositions ()
+  |> List.map snd
 ;;
 
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =

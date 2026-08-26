@@ -60,6 +60,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
   ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref

@@ -315,17 +315,48 @@ type workspace_state_mount_kind =
   | Workspace_state_file
   | Workspace_state_dir
 
+(* Why a path is allowed inside a keeper container.
+
+   This is provenance, not inspection. A content scan for secrets was tried
+   first and it cannot do this job: a Slack bot token and a task id have the
+   same shape ([xoxb-1234-5678-abc] against [sk-342-verify-...]), so a loose
+   matcher reported twelve task ids from the live backlog and a matcher tightened
+   to fix that stopped seeing Slack tokens at all. Neither length nor character
+   class separates them, and a threshold tuned until today's data passes is a
+   heuristic standing where a boundary belongs.
+
+   What can be stated is where a file comes from. Every path below holds a store
+   MASC itself writes, in a schema MASC owns. That is checkable by reading the
+   writer, and it does not decay.
+
+   The variants are the gate. [.masc] also holds [official-clients/], which is
+   the provider CLI's private HOME carrying its OAuth token and login keychain,
+   and [traces/], which writes authorization headers out verbatim. Neither is
+   board, task or goal state, so neither can be added here without a new variant
+   -- and a new variant is a design decision a reviewer sees, where one more line
+   in a list of paths is not. *)
+type mount_warrant =
+  | Board_store
+  | Task_store
+  | Goal_store
+
+let mount_warrant_to_string = function
+  | Board_store -> "board_store"
+  | Task_store -> "task_store"
+  | Goal_store -> "goal_store"
+;;
+
 let docker_workspace_state_mounts =
-  [ Workspace_state_dir, "tasks"
-  ; Workspace_state_file, "tasks.json"
-  ; Workspace_state_file, "backlog.json"
-  ; Workspace_state_file, "board_posts.jsonl"
-  ; Workspace_state_file, "board_comments.jsonl"
-  ; Workspace_state_file, "board_votes.jsonl"
-  ; Workspace_state_file, "board_reactions.jsonl"
-  ; Workspace_state_file, "current_task"
-  ; Workspace_state_file, "goals.json"
-  ; Workspace_state_file, "goal_events.jsonl"
+  [ Task_store, Workspace_state_dir, "tasks"
+  ; Task_store, Workspace_state_file, "tasks.json"
+  ; Task_store, Workspace_state_file, "backlog.json"
+  ; Task_store, Workspace_state_file, "current_task"
+  ; Board_store, Workspace_state_file, "board_posts.jsonl"
+  ; Board_store, Workspace_state_file, "board_comments.jsonl"
+  ; Board_store, Workspace_state_file, "board_votes.jsonl"
+  ; Board_store, Workspace_state_file, "board_reactions.jsonl"
+  ; Goal_store, Workspace_state_file, "goals.json"
+  ; Goal_store, Workspace_state_file, "goal_events.jsonl"
   ]
 ;;
 
@@ -370,7 +401,7 @@ let docker_workspace_state_mount_specs ~base_path ~container_root =
      through /run/host_virtiofs and reject as outside the container rootfs. *)
   let container_masc_root = container_masc_dir ~container_root in
   docker_workspace_state_mounts
-  |> List.concat_map (fun (kind, rel_path) ->
+  |> List.concat_map (fun (_warrant, kind, rel_path) ->
     let host_path = Filename.concat host_masc_root rel_path in
     if not (workspace_state_path_available kind host_path)
     then []
@@ -401,8 +432,32 @@ let docker_config_env_args ~base_path ~container_root =
     ]
 ;;
 
+(* The stores this container was actually given, named by warrant. A keeper that
+   cannot reach a path can otherwise only report the failure; this says what it
+   does have, and a trace of the turn carries the same answer. Projection, not
+   authority -- the mounts above decide, this reports. *)
+let docker_mounted_stores_env_args ~base_path ~container_root =
+  let warranted =
+    docker_workspace_state_mount_specs ~base_path ~container_root
+    |> List.length
+  in
+  if warranted = 0
+  then []
+  else begin
+    let names =
+      docker_workspace_state_mounts
+      |> List.map (fun (warrant, _kind, _rel) -> mount_warrant_to_string warrant)
+      |> List.sort_uniq String.compare
+      |> String.concat ","
+    in
+    [ "-e"; "MASC_KEEPER_MOUNTED_STORES=" ^ names ]
+  end
+;;
+
 let docker_sandbox_env_args ~base_path ~container_root =
-  docker_user_env_args () @ docker_config_env_args ~base_path ~container_root
+  docker_user_env_args ()
+  @ docker_config_env_args ~base_path ~container_root
+  @ docker_mounted_stores_env_args ~base_path ~container_root
 ;;
 
 let docker_identity_dir ~host_root = Filename.concat host_root ".docker-identity"

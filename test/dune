@@ -2717,6 +2717,11 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_sandbox_mount_warrant)
+ (modules test_keeper_sandbox_mount_warrant)
+ (libraries alcotest masc_test_deps))
+
+(test
  (name test_keeper_sandbox_image_contract)
  (modules test_keeper_sandbox_image_contract)
  (deps %{workspace_root}/Dockerfile.keeper-sandbox)

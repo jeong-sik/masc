@@ -349,9 +349,86 @@ export function RailHeader({
   `
 }
 
+/** task id → the goal it serves, read off the goal tree already on this page.
+ *
+ * The tree carries each goal's tasks and the metric it is measured by, so the
+ * map is the same links read the other way rather than a second fetch. Walks
+ * children too: a task hangs off whichever node owns it, at any depth.
+ *
+ * A task under two goals keeps the first the walk meets. The alternative is a
+ * card that lists several aims, which is a different screen than this one.
+ */
+export function goalsByTaskFromTree(
+  nodes: readonly {
+    id: string
+    title: string
+    metric?: string | null
+    target_value?: string | null
+    tasks?: readonly { id: string }[]
+    children?: readonly unknown[]
+  }[] | null | undefined,
+): Map<string, { title: string; metric?: string | null; target_value?: string | null }> {
+  const byTask = new Map<string, { title: string; metric?: string | null; target_value?: string | null }>()
+  const walk = (list: readonly unknown[] | null | undefined): void => {
+    for (const raw of list ?? []) {
+      const node = raw as {
+        title?: string
+        metric?: string | null
+        target_value?: string | null
+        tasks?: readonly { id: string }[]
+        children?: readonly unknown[]
+      }
+      for (const task of node.tasks ?? []) {
+        if (task?.id && !byTask.has(task.id)) {
+          byTask.set(task.id, {
+            title: node.title ?? '(제목 없는 goal)',
+            metric: node.metric ?? null,
+            target_value: node.target_value ?? null,
+          })
+        }
+      }
+      walk(node.children)
+    }
+  }
+  walk(nodes)
+  return byTask
+}
+
+/** What a judged task is working towards, in one line.
+ *
+ * A verdict names a task, a task is linked to goals, and a goal declares the
+ * metric it is measured by. All three were already on this page and none of
+ * them met: a verdict read "approve" without saying what it was approving
+ * towards.
+ *
+ * Returns null when the chain has nothing to say, so the caller draws nothing
+ * rather than an empty label. A goal with no declared metric still answers —
+ * its title is what the task is for, metric or not.
+ */
+export function verdictAim(
+  taskId: string | null | undefined,
+  goalsByTask: ReadonlyMap<string, { title: string; metric?: string | null; target_value?: string | null }>,
+): string | null {
+  if (!taskId) return null
+  const goal = goalsByTask.get(taskId)
+  if (!goal) return null
+  const aim = goal.metric
+    ? (goal.target_value ? `${goal.metric} → ${goal.target_value}` : goal.metric)
+    : (goal.target_value ? `목표 ${goal.target_value}` : null)
+  return aim ? `${goal.title} · ${aim}` : goal.title
+}
+
 // ── Section components ──
 
-export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
+export function RecentVerdictsList({
+  items,
+  goalsByTask,
+}: {
+  items: HarnessVerdictItem[]
+  /** task id → the goal it serves. Empty when the goals have not loaded; the
+   *  cards then say nothing about aim rather than claiming there is none. */
+  goalsByTask?: ReadonlyMap<string, { title: string; metric?: string | null; target_value?: string | null }>
+}) {
   const query = useSignal('')
   const visibleItems = useMemo(
     () => filterVerdicts(items, query.value),
@@ -389,6 +466,12 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
               <${StatusDot} size="md" class=${verdictTone(item.verdict)} />
             </div>
             <div class="mt-2 text-sm text-[var(--color-fg-primary)]">${verdictSummary(item.verdict)}</div>
+            ${(() => {
+              const aim = verdictAim(item.task_id, goalsByTask ?? new Map())
+              return aim
+                ? html`<div class="mt-1 text-xs text-[var(--color-fg-muted)]">→ ${aim}</div>`
+                : null
+            })()}
             ${item.fallback_reason ? html`
               <div class="mt-2 break-all text-xs text-[var(--color-status-warn)]">${item.fallback_reason}</div>
             ` : null}

@@ -1,3 +1,4 @@
+import { scanMascReferences, postsSharingReferences } from '../../lib/masc-reference'
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
 import { AtSign, Mic, Paperclip, Sparkles, Square, Trophy, X } from 'lucide-preact'
@@ -101,6 +102,49 @@ export const BOARD_DETAIL_WIDTH_MIN = 290
 // read poorly at 520px. The feed column is minmax(0, 1fr) so the user drives
 // the trade-off via the resize handle; the cap just lets it go wider.
 export const BOARD_DETAIL_WIDTH_MAX = 760
+
+/** What this post points at, and who else points there.
+ *
+ * Read from the references the writer actually wrote. An id spelled in prose
+ * is not a link: the TUI writes masc:// references beside what it names, and
+ * those are the ones that go where they say.
+ *
+ * Draws nothing when the post points at nothing — an empty heading would say
+ * the post was checked and found bare, which is not what silence means here.
+ */
+function PostReferences({ post }: { post: BoardPost }) {
+  const referenced = scanMascReferences(post.body)
+  if (referenced.length === 0) return null
+  const related = postsSharingReferences(post, boardPosts.value)
+  return html`
+    <div class="mt-3 border-t border-[var(--color-border-subtle)] pt-2">
+      <div class="text-2xs font-semibold text-[var(--color-fg-muted)]">가리키는 것</div>
+      <ul class="mt-1 space-y-0.5">
+        ${referenced.map(hit => html`
+          <li class="text-xs text-[var(--color-fg-primary)]">
+            <span class="text-[var(--color-fg-muted)]">${hit.kind}</span> ${hit.id}
+          </li>
+        `)}
+      </ul>
+      ${related.length > 0 ? html`
+        <div class="mt-2 text-2xs font-semibold text-[var(--color-fg-muted)]">
+          같은 것을 가리키는 글 ${related.length}
+        </div>
+        <ul class="mt-1 space-y-0.5">
+          ${related.slice(0, 5).map(other => html`
+            <li>
+              <button
+                type="button"
+                class="text-left text-xs text-[var(--color-fg-link)] hover:underline"
+                onClick=${() => navigateBoard({ post: other.id })}
+              >${other.title || other.id}</button>
+            </li>
+          `)}
+        </ul>
+      ` : null}
+    </div>
+  `
+}
 
 export function normalizeBoardDetailWidth(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value)
@@ -638,6 +682,7 @@ function BdThreadDetail({
                 <${PostShareActions} post=${post} />
               </div>
               <${RichContent} text=${post.body} previewLimit=${4} />
+              <${PostReferences} post=${post} />
               <${FusionBoardEvidence} post=${evidencePost} class="mt-3" />
             </div>
           </div>

@@ -184,6 +184,46 @@ let calls ~module_path ~binding_name ~callee =
   Ast_grep.count_calls_in_value_binding ~module_path ~binding_name ~callee
 ;;
 
+(* The third reader, and the one the two above did not cover.
+
+   Each surface also works out how many rows it may draw in. When that sum
+   subtracted only the composer, every surface drew one row more than the
+   frame would take, and [finish_surface] cuts a too-tall surface from the
+   bottom -- so the row that disappeared was the footer, with the key hints,
+   the version, the base path and the port on it. It disappeared the moment a
+   wake or a waiting keeper put the strip on screen, and on every surface at
+   once.
+
+   The number now has one owner. The invariant that keeps it that way is that
+   the drawing never reaches for the composer's height itself: a surface that
+   wants a body height has to ask [surface_body_rows], which is where the
+   strip's rows come off. *)
+let test_the_drawing_does_not_measure_the_body_itself () =
+  check
+    int
+    "no render site computes a body height from the composer's rows"
+    0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Composer.rows_for");
+  check
+    bool
+    "they ask the owner instead"
+    true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"Masc_tui_types.surface_body_rows"
+     >= 40);
+  check
+    int
+    "and the owner is the only place the strip's rows come off a height"
+    1
+    (calls
+       ~module_path:"bin/masc_tui_types.ml"
+       ~binding_name:"surface_body_rows"
+       ~callee:"agenda_chrome_rows")
+;;
+
 let test_the_frame_and_the_bound_read_the_same_number () =
   check
     bool
@@ -338,6 +378,8 @@ let () =
     ; ( "the frame and the bound"
       , [ test_case "read the same number" `Quick
             test_the_frame_and_the_bound_read_the_same_number
+        ; test_case "the drawing does not measure the body itself" `Quick
+            test_the_drawing_does_not_measure_the_body_itself
         ] )
     ; ( "how it reads"
       , [ test_case "the clock is local" `Quick test_the_clock_is_local

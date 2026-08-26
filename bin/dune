@@ -596,6 +596,7 @@
   masc.masc_goal
   masc.masc_types
   masc_tui_acting
+  masc_tui_composer
   masc_tui_agenda
   masc_tui_ask_projection
   masc_tui_board_detail

@@ -111,19 +111,21 @@ let move_surface_scroll (state : state) ~rows ~delta ~current =
         Masc_tui_scroll.down ~count:scrolled.sc_count ~height current
       else Masc_tui_scroll.up ~count:scrolled.sc_count ~height current
 
-(* The rows a surface has to draw in: the terminal's, less the composer's,
-   which owns the last row. The same arithmetic the drawing does -- a bound
-   worked out from a different height than the frame uses is not a bound.
-   Reading the terminal's own rows here, as this did, left the log surface's
-   keypress bound one row looser than the frame it moved within. *)
-let surface_rows () =
+(* The rows a surface has to draw in. The same arithmetic the drawing does --
+   a bound worked out from a different height than the frame uses is not a
+   bound. Reading the terminal's own rows here, as this did, left the log
+   surface's keypress bound one row looser than the frame it moved within, and
+   subtracting only the composer left it one row looser again on every screen
+   the agenda strip was on. Both readers now ask
+   {!Masc_tui_types.surface_body_rows}. *)
+let surface_rows (state : state) =
   let terminal_rows, _columns = get_terminal_size () in
-  max 1 (terminal_rows - Composer.rows_for ~terminal_rows)
+  Masc_tui_types.surface_body_rows state ~terminal_rows
 
 (* Page keys move almost one visible body, leaving a few rows of overlap so
    the reader keeps their place across the jump. Individual renderers clamp
    the result against their exact wrapped-line count. *)
-let surface_page_rows () = max 1 (surface_rows () - 8)
+let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
@@ -133,7 +135,7 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with
   | None -> (cursor, scroll + delta)
   | Some ({ sc_count; _ } as scrolled) ->
-      let height = surface_body_height ~rows:(surface_rows ()) scrolled in
+      let height = surface_body_height ~rows:(surface_rows state) scrolled in
       let cursor =
         if delta >= 0 then Masc_tui_scroll.cursor_down ~count:sc_count cursor
         else Masc_tui_scroll.cursor_up ~count:sc_count cursor
@@ -141,7 +143,7 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
 let keeper_log_content_height (state : state) =
-  Metrics_tail.content_height ~terminal_rows:(surface_rows ())
+  Metrics_tail.content_height ~terminal_rows:(surface_rows state)
     ~error:state.log_error
 
 (* Bytes the terminal has delivered that the reader has not served yet.
@@ -2574,7 +2576,7 @@ let search_land state index =
     match scrolled_surface state state.view with
     | None -> ()
     | Some { sc_count = _; sc_chrome } ->
-        let height = max 1 (surface_rows () - sc_chrome) in
+        let height = max 1 (surface_rows state - sc_chrome) in
         set_scroll (Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll)
   in
   match state.view with
@@ -2609,7 +2611,7 @@ let search_land state index =
         state.code_file_cursor <- index;
         state.code_file_scroll <-
           Masc_tui_scroll.ensure_visible ~cursor:index
-            ~height:(Masc_tui_render.code_pane_content_height ())
+            ~height:(Masc_tui_render.code_pane_content_height state)
             state.code_file_scroll
       end
       else
@@ -5489,7 +5491,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
                     the operator cannot see otherwise. *)
                  state.code_file_scroll <-
                    Masc_tui_scroll.ensure_visible ~cursor
-                     ~height:(Masc_tui_render.code_pane_content_height ())
+                     ~height:(Masc_tui_render.code_pane_content_height state)
                      state.code_file_scroll
              | Some _ | None ->
                  state.code_target_line <- Some location.ll_line;
@@ -7220,7 +7222,7 @@ let main () =
                 (* Bounded against the sheet the frame draws, which folds to
                    two columns on a wide terminal and so holds half the rows
                    the lines were written as. *)
-                let count, height = Masc_tui_render.help_viewport () in
+                let count, height = Masc_tui_render.help_viewport state in
                 let move =
                   match k with
                   | "j" | "down" -> Masc_tui_scroll.down
@@ -7813,7 +7815,7 @@ let main () =
                  | None -> ())
             | _ -> ())
        | Some ("pageup" | "pagedown") ->
-           let page = surface_page_rows () in
+           let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
             | Config when state.config_pane = Config_themes ->
@@ -8230,7 +8232,7 @@ let main () =
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            ~height:(Masc_tui_render.code_pane_content_height state)
                             state.code_file_scroll
                     | None -> ())
                 else
@@ -8345,7 +8347,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows:(surface_rows ())
+                    overview_layout state ~terminal_rows:(surface_rows state)
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_older
@@ -8414,10 +8416,10 @@ let main () =
                  state.runtime_cursor <- cursor;
                  state.runtime_surface_scroll <- scroll)
             | Tools -> state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(1)
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(1)
                     ~current:state.tools_scroll
             | Config -> state.config_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:1
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:1
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
@@ -8472,7 +8474,7 @@ let main () =
                         state.code_file_cursor <- cursor;
                         state.code_file_scroll <-
                           Masc_tui_scroll.ensure_visible ~cursor
-                            ~height:(Masc_tui_render.code_pane_content_height ())
+                            ~height:(Masc_tui_render.code_pane_content_height state)
                             state.code_file_scroll
                     | None -> ())
                 else
@@ -8573,7 +8575,7 @@ let main () =
                 end
                 else begin
                   let _, _, row_budget =
-                    overview_layout state ~terminal_rows:(surface_rows ())
+                    overview_layout state ~terminal_rows:(surface_rows state)
                   in
                   state.overview_event_scroll <-
                     Render_schedule.scroll_overview_events_newer
@@ -8644,12 +8646,12 @@ let main () =
             | Tools ->
                 if state.tools_scroll > 0 then
                   state.tools_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
                     ~current:state.tools_scroll
             | Config ->
                 if state.config_scroll > 0 then
                   state.config_scroll <-
-                  move_surface_scroll state ~rows:(surface_rows ()) ~delta:(-1)
+                  move_surface_scroll state ~rows:(surface_rows state) ~delta:(-1)
                     ~current:state.config_scroll
             | Resources ->
                 if state.resource_focus = Right_pane then
@@ -8710,7 +8712,7 @@ let main () =
                                 Masc_tui_scroll.ensure_visible ~cursor
                                   ~height:
                                     (Masc_tui_render
-                                     .code_pane_content_height ())
+                                     .code_pane_content_height state)
                                   state.code_file_scroll)
                       | Some (Hist_commit row) ->
                           let open Masc.Tui_decode in

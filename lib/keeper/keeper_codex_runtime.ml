@@ -334,6 +334,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run on_event =
                          (String.sub text (String.length streamed) suffix_length)
                    })
           end;
+          emit
+            (Agent_core.Types.MessageDelta
+               { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
           emit Agent_core.Types.MessageStop)
 ;;
 

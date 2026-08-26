@@ -584,6 +584,10 @@ let test_official_turn_without_sources_stays_delivery_only () =
   A.on_event t
     (start ~index:0 ~tool_id:(Some "official-call") ~tool_name:(Some "Read"));
   A.on_event t (stop ~index:0);
+  A.on_event t
+    (Agent_core.Types.MessageDelta
+       { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
+  A.on_event t Agent_core.Types.MessageStop;
   (match A.close_turn_without_sources t ~turn:0 with
    | Ok () -> ()
    | Error detail -> fail detail);

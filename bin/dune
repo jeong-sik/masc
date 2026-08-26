@@ -381,6 +381,21 @@
  (modules masc_tui_paste))
 
 (library
+ (name masc_tui_termios)
+ (wrapped false)
+ (modules masc_tui_termios)
+ (libraries unix)
+ (foreign_stubs
+  (language c)
+  (names masc_tui_termios_stubs)))
+
+(library
+ (name masc_tui_clipboard)
+ (wrapped false)
+ (modules masc_tui_clipboard)
+ (libraries unix))
+
+(library
  (name masc_tui_utf8_input)
  (wrapped false)
  (modules masc_tui_utf8_input))
@@ -665,6 +680,8 @@
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_attachment
+  masc_tui_clipboard
+  masc_tui_termios
   masc_tui_keys
   masc_tui_file_icon
   masc_tui_config

@@ -114,6 +114,7 @@ let project ~tool_groups ~task_skill_references ~native_posture =
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
     ~official_client_kind:"codex"
+    ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
     ~tool_groups
     ~current_task_id:(Some "task-001")
@@ -164,6 +165,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~keeper_name:"fixture"
       ~runtime_id:"fixture.runtime"
       ~official_client_kind:"codex"
+      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
       ~tool_groups:None
       ~current_task_id:None
@@ -270,7 +272,41 @@ let test_global_instruction_is_present_in_receipt () =
          [ reference_by_name (skill_snapshot ()) "guide" ]
        |> Yojson.Safe.to_string)
       (Skill_reference.list_to_yojson surface.instruction_skills
-       |> Yojson.Safe.to_string)
+      |> Yojson.Safe.to_string)
+;;
+
+let test_runtime_capability_suppression_is_explicit_and_empty () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let skill_snapshot = skill_snapshot () in
+  match
+    Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"fixture"
+      ~runtime_id:"fixture.runtime"
+      ~official_client_kind:"agent_core"
+      ~tool_delivery:
+        Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
+      ~native_posture:None
+      ~tool_groups:None
+      ~current_task_id:(Some "task-001")
+      ~task_skill_references:[ reference_by_name skill_snapshot "guide" ]
+      ~skill_snapshot
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    check (list string) "no tool reaches the model" [] (names surface);
+    check int "instruction tool is not readable" 0
+      (List.length surface.instruction_skills);
+    check int "composition tools are not callable" 0
+      (List.length surface.composition_skills);
+    let open Yojson.Safe.Util in
+    let delivery =
+      Keeper_effective_tool_surface.to_yojson (Available surface)
+      |> member "tool_delivery"
+    in
+    check string "typed status" "suppressed"
+      (delivery |> member "status" |> to_string);
+    check string "typed reason" "runtime_tools_unsupported"
+      (delivery |> member "reason" |> to_string)
 ;;
 
 let () =
@@ -289,6 +325,8 @@ let () =
             test_instruction_skill_does_not_require_a_named_read_tool
         ; test_case "global instruction is present in receipt" `Quick
             test_global_instruction_is_present_in_receipt
+        ; test_case "runtime capability suppression is explicit and empty" `Quick
+            test_runtime_capability_suppression_is_explicit_and_empty
         ] )
     ]
 ;;

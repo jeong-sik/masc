@@ -448,6 +448,24 @@ let test_rejections () =
   check_rejects ~name:"t" ~contents:"name = \"t\"\ndescription =\n" "parse error"
 ;;
 
+let test_patterns_must_be_provider_portable () =
+  check_rejects
+    ~name:"t"
+    ~contents:
+      (minimal "t"
+       ^ "[[params]]\nname = \"path\"\ntype = \"string\"\npattern = \"^/\"\n")
+    "must start with '^' and end with '$'";
+  match
+    Tool_definition_toml.load
+      ~name:"t"
+      ~contents:
+        (minimal "t"
+         ^ "[[params]]\nname = \"path\"\ntype = \"string\"\npattern = \"^/.*$\"\n")
+  with
+  | Ok _ -> ()
+  | Error message -> failf "expected an anchored pattern to load: %s" message
+;;
+
 (* ── Embedded tree validation ─────────────────────────────────────────── *)
 
 (* The synthetic tree below proves the validator's arms. It cannot prove the
@@ -957,6 +975,8 @@ let () =
         ; test_case "a string default is accepted" `Quick test_a_string_default_is_accepted
         ; test_case "unknown keys, values, and missing keys reject" `Quick
             test_rejections
+        ; test_case "patterns are portable to native Ollama" `Quick
+            test_patterns_must_be_provider_portable
         ] )
     ; ( "validate_embedded"
       , [ test_case "walks tools/, skips the manifest, fails closed" `Quick

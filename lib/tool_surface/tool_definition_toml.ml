@@ -67,6 +67,18 @@ let as_non_empty_string ~context value =
   else Ok text
 ;;
 
+let as_provider_portable_pattern ~context value =
+  let* pattern = as_non_empty_string ~context value in
+  let length = String.length pattern in
+  if length >= 2 && Char.equal pattern.[0] '^' && Char.equal pattern.[length - 1] '$'
+  then Ok pattern
+  else
+    Error
+      (sprintf
+         "%s must start with '^' and end with '$' for native Ollama tool-schema compatibility"
+         context)
+;;
+
 let as_bool ~context = function
   | Otoml.TomlBoolean value -> Ok value
   | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
@@ -310,7 +322,7 @@ let rec param_of_pairs ~context pairs =
       Ok (Some ("minLength", `Int v))
     | "pattern" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
-      let* v = as_non_empty_string ~context:key_context value in
+      let* v = as_provider_portable_pattern ~context:key_context value in
       Ok (Some ("pattern", `String v))
     | "max_items" ->
       let* () = only_for ~context:key_context ~declared Ptype_array in
@@ -449,7 +461,7 @@ and items_json ~context pairs =
       Ok (Some ("maxLength", `Int v))
     | "pattern" ->
       let* () = only_for ~context:key_context ~declared Ptype_string in
-      let* v = as_non_empty_string ~context:key_context value in
+      let* v = as_provider_portable_pattern ~context:key_context value in
       Ok (Some ("pattern", `String v))
     | "additional_properties" ->
       (* JSON Schema lets this be a boolean or a schema. [false] closes the

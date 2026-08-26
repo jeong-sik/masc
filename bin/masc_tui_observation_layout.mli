@@ -15,6 +15,18 @@ type context_summary =
     }
   | Context_unavailable of string
 
+type context_pressure =
+  | Quiet
+  | Pressure
+  | Danger
+
+val percentage_tenths : float -> int
+(** A ratio projected to tenths of one percent, using the rounding visible in
+    the Keeper detail row. For example, [0.4999] becomes [500] ([50.0%]). *)
+
+val context_pressure : float -> context_pressure
+(** The pressure band for the rounded percentage shown to the operator. *)
+
 val log_kind_label : Tui_decode.log_kind -> string
 val log_channel_label : Tui_decode.log_channel -> string
 val usage_label : input:int option -> output:int option -> string

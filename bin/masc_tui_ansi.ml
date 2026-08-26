@@ -354,21 +354,26 @@ let priority_indicator p =
 (** Context ratio tone: healthy capacity recedes; only pressure and danger
     claim an attention colour. All three resolve against the terminal palette. *)
 let ctx_color ratio =
-  if ratio >= 0.8 then Theme.bad ()
-  else if ratio >= 0.5 then Theme.warn ()
-  else Theme.muted ()
+  match Masc_tui_observation_layout.context_pressure ratio with
+  | Masc_tui_observation_layout.Danger -> Theme.bad ()
+  | Masc_tui_observation_layout.Pressure -> Theme.warn ()
+  | Masc_tui_observation_layout.Quiet -> Theme.muted ()
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =
   let width = Masc_tui_render_schedule.nonnegative_width width in
-  let filled = int_of_float (ratio *. float_of_int width) in
+  let visible_ratio =
+    Float.of_int (Masc_tui_observation_layout.percentage_tenths ratio) /. 1000.0
+  in
+  let filled = int_of_float (visible_ratio *. float_of_int width) in
   let filled = max 0 (min width filled) in
   let empty = width - filled in
   let color = ctx_color ratio in
+  let empty_color = Ansi.reset ^ Theme.recede () in
   Printf.sprintf "%s%s%s%s"
     color
     (String.make filled '#')
-    (Ansi.gray ^ String.make empty '-' ^ Ansi.reset)
+    (empty_color ^ String.make empty '-' ^ Ansi.reset)
     Ansi.reset
 
 (* The framed family keeps the full border box. Modals (palette, help) and

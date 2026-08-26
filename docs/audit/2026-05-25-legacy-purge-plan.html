@@ -176,7 +176,7 @@
           <tr>
             <td><code>Tool_bridge.to_oas_tool_result</code> tuple overload</td>
             <td><span class="status done">draft PR #18376</span></td>
-            <td>Delete the deprecated tuple-output OAS bridge overload, keep typed conversion through <code>to_oas_typed_result</code>, and move the externalization tests away from the tuple-era helper.</td>
+            <td>Delete the deprecated tuple-output agent_core bridge overload, keep typed conversion through <code>to_oas_typed_result</code>, and move the externalization tests away from the tuple-era helper.</td>
             <td>Backstop grep is clean for <code>to_oas_tool_result</code> and its orphaned helper. Local ocamlformat, diff check, ignore ratchet, godfile ratchet, and code-smell ratchet pass. Focused Dune is blocked by the same machine-wide bare-Dune guard; GitHub checks have started.</td>
           </tr>
           <tr>
@@ -195,7 +195,7 @@
             <td>MCP join-state identity alias bridge</td>
             <td><span class="status done">merged #18544</span></td>
             <td>Remove the secondary <code>Keeper_identity.normalize_all_names</code> lookup from <code>resolve_bind_state</code>. Bind-auth tools now check only the caller's raw <code>agent_name</code> instead of recovering rotated keeper aliases through canonical keeper names.</td>
-            <td>The alias-recovery test is flipped to prove the canonical form is not retried. Local OCaml format/parse, diff, grep, keeper tool-boundary matrix, structure, stringly-boundary, OAS-boundary, unknown-permissive-default lint, comment-terminator lint, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
+            <td>The alias-recovery test is flipped to prove the canonical form is not retried. Local OCaml format/parse, diff, grep, keeper tool-boundary matrix, structure, stringly-boundary, agent_core-boundary, unknown-permissive-default lint, comment-terminator lint, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
           </tr>
           <tr>
             <td>Tool-call replay snapshot provider aliases</td>
@@ -309,7 +309,7 @@
             <td>Legacy checkpoint shadow cleanup surfaces</td>
             <td><span class="status done">draft PR #18398</span></td>
             <td>Remove <code>Keeper_checkpoint_store.list_checkpoints</code>, operator-clear <code>legacy_shadow_removed_count</code>, dashboard <code>legacy_shadow_count</code>, and startup <code>keeper_checkpoint_prune</code>.</td>
-            <td>OAS <code>&lt;trace_id&gt;.json</code> remains the only keeper recovery source. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+            <td>agent_core <code>&lt;trace_id&gt;.json</code> remains the only keeper recovery source. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td>Keeper failure metric transient compat arg</td>
@@ -470,13 +470,13 @@
           <tr>
             <td><code>keeper.oas_env</code> unified max-token env alias</td>
             <td><span class="status done">merged #18450</span></td>
-            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper OAS env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
+            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper agent_core env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
             <td>The TOML test now rejects the old alias instead of preserving it. Targeted grep is clean for the removed helper and alias wording; focused Dune remained blocked by the machine-wide guard during local verification.</td>
           </tr>
           <tr>
             <td><code>Verifier_oas</code> core re-export facade</td>
             <td><span class="status done">merged #18488</span></td>
-            <td>Remove the public <code>Verifier_core</code> type/helper re-exports from <code>Verifier_oas</code>; callers must use <code>Verifier_core</code> for generic verdict parsing and <code>Verifier_oas</code> for OAS adapter behavior.</td>
+            <td>Remove the public <code>Verifier_core</code> type/helper re-exports from <code>Verifier_oas</code>; callers must use <code>Verifier_core</code> for generic verdict parsing and <code>Verifier_oas</code> for agent_core adapter behavior.</td>
             <td>Backstop grep is clean for the removed re-export symbols. Local OCaml format/parse and diff checks pass; the branch was merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
@@ -636,9 +636,9 @@
             <td>Merged as <code>eb085cc5a</code>; negative tests now pin the removed aliases as absent or rejected.</td>
           </tr>
           <tr>
-            <td>Sandbox / OAS typed failure boundary</td>
+            <td>Sandbox / agent_core typed failure boundary</td>
             <td><span class="status done">merged #18658 / #18663 / #18664</span></td>
-            <td>Type sandbox image preflight failures, OAS failure boundaries, and sandbox env-getter classification annotations instead of relying on loose string/error surfaces.</td>
+            <td>Type sandbox image preflight failures, agent_core failure boundaries, and sandbox env-getter classification annotations instead of relying on loose string/error surfaces.</td>
             <td>Follow-up grep and classification guards stay on typed paths; no compatibility fallback was reintroduced.</td>
           </tr>
           <tr>
@@ -666,7 +666,7 @@
             <td>Merged as <code>f8b48d4a4</code>. Status bridge blockers now derive only from typed blocker values; summaries remain display text.</td>
           </tr>
           <tr>
-            <td>Runtime/OAS string recovery purge</td>
+            <td>Runtime/agent_core string recovery purge</td>
             <td><span class="status done">merged #18707</span></td>
             <td>Remove the remaining P1 string recovery paths: raw resumable CLI hint promotion, <code>runtime_exhaustion_reason_from_message</code>, and <code>max_execution_time_s</code> substring-based timeout/saturation promotion.</td>
             <td>Merged as <code>e88d5758e</code>. Structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes remain, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed runtime errors.</td>
@@ -674,7 +674,7 @@
           <tr>
             <td>Memory/context canonical row purge</td>
             <td><span class="status done">merged #18717</span></td>
-            <td>Remove memory search source fallback to <code>memory</code>, drop old memory-bank rows without current schema/horizon/provenance fields, and stop rewriting legacy duplicate procedural records during OAS flush.</td>
+            <td>Remove memory search source fallback to <code>memory</code>, drop old memory-bank rows without current schema/horizon/provenance fields, and stop rewriting legacy duplicate procedural records during agent_core flush.</td>
             <td>Merged as <code>45728f4c0</code>. Compatibility-preservation tests for legacy procedure dedupe are deleted; current-schema tests now seed canonical rows only.</td>
           </tr>
           <tr>
@@ -842,7 +842,7 @@
           <tr>
             <td><code>Tool_bridge.of_oas_tool_result</code> reverse tuple projection</td>
             <td><span class="status done">merged #18936</span></td>
-            <td>Remove the unused OAS-to-<code>bool * string</code> helper so the bridge only converts typed MASC results into typed OAS results, not back into legacy tuple shape.</td>
+            <td>Remove the unused agent_core-to-<code>bool * string</code> helper so the bridge only converts typed MASC results into typed agent_core results, not back into legacy tuple shape.</td>
             <td>There are no active callers. Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code> is clean after deleting the implementation and interface entry.</td>
           </tr>
           <tr>
@@ -860,7 +860,7 @@
           <tr>
             <td><code>Tool_local_runtime_verify</code> legacy single-host probe fallback</td>
             <td><span class="status now">draft PR #18949</span></td>
-            <td>Delete the old <code>runtime_verify_json_legacy</code> backend so runtime verification no longer falls back to <code>Env_config.Local_runtime.server_url</code> when OAS discovery is absent.</td>
+            <td>Delete the old <code>runtime_verify_json_legacy</code> backend so runtime verification no longer falls back to <code>Env_config.Local_runtime.server_url</code> when agent_core discovery is absent.</td>
             <td>Discovery absence now fails closed with <code>runtime_blocker = "oas_discovery_unavailable"</code>; the compatibility-only fallback test surface is replaced with a fail-closed assertion.</td>
           </tr>
           <tr>
@@ -872,7 +872,7 @@
           <tr>
             <td>Checkpoint <code>working_context</code> runtime read fallbacks</td>
             <td><span class="status done">merged #18622</span></td>
-            <td>Stop reading legacy checkpoint sidecars for runtime <code>max_tokens</code>, checkpoint <code>generation</code>, and OAS history <code>keeper_generation</code>. Runtime budget and generation now come only from canonical checkpoint fields and scoped OAS context.</td>
+            <td>Stop reading legacy checkpoint sidecars for runtime <code>max_tokens</code>, checkpoint <code>generation</code>, and agent_core history <code>keeper_generation</code>. Runtime budget and generation now come only from canonical checkpoint fields and scoped agent_core context.</td>
             <td>Tests assert legacy sidecars are ignored or absent and that history snapshot IDs use canonical context generation even when sidecars disagree. Static OCaml format/parse, diff, and grep checks pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
         </tbody>

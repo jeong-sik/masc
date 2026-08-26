@@ -57,9 +57,9 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 - `lib/keeper/keeper_agent_run_turn_helpers.ml:236-268` installs `on_yield` / `on_resume` hooks that emit `Streaming ⇄ Awaiting_tool_result` **only if** `Env_config.Slot.yield_enabled ()` returns true.
 - TLA `KeeperTurnFSM.tla` models `StreamYieldsTool` and `ToolReturned` unconditionally for every tool call.
 
-**Impact**: When `yield_on_tool=false` (default or production config), the FSM telemetry never enters `Awaiting_tool_result`, even though OAS internally blocks waiting for tool results. The formal model and the runtime telemetry diverge.
+**Impact**: When `yield_on_tool=false` (default or production config), the FSM telemetry never enters `Awaiting_tool_result`, even though agent_core internally blocks waiting for tool results. The formal model and the runtime telemetry diverge.
 
-**Recommended action**: Wire `StreamYieldsTool` / `ToolReturned` transitions unconditionally, e.g. by observing the OAS Event_bus `ToolCalled` / `ToolCompleted` events instead of relying on the optional yield hook.
+**Recommended action**: Wire `StreamYieldsTool` / `ToolReturned` transitions unconditionally, e.g. by observing the agent_core Event_bus `ToolCalled` / `ToolCompleted` events instead of relying on the optional yield hook.
 
 **Related open question**: `OQ-TURN-002` in `docs/spec/04-turn-lifecycle.md`.
 

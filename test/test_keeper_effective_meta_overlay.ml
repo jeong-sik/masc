@@ -1248,9 +1248,43 @@ instructions = "Missing sandbox profile"
     Alcotest.(check bool)
       "raw source provenance remains visible"
       true
-      (match json_field "sources" json with
-       | Some (`Assoc _) -> true
-       | Some _ | None -> false)
+    (match json_field "sources" json with
+     | Some (`Assoc _) -> true
+     | Some _ | None -> false)
+
+let test_config_snapshot_prompt_is_nested_only () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "nested-prompt" in
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+instructions = "nested instructions"
+sandbox_profile = "local"
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  | `Not_found, _ -> Alcotest.fail "expected a keeper config snapshot"
+  | `OK, json ->
+    Alcotest.(check bool)
+      "flat instructions are retired"
+      true
+      (json_field "instructions" json = None);
+    Alcotest.(check bool)
+      "flat effective prompt is retired"
+      true
+      (json_field "effective_system_prompt" json = None);
+    (match json_field "prompt" json with
+     | Some prompt ->
+       Alcotest.(check (option string))
+         "prompt owns instructions"
+         (Some "nested instructions")
+         (json_string_field "instructions" prompt);
+       Alcotest.(check bool)
+         "prompt owns effective system prompt"
+         true
+         (Option.is_some (json_string_field "effective_system_prompt" prompt))
+     | None -> Alcotest.fail "config snapshot omitted prompt")
 
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1339,6 +1373,9 @@ let () =
           Alcotest.test_case
             "config snapshot never falls back to raw effective fields"
             `Quick test_config_snapshot_does_not_fallback_to_raw_meta;
+          Alcotest.test_case
+            "config snapshot prompt is nested only"
+            `Quick test_config_snapshot_prompt_is_nested_only;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

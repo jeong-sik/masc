@@ -530,6 +530,8 @@ let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome 
 let respond_runtime_config_reload state agent_name ~operation request reqd =
   match Runtime.load_config_text () with
   | Ok (path, saved_text) ->
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    ignore (Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path);
     audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
     Http.Response.json_value ~compress:true ~request

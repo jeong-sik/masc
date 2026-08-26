@@ -1358,72 +1358,36 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        ) request reqd)
 
-  (* Skill catalog API (RFC skills-as-tools §2.6): the same load the tool
-     surface performs at turn start, projected as JSON. A broken skills
-     directory answers ok=false with the exact turn-blocking error instead
-     of an empty list, so the dashboard shows why keepers are refusing
-     turns rather than showing no skills. *)
+  (* Skill catalog API: projection only. Bootstrap and runtime-config apply
+     publish the workspace snapshot; this read never scans the filesystem or
+     recomputes a competing catalog. *)
   |> Http.Router.get "/api/v1/skills" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let config = Mcp_server.workspace_config state in
          let json =
-           match
-             Keeper_run_tools_setup.load_skill_catalog
-               ~base_path:config.Workspace.base_path
-           with
-           | Error error ->
+           match Server_skill_snapshot_runtime.lookup ~base_path:config.Workspace.base_path with
+           | Error _error ->
              `Assoc
-               [ ("ok", `Bool false)
-               ; ("error", `String (Agent_core.Error.to_string error))
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "invalid_workspace")
+               ; ("reason", `Assoc [ ("code", `String "invalid_workspace") ])
                ]
-           | Ok catalog ->
-             let skills =
-               Keeper_skill_catalog.skills catalog
-               |> List.map (fun (skill : Keeper_skill_catalog.skill) ->
-                    let base =
-                      [ ("name", `String skill.name)
-                      ; ("description", `String skill.description)
-                      ; ( "kind"
-                        , `String
-                            (Keeper_skill_catalog.surface_to_string
-                               skill.surface) )
-                      ; ("body_bytes", `Int (String.length skill.body))
-                      ]
-                    in
-                    match skill.surface with
-                    | Keeper_skill_catalog.Instruction -> `Assoc base
-                    | Keeper_skill_catalog.Composition entry ->
-                      `Assoc
-                        (base
-                        @ [ ( "tool_name"
-                            , `String
-                                (Keeper_tool_composition_catalog.tool_name
-                                   entry) )
-                          ; ( "execution"
-                            , `String
-                                (Keeper_tool_composition_catalog
-                                 .execution_mode_to_string entry.execution) )
-                          ; ( "params"
-                            , `List
-                                (List.map
-                                   (fun
-                                     (param :
-                                       Keeper_tool_composition_catalog.param)
-                                   ->
-                                     `Assoc
-                                       [ ("name", `String param.param_name)
-                                       ; ( "type"
-                                         , `String
-                                             (Keeper_tool_composition_catalog
-                                              .param_type_to_string
-                                                param.param_type) )
-                                       ; ( "description"
-                                         , `String param.param_description )
-                                       ])
-                                   entry.params) )
-                          ]))
-             in
-             `Assoc [ ("ok", `Bool true); ("skills", `List skills) ]
+           | Ok Not_registered ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "not_registered")
+               ]
+           | Ok Uninitialized ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "uninitialized")
+               ]
+           | Ok (Ready snapshot) ->
+             `Assoc
+               [ ("schema", `String "masc.skill-snapshot/v1")
+               ; ("state", `String "ready")
+               ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
+               ]
          in
          Http.Response.json_value json reqd
        ) request reqd)

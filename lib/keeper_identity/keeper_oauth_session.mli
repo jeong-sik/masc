@@ -23,6 +23,13 @@ type start_error =
   | No_registration of string
       (** Nobody configured a client id and the server offers no way to get
           one. Carries the issuer for the same reason. *)
+  | No_public_client of string
+      (** The token endpoint accepts no client that authenticates with
+          nothing. Refused before anything is registered, because the
+          alternative is an operator consenting in a browser, a client left
+          behind on their account, and the exchange failing afterwards with
+          the server's word for "who are you". Nothing here holds a client
+          secret: a public client's proof is PKCE. Carries the issuer. *)
 
 val start_error_to_string : start_error -> string
 

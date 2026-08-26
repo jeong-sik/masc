@@ -66,8 +66,8 @@ only runs where the previous implementation returned `None`.
 ## Consumer wiring (out of scope here)
 
 Downstream runtimes (masc) resolve an overlay file (e.g. config-root
-`oas-models-overlay.toml`) and call `set_global_overlay` during bootstrap,
-replacing their full-file `oas-models.toml` pickup. Tracked in masc RFC-0342
+`agent_core-models-overlay.toml`) and call `set_global_overlay` during bootstrap,
+replacing their full-file `agent_core-models.toml` pickup. Tracked in masc RFC-0342
 (D1 landing plan and the deployment-fork removal target).
 
 ## Tests

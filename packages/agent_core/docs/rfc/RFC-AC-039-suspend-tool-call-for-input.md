@@ -22,7 +22,7 @@ the tool invocation is opened.
   effect is started.
 
 This is deliberately a synchronous authorization gate, not an SDK-owned
-durable suspension. OAS installs no timer, stores no pending approval request,
+durable suspension. agent_core installs no timer, stores no pending approval request,
 and exposes no resume token here. The callback must settle any remote prompt,
 deadline, or restart policy before it returns; `Timed_out` reports a deadline
 already enforced by the caller. A callback that does not return blocks its

@@ -5,7 +5,7 @@
 | Status | Draft |
 | Author | jeong-sik (with Claude analysis) |
 | Created | 2026-05-08 |
-| Target | `agent_sdk` (oas) v0.193+ |
+| Target | `agent_sdk` (agent_core) v0.193+ |
 | Supersedes | None |
 | Related | None |
 

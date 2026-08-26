@@ -5,10 +5,10 @@
 | Status | Draft |
 | Author | jeong-sik (Claude Opus 4.8 조사·구현) |
 | Created | 2026-07-08 |
-| Target | `agent_sdk` (oas) — `lib/llm_provider/` (`backend_openai_serialize.ml`, `backend_openai_request.ml`, `backend_ollama.ml`, `backend_openai_parse.ml`, `http_client.ml`, `complete_sync.ml`, `error.ml`) |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/` (`backend_openai_serialize.ml`, `backend_openai_request.ml`, `backend_ollama.ml`, `backend_openai_parse.ml`, `http_client.ml`, `complete_sync.ml`, `error.ml`) |
 | Supplements | RFC-AC-029 §thinking/reasoning (thinking control), RFC-AC-033 (typed-vs-string classifier), RFC-AC-034 (capability는 model×transport) |
-| Boundary | parse 계약 + openai-compat wire serialization 변경. OAS-side only; MASC는 typed outcome을 소비(RFC-AC-029 §6: OAS는 MASC에 의존하지 않는다). |
-| Triggering issue | oas#2483 (blank 200 → Ok content=[] → empty-turn storm), 2026-07-06 오류폭풍 근본 분석 |
+| Boundary | parse 계약 + openai-compat wire serialization 변경. agent_core-side only; MASC는 typed outcome을 소비(RFC-AC-029 §6: OAS는 MASC에 의존하지 않는다). |
+| Triggering issue | (blank 200 → Ok content=[] → empty-turn storm), 2026-07-06 오류폭풍 근본 분석 |
 
 ## 0. Summary
 
@@ -44,7 +44,7 @@ type parse_error = Provider_error of string | Empty_completion of empty_completi
 
 ## 3. 범위에서 제외 (명시적 후속)
 
-### 3.1 Streaming symmetry (구현됨 — oas#2483 streaming follow-up PR)
+### 3.1 Streaming symmetry (구현됨 — streaming follow-up PR)
 
 streaming 경로도 `Ok content=[]`를 낼 수 있어 non-streaming과 대칭으로 fail-close가 필요했다. 초기 시도는 `complete_stream_acc.finalize_stream_acc`(구조 조립기)에 직접 가드를 넣는 것이었는데, 이때 **21개 단위 테스트가 깨졌다** — 이들은 empty acc를 finalize해 usage/stop_reason plumbing만 검증하는 최소 fixture다. 이 실패가 **경계 오배치의 신호**였다.
 
@@ -56,9 +56,9 @@ streaming 경로도 `Ok content=[]`를 낼 수 있어 non-streaming과 대칭으
 
 ### 3.2 MASC 소비 (B-full, 별도 repo/PR)
 
-MASC는 OAS SHA를 pin하고 기존 `Error.sdk_error`를 소비한다(RFC-AC-029 §6, 단방향). 현재 실제 소비자는 typed stop reason을 분기하지 않으므로 새 공개 error variant를 추가하지 않는다. typed downstream 정책이 실제로 필요해질 때는 구체적 소비자와 함께 별도 API 변경으로 다룬다.
+MASC는 agent_core SHA를 pin하고 기존 `Error.sdk_error`를 소비한다(RFC-AC-029 §6, 단방향). 현재 실제 소비자는 typed stop reason을 분기하지 않으므로 새 공개 error variant를 추가하지 않는다. typed downstream 정책이 실제로 필요해질 때는 구체적 소비자와 함께 별도 API 변경으로 다룬다.
 
-**상태 업데이트 (실측)**: A+B는 oas#2488(aad819bb1)로 main 착지, MASC는 pin bump #23682으로 이를 흡수했다. 이후 oas#2491은 legacy `lib/streaming.ml`에 fail-close를 추가했지만 Agent가 사용하는 canonical `Complete.complete_stream`과 injected transport는 보호하지 못했고 `Stream_parse_failed` 문자열을 경유했다. 현재 수렴 경로는 모든 completion 소비 경계에서 `Http_client.Empty_completion { stop_reason : Types.stop_reason }`, 공개 SDK 경계에서 기존 `ProviderUnavailable`이다.
+**상태 업데이트 (실측)**: A+B는 (aad819bb1)로 main 착지, MASC는 pin bump #23682으로 이를 흡수했다. 이후 은 legacy `lib/streaming.ml`에 fail-close를 추가했지만 Agent가 사용하는 canonical `Complete.complete_stream`과 injected transport는 보호하지 못했고 `Stream_parse_failed` 문자열을 경유했다. 현재 수렴 경로는 모든 completion 소비 경계에서 `Http_client.Empty_completion { stop_reason : Types.stop_reason }`, 공개 SDK 경계에서 기존 `ProviderUnavailable`이다.
 
 ## 4. 검증
 
@@ -69,4 +69,4 @@ MASC는 OAS SHA를 pin하고 기존 `Error.sdk_error`를 소비한다(RFC-AC-029
 
 ## 5. Rollout
 
-A+B는 하나의 OAS PR(#2483 참조)로 착지. release-please가 버전 bump. MASC는 그 main SHA를 `scripts/oas-agent-sdk-pin.sh`로 pin 후 B-full 소비 PR.
+A+B는 하나의 agent_core PR(#2483 참조)로 착지. release-please가 버전 bump. MASC는 그 main SHA를 `scripts/agent_core-agent-sdk-pin.sh`로 pin 후 B-full 소비 PR.

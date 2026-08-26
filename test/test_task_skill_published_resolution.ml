@@ -242,6 +242,18 @@ let test_uninitialized_snapshot_is_typed () =
     (rejection_code result)
 ;;
 
+let test_unregistered_snapshot_is_typed () =
+  with_workspace @@ fun base_path _config ctx ->
+  (match Service.find_workspace_of_base_path ~base_path with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> fail "test workspace unexpectedly registered");
+  let result = add_task ctx ~title:"Unregistered" [ synthetic_reference () ] in
+  check string
+    "typed code"
+    "skill_snapshot_not_registered"
+    (rejection_code result)
+;;
+
 let test_unknown_identity_and_revision_mismatch_are_typed () =
   with_workspace @@ fun base_path config ctx ->
   write_skill
@@ -343,6 +355,10 @@ let () =
             "shadow exact reference uses one published observation"
             `Quick
             test_shadow_reference_uses_one_published_observation
+        ; test_case
+            "unregistered snapshot is typed"
+            `Quick
+            test_unregistered_snapshot_is_typed
         ; test_case
             "uninitialized snapshot is typed"
             `Quick

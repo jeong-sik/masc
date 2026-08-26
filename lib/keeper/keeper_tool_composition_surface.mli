@@ -43,6 +43,19 @@ val schema_tools :
     {!make_tools}; callers use this to project and hash the effective surface
     without constructing turn sandboxes or executable handlers. *)
 
+val merge_instruction_skills :
+  task:(Skill_reference.t * string * string) list ->
+  global:(Skill_reference.t * string * string) list ->
+  (Skill_reference.t * string * string) list
+(** Preserve Task-selected order, then append globally discoverable exact
+    entries that are not already selected. *)
+
+val instruction_skill_schema_tool :
+  instruction_skills:(Skill_reference.t * string * string) list ->
+  Agent_core.Tool.t
+(** Handler-free [keeper_skill] schema with the same exact Available
+    description used by the executable tool. *)
+
 val make_tools
   :  ?instruction_skills:(Skill_reference.t * string * string) list
        (** Instruction skills this keeper carries, as (exact reference,

@@ -1419,9 +1419,11 @@
   test_set_util
   test_board_core_payload)
  (libraries
-  masc_test_deps
+ masc_test_deps
   masc_test_runtime
   masc.embedded_config
+  masc.skill_config
+  masc.skill_reference
   bigstringaf
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size

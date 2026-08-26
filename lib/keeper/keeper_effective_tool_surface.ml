@@ -87,16 +87,6 @@ let composition_rows skill_catalog =
     { name; origin }, schema_tool)
 ;;
 
-let instruction_skill_row =
-  let schema = Tool_schemas_skill.schema in
-  ( { name = schema.name; origin = Instruction_skill }
-  , Tool_bridge.agent_core_tool_of_masc_with_execution_env
-      ~name:schema.name
-      ~description:schema.description
-      ~input_schema:schema.input_schema
-      (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute") )
-;;
-
 let project
       ~keeper_name
       ~runtime_id
@@ -117,10 +107,32 @@ let project
   match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
   | Error _ as error -> error
   | Ok task_selection ->
+    let task_instruction_skills =
+      List.map
+        (fun (selected : Keeper_task_skill_turn.selected) ->
+           selected.reference, selected.skill.description, selected.skill.body)
+        task_selection.selected
+    in
     let instruction_skills =
       List.map
         (fun (selected : Keeper_task_skill_turn.selected) -> selected.reference)
         task_selection.selected
+    in
+    let global_instruction_skills =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.model_invocable, skill.surface with
+           | Some reference, true, Keeper_skill_catalog.Instruction ->
+             Some (reference, skill.description, skill.body)
+           | None, _, _
+           | Some _, false, _
+           | Some _, true, Keeper_skill_catalog.Composition _ ->
+             None)
+    in
+    let readable_instruction_skills =
+      Keeper_tool_composition_surface.merge_instruction_skills
+        ~task:task_instruction_skills
+        ~global:global_instruction_skills
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog
@@ -133,21 +145,15 @@ let project
            | Some _, true, Keeper_skill_catalog.Instruction ->
              None)
     in
-    let global_instruction_present =
-      List.exists
-        (fun (skill : Keeper_skill_catalog.skill) ->
-           match skill.reference, skill.model_invocable, skill.surface with
-           | Some _, true, Keeper_skill_catalog.Instruction -> true
-           | None, _, _
-           | Some _, false, _
-           | Some _, true, Keeper_skill_catalog.Composition _ ->
-             false)
-        (Keeper_skill_catalog.skills skill_catalog)
-    in
     let instruction_rows =
-      if instruction_skills <> [] || global_instruction_present
-      then [ instruction_skill_row ]
-      else []
+      match readable_instruction_skills with
+      | [] -> []
+      | skills ->
+        let schema_tool =
+          Keeper_tool_composition_surface.instruction_skill_schema_tool
+            ~instruction_skills:skills
+        in
+        [ { name = schema_tool.schema.name; origin = Instruction_skill }, schema_tool ]
     in
     let rows =
       descriptor_rows descriptors

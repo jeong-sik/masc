@@ -1496,6 +1496,17 @@ let test_decode_tool_snapshot_without_inventory_is_an_error () =
   | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
 
 let test_decode_effective_keeper_surface_keeps_provenance () =
+  let exact_reference name revision =
+    `Assoc
+      [ ( "identity"
+        , `Assoc
+            [ "source_id", `String "project-masc"
+            ; "package_id", `String name
+            ; "name", `String name
+            ] )
+      ; "content_revision", `String (String.make 64 revision)
+      ]
+  in
   let effective =
     `Assoc
       [ "status", `String "available"
@@ -1504,8 +1515,8 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "official_client_kind", `String "codex"
       ; "native_posture", `String "read"
       ; "tool_groups", `List [ `String "filesystem" ]
-      ; "instruction_skills", `List [ `String "ocaml-coding" ]
-      ; "composition_skills", `List [ `String "mission-snapshot" ]
+      ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
+      ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
       ; "count", `Int 1
       ; ( "tools"
         , `List
@@ -1537,13 +1548,36 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         _ } ->
       Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
       Alcotest.(check string) "native posture" "read" native;
-      Alcotest.(check (list string)) "declared instruction skill"
-        [ "ocaml-coding" ] ets_instruction_skills;
+      Alcotest.(check string)
+        "declared instruction skill"
+        (Yojson.Safe.to_string (`List [ exact_reference "ocaml-coding" 'a' ]))
+        (Skill_reference.list_to_yojson ets_instruction_skills
+         |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
       Alcotest.(check (option string)) "SKILL.md source"
         (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
       Alcotest.(check int) "digest length" 64 (String.length digest)
   | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
+
+let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
+  let effective =
+    `Assoc
+      [ "status", `String "available"
+      ; "keeper_name", `String "fixture"
+      ; "runtime_id", `String "runtime"
+      ; "official_client_kind", `String "codex"
+      ; "native_posture", `Null
+      ; "tool_groups", `List []
+      ; "instruction_skills", `List [ `String "legacy-name" ]
+      ; "composition_skills", `List []
+      ; "count", `Int 0
+      ; "tools", `List []
+      ; "tool_surface_sha256", `Null
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "legacy Skill name list was accepted"
 
 let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
   let effective =
@@ -2746,6 +2780,8 @@ let () =
           test_decode_tool_snapshot_without_inventory_is_an_error;
         Alcotest.test_case "effective surface keeps provenance" `Quick
           test_decode_effective_keeper_surface_keeps_provenance;
+        Alcotest.test_case "effective surface rejects legacy Skill names" `Quick
+          test_decode_effective_keeper_surface_rejects_legacy_skill_names;
         Alcotest.test_case "effective unavailable stays explicit" `Quick
           test_decode_effective_keeper_surface_does_not_hide_unavailable;
       ] );

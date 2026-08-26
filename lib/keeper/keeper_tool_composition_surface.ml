@@ -952,8 +952,20 @@ let make_request_control_tool
 let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
 let skill_reference_input_schema = skill_tool_schema.input_schema
 
-let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
-  let name = Catalog.skill_tool_name in
+let merge_instruction_skills ~task ~global =
+  List.fold_left
+    (fun selected ((reference, _, _) as skill) ->
+       if
+         List.exists
+           (fun (known, _, _) -> Skill_reference.equal reference known)
+           selected
+       then selected
+       else selected @ [ skill ])
+    task
+    global
+;;
+
+let instruction_skill_description instruction_skills =
   let listed =
     instruction_skills
     |> List.map (fun (reference, description, _body) ->
@@ -961,12 +973,22 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
            "%s: %s"
            (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
            description)
-    |> String.concat "
-"
+    |> String.concat "\n"
   in
-  let description =
-    skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
-  in
+  skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
+;;
+
+let instruction_skill_schema_tool ~instruction_skills =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~name:skill_tool_schema.name
+    ~description:(instruction_skill_description instruction_skills)
+    ~input_schema:skill_reference_input_schema
+    (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute")
+;;
+
+let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
+  let name = Catalog.skill_tool_name in
+  let description = instruction_skill_description instruction_skills in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path

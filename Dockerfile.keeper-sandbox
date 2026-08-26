@@ -36,6 +36,13 @@ RUN apt-get update \
  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
  && printf 'deb [arch=%s signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main\n' \
       "$(dpkg --print-architecture)" > /etc/apt/sources.list.d/github-cli.list \
+ && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+      -o /usr/share/keyrings/nodesource.gpg.armor \
+ && gpg --dearmor -o /usr/share/keyrings/nodesource.gpg \
+      < /usr/share/keyrings/nodesource.gpg.armor \
+ && chmod go+r /usr/share/keyrings/nodesource.gpg \
+ && printf 'deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main\n' \
+      > /etc/apt/sources.list.d/nodesource.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       bash \
@@ -48,8 +55,6 @@ RUN apt-get update \
       jq \
       less \
       make \
-      nodejs \
-      npm \
       openssh-client \
       patch \
       pkg-config \
@@ -61,6 +66,7 @@ RUN apt-get update \
       unzip \
       zip \
       m4 \
+      nodejs \
       procps \
       lsof \
       fd-find \
@@ -100,9 +106,20 @@ RUN apt-get update \
 # (2026-08-20..26). The apt list above closed procps (ps/pgrep/pkill, 35 uses),
 # lsof (7), fd (2), zsh (3) and trash (39). These three are not apt packages.
 #
-# pnpm is the largest single gap at 103 uses -- the dashboard's vitest runs
-# through it and the image shipped npm only.
-RUN npm install --global --no-fund --no-audit pnpm \
+# Node is resolved from the nodesource apt repository added above, the same
+# keyring-and-signed-source shape this file already uses for `gh`, and for the
+# same reason: Ubuntu 24.04 ships nodejs 18.19 while dashboard/package.json
+# declares `"engines": {"node": ">=22"}` and `"packageManager": "pnpm@10.31.0"`.
+#
+# Measured 2026-08-26: pnpm installed on top of apt's node 18 is present on
+# PATH and unusable -- `pnpm --version` answers "requires at least Node.js
+# v22.13". Existing is not working, and the contract test below now asks the
+# second question. The host runs v22.22; the image was four majors behind the
+# project it builds.
+#
+# pnpm is pinned to the version the repository declares, so the image tracks
+# the project rather than drifting with the registry's "latest".
+RUN npm install --global --no-fund --no-audit pnpm@10.31.0 \
  && ln -s "$(command -v timeout)" /usr/local/bin/gtimeout \
  && ln -s "$(command -v fdfind)" /usr/local/bin/fd
 

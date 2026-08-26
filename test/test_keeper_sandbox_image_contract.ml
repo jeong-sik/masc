@@ -16,7 +16,16 @@
     Matching is on whole tokens, not substrings. The Dockerfile is split on
     whitespace and path separators, so ["fd"] is found in
     ["/usr/local/bin/fd"] but ["fd"] would not be found inside ["fd-find"]
-    alone -- both are listed where both are meant. *)
+    alone -- both are listed where both are meant.
+
+    Presence is not the whole contract, and this file learned that twice.
+    The first version searched the entire file, so the prose naming procps
+    satisfied the check and deleting procps from the install list left the test
+    green; comments are stripped now. The second gap is bigger: pnpm installed
+    cleanly on top of apt's node 18 and answered
+    ["requires at least Node.js v22.13"] when run. Present on PATH, unusable.
+    A Dockerfile test cannot execute the image, so what it can check is the
+    version constraint the repository states -- see {!version_pins}. *)
 
 open Alcotest
 
@@ -51,6 +60,11 @@ let tokens text =
     | ' ' | '\t' | '\n' | '\r' | '/' | '\\' | '"' | '\'' | '=' | ':' | ',' -> true
     | _ -> false
   in
+  (* Two shapes need both halves to be findable, so they are split as well as
+     kept whole: [pnpm@10.31.0] has to answer for the tool [pnpm] and for the
+     pin, and [deb.nodesource.com] for the host [nodesource]. Splitting on [@]
+     and [.] wholesale would break [ya29.] style tokens elsewhere, so the extra
+     pieces are added rather than the separator widened. *)
   let out = ref [] in
   let buf = Buffer.create 32 in
   let flush () =
@@ -62,7 +76,15 @@ let tokens text =
   in
   String.iter (fun c -> if is_sep c then flush () else Buffer.add_char buf c) text;
   flush ();
-  List.sort_uniq String.compare !out
+  let pieces =
+    !out
+    |> List.concat_map (fun token ->
+      token
+      |> String.split_on_char '@'
+      |> List.concat_map (String.split_on_char '.')
+      |> List.filter (fun piece -> String.length piece > 0))
+  in
+  List.sort_uniq String.compare (!out @ pieces)
 ;;
 
 let has token set = List.exists (String.equal token) set
@@ -200,6 +222,37 @@ let test_every_measured_tool_is_classified () =
     measured_usage
 ;;
 
+(* Where a tool's usefulness depends on a version, the image has to name the
+   version the project declares -- not "latest", which is how the node 18 /
+   pnpm mismatch got in. dashboard/package.json is the source of both numbers.
+
+   This is a manifest cross-check, not a heuristic: the pin either appears in
+   an instruction line or it does not. *)
+let version_pins =
+  [ "pnpm@10.31.0", "dashboard/package.json declares packageManager pnpm@10.31.0"
+  ; "node_22.x", "dashboard/package.json declares engines.node >= 22"
+  ]
+;;
+
+let test_versions_are_pinned_to_the_project () =
+  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  List.iter
+    (fun (pin, why) ->
+       check bool (Printf.sprintf "%s — %s" pin why) true (has pin set))
+    version_pins
+;;
+
+(* apt's nodejs is 18.19 on this base, so resolving node from apt alone cannot
+   satisfy engines.node >= 22. The nodesource repository has to be present. *)
+let test_node_does_not_come_from_apt_alone () =
+  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  check
+    bool
+    "a signed nodesource repository supplies node"
+    true
+    (has "nodesource" set && has "deb.nodesource.com" set)
+;;
+
 let () =
   run
     "keeper sandbox image contract"
@@ -211,6 +264,14 @@ let () =
             "every measured tool is classified"
             `Quick
             test_every_measured_tool_is_classified
+        ; test_case
+            "versions are pinned to the project"
+            `Quick
+            test_versions_are_pinned_to_the_project
+        ; test_case
+            "node does not come from apt alone"
+            `Quick
+            test_node_does_not_come_from_apt_alone
         ] )
     ]
 ;;

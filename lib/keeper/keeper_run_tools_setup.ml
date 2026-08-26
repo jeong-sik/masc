@@ -644,6 +644,7 @@ let prepare_agent_setup
     ; on_runtime_attempt
     ; tool_result_commit_required
     ; on_tool_stream_observation
+    ; skill_activation_context
     ; on_tool_result_ready
     ; tools
     }

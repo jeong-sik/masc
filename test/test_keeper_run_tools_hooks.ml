@@ -958,6 +958,43 @@ let test_first_round_survives_a_replayed_tool_tail () =
        [ user ])
 
 
+let test_trailing_tool_results_keep_exact_invocation_ids () =
+  let tool_message : Agent_core.Types.message =
+    { role = Agent_core.Types.Tool
+    ; content =
+        [ Agent_core.Types.ToolResult
+            { tool_use_id = "call-skill"
+            ; content = "body"
+            ; outcome = Agent_core.Llm_provider.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ; Agent_core.Types.ToolResult
+            { tool_use_id = "call-other"
+            ; content = "other"
+            ; outcome = Agent_core.Llm_provider.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  check
+    (list string)
+    "exact trailing ids"
+    [ "call-skill"; "call-other" ]
+    (Masc.Keeper_run_tools_hooks.trailing_tool_result_ids [ tool_message ]);
+  check
+    (list string)
+    "a later non-tool message means no provider-bound tool result"
+    []
+    (Masc.Keeper_run_tools_hooks.trailing_tool_result_ids
+       [ tool_message; Agent_core.Types.user_msg "later" ])
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1083,6 +1120,12 @@ let () =
             "validation callback follows exact log commit"
             `Quick
             test_validation_rejection_notifies_after_exact_log_commit
+        ] )
+    ; ( "Skill delivery observation"
+      , [ test_case
+            "keeps exact trailing ToolResult ids"
+            `Quick
+            test_trailing_tool_results_keep_exact_invocation_ids
         ] )
     ]
 ;;

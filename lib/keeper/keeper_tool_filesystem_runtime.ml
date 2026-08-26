@@ -523,6 +523,12 @@ let handle_owned_read_file_with_outcome
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
    multi-edits are rejected (mirrors Edit semantics). *)
+type patch_application =
+  { updated : string
+  ; occurrence_count : int
+  ; line_occurrences : Keeper_file_change_evidence.edit_occurrence list option
+  }
+
 let apply_patch ~old_string ~new_string ~replace_all text =
   if old_string = ""
   then Error "old_string must be non-empty for mode=patch."
@@ -542,35 +548,71 @@ let apply_patch ~old_string ~new_string ~replace_all text =
         in
         loop 0 0)
     in
-    let occurrences = count_occurrences ~needle:old_string text in
-    if occurrences = 0
+    let occurrence_count = count_occurrences ~needle:old_string text in
+    if occurrence_count = 0
     then Error "old_string not found in file. Patch did not match anything."
-    else if (not replace_all) && occurrences > 1
+    else if (not replace_all) && occurrence_count > 1
     then
       Error
         (Printf.sprintf
            "old_string occurs %d times. Pass replace_all=true to apply to all, or supply \
             a more specific old_string."
-           occurrences)
+           occurrence_count)
     else (
       let buf = Buffer.create (String.length text) in
       let nlen = String.length old_string in
       let hlen = String.length text in
-      let rec loop i =
+      let record_line_occurrences =
+        occurrence_count
+        <= Keeper_file_change_evidence.max_recorded_edit_occurrences
+      in
+      let rec loop i old_line new_line evidence_rev =
         if i + nlen > hlen
-        then Buffer.add_substring buf text i (hlen - i)
+        then (
+          Buffer.add_substring buf text i (hlen - i);
+          Option.map List.rev evidence_rev)
         else if String.sub text i nlen = old_string
         then (
+          let evidence_rev =
+            Option.map
+              (fun evidence_rev ->
+                 Keeper_file_change_evidence.edit_occurrence
+                   ~old_start_line:old_line
+                   ~new_start_line:new_line
+                   ~old_string
+                   ~new_string
+                 :: evidence_rev)
+              evidence_rev
+          in
           Buffer.add_string buf new_string;
           if replace_all
-          then loop (i + nlen)
-          else Buffer.add_substring buf text (i + nlen) (hlen - i - nlen))
+          then
+            loop
+              (i + nlen)
+              (Keeper_file_change_evidence.advance_line
+                 ~start_line:old_line
+                 old_string)
+              (Keeper_file_change_evidence.advance_line
+                 ~start_line:new_line
+                 new_string)
+              evidence_rev
+          else (
+            Buffer.add_substring buf text (i + nlen) (hlen - i - nlen);
+            Option.map List.rev evidence_rev))
         else (
-          Buffer.add_char buf text.[i];
-          loop (i + 1))
+          let char = text.[i] in
+          Buffer.add_char buf char;
+          let line_delta = if Char.equal char '\n' then 1 else 0 in
+          loop
+            (i + 1)
+            (old_line + line_delta)
+            (new_line + line_delta)
+            evidence_rev)
       in
-      loop 0;
-      Ok (Buffer.contents buf, occurrences)))
+      let line_occurrences =
+        loop 0 1 1 (if record_line_occurrences then Some [] else None)
+      in
+      Ok { updated = Buffer.contents buf; occurrence_count; line_occurrences }))
 ;;
 
 (* RFC-0378 §5.1 — resolve a write's file path to its attribution.
@@ -1422,7 +1464,10 @@ let confined_write_is_keeper_playground
 ;;
 
 type file_write_attempt =
-  | Write_succeeded of string
+  | Write_succeeded of
+      { payload : string
+      ; file_change_evidence : Keeper_file_change_evidence.t option
+      }
   | Write_authorized of Keeper_gate.authorization * file_write_attempt
   | Write_deferred of Keeper_gate_deferred_payload.t
   | Write_failed of
@@ -1927,7 +1972,12 @@ let observe_append_write_outcome ~keeper_name ~target outcome =
 ;;
 
 let rec file_write_attempt_to_execution = function
-  | Write_succeeded payload -> Keeper_tool_execution.success payload
+  | Write_succeeded { payload; file_change_evidence } ->
+    let execution = Keeper_tool_execution.success payload in
+    (match file_change_evidence with
+     | Some evidence ->
+       Keeper_tool_execution.with_file_change_evidence evidence execution
+     | None -> execution)
   | Write_authorized (authorization, attempt) ->
     file_write_attempt_to_execution attempt
     |> Keeper_tool_execution.with_gate_authorization authorization
@@ -2340,7 +2390,8 @@ let handle_file_write_with_outcome
            ; class_ = Tool_result.Runtime_failure
            })
   in
-  let finish_content_write ~confined ~target ~mode_label ~gate_effect write =
+  let finish_content_write ~confined ~target ~mode ~gate_effect write =
+    let mode_label = fs_write_mode_to_string mode in
     let input =
       file_write_gate_input
         ~gate_effect
@@ -2415,15 +2466,21 @@ let handle_file_write_with_outcome
       in
       Ok
         (Write_succeeded
-           (Yojson.Safe.to_string
-              (`Assoc
-                  ([ "ok", `Bool true
-                   ; "path", `String target
-                   ; "mode", `String mode_label
-                   ; "bytes_written", `Int (String.length content)
-                   ]
-                   @ ide_observation_failure_fields ide_observation_error
-                   @ via_field))))
+           { payload =
+               Yojson.Safe.to_string
+                 (`Assoc
+                     ([ "ok", `Bool true
+                      ; "path", `String target
+                      ; "mode", `String mode_label
+                      ; "bytes_written", `Int (String.length content)
+                      ]
+                      @ ide_observation_failure_fields ide_observation_error
+                      @ via_field))
+           ; file_change_evidence =
+               (match mode with
+                | Overwrite -> Some (Keeper_file_change_evidence.written content)
+                | Append | Patch -> None)
+           })
     in
     match write with
     | Recovery_independent operation -> finish_write_result (operation ())
@@ -2451,7 +2508,7 @@ let handle_file_write_with_outcome
       ~created_directory_permissions
     |> Result.map_error Keeper_alerting_path.path_effect_projection_error_to_string
   in
-  let handle_atomic_content_write ~mode_label ~make_effect =
+  let handle_atomic_content_write ~mode ~make_effect =
     match
       resolve_keeper_confined_write_path
         ~config
@@ -2489,7 +2546,7 @@ let handle_file_write_with_outcome
         finish_content_write
           ~confined
           ~target
-          ~mode_label
+          ~mode
           ~gate_effect
           (Recovery_guarded
              (fun publication_recovery_access ->
@@ -2521,7 +2578,6 @@ let handle_file_write_with_outcome
            (error_json ~fields:[ "path", `String target ] msg))
   in
   let handle_append () =
-    let mode_label = fs_write_mode_to_string Append in
     match
       resolve_keeper_confined_write_path
         ~config
@@ -2552,7 +2608,7 @@ let handle_file_write_with_outcome
           finish_content_write
             ~confined
             ~target
-            ~mode_label
+            ~mode:Append
             ~gate_effect
             (Recovery_independent
                (fun () ->
@@ -2625,7 +2681,7 @@ let handle_file_write_with_outcome
                   finish_content_write
                     ~confined
                     ~target
-                    ~mode_label
+                    ~mode:Append
                     ~gate_effect
                     (Recovery_independent
                        (fun () ->
@@ -2683,7 +2739,13 @@ let handle_file_write_with_outcome
          | Error msg -> Keeper_tool_execution.failure (error_json msg)
          | Ok confined ->
               let target = Keeper_alerting_path.confined_host_path confined in
-              let finish_write ~gate_effect ~updated ~occurrences write =
+              let finish_write
+                    ~gate_effect
+                    ~updated
+                    ~occurrence_count
+                    ~line_occurrences
+                    write
+                =
                 let input =
                   file_write_gate_input
                     ~gate_effect
@@ -2756,7 +2818,7 @@ let handle_file_write_with_outcome
                     meta.name
                     target
                     replace_all
-                    occurrences
+                    occurrence_count
                     (String.length updated);
                   let ide_observation_error =
                     track_write_region
@@ -2771,17 +2833,28 @@ let handle_file_write_with_outcome
                   in
                   Ok
                     (Write_succeeded
-                       (Yojson.Safe.to_string
-                          (`Assoc
-                              ([ "ok", `Bool true
-                               ; "path", `String target
-                               ; "mode", `String "patch"
-                               ; "replace_all", `Bool replace_all
-                               ; "occurrences", `Int occurrences
-                               ; "bytes_written", `Int (String.length updated)
-                               ]
-                               @ ide_observation_failure_fields ide_observation_error
-                               @ via_field))))
+                       { payload =
+                           Yojson.Safe.to_string
+                             (`Assoc
+                                 ([ "ok", `Bool true
+                                  ; "path", `String target
+                                  ; "mode", `String "patch"
+                                  ; "replace_all", `Bool replace_all
+                                  ; "occurrences", `Int occurrence_count
+                                  ; "bytes_written", `Int (String.length updated)
+                                  ]
+                                  @ ide_observation_failure_fields
+                                      ide_observation_error
+                                  @ via_field))
+                       ; file_change_evidence =
+                           Some
+                             (match line_occurrences with
+                              | Some occurrences ->
+                                Keeper_file_change_evidence.edited occurrences
+                              | None ->
+                                Keeper_file_change_evidence.edited_ranges_omitted
+                                  ~occurrence_count)
+                       })
                 in
                 match
                   Keeper_publication_recovery_availability.with_access
@@ -2806,7 +2879,7 @@ let handle_file_write_with_outcome
                     current
                     write
                 =
-                let* updated, occurrences =
+                let* application =
                   apply_patch ~old_string ~new_string ~replace_all current
                 in
                 let* projection =
@@ -2826,8 +2899,9 @@ let handle_file_write_with_outcome
                 in
                 finish_write
                   ~gate_effect
-                  ~updated
-                  ~occurrences
+                  ~updated:application.updated
+                  ~occurrence_count:application.occurrence_count
+                  ~line_occurrences:application.line_occurrences
                   (fun publication_recovery_access updated ->
                      write
                        ~recovery_target
@@ -2922,7 +2996,7 @@ let handle_file_write_with_outcome
                    (error_json ~fields:[ "path", `String target ] msg)))
     | Some Overwrite ->
       handle_atomic_content_write
-        ~mode_label:(fs_write_mode_to_string Overwrite)
+        ~mode:Overwrite
         ~make_effect:Keeper_alerting_path.atomic_replace_effect
     | Some Append -> handle_append ()
   )

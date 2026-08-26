@@ -579,6 +579,37 @@ let make_hooks
         Keeper_execution_join.record ~invocation
           ~execution_id:(Ids.Execution_id.to_string execution_id);
         let log_committed = ref false in
+        let file_change_evidence =
+          Keeper_tool_call_log.peek_file_change_evidence ~invocation ()
+        in
+        (* A completed mutation's producer evidence cannot be recoverably
+           reconstructed. Supplying [on_committed] forces this row through the
+           synchronous append boundary; only that acknowledgement removes the
+           invocation-scoped carrier. *)
+        let on_log_committed =
+          match file_change_evidence, on_tool_result_ready with
+          | None, None -> None
+          | _ ->
+            Some
+              (fun () ->
+                 log_committed := true;
+                 (match file_change_evidence with
+                  | Some _ ->
+                    ignore
+                      (Keeper_tool_call_log.consume_file_change_evidence
+                         ~invocation
+                         ())
+                  | None -> ());
+                 Option.iter
+                   (fun notify ->
+                      notify
+                        ~tool_call_id:tool_use_id
+                        ~turn:
+                          (Agent_core.Tool_contract.Invocation.turn invocation)
+                        ~planned_index:schedule.planned_index
+                        ~execution_id)
+                   on_tool_result_ready)
+        in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -590,6 +621,7 @@ let make_hooks
                 failure, and cannot represent [Deferred] at all. *)
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
+             ?file_change_evidence
              ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name
@@ -613,15 +645,7 @@ let make_hooks
              ?network_mode:tctx.network_mode
              ?runtime_profile:tctx.runtime_profile
              ~result_bytes ?truncated_to
-             ?on_committed:
-               (Option.map
-                  (fun notify () ->
-                    log_committed := true;
-                    notify ~tool_call_id:tool_use_id
-                      ~turn:(Agent_core.Tool_contract.Invocation.turn invocation)
-                      ~planned_index:schedule.planned_index
-                      ~execution_id)
-                  on_tool_result_ready)
+             ?on_committed:on_log_committed
              ()
          with
          | Eio.Cancel.Cancelled _ as e ->

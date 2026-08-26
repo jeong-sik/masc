@@ -99,6 +99,43 @@ let consume_disposition ~invocation () =
     | None -> None)
 ;;
 
+(** Producer-owned file change evidence, keyed by the exact physical
+    invocation. It must not be reconstructed from the output string at the
+    hook boundary. *)
+let pending_file_change_evidence :
+      Keeper_file_change_evidence.t Invocation_table.t
+  =
+  Invocation_table.create 8
+;;
+
+let pending_file_change_evidence_mu = Stdlib.Mutex.create ()
+
+let with_pending_file_change_evidence_lock f =
+  Stdlib.Mutex.lock pending_file_change_evidence_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_file_change_evidence_mu)
+    f
+;;
+
+let set_file_change_evidence ~invocation ~evidence =
+  with_pending_file_change_evidence_lock (fun () ->
+    Invocation_table.replace pending_file_change_evidence invocation evidence)
+;;
+
+let consume_file_change_evidence ~invocation () =
+  with_pending_file_change_evidence_lock (fun () ->
+    match Invocation_table.find_opt pending_file_change_evidence invocation with
+    | Some evidence ->
+      Invocation_table.remove pending_file_change_evidence invocation;
+      Some evidence
+    | None -> None)
+;;
+
+let peek_file_change_evidence ~invocation () =
+  with_pending_file_change_evidence_lock (fun () ->
+    Invocation_table.find_opt pending_file_change_evidence invocation)
+;;
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 
 let create_turn_ctx_cell = Keeper_tool_call_log_context.create_cell
@@ -233,13 +270,21 @@ let reset_for_testing () =
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
-  with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation)
+  with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation);
+  with_pending_file_change_evidence_lock (fun () ->
+    Invocation_table.reset pending_file_change_evidence)
 ;;
 
 let pending_truncation_count_for_testing () =
   with_pending_truncation_lock (fun () ->
     Invocation_table.clean pending_truncation;
     Invocation_table.length pending_truncation)
+;;
+
+let pending_file_change_evidence_count_for_testing () =
+  with_pending_file_change_evidence_lock (fun () ->
+    Invocation_table.clean pending_file_change_evidence;
+    Invocation_table.length pending_file_change_evidence)
 ;;
 
 let store_dir () =
@@ -531,6 +576,7 @@ let log_call
       ?execution_mode
       ?typed_result
       ?disposition
+      ?file_change_evidence
       ?composition_tool
       ?composition_run_id
       ?composition_node_id
@@ -691,6 +737,13 @@ let log_call
              [ "disposition", `String (Tool_result.string_of_disposition d) ]
            | None -> [])
       in
+      let file_change_evidence_field =
+        match file_change_evidence with
+        | Some evidence ->
+          [ ( "file_change_evidence"
+            , Keeper_file_change_evidence.to_yojson evidence ) ]
+        | None -> []
+      in
       let composition_fields =
         [ "composition_tool", composition_tool
         ; "composition_run_id", composition_run_id
@@ -814,6 +867,7 @@ let log_call
            @ batch_size_field
            @ execution_mode_field
            @ typed_result_fields
+           @ file_change_evidence_field
            @ composition_fields
            @ composition_execution_field
            @ composition_tool_kind_field

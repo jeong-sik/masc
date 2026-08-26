@@ -84,6 +84,46 @@ let test_pending_observations_are_occurrence_scoped () =
     (consume first)
 ;;
 
+let test_pending_file_change_evidence_is_occurrence_scoped () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:0 in
+  let second = invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:1 in
+  let first_evidence = Keeper_file_change_evidence.written "one\n" in
+  let second_evidence = Keeper_file_change_evidence.written "one\ntwo\n" in
+  Keeper_tool_call_log.set_file_change_evidence
+    ~invocation:first
+    ~evidence:first_evidence;
+  Keeper_tool_call_log.set_file_change_evidence
+    ~invocation:second
+    ~evidence:second_evidence;
+  let consume invocation =
+    Keeper_tool_call_log.consume_file_change_evidence ~invocation ()
+    |> Option.map (fun evidence ->
+      Keeper_file_change_evidence.to_yojson evidence
+      |> Yojson.Safe.to_string)
+  in
+  let encoded evidence =
+    Keeper_file_change_evidence.to_yojson evidence |> Yojson.Safe.to_string
+  in
+  Alcotest.(check (option string))
+    "peek leaves evidence pending until commit acknowledgement"
+    (Some (encoded second_evidence))
+    (Keeper_tool_call_log.peek_file_change_evidence ~invocation:second ()
+     |> Option.map encoded);
+  Alcotest.(check (option string))
+    "same provider id keeps the second physical occurrence"
+    (Some (encoded second_evidence))
+    (consume second);
+  Alcotest.(check (option string))
+    "same provider id keeps the first physical occurrence"
+    (Some (encoded first_evidence))
+    (consume first);
+  Alcotest.(check (option string))
+    "evidence is consumed once"
+    None
+    (consume first)
+;;
+
 let test_abandoned_observation_is_released_with_invocation () =
   Keeper_tool_call_log.reset_for_testing ();
   let record_abandoned () =
@@ -100,6 +140,23 @@ let test_abandoned_observation_is_released_with_invocation () =
     "settlement-skip observation is weakly released"
     0
     (Keeper_tool_call_log.pending_truncation_count_for_testing ())
+;;
+
+let test_abandoned_file_change_evidence_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_file_change_evidence
+      ~invocation:abandoned
+      ~evidence:(Keeper_file_change_evidence.written "orphaned\n")
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "cancelled invocation weakly releases file change evidence"
+    0
+    (Keeper_tool_call_log.pending_file_change_evidence_count_for_testing ())
 ;;
 
 let with_tmp_log f =
@@ -322,6 +379,47 @@ let test_ordinary_path_disposition_persisted () =
         (Some "failed")
         (Safe_ops.json_string_opt "disposition" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
+
+let test_file_change_evidence_persists_with_execution_identity () =
+  with_tmp_log (fun () ->
+    let occurrence =
+      Keeper_file_change_evidence.edit_occurrence
+        ~old_start_line:2
+        ~new_start_line:2
+        ~old_string:"old a\nold b"
+        ~new_string:"new a\nnew b\nnew c"
+    in
+    let evidence = Keeper_file_change_evidence.edited [ occurrence ] in
+    let execution_id = Ids.Execution_id.of_string "exec-file-change-evidence" in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon"
+      ~tool_name:"keeper_fs_edit"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:(String.make 5000 'x')
+      ~success:true
+      ~duration_ms:3.0
+      ~execution_id
+      ~file_change_evidence:evidence
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "same row keeps canonical execution id"
+        (Some "exec-file-change-evidence")
+        (Safe_ops.json_string_opt "execution_id" entry);
+      let expected =
+        Keeper_file_change_evidence.to_yojson evidence |> Yojson.Safe.to_string
+      in
+      let actual =
+        Yojson.Safe.Util.member "file_change_evidence" entry
+        |> Yojson.Safe.to_string
+      in
+      Alcotest.(check string)
+        "typed evidence bypasses the truncated output preview"
+        expected
+        actual
+    | _ -> Alcotest.fail "expected exactly one file change entry")
+;;
 
 (* A row with neither says so by omission rather than by guessing. *)
 let test_row_without_a_typed_outcome_omits_the_field () =
@@ -1776,9 +1874,17 @@ let () =
             `Quick
             test_pending_observations_are_occurrence_scoped
         ; Alcotest.test_case
+            "file evidence remains occurrence-scoped"
+            `Quick
+            test_pending_file_change_evidence_is_occurrence_scoped
+        ; Alcotest.test_case
             "cancelled invocation releases abandoned observation"
             `Quick
             test_abandoned_observation_is_released_with_invocation
+        ; Alcotest.test_case
+            "cancelled invocation releases file evidence"
+            `Quick
+            test_abandoned_file_change_evidence_is_released_with_invocation
         ] )
     ; ( "read_recent",
         [ eio_test "n=0 returns []" test_read_recent_n_zero
@@ -1791,6 +1897,8 @@ let () =
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
         ; eio_test "ordinary path disposition"
             test_ordinary_path_disposition_persisted
+        ; eio_test "file evidence shares the execution identity row"
+            test_file_change_evidence_persists_with_execution_identity
         ; eio_test "no typed outcome omits the field"
             test_row_without_a_typed_outcome_omits_the_field
         ; eio_test "composition action context"

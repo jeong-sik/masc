@@ -27,6 +27,38 @@ type t =
         (PR #28219 review). *)
   }
 
+type config_source_revision = Config_source_revision of string
+type config_commit_order = Config_commit_order of int64
+
+type config_observation =
+  { path : string
+  ; source_text : string
+  ; source_revision : config_source_revision
+  }
+
+type config_durability =
+  | Durable
+  | Durability_unconfirmed of { detail : string }
+
+type config_commit_receipt =
+  { observation : config_observation
+  ; durability : config_durability
+  ; order : config_commit_order
+  }
+
+let config_source_revision_to_string (Config_source_revision revision) = revision
+let config_commit_order_to_string (Config_commit_order order) = Int64.to_string order
+let compare_config_commit_order (Config_commit_order left) (Config_commit_order right) =
+  Int64.compare left right
+;;
+
+let config_observation ~path source_text =
+  let digest =
+    Digestif.SHA256.(to_hex (digest_string ("runtime_config_source\x00" ^ source_text)))
+  in
+  { path; source_text; source_revision = Config_source_revision digest }
+;;
+
 (* id 파생의 단일 출처는 {!Runtime_schema.binding_key} — runtime 을 id 로
    인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
 let id_of_binding (b : binding) : string = binding_key b
@@ -1151,6 +1183,25 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   materialize_config ~validate_max_context ~config_path cfg
 ;;
 
+let load_list_internal_text ~(config_path : string) ~content ~validate_max_context =
+  let* cfg =
+    Runtime_toml.parse_string content
+    |> Result.map_error (fun errs ->
+      let detail =
+        errs
+        |> List.map (fun (e : Runtime_toml.parse_error) ->
+          Printf.sprintf "  - %s: %s" e.path e.message)
+        |> String.concat "\n"
+      in
+      Printf.sprintf
+        "runtime config parse failed (%s): %d error(s):\n%s"
+        config_path
+        (List.length errs)
+        detail)
+  in
+  materialize_config ~validate_max_context ~config_path cfg
+;;
+
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
   |> Result.map fst
@@ -1251,8 +1302,7 @@ let init_default_strict ~config_path =
   init_default_strict_report ~config_path
   |> Result.map_error strict_init_error_to_string
 
-let init_default_degraded_report ~config_path =
-  match load_list_internal ~config_path ~validate_max_context:false with
+let initialize_degraded_loaded ~config_path = function
   | Error msg -> Error (Runtime_config_error msg)
   | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
     let verifier_exact_slot_ids =
@@ -1295,6 +1345,19 @@ let init_default_degraded_report ~config_path =
                   ~config_path
                   degraded_loaded;
                 Ok (Initialized_degraded degradation)))))
+
+let init_default_degraded_report ~config_path =
+  load_list_internal ~config_path ~validate_max_context:false
+  |> initialize_degraded_loaded ~config_path
+;;
+
+let init_default_degraded_observation observation =
+  load_list_internal_text
+    ~config_path:observation.path
+    ~content:observation.source_text
+    ~validate_max_context:false
+  |> initialize_degraded_loaded ~config_path:observation.path
+;;
 
 let runtime_state () = Atomic.get loaded_state_ref
 
@@ -1612,10 +1675,10 @@ let load_file_result path =
          (Printexc.to_string exn))
 ;;
 
-let load_config_text ?runtime_config_path () =
+let load_config_observation ?runtime_config_path () =
   let* path = runtime_config_path_result ?runtime_config_path () in
   let* content = load_file_result path in
-  Ok (path, content)
+  Ok (config_observation ~path content)
 ;;
 
 let contains_newline s =
@@ -1860,6 +1923,15 @@ let materialize_runtime_config_text ~config_path content =
 ;;
 
 let runtime_config_write_mutex = Mutex.create ()
+let runtime_config_commit_order = ref Int64.zero
+
+let committed_receipt ~observation ~durability =
+  runtime_config_commit_order := Int64.succ !runtime_config_commit_order;
+  { observation
+  ; durability
+  ; order = Config_commit_order !runtime_config_commit_order
+  }
+;;
 
 let with_runtime_config_write_lock f =
   Mutex.lock runtime_config_write_mutex;
@@ -1868,20 +1940,21 @@ let with_runtime_config_write_lock f =
 
 let runtime_config_atomic_failure
     ~replacement_visible
+    ~observation
     (failure : Fs_compat.atomic_replace_failure)
   =
-  match failure.Fs_compat.exception_ with
-  | Eio.Cancel.Cancelled _ ->
-    Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-  | _ ->
+  if replacement_visible
+  then
     let detail = Fs_compat.atomic_replace_failure_to_string failure in
-    if replacement_visible
-    then
-      Error
-        ("runtime config replacement is visible, but parent-directory durability \
-          is unconfirmed; retry the same update: "
-         ^ detail)
-    else Error detail
+    Ok
+      (committed_receipt
+         ~observation
+         ~durability:(Durability_unconfirmed { detail }))
+  else
+    match failure.Fs_compat.exception_ with
+    | Eio.Cancel.Cancelled _ ->
+      Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+    | _ -> Error (Fs_compat.atomic_replace_failure_to_string failure)
 ;;
 
 let runtime_config_write_outcome
@@ -1938,6 +2011,7 @@ let commit_runtime_config_text
     ~path
     content
   =
+  let observation = config_observation ~path content in
   let* loaded, exact_output_lanes =
     parse_and_validate_config_text ~config_path:path content
   in
@@ -1948,14 +2022,20 @@ let commit_runtime_config_text
     (match replace_file path content with
      | Ok () ->
        set_loaded ~config_path:path loaded;
-       Ok ()
+       Ok (committed_receipt ~observation ~durability:Durable)
      | Error (failure : Fs_compat.atomic_replace_failure) ->
        (match failure.stage with
         | Fs_compat.Before_rename ->
-          runtime_config_atomic_failure ~replacement_visible:false failure
+          runtime_config_atomic_failure
+            ~replacement_visible:false
+            ~observation
+            failure
         | Fs_compat.After_rename ->
           set_loaded ~config_path:path loaded;
-          runtime_config_atomic_failure ~replacement_visible:true failure))
+          runtime_config_atomic_failure
+            ~replacement_visible:true
+            ~observation
+            failure))
   | Error error ->
     Error
       ("exact-output registry replacement rejected: "
@@ -1977,12 +2057,19 @@ let commit_runtime_config_text
          ("exact-output registry replacement reservation rejected: "
           ^ Runtime_exact_output_registry.publication_error_to_string error)
      | Ok (Runtime_exact_output_registry.Not_committed failure) ->
-       runtime_config_atomic_failure ~replacement_visible:false failure
-     | Ok (Runtime_exact_output_registry.Committed `Durable) -> Ok ()
+       runtime_config_atomic_failure
+         ~replacement_visible:false
+         ~observation
+         failure
+     | Ok (Runtime_exact_output_registry.Committed `Durable) ->
+       Ok (committed_receipt ~observation ~durability:Durable)
      | Ok
          (Runtime_exact_output_registry.Committed
            (`Durability_unconfirmed failure)) ->
-       runtime_config_atomic_failure ~replacement_visible:true failure)
+       runtime_config_atomic_failure
+         ~replacement_visible:true
+         ~observation
+         failure)
 ;;
 
 let save_config_text_with_replace_file

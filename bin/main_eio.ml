@@ -957,7 +957,7 @@ let runtime_default_set_cmd_exit base_path runtime_id =
   match
     Runtime.set_runtime_default ~runtime_config_path ~runtime_id ()
   with
-  | Ok () ->
+  | Ok _receipt ->
       Printf.printf "set [runtime].default = \"%s\" in %s\n" runtime_id
         runtime_config_path;
       0

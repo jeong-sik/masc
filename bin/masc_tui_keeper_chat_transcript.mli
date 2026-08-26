@@ -121,11 +121,13 @@ type unreadable =
   ; last_detail : string
   }
 
-(** A tool call the keeper is holding, waiting to be answered. *)
+(** A tool call the keeper is holding, waiting to be answered. [because] is
+    why it was held; it is drawn under the question in the pane. *)
 type awaiting_approval =
   { call_id : string
   ; tool_name : string
   ; question : string
+  ; because : string
   }
 
 type t

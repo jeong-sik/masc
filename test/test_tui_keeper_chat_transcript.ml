@@ -231,7 +231,8 @@ let approval_rows t =
          if kind = Transcript.Attention then Some text else None)
 
 let requested ~call_id ~tool_name ~question =
-  Live.Approval_requested { call_id; tool_name; args = ""; question }
+  Live.Approval_requested
+    { call_id; tool_name; args = ""; question; because = "" }
 
 let test_a_held_call_shows_its_question () =
   let t = fresh () in
@@ -252,6 +253,37 @@ let test_a_held_call_shows_its_question () =
       (* Without the keys the prompt is a statement, not a question. *)
       check bool "and so is how to answer it" true
         (contains ~needle:"[y]" row && contains ~needle:"[n]" row)
+  | rows -> failf "expected one prompt row, got %d" (List.length rows)
+
+let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
+  (* The approval list screen shows the because next to each held call
+     (#30518). The chat pane asks the same reader the same question, so it
+     draws the reason under the prompt -- and drops the extra line when the
+     emitter is older and sent none. *)
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{}"
+        ; question = "Run Edit on a.ml?"
+        ; because = "file_path touches /etc"
+        }
+    ];
+  (match approval_rows t with
+   | [ row ] ->
+       check bool "the reason is under the question" true
+         (contains ~needle:"because file_path touches /etc" row)
+   | rows -> failf "expected one prompt row, got %d" (List.length rows));
+  let plain = fresh () in
+  feed plain
+    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?" ];
+  match approval_rows plain with
+  | [ row ] ->
+      check bool "an older emitter draws no because line" true
+        (not (contains ~needle:"because" row))
   | rows -> failf "expected one prompt row, got %d" (List.length rows)
 
 let test_a_held_turn_does_not_say_it_is_working () =
@@ -310,6 +342,7 @@ let test_the_arguments_reach_the_call_row () =
         ; tool_name = "Edit"
         ; args = "{\"file_path\":\"lib/a.ml\"}"
         ; question = "Run Edit on lib/a.ml?"
+        ; because = ""
         }
     ];
   (* A reader deciding whether to allow it needs to see what it would touch,
@@ -683,7 +716,10 @@ let () =
         ] )
     ; ( "held calls"
       , [ test_case "a held call shows its question" `Quick
-            test_a_held_call_shows_its_question
+            test_a_held_call_shows_its_question;
+            test_case "the reason a reader is asked is drawn under the question"
+              `Quick
+              test_the_reason_a_reader_is_asked_is_drawn_under_the_question
         ; test_case "a held turn does not say it is working" `Quick
             test_a_held_turn_does_not_say_it_is_working
         ; test_case "an answer clears the prompt" `Quick

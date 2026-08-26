@@ -23,6 +23,12 @@ type delta =
       ; tool_name : string
       ; args : string
       ; question : string
+      ; (* Why this call was held at all. The approval list screen shows it
+           (#30518); without it here, the same reader answering from the chat
+           pane decides without the reason. Emitted since #30518, so it is
+           read with a default rather than required: an event without it is
+           still a prompt that has to be answered. *)
+        because : string
       }
   | Approval_settled of
       { call_id : string
@@ -111,6 +117,10 @@ let custom_deltas fields =
                        name plus the question is enough to. *)
                     args = Option.value ~default:"" (string_field value "args")
                   ; question
+                  ; (* Same posture as args: a missing because is an older
+                       emitter, not a reason to drop the ask. *)
+                    because =
+                      Option.value ~default:"" (string_field value "because")
                   }
               ]
           | _ ->

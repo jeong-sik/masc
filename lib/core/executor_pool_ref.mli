@@ -11,6 +11,11 @@ val get : unit -> Eio.Executor_pool.t option
 val set : Eio.Executor_pool.t -> unit
 (** Install the pool reference. Idempotent overwrite. *)
 
+val in_worker_context : unit -> bool
+(** Whether the current domain is executing a closure submitted through this
+    shared pool reference. Nested shared-pool adapters use this to run inline
+    instead of waiting on the worker that is already executing them. *)
+
 module For_testing : sig
   val with_pool_option :
     Eio.Executor_pool.t option -> (unit -> 'a) -> 'a

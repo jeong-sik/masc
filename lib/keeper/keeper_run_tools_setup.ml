@@ -106,6 +106,7 @@ let expected_model_tool_names
       ~skill_catalog
       ~identity_tool_names
       ~model_visible_descriptors
+      ()
   =
   let descriptor_names =
     model_visible_descriptors
@@ -524,6 +525,7 @@ let prepare_agent_setup
            (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
            identity_offering.Keeper_identity_tools.offered)
       ~model_visible_descriptors
+      ()
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

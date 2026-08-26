@@ -4,7 +4,7 @@ open Masc
 module Reference = Skill_reference
 module Service = Skill_catalog_snapshot_service
 module Snapshot = Skill_catalog_snapshot
-module Workspace = Workspace_core
+module Workspace = Masc.Workspace
 
 let rec remove_tree path =
   match (Unix.lstat path).Unix.st_kind with

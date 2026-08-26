@@ -658,6 +658,7 @@ let test_composition_skill_joins_projection () =
       ~skill_catalog:
         (skill_catalog_of [ "time-memory-query", composition_document ])
       ~model_visible_descriptors:descriptors
+      ()
   in
   check
     bool
@@ -674,6 +675,7 @@ let test_composition_skill_joins_projection () =
         ~identity_tool_names:[]
       ~skill_catalog:(skill_catalog_of [ "quiet-clock", async_composition_document ])
       ~model_visible_descriptors:descriptors
+      ()
   in
   check
     bool

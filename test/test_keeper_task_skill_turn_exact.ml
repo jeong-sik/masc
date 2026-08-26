@@ -112,6 +112,39 @@ let test_shadow_reference_selects_shadow_not_effective_winner () =
   check bool "exact reference preserved" true (Reference.equal reference selected.reference)
 ;;
 
+let run_skill_tool tool input =
+  match tool.Agent_core.Tool.handler (Agent_core.Tool.Execution_env.create ()) input with
+  | Ok output -> output.Agent_core.Llm_provider.Types.content
+  | Error error -> error.Agent_core.Llm_provider.Types.message
+;;
+
+let test_exact_reference_consumer_rejects_name_fallback () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let snapshot =
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"exact" "EXACT_BODY" ] ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let reference = exact_reference snapshot ~source_id ~package_id:"guide" ~name:"guide" in
+  let selected = resolve_one snapshot reference in
+  let tool =
+    Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
+  in
+  let exact_output = run_skill_tool tool (Reference.to_yojson reference) in
+  check bool "exact input reads body" true
+    (String_util.contains_substring exact_output "EXACT_BODY");
+  let legacy_output = run_skill_tool tool (`Assoc [ "name", `String "guide" ]) in
+  check bool "name fallback rejected" false
+    (String_util.contains_substring legacy_output "EXACT_BODY")
+;;
+
 let test_resolved_body_stays_frozen_after_new_snapshot () =
   let config = config (source_row ~id:"only" ~path:"skills") in
   let original =
@@ -168,6 +201,8 @@ let () =
     [ ( "selection"
       , [ test_case "shadow exact ref selects shadow" `Quick
             test_shadow_reference_selects_shadow_not_effective_winner
+        ; test_case "exact ref consumer rejects name fallback" `Quick
+            test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick
             test_resolved_body_stays_frozen_after_new_snapshot
         ; test_case "revision mismatch remains typed" `Quick

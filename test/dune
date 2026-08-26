@@ -3,7 +3,13 @@
 (test
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
- (libraries masc masc_test_deps alcotest masc.skill_config masc.skill_snapshot))
+ (libraries
+  alcotest
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc_test_deps))
 
 (env
  (_
@@ -3307,7 +3313,13 @@
 (test
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
- (libraries alcotest masc masc_types))
+ (libraries
+  alcotest
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc_types
+  yojson))
 
 (test
  (name test_keeper_skill_usage)
@@ -3358,7 +3370,15 @@
 (test
  (name test_keeper_task_skill_turn_exact)
  (modules test_keeper_task_skill_turn_exact)
- (libraries alcotest masc masc.skill_config masc.skill_reference masc.skill_snapshot yojson))
+ (libraries
+  alcotest
+  masc
+  masc.agent_core
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.string_util
+  yojson))
 
 (test
  (name test_workspace_task_exact_skill_refs)
@@ -3390,12 +3410,16 @@
  (modules test_task_skill_published_resolution)
  (libraries
   alcotest
+  eio
   eio_main
+  fs_compat
   masc
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot
   masc.skill_snapshot_service
+  masc.tool_types
+  masc_core
   unix
   yojson))
 

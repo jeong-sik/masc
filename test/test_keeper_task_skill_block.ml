@@ -76,12 +76,8 @@ let test_one_skill_is_named_with_its_path () =
       (task ~skills:[ reference ])
   in
   check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
-  (* The keeper is told where to read it, not handed the body: a skill can run
-     to tens of kilobytes and would otherwise land on every turn. *)
-  (* The block used to hand over a filesystem path. .masc/skills sits beside
-     the keeper sandbox root rather than inside it, so the [Read] it asked for
-     could not resolve, and over seven days three of 14,582 [Read] calls even
-     tried. The body comes through [keeper_skill] now. *)
+  (* The exact reference stays compact; [keeper_skill] serves the frozen body
+     only when the Keeper selects it. *)
   check
     bool
     "no filesystem path is handed to the model"

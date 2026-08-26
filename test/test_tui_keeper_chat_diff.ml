@@ -58,6 +58,10 @@ let snapshot_json changes =
     ; "malformed", `Int 0
     ]
 
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> invalid_arg "replace_field expects an object"
+
 let snapshot changes =
   match Masc.Tui_decode.decode_file_change_snapshot (snapshot_json changes) with
   | Ok snapshot -> snapshot
@@ -134,6 +138,40 @@ let test_mixed_keeper_snapshot_is_rejected () =
       check bool "both keeper stamps are named" true
         (contains ~needle:"keeper beta inside snapshot for alpha" detail)
   | Ok _ -> fail "mixed-Keeper file-change snapshot was accepted"
+;;
+
+let test_unknown_change_kind_is_rejected () =
+  let change =
+    change_json ()
+    |> replace_field "change" (`Assoc [ "kind", `String "patch" ])
+  in
+  match Masc.Tui_decode.decode_file_change_snapshot (snapshot_json [ change ]) with
+  | Error detail ->
+      check bool "unknown change tag is named" true
+        (contains ~needle:"unknown file change kind \"patch\"" detail)
+  | Ok _ -> fail "unknown file-change kind was accepted"
+;;
+
+let test_unknown_location_kind_is_rejected () =
+  let change =
+    change_json ()
+    |> replace_field "location"
+         (`Assoc [ "kind", `String "workspace"; "path", `String "example.ml" ])
+  in
+  match Masc.Tui_decode.decode_file_change_snapshot (snapshot_json [ change ]) with
+  | Error detail ->
+      check bool "unknown location tag is named" true
+        (contains ~needle:"unknown file change location kind \"workspace\"" detail)
+  | Ok _ -> fail "unknown file-change location kind was accepted"
+;;
+
+let test_malformed_change_object_is_rejected () =
+  let change = change_json () |> replace_field "change" (`String "edit") in
+  match Masc.Tui_decode.decode_file_change_snapshot (snapshot_json [ change ]) with
+  | Error detail ->
+      check bool "malformed change field is named" true
+        (contains ~needle:"field 'change' must be an object" detail)
+  | Ok _ -> fail "malformed file-change object was accepted"
 ;;
 
 let test_full_projection_weaves_recorded_replacement () =
@@ -268,6 +306,12 @@ let () =
             test_missing_canonical_identity_is_counted
         ; test_case "mixed keeper snapshot is rejected" `Quick
             test_mixed_keeper_snapshot_is_rejected
+        ; test_case "unknown change kind is rejected" `Quick
+            test_unknown_change_kind_is_rejected
+        ; test_case "unknown location kind is rejected" `Quick
+            test_unknown_location_kind_is_rejected
+        ; test_case "malformed change object is rejected" `Quick
+            test_malformed_change_object_is_rejected
         ] )
     ; ( "projection"
       , [ test_case "full projection weaves replacement" `Quick

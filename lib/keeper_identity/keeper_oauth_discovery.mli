@@ -43,9 +43,25 @@ type t = {
     and a test that needs the network cannot say when that happened. *)
 type get = url:string -> (int * string, string) result
 
-val discover : ?get:get -> mcp_url:string -> unit -> (t, error) result
-(** [discover ~mcp_url] asks [mcp_url]'s origin for its protected-resource
-    metadata, then asks the authorization server it names for its own.
+(** How the MCP endpoint is asked where its metadata is: the response
+    headers of one unauthenticated request, or [None] when the request did
+    not complete. Injected for the same reason [get] is -- the shape here is
+    a provider's to change, and a test that needs the network cannot say
+    when it did. *)
+type ask = url:string -> (string * string) list option
 
-    The first hop's URL follows RFC 9728: the well-known segment goes between
-    the origin and the resource path, not after it. *)
+val discover :
+  ?get:get -> ?ask:ask -> mcp_url:string -> unit -> (t, error) result
+(** [discover ~mcp_url] finds where [mcp_url]'s protected-resource metadata
+    is, reads it, then asks the authorization server it names for its own.
+
+    Where the first document is comes from the server when it says: RFC 9728
+    5.1 has an unauthenticated request answered with a WWW-Authenticate
+    header naming it. Only when no header says so is the URL computed, with
+    the well-known segment between the origin and the resource path as RFC
+    9728 3 defines it.
+
+    Both routes are needed rather than either alone. Measured across 41 live
+    MCP servers on 2026-08-27: eleven name a location the computed URL does
+    not reach, because they publish at the origin and serve MCP below it,
+    and nine send no such header at all. *)

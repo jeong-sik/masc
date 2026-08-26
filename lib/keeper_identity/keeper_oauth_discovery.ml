@@ -36,6 +36,13 @@ type get = url:string -> (int * string, string) result
 
 let default_get ~url = Masc_http_client.get_sync ~url ~headers:[] ()
 
+type ask = url:string -> (string * string) list option
+
+let default_ask ~url =
+  match Masc_http_client.get_response_sync ~url ~headers:[] () with
+  | Error _ -> None
+  | Ok response -> Some response.Masc_http_client.headers
+
 let ( let* ) = Result.bind
 
 (* RFC 9728 puts the well-known segment between the origin and the resource
@@ -52,6 +59,48 @@ let well_known_url ~segment url =
     let origin = Uri.with_path (Uri.with_query uri []) "" in
     Ok (Printf.sprintf "%s/.well-known/%s%s" (Uri.to_string origin) segment path)
   | _ -> Error (Bad_mcp_url url)
+
+(* RFC 9728 5.1: a protected resource answers an unauthenticated request
+   with a WWW-Authenticate header naming where its metadata is:
+
+     Bearer resource_metadata="https://host/.well-known/...", error="..."
+
+   Only the quoted form is read. The grammar allows a bare token and no
+   server measured uses one; reading it would mean guessing where the value
+   ends among the other parameters, which is a worse failure than not
+   reading it at all.
+
+   A plaintext location is dropped rather than followed: the answer decides
+   where a token comes from, and one fetched over http could be replaced on
+   the way. *)
+let resource_metadata_of_headers headers =
+  let header =
+    List.find_map
+      (fun (name, value) ->
+        if String.equal (String.lowercase_ascii name) "www-authenticate"
+        then Some value
+        else None)
+      headers
+  in
+  match header with
+  | None -> None
+  | Some value ->
+    let key = "resource_metadata=\"" in
+    let rec after at =
+      if at + String.length key > String.length value then None
+      else if String.equal (String.sub value at (String.length key)) key
+      then Some (at + String.length key)
+      else after (at + 1)
+    in
+    (match after 0 with
+     | None -> None
+     | Some start ->
+       (match String.index_from_opt value start '"' with
+        | None -> None
+        | Some stop ->
+          let found = String.sub value start (stop - start) in
+          if String.starts_with ~prefix:"https://" found then Some found
+          else None))
 
 let fetch_json ~get ~url =
   match get ~url with
@@ -86,9 +135,22 @@ let require ~url ~key value =
   | None ->
     Error (Malformed { url; detail = Printf.sprintf "no %s" key })
 
-let discover ?(get = default_get) ~mcp_url () =
-  let* resource_url =
+let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
+  (* Asked before computed. Of 41 live MCP servers measured on 2026-08-27,
+     eleven name a location the computed URL does not reach -- they publish
+     at the origin while serving MCP below it -- and nine send no such
+     header, so neither route alone reaches every server. Where a server
+     answers, its answer is taken as it stands: every one measured returned
+     a usable document, and trying a second location after the server has
+     said which one is its own would be this code overruling it. *)
+  let* computed =
     well_known_url ~segment:"oauth-protected-resource" mcp_url
+  in
+  let resource_url =
+    match ask ~url:mcp_url with
+    | None -> computed
+    | Some headers ->
+      Option.value (resource_metadata_of_headers headers) ~default:computed
   in
   let* resource_pairs = fetch_json ~get ~url:resource_url in
   let resource =

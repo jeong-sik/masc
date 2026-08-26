@@ -1069,6 +1069,9 @@ type file_change = {
   fc_execution_id : string option;
       (** Canonical physical-execution identity. A chat activity may join a
           change only through this field, never through provider call ids. *)
+  fc_line_evidence : Keeper_file_change_evidence.t option;
+      (** Producer-recorded 1-based old/new ranges. [None] is an older row,
+          not a request for the reader to rediscover a location from text. *)
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -1084,6 +1087,12 @@ type file_change_snapshot = {
   fcs_over_budget : int;
   fcs_malformed : int;
 }
+
+val file_change_target_line : file_change -> int
+(** Exact producer-recorded line to open. A deletion opens at its old start,
+    which is the post-edit position of the following line. Historical,
+    empty, and range-omitted rows return line 1 rather than searching current
+    file text for a plausible duplicate. *)
 
 val decode_file_change_snapshot :
   Yojson.Safe.t -> (file_change_snapshot, string) result

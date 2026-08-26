@@ -3514,6 +3514,7 @@ type file_change = {
   fc_turn : int option;
   fc_task_id : string option;
   fc_execution_id : string option;
+  fc_line_evidence : Keeper_file_change_evidence.t option;
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -3579,6 +3580,15 @@ let decode_file_change json =
   let* fc_turn = optional_int_or_null json "turn" in
   let* fc_task_id = optional_string_field json "task_id" in
   let* fc_execution_id = optional_string_field json "execution_id" in
+  let* fc_line_evidence =
+    match member "line_evidence" json with
+    | `Null -> Ok None
+    | (`Assoc _ as evidence) ->
+      (match Keeper_file_change_evidence.of_yojson evidence with
+       | Ok evidence -> Ok (Some evidence)
+       | Error detail -> Error ("line_evidence: " ^ detail))
+    | bad -> field_type_error "line_evidence" "an object or null" bad
+  in
   let* location_json = required_object_field json "location" in
   let* fc_location = decode_file_change_location location_json in
   let* kind_json = required_object_field json "change" in
@@ -3590,10 +3600,25 @@ let decode_file_change json =
     ; fc_turn
     ; fc_task_id
     ; fc_execution_id
+    ; fc_line_evidence
     ; fc_location
     ; fc_kind
     ; fc_succeeded
     }
+
+let file_change_target_line change =
+  match change.fc_line_evidence with
+  | Some (Keeper_file_change_evidence.Written { new_range = Some range }) ->
+    range.start_line
+  | Some
+      (Keeper_file_change_evidence.Edited
+        { occurrences = Some (first :: _); _ }) ->
+    (match first.new_range with
+     | Some range -> range.start_line
+     | None -> first.old_range.start_line)
+  | Some (Keeper_file_change_evidence.Written { new_range = None })
+  | Some (Keeper_file_change_evidence.Edited { occurrences = None | Some []; _ })
+  | None -> 1
 
 (* ── Workspace tree (/api/v1/workspace/tree, /workspace/children) ──────
 

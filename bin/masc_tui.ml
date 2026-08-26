@@ -2560,48 +2560,6 @@ let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
       Some (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
   | Masc.Tui_decode.Fc_at_absolute_path _ -> None
 
-(* Which line to open at.
-
-   The tool call records what was written and not where it landed, so the line
-   is found rather than known: the first line of the text the change wrote is
-   looked up in the file as it stands. That is a match, not a record -- the
-   same line may appear twice, and a later edit may have moved or removed it --
-   so a miss falls back to the top of the file rather than to a guess. Opening
-   at line 1 is visibly the top; opening at a wrong line looks like an answer.
-
-   Only the first line is compared. An edit's text is usually several lines and
-   the later ones are as likely to have changed since. *)
-let change_line ~path (change : Masc.Tui_decode.file_change) =
-  let wrote =
-    match change.Masc.Tui_decode.fc_kind with
-    | Masc.Tui_decode.Fc_edited { after; _ } -> after
-    | Masc.Tui_decode.Fc_written _ -> ""
-  in
-  let needle =
-    String.split_on_char '\n' wrote
-    |> List.map String.trim
-    |> List.find_opt (fun line -> String.length line > 0)
-  in
-  match needle with
-  | None -> 1
-  | Some needle -> (
-      match open_in path with
-      | exception Sys_error _ -> 1
-      | channel ->
-          let contains haystack =
-            let n = String.length needle and h = String.length haystack in
-            let rec at i = i + n <= h && (String.sub haystack i n = needle || at (i + 1)) in
-            n > 0 && at 0
-          in
-          let rec scan number =
-            match input_line channel with
-            | exception End_of_file -> 1
-            | line -> if contains line then number else scan (number + 1)
-          in
-          Fun.protect
-            ~finally:(fun () -> try close_in channel with Sys_error _ -> ())
-            (fun () -> scan 1))
-
 (* The window the Changes surface asks for. A day is what an operator means
    by "what has this keeper been doing"; the server's own ceiling is what the
    read costs, and it clamps anything wider. *)
@@ -10329,15 +10287,8 @@ let main () =
                         state.code_file <- None;
                         state.code_file_error <- None;
                         state.code_focus_file <- Left_pane;
-                        (* The line is found in the local copy when one
-                           exists (a Docker keeper's bundle is not on this
-                           filesystem); a miss opens at the top, which is
-                           visibly the top rather than a wrong answer. *)
                         state.code_target_line <-
-                          (let local = change_absolute_path ~base_path change in
-                           if Sys.file_exists local then
-                             Some (change_line ~path:local change)
-                           else None);
+                          Some (Masc.Tui_decode.file_change_target_line change);
                         state.view <- Code;
                         launch_code_entries_load state
                           ~mailbox:async_messages;
@@ -10363,7 +10314,7 @@ let main () =
                       add_event state "error"
                         ("not on this machine: " ^ path)
                     else
-                      let line = change_line ~path change in
+                      let line = Masc.Tui_decode.file_change_target_line change in
                       let target =
                         { Masc_tui_editor_jump.path; Masc_tui_editor_jump.line }
                       in

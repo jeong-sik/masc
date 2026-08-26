@@ -20,6 +20,7 @@ type t = {
   turn : int option;
   task_id : string option;
   execution_id : string option;
+  line_evidence : Keeper_file_change_evidence.t option;
   location : location;
   kind : kind;
   succeeded : bool;
@@ -130,6 +131,28 @@ let target_path_of_row row =
       Error (Malformed (Printf.sprintf "action_radius is %s, expected %s" got expected))
   | Json_field.Found fields -> required_string (`Assoc fields) "target_path"
 
+let line_evidence_of_row row =
+  match Json_field.assoc row "file_change_evidence" with
+  | Json_field.Field_absent -> Ok None
+  | Json_field.Wrong_shape { expected; got } ->
+    Error
+      (Malformed
+         (Printf.sprintf "file_change_evidence is %s, expected %s" got expected))
+  | Json_field.Found fields ->
+    (match Keeper_file_change_evidence.of_yojson (`Assoc fields) with
+     | Ok evidence -> Ok (Some evidence)
+     | Error detail -> Error (Malformed ("file_change_evidence: " ^ detail)))
+
+let validate_line_evidence_kind kind line_evidence =
+  match kind, line_evidence with
+  | Edited _, Some (Keeper_file_change_evidence.Edited _)
+  | Written _, Some (Keeper_file_change_evidence.Written _)
+  | (Edited _ | Written _), None -> Ok ()
+  | Edited _, Some (Keeper_file_change_evidence.Written _) ->
+    Error (Malformed "edit input carries write file_change_evidence")
+  | Written _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error (Malformed "write input carries edit file_change_evidence")
+
 (* Where the target sits. A relative target is read as the bundle-relative
    path it is, not rebuilt into an absolute one first: whether the keeper ran
    local or in Docker changes where its bundle sits on disk and nothing about
@@ -231,8 +254,12 @@ let classify row =
         let parsed =
           Result.bind input (fun input ->
               Result.bind (kind_of_input ~handler input) (fun kind ->
-                  Result.bind (target_path_of_row row) (fun target_path ->
-                      Result.bind (required_string row "keeper") (fun keeper ->
+                  Result.bind (line_evidence_of_row row) (fun line_evidence ->
+                    Result.bind
+                      (validate_line_evidence_kind kind line_evidence)
+                      (fun () ->
+                        Result.bind (target_path_of_row row) (fun target_path ->
+                          Result.bind (required_string row "keeper") (fun keeper ->
                           let at =
                             Option.value ~default:0.
                               (Json_field.to_option (Json_field.float row "ts"))
@@ -243,12 +270,13 @@ let classify row =
                             ; turn = optional_int row "turn"
                             ; task_id = optional_string row "task_id"
                             ; execution_id = optional_string row "execution_id"
+                            ; line_evidence
                             ; location = location_of_target ~target_path
                             ; kind
                             ; succeeded =
                                 Option.value ~default:false
                                   (Json_field.to_option (Json_field.bool row "success"))
-                            }))))
+                            }))))))
         in
         (match parsed with
          | Ok change -> File_change change
@@ -306,6 +334,8 @@ let to_json change =
     ; ("turn", optional_json (fun turn -> `Int turn) change.turn)
     ; ("task_id", optional_json (fun id -> `String id) change.task_id)
     ; ("execution_id", optional_json (fun id -> `String id) change.execution_id)
+    ; ( "line_evidence"
+      , optional_json Keeper_file_change_evidence.to_yojson change.line_evidence )
     ; ("location", location_to_json change.location)
     ; ("change", kind_to_json change.kind)
     ; ("succeeded", `Bool change.succeeded)

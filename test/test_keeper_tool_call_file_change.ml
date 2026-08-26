@@ -15,7 +15,8 @@ module Change = Keeper_tool_call_file_change
    about the writer's schema instead of about what the reader needs. *)
 let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
     ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml") ?(success = true)
-    ?(turn = Some 2459) ?(task_id = Some "task-475") ?(ts = 1787533327.603755) input =
+    ?(turn = Some 2459) ?(task_id = Some "task-475") ?line_evidence
+    ?(ts = 1787533327.603755) input =
   let optional name = function None -> [] | Some value -> [ (name, value) ] in
   `Assoc
     ([ ("ts", `Float ts)
@@ -27,7 +28,8 @@ let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
      ; ("action_radius", `Assoc [ ("target_path", `String target_path) ])
      ]
     @ optional "turn" (Option.map (fun t -> `Int t) turn)
-    @ optional "task_id" (Option.map (fun t -> `String t) task_id))
+    @ optional "task_id" (Option.map (fun t -> `String t) task_id)
+    @ optional "file_change_evidence" line_evidence)
 ;;
 
 let edit_input ?(replace_all = None) ~before ~after () =
@@ -138,6 +140,75 @@ let test_metadata_round_trip () =
   check (option int) "turn" (Some 2459) change.Change.turn;
   check (option string) "task" (Some "task-475") change.Change.task_id;
   check bool "succeeded" true change.Change.succeeded
+;;
+
+let test_producer_line_evidence_reaches_projection () =
+  let evidence =
+    Keeper_file_change_evidence.edited
+      [ Keeper_file_change_evidence.edit_occurrence
+          ~old_start_line:9
+          ~new_start_line:9
+          ~old_string:"old\nline"
+          ~new_string:"new\nline\nextra"
+      ]
+  in
+  let change =
+    change_of
+      (row
+         ~line_evidence:(Keeper_file_change_evidence.to_yojson evidence)
+         (edit_input ~before:"old\nline" ~after:"new\nline\nextra" ()))
+  in
+  match change.Change.line_evidence with
+  | Some actual ->
+    check string "typed evidence survives"
+      (Keeper_file_change_evidence.to_yojson evidence |> Yojson.Safe.to_string)
+      (Keeper_file_change_evidence.to_yojson actual |> Yojson.Safe.to_string);
+    check bool "wire projection carries evidence" true
+      (Yojson.Safe.Util.member "line_evidence" (Change.to_json change)
+       = Keeper_file_change_evidence.to_yojson evidence)
+  | None -> fail "producer evidence was dropped"
+;;
+
+let test_malformed_line_evidence_is_unreadable () =
+  match
+    classify
+      (row
+         ~line_evidence:
+           (`Assoc
+             [ "kind", `String "edit"
+             ; "occurrence_count", `Int 1
+             ; "occurrences", `List []
+             ])
+         (edit_input ~before:"old" ~after:"new" ()))
+  with
+  | Change.Unreadable (Change.Malformed detail) ->
+    check bool "evidence failure is named" true
+      (String_util.contains_substring detail "file_change_evidence")
+  | Change.Unreadable Change.Input_exceeded_log_budget ->
+    fail "malformed evidence is not an input budget problem"
+  | Change.File_change _ -> fail "malformed evidence was accepted"
+  | Change.Not_a_file_change -> fail "an edit became a read"
+;;
+
+let test_line_evidence_kind_must_match_the_tool () =
+  match
+    classify
+      (row
+         ~line_evidence:
+           (`Assoc
+             [ "kind", `String "write"
+             ; ( "new_range"
+               , `Assoc [ "start_line", `Int 1; "end_line", `Int 1 ] )
+             ])
+         (edit_input ~before:"old" ~after:"new" ()))
+  with
+  | Change.Unreadable (Change.Malformed detail) ->
+    check bool "kind drift is named" true
+      (String_util.contains_substring detail "edit input carries write")
+  | Change.Unreadable Change.Input_exceeded_log_budget ->
+    fail "kind drift is not an input budget problem"
+  | Change.File_change _ -> fail "mismatched producer evidence was accepted"
+  | Change.Not_a_file_change -> fail "an edit became a read"
 ;;
 
 (* A write that failed is a change the keeper attempted. Filtering it out here
@@ -288,6 +359,12 @@ let () =
         ] )
     ; ( "metadata"
       , [ test_case "round trip" `Quick test_metadata_round_trip
+        ; test_case "producer line evidence reaches projection" `Quick
+            test_producer_line_evidence_reaches_projection
+        ; test_case "malformed line evidence is unreadable" `Quick
+            test_malformed_line_evidence_is_unreadable
+        ; test_case "line evidence kind matches the tool" `Quick
+            test_line_evidence_kind_must_match_the_tool
         ; test_case "failed write is projected" `Quick test_failed_write_is_still_projected
         ] )
     ; ( "not a change"

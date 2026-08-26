@@ -56,6 +56,9 @@ type t = {
   turn : int option;
   task_id : string option;
   execution_id : string option;
+  line_evidence : Keeper_file_change_evidence.t option;
+      (** Producer-recorded 1-based ranges. [None] belongs to rows written
+          before the evidence contract existed. *)
   location : location;
   kind : kind;
   succeeded : bool;

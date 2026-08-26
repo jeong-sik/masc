@@ -6404,16 +6404,55 @@ let change_row_address (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> bundle_path
   | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
 
+let file_change_range_label
+      (range : Masc.Keeper_file_change_evidence.line_range)
+  =
+  if range.start_line = range.end_line
+  then Printf.sprintf "L%d" range.start_line
+  else Printf.sprintf "L%d-%d" range.start_line range.end_line
+
+let file_change_evidence_label = function
+  | None -> None
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
+    Some "empty file"
+  | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+    Some (file_change_range_label range)
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = None }) ->
+    Some (Printf.sprintf "%d matches; ranges omitted" occurrence_count)
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = Some occurrences }) ->
+    (match occurrences with
+     | [] -> Some (Printf.sprintf "%d matches" occurrence_count)
+     | first :: _ ->
+       let old_range = file_change_range_label first.old_range in
+       let changed =
+         match first.new_range with
+         | Some new_range -> old_range ^ "→" ^ file_change_range_label new_range
+         | None -> old_range ^ "→deleted"
+       in
+       if occurrence_count = 1
+       then Some changed
+       else Some (Printf.sprintf "%s (+%d)" changed (occurrence_count - 1)))
+
 (* One line of what the change put there. An edit shows the text it wrote
    rather than the text it removed: the question a reader has is what the file
    says now. A write shows its size, because the whole body is never one row
    and a truncated first line of a new file says less than its length. *)
 let change_row_summary (change : Masc.Tui_decode.file_change) =
-  match change.Masc.Tui_decode.fc_kind with
-  | Masc.Tui_decode.Fc_edited { after; _ } ->
-      Terminal_text.single_line after
-  | Masc.Tui_decode.Fc_written { content } ->
+  let content =
+    match change.Masc.Tui_decode.fc_kind with
+    | Masc.Tui_decode.Fc_edited { after; _ } -> Terminal_text.single_line after
+    | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
+  in
+  match file_change_evidence_label change.fc_line_evidence with
+  | None -> content
+  | Some label ->
+    Printf.sprintf "%s%s[%s]%s %s" Ansi.bold (Theme.info ()) label Ansi.reset
+      content
 
 let change_kind_badge (change : Masc.Tui_decode.file_change) =
   match change.Masc.Tui_decode.fc_kind with
@@ -6507,6 +6546,11 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
         [ turn; "  replace_all: every occurrence changed; the log holds the text once" ]
     | Masc.Tui_decode.Fc_edited { replace_all = false; _ }
     | Masc.Tui_decode.Fc_written _ -> [ turn ]
+  in
+  let notes =
+    match file_change_evidence_label change.fc_line_evidence with
+    | None -> notes
+    | Some label -> notes @ [ "  producer lines " ^ label ]
   in
   List.iter (fun note -> box_line_styled buf cols ~style:(Theme.recede ()) note) notes;
   box_divider buf cols;

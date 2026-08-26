@@ -14,6 +14,7 @@ let contains ~needle text =
 
 let change_json ?(keeper = "alpha") ?(execution_id = Some "exec-edit-1")
     ?(path = "lib/example.ml") ?(succeeded = true)
+    ?(line_evidence = `Null)
     ?(kind = `Edit ("let answer = 41", "let answer = 42", false)) () =
   let identity =
     match execution_id with
@@ -37,6 +38,7 @@ let change_json ?(keeper = "alpha") ?(execution_id = Some "exec-edit-1")
      ; "keeper", `String keeper
      ; "turn", `Int 7
      ; "task_id", `String "task-1"
+     ; "line_evidence", line_evidence
      ]
     @ identity
     @ [ ( "location"
@@ -173,6 +175,36 @@ let test_malformed_change_object_is_rejected () =
       check bool "malformed change field is named" true
         (contains ~needle:"field 'change' must be an object" detail)
   | Ok _ -> fail "malformed file-change object was accepted"
+;;
+
+let test_target_line_comes_from_producer_evidence () =
+  let line_evidence =
+    `Assoc
+      [ "kind", `String "edit"
+      ; "occurrence_count", `Int 1
+      ; ( "occurrences"
+        , `List
+            [ `Assoc
+                [ ( "old_range"
+                  , `Assoc [ "start_line", `Int 9; "end_line", `Int 10 ] )
+                ; ( "new_range"
+                  , `Assoc [ "start_line", `Int 9; "end_line", `Int 11 ] )
+                ]
+            ] )
+      ]
+  in
+  let change =
+    (snapshot [ change_json ~line_evidence () ]).Masc.Tui_decode.fcs_changes
+    |> List.hd
+  in
+  check int "producer line, not replacement-text search" 9
+    (Masc.Tui_decode.file_change_target_line change)
+;;
+
+let test_target_line_without_evidence_is_the_visible_top () =
+  let change = (snapshot [ change_json () ]).Masc.Tui_decode.fcs_changes |> List.hd in
+  check int "historical row does not guess" 1
+    (Masc.Tui_decode.file_change_target_line change)
 ;;
 
 let test_full_projection_weaves_recorded_replacement () =
@@ -371,6 +403,10 @@ let () =
             test_unknown_location_kind_is_rejected
         ; test_case "malformed change object is rejected" `Quick
             test_malformed_change_object_is_rejected
+        ; test_case "producer evidence owns the target line" `Quick
+            test_target_line_comes_from_producer_evidence
+        ; test_case "historical row opens at the top" `Quick
+            test_target_line_without_evidence_is_the_visible_top
         ] )
     ; ( "projection"
       , [ test_case "full projection weaves replacement" `Quick

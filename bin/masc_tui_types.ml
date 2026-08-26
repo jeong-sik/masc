@@ -530,7 +530,7 @@ let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
-  | Detail_instructions -> "Instructions"
+  | Detail_instructions -> "Settings"
   | Detail_github -> "GitHub"
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two

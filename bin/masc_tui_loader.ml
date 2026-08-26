@@ -995,11 +995,20 @@ let load_keeper_config_view ~(host : string) ~(port : int)
     in
     Ok
       (sanitize_view_lines
-         (("# instructions" :: instructions_lines)
+         (Masc_tui_keeper_config.view_lines json
+          @ ("" :: "# instructions" :: instructions_lines)
           @ ("" :: "# effective system prompt" :: effective_lines)
           @ (match sources_lines with
              | [] -> []
              | lines -> "" :: "# sources" :: lines)))
+
+let load_keeper_config_editor ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
+  match
+    Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper config load failed: " ^ err)
+  | Ok json -> Ok (json, Masc_tui_keeper_config.editor_stem json)
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =

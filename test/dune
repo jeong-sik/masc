@@ -35,6 +35,11 @@
 
 ; Group 1: Pure synchronous tests
 
+(test
+ (name test_tui_keeper_config)
+ (modules test_tui_keeper_config)
+ (libraries alcotest masc_tui_keeper_config yojson str))
+
 (tests
  (names
   test_keeper_lifecycle_gate

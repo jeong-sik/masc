@@ -185,6 +185,47 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
     [ "qwen3.5:cloud"; "gemma4:31b-cloud" ]
 ;;
 
+(* No ollama_cloud row states a thinking control of its own.
+
+   The value such a row would state is a wire, and this provider is reachable
+   over two ([[providers]] identity_kinds = ["ollama", "openai_compat"]). A row
+   cannot know which one a deployment points it at, so a row that states one is
+   guessing, and the guess is wrong for every deployment on the other wire.
+   [capabilities_base_by_identity_kind] answers instead, at resolution time.
+
+   Before that existed the same declaration was edited five times in five
+   weeks, each edit correct for the row it touched and each leaving the class
+   open — 17 rows saying ollama_think (unencodable on /v1) and 8 hand-corrected
+   to "none" (which claims a control does not exist when one does). This is the
+   ratchet against that returning: adding a row is fine, adding a wire to a row
+   is not.
+
+   Rows that declare supports_reasoning = false keep their own declaration. A
+   model that does not reason has no control on either wire, so nothing about
+   the wire is being guessed (RFC-one-provider-two-wires §5). *)
+let test_no_ollama_cloud_row_states_a_wire () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"Ollama Cloud rows leave the wire to the provider"
+  in
+  let offenders =
+    Model_catalog.model_entries catalog
+    |> List.filter (fun (entry : Model_catalog.model_entry) ->
+      match entry.provider_name with
+      | Some "ollama_cloud" ->
+        entry.supports_reasoning = Some true
+        && Option.is_some entry.thinking_control_format
+      | Some _ | None -> false)
+    |> List.map (fun (entry : Model_catalog.model_entry) -> entry.id_prefix)
+    |> List.sort String.compare
+  in
+  check
+    (list string)
+    "no reasoning-capable ollama_cloud row states a thinking control"
+    []
+    offenders
+;;
+
 let test_in_memory_catalog_rejects_invalid_generated_input () =
   match
     Model_catalog.of_toml_string
@@ -344,6 +385,10 @@ let () =
             "Ollama Cloud v1 vendor rows preserve probe truth"
             `Quick
             test_ollama_cloud_v1_vendor_rows_preserve_probe_truth
+        ; test_case
+            "no Ollama Cloud row states a wire"
+            `Quick
+            test_no_ollama_cloud_row_states_a_wire
         ; test_case
             "invalid generated input fails closed"
             `Quick

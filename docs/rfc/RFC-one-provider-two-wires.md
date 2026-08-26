@@ -1,7 +1,7 @@
 ---
 rfc: "one-provider-two-wires"
 title: "One provider, two wires"
-status: Draft
+status: Implemented
 created: 2026-08-27
 updated: 2026-08-27
 author: vincent
@@ -194,3 +194,41 @@ Older deployments declare the `/v1` truth per binding in
 `agent-core-models-overlay.toml`. Once a binary containing this catalog is
 deployed, those `thinking_control_format` overrides are redundant and should
 be removed; the provider row and resolved wire are then the only authority.
+
+## 9. Implementation summary
+
+Landed in #30974 and the change alongside this closeout.
+
+| Section | Where |
+| --- | --- |
+| §4.1 per-wire capability base | `models.toml:2415` — `capabilities_base_by_identity_kind = { openai_compat = "ollama_cloud_v1" }`; parsed by `model_provider_catalog.ml` |
+| §4.2 `ollama_cloud_v1` preset | `capabilities.ml` — `Reasoning_effort` plus the measured ladder |
+| §4.3 resolution takes the wire | `capabilities.ml` `provider_base_label ~catalog ~wire`, reached from `provider_config.ml` `capabilities_for_config_model` with `~wire:(Some config.kind)` |
+| §4.4 rows stop naming a wire | 25 `ollama_cloud` rows dropped `thinking_control_format`; the 12 with `supports_reasoning = false` keep theirs, per §5 |
+
+Verification, against §6:
+
+1. Provider entries resolve per `identity_kind` — covered by the registry pin
+   and by `test_capabilities` "ollama cloud /v1 wire resolves the effort
+   control" / "ollama cloud native wire is unchanged". The second is the one
+   that matters: the wire selects a base, it does not rewrite a row.
+2. The ratchet — `test_model_catalog_default` "no Ollama Cloud row states a
+   wire" walks every `provider_name = "ollama_cloud"` entry and fails on any
+   reasoning-capable row that declares a thinking control. Checked by
+   reintroducing one: it named `deepseek-v3.1:671b` and failed.
+3. Live turn on the `/v1` wire — 2026-08-27, keeper `adm-race-cf-001` on
+   `ollama_cloud.ollama-cloud-deepseek-v4-flash-0731`: `reasoning_effort=low`
+   on the request, `thinking_blocks=0`, non-empty text, terminal reason
+   `success`. The same lane had produced 54 zero-text turns before this.
+4. Native-path pins unchanged — `test_thinking_control_dialects` green without
+   edits, including the glm-5.2 native `think` body assertion.
+
+The deployment cleanup in §8 is done for this deployment: the overlay no
+longer declares a thinking control for any row.
+
+One thing this does not close. The provider entry still declares
+`kind = "ollama"` and `request_path = "/api/chat"` while carrying an
+`openai_compat` identity kind, so the entry's own default wire and its second
+wire are stated in different vocabularies. Nothing reads them inconsistently
+today, and §3 explains why moving the catalog key is the wrong repair. It is
+recorded here because the next person to read that row will notice it.

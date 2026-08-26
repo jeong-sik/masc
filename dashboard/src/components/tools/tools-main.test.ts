@@ -155,8 +155,20 @@ function keeperReceiptFixture(
     skill_activations: {
       status: 'available',
       keeper_name: keeperName,
+      summary: {
+        instruction_invocations: 1,
+        skill_bodies_served: 1,
+        skill_resources_served: 0,
+        instruction_deliveries: 1,
+        instruction_actions_observed: 1,
+        composition_invocations: 0,
+        composition_deliveries: 0,
+        composition_actions_observed: 0,
+        invalid_transitions: 0,
+      },
       ledger: {
-        schema: 'masc.skill-activations/v1',
+        schema: 'masc.skill-activations/v2',
+        workspace_key: 'e'.repeat(64),
         session_id: sessionId,
         revision: 'c'.repeat(64),
         activations: [
@@ -164,6 +176,24 @@ function keeperReceiptFixture(
             ...reference,
             snapshot_revision: 'd'.repeat(64),
             turn_ref: `${sessionId}#1`,
+            runtime_id: 'openai.codex',
+            skill_tool_use_id: 'call-skill-1',
+            agent_core_turn: 0,
+            served_content: {
+              kind: 'skill_body',
+              bytes: 12,
+              sha256: 'f'.repeat(64),
+            },
+            delivery: {
+              agent_core_turn: 1,
+              delivered_at: '2026-08-26T00:00:01Z',
+            },
+            actions: [{
+              tool_use_id: 'call-action-1',
+              tool_name: 'keeper_time_now',
+              agent_core_turn: 1,
+              observed_at: '2026-08-26T00:00:02Z',
+            }],
             activated_at: '2026-08-26T00:00:00Z',
             origin: { kind: 'task_instruction', task_id: 'task-001' },
           },
@@ -400,6 +430,13 @@ describe('Tools', () => {
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
     expect(container.textContent).toContain('Task instruction · task-001')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
+    expect(container.textContent).toContain('offered 1')
+    expect(container.textContent).toContain('invoked 1')
+    expect(container.textContent).toContain('delivered 1')
+    expect(container.textContent).toContain('actions 1')
+    expect(container.textContent).toContain('invalid 0')
+    expect(container.textContent).toContain('call-skill-1')
+    expect(container.textContent).toContain('keeper_time_now')
   })
 
   it('fails loudly when one Keeper projection is omitted', async () => {

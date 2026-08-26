@@ -1720,19 +1720,6 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
           index = Some duplicate_index;
           tool_call_id = Some duplicate_tool_id;
           reason = Some duplicate_reason;
-          _ };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = args_kind;
-          index = Some args_index;
-          tool_call_id = Some args_tool_id;
-          reason = Some args_reason;
-          _ };
-      Keeper_chat_events.Agent_core_content_block_stop { index = stop_index };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = stop_kind;
-          index = Some stop_error_index;
-          tool_call_id = Some stop_tool_id;
-          reason = Some stop_reason;
           _ } ] ->
       check int "first block index" 2 first_block_index;
       check string "first block id" "tc-first" first_block_id;
@@ -1747,20 +1734,7 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
       check int "duplicate index" 2 duplicate_index;
       check string "duplicate tool id" "tc-first" duplicate_tool_id;
       check bool "duplicate reason names incoming tool" true
-        (string_contains duplicate_reason "incoming tool tc-second");
-      check string "args kind" "tool_args_without_start"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string args_kind);
-      check int "args index" 2 args_index;
-      check string "args error tool id" "tc-first" args_tool_id;
-      check string "args reason"
-        "tool argument event arrived after invalid tool block start" args_reason;
-      check int "stop index" 2 stop_index;
-      check string "stop kind" "tool_stop_without_start"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string stop_kind);
-      check int "stop error index" 2 stop_error_index;
-      check string "stop error tool id" "tc-first" stop_tool_id;
-      check string "stop reason"
-        "content block stop arrived for invalid tool block" stop_reason
+        (string_contains duplicate_reason "incoming tool tc-second")
   | _ ->
       fail
         "expected conflicting reused-index tool start to fail closed without forged tool events"
@@ -2171,10 +2145,7 @@ let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
       events
   in
   check (list string) "tool occurrence remains invalid after media mismatch"
-    [ "tool_delta_invalid_kind"
-    ; "tool_args_without_start"
-    ; "tool_stop_without_start"
-    ]
+    [ "tool_delta_invalid_kind" ]
     (List.map fst errors);
   (match errors with
    | (_, quarantined_occurrence) :: _ ->
@@ -2570,22 +2541,28 @@ let test_stream_protocol_error_summary_includes_diagnostics () =
 
 let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   let open Agent_core.Types in
-  let events =
+  let unknown_then_incomplete =
     translate_agent_core_stream_events
       [
         SSEUnknownEventType { event_type = "response.future"; raw = "{\"x\":1}" };
         StreamIncomplete { reason = "max_output_tokens" };
       ]
   in
-  match events with
+  (match unknown_then_incomplete with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = unknown_kind; event_type = Some event_type; _ };
-      Keeper_chat_events.Agent_core_stream_protocol_error
-        { kind = incomplete_kind; _ };
-      Keeper_chat_events.Event_error { message } ] ->
+        { kind = unknown_kind; event_type = Some event_type; _ } ] ->
       check string "unknown kind" "sse_unknown_event_type"
         (Keeper_chat_events.stream_protocol_error_kind_to_string unknown_kind);
-      check string "unknown event type" "response.future" event_type;
+      check string "unknown event type" "response.future" event_type
+  | _ -> fail "expected the first unknown provider event to freeze its stream");
+  let incomplete =
+    translate_agent_core_stream_events
+      [ StreamIncomplete { reason = "max_output_tokens" } ]
+  in
+  match incomplete with
+  | [ Keeper_chat_events.Agent_core_stream_protocol_error
+        { kind = incomplete_kind; _ };
+      Keeper_chat_events.Event_error { message } ] ->
       check string "incomplete kind" "sse_stream_incomplete"
         (Keeper_chat_events.stream_protocol_error_kind_to_string incomplete_kind);
       check string "incomplete is visible error"
@@ -2597,15 +2574,13 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
   let provider_kind = Agent_core.Llm_provider.Provider_kind.Gemini in
   let part_raw = "{\"inlineData\":{}}" in
   let response_raw = "{\"promptFeedback\":{}}" in
-  let events =
+  let part_events =
     translate_agent_core_stream_events
       [ SSEUnsupportedPart
           { provider_kind; part = "inline_data"; raw = part_raw }
-      ; SSEUnsupportedResponse
-          { provider_kind; response = "prompt_feedback"; raw = response_raw }
       ]
   in
-  match events with
+  (match part_events with
   | [ Keeper_chat_events.Agent_core_stream_protocol_error
         { kind = part_kind
         ; event_type = Some "inline_data"
@@ -2614,7 +2589,22 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         ; _
         }
     ; Keeper_chat_events.Event_error { message = part_message }
-    ; Keeper_chat_events.Agent_core_stream_protocol_error
+    ] ->
+      check string "unsupported part kind" "sse_unsupported_part"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
+      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
+      check string "unsupported part is visible"
+        "Provider stream capability unsupported: gemini.part.inline_data"
+        part_message
+  | _ -> fail "expected a typed visible unsupported provider part");
+  let response_events =
+    translate_agent_core_stream_events
+      [ SSEUnsupportedResponse
+          { provider_kind; response = "prompt_feedback"; raw = response_raw }
+      ]
+  in
+  match response_events with
+  | [ Keeper_chat_events.Agent_core_stream_protocol_error
         { kind = response_kind
         ; event_type = Some "prompt_feedback"
         ; reason = Some "gemini.response.prompt_feedback"
@@ -2623,20 +2613,14 @@ let test_keeper_stream_bridge_surfaces_unsupported_provider_shapes () =
         }
     ; Keeper_chat_events.Event_error { message = response_message }
     ] ->
-      check string "unsupported part kind" "sse_unsupported_part"
-        (Keeper_chat_events.stream_protocol_error_kind_to_string part_kind);
       check string "unsupported response kind" "sse_unsupported_response"
         (Keeper_chat_events.stream_protocol_error_kind_to_string response_kind);
-      check int "unsupported part raw bytes" (String.length part_raw) part_bytes;
       check int "unsupported response raw bytes" (String.length response_raw)
         response_bytes;
-      check string "unsupported part is visible"
-        "Provider stream capability unsupported: gemini.part.inline_data"
-        part_message;
       check string "unsupported response is visible"
         "Provider stream capability unsupported: gemini.response.prompt_feedback"
         response_message
-  | _ -> fail "expected typed visible failures for unsupported provider shapes"
+  | _ -> fail "expected a typed visible unsupported provider response"
 
 let test_keeper_stream_bridge_preserves_ndjson_parse_failure () =
   let open Agent_core.Types in

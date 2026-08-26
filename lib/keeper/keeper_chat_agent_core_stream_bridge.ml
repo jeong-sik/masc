@@ -245,6 +245,12 @@ let stream_start_is_media content_type =
   || String.equal content_type "document"
 ;;
 
+let has_any_tool_identity ~tool_id ~tool_name =
+  match tool_id, tool_name with
+  | None, None -> false
+  | _ -> true
+;;
+
 let protocol_error ?quarantined_occurrence ?index ?tool_call_id ?event_type ?reason
     ?raw_bytes kind =
   Keeper_chat_events.Agent_core_stream_protocol_error
@@ -1045,6 +1051,48 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       let block_start =
         content_block_start_event ~index ~content_type ~tool_id ~tool_name
       in
+      let rejects_non_tool_identity =
+        not (String.equal content_type Runtime_native_tools.stream_content_type)
+        && has_any_tool_identity ~tool_id ~tool_name
+      in
+      let reject_non_tool_identity () =
+        let incoming_tool_call_id =
+          Option.bind tool_id (fun id ->
+            let id = String.trim id in
+            if String.equal id "" then None else Some id)
+        in
+        let occurrence =
+          tool_occurrence bridge_state ~stream_scope ~block_index:index
+        in
+        let quarantined_occurrence, failed_tool_call_id =
+          match stream_block_for_index bridge_state index with
+          | Some (Active_tool existing) ->
+            Some existing.occurrence, existing.tool_call_id
+          | Some
+              (Invalid_tool_block
+                { failed_tool_call_id; quarantined_occurrence; _ }) ->
+            quarantined_occurrence, failed_tool_call_id
+          | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+            None, incoming_tool_call_id
+          | None ->
+            (match finalized_tool_for_occurrence bridge_state occurrence with
+             | Some finalized ->
+               Some finalized.occurrence, finalized.tool_call_id
+             | None -> None, incoming_tool_call_id)
+        in
+        { bridge_state =
+            invalidate_block ?quarantined_occurrence
+              ~quarantine_kind:Keeper_chat_events.Tool_start_missing_identity
+              bridge_state index ~failed_tool_call_id
+        ; chat_events =
+            [ block_start
+            ; protocol_error ?quarantined_occurrence ~index
+                ?tool_call_id:failed_tool_call_id
+                ~reason:"non-tool content block carried tool id or name"
+                Tool_start_missing_identity
+            ]
+        }
+      in
       let conflict ?quarantined_occurrence ?tool_call_id reason =
         { bridge_state =
             invalidate_block ?quarantined_occurrence
@@ -1058,7 +1106,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
             ]
         }
       in
-      (match stream_block_for_index bridge_state index with
+      if rejects_non_tool_identity
+      then reject_non_tool_identity ()
+      else (match stream_block_for_index bridge_state index with
        | Some (Active_tool existing) ->
          conflict ~quarantined_occurrence:existing.occurrence
            ?tool_call_id:existing.tool_call_id

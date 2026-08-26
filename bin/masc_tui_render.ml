@@ -7257,14 +7257,16 @@ let tool_domain_rule =
   String.concat "" (List.init tool_domain_rule_cells (fun _ -> Ansi.box_h))
 
 let skill_activation_origin_text = function
-  | Masc.Tui_decode.Skill_task_instruction { sao_task_id } ->
-      "task_instruction task=" ^ sao_task_id
-  | Masc.Tui_decode.Skill_session_instruction -> "session_instruction"
-  | Masc.Tui_decode.Skill_task_composition { sao_task_id; sao_tool_name } ->
+  | Masc.Keeper_skill_activation_ledger.Task_instruction { task_id } ->
+      "task_instruction task=" ^ Keeper_id.Task_id.to_string task_id
+  | Masc.Keeper_skill_activation_ledger.Session_instruction ->
+      "session_instruction"
+  | Masc.Keeper_skill_activation_ledger.Task_composition
+      { task_id; tool_name } ->
       Printf.sprintf "task_composition task=%s tool=%s"
-        sao_task_id sao_tool_name
-  | Masc.Tui_decode.Skill_session_composition { sao_tool_name } ->
-      "session_composition tool=" ^ sao_tool_name
+        (Keeper_id.Task_id.to_string task_id) tool_name
+  | Masc.Keeper_skill_activation_ledger.Session_composition { tool_name } ->
+      "session_composition tool=" ^ tool_name
 
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -7326,6 +7328,7 @@ let render_tools (state : state) =
                  { ets_keeper_name;
                    ets_runtime_id;
                    ets_official_client_kind;
+                   ets_tool_delivery;
                    ets_native_posture;
                    ets_tool_groups;
                    ets_instruction_skills;
@@ -7336,6 +7339,12 @@ let render_tools (state : state) =
                  });
           _ } ->
         let native = Option.value ~default:"n/a" ets_native_posture in
+        let delivery =
+          match ets_tool_delivery with
+          | Masc.Tui_decode.Effective_tools_delivered -> "delivered"
+          | Masc.Tui_decode.Effective_tools_suppressed_runtime_unsupported ->
+            "suppressed:runtime_tools_unsupported"
+        in
         let groups =
           match ets_tool_groups with [] -> "all" | xs -> String.concat "," xs
         in
@@ -7376,10 +7385,11 @@ let render_tools (state : state) =
             (Terminal_text.single_line ets_keeper_name)
             (List.length ets_tools);
           Ansi.dim,
-          Printf.sprintf "   runtime=%s  client=%s  native=%s  groups=%s"
+          Printf.sprintf "   runtime=%s  client=%s  native=%s  delivery=%s  groups=%s"
             (Terminal_text.single_line ets_runtime_id)
             (Terminal_text.single_line ets_official_client_kind)
-            native (Terminal_text.single_line groups);
+            native (Terminal_text.single_line delivery)
+            (Terminal_text.single_line groups);
           Ansi.dim,
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
@@ -7434,28 +7444,34 @@ let render_tools (state : state) =
             Some
               (Masc.Tui_decode.Skill_activations_available
                  { sap_keeper_name
-                 ; sap_workspace_key
-                 ; sap_session_id
-                 ; sap_revision
-                 ; sap_activations
+                 ; sap_ledger
                  });
           _ } ->
+        let sap_activations =
+          Masc.Keeper_skill_activation_ledger.activations sap_ledger
+        in
         let receipt_lines =
           List.concat_map
-            (fun (activation : Masc.Tui_decode.skill_activation) ->
+            (fun (activation : Masc.Keeper_skill_activation_ledger.activation) ->
                let exact_reference =
-                 Skill_reference.to_yojson activation.sa_reference
+                 Skill_reference.make
+                   ~identity:activation.identity
+                   ~content_revision:activation.content_revision
+                 |> Skill_reference.to_yojson
                  |> Yojson.Safe.to_string
                in
                [ Ansi.dim,
                  "   exact=" ^ Terminal_text.single_line exact_reference
                ; Ansi.dim,
                  Printf.sprintf "     snapshot=%s  turn=%s  origin=%s  at=%s"
-                   (Terminal_text.single_line activation.sa_snapshot_revision)
-                   (Terminal_text.single_line activation.sa_turn_ref)
-                   (skill_activation_origin_text activation.sa_origin
+                   (Skill_catalog_snapshot.snapshot_revision_to_string
+                      activation.snapshot_revision
                     |> Terminal_text.single_line)
-                   (Terminal_text.single_line activation.sa_activated_at)
+                   (Ids.Turn_ref.to_string activation.turn_ref
+                    |> Terminal_text.single_line)
+                   (skill_activation_origin_text activation.origin
+                    |> Terminal_text.single_line)
+                   (Terminal_text.single_line activation.activated_at)
                ])
             sap_activations
         in
@@ -7465,10 +7481,16 @@ let render_tools (state : state) =
             (List.length sap_activations)
         ; Ansi.dim,
           Printf.sprintf "   session=%s  ledger=%s"
-            (Terminal_text.single_line sap_session_id)
-            (Terminal_text.single_line sap_revision)
+            (Masc.Keeper_skill_activation_ledger.session_id sap_ledger
+             |> Keeper_id.Trace_id.to_string
+             |> Terminal_text.single_line)
+            (Masc.Keeper_skill_activation_ledger.revision sap_ledger
+             |> Masc.Keeper_skill_activation_ledger.ledger_revision_to_string
+             |> Terminal_text.single_line)
         ; Ansi.dim,
-          "   workspace=" ^ Terminal_text.single_line sap_workspace_key
+          "   workspace="
+          ^ (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger
+             |> Terminal_text.single_line)
         ]
         @ receipt_lines
   in

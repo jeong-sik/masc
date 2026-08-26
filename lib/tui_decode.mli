@@ -198,11 +198,16 @@ type effective_tool = {
   et_skill_source : string option;
 }
 
+type effective_tool_delivery =
+  | Effective_tools_delivered
+  | Effective_tools_suppressed_runtime_unsupported
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
       ets_runtime_id : string;
       ets_official_client_kind : string;
+      ets_tool_delivery : effective_tool_delivery;
       ets_native_posture : string option;
       ets_tool_groups : string list;
       ets_instruction_skills : Skill_reference.t list;
@@ -222,30 +227,10 @@ type effective_tool_surface =
     }
   | Effective_surface_warming of { ets_keeper_name : string }
 
-type skill_activation_origin =
-  | Skill_task_instruction of { sao_task_id : string }
-  | Skill_session_instruction
-  | Skill_task_composition of {
-      sao_task_id : string;
-      sao_tool_name : string;
-    }
-  | Skill_session_composition of { sao_tool_name : string }
-
-type skill_activation = {
-  sa_reference : Skill_reference.t;
-  sa_snapshot_revision : string;
-  sa_turn_ref : string;
-  sa_activated_at : string;
-  sa_origin : skill_activation_origin;
-}
-
 type skill_activation_projection =
   | Skill_activations_available of {
       sap_keeper_name : string;
-      sap_workspace_key : string;
-      sap_session_id : string;
-      sap_revision : string;
-      sap_activations : skill_activation list;
+      sap_ledger : Keeper_skill_activation_ledger.t;
     }
   | Skill_activations_no_session of { sap_keeper_name : string }
   | Skill_activations_unavailable of {

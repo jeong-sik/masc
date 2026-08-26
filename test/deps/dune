@@ -102,6 +102,7 @@
   ;; RFC-0056 Phase 1M — Execution policy leaf sub-library.
   (re_export masc.exec_policy)
   (re_export masc.keeper_registry)
+  (re_export masc.skill_snapshot)
   (re_export masc.keeper_metrics)
   (re_export masc.keeper_failure_taxonomy)
   (re_export masc.keeper_types)

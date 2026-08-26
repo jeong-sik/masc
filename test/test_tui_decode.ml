@@ -1407,7 +1407,7 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
 
 let tool_snapshot_json ?effective ?activations tools =
   `Assoc
-    ([ ("generated_at", `String "2026-08-23T09:00:00Z")
+    [ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
     ; ("runtime_resolution", `Assoc [])
     ; ( "tool_inventory"
@@ -1417,15 +1417,11 @@ let tool_snapshot_json ?effective ?activations tools =
           ; ("surface_summary", `Assoc [])
           ] )
     ; ("tool_usage", `Assoc [])
+    ; ( "effective_keeper_surface"
+      , Option.value ~default:`Null effective )
+    ; ( "skill_activations"
+      , Option.value ~default:`Null activations )
     ]
-    @
-    (match effective with
-     | None -> []
-     | Some value -> [ "effective_keeper_surface", value ])
-    @
-    match activations with
-    | None -> []
-    | Some value -> [ "skill_activations", value ])
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
@@ -1517,6 +1513,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "keeper_name", `String "codex-mcp-client"
       ; "runtime_id", `String "openai.codex"
       ; "official_client_kind", `String "codex"
+      ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `String "read"
       ; "tool_groups", `List [ `String "filesystem" ]
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
@@ -1570,6 +1567,7 @@ let test_decode_effective_keeper_surface_rejects_legacy_skill_names () =
       ; "keeper_name", `String "fixture"
       ; "runtime_id", `String "runtime"
       ; "official_client_kind", `String "codex"
+      ; "tool_delivery", `Assoc [ "status", `String "delivered" ]
       ; "native_posture", `Null
       ; "tool_groups", `List []
       ; "instruction_skills", `List [ `String "legacy-name" ]
@@ -1605,6 +1603,41 @@ let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
   | Ok _ -> Alcotest.fail "expected an unavailable effective Keeper surface"
   | Error err -> Alcotest.failf "decode failed: %s" err
 
+let test_decode_effective_keeper_surface_keeps_tool_suppression () =
+  let effective =
+    `Assoc
+      [ "status", `String "available"
+      ; "keeper_name", `String "text-only"
+      ; "runtime_id", `String "agent-core.text"
+      ; "official_client_kind", `String "agent_core"
+      ; ( "tool_delivery"
+        , `Assoc
+            [ "status", `String "suppressed"
+            ; "reason", `String "runtime_tools_unsupported"
+            ] )
+      ; "native_posture", `Null
+      ; "tool_groups", `List []
+      ; "instruction_skills", `List []
+      ; "composition_skills", `List []
+      ; "count", `Int 0
+      ; "tools", `List []
+      ; "tool_surface_sha256", `Null
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Ok
+      { Tui_decode.ts_effective =
+          Some
+            (Tui_decode.Effective_surface_available
+               { ets_tool_delivery =
+                   Tui_decode.Effective_tools_suppressed_runtime_unsupported;
+                 ets_tools = [];
+                 _
+               });
+        _ } -> ()
+  | Ok _ -> Alcotest.fail "runtime tool suppression was not kept distinct"
+  | Error err -> Alcotest.failf "decode failed: %s" err
+
 let skill_activation_reference_json name revision =
   `Assoc
     [ ( "identity"
@@ -1630,15 +1663,27 @@ let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instructi
   | _ -> assert false
 
 let skill_activation_projection_json activations =
+  let workspace_key = String.make 64 '1' in
+  let session_id = "trace-activation" in
+  let revision =
+    `Assoc
+      [ "workspace_key", `String workspace_key
+      ; "session_id", `String session_id
+      ; "activations", `List activations
+      ]
+    |> Yojson.Safe.to_string
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
+  in
   `Assoc
     [ "status", `String "available"
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
           [ "schema", `String "masc.skill-activations/v1"
-          ; "workspace_key", `String (String.make 64 '1')
-          ; "session_id", `String "trace-activation"
-          ; "revision", `String (String.make 64 '2')
+          ; "workspace_key", `String workspace_key
+          ; "session_id", `String session_id
+          ; "revision", `String revision
           ; "activations", `List activations
           ] )
     ]
@@ -1673,37 +1718,49 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
           Some
             (Tui_decode.Skill_activations_available
                { sap_keeper_name
-               ; sap_session_id
-               ; sap_activations =
-                   [ { sa_reference
-                     ; sa_snapshot_revision
-                     ; sa_turn_ref
-                     ; sa_origin =
-                         Tui_decode.Skill_task_composition
-                           { sao_task_id; sao_tool_name }
-                     ; _
-                     }
-                   ; { sa_origin =
-                         Tui_decode.Skill_session_composition
-                           { sao_tool_name = session_tool }
-                     ; _
-                     }
-                   ]
+               ; sap_ledger
                ; _
                });
         _ } ->
+      let activations =
+        Keeper_skill_activation_ledger.activations sap_ledger
+      in
+      let first, second =
+        match activations with
+        | [ first; second ] -> first, second
+        | _ -> Alcotest.fail "expected two canonical activation rows"
+      in
+      let sao_task_id, sao_tool_name =
+        match first.origin with
+        | Keeper_skill_activation_ledger.Task_composition
+            { task_id; tool_name } -> task_id, tool_name
+        | _ -> Alcotest.fail "expected task composition origin"
+      in
+      let session_tool =
+        match second.origin with
+        | Keeper_skill_activation_ledger.Session_composition { tool_name } ->
+          tool_name
+        | _ -> Alcotest.fail "expected session composition origin"
+      in
+      let sa_reference =
+        Skill_reference.make
+          ~identity:first.identity
+          ~content_revision:first.content_revision
+      in
       Alcotest.(check string) "Keeper" "codex-mcp-client" sap_keeper_name;
       Alcotest.(check string) "session" "trace-activation"
-        sap_session_id;
+        (Keeper_skill_activation_ledger.session_id sap_ledger
+         |> Keeper_id.Trace_id.to_string);
       Alcotest.(check string) "exact reference"
         (Yojson.Safe.to_string (skill_activation_reference_json "ocaml-coding" 'a'))
         (Skill_reference.to_yojson sa_reference |> Yojson.Safe.to_string);
       Alcotest.(check string) "snapshot revision" (String.make 64 'f')
-        sa_snapshot_revision;
+        (Skill_catalog_snapshot.snapshot_revision_to_string
+           first.snapshot_revision);
       Alcotest.(check string) "turn" "trace-activation#7"
-        sa_turn_ref;
+        (Ids.Turn_ref.to_string first.turn_ref);
       Alcotest.(check string) "task" "task-470"
-        sao_task_id;
+        (Keeper_id.Task_id.to_string sao_task_id);
       Alcotest.(check string) "task tool" "run-checks" sao_tool_name;
       Alcotest.(check string) "session tool" "summarize" session_tool
   | Ok _ -> Alcotest.fail "expected two typed Skill activation receipts"
@@ -1758,6 +1815,52 @@ let test_decode_skill_activations_rejects_cross_session_turn () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~activations []) with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "cross-session activation turn_ref was accepted"
+
+let test_decode_tool_snapshot_requires_both_keeper_projection_fields () =
+  let missing_activations =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (List.remove_assoc "skill_activations" fields)
+    | other -> other
+  in
+  match Tui_decode.decode_tool_snapshot missing_activations with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "missing skill_activations field was accepted"
+
+let test_decode_skill_activations_reuses_canonical_ledger_decoder () =
+  let activation = skill_activation_json () in
+  let invalid_time =
+    match activation with
+    | `Assoc fields ->
+      `Assoc
+        (("activated_at", `String "not-a-time")
+         :: List.remove_assoc "activated_at" fields)
+    | other -> other
+  in
+  let duplicate = skill_activation_projection_json [ activation; activation ] in
+  let invalid_time = skill_activation_projection_json [ invalid_time ] in
+  let invalid_revision =
+    match skill_activation_projection_json [ activation ] with
+    | `Assoc fields ->
+      let ledger =
+        match List.assoc "ledger" fields with
+        | `Assoc ledger_fields ->
+          `Assoc
+            (("revision", `String (String.make 64 '0'))
+             :: List.remove_assoc "revision" ledger_fields)
+        | other -> other
+      in
+      `Assoc (("ledger", ledger) :: List.remove_assoc "ledger" fields)
+    | other -> other
+  in
+  List.iter
+    (fun projection ->
+       match
+         Tui_decode.decode_tool_snapshot
+           (tool_snapshot_json ~activations:projection [])
+       with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "canonical activation invariant was bypassed")
+    [ invalid_time; duplicate; invalid_revision ]
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
@@ -3096,6 +3199,8 @@ let () =
           test_decode_effective_keeper_surface_rejects_legacy_skill_names;
         Alcotest.test_case "effective unavailable stays explicit" `Quick
           test_decode_effective_keeper_surface_does_not_hide_unavailable;
+        Alcotest.test_case "effective surface keeps tool suppression" `Quick
+          test_decode_effective_keeper_surface_keeps_tool_suppression;
         Alcotest.test_case "Skill activations keep exact receipt and origin" `Quick
           test_decode_skill_activations_keeps_exact_receipt_and_origin;
         Alcotest.test_case "Skill activations keep no session distinct" `Quick
@@ -3104,6 +3209,10 @@ let () =
           test_decode_skill_activations_does_not_hide_unavailable;
         Alcotest.test_case "Skill activation rejects cross-session turn" `Quick
           test_decode_skill_activations_rejects_cross_session_turn;
+        Alcotest.test_case "tool snapshot requires Keeper projection fields" `Quick
+          test_decode_tool_snapshot_requires_both_keeper_projection_fields;
+        Alcotest.test_case "Skill activation reuses canonical ledger decoder" `Quick
+          test_decode_skill_activations_reuses_canonical_ledger_decoder;
       ] );
     ( "decode_connectors",
       [

@@ -104,7 +104,7 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
   let keeper_name = ctx.agent_name in
   match list_field "questions" ctx.arguments with
   | Error detail -> reject detail
-  | Ok [] -> reject "questions must carry at least one question"
+  | Ok [] -> reject "at least one question is required"
   | Ok question_items -> (
       match map_results question_of_json question_items with
       | Error detail -> reject detail

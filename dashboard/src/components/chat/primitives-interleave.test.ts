@@ -84,6 +84,51 @@ describe('interleaveTraceAndTools', () => {
     expect(labels(out)).toEqual(['think:A', 'tool:legacy-tool', 'tool:tool-X'])
   })
 
+  it('joins matching execution ids even when provider correlation ids differ', () => {
+    const out = interleaveTraceAndTools(
+      [
+        think('A'),
+        {
+          kind: 'tool',
+          name: 'status',
+          toolCallId: 'provider-trace',
+          executionId: 'exec-shared',
+        },
+      ],
+      [{
+        entry: {
+          id: 'tool-durable',
+          role: 'tool',
+          toolCallId: 'provider-row',
+          executionId: 'exec-shared',
+        } as unknown as KeeperConversationEntry,
+        output: null,
+      }],
+    )
+    expect(labels(out)).toEqual(['think:A', 'tool:tool-durable'])
+  })
+
+  it('does not join matching provider ids when execution ids differ', () => {
+    const out = interleaveTraceAndTools(
+      [{
+        kind: 'tool',
+        name: 'status',
+        toolCallId: 'provider-shared',
+        executionId: 'exec-trace',
+      }],
+      [{
+        entry: {
+          id: 'tool-durable',
+          role: 'tool',
+          toolCallId: 'provider-shared',
+          executionId: 'exec-row',
+        } as unknown as KeeperConversationEntry,
+        output: null,
+      }],
+    )
+    expect(labels(out)).toEqual(['tool:provider-shared', 'tool:tool-durable'])
+  })
+
   it('handles empty inputs without error', () => {
     expect(interleaveTraceAndTools([], [])).toEqual([])
     expect(

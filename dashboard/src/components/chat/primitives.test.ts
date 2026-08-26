@@ -3150,7 +3150,11 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
             text: 'legacy trace',
             role: 'assistant',
             source: 'direct_assistant',
-            traceSteps: [{ kind: 'tool', name: 'legacy_tool_without_id' }],
+            traceSteps: [{
+              kind: 'tool',
+              name: 'legacy_tool_without_id',
+              toolCallId: 'provider-only-call',
+            }],
           }),
         ]}
         emptyText="empty"
@@ -3165,10 +3169,10 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]') as HTMLElement | null
     expect(step?.querySelector('.chat-block-tstep-status.unlinked')).not.toBeNull()
     expect(step?.querySelector('.chat-block-tstep-status.pending')).toBeNull()
-    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('unlinked_trace')
+    expect(step?.querySelector('[data-chat-trace-provenance]')?.getAttribute('data-chat-trace-provenance')).toBe('tool_call_id')
     expect(step?.getAttribute('data-chat-trace-link-state')).toBe('unlinked')
     expect(step?.getAttribute('data-chat-trace-output-state')).toBe('unlinked')
-    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBeNull()
+    expect(step?.getAttribute('data-chat-trace-tool-call-id')).toBe('provider-only-call')
     expect(step?.getAttribute('data-chat-trace-entry-id')).toBeNull()
 
     ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()

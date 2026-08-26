@@ -839,6 +839,9 @@ describe('parseSSEMessage', () => {
       batch_index: 0,
       batch_size: 3,
       execution_mode: 'concurrent',
+      success: true,
+      disposition: 'completed',
+      duration_ms: 12.5,
       ts_unix: 1_786_588_800,
     })
 
@@ -870,6 +873,9 @@ describe('parseSSEMessage', () => {
       batch_index: 0,
       batch_size: 3,
       execution_mode: 'concurrent',
+      success: true,
+      disposition: 'completed',
+      duration_ms: 12.5,
       ts_unix: 1_786_588_800,
     })).toBeNull()
     expect(warnSpy).toHaveBeenCalledOnce()

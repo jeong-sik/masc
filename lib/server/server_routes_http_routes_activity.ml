@@ -1413,17 +1413,24 @@ let add_routes ~sw ~clock router =
                     | Ok skill ->
                       (match skill.surface with
                        | Keeper_skill_catalog.Instruction ->
+                         let summary =
+                           Keeper_skill_usage.summarize ~rows
+                             (Keeper_skill_usage.Instruction_read skill.name)
+                         in
                          `Assoc
                            (base
                            @ [ ("kind", `String "instruction")
-                             ; ( "recent_use_count"
-                               , `Int
-                                   (Keeper_skill_usage.count ~rows
-                                      (Keeper_skill_usage.Instruction_read skill.name)) )
+                             ; "recent_use_count", `Int summary.use_count
+                             ; "recent_success_count", `Int summary.success_count
+                             ; "recent_failure_count", `Int summary.failure_count
                              ])
                        | Keeper_skill_catalog.Composition composition ->
                          let tool_name =
                            Keeper_tool_composition_catalog.tool_name composition
+                         in
+                         let summary =
+                           Keeper_skill_usage.summarize ~rows
+                             (Keeper_skill_usage.Composition_tool tool_name)
                          in
                          `Assoc
                            (base
@@ -1433,10 +1440,9 @@ let add_routes ~sw ~clock router =
                                , `String
                                    (Keeper_tool_composition_catalog.execution_mode_to_string
                                       composition.execution) )
-                             ; ( "recent_use_count"
-                               , `Int
-                                   (Keeper_skill_usage.count ~rows
-                                      (Keeper_skill_usage.Composition_tool tool_name)) )
+                             ; "recent_use_count", `Int summary.use_count
+                             ; "recent_success_count", `Int summary.success_count
+                             ; "recent_failure_count", `Int summary.failure_count
                              ]))
                     | Error error ->
                       `Assoc

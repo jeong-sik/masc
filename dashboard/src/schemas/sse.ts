@@ -1003,6 +1003,27 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
     if (value.execution_mode !== 'serial' && value.execution_mode !== 'concurrent') {
       return fail('execution_mode', 'Expected serial or concurrent execution_mode')
     }
+    if (value.success !== undefined && typeof value.success !== 'boolean') {
+      return fail('success', 'Expected success to be a boolean')
+    }
+    if (
+      value.disposition !== undefined
+      && value.disposition !== 'completed'
+      && value.disposition !== 'deferred'
+      && value.disposition !== 'failed'
+    ) {
+      return fail('disposition', 'Expected completed, deferred, or failed disposition')
+    }
+    if (
+      value.duration_ms !== undefined
+      && (
+        typeof value.duration_ms !== 'number'
+        || !Number.isFinite(value.duration_ms)
+        || value.duration_ms < 0
+      )
+    ) {
+      return fail('duration_ms', 'Expected a non-negative finite duration_ms')
+    }
     for (const field of ['turn', 'planned_index', 'batch_index', 'batch_size'] as const) {
       const candidate = value[field]
       const minimum = field === 'batch_size' ? 1 : 0

@@ -131,10 +131,12 @@ error로 거부한다. 반면 이름 불일치·한계 초과·확장 키는 `ru
 ## 5. 관측
 
 - `GET /api/v1/skills` — 발행 스냅샷의 이름·설명·conformance·diagnostics와, 턴 파서가
-  만든 종류·합성 도구 이름/실행 모드·최근 사용량을 함께 돌려준다.
+  만든 종류·합성 도구 이름/실행 모드·최근 사용 및 완료 성공/실패 횟수를 함께 돌려준다.
 - 합성 실행은 노드 단위로 `tool_calls` 스토어에 남는다 (`composition_tool`,
   `composition_run_id`, `composition_node_id`) — SSE
-  `keeper_tool_call_evidence_committed` 로도 흐른다.
+  `keeper_tool_call_evidence_committed` 로도 흐른다. 이벤트에는 `success`, `disposition`,
+  `duration_ms`가 포함된다. run 전체는 `record_kind=composition_run` 종결 행으로 별도
+  기록되며 async는 durable settlement 이후에만 종결된다.
 
 ## 6. 배포 주의 — #30208~#30220 창
 

@@ -5,7 +5,7 @@
 | Status | Draft |
 | Author | jeong-sik (with Claude analysis) |
 | Created | 2026-05-09 |
-| Target | `agent_sdk` (oas) — and as cross-repo template for `masc_mcp` |
+| Target | `agent_sdk` (agent_core) — and as cross-repo template for `masc_mcp` |
 | Supersedes | None |
 
 ## 0. Summary
@@ -16,7 +16,7 @@ OCaml `ref` / `mutable record` / `Hashtbl` 사용지점을 *3 카테고리*로 �
 
 ## 1. Inventory (line-pinned, 2026-05-09 main)
 
-### 1.1 OAS (`agent_sdk`)
+### 1.1 agent_core (`agent_sdk`)
 
 | 패턴 | 카운트 | 비고 |
 |---|---|---|
@@ -28,7 +28,7 @@ Top files:
 - `lib/streaming.ml`: 17 ref (streaming buffer — *legitimate*)
 - `lib/llm_provider/complete_stream_acc.ml`: 16 ref (stream accumulator — *legitimate*)
 - `lib/llm_provider/transport_codex_cli.ml`: 12 ref (transport state — 검토 필요)
-- `lib/proof_store.ml`: 11 ref (CDAL 제거 때 OAS lib에서 함께 제거됨)
+- `lib/proof_store.ml`: 11 ref (CDAL 제거 때 agent_core lib에서 함께 제거됨)
 
 ### 1.2 masc-mcp
 
@@ -46,7 +46,7 @@ Top files:
 
 ### 1.3 합계
 
-**OAS + masc-mcp = ~700+ ref** + **180+ mutable record** + **300+ Hashtbl**.
+**agent_core + masc-mcp = ~700+ ref** + **180+ mutable record** + **300+ Hashtbl**.
 
 ## 2. 카테고리 분류
 
@@ -168,7 +168,7 @@ cost** — defer to lab/ branch demos, never bulk-cleanup.
 
 | Repo | Category C strict (true zero mutation) |
 |---|---|
-| OAS `lib/` | **0** after PR-A + PR-B (eval_stats.idx and harness.common were Category B incr-loops, both converted) |
+| agent_core `lib/` | **0** after PR-A + PR-B (eval_stats.idx and harness.common were Category B incr-loops, both converted) |
 | masc-mcp `lib/` | **2** false-positives traced to multi-line `:=` formatting (`cdal_runtime/proof_capture.ml: refs`, `coordination_product.ml: violations`) — both reclassified Category B (closure-around-ref) and deferred. |
 
 → *true Category C is the rare case*. Most "looks like a bare ref" is actually

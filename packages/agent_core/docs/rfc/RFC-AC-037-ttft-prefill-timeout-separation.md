@@ -5,7 +5,7 @@
 | Status | Draft |
 | Author | vincent (with Claude analysis) |
 | Created | 2026-07-20 |
-| Target | `agent_sdk` (oas) |
+| Target | `agent_sdk` (agent_core) |
 | Related | [[RFC-AC-020]] (TTFT instrumentation), [[RFC-AC-026]] (transport-liveness-carrier), masc [[RFC-0345]] (stream-idle fail-safe floor) |
 
 ## 0. Summary

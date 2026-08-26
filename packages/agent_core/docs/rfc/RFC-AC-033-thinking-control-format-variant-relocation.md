@@ -8,7 +8,7 @@
 | Amended | 2026-07-18 — exact lossless thinking-control codec contract |
 | Target | `lib/llm_provider/capability_vocab.ml`, `capabilities.ml`(+`.mli`), `provider_catalog.ml`, `capability_manifest.ml`, `model_catalog.ml`, `reasoning_dialect.ml` |
 | Supplements | RFC-AC-023 (capability axis reshape), RFC-AC-029 §1.2 (string classifier bypassing typed kind) |
-| Boundary | OAS capability vocabulary and catalog-input contract. Variant ownership remains internal; the public codec rejects non-canonical labels and invalid token combinations. |
+| Boundary | agent_core capability vocabulary and catalog-input contract. Variant ownership remains internal; the public codec rejects non-canonical labels and invalid token combinations. |
 
 ## 0. Summary
 

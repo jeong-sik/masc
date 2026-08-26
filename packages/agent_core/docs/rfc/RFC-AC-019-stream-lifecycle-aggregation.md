@@ -5,14 +5,14 @@
 | Status | Draft |
 | Author | vincent (with Claude analysis) |
 | Created | 2026-05-14 |
-| Target | `agent_sdk` (oas) |
+| Target | `agent_sdk` (agent_core) |
 | Sibling | RFC-AC-018 (provider-model-catalog-externalization) |
 
 ## 0. Summary
 
 `Telemetry_event.Streaming_chunk_n` is currently emitted once per streamed chunk from `lib/llm_provider/complete.ml:1058-1061`. A single completion produces hundreds of these records (observed `chunk_index: 314` on one attempt), each carrying only `provider`, `model`, `chunk_index`, `inter_chunk_ms`. Downstream telemetry sinks that persist `Custom("telemetry_event", json)` payloads receive raw chunk records, drowning every higher-level event.
 
-This RFC replaces per-chunk emission with a single typed `Streaming_summary` variant emitted at stream finalize. Prometheus metric paths (if any) are untouched — the variant change is on the OAS `Event_bus` telemetry surface only. Per-chunk dispatch internal to the SDK (debouncing, liveness, parser progress) is preserved; only the *external* event variant changes.
+This RFC replaces per-chunk emission with a single typed `Streaming_summary` variant emitted at stream finalize. Prometheus metric paths (if any) are untouched — the variant change is on the agent_core `Event_bus` telemetry surface only. Per-chunk dispatch internal to the SDK (debouncing, liveness, parser progress) is preserved; only the *external* event variant changes.
 
 ## 1. Problem (line-pinned, 2026-05-14 main `5e68d21d`)
 

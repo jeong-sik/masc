@@ -5,7 +5,7 @@
 | Status | Superseded by the explicit provider/model tuple hard cut (#2590) |
 | Author | jeong-sik (Claude Opus 4.8 조사) |
 | Created | 2026-07-01 |
-| Target | `agent_sdk` (oas) — `lib/llm_provider/` (`provider_endpoint.ml`, `provider_config.ml`, `provider_registry.ml`, `discovery.ml`, `capabilities.ml`, `complete_sampling.ml`) |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/` (`provider_endpoint.ml`, `provider_config.ml`, `provider_registry.ml`, `discovery.ml`, `capabilities.ml`, `complete_sampling.ml`) |
 | Supplements | RFC-AC-023 (capability axis = model × transport) — 034는 그 원칙의 *집행* 레이어 |
 | Mirrors | RFC-AC-022 (monotone-decrease ratchet) — 신규 위반 사이트를 CI에서 0으로 고정 |
 | Aligned infra | RFC-AC-018 (catalog externalization), PR #2404 (declarative override SSOT) |
@@ -15,7 +15,7 @@
 
 > Current contract: provider identity and model id are separate typed/configured
 > values. A model row may declare `provider_name` plus its bare `id_prefix`;
-> OAS does not synthesize `/`, `:`, or `.`-qualified model ids. Provider identity
+> agent_core does not synthesize `/`, `:`, or `.`-qualified model ids. Provider identity
 > is carried as the explicit provider selector / `Provider_config.provider_id`;
 > endpoint URLs and request paths never select it, even when they happen to
 > equal a catalog row. The rest of this RFC records the historical problem and
@@ -33,7 +33,7 @@ RFC-AC-023이 이미 축을 선언했다 — capability = `model_caps ∩ transp
 
 ### 1.1 재발하는 계열 (원칙 RFC만으로 안 막힘)
 
-2026-07-01 감사 (`oas-endpoint-capability-boundary-audit`, 29 agents, 7 finder 차원 + 적대 검증): 41 dedup 사이트 중 **confirmed 4 / borderline 5 / legit 32**.
+2026-07-01 감사 (`agent_core-endpoint-capability-boundary-audit`, 29 agents, 7 finder 차원 + 적대 검증): 41 dedup 사이트 중 **confirmed 4 / borderline 5 / legit 32**.
 
 핵심은 `runpod_mtp`가 신규 실수 하나가 아니라 **이미 main에 사는 계열의 재발**이라는 것이다. main에 `provider_registry.ml`의 `is_local → "nous"`가 이미 있었고(§3 B3), #2374·#2408은 그 선례를 두 번 따랐다. 한 번 워크어라운드 패턴이 main에 들어가면 이후 코드 생성(AI든 사람이든)이 그 패턴을 *합리적 선례*로 학습해 누적되는 나선 — 이 RFC가 문서화하는 반복이 바로 그 실측 사례다.
 

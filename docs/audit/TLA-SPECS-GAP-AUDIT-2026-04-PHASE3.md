@@ -112,7 +112,7 @@ The 8 specs are listed below in fan-out order, prioritised by hot-path proximity
 
 ## 3. Common pattern across stubs
 
-Three of the eight (MASCEcosystem, MultimodalHydrator, SharedAudit) need a **prerequisite** — strengthening the clean cfg's invariant set before adding the BugAction is meaningful. This is the same shape as the OAS chain's Layer C taxonomy: surveys often surface that the tools you'd reach for (a buggy.cfg) need an upstream change first (a stronger clean.cfg invariant).
+Three of the eight (MASCEcosystem, MultimodalHydrator, SharedAudit) need a **prerequisite** — strengthening the clean cfg's invariant set before adding the BugAction is meaningful. This is the same shape as the agent_core chain's Layer C taxonomy: surveys often surface that the tools you'd reach for (a buggy.cfg) need an upstream change first (a stronger clean.cfg invariant).
 
 The other five (AutonomousLoop, AutonomousPhase, MultimodalArtifact, ResilienceDegradation, ResilienceOutcome) have invariants strong enough to catch a realistic bug — only the buggy.cfg + BugAction is missing.
 
@@ -134,7 +134,7 @@ Total: ~14h spread across 8 small PRs. Each PR is independent (different domain,
 
 Phase 4 will wire the descriptive ratchet (`domains_without_bug_model`) per Phase 1 §6, **after** at least 2 of the 8 RFC stubs above have produced merged buggy cfgs. The ratchet starts at the post-merge floor (e.g. 3 if 2 specs merged) so the first enforcement coincides with real progress.
 
-This mirrors the OAS chain's Phase 4 deferral (`bridge_adoption` monotonic floor deferred 6 months pending usage data).
+This mirrors the agent_core chain's Phase 4 deferral (`bridge_adoption` monotonic floor deferred 6 months pending usage data).
 
 ## 7. References
 

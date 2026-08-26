@@ -5,7 +5,7 @@
 | Status | Draft (skeleton) |
 | Author | jeong-sik |
 | Created | 2026-05-26 |
-| Target | `agent_sdk` (oas) — `lib/llm_provider/`, `lib/provider.ml` |
+| Target | `agent_sdk` (agent_core) — `lib/llm_provider/`, `lib/provider.ml` |
 | Supersedes (partial) | RFC-0001 vendor purge (naming policy portion) — see §7.1 |
 | Supplements | RFC-AC-018 catalog externalization (adds axis reshape on top of externalization) — see §7.2 |
 | Sibling | RFC-AC-017 (coordinator-shape leak) |
@@ -13,7 +13,7 @@
 
 ## 0. Summary
 
-OAS capability catalog가 두 가지 동시 결함을 가지고 있다.
+agent_core capability catalog가 두 가지 동시 결함을 가지고 있다.
 
 1. **표기 결함** — RFC-0001 후 brand가 알파벳 부호로 1:1 치환되었다 (`Anthropic → Provider_a`, `Kimi → Provider_c`, `OpenAI_compat → Provider_d_compat` 등 14×N). [feedback_vendor_brand_substitution_is_encryption_not_abstraction] 메모리(2026-05-24)의 자기 비판이 그대로 적용된다 — abstraction이 아니라 encryption.
 2. **축 결함** — capability의 1차 축은 *model*인데 catalog는 *provider* 부호로 분류되어 있다. 같은 모델(`kimi-k2.6`)이 여러 provider(Moonshot direct / Ollama Turbo cloud / OpenRouter / local quantization)로 갈 수 있고, capability는 `model_caps ∩ transport_caps`의 cross-product에서 결정되는데, 지금 catalog는 두 record를 한 record로 압축하여 *둘 다*를 잃었다.
@@ -27,7 +27,7 @@ OAS capability catalog가 두 가지 동시 결함을 가지고 있다.
 
 ### 1.1 RFC-0001 substitution = encryption
 
-RFC-0001은 "OAS 가 그쪽이니까 같이 폭파에 동참하자", "전체 폭파 . 어차피 레거시 지원 안할거임" 지시로 14개 brand를 알파벳 부호로 1:1 치환했다. 결과:
+RFC-0001은 "agent_core 가 그쪽이니까 같이 폭파에 동참하자", "전체 폭파 . 어차피 레거시 지원 안할거임" 지시로 14개 brand를 알파벳 부호로 1:1 치환했다. 결과:
 
 ```
 Anthropic       → Provider_a
@@ -53,7 +53,7 @@ Codex_cli       → Cli_tool_a
 증상:
 
 - 새 maintainer가 `base = "provider_d_chat"` manifest entry를 적으려면 `capabilities_for_provider_label` 매핑을 *역추적*해야 한다 ("끝말풀이").
-- cascade.toml의 model id는 brand 그대로(`kimi-k2.6:cloud`, `deepseek-v4-pro:cloud`)인데 OAS catalog만 부호 — 양쪽이 만나는 모든 경계에서 매핑 테이블이 필요해진다.
+- cascade.toml의 model id는 brand 그대로(`kimi-k2.6:cloud`, `deepseek-v4-pro:cloud`)인데 agent_core catalog만 부호 — 양쪽이 만나는 모든 경계에서 매핑 테이블이 필요해진다.
 - 부호의 *의미*는 코드 어디에도 명시되어 있지 않다 (`provider_d_chat`이 OpenAI chat completions wire를 가리킨다는 사실은 `backend_openai.ml` 파일명을 봐야 추정 가능).
 
 ### 1.2 Axis confusion — capability의 1차축이 model
@@ -97,15 +97,15 @@ kimi-k2.6  →  Moonshot direct           (chat_completions_v1)
 - 같은 `kimi-k2.6`을 다른 provider로 라우팅할 때 capability가 정확히 표현되지 않는다.
 - `apply_manifest_entry`에서 `base_label` 인터페이스가 부자연스럽다 (base로 무엇을 골라야 할지 model/transport 어느 축에서 잡을지 모호).
 
-### 1.4 Scope boundary — OAS doesn't know about consumers
+### 1.4 Scope boundary — agent_core doesn't know about consumers
 
-본 RFC 의 *operational scope* 는 OAS 자체 의 lib/+test/+bin/ 에 한정한다. **OAS 는 자신의 consumer (masc-mcp, cascade.toml, 기타) 를 모른다** — RFC-AC-018 §0 자매 약속의 그대로 적용 ("같은 SDK 가 'MASC 를 모른다' 와 자매 약속인 'Ollama / Qwen / Gemma / Kimi 를 모른다'").
+본 RFC 의 *operational scope* 는 agent_core 자체 의 lib/+test/+bin/ 에 한정한다. **agent_core 는 자신의 consumer (masc-mcp, cascade.toml, 기타) 를 모른다** — RFC-AC-018 §0 자매 약속의 그대로 적용 ("같은 SDK 가 'MASC 를 모른다' 와 자매 약속인 'Ollama / Qwen / Gemma / Kimi 를 모른다'").
 
 함의:
 
 - **권고 범위**: 본 RFC 본문이 "masc-mcp 와 동시 cross-cut PR" 같은 *consumer 측 operational 권고* 를 *하지 않는다*. consumer migration timeline 은 consumer 책임.
 - **외부 evidence 인용 가능**: consumer-side 측정 (§7.3 286 callsite, §5.1 0/13 audit) 은 *evidence-only*.
-- **결정 권한 분리**: SDK 의 variant 명명 / capability schema 는 OAS 의 결정. consumer 가 그 SDK 를 어느 timeline 에 받을지 / 어떤 alias 를 자기 routing 에 쓸지는 consumer 의 결정.
+- **결정 권한 분리**: SDK 의 variant 명명 / capability schema 는 agent_core 의 결정. consumer 가 그 SDK 를 어느 timeline 에 받을지 / 어떤 alias 를 자기 routing 에 쓸지는 consumer 의 결정.
 
 **PR self-check** (본 RFC 의 모든 stack PR 이 통과 의무):
 1. ☐ consumer 의 *operational action* (cross-cut PR, 동시 머지, etc.) 권고 *안* 하는가?
@@ -189,7 +189,7 @@ val effective_caps : model_id:string -> provider:provider -> capabilities
 
 - `default_provider_d_compat_capabilities` callers in `test/`: **3 파일 (7 사이트)** (test_capabilities × 1, test_capabilities_wiring × 1, test_llm_provider_cov × 5)
 - Lock 패턴: `rg "expect.*provider_d_chat|Alcotest.check.*default" test/` → **0 matches**, `rg "let%expect_test" test/` → **0 matches**
-- [feedback_tests_locking_anti_pattern_behavior] 의 lock 패턴이 OAS test/ 에 *부재*
+- [feedback_tests_locking_anti_pattern_behavior] 의 lock 패턴이 agent_core test/ 에 *부재*
 
 → Decision #5 hard error 전환 비용 *예상보다 낮음*. 73 callsite migration 이 *값 expectation 깨짐 없이* 안전.
 
@@ -342,11 +342,11 @@ provider_k_capabilities             → glm_model_default_caps
 
 ## 5. Inventory
 
-### 5.1 cascade.toml × OAS catalog 커버리지 (2026-05-26 audit)
+### 5.1 cascade.toml × agent_core catalog 커버리지 (2026-05-26 audit)
 
-`<MASC_BASE>/.masc/config/cascade.toml` 의 모든 `api-name` 을 OAS `Capabilities.for_model_id` 의 prefix table (capabilities.ml `String.starts_with` 30 prefixes) 과 대조한 결과:
+`<MASC_BASE>/.masc/config/cascade.toml` 의 모든 `api-name` 을 agent_core `Capabilities.for_model_id` 의 prefix table (capabilities.ml `String.starts_with` 30 prefixes) 과 대조한 결과:
 
-| api-name (wire에 흐르는 그대로) | Brand | RFC-0001 cipher | OAS prefix가 기대하는 형태 | Match |
+| api-name (wire에 흐르는 그대로) | Brand | RFC-0001 cipher | agent_core prefix가 기대하는 형태 | Match |
 |---|---|---|---|---|
 | `gpt-5.3-codex-spark` | OpenAI | Provider_d | `model-d-5*` | **MISS** |
 | `gpt-4.1` | OpenAI | Provider_d | `model-d-4.1*` | **MISS** |
@@ -366,8 +366,8 @@ provider_k_capabilities             → glm_model_default_caps
 
 해석:
 
-- RFC-0001 이 *source-level brand* 는 cipher 로 바꿨지만, *wire 에 들어오는 model_id 문자열* 은 brand 그대로다. cascade 가 `kimi-k2.6:cloud` 를 그대로 흘리는데 OAS catalog 의 prefix table 은 `provider_c-k2*` 를 기대 — 100% miss.
-- 결과적으로 cascade.toml 의 모든 모델이 `default_provider_d_compat_capabilities` (≡ `provider_d_chat_capabilities`, reasoning=false) 보수적 default 로 fallback 중. 즉 cascade.toml 의 `[models.X.capabilities]` 블록에 사용자가 *명시적으로 적은* capability 선언이 OAS 가 보는 effective_caps 와 *전혀 일치하지 않는다*.
+- RFC-0001 이 *source-level brand* 는 cipher 로 바꿨지만, *wire 에 들어오는 model_id 문자열* 은 brand 그대로다. cascade 가 `kimi-k2.6:cloud` 를 그대로 흘리는데 agent_core catalog 의 prefix table 은 `provider_c-k2*` 를 기대 — 100% miss.
+- 결과적으로 cascade.toml 의 모든 모델이 `default_provider_d_compat_capabilities` (≡ `provider_d_chat_capabilities`, reasoning=false) 보수적 default 로 fallback 중. 즉 cascade.toml 의 `[models.X.capabilities]` 블록에 사용자가 *명시적으로 적은* capability 선언이 agent_core 가 보는 effective_caps 와 *전혀 일치하지 않는다*.
 - drift WARN (`Thinking_returned_but_declared_unsupported`, `Tools_used_but_declared_unsupported` 등) 이 *전체 cascade 모델* 에서 발생 가능 상태. kimi-k2.6 만 본 것이 아니라 *시스템 전체* 가 catalog miss 영역에 있다.
 
 평면 불일치 문제로서의 함의:
@@ -388,7 +388,7 @@ provider_k_capabilities             → glm_model_default_caps
 ```
 
 - **1분 안 2회** 동일 drift WARN — cascade 호출마다 emit. 시간당 X회 누적.
-- `capability_source:"provider_default"` 라벨이 *OAS observability code 의 self-report* — catalog miss 명시. RFC merge + Phase 5 catalog 채움 후 `model_specific` 로 전환되는 게 성공 metric.
+- `capability_source:"provider_default"` 라벨이 *agent_core observability code 의 self-report* — catalog miss 명시. RFC merge + Phase 5 catalog 채움 후 `model_specific` 로 전환되는 게 성공 metric.
 - **0/13 audit 의 runtime confirmation** — 평면 불일치가 *현 시점 prod state* 에서 가시화 진행 중. §5.2 +91% literal leak 와 함께 *비용 정량 의 두 축*.
 
 ### 5.2 RFC-AC-018 inventory refresh
@@ -412,7 +412,7 @@ RFC-AC-018 의 inventory (2026-05-12 측정) 를 14일 후 재측정 (2026-05-26
 
 `capabilities.ml` LoC 1537 도 CLAUDE.md "300줄+ 분할 검토" 기준 5배 초과 — sweep 동시 sub-library 분해 (§7.2 RFC-AC-018 supplement) 고려.
 
-### 5.3 Phase 5 catalog 채움 draft — cascade.toml × OAS catalog 1:1 mapping
+### 5.3 Phase 5 catalog 채움 draft — cascade.toml × agent_core catalog 1:1 mapping
 
 #1777 권고 (cascade alias verbatim 을 catalog key) 적용 시 Phase 5 의 *시작점 mapping*:
 
@@ -436,7 +436,7 @@ RFC-AC-018 의 inventory (2026-05-12 측정) 를 14일 후 재측정 (2026-05-26
 4. Runtime probe 보강 (`discovery.ml` `/props` `/slots`)
 5. Drift detector 검증 (16:42 같은 WARN 0건 도달)
 
-> Boundary: cascade.toml audit 은 *external evidence* (§1.4). Phase 5 의 catalog 채움은 *OAS 자체 결정*. mapping 은 *시작점 reference* 일 뿐.
+> Boundary: cascade.toml audit 은 *external evidence* (§1.4). Phase 5 의 catalog 채움은 *agent_core 자체 결정*. mapping 은 *시작점 reference* 일 뿐.
 
 ## 6. Migration
 
@@ -456,7 +456,7 @@ RFC-AC-018 의 inventory (2026-05-12 측정) 를 14일 후 재측정 (2026-05-26
 - Phase 4: silent default fallback 제거 + Unknown 정책 적용
 - Phase 5: cascade.toml audit 기반 model catalog 채움
 
-**Phase 1 단독 OAS 내부 size estimate (2026-05-26)**:
+**Phase 1 단독 agent_core 내부 size estimate (2026-05-26)**:
 
 | Surface | Count |
 |---|---|
@@ -472,9 +472,9 @@ RFC-AC-018 의 inventory (2026-05-12 측정) 를 14일 후 재측정 (2026-05-26
 - paired test 38 file 각 sync
 - **실 size: ~140-150 file, ~1200+ callsite, 추정 -200/+1500 line**
 
-OAS standalone scope (§1.4) — consumer (masc-mcp 등) 영향은 *consumer 측 책임*. 286 consumer callsite (§7.3) 는 evidence-only.
+agent_core standalone scope (§1.4) — consumer (masc-mcp 등) 영향은 *consumer 측 책임*. 286 consumer callsite (§7.3) 는 evidence-only.
 
-> **[DECISION NEEDED #1 — RESOLVED (권고)]** **Single big PR** (OAS standalone, ~140-150 file). [feedback_radical_improvement_over_diff_size] + [feedback_big_bang_refactor_preference] 정합. 조건: §6.2 audit 5-prong 의무 + §6.3 `dune --keep-going` + `_build/` cache clear.
+> **[DECISION NEEDED #1 — RESOLVED (권고)]** **Single big PR** (agent_core standalone, ~140-150 file). [feedback_radical_improvement_over_diff_size] + [feedback_big_bang_refactor_preference] 정합. 조건: §6.2 audit 5-prong 의무 + §6.3 `dune --keep-going` + `_build/` cache clear.
 
 ### 6.2 Audit obligations
 
@@ -492,7 +492,7 @@ OAS standalone scope (§1.4) — consumer (masc-mcp 등) 영향은 *consumer 측
 
 **외부 evidence — 유사 sweep 사고 사례 (informational only)**:
 
-OAS 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh pr list --search "dead-export OR orphan after:2026-05-20"` 결과, 2026-05-26):
+agent_core 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh pr list --search "dead-export OR orphan after:2026-05-20"` 결과, 2026-05-26):
 
 | PR # | 사고 유형 |
 |---|---|
@@ -509,7 +509,7 @@ OAS 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh pr list
 - **#18090** — 이전 sweep PR 들이 *live export 를 잘못 삭제* → restore PR 필요. 5-prong audit (특히 `include Module` facade re-export + opener-unqualified bare names) 의 *부재* 가 직접 원인.
 - **#18173** — audit tooling 이 *v3 까지 반복 진화*. 정적 grep 만으로는 *filename cipher* 못 잡음.
 
-> Boundary: 위 PR 목록은 외부 codebase 데이터. OAS 는 그 operational state 를 own 하지 않음 (§1.4). audit 의무의 importance 보강용 *현실 세계 evidence* 인용일 뿐.
+> Boundary: 위 PR 목록은 외부 codebase 데이터. agent_core 는 그 operational state 를 own 하지 않음 (§1.4). audit 의무의 importance 보강용 *현실 세계 evidence* 인용일 뿐.
 
 ### 6.3 Test 운영 + Sweep 도구 운영 (§6.4 dry-run 발견 반영)
 
@@ -518,7 +518,7 @@ OAS 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh pr list
 - `dune build --keep-going` 으로 cascading error 일괄 수집. dune first-error halt 가 sweep cycle 길이 과도하게 늘림 (§6.4 dry-run: 1 변경 → 1 error).
 - **fix-and-retry loop**: 1 cycle = `build --keep-going` → error sample N → batch fix → 재build. 5-10 cycle 수렴 예상.
 - **`_build/` cache 클리어 시점**: 파일 rename / module discovery 변경 시 `rm -rf _build/` 필수.
-- **Sandbox config**: `MASC_CONFIG_DIR` 등 env 의존성 없음 — OAS standalone (§1.4).
+- **Sandbox config**: `MASC_CONFIG_DIR` 등 env 의존성 없음 — agent_core standalone (§1.4).
 
 **Test fixture sync**:
 
@@ -532,7 +532,7 @@ OAS 외부 codebase 에서 vendor sweep 진행 후 발생한 사고 (`gh pr list
 
 **TLA+ spec**:
 
-- OAS 에 capability TLA+ spec *없음* (현재 0). 새로 작성 *선택* — `thinking_wire_variant` closed-sum exhaustiveness 검증 case 로 적합 (masc-mcp `KeeperOASAdvanced.tla` 의 `BugAction` 패턴 적용 가능).
+- agent_core 에 capability TLA+ spec *없음* (현재 0). 새로 작성 *선택* — `thinking_wire_variant` closed-sum exhaustiveness 검증 case 로 적합 (masc-mcp `KeeperOASAdvanced.tla` 의 `BugAction` 패턴 적용 가능).
 
 ### 6.4 Phase 1 dry-run findings (2026-05-26)
 
@@ -598,7 +598,7 @@ RFC-AC-023 stack merge (this RFC)
 
 ### 7.3 masc-mcp RFC-0174~0177 boundary
 
-masc-mcp는 OAS SDK의 `Provider_kind.t` variant 이름에 의존한다 (RFC-0174~0177 client-agnostic family에서 부호 매핑 적용). 본 RFC의 variant rename은 **breaking change**.
+masc-mcp는 agent_core SDK의 `Provider_kind.t` variant 이름에 의존한다 (RFC-0174~0177 client-agnostic family에서 부호 매핑 적용). 본 RFC의 variant rename은 **breaking change**.
 
 옵션:
 
@@ -611,23 +611,23 @@ masc-mcp는 OAS SDK의 `Provider_kind.t` variant 이름에 의존한다 (RFC-017
 - `lib/cascade/` 15 파일 의존 (라우팅 평면 cipher-bound)
 - Top: `test_provider_kind_resolution.ml`(31), `test_provider_capability_matrix.ml`(18), `test_keeper_hooks_oas_telemetry.ml`(15), `cascade_runtime_candidate.ml`(11)
 
-**Decision #2 권고 — OAS standalone**:
+**Decision #2 권고 — agent_core standalone**:
 
-§1.4 boundary 적용: **OAS 는 masc-mcp 를 모름** (RFC-AC-018 §0 자매 약속). 본 RFC 의 *operational scope* 는 OAS 자체 의 catalog/variant rename 에 한정.
+§1.4 boundary 적용: **agent_core 는 masc-mcp 를 모름** (RFC-AC-018 §0 자매 약속). 본 RFC 의 *operational scope* 는 agent_core 자체 의 catalog/variant rename 에 한정.
 
-- **OAS PR**: variant rename + axis reshape sweep, OAS 단독. masc-mcp 존재 *전제 안 함*.
+- **agent_core PR**: variant rename + axis reshape sweep, agent_core 단독. masc-mcp 존재 *전제 안 함*.
 - **masc-mcp PR**: 신 SDK variant 이름으로 286 import 마이그레이션 — **masc-mcp 측 별개 RFC/PR** 의 책임. 본 RFC 범위 밖.
-- **타이밍**: OAS PR 머지 후 masc-mcp 가 consumer 로서 새 SDK 버전을 받아 자기 timeline 에. RFC body 가 cross-cut 권고 *안 함*.
+- **타이밍**: agent_core PR 머지 후 masc-mcp 가 consumer 로서 새 SDK 버전을 받아 자기 timeline 에. RFC body 가 cross-cut 권고 *안 함*.
 
 이전 cross-cut PR 권고 시도는 RFC-AC-018 자매 약속 위반 (정정 완료).
 
-> **[DECISION NEEDED #2 — RESOLVED]** OAS standalone rename. masc-mcp consumer migration 은 별개 책임. cross-cut PR 패턴 폐기.
+> **[DECISION NEEDED #2 — RESOLVED]** agent_core standalone rename. masc-mcp consumer migration 은 별개 책임. cross-cut PR 패턴 폐기.
 
 cascade phonebook TOML config / `<base-path>/.masc/config/cascade.toml` 영향은 *masc-mcp 측 책임* — 본 RFC 가 cross-reference 만 할 뿐 권고 안 함 (§1.4).
 
 ## 8. Non-goals
 
-- cascade.toml과 OAS catalog 간 *자동 동기화* — OAS catalog가 진실원. cascade.toml은 routing 평면.
+- cascade.toml과 agent_core catalog 간 *자동 동기화* — agent_core catalog가 진실원. cascade.toml은 routing 평면.
 - Per-deployment quantization-specific capability tracking — model_caps는 *canonical model*의 사실. quantization-side cap은 transport_caps의 max_context_tokens_cap에 흡수.
 - Pricing catalog (RFC-AC-018 §pricing 별도).
 
@@ -636,7 +636,7 @@ cascade phonebook TOML config / `<base-path>/.masc/config/cascade.toml` 영향�
 | # | Decision | Status | 근거 sub-section |
 |---|----------|--------|------------------|
 | 1 | Single big PR vs phased | **RESOLVED — Big PR** | §6.1 + §6.4 |
-| 2 | masc-mcp 동시 처리 | **RESOLVED — OAS standalone** | §1.4 + §7.3 |
+| 2 | masc-mcp 동시 처리 | **RESOLVED — agent_core standalone** | §1.4 + §7.3 |
 | 3 | `capabilities_for_provider_label` | **RESOLVED — 완전 폐지** | §3.3 |
 | 4 | RFC-AC-018 작업 순서 | **RESOLVED — RFC-AC-023 선행** | §5.2 + §7.2 |
 | 5 | Unknown model 동작 | **RESOLVED — Hard error** | §3.2 |
@@ -644,9 +644,9 @@ cascade phonebook TOML config / `<base-path>/.masc/config/cascade.toml` 영향�
 
 ### 9.1 Decision #1 — Big PR
 
-OAS 자체 1159 callsite × 138 file × 38 paired test (§6.1). dry-run 정밀화: ~140-150 file, ~1200+ callsite, -200/+1500 line (§6.4). Consumer 1명 SDK + [feedback_radical_improvement_over_diff_size] 정합. 조건: §6.2 audit 5-prong + §6.3 `dune --keep-going`.
+agent_core 자체 1159 callsite × 138 file × 38 paired test (§6.1). dry-run 정밀화: ~140-150 file, ~1200+ callsite, -200/+1500 line (§6.4). Consumer 1명 SDK + [feedback_radical_improvement_over_diff_size] 정합. 조건: §6.2 audit 5-prong + §6.3 `dune --keep-going`.
 
-### 9.2 Decision #2 — OAS standalone
+### 9.2 Decision #2 — agent_core standalone
 
 RFC-AC-018 §0 자매 약속 + §1.4 boundary. cross-cut PR 패턴 boundary 위반. 286 consumer callsite (§7.3) 는 evidence-only.
 

@@ -5,13 +5,13 @@
 | Status | Draft |
 | Author | jeong-sik (with Claude analysis) |
 | Created | 2026-05-12 |
-| Target | `agent_sdk` (oas) |
+| Target | `agent_sdk` (agent_core) |
 | Supersedes | PR #1536 (`refactor/ollama-endpoint-constant`, closed as antipattern reinforcement) |
 | Sibling | RFC-AC-015 (mutable cleanup), RFC-AC-016 (mcp optional), RFC-AC-017 (coordinator-shape leak) |
 
 ## 0. Summary
 
-OAS 의 `lib/` 안에 *vendor*, *model name*, *endpoint port*, *capability dispatcher*, *pricing table* 이 source-level 로 박혀 있다. 같은 SDK 가 "MASC 를 모른다" 와 자매 약속인 "Ollama / Qwen / Gemma / Kimi 를 모른다" 가 깨져 있고, *추가 vendor* 마다 core 변이가 강제되는 *closed-sum dispatch* 가 누적 중이다.
+agent_core 의 `lib/` 안에 *vendor*, *model name*, *endpoint port*, *capability dispatcher*, *pricing table* 이 source-level 로 박혀 있다. 같은 SDK 가 "MASC 를 모른다" 와 자매 약속인 "Ollama / Qwen / Gemma / Kimi 를 모른다" 가 깨져 있고, *추가 vendor* 마다 core 변이가 강제되는 *closed-sum dispatch* 가 누적 중이다.
 
 본 RFC 는 이 leak 을 *4-phase* 로 외부 catalog 화한다. 한 PR 로 240 사이트 rewrite 는 *명시적 비목표* (CLAUDE.md §Workaround Rejection Bar #3 N-of-M).
 
@@ -105,7 +105,7 @@ SDK 핵심 가정:
 ### Phase 0 — Foundations
 - 본 RFC 머지.
 - `lib/llm_provider/catalog_intf.mli` (interface only, 구현 0). 본 RFC 머지 직후 stub PR.
-- `docs/rfc/oas-018/inventory.md` 에 240 사이트 file:line 고정 (drift 감지 baseline).
+- `docs/rfc/agent_core-018/inventory.md` 에 240 사이트 file:line 고정 (drift 감지 baseline).
 - **G0**: `catalog_intf.mli` 추가, lib 동작 0 변경.
 
 ### Phase 1 — Catalog provider parallel, prefix dispatch survives
@@ -171,7 +171,7 @@ esac
 
 ## 7. Open questions
 
-- Catalog 파일 위치: `$XDG_CONFIG_HOME/oas/catalog.toml` 우선, fallback `./oas-catalog.toml`. RFC-AC-016 (MCP optional config) 와 같은 convention 채택.
+- Catalog 파일 위치: `$XDG_CONFIG_HOME/agent_core/catalog.toml` 우선, fallback `./agent-core-catalog.toml`. RFC-AC-016 (MCP optional config) 와 같은 convention 채택.
 - Size token (`27b`, `31b`) → `params_millions : int option` 으로 일반화. 모델별 사이즈 variant 는 catalog entry id 로 표현.
 - Multi-generation drift (같은 `claude-haiku-4-5` 가 시점에 따라 capability 변경) → 본 RFC scope 밖, RFC-AC-019 후보.
 - Catalog hot-reload (server 재기동 없이 reload) → Phase 4 후 별도 RFC.

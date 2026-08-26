@@ -5,7 +5,7 @@
 | Status | Draft |
 | Author | jeong-sik (with Claude analysis) |
 | Created | 2026-05-12 |
-| Target | `agent_sdk` (oas) |
+| Target | `agent_sdk` (agent_core) |
 | Supersedes | None |
 | Related | `sub-library-decomposition-rfc.md` (overall sub-library structure — adjacent but separate concern) |
 
@@ -13,7 +13,7 @@
 
 `agent_sdk.opam` lists `mcp_protocol >= 1.3.0` as an **unconditional** dependency. The `mcp_protocol` package is a fork (`jeong-sik/mcp-protocol-sdk`) not present on the opam registry, so every consumer of `agent_sdk` must pin the fork in their switch — even when they never instantiate an MCP server.
 
-This RFC proposes splitting MCP integration into an optional sub-library `agent_sdk.mcp` so the core `agent_sdk` library has no `mcp_protocol` dep. Audit shows the coupling is **not structural**: `Mcp_protocol.Mcp_types` only leaks into one OAS implementation file (`lib/protocol/mcp_schema.ml`) and its interface (`lib/protocol/mcp_schema.mli`) — see §2.1 for the full list. What is load-bearing is OAS's **own** `Mcp.managed` / `Mcp_session.info` types being embedded in core agent state (`agent_types.ml`, `builder.ml`, `checkpoint*.ml`, `contract.ml`, `tool_middleware.ml`). Migration requires relocating those touchpoints behind an abstract type or callback, not rewriting MCP itself.
+This RFC proposes splitting MCP integration into an optional sub-library `agent_sdk.mcp` so the core `agent_sdk` library has no `mcp_protocol` dep. Audit shows the coupling is **not structural**: `Mcp_protocol.Mcp_types` only leaks into one agent_core implementation file (`lib/protocol/mcp_schema.ml`) and its interface (`lib/protocol/mcp_schema.mli`) — see §2.1 for the full list. What is load-bearing is agent_core's **own** `Mcp.managed` / `Mcp_session.info` types being embedded in core agent state (`agent_types.ml`, `builder.ml`, `checkpoint*.ml`, `contract.ml`, `tool_middleware.ml`). Migration requires relocating those touchpoints behind an abstract type or callback, not rewriting MCP itself.
 
 ## 1. Problem
 
@@ -29,7 +29,7 @@ This RFC proposes splitting MCP integration into an optional sub-library `agent_
 
 ### 1.2 Consumer friction
 
-Any consumer who wants to use `agent_sdk` for a non-MCP agent app must still pin `jeong-sik/mcp-protocol-sdk` (not on opam) in their switch. The fork-pin propagates to anyone who depends on their library, etc. Inverse: removing OAS from a project does not remove the fork pin from their `.opam` / switch state — it has to be cleaned by hand.
+Any consumer who wants to use `agent_sdk` for a non-MCP agent app must still pin `jeong-sik/mcp-protocol-sdk` (not on opam) in their switch. The fork-pin propagates to anyone who depends on their library, etc. Inverse: removing agent_core from a project does not remove the fork pin from their `.opam` / switch state — it has to be cleaned by hand.
 
 ### 1.3 Why this PR didn't already happen during #557 / sub-library RFC
 
@@ -51,7 +51,7 @@ lib/protocol/mcp_schema.mli:6  Mcp_protocol.Mcp_types
 
 Grep `rg -l 'Mcp_protocol' lib/` returns nothing outside `lib/protocol/`. The fork barely leaks.
 
-### 2.2 OAS-local `Mcp` / `Mcp_session` types embedded in core (the real coupling)
+### 2.2 agent_core-local `Mcp` / `Mcp_session` types embedded in core (the real coupling)
 
 | Site | Reference |
 |---|---|
@@ -75,7 +75,7 @@ Grep `rg -l 'Mcp_protocol' lib/` returns nothing outside `lib/protocol/`. The fo
 
 ### Option A — status quo (rejected)
 
-Keep `mcp_protocol` as an unconditional dep. Document the fork pin in `README` as a known friction point. Trade-off: zero refactoring cost; persistent consumer friction; "use OAS for other OCaml dev" stays compromised.
+Keep `mcp_protocol` as an unconditional dep. Document the fork pin in `README` as a known friction point. Trade-off: zero refactoring cost; persistent consumer friction; "use agent_core for other OCaml dev" stays compromised.
 
 ### Option B — `with-test` filter only (rejected)
 
@@ -169,7 +169,7 @@ Drop `module Mcp = Mcp` etc. from `agent_sdk.ml` so the **public facade** doesn'
 | Risk | Mitigation |
 |---|---|
 | Phase 4.2 abstract type breaks downstream codecs that decode `Mcp_session.info` from external JSON | Keep the JSON schema of the embedded MCP session field byte-identical; only the OCaml type name changes. Run existing `test/test_checkpoint.ml` round-trip with a pre-refactor fixture. |
-| `Mcp.json_schema_type_to_param_type` consumers outside OAS | Grep is internal-only at the moment, but the public facade exports `Mcp`, so external code may transitively call it. Provide a 1-version deprecation alias in `Mcp` that delegates to the new home. |
+| `Mcp.json_schema_type_to_param_type` consumers outside agent_core | Grep is internal-only at the moment, but the public facade exports `Mcp`, so external code may transitively call it. Provide a 1-version deprecation alias in `Mcp` that delegates to the new home. |
 | dune `(optional)` library semantics surprise opam solvers | If C-2 chosen, validate with `opam install --dry-run agent_sdk` on a freshly bootstrapped switch. Fall back to C-1 (two-package split) if surprises emerge. |
 | `Phase 4.3` collides with `sub-library-decomposition-rfc.md` Phase 1's `agent_sdk.protocol` extraction | Sequence: land 4.2 first (abstract types) — both decompositions become safe afterwards because the moved files no longer leak `Mcp_protocol` symbols. |
 

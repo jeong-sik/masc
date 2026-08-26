@@ -25,6 +25,10 @@ val error_to_string : error -> string
 
 type t = private {
   id : string;
+      (** One path component, checked when the declaration is read. The
+          record is private, so anything built from an id -- a directory
+          holding this provider's registered client, for one -- can rely on
+          that without checking again. *)
   label : string;  (** what a screen calls this provider *)
   mcp_url : string;
       (** The only endpoint declared. Everything else about the exchange --
@@ -35,9 +39,15 @@ type t = private {
   access_token_env : string;
       (** Env entry in [secrets/<keeper>/env/] the access token is written
           to. A tool call reads it from there. *)
+  expires_at_env : string;
+      (** Env entry the access token's expiry is written to, as unix
+          seconds. Declared rather than derived from
+          [access_token_env]: a name built by gluing a suffix onto another
+          name is a name nobody can search for. *)
   refresh_token_file : string;
       (** File entry in [secrets/<keeper>/files/] the refresh token is
-          written to. Not an env entry: a refresh token outlives the access
+          written to, as the absolute container path the Keeper would read
+          it at. Not an env entry: a refresh token outlives the access
           tokens it mints, and an environment is read by everything a Keeper
           runs. *)
   renew_before_sec : int;

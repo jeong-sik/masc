@@ -14,6 +14,7 @@ type pending = {
   keeper : string;
   verifier : string;
   state : string;
+  redirect_uri : string;
   authorize_url : string;
 }
 
@@ -86,6 +87,7 @@ let begin_authorization
   ; keeper
   ; verifier
   ; state
+  ; redirect_uri
   ; authorize_url =
       Printf.sprintf "%s?%s"
         discovered.Keeper_oauth_discovery.authorize_url
@@ -149,7 +151,6 @@ let complete
       ?(post = default_post)
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
-      ~redirect_uri
       ~pending
       ~code
       ~state
@@ -165,7 +166,7 @@ let complete
       [ "grant_type", "authorization_code"
       ; "client_id", client_id
       ; "code", code
-      ; "redirect_uri", redirect_uri
+      ; "redirect_uri", pending.redirect_uri
       ; "code_verifier", pending.verifier
       ; "resource", discovered.Keeper_oauth_discovery.resource
       ]

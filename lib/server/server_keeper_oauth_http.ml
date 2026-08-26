@@ -1,0 +1,73 @@
+(** See server_keeper_oauth_http.mli. *)
+
+module Http = Http_server_eio
+
+let escape = Server_oauth_service.html_escape
+
+let page ~title ~heading ~detail =
+  Printf.sprintf
+    {|<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>%s</title>
+<style>
+ :root { color-scheme: light dark; }
+ body { font: 15px/1.6 ui-sans-serif, system-ui, sans-serif;
+        margin: 0; min-height: 100vh; display: grid; place-items: center; }
+ main { max-width: 34rem; padding: 2rem; }
+ h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+ p { margin: 0; opacity: .8; }
+</style></head>
+<body><main><h1>%s</h1><p>%s</p></main></body></html>
+|}
+    (escape title) (escape heading) (escape detail)
+;;
+
+let respond_page ?status reqd ~title ~heading ~detail =
+  Http.Response.html ?status (page ~title ~heading ~detail) reqd
+;;
+
+let handle_callback request reqd =
+  let query name = Server_utils.query_param request name in
+  match Server_auth.current_server_state () with
+  | None ->
+    respond_page ~status:`Service_unavailable reqd ~title:"masc"
+      ~heading:"This server is still starting"
+      ~detail:"Start the login again once it is up."
+  | Some state ->
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    (match query "error", query "code", query "state" with
+     (* The provider says the operator declined, or it refused the request.
+        Its own words, because ours would be a guess at what happened on a
+        screen we never saw. *)
+     | Some provider_error, _, _ ->
+       respond_page ~status:`Bad_request reqd ~title:"masc"
+         ~heading:"The provider did not grant this"
+         ~detail:
+           (match query "error_description" with
+            | Some description -> description
+            | None -> provider_error)
+     | None, Some code, Some state_value
+       when String.trim code <> "" && String.trim state_value <> "" ->
+       (match
+          Server_keeper_oauth.finish ~base_path ~state:state_value ~code
+            ~now:(Unix.gettimeofday ())
+        with
+        | Ok attached ->
+          respond_page reqd ~title:"masc"
+            ~heading:
+              (Printf.sprintf "%s is attached to %s" attached.Server_keeper_oauth.keeper
+                 attached.Server_keeper_oauth.provider_label)
+            ~detail:"You can close this tab. The credentials are in that Keeper's own secret scope."
+        | Error message ->
+          respond_page ~status:`Bad_request reqd ~title:"masc"
+            ~heading:"That login could not be finished" ~detail:message)
+     | None, _, _ ->
+       respond_page ~status:`Bad_request reqd ~title:"masc"
+         ~heading:"This is not a callback"
+         ~detail:"A provider sends a code and the state it was given; this request carries neither.")
+;;
+
+let add_routes router =
+  router |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
+;;

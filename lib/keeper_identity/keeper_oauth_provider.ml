@@ -26,6 +26,7 @@ type t = {
   label : string;
   mcp_url : string;
   access_token_env : string;
+  expires_at_env : string;
   refresh_token_file : string;
   renew_before_sec : int;
   authorize_params : (string * string) list;
@@ -110,13 +111,26 @@ let https_field pairs key =
   then Ok value
   else Error (Wrong_type { field = key; expected = "an https:// URL" })
 
+(* The id names a file and, through {!t} being private, whatever a caller
+   builds from a declaration -- a directory holding the client this provider
+   registered, for one. One path component, so that stays true. *)
+let single_path_component value =
+  not
+    (String.equal value ""
+     || String.equal value "."
+     || String.equal value ".."
+     || String.exists (fun c -> Char.equal c '/') value)
+;;
+
 let load ~file_name ~contents =
   match Otoml.Parser.from_string_result contents with
   | Error message -> Error (Malformed_toml message)
   | Ok (Otoml.TomlTable pairs) ->
     let* id = string_field pairs "id" in
     let* () =
-      if String.equal id file_name
+      if not (single_path_component id)
+      then Error (Wrong_type { field = "id"; expected = "one path component" })
+      else if String.equal id file_name
       then Ok ()
       else Error (Name_mismatch { declared = id; file = file_name })
     in
@@ -124,6 +138,7 @@ let load ~file_name ~contents =
     let* mcp_url = https_field pairs "mcp_url" in
     let* authorize_params = string_table_field pairs "authorize_params" in
     let* access_token_env = string_field pairs "access_token_env" in
+    let* expires_at_env = string_field pairs "expires_at_env" in
     let* refresh_token_file = string_field pairs "refresh_token_file" in
     let* renew_before_sec = int_field pairs "renew_before_sec" in
     if renew_before_sec < 0
@@ -134,6 +149,7 @@ let load ~file_name ~contents =
         ; label
         ; mcp_url
         ; access_token_env
+        ; expires_at_env
         ; refresh_token_file
         ; renew_before_sec
         ; authorize_params

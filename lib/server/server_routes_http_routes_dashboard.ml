@@ -2121,6 +2121,15 @@ let add_routes ~sw ~clock router =
              (fun state _agent_name req reqd ->
                Keeper_api.handle_keeper_github_login_post state req reqd)
              request reqd
+       | Keeper_api.Keeper_post_oauth_login ->
+           (* Same authority as writing a secret by hand: what this begins
+              ends with credentials in that keeper's scope. *)
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_oauth_login_post state req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_boot ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->

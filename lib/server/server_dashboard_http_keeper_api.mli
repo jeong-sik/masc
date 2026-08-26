@@ -180,6 +180,11 @@ val handle_keeper_github_login_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Stream an isolated GitHub CLI login for the selected keeper. *)
 
+val handle_keeper_oauth_login_post :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /oauth-login]: begin attaching this keeper to the declared
+    provider named in the body, and answer with the URL to open. *)
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->

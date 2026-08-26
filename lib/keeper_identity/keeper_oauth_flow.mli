@@ -35,6 +35,12 @@ type pending = private {
   state : string;
       (** Echoed by the provider on the callback. A callback carrying any
           other value is not the one this pending exchange asked for. *)
+  redirect_uri : string;
+      (** Where the authorize call said to come back to. Kept rather than
+          taken again at redemption: the token endpoint compares the two,
+          byte for byte, and a server whose advertised address changed
+          between the halves would otherwise send a different one and be
+          refused with a message about a redirect URI nobody typed. *)
   authorize_url : string;  (** where the operator has to go *)
 }
 
@@ -80,7 +86,6 @@ val complete :
   ?post:post ->
   discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
-  redirect_uri:string ->
   pending:pending ->
   code:string ->
   state:string ->

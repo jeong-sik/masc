@@ -83,11 +83,12 @@ type finished = {
 val finish :
   ?post:Keeper_oauth_flow.post ->
   pending:Keeper_oauth_pending.t ->
-  redirect_uri:string ->
   state:string ->
   code:string ->
   now:float ->
   unit ->
   (finished, finish_error) result
 (** Redeem the code the callback carried, at the endpoint the first half was
-    built from. *)
+    built from and naming the redirect URI it sent -- both read from the
+    exchange being redeemed, so a callback cannot be finished against a
+    different one than it started. *)

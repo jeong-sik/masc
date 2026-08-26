@@ -117,7 +117,7 @@ type finished = {
   expires_at : float;
 }
 
-let finish ?post ~pending ~redirect_uri ~state ~code ~now () =
+let finish ?post ~pending ~state ~code ~now () =
   match Pending.take pending ~now ~state with
   | None -> Error Unknown_state
   | Some in_flight ->
@@ -126,8 +126,8 @@ let finish ?post ~pending ~redirect_uri ~state ~code ~now () =
       Result.map_error
         (fun err -> Exchange_failed err)
         (Flow.complete ?post ~discovered:in_flight.Pending.discovered
-           ~client_id:in_flight.Pending.client_id ~redirect_uri
-           ~pending:flow_pending ~code ~state ~now ())
+           ~client_id:in_flight.Pending.client_id ~pending:flow_pending ~code
+           ~state ~now ())
     in
     (match tokens.Flow.refresh_token with
      | Some refresh_token ->

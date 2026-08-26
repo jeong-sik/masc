@@ -24,7 +24,8 @@ id = "atlassian"
 label = "Atlassian"
 mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
 access_token_env = "ATLASSIAN_ACCESS_TOKEN"
-refresh_token_file = "atlassian/refresh_token"
+expires_at_env = "ATLASSIAN_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.atlassian/refresh_token"
 renew_before_sec = 600
 
 [authorize_params]
@@ -220,7 +221,7 @@ let complete_with _provider pending ~state ~answer =
   let post, seen = recording_post answer in
   let result =
     Keeper_oauth_flow.complete ~post ~discovered:(discovered_atlassian ())
-      ~client_id:"client-abc" ~redirect_uri ~pending ~code:"the-code" ~state
+      ~client_id:"client-abc" ~pending ~code:"the-code" ~state
       ~now:1000.0 ()
   in
   (result, seen)
@@ -678,7 +679,7 @@ let test_the_callback_finishes_the_login_it_started () =
   | Ok started -> (
       let post, seen = recording_post ok_answer in
       let result =
-        Keeper_oauth_session.finish ~post ~pending:table ~redirect_uri
+        Keeper_oauth_session.finish ~post ~pending:table
           ~state:started.Keeper_oauth_session.state ~code:"the-code" ~now:1.0 ()
       in
       (match !seen with
@@ -710,7 +711,7 @@ let test_a_callback_nobody_is_waiting_on_says_so () =
     Keeper_oauth_session.finish
       ~post:(fun ~url:_ ~headers:_ ~body:_ ->
         Alcotest.fail "sent an exchange for a state nobody was waiting on")
-      ~pending:table ~redirect_uri ~state:"never-issued" ~code:"the-code"
+      ~pending:table ~state:"never-issued" ~code:"the-code"
       ~now:1.0 ()
   with
   | Error Keeper_oauth_session.Unknown_state -> ()
@@ -718,6 +719,98 @@ let test_a_callback_nobody_is_waiting_on_says_so () =
       Alcotest.failf "wrong refusal: %s"
         (Keeper_oauth_session.finish_error_to_string other)
   | Ok _ -> Alcotest.fail "a code was redeemed against no login"
+
+(* ── the client this install registered ──────────────────────────────── *)
+
+let temp_dir () =
+  let path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-oauth-client-%d-%d" (Unix.getpid ())
+         (Random.int 1_000_000))
+  in
+  Unix.mkdir path 0o700;
+  path
+
+let test_no_client_until_one_is_registered () =
+  let dir = temp_dir () in
+  let provider = load_or_fail atlassian_toml in
+  match Keeper_oauth_client_store.load ~dir ~provider with
+  | Ok None -> ()
+  | Ok (Some found) -> Alcotest.failf "found a client nobody registered: %s" found
+  | Error message -> Alcotest.failf "reading an empty directory failed: %s" message
+
+let test_a_registered_client_comes_back () =
+  let dir = temp_dir () in
+  let provider = load_or_fail atlassian_toml in
+  (match
+     Keeper_oauth_client_store.save ~dir ~provider ~client_id:"client-from-registration"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "saving failed: %s" message);
+  match Keeper_oauth_client_store.load ~dir ~provider with
+  | Ok (Some found) -> check str "the id that was saved" "client-from-registration" found
+  | Ok None -> Alcotest.fail "the saved client id did not come back"
+  | Error message -> Alcotest.failf "reading back failed: %s" message
+
+let test_an_empty_client_file_is_not_a_client () =
+  (* A write that did not finish. Reading it as "no client" would register a
+     second one over it and leave the first stranded on a server this install
+     does not administer. *)
+  let dir = temp_dir () in
+  let provider = load_or_fail atlassian_toml in
+  Unix.mkdir (Filename.concat dir "atlassian") 0o700;
+  Out_channel.with_open_bin
+    (Filename.concat (Filename.concat dir "atlassian") "client_id")
+    (fun oc -> Out_channel.output_string oc "   ");
+  match Keeper_oauth_client_store.load ~dir ~provider with
+  | Error _ -> ()
+  | Ok None -> Alcotest.fail "an unfinished write read as having no client"
+  | Ok (Some found) -> Alcotest.failf "read whitespace as a client id: %S" found
+
+let test_the_id_has_to_be_one_path_component () =
+  (* [t] is private and the client store joins the id onto a directory
+     without checking, so the check has to be here. *)
+  let escaping =
+    Str.global_replace
+      (Str.regexp_string {|id = "atlassian"|})
+      {|id = "../elsewhere"|} atlassian_toml
+  in
+  expect_rejected ~why:"names a path rather than a provider"
+    ~file_name:"../elsewhere" escaping
+
+(* ── the declaration against the projection that stores it ───────────── *)
+
+module Keeper_secret_projection = Masc.Keeper_secret_projection
+
+let test_the_shipped_file_entry_is_one_the_projection_accepts () =
+  (* The declaration says where the refresh token goes; the projection
+     decides what it will accept. Nothing makes those two agree, so this
+     asks the projection directly rather than restating its rule here. *)
+  let provider = load_or_fail (shipped_atlassian ()) in
+  let base_path = temp_dir () in
+  match
+    Keeper_secret_projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+      ~scope:Keeper_secret_projection.Keeper_secret
+      ~container_path:provider.Keeper_oauth_provider.refresh_token_file
+      ~value:"a-refresh-token"
+  with
+  | Ok () -> ()
+  | Error message ->
+      Alcotest.failf "the shipped refresh_token_file is not storable: %s" message
+
+let test_the_shipped_env_entries_are_ones_the_projection_accepts () =
+  let provider = load_or_fail (shipped_atlassian ()) in
+  let base_path = temp_dir () in
+  let set name value =
+    Keeper_secret_projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+      ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
+  in
+  (match set provider.Keeper_oauth_provider.access_token_env "an-access-token" with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "access_token_env is not storable: %s" message);
+  match set provider.Keeper_oauth_provider.expires_at_env "1780000000" with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "expires_at_env is not storable: %s" message
 
 let () =
   Alcotest.run "keeper_oauth_identity"
@@ -784,6 +877,22 @@ let () =
             test_the_callback_finishes_the_login_it_started;
           Alcotest.test_case "a callback nobody is waiting on says so" `Quick
             test_a_callback_nobody_is_waiting_on_says_so;
+        ] );
+      ( "the registered client",
+        [ Alcotest.test_case "none until one is registered" `Quick
+            test_no_client_until_one_is_registered;
+          Alcotest.test_case "a registered client comes back" `Quick
+            test_a_registered_client_comes_back;
+          Alcotest.test_case "an unfinished write is not a client" `Quick
+            test_an_empty_client_file_is_not_a_client;
+          Alcotest.test_case "the id has to be one path component" `Quick
+            test_the_id_has_to_be_one_path_component;
+        ] );
+      ( "what the declaration says against what stores it",
+        [ Alcotest.test_case "the shipped file entry is storable" `Quick
+            test_the_shipped_file_entry_is_one_the_projection_accepts;
+          Alcotest.test_case "the shipped env entries are storable" `Quick
+            test_the_shipped_env_entries_are_ones_the_projection_accepts;
         ] );
       ( "pending",
         [ Alcotest.test_case "a state is redeemed once" `Quick

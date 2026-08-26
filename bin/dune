@@ -895,4 +895,5 @@
 (library
  (name masc_tui_link_label)
  (wrapped false)
- (modules masc_tui_link_label))
+ (modules masc_tui_link_label)
+ (libraries uri))

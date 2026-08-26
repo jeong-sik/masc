@@ -10,7 +10,10 @@ let check_label name expected url = check (option string) name expected (label u
 
 let test_a_pull_request () =
   check_label "the repo and the number" (Some "masc PR #30866")
-    "https://github.com/jeong-sik/masc/pull/30866"
+    "https://github.com/jeong-sik/masc/pull/30866";
+  check_label "a query does not become part of the number"
+    (Some "masc PR #30866")
+    "https://github.com/jeong-sik/masc/pull/30866?diff=split"
 
 let test_an_issue () =
   check_label "issues are not pulls" (Some "masc issue #22797")
@@ -32,7 +35,20 @@ let test_a_file_keeps_its_name_and_its_lines () =
     "https://github.com/jeong-sik/masc/blob/main/bin/masc_tui_render.ml";
   check_label "the file and the range it points at"
     (Some "masc masc_tui_render.ml L108-L115")
-    "https://github.com/jeong-sik/masc/blob/main/bin/masc_tui_render.ml#L108-L115"
+    "https://github.com/jeong-sik/masc/blob/main/bin/masc_tui_render.ml?plain=1#L108-L115"
+
+let test_percent_encoded_path_names_stay_encoded () =
+  check_label "Uri.path keeps the encoded name"
+    (Some "masc file%20name.ml L2")
+    "https://github.com/jeong-sik/masc/blob/main/bin/file%20name.ml#L2";
+  check_label "an encoded slash stays in the file name segment"
+    (Some "masc folder%2Fname.ml")
+    "https://github.com/jeong-sik/masc/blob/main/bin/folder%2Fname.ml"
+
+let test_uri_normalizes_the_host () =
+  check_label "host matching follows Uri's case normalization"
+    (Some "masc PR #30866")
+    "HTTPS://GITHUB.COM/jeong-sik/masc/pull/30866"
 
 let test_the_repository_itself () =
   check_label "owner and repo" (Some "jeong-sik/masc")
@@ -43,9 +59,19 @@ let test_the_repository_itself () =
    becomes wrong. *)
 let test_what_gets_no_label () =
   check_label "another host" None "https://docs.anthropic.com/en/api";
+  check_label "a github subdomain" None
+    "https://api.github.com/jeong-sik/masc";
+  check_label "a non-web scheme" None
+    "ftp://github.com/jeong-sik/masc/pull/30866";
+  check_label "a port changes the authority" None
+    "https://github.com:443/jeong-sik/masc/pull/30866";
+  check_label "userinfo changes the authority" None
+    "https://reader@github.com/jeong-sik/masc/pull/30866";
   check_label "a github path this does not read" None
     "https://github.com/jeong-sik/masc/settings/hooks";
   check_label "not a url at all" None "docs/evidence/shot.png";
+  check_label "a malformed url has no authority" None
+    "https:///jeong-sik/masc/pull/30866";
   check_label "the host alone" None "https://github.com"
 
 let () =
@@ -57,6 +83,9 @@ let () =
         ; test_case "a ci run" `Quick test_a_ci_run
         ; test_case "a file keeps its name and its lines" `Quick
             test_a_file_keeps_its_name_and_its_lines
+        ; test_case "percent encoded path names stay encoded" `Quick
+            test_percent_encoded_path_names_stay_encoded
+        ; test_case "Uri normalizes the host" `Quick test_uri_normalizes_the_host
         ; test_case "the repository itself" `Quick test_the_repository_itself
         ] )
     ; ("silence", [ test_case "what gets no label" `Quick test_what_gets_no_label ])

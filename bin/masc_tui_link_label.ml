@@ -10,36 +10,16 @@
 
 let github_host = "github.com"
 
-let split_path url =
-  match String.index_opt url ':' with
-  | None -> []
-  | Some colon ->
-      let rest =
-        String.sub url (colon + 1) (String.length url - colon - 1)
-      in
-      (* Past the "//", then the host, then the path. Empty segments are
-         dropped, which is also what removes the "//". *)
-      String.split_on_char '/' rest
-      |> List.filter (fun segment -> not (String.equal segment ""))
+let is_web_scheme = function
+  | Some ("http" | "https") -> true
+  | Some _ | None -> false
 
-(* Trailing "#L12-L20" and "?w=1" belong to the link, not to the name of the
-   thing it points at. *)
-let strip_suffix segment =
-  let cut_at index = String.sub segment 0 index in
-  match (String.index_opt segment '#', String.index_opt segment '?') with
-  | Some hash, Some query -> cut_at (min hash query)
-  | Some hash, None -> cut_at hash
-  | None, Some query -> cut_at query
-  | None, None -> segment
-
-let fragment_of segment =
-  match String.index_opt segment '#' with
-  | None -> None
-  | Some hash ->
-      let rest =
-        String.sub segment (hash + 1) (String.length segment - hash - 1)
-      in
-      if String.equal rest "" then None else Some rest
+let path_segments uri =
+  (* [Uri.path] keeps percent encoding, so an encoded slash stays inside its
+     segment rather than becoming another level in the GitHub route. *)
+  Uri.path uri
+  |> String.split_on_char '/'
+  |> List.filter (fun segment -> not (String.equal segment ""))
 
 (* Seven characters is what git itself prints, and what a commit is called in
    conversation. *)
@@ -50,27 +30,30 @@ let short_sha sha =
   else String.sub sha 0 short_sha_length
 
 let label url =
-  match split_path url with
-  | host :: owner :: repo :: rest when String.equal host github_host -> (
-      let repo = strip_suffix repo in
+  let uri = Uri.of_string url in
+  match (Uri.scheme uri, Uri.host uri, Uri.userinfo uri, Uri.port uri) with
+  | scheme, Some host, None, None
+    when is_web_scheme scheme && String.equal host github_host -> (
+    match path_segments uri with
+    | owner :: repo :: rest -> (
       match rest with
-      | [ "pull"; number ] -> Some (Printf.sprintf "%s PR #%s" repo (strip_suffix number))
+      | [ "pull"; number ] -> Some (Printf.sprintf "%s PR #%s" repo number)
       | [ "issues"; number ] ->
-          Some (Printf.sprintf "%s issue #%s" repo (strip_suffix number))
+          Some (Printf.sprintf "%s issue #%s" repo number)
       | [ "commit"; sha ] ->
-          Some (Printf.sprintf "%s commit %s" repo (short_sha (strip_suffix sha)))
+          Some (Printf.sprintf "%s commit %s" repo (short_sha sha))
       | "actions" :: "runs" :: number :: _ ->
-          Some (Printf.sprintf "%s CI run %s" repo (strip_suffix number))
+          Some (Printf.sprintf "%s CI run %s" repo number)
       | "blob" :: _ :: (_ :: _ as path) | "tree" :: _ :: (_ :: _ as path) ->
           (* The file, not the branch it was read on: a reader following this
              wants to know which file. The line range comes with it, since a
              link that carries one is pointing at the range. *)
           let last = List.nth path (List.length path - 1) in
-          let name = strip_suffix last in
           Some
-            (match fragment_of last with
-             | None -> Printf.sprintf "%s %s" repo name
-             | Some lines -> Printf.sprintf "%s %s %s" repo name lines)
+            (match Uri.fragment uri with
+             | None -> Printf.sprintf "%s %s" repo last
+             | Some lines -> Printf.sprintf "%s %s %s" repo last lines)
       | [] -> Some (Printf.sprintf "%s/%s" owner repo)
       | _ -> None)
+    | _ -> None)
   | _ -> None

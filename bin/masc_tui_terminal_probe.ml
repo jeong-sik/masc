@@ -36,6 +36,11 @@ type decoder =
   ; mutable mode : mode
   ; mutable foreground : Masc_tui_terminal_palette.rgb option
   ; mutable background : Masc_tui_terminal_palette.rgb option
+  ; ansi : Masc_tui_terminal_palette.rgb option array
+        (** One slot per SGR colour code. Written once each, by this decoder,
+            as the OSC 4 answers arrive. Nothing waits on them: a terminal
+            that answers 10 and 11 but not 4 leaves them all [None] and the
+            probe still completes. *)
   ; mutable graphics : Masc_tui_graphics.query_reply option
   }
 
@@ -47,6 +52,8 @@ let create ~palette_requested =
   ; mode = Normal
   ; foreground = None
   ; background = None
+  ; ansi =
+      Array.make Masc_tui_terminal_palette.ansi_slot_count None
   ; graphics = None
   }
 ;;
@@ -79,6 +86,12 @@ let record_palette decoder slot color =
     if Option.is_none decoder.foreground then decoder.foreground <- color
   | Masc_tui_terminal_palette.Background ->
     if Option.is_none decoder.background then decoder.background <- color
+  | Masc_tui_terminal_palette.Ansi index ->
+    if
+      index >= 0
+      && index < Masc_tui_terminal_palette.ansi_slot_count
+      && Option.is_none decoder.ansi.(index)
+    then decoder.ansi.(index) <- color
 ;;
 
 let finish_osc decoder terminator_bytes =
@@ -214,7 +227,7 @@ let rec feed decoder byte =
 
 let palette decoder =
   Masc_tui_terminal_palette.of_responses ~foreground:decoder.foreground
-    ~background:decoder.background
+    ~background:decoder.background ~ansi:decoder.ansi
 ;;
 
 let complete decoder =

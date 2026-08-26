@@ -58,13 +58,105 @@ end
     code literal) rather than a reading of state. Renderers do not choose raw
     red, yellow, or green themselves. *)
 module Theme = struct
-  let ok = Masc_tui_theme.status Masc_tui_theme.Ok
-  let warn = Masc_tui_theme.status Masc_tui_theme.Warn
-  let bad = Masc_tui_theme.status Masc_tui_theme.Bad
-  let info = Masc_tui_theme.status Masc_tui_theme.Info
-  let muted = Masc_tui_theme.status Masc_tui_theme.Muted
+  (* Resolved against the terminal's own palette, so a colour the reader's
+     theme leaves unreadable is lifted rather than drawn and lost. The palette
+     arrives after start-up from the OSC answers and can arrive again; the
+     generation says which. Rebuilt only when that changes, because these are
+     read once per drawn row. *)
+  type resolved =
+    { generation : int
+    ; ok : string
+    ; warn : string
+    ; bad : string
+    ; info : string
+    ; muted : string
+    ; user : string
+    ; keeper : string
+    ; tool : string
+    ; quiet : string
+    }
+
+  let resolved_cache : resolved option Atomic.t = Atomic.make None
+
+  let rec resolved () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get resolved_cache in
+    match previous with
+    | Some cached when cached.generation = generation -> cached
+    | Some _ | None ->
+      let palette = Masc_tui_terminal_palette.snapshot_palette probed in
+      let of_state = Masc_tui_theme.status_readable palette in
+      let of_colour = Masc_tui_theme.ansi_readable palette in
+      let next =
+        { generation
+        ; ok = of_state Masc_tui_theme.Ok
+        ; warn = of_state Masc_tui_theme.Warn
+        ; bad = of_state Masc_tui_theme.Bad
+        ; info = of_state Masc_tui_theme.Info
+        ; muted = of_state Masc_tui_theme.Muted
+        ; user = of_colour Masc_tui_theme.Bright_cyan
+        ; keeper = of_colour Masc_tui_theme.Bright_blue
+        ; tool = of_colour Masc_tui_theme.Bright_magenta
+        ; quiet = of_colour Masc_tui_theme.Bright_black
+        }
+      in
+      if Atomic.compare_and_set resolved_cache previous (Some next) then next
+      else resolved ()
+  ;;
+
+  let ok () = (resolved ()).ok
+  let warn () = (resolved ()).warn
+  let bad () = (resolved ()).bad
+  let info () = (resolved ()).info
+  let muted () = (resolved ()).muted
+
+  (* Who is speaking is a reading too, so the role colours draw through the
+     same path as the state ones. Measured on the twelve schemes, they need it
+     as much: the Keeper's blue reads at 2.26:1 on default-light and the tool
+     trail's bright black at 1.69:1 on Nord, which is the row an operator
+     scans to see what a keeper just did. *)
+  let user_origin () = (resolved ()).user
+  let keeper_origin () = (resolved ()).keeper
+  let tool_origin () = (resolved ()).tool
+  let quiet_origin () = (resolved ()).quiet
   let selection = Masc_tui_theme.selection
   let border_focus = Masc_tui_theme.border_focus
+
+  (* A row drawn behind the ones around it.
+
+     Not a synonym for [Ansi.dim]. SGR 2 modifies whatever colour is already
+     open -- dim red stays red -- so it is the right thing where a coloured
+     run needs to be quieter. This replaces the colour outright, which is only
+     what a row wants when the whole row is the quiet thing. Those are
+     different jobs and both remain.
+
+     The palette arrives after start-up, from the terminal's answer to the
+     OSC query, and can arrive again; the generation is what says which. The
+     escape is rebuilt only when it changes, because this is read once per
+     drawn row. *)
+  let recede_cache : (int * string) option Atomic.t = Atomic.make None
+
+  let rec recede () =
+    (* Named for what it holds rather than [snapshot]: an AST guard counts the
+       palette reads inside the binding [Chat_theme.snapshot], and a local of
+       that name here joins its count. *)
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get recede_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.recede
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set recede_cache previous
+           (Some (generation, style))
+      then style
+      else recede ()
+  ;;
 
   module Syntax = struct
     let keyword = Masc_tui_theme.Syntax.keyword
@@ -97,17 +189,17 @@ module Chat_theme = struct
     }
 
   let origin : Masc_tui_message_layout.style -> string = function
-    | Masc_tui_message_layout.User -> Ansi.bright_cyan
-    | Masc_tui_message_layout.Keeper -> Ansi.bright_blue
-    | Masc_tui_message_layout.Status -> Theme.warn
-    | Masc_tui_message_layout.Error -> Theme.bad
-    | Masc_tui_message_layout.Tool -> Ansi.bright_magenta
-    | Masc_tui_message_layout.Thinking -> Ansi.gray
+    | Masc_tui_message_layout.User -> Theme.user_origin ()
+    | Masc_tui_message_layout.Keeper -> Theme.keeper_origin ()
+    | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Error -> Theme.bad ()
+    | Masc_tui_message_layout.Tool -> Theme.tool_origin ()
+    | Masc_tui_message_layout.Thinking -> Theme.quiet_origin ()
 
   let body : Masc_tui_message_layout.style -> string = function
     | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper -> Ansi.reset
-    | Masc_tui_message_layout.Status -> Theme.warn
-    | Masc_tui_message_layout.Error -> Theme.bad
+    | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
     | Masc_tui_message_layout.Thinking -> Ansi.dim
 

@@ -131,7 +131,8 @@ let prompt_section_framing_reserved_bytes =
    is no provider refusal to catch an append that lands after the cut, so
    the window must see everything that ships. The appended reference is the
    newest material and survives the tail window. *)
-let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
+let bounded_history_projection ~capacity_bytes ~reserved_bytes
+    ?on_model_input_window_observation source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun messages ->
@@ -140,24 +141,41 @@ let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
     | None -> Ok messages
     | Some project -> project messages
   in
+  let history_atom_count = List.length messages in
   Domain_pool_ref.submit_cpu_or_inline (fun () ->
     match
-      Runtime_model_input_tail_window.project
+      (* [project_with_drop] rather than [project]: the same cut, keeping the
+         counts instead of discarding them. The Agent Core path publishes this
+         reading; discarding it here wrote every Antigravity turn record with
+         no window and no input composition, which is what [/context] reads. *)
+      Runtime_model_input_tail_window.project_with_drop
         ~allow_empty_history:true
         ~measure_message_bytes:measure_model_input_message_bytes
         ~capacity_bytes
         ~reserved_bytes
         messages
     with
-    | Ok projected -> Ok projected
+    | Ok projection ->
+      Option.iter
+        (fun observe ->
+           observe
+             (Runtime_model_input_tail_window.observe
+                ~history_atom_count
+                projection))
+        on_model_input_window_observation;
+      Ok projection.Runtime_model_input_tail_window.messages
     | Error error ->
       Error (Runtime_model_input_tail_window.budget_error_to_core_error error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
-    ~system_prompt ~goal source_projection
+    ~system_prompt ~goal ?on_model_input_window_observation source_projection
   =
   match declared_max_prompt_bytes with
+  (* [None] keeps passing the source through unchanged, as the interface
+     says. A runtime that declares no cap cuts nothing, so there is no window
+     reading to report and inventing one would claim a measurement that was
+     never taken. *)
   | None -> Ok source_projection
   | Some capacity_bytes ->
     let reserved_bytes =
@@ -180,6 +198,7 @@ let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
            (bounded_history_projection
               ~capacity_bytes
               ~reserved_bytes
+              ?on_model_input_window_observation
               source_projection))
 ;;
 
@@ -342,6 +361,7 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event =
 ;;
 
 let run_without_lifecycle ~runtime_id ~keeper_name
+    ~on_model_input_window_observation
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
@@ -427,6 +447,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~declared_max_prompt_bytes
         ~system_prompt
         ~goal
+        ?on_model_input_window_observation
         model_input_projection
     in
     let* prepared =
@@ -999,6 +1020,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ?on_model_input_window_observation
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1011,6 +1033,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
       run_without_lifecycle
         ~runtime_id
         ~keeper_name
+        ~on_model_input_window_observation
     ~pre_tool_rejects
         ~base_path
         ~goal

@@ -67,26 +67,55 @@ let measure_model_input_message_bytes message =
    cases is what made a declared ceiling cost a full turn to discover. The
    next structural boundary is computed before source projections append
    synthetic evidence, matching the Codex official-client path. *)
+(* The cut is the same one [Keeper_turn_driver_try_provider] makes on the
+   Agent Core path, and that path reports it: [project_with_drop] returns how
+   much of the history survived, [observe] pairs it with what was offered, and
+   the turn record carries the pair. Here the same call went through [project],
+   which keeps the messages and drops the counts, so every official-client turn
+   wrote a record with no window reading and no input composition -- which is
+   what [/context] reads. Same measurement, reported instead of discarded. *)
 let model_input_projection_for_capacity
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
     ~observed_floor_capacity_bytes
+    ?on_model_input_window_observation
     source_projection
     messages =
+  let history_atom_count = List.length messages in
   let windowed =
     if capacity_bytes = unbounded_model_input_capacity_bytes
-    then Ok messages
+    then (
+      (* No cut is still a reading: everything offered was carried. Leaving
+         this branch silent would put the turn record's absent window back
+         for any runtime whose declared cap is unbounded. *)
+      Option.iter
+        (fun observe ->
+           observe
+             { Runtime_model_input_tail_window.transmitted_atoms =
+                 history_atom_count
+             ; total_atoms = history_atom_count
+             })
+        on_model_input_window_observation;
+      Ok messages)
     else
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
-          Runtime_model_input_tail_window.project
+          Runtime_model_input_tail_window.project_with_drop
             ~allow_empty_history:true
             ~measure_message_bytes:measure_model_input_message_bytes
             ~capacity_bytes
             ~reserved_bytes:0
             messages
         with
-        | Ok projected -> Ok projected
+        | Ok projection ->
+          Option.iter
+            (fun observe ->
+               observe
+                 (Runtime_model_input_tail_window.observe
+                    ~history_atom_count
+                    projection))
+            on_model_input_window_observation;
+          Ok projection.Runtime_model_input_tail_window.messages
         | Error error ->
           Error
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
@@ -996,6 +1025,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ?on_model_input_window_observation
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1075,6 +1105,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
                     ~capacity_bytes
                     ~observed_next_shrink_capacity_bytes
                     ~observed_floor_capacity_bytes
+                    ?on_model_input_window_observation
                     model_input_projection))
             ~hooks
           ~context_injector

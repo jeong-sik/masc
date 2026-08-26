@@ -752,6 +752,51 @@ let capacity_projection ~declared_max_prompt_bytes ~system_prompt ~goal source =
     source
 ;;
 
+(* The window reading is what a turn record carries and what /context reads.
+   Before this was wired, the official-client adapters made the same cut as
+   the Agent Core path and threw the counts away, so every one of their turn
+   records was written with no window -- and /context answered "no turn has an
+   exact provider-input composition" for keepers that had been running all
+   day. Assert the numbers, not that a callback fired: a reading that says
+   nothing about how much was dropped would satisfy the latter. *)
+let test_capacity_reports_what_the_window_carried () =
+  let observed = ref None in
+  let messages = List.init 40 (fun i -> plain_user_message (Printf.sprintf "m%02d" i)) in
+  match
+    Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+      ~declared_max_prompt_bytes:(Some 4096)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      ~on_model_input_window_observation:(fun o -> observed := Some o)
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "a declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project messages with
+     | Error error -> fail (Agent_core.Error.to_string error)
+     | Ok windowed ->
+       (match !observed with
+        | None -> fail "the projection cut the history and reported nothing"
+        | Some observation ->
+          check
+            int
+            "the reading counts the history it was offered"
+            (List.length messages)
+            observation.Runtime_model_input_tail_window.total_atoms;
+          check
+            int
+            "the reading counts what survived the cut"
+            (List.length windowed)
+            observation.Runtime_model_input_tail_window.transmitted_atoms;
+          check
+            bool
+            "a cut happened, so the two numbers differ"
+            true
+            (observation.Runtime_model_input_tail_window.transmitted_atoms
+             < observation.Runtime_model_input_tail_window.total_atoms)))
+;;
+
 let test_capacity_undeclared_passes_source_through () =
   (match
      capacity_projection
@@ -1013,6 +1058,10 @@ let () =
               "oversized fixed sections are refused"
               `Quick
               test_capacity_refuses_oversized_fixed_sections
+          ; test_case
+              "the window reports what it carried and what it was offered"
+              `Quick
+              test_capacity_reports_what_the_window_carried
         ] )
     ]
 ;;

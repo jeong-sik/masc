@@ -44,9 +44,16 @@ val run :
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
   ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
+  ?on_model_input_window_observation:
+    (Runtime_model_input_tail_window.window_observation -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.claude_code ->
   unit ->
   attempt_outcome
+(** [on_model_input_window_observation] receives how much of the offered
+    history this turn actually carried. The Agent Core path reports the same
+    reading through [Keeper_turn_driver]'s callback of that name; without it
+    here, every official-client turn record was written with no window and no
+    input composition, which is what [/context] reads. *)

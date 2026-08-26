@@ -2743,7 +2743,7 @@ let secret_projection_json ~status ~env_names ~mounts =
   `Assoc
     [ ("status", `String status);
       ("configured", `Bool true);
-      ("root", `String "/base/.masc/secrets/kidsnote");
+      ("root", `String "/base/.masc/secrets/marlow");
       ("source", `String "workspace_masc_secrets");
       ("env_count", `Int (List.length env_names));
       ("file_count", `Int (List.length mounts));
@@ -2779,19 +2779,19 @@ let snapshots_json entries =
 let test_decode_secret_projection_reads_names_not_values () =
   let json =
     snapshots_json
-      [ ( "kidsnote",
+      [ ( "marlow",
           Some
             (secret_projection_json ~status:"ready"
                ~env_names:[ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
                ~mounts:
-                 [ ( "/base/.masc/secrets/kidsnote/files/app.pem",
+                 [ ( "/base/.masc/secrets/marlow/files/app.pem",
                      "/tmp/masc-runtime/secrets/app.pem" ) ]) );
       ]
   in
   match Tui_decode.decode_keeper_secret_projections json with
   | Error err -> Alcotest.fail err
   | Ok [ p ] ->
-      Alcotest.(check string) "keeper" "kidsnote" p.Tui_decode.ksp_keeper;
+      Alcotest.(check string) "keeper" "marlow" p.Tui_decode.ksp_keeper;
       Alcotest.(check string) "status" "ready"
         (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
       Alcotest.(check (list string)) "env names"
@@ -2807,7 +2807,7 @@ let test_decode_secret_projection_skips_unprojected_keeper () =
   let json =
     snapshots_json
       [ ("analyst", None);
-        ( "kidsnote",
+        ( "marlow",
           Some
             (secret_projection_json ~status:"absent" ~env_names:[] ~mounts:[]) );
       ]
@@ -2815,7 +2815,7 @@ let test_decode_secret_projection_skips_unprojected_keeper () =
   match Tui_decode.decode_keeper_secret_projections json with
   | Error err -> Alcotest.fail err
   | Ok [ p ] ->
-      Alcotest.(check string) "the projected one is read" "kidsnote"
+      Alcotest.(check string) "the projected one is read" "marlow"
         p.Tui_decode.ksp_keeper
   | Ok other ->
       Alcotest.failf "expected one projection, read %d" (List.length other)
@@ -2826,7 +2826,7 @@ let test_decode_secret_projection_keeps_an_unknown_status () =
      else entirely. *)
   let json =
     snapshots_json
-      [ ( "kidsnote",
+      [ ( "marlow",
           Some
             (secret_projection_json ~status:"quarantined" ~env_names:[]
                ~mounts:[]) );
@@ -2845,11 +2845,11 @@ let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
       [ ("snapshots",
          `List
            [ `Assoc
-               [ ("keeper", `String "kidsnote");
+               [ ("keeper", `String "marlow");
                  ("secret_projection",
                   `Assoc
                     [ ("status", `String "ready");
-                      ("root", `String "/base/.masc/secrets/kidsnote");
+                      ("root", `String "/base/.masc/secrets/marlow");
                       ("env_names", `List [ `Int 7 ]);
                     ]);
                ];

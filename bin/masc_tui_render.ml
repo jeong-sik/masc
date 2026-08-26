@@ -23,6 +23,7 @@ module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Theme_choice = Masc_tui_theme_choice
 module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
@@ -53,6 +54,28 @@ let finish_frame ?clamped ~surface_key ~cursor ~rows ~cols buf :
       lines = frame_lines buf;
     }
   , clamped )
+
+(* The row a surface draws when its load failed. Six copies wrote the sentence
+   out and each reserved [cols - 24] for the error beside it -- one cell more
+   than the frame gives, so a long error was cut where its closing bracket
+   should have been. The room is worked out from the sentence here, which is
+   what stops the two from drifting the next time the wording changes. *)
+let data_unreliable_open = "  (data unreliable: "
+let data_unreliable_close = ")"
+
+let data_unreliable_row ~cols err =
+  let room =
+    max 8
+      (framed_inner_width cols
+       - Message_layout.display_width data_unreliable_open
+       - Message_layout.display_width data_unreliable_close)
+  in
+  (Theme.bad ())
+  ^ data_unreliable_open
+  ^ fit_width err room
+  ^ data_unreliable_close
+  ^ Ansi.reset
+;;
 
 (* Terminal dress for the markdown a keeper writes. The marker is the noise:
    a backticked identifier should read as the identifier, and a fenced diff
@@ -773,9 +796,7 @@ let render_overview (state : state) =
   let summary_line =
     match (ov, overview_error) with
     | _, Some err ->
-        Printf.sprintf "  %s(data unreliable: %s)%s" (Theme.bad ())
-          (fit_width err (cols - 24))
-          Ansi.reset
+        data_unreliable_row ~cols err
     | None, None ->
         Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
           Ansi.dim Ansi.reset
@@ -1243,10 +1264,7 @@ let render_approvals (state : state) =
   if count = 0 then begin
     (match state.approval_snapshot, approvals_error with
      | _, Some err ->
-         box_line buf cols
-           ((Theme.bad ()) ^ "  (data unreliable: "
-           ^ fit_width err (cols - 24)
-           ^ ")" ^ Ansi.reset)
+         box_line buf cols (data_unreliable_row ~cols err)
      | None, None ->
          box_line buf cols
            (Ansi.dim ^ "  (no approval data — press 'r' to refresh)"
@@ -1646,10 +1664,7 @@ let render_board_list (state : state) =
     Terminal_text.optional_single_line state.board_list_error
   in
   let render_list_error err =
-    box_line buf cols
-      ((Theme.bad ()) ^ "  (data unreliable: "
-      ^ fit_width err (max 1 (cols - 24))
-      ^ ")" ^ Ansi.reset)
+    box_line buf cols (data_unreliable_row ~cols err)
   in
   if count = 0 then begin
     (match board_list_error with
@@ -1839,7 +1854,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
          (if focused then "  [j/k]" else "")
      ^ Ansi.reset);
   framed_divider buf cols;
-  let content_height = max 0 (rows - 5) in
+  let content_height = max 0 (rows - framed_chrome_rows) in
   let selected_index =
     let rec find i = function
       | [] -> 0
@@ -2014,10 +2029,7 @@ let render_planning_list (state : state) =
    | None ->
        (match planning_error with
         | Some err ->
-            box_line buf cols
-              ((Theme.bad ()) ^ "  (data unreliable: "
-              ^ fit_width err (cols - 24)
-              ^ ")" ^ Ansi.reset)
+            box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
@@ -2261,10 +2273,7 @@ let render_schedule_list (state : state) =
    | None ->
        (match Terminal_text.optional_single_line state.schedules_error with
         | Some err ->
-            box_line buf cols
-              ((Theme.bad ()) ^ "  (data unreliable: "
-              ^ fit_width err (cols - 24)
-              ^ ")" ^ Ansi.reset)
+            box_line buf cols (data_unreliable_row ~cols err)
         | None ->
             box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
        for _ = 1 to rows - 10 do
@@ -2277,10 +2286,7 @@ let render_schedule_list (state : state) =
             scheduled". *)
          (match snapshot.scs_read_error with
           | Some err ->
-              box_line buf cols
-                ((Theme.bad ()) ^ "  (data unreliable: "
-                ^ fit_width err (cols - 24)
-                ^ ")" ^ Ansi.reset)
+              box_line buf cols (data_unreliable_row ~cols err)
           | None ->
               box_line buf cols
                 ((Theme.bad ()) ^ "  (schedule store unreadable)" ^ Ansi.reset));
@@ -2472,7 +2478,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
        (schedule_status_color row.sch_status)
        (Terminal_text.single_line row.sch_status) Ansi.reset);
   box_divider buf cols;
-  let lines = schedule_detail_lines ~width:(max 1 (cols - 4)) row in
+  let lines = schedule_detail_lines ~width:(max 1 (framed_inner_width cols)) row in
   let content_height = max 1 (rows - 6) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.schedule_scroll max_scroll) in
@@ -2807,7 +2813,7 @@ let render_keeper_list (state : state) =
      lays out fits above it. *)
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
-  let inner = max 1 (cols - 4) in
+  let inner = max 1 (framed_inner_width cols) in
   let readings = List.map (keeper_reading state) state.keepers in
   let selected_reading =
     Option.map (keeper_reading state) (selected_keeper state)
@@ -3130,7 +3136,7 @@ let keeper_lane_row (columns : keeper_lane_columns)
 let render_lanes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  let inner = max 1 (cols - 4) in
+  let inner = max 1 (framed_inner_width cols) in
   let buf = Buffer.create 4096 in
   let lanes =
     match state.lanes with
@@ -3277,7 +3283,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let box_line = if framed then framed_line else box_line in
     let box_empty = if framed then framed_empty else box_empty in
     let box_bottom = if framed then framed_bottom else box_bottom in
-    let inner = cols - 4 in  (* width inside borders *)
+    let inner = framed_inner_width cols in
 
     (* Build all detail lines first, then apply scroll *)
     let lines = ref [] in
@@ -3469,7 +3475,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        bottom); the indicator, when the content overflows, spends one
        content row rather than growing the pane, so the pane's height is
        rows - 1 in both cases and the split's two bottoms stay level. *)
-    let base_height = max 0 (rows - 5) in
+    let base_height = max 0 (rows - framed_chrome_rows) in
     let content_height =
       if total_lines > base_height then max 0 (base_height - 1)
       else base_height
@@ -3510,7 +3516,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   framed_top buf cols;
   let title = " KEEPERS" in
   let hint = if focused then "ENTER OPEN" else "^B HIDE" in
-  let title_gap = max 1 (cols - 4 - String.length title - String.length hint) in
+  let title_gap = max 1 (framed_inner_width cols - String.length title - String.length hint) in
   let title_row = title ^ String.make title_gap ' ' ^ hint in
   framed_line buf cols
     (if focused then Theme.selection ^ title_row ^ Ansi.reset
@@ -3518,7 +3524,7 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
        Ansi.bold ^ title ^ Ansi.reset ^ String.make title_gap ' ' ^ Ansi.dim
        ^ hint ^ Ansi.reset);
   framed_divider buf cols;
-  let content_height = max 0 (rows - 5) in
+  let content_height = max 0 (rows - framed_chrome_rows) in
   let first =
     if state.keeper_cursor < content_height then 0
     else state.keeper_cursor - content_height + 1
@@ -4066,7 +4072,7 @@ let render_keeper_message (state : state) =
       | Some _ | None -> []
     in
     let layout_entries = layout_entries @ live_entries in
-    let inner_width = max 1 (chat_cols - 4) in
+    let inner_width = max 1 (framed_inner_width chat_cols) in
     (* Clamped here rather than where the key is handled: the limit depends on
        the terminal width and the pane's height, and a resize changes both
        under a scroll position that was legal before it. *)
@@ -4764,7 +4770,7 @@ let render_verification_detail (state : state) request =
        (screen_title " MASC Verification \xe2\x96\xb8 details")
        (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
   box_divider buf cols;
-  let lines = verification_detail_lines ~width:(max 1 (cols - 4)) request in
+  let lines = verification_detail_lines ~width:(max 1 (framed_inner_width cols)) request in
   let content_height = max 1 (rows - 6) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
@@ -5355,7 +5361,7 @@ let diff_row_span ~width (row : Diff.row) =
   Span.pad_to width background (Span.truncate width composed)
 
 let box_line_span buf cols span =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   Buffer.add_string buf
     (Printf.sprintf "  %s  \n" (Span.render (Span.pad_to inner Span.plain (Span.truncate inner span))))
 
@@ -5419,7 +5425,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     for i = 0 to content_height - 1 do
       match List.nth_opt diff_rows (i + scroll) with
       | None -> box_empty buf cols
-      | Some row -> box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
+      | Some row -> box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
     done;
   if total > content_height then
     box_line_styled buf cols ~style:(Theme.recede ())
@@ -5582,7 +5588,7 @@ let render_changes_list (state : state) =
        for i = 0 to body_height - 1 do
          match List.nth_opt diff_rows i with
          | Some row ->
-             box_line_span buf cols (diff_row_span ~width:(cols - 4) row)
+             box_line_span buf cols (diff_row_span ~width:(framed_inner_width cols) row)
          | None -> box_empty buf cols
        done
    | Some _ -> ());
@@ -5685,7 +5691,7 @@ let render_changes_tree_diff (state : state)
       match List.nth_opt diff_rows (i + scroll) with
       | None -> box_empty buf cols
       | Some row ->
-          box_line_span buf cols (tree_diff_row_span ~width:(cols - 4) row)
+          box_line_span buf cols (tree_diff_row_span ~width:(framed_inner_width cols) row)
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (if total > content_height then
@@ -6734,14 +6740,14 @@ let render_runtime_pick (state : state) =
 let code_pane_content_height () =
   let terminal_rows, _ = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  max 1 (rows - 5)
+  framed_content_height ~rows
 
 let render_code (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  let list_rows_budget = max 1 (rows - 5) in
+  let list_rows_budget = framed_content_height ~rows in
   let entries = state.code_entries in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
@@ -7236,7 +7242,7 @@ let render_resources (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   let buf = Buffer.create 4096 in
   let split = cols >= keeper_split_threshold_cols in
-  let list_rows_budget = max 1 (rows - 5) in
+  let list_rows_budget = framed_content_height ~rows in
   let rows_list =
     match state.resources_list with Some rows -> rows | None -> []
   in
@@ -7304,7 +7310,7 @@ let render_resources (state : state) =
        ^ (if state.resource_focus = Right_pane then "  [j/k]" else "")
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    let content_height = max 1 (rows - 5) in
+    let content_height = framed_content_height ~rows in
     (match state.resource_content_error, state.resource_content with
      | Some detail, _ ->
          box_line pane_buf pane_cols
@@ -7512,6 +7518,66 @@ let render_prompts (state : state) =
          "j/k:select  PgUp/PgDn:read  i:latest input  e:edit  x:clear  c:runtime.toml");
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
 
+(* The row the reader is on. A check rather than a colour, because the point
+   of this screen is that colours are about to change. *)
+let chosen_mark = "\xe2\x9c\x93"
+
+let render_themes (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Themes")
+       (Ansi.dim ^ "p: runtime.toml / prompts / themes" ^ Ansi.reset)
+       (connection_badge state));
+  box_divider buf cols;
+  let chosen = state.theme_choice in
+  let entries = Theme_choice.entries () in
+  let content_height = max 1 (rows - 6) in
+  let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
+  let scroll = max 0 (cursor - content_height + 1) in
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %-24s %-9s %-10s %s" "theme" "page" "lifted" "")
+  ;
+  List.iteri
+    (fun index (entry : Theme_choice.entry) ->
+      if index >= scroll && index < scroll + content_height then begin
+        let picked =
+          match chosen with
+          | Some name -> String.equal name entry.name
+          | None -> false
+        in
+        let row =
+          Printf.sprintf "  %s %-24s %-9s %-10s"
+            (if picked then chosen_mark else " ")
+            (Terminal_text.single_line entry.name)
+            (if entry.light then "light" else "dark")
+            (match entry.lifted with
+             | 0 -> "none"
+             | count -> Printf.sprintf "%d of %d" count entry.measured)
+        in
+        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
+        else box_line buf cols row
+      end)
+    entries;
+  let drawn = min content_height (List.length entries) in
+  for _ = drawn to content_height - 1 do
+    box_empty buf cols
+  done;
+  box_line_styled buf cols ~style:Ansi.dim
+    (match chosen with
+     | None ->
+       "  following the terminal's own colours \xe2\x80\x94 Enter picks a theme"
+     | Some name ->
+       Printf.sprintf "  %s \xe2\x80\x94 Enter picks another, x follows the terminal again"
+         (Terminal_text.single_line name));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+  finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -7637,6 +7703,7 @@ let render_surface (state : state) =
   | Config -> (
     match state.config_pane with
     | Config_prompts -> render_prompts state
+    | Config_themes -> render_themes state
     | Config_runtime -> render_config state)
   | Resources -> render_resources state
   | Code -> render_code state
@@ -7966,7 +8033,7 @@ let context_inspector_content_lines state =
 let context_inspector_viewport state =
   let terminal_rows, _ = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
-  (List.length (context_inspector_content_lines state), max 1 (rows - 5))
+  (List.length (context_inspector_content_lines state), framed_content_height ~rows)
 
 let render_context_inspector state =
   let terminal_rows, cols = get_terminal_size () in
@@ -7995,7 +8062,7 @@ let render_context_inspector state =
        ^ (tab_label Masc_tui_context_inspector.Input_map "3" "map"));
   framed_divider buf cols;
   let lines = context_inspector_content_lines state in
-  let content_height = max 1 (rows - 5) in
+  let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines)
       ~height:content_height state.context_inspector_scroll
@@ -8024,7 +8091,7 @@ let help_viewport () =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   ( List.length (Masc_tui_help.sheet ~cols (help_lines ()))
-  , Masc_tui_help.content_height ~rows )
+  , framed_content_height ~rows )
 
 (* The [:] palette: a typed filter over every jump the strip and roster
    offer. The list is the same [palette_matches] the Enter key resolves, so
@@ -8042,7 +8109,7 @@ let render_palette (state : state) =
        (Terminal_text.single_line state.palette_query)
        (Ansi.cyan ^ "\xe2\x96\x8c" ^ Ansi.reset));
   framed_divider buf cols;
-  let content_height = max 1 (rows - 5) in
+  let content_height = framed_content_height ~rows in
   let first =
     if cursor < content_height then 0
     else cursor - content_height + 1
@@ -8082,7 +8149,7 @@ let render_help (state : state) =
   framed_divider buf cols;
   let lines = help_lines () in
   let rendered_rows = Masc_tui_help.sheet ~cols lines in
-  let content_height = Masc_tui_help.content_height ~rows in
+  let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize
       ~count:(List.length rendered_rows) ~height:content_height state.help_scroll
@@ -8108,7 +8175,7 @@ let agenda_viewport (state : state) =
       ~cols:(framed_inner_width cols)
       (Masc_tui_types.agenda state)
   in
-  (List.length lines, Masc_tui_help.content_height ~rows)
+  (List.length lines, framed_content_height ~rows)
 ;;
 
 (* The panel behind [;]. The strip above the composer says whether anything is
@@ -8134,7 +8201,7 @@ let render_agenda (state : state) =
       ~cols:(framed_inner_width cols)
       (Masc_tui_types.agenda state)
   in
-  let content_height = Masc_tui_help.content_height ~rows in
+  let content_height = framed_content_height ~rows in
   let scroll =
     Masc_tui_scroll.normalize
       ~count:(List.length lines)

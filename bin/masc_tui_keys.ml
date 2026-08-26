@@ -198,10 +198,12 @@ let for_surface = function
       [ b Navigate "j/k" "scroll"
         (* The surface owns the two files the server reads. Which one [e]
            opens depends on which list is showing, so the row says both. *)
-      ; b Navigate "p" "runtime.toml / prompts"
+      ; b Navigate "p" "runtime.toml / prompts / themes"
       ; b Act "e" "edit"
           ~help:"runtime.toml previews before it writes; a prompt saves as an override"
-      ; b Act "x" "clear override" ~help:"on a prompt: back to the file's words"
+      ; b Act "Enter" "use theme" ~help:"on themes: draw with that scheme's colours"
+      ; b Act "x" "clear override"
+          ~help:"on a prompt: back to the file's words. on themes: back to the terminal's colours"
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"

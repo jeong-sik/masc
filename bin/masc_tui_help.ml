@@ -2,14 +2,8 @@ module Message_layout = Masc_tui_message_layout
 
 let two_column_minimum_cols = 96
 
-(* Top border, title, divider, bottom border, footer: the five rows the
-   overlay draws whatever the sheet holds. *)
-let chrome_rows = 5
-
 (* The gutter the two columns leave: one border and one pad on each side. *)
 let column_gutter_cols = 6
-
-let content_height ~rows = max 1 (rows - chrome_rows)
 
 let column_width ~cols = (cols - column_gutter_cols) / 2
 

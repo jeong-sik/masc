@@ -309,6 +309,11 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_frame)
+ (wrapped false)
+ (modules masc_tui_frame))
+
+(library
  (name masc_tui_agenda)
  (wrapped false)
  (modules masc_tui_agenda)
@@ -330,6 +335,12 @@
  (wrapped false)
  (modules masc_tui_theme_catalog)
  (libraries masc_tui_terminal_palette))
+
+(library
+ (name masc_tui_theme_choice)
+ (wrapped false)
+ (modules masc_tui_theme_choice)
+ (libraries masc_tui_color masc_tui_terminal_palette masc_tui_theme_catalog))
 
 (library
  (name masc_tui_color)
@@ -634,9 +645,12 @@
  (libraries
   masc_tui_agenda
   masc_tui_ask_projection
+  masc_tui_frame
   masc_tui_attachment
   masc_tui_keys
   masc_tui_theme
+  masc_tui_theme_catalog
+  masc_tui_theme_choice
   masc_tui_terminal_palette
   masc_tui_terminal_probe
   masc_tui_code_lexer

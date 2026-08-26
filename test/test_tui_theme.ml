@@ -32,6 +32,12 @@ let conditional_tokens =
     ; ("white", white, "\027[37m")
     ; ("default_fg", default_fg, "\027[39m")
     ; ("gray", gray, "\027[90m")
+    ; ("bright_red", bright_red, "\027[91m")
+    ; ("bright_green", bright_green, "\027[92m")
+    ; ("bright_yellow", bright_yellow, "\027[93m")
+    ; ("bright_blue", bright_blue, "\027[94m")
+    ; ("bright_magenta", bright_magenta, "\027[95m")
+    ; ("bright_cyan", bright_cyan, "\027[96m")
     ; ("bg_removed", bg_removed, "\027[48;5;52m")
     ; ("bg_added", bg_added, "\027[48;5;22m")
     ]
@@ -145,18 +151,18 @@ let test_colour_environment_policy () =
 
 let test_status_names_the_exact_hues () =
   let open Masc_tui_theme in
-  check str "ok is green" Sgr.green (status Ok);
-  check str "warn is yellow" Sgr.yellow (status Warn);
-  check str "bad is red" Sgr.red (status Bad);
-  check str "info is cyan" Sgr.cyan (status Info);
-  check str "muted is dim" Sgr.dim (status Muted)
+  check str "ok is vivid green" Sgr.bright_green (status Ok);
+  check str "warn is vivid yellow" Sgr.bright_yellow (status Warn);
+  check str "bad is vivid red" Sgr.bright_red (status Bad);
+  check str "info is vivid cyan" Sgr.bright_cyan (status Info);
+  check str "muted remains readable gray" Sgr.gray (status Muted)
 
 let test_tone_is_three_values () =
   let open Masc_tui_theme in
   check str "normal needs no escape" "" (tone Normal);
   check str "dim is the dim weight" Sgr.dim (tone Dim);
-  check str "accent is the one accent hue" Sgr.cyan (tone Accent);
-  check str "border focus shares the accent" Sgr.cyan border_focus
+  check str "accent is the vivid accent hue" Sgr.bright_cyan (tone Accent);
+  check str "border focus shares the accent" Sgr.bright_cyan border_focus
 
 let test_glyphs_hold_their_bytes () =
   let open Masc_tui_theme.Glyph in

@@ -299,4 +299,21 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
+    # --self-check answers "is this guard wired and loadable, offline?" for
+    # the lint suite. It is not the audit itself: decision coverage lives in
+    # test_check_merge_audit.py (11 assertions), and the live audit runs in
+    # the merge-audit workflow job on pushes to main.
+    if "--self-check" in sys.argv[1:]:
+        import argparse  # noqa: F401  (import surface only; see below)
+
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument("--self-check", action="store_true")
+        known, _ = parser.parse_known_args(sys.argv[1:])
+        print(
+            "merge audit self-check: importable, "
+            f"required-contexts default={REQUIRED_CONTEXTS_DEFAULT!r}, "
+            f"exit codes clean={EXIT_CLEAN} unclean={EXIT_UNCLEAN_MERGE} "
+            f"cannot-audit={EXIT_CANNOT_AUDIT}"
+        )
+        sys.exit(EXIT_CLEAN)
     sys.exit(main())

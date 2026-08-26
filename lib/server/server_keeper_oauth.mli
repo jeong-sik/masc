@@ -28,6 +28,12 @@ val set_client :
   provider_id:string ->
   client_id:string ->
   client_secret:string option ->
+  scopes:string ->
+      (** Space-separated, and empty to ask for whatever the resource
+          publishes. An app an operator brought is the authority on what it
+          may be granted: asking for a scope it does not declare is refused,
+          and adding that scope means reinstalling an app other people may
+          depend on. *)
   (Yojson.Safe.t, string) result
 (** Record an app an operator made themselves.
 
@@ -39,7 +45,9 @@ val set_client :
     One per provider for this install rather than one per Keeper, matching
     where a registered client is kept.
 
-    The answer says whether a secret is on file and never what it is. *)
+    The answer says whether a secret is on file and never what it is. It does
+    say the scopes, which are not a credential and are the thing an operator
+    most needs to check. *)
 
 val start :
   base_path:string ->

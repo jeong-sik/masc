@@ -146,7 +146,8 @@ let handle_set_client request reqd =
                 | None -> Error "client_id is required"
                 | Some client_id ->
                   Server_keeper_oauth.set_client ~base_path ~provider_id
-                    ~client_id ~client_secret:(field "client_secret")))
+                    ~client_id ~client_secret:(field "client_secret")
+                    ~scopes:(Option.value (field "scopes") ~default:"")))
           | _ -> Error "the request body is not an object"
         in
         match answer with

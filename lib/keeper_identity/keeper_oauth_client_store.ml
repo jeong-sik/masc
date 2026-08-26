@@ -3,6 +3,7 @@
 type credentials = {
   client_id : string;
   client_secret : string option;
+  scopes : string list;
 }
 
 (* Keyed by the provider's client group rather than its id: a client belongs
@@ -18,6 +19,7 @@ let entry_path ~dir ~(provider : Keeper_oauth_provider.t) name =
 
 let file_path ~dir ~provider = entry_path ~dir ~provider "client_id"
 let secret_path ~dir ~provider = entry_path ~dir ~provider "client_secret"
+let scopes_path ~dir ~provider = entry_path ~dir ~provider "scopes"
 ;;
 
 let rec ensure_dir path =
@@ -58,7 +60,22 @@ let load ~dir ~provider =
        rather than a half-written pair. *)
     (match read_trimmed (secret_path ~dir ~provider) with
      | Error message -> Error message
-     | Ok client_secret -> Ok (Some { client_id; client_secret }))
+     | Ok client_secret ->
+       (* Space separated on disk, as it goes on the wire. A file that is not
+          there is no override, which is a different thing from a file
+          holding nothing -- and [read_trimmed] already refuses the latter. *)
+       (match read_trimmed (scopes_path ~dir ~provider) with
+        | Error message -> Error message
+        | Ok stored ->
+          let scopes =
+            match stored with
+            | None -> []
+            | Some text ->
+              List.filter
+                (fun scope -> not (String.equal scope ""))
+                (String.split_on_char ' ' text)
+          in
+          Ok (Some { client_id; client_secret; scopes })))
 ;;
 
 let write_whole path value =
@@ -71,12 +88,15 @@ let write_whole path value =
   Unix.rename temp path
 ;;
 
-let save ~dir ~provider { client_id; client_secret } =
+let save ~dir ~provider { client_id; client_secret; scopes } =
   try
     (* Secret first, id second. The id is what {!load} keys on, so writing it
        last means a reader never finds a confidential client wearing the face
        of a public one -- which would fail at the token endpoint with the
        server's word for "who are you" and nothing here saying why. *)
+    (match scopes with
+     | [] -> ()
+     | scopes -> write_whole (scopes_path ~dir ~provider) (String.concat " " scopes));
     (match client_secret with
      | None -> ()
      | Some secret -> write_whole (secret_path ~dir ~provider) secret);

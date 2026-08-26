@@ -84,7 +84,7 @@ let declarations_json ~base_path =
    Keeper. A secret is optional -- some providers issue an app without one --
    and clearing it is saying "this app has none" rather than "leave what is
    there", so an absent field and an empty one mean the same. *)
-let set_client ~base_path ~provider_id ~client_id ~client_secret =
+let set_client ~base_path ~provider_id ~client_id ~client_secret ~scopes =
   let* provider = provider_of_id provider_id in
   let trimmed = String.trim client_id in
   if String.equal trimmed ""
@@ -95,9 +95,14 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret =
       | Some secret when String.trim secret <> "" -> Some (String.trim secret)
       | Some _ | None -> None
     in
+    let scopes =
+      List.filter
+        (fun scope -> not (String.equal scope ""))
+        (String.split_on_char ' ' (String.trim scopes))
+    in
     let* () =
       Store.save ~dir:(identity_dir ~base_path) ~provider
-        { Store.client_id = trimmed; client_secret }
+        { Store.client_id = trimmed; client_secret; scopes }
     in
     Ok
       (`Assoc
@@ -107,6 +112,9 @@ let set_client ~base_path ~provider_id ~client_id ~client_secret =
           (* Never the secret back. What an operator needs to know is
              whether one is on file. *)
         ; "has_client_secret", `Bool (client_secret <> None)
+          (* Echoed, unlike the secret: an operator needs to see what will
+             actually be asked for, and a scope list is not a credential. *)
+        ; "scopes", `List (List.map (fun scope -> `String scope) scopes)
         ])
 ;;
 

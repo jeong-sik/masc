@@ -60,6 +60,7 @@ let begin_authorization
       ~(provider : Provider.t)
       ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
+      ~scopes
       ~redirect_uri
       ~keeper
   =
@@ -69,11 +70,16 @@ let begin_authorization
      an empty list, it is a malformed one, and some servers answer it with
      invalid_scope. *)
   let scope =
-    match discovered.Keeper_oauth_discovery.scopes_supported with
+    match
+      match scopes with
+      (* Everything the server said it offers. Narrowing is not this code's
+         decision -- but it is the operator's, and an app they brought is
+         the authority on what it may be granted, so what they recorded with
+         the client wins over what the resource publishes. *)
+      | [] -> discovered.Keeper_oauth_discovery.scopes_supported
+      | asked -> asked
+    with
     | [] -> []
-    (* Everything the server said it offers. Narrowing here would be this
-       code deciding what a Keeper may reach, which is the declaration's
-       business at most and the operator's at the consent screen. *)
     | scopes -> [ "scope", String.concat " " scopes ]
   in
   let parameters =

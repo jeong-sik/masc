@@ -157,8 +157,8 @@ let discovered_atlassian () =
 
 let begin_for provider =
   Keeper_oauth_flow.begin_authorization ~provider
-    ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~redirect_uri
-    ~keeper:"oauth-fixture"
+    ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~scopes:[]
+    ~redirect_uri ~keeper:"oauth-fixture"
 
 let query_of url =
   match String.index_opt url '?' with
@@ -218,7 +218,8 @@ let test_a_server_that_names_no_scopes_is_asked_for_none () =
   in
   let pending =
     Keeper_oauth_flow.begin_authorization ~provider ~discovered
-      ~client_id:"client-abc" ~redirect_uri ~keeper:"oauth-fixture"
+      ~client_id:"client-abc" ~scopes:[] ~redirect_uri
+      ~keeper:"oauth-fixture"
   in
   let query = query_of pending.Keeper_oauth_flow.authorize_url in
   Alcotest.(check bool)
@@ -228,6 +229,23 @@ let test_a_server_that_names_no_scopes_is_asked_for_none () =
      shorter URL. *)
   check str "the resource is still named" "https://mcp.atlassian.com/v1/mcp/authv2"
     (param query "resource")
+
+let test_recorded_scopes_replace_the_published_ones () =
+  (* Slack publishes thirty scopes and a workspace app declares a handful.
+     Asking for the thirty is refused, and adding them to the app means a
+     reinstall an admin has to approve again -- so what the operator recorded
+     beside the client is what goes on the authorize call. *)
+  let provider = load_or_fail atlassian_toml in
+  let pending =
+    Keeper_oauth_flow.begin_authorization ~provider
+      ~discovered:(discovered_atlassian ())
+      ~client_id:"client-abc"
+      ~scopes:[ "channels:read"; "chat:write" ]
+      ~redirect_uri ~keeper:"oauth-fixture"
+  in
+  let query = query_of pending.Keeper_oauth_flow.authorize_url in
+  check str "only what was recorded" "channels:read chat:write"
+    (param query "scope")
 
 let test_two_exchanges_do_not_share_a_verifier () =
   let provider = load_or_fail atlassian_toml in
@@ -824,8 +842,8 @@ let stub_discover
 let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
   Alcotest.fail "registered a client when one was already configured"
 
-let credentials ?secret client_id =
-  { Keeper_oauth_client_store.client_id; client_secret = secret }
+let credentials ?secret ?(scopes = []) client_id =
+  { Keeper_oauth_client_store.client_id; client_secret = secret; scopes }
 
 let start_login ?(configured = None) ?discover ?register provider table =
   Keeper_oauth_session.start ?discover ?register ~provider ~configured
@@ -1156,6 +1174,8 @@ let () =
             test_authorize_url_proves_the_verifier;
           Alcotest.test_case "a server naming no scopes is asked for none"
             `Quick test_a_server_that_names_no_scopes_is_asked_for_none;
+          Alcotest.test_case "recorded scopes replace the published ones"
+            `Quick test_recorded_scopes_replace_the_published_ones;
           Alcotest.test_case "two exchanges share nothing" `Quick
             test_two_exchanges_do_not_share_a_verifier;
         ] );

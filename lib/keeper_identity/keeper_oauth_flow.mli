@@ -48,6 +48,11 @@ val begin_authorization :
   provider:Keeper_oauth_provider.t ->
   discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
+  scopes:string list ->
+      (** What to ask for. Empty asks for everything the resource publishes,
+          which is right for a client registered here. An app an operator
+          brought is the authority on what it may be granted, so what they
+          recorded beside it wins. *)
   redirect_uri:string ->
   keeper:string ->
   pending

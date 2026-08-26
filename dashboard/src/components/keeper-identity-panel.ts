@@ -37,6 +37,7 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
   const [ownApp, setOwnApp] = useState<string | null>(null)
   const [ownId, setOwnId] = useState('')
   const [ownSecret, setOwnSecret] = useState('')
+  const [ownScopes, setOwnScopes] = useState('')
   const [ownSaved, setOwnSaved] = useState<string | null>(null)
 
   useEffect(() => {
@@ -76,16 +77,25 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
     setActionError(null)
     setOwnSaved(null)
     try {
-      const answer = await setIdentityClient(providerId, ownId, ownSecret)
+      const answer = await setIdentityClient(
+        providerId,
+        ownId,
+        ownSecret,
+        ownScopes,
+      )
       // Cleared on the way out. A secret left in a field is a secret in the
       // page for as long as the tab is open.
       setOwnId('')
       setOwnSecret('')
+      setOwnScopes('')
       setOwnApp(null)
+      const secretPart = answer.has_client_secret ? '비밀키 포함' : '비밀키 없음'
+      const scopePart =
+        answer.scopes.length === 0
+          ? '권한은 서비스가 내놓는 대로'
+          : `권한 ${answer.scopes.length}개`
       setOwnSaved(
-        answer.has_client_secret
-          ? `${answer.provider_label} 앱을 저장했어요 (비밀키 포함)`
-          : `${answer.provider_label} 앱을 저장했어요 (비밀키 없음)`,
+        `${answer.provider_label} 앱을 저장했어요 (${secretPart}, ${scopePart})`,
       )
     } catch (error) {
       setActionError(error instanceof Error ? error.message : String(error))
@@ -159,6 +169,7 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
                         setOwnApp(current => current === provider.provider ? null : provider.provider)
                         setOwnId('')
                         setOwnSecret('')
+                        setOwnScopes('')
                       }}
                     >${ownApp === provider.provider ? '접기' : '내 앱 쓰기'}</button>
                   </div>
@@ -180,6 +191,13 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
                         placeholder="client secret (없으면 비워 두세요)"
                         value=${ownSecret}
                         onInput=${(event: Event) => setOwnSecret((event.target as HTMLInputElement).value)}
+                      />
+                      <input
+                        class="kcf-input mono"
+                        type="text"
+                        placeholder="scopes (비우면 서비스가 내놓는 전부)"
+                        value=${ownScopes}
+                        onInput=${(event: Event) => setOwnScopes((event.target as HTMLInputElement).value)}
                       />
                       <button
                         type="button"

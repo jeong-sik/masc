@@ -521,6 +521,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
        ~provider
        { Keeper_oauth_client_store.client_id = "client-abc"
        ; client_secret = None
+       ; scopes = []
        }
    with
   | Ok () -> ()

@@ -83,6 +83,9 @@ export interface OwnAppRecorded {
    *  "did that save" is a yes, not a credential travelling back through
    *  every log and proxy on the way. */
   has_client_secret: boolean
+  /** What will be asked for. Echoed, unlike the secret: a scope list is not
+   *  a credential and it is the thing worth checking before consenting. */
+  scopes: string[]
 }
 
 /** Record an app the operator made themselves.
@@ -95,6 +98,7 @@ export async function setIdentityClient(
   providerId: string,
   clientId: string,
   clientSecret: string,
+  scopes: string,
 ): Promise<OwnAppRecorded> {
   await ensureDevToken()
   return post<OwnAppRecorded>('/api/v1/keepers/oauth/client', {
@@ -103,5 +107,8 @@ export async function setIdentityClient(
     // Sent as given. An empty string is the operator saying this app has no
     // secret, and the server reads it that way.
     client_secret: clientSecret,
+    // Space separated, empty to ask for whatever the service publishes. An
+    // app the operator brought is the authority on what it may be granted.
+    scopes,
   })
 }

@@ -56,6 +56,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; shutdown_reserved : int
   ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
@@ -385,6 +386,7 @@ let project_discovery_inline
     ; no_pending = 0
     ; converged = 0
     ; claim_busy = 0
+    ; shutdown_reserved = 0
     ; projections = []
     ; failures = []
     ; discovery_error =
@@ -409,6 +411,8 @@ let project_discovery_inline
            { report with converged = report.converged + 1 }
          | Ok Claim_busy ->
            { report with claim_busy = report.claim_busy + 1 }
+         | Error (Owner_shutdown_reserved _) ->
+           { report with shutdown_reserved = report.shutdown_reserved + 1 }
          | Error error ->
            { report with
              failures = { keeper_name; error } :: report.failures
@@ -449,6 +453,7 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
         ; no_pending = 0
         ; converged = 0
         ; claim_busy = 0
+        ; shutdown_reserved = 0
         ; projections = []
         ; failures = []
         ; discovery_error = Some discovery_error

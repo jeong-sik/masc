@@ -1269,6 +1269,32 @@ let () =
               Alcotest.fail
                 (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
             | Ok _ -> Alcotest.fail "source recovery bypassed shutdown fence");
+           let budget =
+             match
+               Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:10
+             with
+             | Ok budget -> budget
+             | Error error ->
+               Alcotest.fail
+                 (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string
+                    error)
+           in
+           let report =
+             (with_strict_executor @@ fun () ->
+                Masc.Keeper_event_queue_recovery.project_discovered_bounded
+                  ~base_path
+                  ~budget
+                  ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+               .report
+           in
+           Alcotest.(check int)
+             "shutdown reservation is a typed deferral"
+             1
+             report.shutdown_reserved;
+           Alcotest.(check int)
+             "shutdown reservation is not a projection failure"
+             0
+             (List.length report.failures);
            Alcotest.(check bool)
              "shutdown-fenced recovery creates no target artifacts"
              false

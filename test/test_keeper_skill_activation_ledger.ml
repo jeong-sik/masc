@@ -226,6 +226,74 @@ let test_session_origins_roundtrip () =
      | _ -> fail "session origins did not survive durable roundtrip")
 ;;
 
+let test_delivery_and_later_action_form_one_exact_chain () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:0 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let delivered, matching_ids =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_result_ids:[ "unrelated"; "call-skill" ]
+        ~agent_core_turn:1
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check (list string) "one matching Skill result" [ "call-skill" ] matching_ids;
+  let activation =
+    match Ledger.activations delivered with
+    | [ activation ] -> activation
+    | _ -> fail "delivery changed activation cardinality"
+  in
+  (match activation.delivery with
+   | Some delivery -> check int "delivery round" 1 delivery.agent_core_turn
+   | None -> fail "matching provider input did not record delivery");
+  let with_action, added =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_tool_use_id:"call-action"
+        ~tool_name:"keeper_time_now"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:02Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "one Skill linked to the action" 1 added;
+  (match Ledger.activations with_action with
+   | [ { actions = [ action ]; _ } ] ->
+     check string "later action id" "call-action" action.tool_use_id;
+     check string "later action tool" "keeper_time_now" action.tool_name
+   | _ -> fail "later action was not attached to the exact Skill invocation");
+  let _, repeated =
+    match
+      Ledger.observe_action
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~active_skill_tool_use_ids:[ "call-skill" ]
+        ~action_tool_use_id:"call-action"
+        ~tool_name:"keeper_time_now"
+        ~agent_core_turn:1
+        ~observed_at:"2026-08-26T00:00:03Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "repeated action observation is idempotent" 0 repeated
+;;
+
 let test_corrupt_ledger_is_typed () =
   with_session @@ fun config trace_id session_dir ->
   let path = Filename.concat session_dir "skill-activations.json" in
@@ -457,6 +525,8 @@ let () =
             test_same_skill_different_invocations_are_distinct
         ; test_case "session origins survive durable roundtrip" `Quick
             test_session_origins_roundtrip
+        ; test_case "delivery and later action share one exact chain" `Quick
+            test_delivery_and_later_action_form_one_exact_chain
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
         ; test_case "copied ledger is bound to its trace" `Quick
             test_copied_ledger_is_rejected_by_session_identity

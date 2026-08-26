@@ -95,6 +95,38 @@ let record_composition ~config context ~invocation ~tool_name reference =
   record ~config context ~invocation ~body:"" ~origin reference
 ;;
 
+let observe_delivery ~config context ~tool_result_ids ~agent_core_turn =
+  Ledger.observe_delivery
+    ~config
+    ~trace_id:context.trace_id
+    ~turn_ref:context.turn_ref
+    ~tool_result_ids
+    ~agent_core_turn
+    ~delivered_at:(Masc_domain.now_iso ())
+  |> Result.map snd
+  |> Result.map_error (fun error -> Store_failed error)
+;;
+
+let observe_action
+      ~config
+      context
+      ~active_skill_tool_use_ids
+      ~invocation
+      ~tool_name
+  =
+  Ledger.observe_action
+    ~config
+    ~trace_id:context.trace_id
+    ~turn_ref:context.turn_ref
+    ~active_skill_tool_use_ids
+    ~action_tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+    ~tool_name
+    ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+    ~observed_at:(Masc_domain.now_iso ())
+  |> Result.map snd
+  |> Result.map_error (fun error -> Store_failed error)
+;;
+
 let error_code = function
   | Turn_scope_mismatch -> "turn_scope_mismatch"
   | Invalid_task_id _ -> "invalid_task_id"

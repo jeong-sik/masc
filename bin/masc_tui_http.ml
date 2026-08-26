@@ -984,9 +984,11 @@ let post_keeper_ask_answer ~(host : string) ~(port : int)
   post_json ~host ~port ~path:"/api/v1/keepers/ask-answer"
     ~body:(Yojson.Safe.to_string payload)
 
-(** Fetch /api/v1/board (post list). *)
-let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/board"
+(** Fetch /api/v1/board (post list) in the operator-selected server order. *)
+let fetch_board ~(host : string) ~(port : int)
+    ~(sort_by : string) : (Yojson.Safe.t, string) result =
+  get_json ~host ~port
+    ~path:("/api/v1/board?sort_by=" ^ sort_by)
 
 (** POST /api/v1/tools/masc_board_post. The draft follows the commit-message
     shape -- first line is the title, the rest is the body -- and the server

@@ -630,9 +630,10 @@ let load_schedules ~(host : string) ~(port : int) :
   | Ok json -> decode_schedule_snapshot json
 
 (** Load board post list from /api/v1/board *)
-let load_board_list ~(host : string) ~(port : int) :
+let load_board_list ~(host : string) ~(port : int)
+    ~(sort_by : string) :
     (board_post list, string) result =
-  match fetch_board ~host ~port with
+  match fetch_board ~host ~port ~sort_by with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
       let* posts = required_list_field json "posts" in

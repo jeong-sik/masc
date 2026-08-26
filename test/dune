@@ -3037,6 +3037,16 @@
  (modules test_tui_board_detail)
  (libraries alcotest masc_tui_board_detail))
 
+(test
+ (name test_tui_link)
+ (modules test_tui_link)
+ (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_planning_order)
+ (modules test_tui_planning_order)
+ (libraries alcotest masc.masc_goal masc_tui_types))
+
 (rule
  (alias runtest-test_tui_keyboard_input)
  (deps

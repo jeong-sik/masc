@@ -513,7 +513,35 @@ type planning_snapshot = Tui_decode.planning_snapshot
 }
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
-  goals
+  let phase_rank = function
+    | Goal_phase.Executing -> 0
+    | Goal_phase.Verifying -> 1
+    | Goal_phase.Completed -> 2
+    | Goal_phase.Dropped -> 3
+  in
+  (* The server already keeps equally-ranked goals newest first. Group the
+     lifecycle and priority here, but keep that useful recency ordering for
+     ties instead of inventing another timestamp contract in the TUI. *)
+  List.stable_sort
+    (fun left right ->
+       match Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase) with
+       | 0 -> Int.compare left.pg_priority right.pg_priority
+       | order -> order)
+    goals
+
+type board_sort =
+  | Board_hot
+  | Board_trending
+  | Board_recent
+  | Board_updated
+  | Board_discussed
+
+let board_sort_label = function
+  | Board_hot -> "hot"
+  | Board_trending -> "trending"
+  | Board_recent -> "recent"
+  | Board_updated -> "updated"
+  | Board_discussed -> "discussed"
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -997,9 +1025,14 @@ type state = {
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
   mutable board_cursor: int;
+  mutable board_sort: board_sort;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
+  (* Wide terminals normally keep the Board list beside the open post. [z]
+     lets the reader spend those columns on a long post or comment instead;
+     this is an explicit reading choice, so resizing must not reset it. *)
+  mutable board_detail_wide: bool;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -1505,9 +1538,11 @@ let create_state
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
   board_cursor = 0;
+  board_sort = Board_hot;
   board_scroll = 0;
   board_mode = Board_list;
   board_focus = Right_pane;
+  board_detail_wide = false;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;

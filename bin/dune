@@ -398,6 +398,12 @@
  (libraries base64))
 
 (library
+ (name masc_tui_link)
+ (wrapped false)
+ (modules masc_tui_link)
+ (libraries base64))
+
+(library
  (name masc_tui_terminal_probe)
  (wrapped false)
  (modules masc_tui_terminal_probe)
@@ -708,6 +714,7 @@
   masc_tui_keeper_config
   masc_tui_markdown
   masc_tui_graphics
+  masc_tui_link
   masc_tui_markdown_render_cache
   masc_tui_message_layout
   masc_tui_paste

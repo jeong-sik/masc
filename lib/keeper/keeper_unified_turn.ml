@@ -973,7 +973,27 @@ let run_keeper_cycle
                    Keeper_runtime_manifest.Event_bus_correlated
                in
                let degraded_retry_info = turn_state.degraded_retry_info in
-               let degraded_retry_applied = Option.is_some degraded_retry_info in
+               (* [degraded_retry_info] is seeded at [initial_turn_state] from the
+                  [deferred_runtime_lane] argument -- a hint a *previous* turn left
+                  behind -- and no path in this turn writes it. Its presence says a
+                  deferred lane is pending, not that a retry ran.
+
+                  Applied means this turn actually ran on the runtime the hint
+                  named. Presence alone reported "applied" on every turn carrying a
+                  hint, which is why fsm-hub.ts could never render its "retry
+                  queued" branch, and why an operator reading a receipt saw a retry
+                  that had not happened -- carrying a [fallback_reason] computed
+                  from the earlier turn's failure rather than this turn's. Observed
+                  2026-08-27 on a taskmaster receipt whose own error was an invalid
+                  request while the reason read rate_limit.
+
+                  The comparison lives in [Keeper_unified_turn_types] so it can be
+                  exercised without standing up a keeper cycle. *)
+               let degraded_retry_applied =
+                 degraded_retry_applied_for_turn
+                   ~degraded_retry_info
+                   ~last_execution:turn_state.last_execution
+               in
                let degraded_retry_runtime =
                  Option.map
                    (fun (retry : EC.degraded_retry) -> retry.next_runtime)

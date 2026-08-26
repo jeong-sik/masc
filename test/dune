@@ -253,6 +253,7 @@
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
+  test_keeper_degraded_retry_applied
   test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
@@ -599,6 +600,7 @@
   test_keeper_provider_call_deadline
   test_keeper_failed_selection_disposition
   test_keeper_cycle_failed_runtime_attribution
+  test_keeper_degraded_retry_applied
   test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes

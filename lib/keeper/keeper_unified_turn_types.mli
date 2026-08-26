@@ -54,6 +54,23 @@ val keeper_cycle_failed_runtime_attribution :
   execution_runtime_id:string ->
   keeper_cycle_failed_runtime_attribution
 
+val degraded_retry_applied_for_turn :
+  degraded_retry_info:Keeper_error_classify.degraded_retry option ->
+  last_execution:Keeper_turn_runtime_budget.runtime_execution option ->
+  bool
+(** Whether the deferred lane a previous turn hinted at is the lane this turn
+    actually ran on.
+
+    [turn_state.degraded_retry_info] is seeded at [initial_turn_state] from the
+    [deferred_runtime_lane] argument and nothing writes it afterwards, so its
+    presence means a deferred lane is pending — not that a retry ran. Reporting
+    presence as "applied" told an operator a retry had happened on turns where
+    none had, and attached a [fallback_reason] derived from the earlier turn's
+    failure to this turn's receipt.
+
+    Returns [false] when no execution was recorded: nothing ran, so nothing was
+    applied. *)
+
 val turn_event_bus_manifest_decision :
   Keeper_turn_runtime_budget.turn_event_bus_summary -> Yojson.Safe.t
 

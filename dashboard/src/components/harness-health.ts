@@ -2,6 +2,9 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
+// The goal tree is already loaded for the goals screen; the aim shown beside a
+// verdict is read from it rather than fetched again here.
+import { goalTreeData } from '../goal-tree-state'
 import { formatPct1 } from '../lib/format-number'
 import { formatTimestampKo } from '../lib/format-time'
 import { assertExhaustive } from '../lib/exhaustive'
@@ -32,6 +35,7 @@ import {
   RailHeader,
   GateChart,
   RecentVerdictsList,
+  goalsByTaskFromTree,
   PreCompactList,
   HandoffList,
 } from './harness-health-sections'
@@ -393,7 +397,10 @@ export function HarnessHealth() {
 
             <div>
               <div class="mb-2 text-xs uppercase tracking-wider text-[var(--color-fg-disabled)]">최근 판정</div>
-              <${RecentVerdictsList} items=${data.recent_verdicts} />
+              <${RecentVerdictsList}
+                items=${data.recent_verdicts}
+                goalsByTask=${goalsByTaskFromTree(goalTreeData.value?.tree)}
+              />
             </div>
           </div>
         `}

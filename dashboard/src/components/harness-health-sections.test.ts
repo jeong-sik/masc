@@ -19,6 +19,8 @@ import {
   EmptySignal,
   HeroRailCard,
   GateChart,
+  verdictAim,
+  goalsByTaskFromTree,
 } from './harness-health-sections'
 import type {
   HarnessHealthData,
@@ -606,5 +608,82 @@ describe('harness section components render v2 lab markers', () => {
   it('GateChart rows wear v2-lab-row', () => {
     render(html`<${GateChart} distribution=${{ a: 1, b: 2 }} />`, container)
     expect(container.querySelector('.v2-lab-row')).not.toBeNull()
+  })
+})
+
+describe('verdictAim', () => {
+  const goals = new Map([
+    ['task-1', { title: 'raise SSIM to 0.95', metric: 'SSIM', target_value: '0.95' }],
+    ['task-2', { title: 'ship the migration', metric: null, target_value: null }],
+    ['task-3', { title: 'cut p95', metric: 'p95', target_value: null }],
+    ['task-4', { title: 'hit the number', metric: null, target_value: '12' }],
+  ])
+
+  it('reads the metric and the target the goal declared', () => {
+    expect(verdictAim('task-1', goals)).toBe('raise SSIM to 0.95 · SSIM → 0.95')
+  })
+
+  it('still answers when the goal declared no metric', () => {
+    // The title is what the task is for, metric or not. Saying nothing would
+    // hide a link that exists.
+    expect(verdictAim('task-2', goals)).toBe('ship the migration')
+  })
+
+  it('takes whichever half the goal declared', () => {
+    expect(verdictAim('task-3', goals)).toBe('cut p95 · p95')
+    expect(verdictAim('task-4', goals)).toBe('hit the number · 목표 12')
+  })
+
+  it('says nothing when the chain has nothing to say', () => {
+    // A verdict with no task, a task linked to no goal, and goals that have
+    // not loaded are all "draw nothing" -- never an empty label.
+    expect(verdictAim(null, goals)).toBeNull()
+    expect(verdictAim('', goals)).toBeNull()
+    expect(verdictAim('task-unlinked', goals)).toBeNull()
+    expect(verdictAim('task-1', new Map())).toBeNull()
+  })
+})
+
+describe('goalsByTaskFromTree', () => {
+  it('finds tasks at any depth, carrying the goal that owns them', () => {
+    const tree = [
+      {
+        id: 'g-1',
+        title: 'top goal',
+        metric: 'SSIM',
+        target_value: '0.95',
+        tasks: [{ id: 'task-a' }],
+        children: [
+          {
+            id: 'g-2',
+            title: 'nested goal',
+            metric: 'p95',
+            target_value: null,
+            tasks: [{ id: 'task-b' }],
+            children: [],
+          },
+        ],
+      },
+    ]
+    const map = goalsByTaskFromTree(tree)
+    expect(map.get('task-a')).toEqual({ title: 'top goal', metric: 'SSIM', target_value: '0.95' })
+    expect(map.get('task-b')).toEqual({ title: 'nested goal', metric: 'p95', target_value: null })
+    expect(map.size).toBe(2)
+  })
+
+  it('keeps the first goal a task is met under', () => {
+    // A task under two goals would otherwise flip depending on walk order,
+    // and a card that changed its aim between renders is worse than one aim.
+    const tree = [
+      { id: 'g-1', title: 'first', tasks: [{ id: 'shared' }], children: [] },
+      { id: 'g-2', title: 'second', tasks: [{ id: 'shared' }], children: [] },
+    ]
+    expect(goalsByTaskFromTree(tree).get('shared')?.title).toBe('first')
+  })
+
+  it('answers empty for a tree that has not loaded', () => {
+    expect(goalsByTaskFromTree(null).size).toBe(0)
+    expect(goalsByTaskFromTree(undefined).size).toBe(0)
+    expect(goalsByTaskFromTree([]).size).toBe(0)
   })
 })

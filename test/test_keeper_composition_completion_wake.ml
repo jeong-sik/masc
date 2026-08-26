@@ -291,6 +291,78 @@ let the_result_survives_a_round_trip () =
     ]
 ;;
 
+(* A composition result is read before the Board backlog it landed behind.
+
+   [pending_entries] is urgency-sorted and stable, so an entry at [Normal]
+   queues after every [Normal] already there — and Board attention stimuli are
+   [Normal]. Measured on the live fleet, one Keeper held 151 of them; at
+   [Normal] this wake would be read on the 152nd turn, which is slower than
+   the polling it replaces. [Immediate] is the same urgency [Hitl_resolved]
+   uses, for the same reason: an answer to something this Keeper asked for is
+   not the same kind of event as somebody else posting to the Board. *)
+let a_result_is_read_before_the_board_backlog () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    let base_path = config.Workspace.base_path in
+    let board_post index : Event_queue.stimulus =
+      { post_id = Printf.sprintf "p-board-%d" index
+      ; urgency = Event_queue.Normal
+      ; arrived_at = 100.0 +. float_of_int index
+      ; payload =
+          Event_queue.Board_signal
+            { kind = Event_queue.Post_created
+            ; author = "somebody-else"
+            ; title = "a post this Keeper did not ask for"
+            ; content = ""
+            ; hearth = None
+            ; updated_at = Some (100.0 +. float_of_int index)
+            }
+      }
+    in
+    let completion =
+      { Event_queue.cc_request_id = request_id
+      ; cc_tool = composition_tool
+      ; cc_terminal = Event_queue.Composition_succeeded
+      }
+    in
+    (* Every Board entry arrives first, so arrival order alone would put the
+       result last. *)
+    let queue =
+      List.fold_left
+        Event_queue.enqueue
+        Event_queue.empty
+        (List.init 8 board_post
+         @ [ { Event_queue.post_id =
+                 Event_queue.composition_completion_post_id completion
+             ; urgency = Event_queue.Immediate
+             ; arrived_at = 900.0
+             ; payload = Event_queue.Composition_completed completion
+             }
+           ])
+    in
+    Keeper_event_queue_persistence.persist ~base_path ~keeper_name:submitter queue;
+    match
+      Keeper_event_queue_persistence.load_state_result ~base_path ~keeper_name:submitter
+    with
+    | Error detail -> fail ("queue state load failed: " ^ detail)
+    | Ok state ->
+      (match Keeper_event_queue_state.select_when ~ready:(fun _ -> true) state with
+       | None -> fail "nothing was selectable"
+       | Some entry ->
+         (match entry.Keeper_event_queue_state.source.payload with
+          | Event_queue.Composition_completed picked ->
+            check
+              string
+              "the result is selected ahead of eight earlier Board entries"
+              request_id
+              picked.Event_queue.cc_request_id
+          | Event_queue.Board_signal _ ->
+            fail
+              "the result queued behind the Board backlog; at Normal urgency it \
+               would be read only after every Board entry ahead of it"
+          | _ -> fail "an unexpected payload was selected")))
+;;
+
 (* Which settled statuses wake the submitter. A status the broker can reach
    and this does not announce is a silent drop — the exact failure this module
    exists to end — so every one is named. *)
@@ -394,6 +466,10 @@ let () =
             the_prompt_row_says_what_settled
         ; test_case "the result survives a round trip" `Quick
             the_result_survives_a_round_trip
+        ] )
+    ; ( "ordering"
+      , [ test_case "a result is read before the Board backlog" `Quick
+            a_result_is_read_before_the_board_backlog
         ] )
     ; ( "settlement"
       , [ test_case "every settled status is announced" `Quick

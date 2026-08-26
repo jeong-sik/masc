@@ -25,7 +25,21 @@ let deliver ~base_path ~keeper_name ~request_id ~composition_tool ~terminal =
   let stimulus : Keeper_event_queue.stimulus =
     { Keeper_event_queue.post_id =
         Keeper_event_queue.composition_completion_post_id completion
-    ; urgency = Keeper_event_queue.Normal
+      (* [pending_entries] is urgency-sorted and stable, so [Normal] would put
+         this behind every Board stimulus already queued. Measured on the live
+         fleet: a Keeper with 151 pending would read its own result 151 turns
+         after it landed, which is worse than the polling this replaces.
+
+         [Immediate] is what [Hitl_resolved] uses, and for the same reason: an
+         answer to something this Keeper asked for is not the same kind of
+         event as somebody else posting to the Board. A Board post can be read
+         later; work the Keeper started and is counting on cannot.
+
+         [Fusion_completed] and [Delegate_completed] are still [Normal] and
+         have the same argument for moving. Not changed here — each is its own
+         call, and one of them wakes a different Keeper than the one that
+         asked. *)
+    ; urgency = Keeper_event_queue.Immediate
     ; arrived_at = Time_compat.now ()
     ; payload = Keeper_event_queue.Composition_completed completion
     }

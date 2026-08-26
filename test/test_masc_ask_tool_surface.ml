@@ -50,26 +50,35 @@ let every_dispatched_operation_has_a_schema () =
       Alcotest.(check string) ("schema for " ^ name) name schema.Masc_domain.name)
     Tool_schemas_misc.mcp_runtime_operations
 
-(* A live Keeper reaches its own tools under the agent alias its runtime was
-   spawned with, not under the bare name the registry holds. Measured against
-   a running server on 2026-08-26: every unit test passed while a real
-   taskmaster keeper was refused with "keeper-taskmaster-agent is not a
-   registered keeper", because the tool read the alias straight through. The
-   guard is right; the name it was handed was not. *)
-let the_agent_alias_resolves_to_the_registered_name () =
-  Alcotest.(check (option string))
-    "the alias a Keeper runtime spawns under" (Some "taskmaster")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper-taskmaster-agent");
-  Alcotest.(check (option string))
-    "underscore spelling" (Some "taskmaster")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper_taskmaster_agent")
+(* Who is asking.
 
-let a_bare_name_is_left_alone () =
-  (* An operator and these tests call under the registry name itself. It is
-     not an alias, so it must pass through rather than resolve to nothing. *)
-  Alcotest.(check (option string))
-    "not an alias" None
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "taskmaster")
+   Measured against a running server on 2026-08-26: every unit test passed
+   while a real taskmaster keeper was refused with "keeper-taskmaster-agent is
+   not a registered keeper". The guard was right; the name it was handed was
+   not. These call [asking_keeper_name] itself, so a resolver that stops
+   recognising a spelling fails here rather than in front of an operator. *)
+let resolves = Masc.Mcp_tool_runtime_ask.asking_keeper_name
+
+let the_spellings_a_keeper_runtime_spawns_under () =
+  Alcotest.(check string) "the canonical agent alias" "taskmaster"
+    (resolves "keeper-taskmaster-agent");
+  Alcotest.(check string) "underscore spelling" "taskmaster"
+    (resolves "keeper_taskmaster_agent");
+  Alcotest.(check string) "the bare prefix form" "taskmaster"
+    (resolves "keeper-taskmaster")
+
+let the_registry_name_passes_through () =
+  (* An operator and these tests call under the registry name itself. It has
+     to survive the resolver unchanged, or answering would break for everyone
+     who is not a Keeper runtime. *)
+  Alcotest.(check string) "unchanged" "taskmaster" (resolves "taskmaster")
+
+let a_name_no_canonicaliser_knows_is_left_alone () =
+  (* Left alone on purpose: the registry check downstream is what refuses a
+     caller that is not a Keeper, and it can only say so if it is handed the
+     name the caller actually used. *)
+  Alcotest.(check string) "an ordinary client name" "codex-mcp-client"
+    (resolves "codex-mcp-client")
 
 let () =
   Alcotest.run "masc_ask tool surface"
@@ -89,8 +98,11 @@ let () =
         ] );
       ( "who is asking",
         [
-          Alcotest.test_case "the agent alias resolves to the registered name" `Quick
-            the_agent_alias_resolves_to_the_registered_name;
-          Alcotest.test_case "a bare name is left alone" `Quick a_bare_name_is_left_alone;
+          Alcotest.test_case "the spellings a Keeper runtime spawns under" `Quick
+            the_spellings_a_keeper_runtime_spawns_under;
+          Alcotest.test_case "the registry name passes through" `Quick
+            the_registry_name_passes_through;
+          Alcotest.test_case "a name no canonicaliser knows is left alone" `Quick
+            a_name_no_canonicaliser_knows_is_left_alone;
         ] );
     ]

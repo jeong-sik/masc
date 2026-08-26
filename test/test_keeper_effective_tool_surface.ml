@@ -25,22 +25,22 @@ value = {}
     name name execution
 ;;
 
-let instruction_skill name =
+let instruction_skill ?(description = "Read these instructions before working.") name =
   Printf.sprintf
     {|---
 name: %s
-description: Read these instructions before working.
+description: %s
 ---
 
 Use the repository's focused validation wrapper.
 |}
-    name
+    name description
 ;;
 
-let skill_catalog () =
+let skill_catalog_with_description description =
   match
     Keeper_skill_catalog.of_documents
-      [ "guide", instruction_skill "guide"
+      [ "guide", instruction_skill ~description "guide"
       ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
       ]
   with
@@ -50,13 +50,17 @@ let skill_catalog () =
       (Keeper_skill_catalog.error_to_string error)
 ;;
 
+let skill_catalog () =
+  skill_catalog_with_description "Read these instructions before working."
+;;
+
 let names (surface : Keeper_effective_tool_surface.t) =
   surface.tools
   |> List.map (fun (tool : Keeper_effective_tool_surface.tool) -> tool.name)
   |> List.sort String.compare
 ;;
 
-let project ~tool_groups ~task_skill_names ~native_posture =
+let project ?(catalog = skill_catalog ()) ~tool_groups ~task_skill_names ~native_posture =
   Keeper_effective_tool_surface.For_testing.project
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
@@ -65,7 +69,7 @@ let project ~tool_groups ~task_skill_names ~native_posture =
     ~tool_groups
     ~current_task_id:(Some "task-001")
     ~task_skill_names
-    ~skill_catalog:(skill_catalog ())
+    ~skill_catalog:catalog
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
@@ -104,7 +108,24 @@ let test_projection_names_equal_turn_surface_authority () =
             | _ -> false)
          surface.tools);
     check bool "official client digest exists" true
-      (Option.is_some surface.tool_surface_sha256)
+      (Option.is_some surface.tool_surface_sha256);
+    let instruction_entries =
+      Keeper_skill_catalog.instruction_entries (skill_catalog ())
+    in
+    let schema_tool =
+      Keeper_tool_composition_surface.schema_tools
+        ~instruction_skills:instruction_entries
+        ()
+      |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
+        String.equal tool.schema.name "keeper_skill")
+    in
+    (match schema_tool with
+     | None -> fail "schema-only surface omitted keeper_skill"
+     | Some tool ->
+       check string "projection carries the exact Available list"
+         (Keeper_tool_composition_surface.For_testing.instruction_skill_description
+            instruction_entries)
+         tool.schema.description)
 ;;
 
 let test_two_surfaces_have_different_names_and_digests () =
@@ -129,7 +150,7 @@ let test_two_surfaces_have_different_names_and_digests () =
   | Error (_, detail), _ | _, Error (_, detail) -> fail detail
 ;;
 
-let test_instruction_skill_without_read_fails_closed () =
+let test_instruction_skill_without_read_is_admitted () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   match
     project
@@ -137,9 +158,28 @@ let test_instruction_skill_without_read_fails_closed () =
       ~task_skill_names:[ "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
   with
-  | Error (reason, _) ->
-    check string "typed conflict" "instruction_skill_unreadable" reason
-  | Ok _ -> fail "instruction skill was projected without Read"
+  | Error (_, detail) -> fail detail
+  | Ok surface ->
+    check (list string) "instruction name is admitted" [ "guide" ]
+      surface.instruction_skills;
+    check bool "dedicated reader is present" true
+      (List.exists (String.equal "keeper_skill") (names surface))
+;;
+
+let test_instruction_description_changes_digest () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let project_description description =
+    project
+      ~catalog:(skill_catalog_with_description description)
+      ~tool_groups:None
+      ~task_skill_names:[ "guide" ]
+      ~native_posture:Runtime_native_tools.Native_read
+  in
+  match project_description "first contract", project_description "second contract" with
+  | Ok left, Ok right ->
+    check bool "instruction description participates in digest" true
+      (left.tool_surface_sha256 <> right.tool_surface_sha256)
+  | Error (_, detail), _ | _, Error (_, detail) -> fail detail
 ;;
 
 let rec remove_tree path =
@@ -151,7 +191,7 @@ let rec remove_tree path =
   else Sys.remove path
 ;;
 
-let test_turn_admission_rechecks_instruction_readability () =
+let test_turn_admission_uses_dedicated_instruction_reader () =
   let base = Filename.temp_file "keeper-skill-admission-" "" in
   Sys.remove base;
   Unix.mkdir base 0o755;
@@ -197,12 +237,8 @@ let test_turn_admission_rechecks_instruction_readability () =
            ~meta
            ~skill_catalog:(skill_catalog ())
        with
-       | Error error ->
-         check bool "turn admission names Read conflict" true
-           (String_util.contains_substring
-              (Agent_core.Error.to_string error)
-              "model-visible Read tool")
-       | Ok () -> fail "turn admission accepted an unreadable instruction skill")
+       | Ok () -> ()
+       | Error error -> fail (Agent_core.Error.to_string error))
 ;;
 
 (* task-364: a keeper holding task A (current) that claims task B, which
@@ -266,15 +302,23 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
        in
        (match
           Keeper_run_tools_setup.validate_held_task_skill_admission
-            ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_catalog:(skill_catalog ())
+            ~config
+            ~meta:(meta ~tool_groups:(Some [ "board" ]))
+            ~skill_catalog:Keeper_skill_catalog.empty
         with
+        | Ok () -> fail "held task's missing skill was not inspected"
         | Error error ->
           let rendered = Agent_core.Error.to_string error in
           check bool "the held task, not the current one, is named" true
             (String_util.contains_substring rendered task_b);
-          check bool "Read conflict" true
-            (String_util.contains_substring rendered "model-visible Read tool")
-        | Ok () -> fail "held task's instruction skill was admitted without Read");
+          check bool "the held skill is named" true
+            (String_util.contains_substring rendered "guide"));
+       (match
+          Keeper_run_tools_setup.validate_held_task_skill_admission
+            ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_catalog:(skill_catalog ())
+        with
+        | Ok () -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
        match
          Keeper_run_tools_setup.validate_held_task_skill_admission
            ~config ~meta:(meta ~tool_groups:None) ~skill_catalog:(skill_catalog ())
@@ -291,10 +335,12 @@ let () =
             test_projection_names_equal_turn_surface_authority
         ; test_case "different Keeper declarations change names and digest" `Quick
             test_two_surfaces_have_different_names_and_digests
-        ; test_case "instruction skill requires Read" `Quick
-            test_instruction_skill_without_read_fails_closed
-        ; test_case "turn admission rechecks Read" `Quick
-            test_turn_admission_rechecks_instruction_readability
+        ; test_case "instruction skill does not require Read" `Quick
+            test_instruction_skill_without_read_is_admitted
+        ; test_case "instruction description changes digest" `Quick
+            test_instruction_description_changes_digest
+        ; test_case "turn admission uses dedicated instruction reader" `Quick
+            test_turn_admission_uses_dedicated_instruction_reader
         ; test_case "turn admission covers held tasks beyond the current one" `Quick
             test_turn_admission_covers_held_tasks_beyond_current
         ] )

@@ -79,39 +79,20 @@ let composition_rows skill_catalog =
   Keeper_tool_composition_surface.schema_tools
     ~skill_composition_entries:
       (Keeper_skill_catalog.composition_entries skill_catalog)
-    ~include_instruction_skill:
-      (Keeper_skill_catalog.has_instruction_skill skill_catalog)
+    ~instruction_skills:(Keeper_skill_catalog.instruction_entries skill_catalog)
     ()
   |> List.map (fun (schema_tool : Agent_core.Tool.t) ->
     let name = schema_tool.schema.name in
     { name; origin = composition_origin name }, schema_tool)
 ;;
 
-let validate_task_skills ~task_skill_names ~skill_catalog ~model_tool_names =
-  let rec loop instruction = function
-    | [] -> Ok (List.rev instruction)
-    | name :: rest ->
-      (match Keeper_skill_catalog.find skill_catalog name with
-       | None ->
-         Error
-           ( "declared_skill_missing"
-           , Printf.sprintf "current task declares missing skill %S" name )
-       | Some skill ->
-         (match skill.surface with
-          | Keeper_skill_catalog.Composition _ -> loop instruction rest
-          | Keeper_skill_catalog.Instruction -> loop (name :: instruction) rest))
-  in
-  match loop [] task_skill_names with
-  | Error _ as error -> error
-  | Ok instruction_skills ->
-    if instruction_skills <> [] && not (List.mem "Read" model_tool_names)
-    then
-      Error
-        ( "instruction_skill_unreadable"
-        , Printf.sprintf
-            "instruction skills [%s] require the model-visible Read tool"
-            (String.concat ", " instruction_skills) )
-    else Ok instruction_skills
+let validate_task_skills ~task_skill_names ~skill_catalog =
+  match Keeper_skill_catalog.instruction_names_for skill_catalog task_skill_names with
+  | Ok instruction_skills -> Ok instruction_skills
+  | Error (Keeper_skill_catalog.Missing_named_skill { name }) ->
+    Error
+      ( "declared_skill_missing"
+      , Printf.sprintf "current task declares missing skill %S" name )
 ;;
 
 let project
@@ -131,10 +112,7 @@ let project
   let rows = descriptor_rows descriptors @ composition_rows skill_catalog in
   let tools = List.map fst rows in
   let schema_tools = List.map snd rows in
-  let model_tool_names = List.map (fun row -> row.name) tools in
-  match
-    validate_task_skills ~task_skill_names ~skill_catalog ~model_tool_names
-  with
+  match validate_task_skills ~task_skill_names ~skill_catalog with
   | Error _ as error -> error
   | Ok instruction_skills ->
     let composition_skills =

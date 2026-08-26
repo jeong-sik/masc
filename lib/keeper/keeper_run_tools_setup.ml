@@ -201,7 +201,7 @@ let expected_model_tool_names ~skill_catalog ~identity_tool_names
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
   let instruction_skill_names =
-    if Keeper_skill_catalog.has_instruction_skill skill_catalog
+    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
@@ -233,47 +233,16 @@ let expected_model_tool_names ~skill_catalog ~identity_tool_names
          @ identity_tool_names))
 ;;
 
-(* One task's declared skills against the catalog and the tool surface:
-   every name must be a skill, and a task that names an instruction skill
-   needs the model-visible Read tool so the body can be read. *)
-let validate_task_skills
-      ~(meta : Keeper_meta_contract.keeper_meta)
-      ~skill_catalog
-      ~task_id
-      (skills : string list)
-  =
-  let rec instruction_skills acc = function
-    | [] -> Ok (List.rev acc)
-    | name :: rest ->
-      (match Keeper_skill_catalog.find skill_catalog name with
-       | None ->
-         Error
-           (skill_catalog_config_error
-              (Printf.sprintf "task %s declares missing skill %S" task_id name))
-       | Some skill ->
-         (match skill.surface with
-          | Keeper_skill_catalog.Instruction -> instruction_skills (name :: acc) rest
-          | Keeper_skill_catalog.Composition _ -> instruction_skills acc rest))
-  in
-  match instruction_skills [] skills with
-  | Error _ as error -> error
-  | Ok [] -> Ok ()
-  | Ok names ->
-    let surface = Keeper_tool_descriptor.tool_groups_to_surface meta.tool_groups in
-    let has_read =
-      Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
-      |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-      |> List.mem "Read"
-    in
-    if has_read
-    then Ok ()
-    else
-      Error
-        (skill_catalog_config_error
-           (Printf.sprintf
-              "task %s instruction skills [%s] require the model-visible Read tool"
-              task_id
-              (String.concat ", " names)))
+(* One task's declared skill names against the catalog. Instruction bodies are
+   served by [keeper_skill], so admitting them no longer depends on whether
+   the Keeper's unrelated filesystem surface happens to include [Read]. *)
+let validate_task_skills ~skill_catalog ~task_id (skills : string list) =
+  match Keeper_skill_catalog.instruction_names_for skill_catalog skills with
+  | Ok _ -> Ok ()
+  | Error (Keeper_skill_catalog.Missing_named_skill { name }) ->
+    Error
+      (skill_catalog_config_error
+         (Printf.sprintf "task %s declares missing skill %S" task_id name))
 ;;
 
 (* The skills a turn admits are the ones every held task names: the current
@@ -314,7 +283,7 @@ let validate_held_task_skill_admission
       (fun acc (task_id, skills) ->
          match acc with
          | Error _ -> acc
-         | Ok () -> validate_task_skills ~meta ~skill_catalog ~task_id skills)
+         | Ok () -> validate_task_skills ~skill_catalog ~task_id skills)
       (Ok ())
       (current @ held)
 ;;

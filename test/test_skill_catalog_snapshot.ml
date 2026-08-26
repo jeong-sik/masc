@@ -348,6 +348,27 @@ let test_package_id_is_one_path_segment () =
   check bool "separator rejected" true (Result.is_error (Snapshot.package_id_of_directory "a/b"))
 ;;
 
+let test_unreadable_invalid_package_keeps_typed_rejection () =
+  let config =
+    parse_config (config_text (source_row ~id:"only" ~path:"skills"))
+  in
+  let unreadable =
+    Snapshot.Candidate_unreadable
+      { directory = ".."; path = "/workspace/skills/../SKILL.md"; detail = "denied" }
+  in
+  let snapshot =
+    configured_snapshot
+      ~config
+      (scans ~base_path:"/workspace" config [ [ unreadable ] ])
+  in
+  match Snapshot.rejections snapshot with
+  | [ { Snapshot.package_id = None
+      ; reason = Invalid_package_id Parent_directory_package_id
+      ; _
+      } ] -> ()
+  | _ -> fail "unreadable invalid package did not preserve its typed rejection"
+;;
+
 let () =
   run
     "skill_catalog_snapshot"
@@ -369,6 +390,8 @@ let () =
         ; test_case "absolute path redaction" `Quick
             test_public_projection_redacts_absolute_config_path
         ; test_case "package id" `Quick test_package_id_is_one_path_segment
+        ; test_case "unreadable invalid package" `Quick
+            test_unreadable_invalid_package_keeps_typed_rejection
         ] )
     ]
 ;;

@@ -114,6 +114,15 @@ val tool_rows : Masc_tui_keeper_chat_transcript.tool_block -> string list
 (** The current full-detail rows for a typed history block. This delegates to
     the shared projector; it does not own another formatter. *)
 
+type attachment_note =
+  { att_name : string
+  ; att_mime : string
+  ; att_bytes : int
+  }
+(** A file the row carries, named but not held: the bytes stay in the store.
+    The pane's job is to say one is there, which it could not do while this
+    reader ignored the field the composer has been writing all along. *)
+
 type row =
   { at : float  (** The server's [ts], the sort key. *)
   ; turn_id : string option
@@ -124,6 +133,9 @@ type row =
   ; text : string
       (** What to draw. Empty for [Tool_calls] and [Reasoning], whose typed
           block or lines carry the content. *)
+  ; attachments : attachment_note list
+      (** Files this row carries. Empty for every kind but a message that
+          arrived with one. *)
   }
 
 type decoded =

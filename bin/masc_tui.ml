@@ -3278,6 +3278,31 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
         "--:--:--"
     | _ -> clock_text_of_unix row.Keeper_chat_history.at
   in
+  (* A file the row carries, said on a line of its own under the words. The
+     store has held these since the composer learned to stage one; the pane
+     never looked, so a message that arrived with a 70 KB image read as the
+     sentence beside it and nothing else.
+
+     Named, not drawn: the bytes stay where they are and [Ctrl-O] opens a path
+     the conversation mentions. What the reader needs here is to know a file
+     is there at all. *)
+  let text =
+    match row.Keeper_chat_history.attachments with
+    | [] -> text
+    | notes ->
+      let note (n : Keeper_chat_history.attachment_note) =
+        Printf.sprintf "\xe2\x8e\x98 %s%s%s"
+          n.Keeper_chat_history.att_name
+          (if n.Keeper_chat_history.att_bytes > 0 then
+             Printf.sprintf " \xc2\xb7 %s"
+               (Masc_tui_context_inspector.format_bytes
+                  n.Keeper_chat_history.att_bytes)
+           else "")
+          (if n.Keeper_chat_history.att_mime = "" then ""
+           else " \xc2\xb7 " ^ n.Keeper_chat_history.att_mime)
+      in
+      String.concat "\n" (text :: List.map note notes)
+  in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text
   ; me_tool_block = tool_block

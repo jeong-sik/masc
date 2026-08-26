@@ -34,6 +34,21 @@ val record_composition :
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 
+val observe_delivery :
+  config:Workspace.config ->
+  t ->
+  tool_result_ids:string list ->
+  agent_core_turn:int ->
+  (string list, error) result
+
+val observe_action :
+  config:Workspace.config ->
+  t ->
+  active_skill_tool_use_ids:string list ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  tool_name:string ->
+  (int, error) result
+
 val error_code : error -> string
 val error_to_string : error -> string
 val error_to_yojson : error -> Yojson.Safe.t

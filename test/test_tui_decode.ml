@@ -1662,6 +1662,8 @@ let skill_activation_json ?(origin = `Assoc [ "kind", `String "session_instructi
            ; "agent_core_turn", `Int 0
            ; "body_bytes", `Int 12
            ; "body_sha256", `String (String.make 64 'c')
+           ; "delivery", `Null
+           ; "actions", `List []
            ; "activated_at", `String "2026-08-26T10:30:00Z"
            ; "origin", origin
            ])

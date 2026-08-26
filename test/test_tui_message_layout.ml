@@ -1083,8 +1083,9 @@ let test_inline_margin_carries_clock_and_speaker () =
 let inline_rows ~terminal_cols source =
   let inner_width = Frame.inner_width ~cols:terminal_cols in
   let role =
-    Layout.align_role_label ~column:Layout.chat_role_label_column
-      ~style:Layout.Keeper source
+    (* The column is [align_role_label]'s own default, so it is left to it:
+       spelling it here needed the constant exported, and it is not. *)
+    Layout.align_role_label ~style:Layout.Keeper source
   in
   let rows =
     Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width ~height:20
@@ -1144,8 +1145,9 @@ let test_a_narrow_inline_margin_keeps_the_source () =
    width. *)
 let test_normal_inline_margin_bytes_stay_stable () =
   let role =
-    Layout.align_role_label ~column:Layout.chat_role_label_column
-      ~style:Layout.Keeper "keeper.one"
+    (* The column is [align_role_label]'s own default, so it is left to it:
+       spelling it here needed the constant exported, and it is not. *)
+    Layout.align_role_label ~style:Layout.Keeper "keeper.one"
   in
   let entries =
     [ entry ~timestamp:"12:34:56" Layout.Keeper role "tui-..bbbbbbbb" "first"

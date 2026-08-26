@@ -130,6 +130,21 @@ let require_list ~ctx ~field json =
         (Printf.sprintf "%s.%s must be array, got %s: %s" ctx field
            (Json_util.kind_name raw) (Json_util.excerpt raw))
 
+let reject_unknown_fields ~ctx ~allowed = function
+  | `Assoc fields -> (
+    match
+      List.find_opt
+        (fun (field, _) -> not (List.mem field allowed))
+        fields
+    with
+    | None -> Ok ()
+    | Some (field, _) ->
+      Error (Printf.sprintf "%s.%s is not a supported field" ctx field) )
+  | json ->
+    Error
+      (Printf.sprintf "%s must be object, got %s: %s" ctx
+         (Json_util.kind_name json) (Json_util.excerpt json))
+
 let endpoint_kind_of_string = function
   | "openai_compat" -> Ok Openai_compat
   | "elevenlabs_direct" -> Ok Elevenlabs_direct
@@ -147,8 +162,21 @@ let string_of_endpoint_kind = function
 
 let parse_endpoint ~ctx json =
   let open Result in
-  (* Read compatibility only: old deployments may still carry the removed
-     field.  It has no runtime meaning and is never projected back out. *)
+  let* () =
+    reject_unknown_fields ~ctx
+      ~allowed:
+        [ "id"
+        ; "kind"
+        ; "base_url"
+        ; "mcp_url"
+        ; "health_url"
+        ; "api_key_env"
+        ; "enabled"
+        ; "timeout_seconds"
+        ; "default_voice"
+        ]
+      json
+  in
   let* id = require_string ~ctx ~field:"id" json in
   let* kind_raw = require_string ~ctx ~field:"kind" json in
   let* kind = endpoint_kind_of_string kind_raw in

@@ -148,14 +148,17 @@ let test_session_empty_endpoints_ok () =
   | Error err ->
     fail (Printf.sprintf "expected Ok, got Error: %s" err)
 
-let test_removed_max_retries_is_ignored_on_read () =
+let test_unknown_endpoint_field_is_rejected () =
   let endpoints =
     {|[{"id":"session","kind":"voice_mcp","mcp_url":"http://localhost/mcp","max_retries":2}]|}
   in
   match parse (minimal_config_json ~session_endpoints:endpoints) with
-  | Ok config ->
-    check int "legacy endpoint remains available" 1 (List.length config.session.endpoints)
-  | Error message -> fail ("legacy max_retries field broke config loading: " ^ message)
+  | Ok _ -> fail "expected unknown endpoint field to be rejected"
+  | Error message ->
+    check bool "unknown field is named" true
+      (String_util.string_contains_substring
+         ~needle:"session.endpoints[0].max_retries is not a supported field"
+         message)
 
 let test_session_with_endpoint_ok () =
   let session_ep =
@@ -325,8 +328,8 @@ let () =
         [
           test_case "empty session endpoints parses ok"
             `Quick test_session_empty_endpoints_ok;
-          test_case "removed max_retries is ignored on read"
-            `Quick test_removed_max_retries_is_ignored_on_read;
+          test_case "unknown endpoint field is rejected"
+            `Quick test_unknown_endpoint_field_is_rejected;
           test_case "session with endpoint parses ok"
             `Quick test_session_with_endpoint_ok;
           test_case "tts reachable when session empty"

@@ -74,6 +74,8 @@ val equal : t -> t -> bool
 
 val identity_to_yojson : identity -> Yojson.Safe.t
 val to_yojson : t -> Yojson.Safe.t
+val pp : Format.formatter -> t -> unit
+(** Canonical exact JSON printer used by enclosing derived domain printers. *)
 val list_to_yojson : t list -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, decode_error) result
 val list_of_yojson : Yojson.Safe.t -> (t list, decode_error) result

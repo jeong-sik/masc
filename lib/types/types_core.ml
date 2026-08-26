@@ -563,17 +563,10 @@ type task = {
   cycle_count: int; [@default 0]
   reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
-  (* RFC skills-declared-not-discovered: which skills a keeper working this
-     task can read. Named by their directory under <base_path>/.masc/skills/.
-
-     Declared rather than discovered on purpose. The Agent Skills default is
-     to list every skill's description in the prompt and let the model pick,
-     which is a semantic match masc does not make elsewhere. A task that names
-     its skills answers "what was loaded on that turn" by being read, not by
-     replaying what the model decided.
-
-     Empty is the ordinary case and means no skill block is built at all. *)
-  skills: string list; [@default []]
+  (* Exact immutable Skill references are Task evidence. Their source,
+     package, name, and content revision survive every state transition and do
+     not depend on whichever catalog is current when the Task is later read. *)
+  skills: Skill_reference.t list; [@default []]
 } [@@deriving show]
 
 (* RFC-0323 G-10: the typed reclaim claim gate is retired. #23661 removed its
@@ -720,15 +713,14 @@ let task_to_yojson t =
     | None -> with_reclaim_policy
     | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
   in
-  (* Omitted when no skill is named, which is every task that does not need
-     one. Writing an empty list instead would put the key on every row in the
-     backlog to say nothing. *)
+  (* Omitted when the Task declares no Skill. A present value always uses the
+     canonical exact-reference wire shape. *)
   let with_skills =
     match t.skills with
     | [] -> with_do_not_reclaim
     | skills ->
         with_do_not_reclaim
-        @ [("skills", `List (List.map (fun s -> `String s) skills))]
+        @ [("skills", Skill_reference.list_to_yojson skills)]
   in
   (* Merge status fields into task *)
   match status_json with
@@ -761,9 +753,36 @@ let task_of_yojson json =
     let description = opt "description" |> Option.value ~default:"" in
     let priority = Json_util.get_int json "priority" |> Option.value ~default:3 in
     let files = Json_util.get_string_list json "files" in
-    (* Absent on every task written before skills existed, and on every task
-       that names none. Both read as the empty list, which is the same fact. *)
-    let skills = Json_util.get_string_list json "skills" in
+    let skills_result =
+      match member "skills" with
+      | None -> Ok []
+      | Some skills_json ->
+        Skill_reference.list_of_yojson skills_json
+        |> Result.map_error (fun error ->
+          let detail =
+            match error with
+            | Skill_reference.Expected_object { field } ->
+              Printf.sprintf "%s must be an object" field
+            | Expected_list _ -> "skills must be a list"
+            | Missing_field { object_name; field } ->
+              Printf.sprintf "%s.%s is required" object_name field
+            | Expected_string { object_name; field } ->
+              Printf.sprintf "%s.%s must be a string" object_name field
+            | Duplicate_field { object_name; field } ->
+              Printf.sprintf "%s.%s is duplicated" object_name field
+            | Unexpected_field { object_name; field } ->
+              Printf.sprintf "%s.%s is unexpected" object_name field
+            | Invalid_source_id source_id ->
+              Printf.sprintf "source_id %S is invalid" source_id
+            | Invalid_package_id _ -> "package_id is invalid"
+            | Invalid_content_revision _ -> "content_revision is invalid"
+            | Duplicate_reference reference ->
+              Printf.sprintf
+                "exact reference is duplicated: %s"
+                (Yojson.Safe.to_string (Skill_reference.to_yojson reference))
+          in
+          "task.skills corrupt: " ^ detail)
+    in
     let created_at = req "created_at" in
     let created_by = opt "created_by" in
     (* The predecessor link is optional. *)
@@ -796,8 +815,10 @@ let task_of_yojson json =
            | Error _ -> None)
     in
     let do_not_reclaim_reason = opt "do_not_reclaim_reason" in
-    match contract_result, execution_links_result, task_status_of_yojson json with
-    | Ok contract, Ok execution_links, Ok task_status ->
+    match
+      skills_result, contract_result, execution_links_result, task_status_of_yojson json
+    with
+    | Ok skills, Ok contract, Ok execution_links, Ok task_status ->
         Ok
           {
             id;
@@ -817,9 +838,10 @@ let task_of_yojson json =
             do_not_reclaim_reason;
             skills;
           }
-    | Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
-    | _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
-    | _, _, Error error -> Error error
+    | Error error, _, _, _ -> Error error
+    | _, Error error, _, _ -> Error ("task.contract corrupt: " ^ error)
+    | _, _, Error error, _ -> Error ("task.execution_links corrupt: " ^ error)
+    | _, _, _, Error error -> Error error
   with e -> Error (Printexc.to_string e)
 
 (** Message - broadcast or direct *)

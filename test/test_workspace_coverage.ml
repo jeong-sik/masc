@@ -2712,28 +2712,61 @@ let task_of config task_id =
   | None -> Alcotest.fail (Printf.sprintf "%s missing from backlog" task_id)
 ;;
 
+let exact_skill_reference name revision_character =
+  let source_id =
+    match Skill_source_config.source_id_of_string "project-masc" with
+    | Ok source_id -> source_id
+    | Error detail -> Alcotest.fail detail
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory name with
+    | Ok package_id -> package_id
+    | Error _ -> Alcotest.fail "invalid Skill package fixture"
+  in
+  let content_revision =
+    match
+      Skill_reference.content_revision_of_string
+        (String.make 64 revision_character)
+    with
+    | Ok revision -> revision
+    | Error _ -> Alcotest.fail "invalid Skill revision fixture"
+  in
+  Skill_reference.make
+    ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name)
+    ~content_revision
+;;
+
+let exact_skill_references_json references =
+  Skill_reference.list_to_yojson references |> Yojson.Safe.to_string
+;;
+
 (* Reading the returned record would only prove the argument reached the
    constructor. The keeper reads the task back off disk, so the assertion has
    to go through the backlog: a field that serializes to nothing looks exactly
    like a field that was never set. *)
 let test_skills_survive_the_backlog_round_trip () =
   with_test_env (fun config ->
+    let expected =
+      [ exact_skill_reference "humanize-korean" 'a'
+      ; exact_skill_reference "second-skill" 'b'
+      ]
+    in
     match
       Workspace.add_task_with_result
         config
         ~title:"needs a skill"
         ~priority:3
         ~description:""
-        ~skills:[ "humanize-korean"; "second-skill" ]
+        ~skills:expected
     with
     | Error e ->
       Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
     | Ok created ->
       let task = task_of config created.Workspace.task_id in
-      Alcotest.(check (list string))
+      Alcotest.(check string)
         "skills read back in the order they were given"
-        [ "humanize-korean"; "second-skill" ]
-        task.Masc_domain.skills)
+        (exact_skill_references_json expected)
+        (exact_skill_references_json task.Masc_domain.skills))
 ;;
 
 (* The ordinary case. Omitting the argument has to leave the field empty
@@ -2752,7 +2785,7 @@ let test_a_task_without_skills_reads_back_empty () =
       Alcotest.fail ("add_task rejected: " ^ Workspace.add_task_error_to_string e)
     | Ok created ->
       let task = task_of config created.Workspace.task_id in
-      Alcotest.(check (list string)) "no skills" [] task.Masc_domain.skills)
+      Alcotest.(check int) "no skills" 0 (List.length task.Masc_domain.skills))
 ;;
 
 let test_predecessor_unknown_rejected () =

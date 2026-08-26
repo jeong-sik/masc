@@ -3351,6 +3351,31 @@
  (libraries alcotest masc.skill_config masc.skill_reference yojson))
 
 (test
+ (name test_task_exact_skill_refs)
+ (modules test_task_exact_skill_refs)
+ (libraries
+  alcotest
+  masc.masc_types
+  masc.skill_config
+  masc.skill_reference
+  yojson))
+
+(test
+ (name test_workspace_task_exact_skill_refs)
+ (modules test_workspace_task_exact_skill_refs)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc.masc_types
+  masc.masc_workspace
+  masc.skill_config
+  masc.skill_reference
+  unix
+  yojson))
+
+(test
  (name test_skill_catalog_snapshot_service)
  (modules test_skill_catalog_snapshot_service)
  (libraries

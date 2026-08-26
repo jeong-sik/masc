@@ -214,17 +214,11 @@ type task =
   ; cycle_count : int [@default 0]
   ; reclaim_policy : task_reclaim_policy option [@default None]
   ; do_not_reclaim_reason : string option [@default None]
-  ; skills : string list [@default []]
-        (** Skills a keeper working this task may read, named by their
-            directory under [<base_path>/.masc/skills/].
-
-            Declared here rather than discovered at turn time. The Agent
-            Skills default lists every skill's description in the prompt and
-            lets the model pick; naming them on the task makes "what was
-            loaded on that turn" a fact the task states rather than one
-            reconstructed from what the model chose.
-
-            Empty is the ordinary case and builds no skill block at all. *)
+  ; skills : Skill_reference.t list [@default []]
+        (** Exact, immutable Skill references attached at Task creation.
+            Source, package, canonical name, and content revision remain one
+            durable fact throughout the Task lifecycle. Empty means the Task
+            declares no Skill. *)
   }
 [@@deriving show]
 

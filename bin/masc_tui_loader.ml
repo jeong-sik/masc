@@ -131,9 +131,30 @@ let load_active_tasks (base_path : string) :
             report path recovery.primary_error;
             Some ("task backlog recovered from backup: " ^ recovery.primary_error)
       in
-      ( Tui_decode.active_tasks_of_domain observation.observed_backlog.tasks
+      (* The backlog says what the tasks are; the goal-task registry says what
+         they serve. A task record carries no goal on purpose -- the registry
+         is the source of truth -- so reading only the backlog is what left
+         every task on this screen unable to name its goal.
+
+         A registry that cannot be read leaves the links empty rather than
+         failing the whole load: the tasks are still worth showing, and the
+         reason is reported beside them rather than as an absence of links. *)
+      let goals_for_task, goal_link_error =
+        match Workspace_goal_index.read_goal_task_links_r config with
+        | Error err -> (fun _ -> []), Some ("goal links unavailable: " ^ err)
+        | Ok goal_task_links ->
+          let index =
+            Workspace_goal_index.build_task_goal_index ~goal_task_links ()
+          in
+          ( (fun task_id -> Workspace_goal_index.goals_for_task index ~task_id)
+          , None )
+      in
+      ( Tui_decode.active_tasks_of_domain ~goals_for_task
+          observation.observed_backlog.tasks
       , observation.observed_backlog.tasks
-      , recovery_error )
+      , (match recovery_error, goal_link_error with
+         | Some recovery, _ -> Some recovery
+         | None, other -> other) )
 
 (** Apply one strict bounded metrics snapshot to the mutable screen state. *)
 let apply_keeper_log_snapshot (state : state)

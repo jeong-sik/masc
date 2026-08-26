@@ -12,6 +12,7 @@ type task = {
   title : string;
   status : Masc_domain.task_status;
   priority : int;
+  goal_ids : string list;
 }
 
 type keeper = {
@@ -472,17 +473,21 @@ let decode_agent json =
   let* last_seen = require_string_field json "last_seen" in
   Ok { name; status; current_task; last_seen }
 
-let task_of_domain (task : Masc_domain.task) =
+let task_of_domain ?(goal_ids = []) (task : Masc_domain.task) =
   {
     id = task.id;
     title = task.title;
     status = task.task_status;
     priority = task.priority;
+    goal_ids;
   }
 
-let active_tasks_of_domain tasks =
+let active_tasks_of_domain ?goals_for_task tasks =
+  let goal_ids (task : Masc_domain.task) =
+    match goals_for_task with None -> [] | Some lookup -> lookup task.id
+  in
   tasks
-  |> List.map task_of_domain
+  |> List.map (fun task -> task_of_domain ~goal_ids:(goal_ids task) task)
   |> List.filter (fun task ->
        not (Masc_domain.task_status_is_terminal task.status))
   |> List.stable_sort (fun left right ->

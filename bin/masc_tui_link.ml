@@ -14,6 +14,15 @@ let path = function
   | Fusion_run -> "fusion"
   | Keeper -> "keepers"
 
+let kind_label = function
+  | Board_post -> "post"
+  | Goal -> "goal"
+  | Schedule -> "schedule"
+  | Task -> "task"
+  | Fusion_run -> "run"
+  | Keeper -> "keeper"
+;;
+
 let is_unreserved = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
   | _ -> false
@@ -91,6 +100,31 @@ let parse reference =
         match kind_of_path path_part, percent_decode_segment id_part with
         | Some kind, Some id -> Some (kind, id)
         | _ -> None))
+;;
+
+(* A reference ends where a path segment can no longer continue. The writer
+   percent-encodes everything outside the unreserved set, so the scan stops at
+   the first byte [reference] would never have emitted. *)
+let reference_byte byte = is_unreserved byte || byte = '%' || byte = '/'
+
+let scan body =
+  let limit = String.length body in
+  let scheme_length = String.length scheme in
+  let rec extent index =
+    if index < limit && reference_byte body.[index] then extent (index + 1) else index
+  in
+  let rec walk index found =
+    if index + scheme_length > limit then List.rev found
+    else if String.equal (String.sub body index scheme_length) scheme then (
+      let stop = extent (index + scheme_length) in
+      let candidate = String.sub body index (stop - index) in
+      match parse candidate with
+      | Some hit when not (List.mem hit found) -> walk stop (hit :: found)
+      | Some _ -> walk stop found
+      | None -> walk stop found)
+    else walk (index + 1) found
+  in
+  walk 0 []
 ;;
 
 let osc52_copy text =

@@ -52,6 +52,7 @@ let make_tool_bundle_for_descriptors
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(task_instruction_skills = [])
       ?skill_activation_context
+      ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -64,9 +65,10 @@ let make_tool_bundle_for_descriptors
          (Keeper_skill_catalog.skills skill_catalog)
   in
   (match skill_surface_present, skill_activation_context with
-   | true, None ->
+   | true, None when not allow_unrecorded_skill_surface ->
      invalid_arg
        "Skill-bearing Keeper bundle requires a frozen activation context"
+   | true, None
    | true, Some _ | false, Some _ | false, None -> ());
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory. in_playground and the runtime cache key need
@@ -481,7 +483,7 @@ let make_tool_bundle_for_descriptors
   }
 ;;
 
-let make_tool_bundle
+let make_tool_bundle_with_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -494,6 +496,7 @@ let make_tool_bundle
       ?skill_catalog
       ?task_instruction_skills
       ?skill_activation_context
+      ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
       ()
   =
@@ -516,8 +519,41 @@ let make_tool_bundle
     ?skill_catalog
     ?task_instruction_skills
     ?skill_activation_context
+    ~allow_unrecorded_skill_surface
     ?turn_ctx_cell
     ~descriptors
+    ()
+;;
+
+let make_tool_bundle
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
+      ?skill_catalog
+      ?task_instruction_skills
+      ?skill_activation_context
+      ?turn_ctx_cell
+      ()
+  =
+  make_tool_bundle_with_policy
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ?clock
+    ?continuation_channel
+    ?gate_context
+    ?hitl_resolution
+    ?skill_catalog
+    ?task_instruction_skills
+    ?skill_activation_context
+    ~allow_unrecorded_skill_surface:false
+    ?turn_ctx_cell
     ()
 ;;
 
@@ -550,6 +586,60 @@ let make_tools
 ;;
 
 module For_testing = struct
+  let make_tool_bundle
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_snapshot
+        ?clock
+        ?continuation_channel
+        ?gate_context
+        ?hitl_resolution
+        ?skill_catalog
+        ?task_instruction_skills
+        ?turn_ctx_cell
+        ()
+    =
+    make_tool_bundle_with_policy
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
+      ?skill_catalog
+      ?task_instruction_skills
+      ~allow_unrecorded_skill_surface:true
+      ?turn_ctx_cell
+      ()
+  ;;
+
+  let make_tools
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_snapshot
+        ?clock
+        ?skill_catalog
+        ?task_instruction_skills
+        ?turn_ctx_cell
+        ()
+    =
+    (make_tool_bundle
+       ~config
+       ~meta
+       ~publication_recovery
+       ~ctx_snapshot
+       ?clock
+       ?skill_catalog
+       ?task_instruction_skills
+       ?turn_ctx_cell
+       ())
+      .tools
+  ;;
+
   let initial_terminal_effect_state = initial_terminal_effect_state
 
   let terminal_externalization_failure =

@@ -11,6 +11,7 @@ type block_state =
   | Invalid_tool_block of
       { failed_tool_call_id : string option
       ; quarantined_occurrence : Keeper_chat_events.tool_stream_occurrence option
+      ; quarantine_kind : Keeper_chat_events.stream_protocol_error_kind option
       }
   | Invalid_media_block
   | Active_media of
@@ -119,9 +120,11 @@ let replace_block bridge_state index block =
       (index, block) :: List.remove_assoc index bridge_state.blocks_by_index
   }
 
-let invalidate_block ?quarantined_occurrence bridge_state index ~failed_tool_call_id =
+let invalidate_block ?quarantined_occurrence ?quarantine_kind bridge_state index
+    ~failed_tool_call_id =
   replace_block bridge_state index
-    (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence })
+    (Invalid_tool_block
+       { failed_tool_call_id; quarantined_occurrence; quarantine_kind })
 
 let invalidate_media_block bridge_state index =
   replace_block bridge_state index Invalid_media_block
@@ -165,6 +168,31 @@ let occurrence_is_quarantined state occurrence =
           | Invalid_media_block
           | Active_media _ -> false)
        state.blocks_by_index
+;;
+
+let first_quarantine_kind state occurrence =
+  match
+    List.find_opt
+      (fun quarantine -> same_occurrence quarantine.occurrence occurrence)
+      state.tool_quarantines
+  with
+  | Some quarantine -> Some quarantine.kind
+  | None ->
+    List.find_map
+      (fun (_, block) ->
+         match block with
+         | Invalid_tool_block
+             { quarantined_occurrence = Some recorded
+             ; quarantine_kind = Some kind
+             ; _
+             }
+           when same_occurrence recorded occurrence -> Some kind
+         | Active_tool _
+         | Occupied_non_tool_block
+         | Invalid_tool_block _
+         | Invalid_media_block
+         | Active_media _ -> None)
+      state.blocks_by_index
 ;;
 
 let remember_tool_quarantines state ~kind tools =
@@ -279,6 +307,7 @@ let poison_scope state ~kind ~reason =
            , Invalid_tool_block
                { failed_tool_call_id = tool.tool_call_id
                ; quarantined_occurrence = Some tool.occurrence
+               ; quarantine_kind = Some kind
                } )
          | Occupied_non_tool_block
          | Invalid_tool_block _
@@ -342,6 +371,7 @@ let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
     Some
       { bridge_state =
           invalidate_block ~quarantined_occurrence:tool.occurrence
+            ~quarantine_kind:Keeper_chat_events.Tool_delta_invalid_kind
             bridge_state index ~failed_tool_call_id:tool.tool_call_id
       ; chat_events =
           [ protocol_error ~quarantined_occurrence:tool.occurrence
@@ -352,7 +382,8 @@ let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
   in
   match stream_block_for_index bridge_state index with
   | Some (Active_tool tool) -> reject tool
-  | Some (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+  | Some
+      (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
     let reason =
       Printf.sprintf "non-input %s delta arrived for an invalid tool-use block"
         delta_kind
@@ -509,7 +540,8 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
             }
       in
       { bridge_state; chat_events = [ chat_event ] }
-  | Some (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+  | Some
+      (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
       { bridge_state;
         chat_events =
           [ protocol_error ?quarantined_occurrence
@@ -550,6 +582,7 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
        | Some tool ->
          { bridge_state =
              invalidate_block ~quarantined_occurrence:tool.occurrence
+               ~quarantine_kind:Keeper_chat_events.Tool_args_without_start
                bridge_state index ~failed_tool_call_id:tool.tool_call_id
          ; chat_events =
              [ protocol_error ~quarantined_occurrence:tool.occurrence
@@ -579,17 +612,57 @@ let content_event_allowed state (evt : Agent_core.Types.sse_event) =
   | _ -> true
 ;;
 
+let reject_quarantined_content_event ~stream_scope state
+    (evt : Agent_core.Types.sse_event) =
+  let open Agent_core.Types in
+  let index =
+    match evt with
+    | ContentBlockStart { index; _ }
+    | ContentBlockDelta { index; _ }
+    | ContentBlockStop { index } -> Some index
+    | MessageStart _
+    | MessageDelta _
+    | MessageStop
+    | Ping
+    | SSEError _
+    | NDJSONError _
+    | SSEParseFailed _
+    | NDJSONParseFailed _
+    | SSEUnknownEventType _
+    | SSEUnsupportedPart _
+    | SSEUnsupportedResponse _
+    | Connected
+    | Timeout _
+    | StreamIncomplete _ -> None
+  in
+  match index with
+  | None -> None
+  | Some index ->
+    let occurrence = tool_occurrence state ~stream_scope ~block_index:index in
+    (match first_quarantine_kind state occurrence with
+     | Some _ -> Some { bridge_state = state; chat_events = [] }
+     | None when occurrence_is_quarantined state occurrence ->
+       (* Defensive compatibility for a state created before quarantine kinds
+          became mandatory. The first exact error is still write-once. *)
+       Some { bridge_state = state; chat_events = [] }
+     | None -> None)
+;;
+
 let translate ~redact_text ~base_dir ~stream_scope bridge_state
     (evt : Agent_core.Types.sse_event) =
   let open Agent_core.Types in
   let open Keeper_chat_events in
   let bridge_state = enter_stream_scope bridge_state stream_scope in
-  match bridge_state.scope_failure with
-  | Some _ -> { bridge_state; chat_events = [] }
-  | None when not (content_event_allowed bridge_state evt) ->
+  let quarantined_content_rejection =
+    reject_quarantined_content_event ~stream_scope bridge_state evt
+  in
+  match bridge_state.scope_failure, quarantined_content_rejection with
+  | Some _, _ -> { bridge_state; chat_events = [] }
+  | None, _ when not (content_event_allowed bridge_state evt) ->
     poison_scope bridge_state ~kind:Keeper_chat_events.Stream_event_after_terminal
       ~reason:"content event arrived after the provider content became terminal"
-  | None ->
+  | None, Some rejected -> rejected
+  | None, None ->
   match evt with
   | Connected ->
       { bridge_state; chat_events = [ Agent_core_stream_connected ] }
@@ -786,7 +859,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                    Media_delta_invalid_block ]
            }
       | Some
-          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
           { bridge_state;
             chat_events =
               [ protocol_error ?quarantined_occurrence
@@ -836,6 +909,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
        | Some (Active_tool existing) ->
            { bridge_state =
                invalidate_block ~quarantined_occurrence:existing.occurrence
+                 ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
                  bridge_state index
                  ~failed_tool_call_id:existing.tool_call_id;
              chat_events =
@@ -854,7 +928,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
            }
        | Some Occupied_non_tool_block ->
          { bridge_state =
-             invalidate_block bridge_state index
+             invalidate_block
+               ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
+               bridge_state index
                ~failed_tool_call_id:tool_call_id
          ; chat_events =
              [ block_start
@@ -864,7 +940,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
              ]
          }
        | Some
-           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
            { bridge_state;
              chat_events =
                [ block_start;
@@ -883,7 +959,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
            }
        | Some (Active_media _) ->
            { bridge_state =
-               invalidate_block bridge_state index ~failed_tool_call_id:None;
+               invalidate_block
+                 ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
+                 bridge_state index ~failed_tool_call_id:None;
              chat_events =
                [ block_start;
                  protocol_error ~index
@@ -897,6 +975,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
               { bridge_state =
                   invalidate_block
                     ~quarantined_occurrence:finalized.occurrence
+                    ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
                     bridge_state index
                     ~failed_tool_call_id:finalized.tool_call_id
               ; chat_events =
@@ -922,7 +1001,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           in
           let invalidate ?quarantined_occurrence ?tool_call_id () =
             { bridge_state =
-                invalidate_block ?quarantined_occurrence bridge_state index
+                invalidate_block ?quarantined_occurrence
+                  ~quarantine_kind:Keeper_chat_events.Tool_start_missing_identity
+                  bridge_state index
                   ~failed_tool_call_id:tool_call_id
             ; chat_events =
                 [ block_start
@@ -938,7 +1019,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                ?tool_call_id:existing.tool_call_id ()
            | Some
                (Invalid_tool_block
-                 { failed_tool_call_id; quarantined_occurrence }) ->
+                 { failed_tool_call_id; quarantined_occurrence; _ }) ->
              invalidate ?quarantined_occurrence
                ?tool_call_id:failed_tool_call_id ()
            | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
@@ -958,7 +1039,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       in
       let conflict ?quarantined_occurrence ?tool_call_id reason =
         { bridge_state =
-            invalidate_block ?quarantined_occurrence bridge_state index
+            invalidate_block ?quarantined_occurrence
+              ~quarantine_kind:Keeper_chat_events.Tool_start_duplicate_index
+              bridge_state index
               ~failed_tool_call_id:tool_call_id
         ; chat_events =
             [ block_start
@@ -973,7 +1056,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
            ?tool_call_id:existing.tool_call_id
            "non-tool content block header replaced an active tool occurrence"
        | Some
-           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
          conflict ?quarantined_occurrence
            ?tool_call_id:failed_tool_call_id
            "non-tool content block header reused an invalid index"
@@ -1020,7 +1103,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
       | Some Occupied_non_tool_block ->
         { bridge_state; chat_events = [ block_stop ] }
       | Some
-          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence; _ }) ->
           { bridge_state
           ; chat_events =
               [ block_stop;

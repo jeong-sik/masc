@@ -8,7 +8,11 @@
     state reduces explicitly typed [TextSnapshot] values to unseen suffixes and
     suppresses exact snapshot replays before invoking this boundary. Ordinary
     [TextDelta] values always append. This adapter projects each accepted delta
-    exactly once and never reinterprets it. *)
+    exactly once and never reinterprets it.
+
+    Exact tool quarantine is write-once per stream occurrence. The bridge keeps
+    the first typed quarantine kind for freeze checks; later content events at
+    that scope/index are suppressed and cannot overwrite the first failure. *)
 
 type state
 (** Per-stream correlation state for AGENT_CORE content block indices. *)

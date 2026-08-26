@@ -1409,6 +1409,94 @@ let test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool () =
          ; "incomplete", StreamIncomplete { reason = "max_output_tokens" }
          ])
 
+let test_keeper_stream_bridge_freezes_late_events_after_incomplete () =
+  let open Agent_core.Types in
+  let base_dir = temp_base_path "gate-keeper-stream-incomplete-late-events" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+       let redact_text text = text in
+       let translate ~stream_scope state event =
+         Keeper_chat_agent_core_stream_bridge.translate ~redact_text ~base_dir
+           ~stream_scope state event
+       in
+       let started =
+         translate ~stream_scope:0
+           (Keeper_chat_agent_core_stream_bridge.empty_state ())
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-incomplete"
+              ; tool_name = Some "Read"
+              })
+       in
+       let finalized =
+         translate ~stream_scope:0 started.bridge_state
+           (ContentBlockStop { index = 0 })
+       in
+       let failed =
+         translate ~stream_scope:0 finalized.bridge_state
+           (StreamIncomplete { reason = "max_output_tokens" })
+       in
+       let first_quarantine =
+         List.find_map
+           (function
+             | Keeper_chat_events.Agent_core_stream_protocol_error
+                 ({ quarantined_occurrence = Some _; _ } as error) -> Some error
+             | _ -> None)
+           failed.chat_events
+       in
+       (match first_quarantine with
+        | Some { kind = Keeper_chat_events.Sse_stream_incomplete; _ } -> ()
+        | Some _ -> fail "incomplete stream recorded the wrong first quarantine kind"
+        | None -> fail "incomplete stream did not quarantine the finalized tool");
+       let late_events =
+         [ ContentBlockDelta
+             { index = 0; delta = InputJsonDelta {|{"late":true}|} }
+         ; ContentBlockStart
+             { index = 0
+             ; content_type = "tool_use"
+             ; tool_id = Some "tc-incomplete"
+             ; tool_name = Some "Read"
+             }
+         ; ContentBlockDelta { index = 0; delta = TextDelta "late" }
+         ; ContentBlockStop { index = 0 }
+         ]
+       in
+       let after_late =
+         List.fold_left
+           (fun state event ->
+              let rejected = translate ~stream_scope:0 state event in
+              check int "late event is suppressed after first quarantine" 0
+                (List.length rejected.chat_events);
+              rejected.bridge_state)
+           failed.bridge_state late_events
+       in
+       let fallback =
+         Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
+           ~previous_scope:Keeper_chat_events.Abandon_previous_scope after_late
+       in
+       (match fallback.chat_events with
+        | [ Keeper_chat_events.Agent_core_runtime_attempt_started ] -> ()
+        | _ -> fail "fallback re-quarantined an already frozen occurrence");
+       let fresh =
+         translate ~stream_scope:1 fallback.bridge_state
+           (ContentBlockStart
+              { index = 0
+              ; content_type = "tool_use"
+              ; tool_id = Some "tc-fallback-fresh"
+              ; tool_name = Some "Write"
+              })
+       in
+       check bool "fallback scope reuses the index independently" true
+         (List.exists
+            (function
+              | Keeper_chat_events.Tool_call_start
+                  { occurrence; tool_call_id = Some "tc-fallback-fresh"; _ } ->
+                occurrence.stream_scope = 1 && occurrence.block_index = 0
+              | _ -> false)
+            fresh.chat_events))
+
 let test_keeper_stream_bridge_quarantines_transport_failed_scope () =
   let open Agent_core.Types in
   let base_dir = temp_base_path "gate-keeper-stream-transport-failure" in
@@ -3345,6 +3433,8 @@ let () =
           test_case "stream bridge does not re-quarantine failed attempt tool"
             `Quick
             test_keeper_stream_bridge_does_not_requarantine_failed_attempt_tool;
+          test_case "stream bridge freezes late events after incomplete" `Quick
+            test_keeper_stream_bridge_freezes_late_events_after_incomplete;
           test_case "stream bridge quarantines transport-failed scope" `Quick
             test_keeper_stream_bridge_quarantines_transport_failed_scope;
           test_case "stream bridge terminalizes conflicting message tool" `Quick

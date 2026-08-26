@@ -7991,6 +7991,46 @@ let main () =
         Frame_presenter.last_frame_is_compact frame_presenter
       in
       (match input with
+       (* A paste while the Identity tab is taking text belongs to the field
+          taking it. A client secret is exactly the thing an operator pastes,
+          and the default path puts it in a chat draft -- a credential in a
+          message nobody meant to write. *)
+       | Some (Pasted paste)
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && (Option.is_some state.identity_app_form
+                  || Option.is_some state.identity_filter)
+              && not compact_viewport ->
+           (* One line: a copied secret carries the newline that ended it,
+              and a field is not a place for one. *)
+           let text =
+             String.trim
+               (Terminal_text.single_line paste.Masc_tui_paste.text)
+           in
+           (match state.identity_app_form with
+            | Some form ->
+              state.identity_app_form <-
+                Some
+                  (match form.Masc_tui_types.iaf_field with
+                   | Masc_tui_types.App_client_id ->
+                     { form with
+                       Masc_tui_types.iaf_client_id =
+                         form.Masc_tui_types.iaf_client_id ^ text
+                     }
+                   | Masc_tui_types.App_client_secret ->
+                     { form with
+                       Masc_tui_types.iaf_client_secret =
+                         form.Masc_tui_types.iaf_client_secret ^ text
+                     }
+                   | Masc_tui_types.App_scopes ->
+                     { form with
+                       Masc_tui_types.iaf_scopes =
+                         form.Masc_tui_types.iaf_scopes ^ text
+                     })
+            | None ->
+              state.identity_filter <-
+                Some (Option.value state.identity_filter ~default:"" ^ text);
+              state.identity_cursor <- 0)
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
        | Some (Pasted paste)

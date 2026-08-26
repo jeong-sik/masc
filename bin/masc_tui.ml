@@ -585,7 +585,16 @@ let parse_args () =
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
-  (base, r, !port, !refresh, reasoning_visibility, tool_visibility)
+  let base_path_input =
+    if !base_path <> "" then !base_path else base
+  in
+  ( base_path_input
+  , base
+  , r
+  , !port
+  , !refresh
+  , reasoning_visibility
+  , tool_visibility )
 
 let save_message_draft state =
   match state.msg_target_keeper_name with
@@ -6023,7 +6032,8 @@ let main () =
      to protect, so it routes them the same way and before anything can ask the
      catalog a question. *)
   Provider_diag_log_sink.install ();
-  let ( base_path
+  let ( base_path_input
+      , base_path
       , workspace
       , port
       , refresh
@@ -6031,6 +6041,15 @@ let main () =
       , tool_visibility ) =
     parse_args ()
   in
+  (* The command-line path and the process environment are two inputs to the
+     same workspace identity. Freeze them to the value this TUI displays
+     before any store is opened. Otherwise an inherited MASC_BASE_PATH wins
+     inside [Workspace.default_config], even when --base-path selected a
+     different server, and the screen combines that server with local Keeper
+     metadata from another workspace. *)
+  Unix.putenv Env_config_core.base_path_input_env_key base_path_input;
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   require_interactive_terminal ();
   (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
      on the same [/dev/ttys*]. Everything that writes there writes into the

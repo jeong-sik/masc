@@ -875,6 +875,38 @@ let make_hooks
                 "tool=%s rejected-call log_call write failed: %s"
                 tool_name (Printexc.to_string exn);
               if tool_result_commit_required () then raise exn));
+          (* A rejected call is still a call the loop made, and the
+             repeated-call brake counts calls, not executions. Until this
+             callback fired here, a turn that rejected every attempt
+             (argv-missing validation errors and unroutable contaminated
+             names alike) accumulated zero rows in the fingerprint list, so
+             the brake never saw a repeat — the reject loop on
+             2026-08-27 (edgar.a.poe, glm-5-turbo) spun through exactly
+             this gap. The input and error strings are stable across
+             attempts now that the reject message carries the repair stem
+             instead of the raw wire tail, so identical rejects do reach
+             the 3-count yield. *)
+          (try
+            on_tool_executed
+              ~tool_name
+              ~input
+              ~output_text:error
+              ~success:false
+              ~duration_ms
+              ~provider:(current_keeper_model meta)
+              ~typed_outcome:None
+           with Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string LifecycleCallbackFailures)
+                ~labels:
+                  [ (label_keeper, meta.name)
+                  ; (label_callback, callback_label_on_tool_executed)
+                  ]
+                ();
+              Log.Keeper.error ~keeper_name:meta.name
+                "on_tool_executed callback failed for %s: %s"
+                tool_name (Printexc.to_string exn));
         Agent_core.Hooks.Continue
       | _event -> Agent_core.Hooks.Continue);
   }

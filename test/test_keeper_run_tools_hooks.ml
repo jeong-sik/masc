@@ -903,6 +903,85 @@ let test_production_post_tool_hook_cancellation_releases_next_completion () =
          !second_observed)
 ;;
 
+(* A call refused before execution is still a call the loop made, and the
+   repeated-call brake counts calls through the on_tool_executed
+   accumulator. Until this contract held, a turn that rejected every
+   attempt accumulated zero rows there, so the brake never saw a repeat —
+   the 2026-08-27 reject loop (edgar.a.poe, glm-5-turbo, contaminated
+   Execute names) spun through exactly that gap. *)
+let test_validation_reject_reaches_on_tool_executed () =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let config = Masc.Workspace.default_config base_path in
+       let meta_ref = ref (make_meta "reject-observer") in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let serialize =
+         Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+       in
+       let observed = ref [] in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config
+           ~meta_ref
+           ~turn_ctx_cell
+           ~trace_id:"reject-observer-trace"
+           ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore
+           ~on_tool_executed:
+             (fun ~tool_name ~input:_ ~output_text ~success ~duration_ms:_
+              ~provider:_ ~typed_outcome:_ ->
+                serialize (fun () ->
+                  observed := (tool_name, success, output_text) :: !observed))
+           ()
+       in
+       let failure_hook =
+         match hooks.Agent_core.Hooks.post_tool_use_failure with
+         | Some hook -> hook
+         | None -> fail "production Keeper hooks omitted post_tool_use_failure"
+       in
+       let invocation =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id:"reject-observer-1"
+           ~turn:1
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+       in
+       let event =
+         Agent_core.Hooks.PostToolUseFailure
+           { invocation
+           ; tool_name = "Execute"
+           ; input = `Assoc []
+           ; stage = Agent_core.Hooks.Validation_before_execution
+           ; duration_ms = 0.0
+           ; error =
+             "Tool not found: Execute. The name carries extra characters."
+           }
+       in
+       (match failure_hook event with
+        | Agent_core.Hooks.Continue -> ()
+        | _ -> fail "validation reject hook stopped the turn");
+       ignore env;
+       match List.rev !observed with
+       | [ (tool_name, success, output_text) ] ->
+         check string "reject observer sees the repair stem" "Execute" tool_name;
+         check bool "reject observer reports failure" false success;
+         check bool "reject observer carries the error content" true
+           (String.length output_text > 0)
+       | rows ->
+         failf "expected exactly one observed reject, got %d" (List.length rows))
+;;
+
 (* The post-tool-round predicate is the position of the last message, not
    containment over history: an old Tool message earlier in the conversation
    must not read as "this round follows tool execution" — that misread
@@ -1083,6 +1162,10 @@ let () =
             "validation callback follows exact log commit"
             `Quick
             test_validation_rejection_notifies_after_exact_log_commit
+        ; test_case
+            "a rejected call reaches the repeat-counting observer"
+            `Quick
+            test_validation_reject_reaches_on_tool_executed
         ] )
     ]
 ;;

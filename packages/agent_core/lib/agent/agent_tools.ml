@@ -133,6 +133,34 @@ let strip_registered_suffix ~available requested =
   | [] | _ :: _ :: _ -> None
 ;;
 
+(* [Some stem] when [requested] extends exactly one registered name with ANY
+   tail (characters unrestricted). This is the display/recovery bound, not
+   the execution bound: [strip_registered_suffix] above admits only a
+   [0-9.] tail because a name it returns is EXECUTED, while a name that lands
+   in a reject message is only echoed back to the model as repair material.
+   Contaminated wire shapes observed so far were all stem+tail — the fused
+   argument fragments of masc#29008 ([Execute[argv]]) and the hex run of
+   2026-08-27 ([Execute1941e-8610...]) — and a tail of arbitrary bytes is
+   never repair material: the model can act on the stem plus the
+   extra-characters hint, never on the garbage. When several registered
+   names are prefixes (Read / Read_file) the longest is the only one that
+   names the tool the model was reaching for. *)
+let registered_prefix ~available requested =
+  match
+    List.filter_map
+      (fun registered ->
+         let rlen = String.length registered in
+         let tlen = String.length requested in
+         if tlen > rlen && String.starts_with ~prefix:registered requested
+         then Some registered
+         else None)
+      available
+  with
+  | [] -> None
+  | stem :: _ as stems ->
+    Some (List.fold_left (fun acc s -> if String.length s > String.length acc then s else acc) stem stems)
+;;
+
 let levenshtein a b =
   let la = String.length a
   and lb = String.length b in
@@ -177,25 +205,42 @@ let unknown_tool_failure ~requested ~available =
      registered: 1,915 of the message's 1,975 bytes were the list, and one turn
      missed 88 times in a row, so a model already failing under tool-surface
      pressure was handed 170 KB more of it. What it cannot derive is which name
-     failed and how that name was malformed; those stay. *)
+     failed and how that name was malformed; those stay.
+
+     The name itself travels back only up to a repair boundary: the reject
+     content is replayed to the model on the next request, so echoing a
+     contaminated wire name in full (stem + garbage tail) hands the model its
+     own corruption to re-read and re-emit — the transcript-replay loop of
+     masc#29337 survived exactly this way through the ToolResult channel
+     while the ToolUse channel was already filtered. The stem plus the
+     "extra characters" hint is the whole repair material; a genuine unknown
+     bare identifier has nothing to strip and stays byte-identical. *)
+  let exposed =
+    match registered_prefix ~available requested with
+    | Some stem -> stem
+    | None ->
+      (match identifier_prefix requested with
+       | Some prefix -> prefix
+       | None -> requested)
+  in
   let base =
     match available with
-    | [] -> Printf.sprintf "Tool not found: %s. No tools are registered" requested
-    | _ :: _ -> Printf.sprintf "Tool not found: %s" requested
+    | [] -> Printf.sprintf "Tool not found: %s. No tools are registered" exposed
+    | _ :: _ -> Printf.sprintf "Tool not found: %s" exposed
   in
   let extras =
-    match identifier_prefix requested with
-    | None ->
-      (match closest_registered ~requested ~available with
-       | None -> []
-       | Some name -> [ Printf.sprintf "Closest registered name: %s." name ])
-    | Some prefix when List.exists (String.equal prefix) available ->
+    match identifier_prefix requested, registered_prefix ~available requested with
+    | _, Some stem ->
       [ Printf.sprintf
           "The name carries extra characters after %S; send the tool name alone and \
            put arguments in the input object."
-          prefix
+          stem
       ]
-    | Some prefix ->
+    | None, None ->
+      (match closest_registered ~requested ~available with
+       | None -> []
+       | Some name -> [ Printf.sprintf "Closest registered name: %s." name ])
+    | Some prefix, None ->
       (match closest_registered ~requested:prefix ~available with
        | Some name ->
          [ Printf.sprintf
@@ -665,18 +710,38 @@ let find_and_execute_tool_with_index
     | None ->
       (* Tool dispatch failure (the LLM asked for a tool that isn't
          registered). Distinct from OnToolError — that fires when a
-         tool actually ran and returned Error. This is a configuration
-         / routing mistake, so it belongs on the general OnError
-         channel. Unknown names are always typed as validation errors; the
-         available names remain diagnostic data only. *)
+         tool actually ran and returned Error. The call was still refused
+         BEFORE execution, which is exactly the Validation_before_execution
+         stage of post_tool_use_failure: the keeper's fingerprint
+         accumulation and its #9919 log row live on that channel, and an
+         unroutable call repeated every turn is the same no-progress loop
+         that row was created for — routing it through OnError left it
+         invisible to the repeated-call brake (live shape 2026-08-27,
+         edgar.a.poe on glm-5-turbo: contaminated Execute wire names
+         rejected all turn, every reject invisible to the loop yield).
+         Unknown names are always typed as validation errors; the
+         available names remain diagnostic data only.
+
+         The name carried in the event and the result is the repair stem
+         ([registered_prefix]), not the raw wire name: a contaminated wire
+         shape is [stem + garbage tail] whose tail bytes differ per
+         attempt, and a per-attempt name defeats every consumer that
+         counts repeats. The raw wire name stays in the warn log above
+         and in the provider trace, which is the evidence authority. *)
       let available = tool_names_of_index tool_index in
       let message, failure_kind =
         unknown_tool_failure ~requested:requested_name ~available
+      in
+      let exposed_name =
+        match registered_prefix ~available requested_name with
+        | Some stem -> stem
+        | None -> requested_name
       in
       Log.warn
         _log
         "tool not found"
         [ Log.S ("tool", requested_name)
+        ; Log.S ("resolved_for_feedback", exposed_name)
         ; Log.S ("available_tools", render_tool_names available)
         ];
       defer_observer (fun () ->
@@ -685,18 +750,21 @@ let find_and_execute_tool_with_index
           ~tracer
           ~agent_name
           ~invocation
-          ~hook_name:"on_error"
-          ~tool_name:requested_name
-          hooks.on_error
-          (Hooks.OnError
-             { invocation = Some invocation
-             ; detail = message
-             ; context = "agent_tools.find_and_execute_tool"
+          ~hook_name:"post_tool_use_failure"
+          ~tool_name:exposed_name
+          hooks.post_tool_use_failure
+          (Hooks.PostToolUseFailure
+             { invocation
+             ; tool_name = exposed_name
+             ; input
+             ; stage = Hooks.Validation_before_execution
+             ; duration_ms = 0.0
+             ; error = message
              })
         |> Option.iter record_deferred_failure);
       { result =
           { invocation
-          ; tool_name = requested_name
+          ; tool_name = exposed_name
           ; input
           ; content = message
           ; outcome = Tool_failed { failure_kind; error_class = Some Types.Deterministic }

@@ -813,10 +813,14 @@ let test_fused_name_reject_names_the_registered_prefix () =
     run_unknown_name ~tools:[ make_echo_tool "Execute" ] {|Execute["argv"]|}
   in
   check_unknown_validation "fused name" result;
+  (* The reject content is replayed to the model, so the contaminated tail
+     ([["argv"]]) must not travel back — the stem plus the hint is the whole
+     repair material (2026-08-27: echoing the tail verbatim taught the model
+     to re-emit its own corruption). *)
   check
     string
     "fused name reject quotes the registered prefix and the repair"
-    ("Tool not found: Execute[\"argv\"]. "
+    ("Tool not found: Execute. "
      ^ "The name carries extra characters after \"Execute\"; send the tool name "
      ^ "alone and put arguments in the input object.")
     result.content
@@ -841,10 +845,12 @@ let test_fused_typo_prefix_reject_suggests_closest_registered () =
     run_unknown_name ~tools:[ make_echo_tool "Execute" ] {|Exceute["x"]|}
   in
   check_unknown_validation "fused typo prefix" result;
+  (* Same repair-boundary rule as the fused-name case: the fused argument
+     fragment is echoed up to the identifier boundary only. *)
   check
     string
     "fused typo reject pairs the shape note with the closest name"
-    ("Tool not found: Exceute[\"x\"]. "
+    ("Tool not found: Exceute. "
      ^ "The name is not a bare identifier (closest registered name: Execute); "
      ^ "send the registered tool name alone and put arguments in the input object.")
     result.content

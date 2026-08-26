@@ -51,6 +51,24 @@ val find_in_index : tool_index -> string -> Tool.t option
     exact-match answer for those. *)
 val strip_registered_suffix : available:string list -> string -> string option
 
+(** [registered_prefix ~available requested] is [Some stem] (the longest,
+    when several registered names are prefixes) for any [requested] that
+    extends a registered name with any tail, and [None] otherwise. Unlike
+    {!strip_registered_suffix} the result is never executed — it names the
+    repair material echoed back to the model in a reject message and the
+    fingerprint identity of a rejected call, where a per-attempt garbage
+    tail (a hex run such as [Execute1941e-8610...], or the fused argument
+    fragments of masc#29008) must not travel. *)
+val registered_prefix : available:string list -> string -> string option
+
+(** [unknown_tool_failure ~requested ~available] is the reject message and
+    failure kind for a tool name no registered tool answers. The message
+    exposes the requested name only up to a repair boundary (see
+    {!registered_prefix}); the raw contaminated tail never travels back
+    into the conversation. *)
+val unknown_tool_failure :
+  requested:string -> available:string list -> string * Types.tool_failure_kind
+
 (** What survives into the conversation history for one provider turn.
     [admitted] keeps every non-tool block untouched and rewrites each routable
     tool call to the registered name dispatch will use; [rejected] counts the

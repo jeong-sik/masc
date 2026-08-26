@@ -161,6 +161,102 @@ let test_strip_suffix_refuses_ambiguous_prefix () =
        "alpha12")
 ;;
 
+(* --- Reject feedback for contaminated wire names --- *)
+
+(* [registered_prefix] is the display/recovery bound — the echo half of
+   [strip_registered_suffix]'s execution bound. The 2026-08-27 live shape
+   (edgar.a.poe on glm-5-turbo) fused hex garbage onto Execute:
+   [Execute1941e-861060580025800480...]. Every observed contamination has
+   been a registered stem plus a tail, and the tail is never repair
+   material: it must not travel back in the reject message (the model
+   re-reads and re-emits its own corruption) and must not become the
+   fingerprint identity of the rejected call (a fresh tail per attempt
+   defeats repeat counting). *)
+let test_registered_prefix_recovers_contaminated_stem () =
+  let available = [ "Execute"; "Grep"; "Read" ] in
+  check
+    (option string)
+    "hex garbage tail recovers the stem"
+    (Some "Execute")
+    (Agent_tools.registered_prefix ~available "Execute1941e-861060580025800480");
+  check
+    (option string)
+    "fused argument fragment recovers the stem"
+    (Some "Execute")
+    (Agent_tools.registered_prefix ~available "Execute\":[\"argv\"");
+  check
+    (option string)
+    "longest registered prefix wins"
+    (Some "Read_file")
+    (Agent_tools.registered_prefix ~available:[ "Read"; "Read_file" ] "Read_file1941e-8610")
+;;
+
+let test_registered_prefix_refuses_non_extensions () =
+  let available = [ "Execute"; "Grep"; "Read" ] in
+  check
+    (option string)
+    "exact registered name is not an extension"
+    None
+    (Agent_tools.registered_prefix ~available "Execute");
+  check
+    (option string)
+    "unknown stem stays None"
+    None
+    (Agent_tools.registered_prefix ~available "Nope1941e-8610")
+;;
+
+let contains_substring ~haystack needle =
+  let n = String.length needle and h = String.length haystack in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  go 0
+;;
+
+(* The reject content is replayed into the model's next request; carrying
+   the contaminated tail verbatim hands the model its own corruption to
+   copy — masc#29337's transcript replay survived through exactly this
+   ToolResult channel while the ToolUse channel was already filtered. The
+   stem plus the hint is the whole repair material; a genuine unknown bare
+   identifier has nothing to strip and stays byte-identical. *)
+let test_unknown_tool_failure_strips_contaminated_tail () =
+  let available = [ "Execute"; "Grep"; "Read" ] in
+  let message, failure_kind =
+    Agent_tools.unknown_tool_failure
+      ~requested:"Execute1941e-861060580025800480"
+      ~available
+  in
+  check
+    bool
+    "contaminated tail never travels back"
+    false
+    (contains_substring ~haystack:message "1941e");
+  check
+    bool
+    "repair stem is visible"
+    true
+    (contains_substring ~haystack:message "Tool not found: Execute");
+  check
+    bool
+    "extra-characters hint is present"
+    true
+    (contains_substring
+       ~haystack:message
+       "The name carries extra characters after \"Execute\"");
+  check bool "failure stays a validation error" true (failure_kind = Types.Validation_error)
+;;
+
+let test_unknown_tool_failure_keeps_genuine_unknown_verbatim () =
+  check
+    string
+    "genuine unknown bare identifier stays byte-identical"
+    "Tool not found: Nope_tool"
+    (fst (Agent_tools.unknown_tool_failure ~requested:"Nope_tool" ~available:[ "Execute"; "Grep" ]));
+  check
+    string
+    "empty registry keeps its suffix"
+    "Tool not found: Nope. No tools are registered"
+    (fst (Agent_tools.unknown_tool_failure ~requested:"Nope" ~available:[]))
+;;
+
 let tool_use id name = Types.ToolUse { id; name; input = `Assoc [] }
 
 let admit names blocks =
@@ -336,6 +432,24 @@ let () =
             "underscore tails stay None"
             `Quick
             test_strip_suffix_refuses_underscore_tails
+        ] )
+    ; ( "reject feedback"
+      , [ test_case
+            "contaminated stem recovers for display"
+            `Quick
+            test_registered_prefix_recovers_contaminated_stem
+        ; test_case
+            "non-extensions stay None"
+            `Quick
+            test_registered_prefix_refuses_non_extensions
+        ; test_case
+            "contaminated tail never travels back"
+            `Quick
+            test_unknown_tool_failure_strips_contaminated_tail
+        ; test_case
+            "genuine unknown stays verbatim"
+            `Quick
+            test_unknown_tool_failure_keeps_genuine_unknown_verbatim
         ] )
     ]
 ;;

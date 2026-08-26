@@ -3737,7 +3737,20 @@ let open_image state ~notice path =
       match read_file_bytes path with
       | Error detail -> refuse detail
       | Ok data when String.length data = 0 -> refuse "the file is empty"
-      | Ok data ->
+      (* Asked before the write, not after: [place] is told not to answer, so a
+         format the terminal cannot decode leaves a cleared screen and no word
+         about why -- the picture that never arrives looks exactly like the
+         picture that did. The sniff is the composer's, so both surfaces read
+         bytes by one rule. *)
+      | Ok data -> (
+        match Masc.Keeper_vision_tool.sniff_image_media_type data with
+        | Error detail -> refuse detail
+        | Ok media
+          when not (String.equal media Masc_tui_graphics.payload_media_type) ->
+            refuse
+              (Printf.sprintf "the terminal draws %s and this is %s"
+                 Masc_tui_graphics.payload_media_type media)
+        | Ok _ ->
           let rows, columns = get_terminal_size () in
           (* Two rows kept back: one names the file above the picture, one
              says how to leave below it. *)
@@ -3755,7 +3768,7 @@ let open_image state ~notice path =
                 (Message_layout.fit_width "  any key: back"
                    (max 1 (columns - 1))));
           state.image_open <-
-            Some { image_path = path; image_bytes = String.length data })
+            Some { image_path = path; image_bytes = String.length data }))
 
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)

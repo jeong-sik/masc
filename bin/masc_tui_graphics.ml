@@ -60,6 +60,19 @@ let parse_query_reply body =
    accept. *)
 let chunk_bytes = 4096
 
+(* What [place] encodes its payload as. It says f=100 -- a PNG file's bytes --
+   and q=2, which tells the terminal not to answer, so bytes of any other
+   format are encoded, sent, dropped by the decoder, and nothing on the wire
+   says so: the screen clears, no picture arrives, and the only text on it is
+   how to leave.
+
+   Named rather than left inside the escape so a caller holding bytes can ask
+   whatever already knows how to identify them whether they are this, before
+   placing. This module does not identify bytes itself -- it speaks a terminal
+   protocol, and a sniffer here would be a second answer to a question the
+   composer's already answers. *)
+let payload_media_type = "image/png"
+
 let place ~data { columns; rows } =
   let encoded = Base64.encode_string data in
   let length = String.length encoded in

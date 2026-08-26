@@ -116,6 +116,26 @@ let test_only_the_first_escape_describes_the_image () =
         rest
 ;;
 
+(* [f=100] and [payload_media_type] are one fact said twice: the escape says
+   it to the terminal and the name says it to a caller holding bytes. A caller
+   that checked the name while the escape said something else would admit a
+   format the terminal then drops in silence, since [q=2] means it never
+   answers. Pinned rather than derived -- which number means PNG is the
+   protocol's to say, not ours. *)
+let test_the_named_format_is_the_one_the_escape_asks_for () =
+  check string "the name says PNG" "image/png"
+    Masc_tui_graphics.payload_media_type;
+  match
+    Masc_tui_graphics.place ~data:"bytes"
+      { Masc_tui_graphics.columns = 4; rows = 2 }
+    |> bodies
+  with
+  | [] -> failf "no escapes"
+  | first :: _ ->
+      let keys, _ = keys_and_payload first in
+      if not (List.exists (String.equal "f=100") keys) then
+        failf "the escape does not ask for PNG: %S" first
+
 let test_an_empty_image_places_nothing () =
   check string "no escape at all" ""
     (Masc_tui_graphics.place ~data:"" { Masc_tui_graphics.columns = 1; rows = 1 })
@@ -191,6 +211,8 @@ let () =
             test_every_chunk_but_the_last_says_more
         ; test_case "only the first escape describes the image" `Quick
             test_only_the_first_escape_describes_the_image
+        ; test_case "the named format is the one the escape asks for" `Quick
+            test_the_named_format_is_the_one_the_escape_asks_for
         ; test_case "an empty image places nothing" `Quick
             test_an_empty_image_places_nothing
         ] )

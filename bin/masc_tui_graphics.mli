@@ -41,6 +41,13 @@ val parse_query_reply : string -> query_reply option
     [None] when the body is not an answer to {!query}: another image's
     response, or something that is not a graphics reply. *)
 
+val payload_media_type : string
+(** What {!place} encodes its payload as: it says [f=100], a PNG file's bytes,
+    and [q=2], which tells the terminal not to answer. Bytes of any other
+    format are sent, dropped by the decoder, and nothing says so. Ask whatever
+    identifies bytes whether they are this, before placing -- after placing
+    there is nobody to ask. *)
+
 val place : data:string -> placement -> string
 (** Bytes that put [data] -- the contents of a PNG file -- on the terminal at
     the cursor.

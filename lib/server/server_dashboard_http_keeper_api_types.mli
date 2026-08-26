@@ -16,6 +16,11 @@ val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_github_identity : string
 val keeper_suffix_github_login : string
+
+val keeper_suffix_oauth_login : string
+(** Attaching a Keeper to a declared work service. Beside github-login
+    because it is the same act -- an operator granting one Keeper the right
+    to act somewhere -- reached a different way. *)
 val keeper_suffix_boot : string
 val keeper_suffix_up : string
 val keeper_suffix_shutdown : string
@@ -64,6 +69,7 @@ type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
   | Keeper_post_github_login
+  | Keeper_post_oauth_login
   | Keeper_post_boot
   | Keeper_post_up
   | Keeper_post_shutdown

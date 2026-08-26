@@ -1,0 +1,21 @@
+;; A Keeper's identity with an OAuth provider. The provider is a declaration
+;; under config/identity/, never a branch in here, so attaching one more is a
+;; file rather than a change to this library.
+;;
+;; The narrow (libraries) list is the point: this layer reaches the HTTP
+;; client, the crypto source and the PKCE helper, and nothing that knows what
+;; a Keeper is. Where tokens are stored is the caller's question.
+
+(include_subdirs no)
+
+(library
+ (name masc_keeper_identity)
+ (public_name masc.keeper_identity)
+ (modules keeper_oauth_provider keeper_oauth_flow keeper_oauth_pending
+  keeper_oauth_discovery keeper_oauth_registration keeper_oauth_session
+  keeper_oauth_client_store)
+ (wrapped false)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries otoml uri yojson unix masc.http_client masc.masc_random_id
+  masc.auth))

@@ -3273,6 +3273,51 @@ let secret_lines (state : state) (k : keeper) =
              else "  Values were not validated on the last read.")
         ]
 
+(* The Identity tab's body. Numbering comes from
+   [Masc_tui_types.identity_connectable], which is also what the key handler
+   indexes, so the number on screen and the provider a keypress starts are
+   the same list. *)
+let identity_lines (state : state) (k : keeper) providers =
+  let connectable = Masc_tui_types.identity_connectable providers in
+  let numbered =
+    List.mapi
+      (fun index (_, label) ->
+        Printf.sprintf "  %d  %s" (index + 1)
+          (Terminal_text.single_line label))
+      connectable
+  in
+  let rejected =
+    List.filter_map
+      (function
+        | Masc_tui_types.Identity_declared _ -> None
+        | Masc_tui_types.Identity_unreadable { idp_id; idp_problem } ->
+            Some
+              (Printf.sprintf "  -  %s  %s%s%s"
+                 (Terminal_text.single_line idp_id)
+                 (Theme.bad ())
+                 (Terminal_text.single_line idp_problem)
+                 Ansi.reset))
+      providers
+  in
+  let started =
+    match state.identity_login with
+    | Some login when String.equal login.ils_keeper k.k_name ->
+        [ "";
+          Ansi.bold ^ "  Open this to consent as "
+          ^ Terminal_text.single_line login.ils_label ^ ":" ^ Ansi.reset;
+          "  " ^ Terminal_text.single_line login.ils_url;
+          Ansi.dim
+          ^ "  Nothing is written to this keeper until you come back."
+          ^ Ansi.reset ]
+    | Some _ | None -> []
+  in
+  if numbered = [] && rejected = [] then
+    [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
+  else
+    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name) ^ ".")
+     :: "" :: numbered)
+    @ rejected @ started
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
@@ -3437,6 +3482,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | Detail_github ->
           stamped_or state.github_identity_view
             state.github_identity_view_error
+      | Detail_identity ->
+          stamped_or
+            (Option.map
+               (fun (stamp, providers) -> (stamp, identity_lines state k providers))
+               state.identity_view)
+            state.identity_view_error
     in
     let total_lines = List.length all_lines in
 
@@ -3457,6 +3508,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
+      | Detail_identity -> "[ ]:tab  1-9:connect"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

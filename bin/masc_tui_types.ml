@@ -533,15 +533,44 @@ type keeper_detail_tab =
   | Detail_instructions
   | Detail_secrets
   | Detail_github
+  | Detail_identity
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github ]
+  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github
+  ; Detail_identity ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
+  | Detail_identity -> "Identity"
+
+(** One line of the Identity tab. A declaration nobody can read is carried
+    rather than dropped: an operator who came looking for a provider needs to
+    see why it is not on offer, not a shorter list. *)
+type identity_provider =
+  | Identity_declared of { idp_id: string; idp_label: string }
+  | Identity_unreadable of { idp_id: string; idp_problem: string }
+
+(** The providers a key can act on, in the order the screen numbers them.
+    Both the renderer and the key handler read this, so the number an
+    operator sees and the provider a keypress starts cannot drift apart. *)
+let identity_connectable providers =
+  List.filter_map
+    (function
+      | Identity_declared { idp_id; idp_label } -> Some (idp_id, idp_label)
+      | Identity_unreadable _ -> None)
+    providers
+
+(** A login the operator has started but not finished: they have to open
+    [ils_url] in a browser, and until they come back nothing has been
+    written to the Keeper. *)
+type identity_login_started = {
+  ils_keeper: string;
+  ils_label: string;
+  ils_url: string;
+}
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error
@@ -863,6 +892,14 @@ type state = {
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
+  (* The Identity tab. Stamped with the keeper it was fetched for, like the
+     other fetched tabs, so the pane shows loading rather than another
+     keeper's answer. The providers are held rather than pre-rendered lines
+     because the screen's numbering and the key that acts on it have to come
+     out of one list -- see [identity_connectable]. *)
+  mutable identity_view: (string * identity_provider list) option;
+  mutable identity_view_error: string option;
+  mutable identity_login: identity_login_started option;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -1405,6 +1442,9 @@ let create_state
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;
+  identity_view = None;
+  identity_view_error = None;
+  identity_login = None;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;

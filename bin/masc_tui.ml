@@ -1205,6 +1205,9 @@ type async_msg =
       string * string * (Masc.Tui_decode.lsp_answer, string) result
   | Resource_read of string * (string list, string) result
   | Github_identity_view_loaded of string * (string list, string) result
+  | Identity_providers_loaded of
+      string * (Masc_tui_types.identity_provider list, string) result
+  | Identity_login_started of string * (string * string, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
@@ -2197,6 +2200,62 @@ let launch_github_identity_view state ~mailbox keeper_name =
       enqueue_async mailbox
         (Github_identity_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_identity_view state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_identity_providers ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_providers_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_providers_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* Begin a login. The answer is a URL the operator has to open; nothing is
+   written to the keeper until the browser comes back to the server. *)
+let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        match
+          Masc_tui_http.post_keeper_oauth_login ~host ~port ~keeper_name
+            ~provider_id
+        with
+        | Error err -> Error err
+        | Ok json -> (
+            match json with
+            | `Assoc fields -> (
+                match List.assoc_opt "authorize_url" fields with
+                | Some (`String url) -> Ok (label, url)
+                | Some _ | None ->
+                    Error "the server answered without an authorize_url")
+            | _ -> Error "the server answered with something this cannot read")
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_login_started (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_login_started (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = server_peer_host in
@@ -3973,7 +4032,11 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
        | Detail_github ->
            state.github_identity_view <- None;
            state.github_identity_view_error <- None;
-           launch_github_identity_view state ~mailbox keeper.k_name)
+           launch_github_identity_view state ~mailbox keeper.k_name
+       | Detail_identity ->
+           state.identity_view <- None;
+           state.identity_view_error <- None;
+           launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
@@ -5568,6 +5631,27 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.github_identity_view <- Some (keeper_name, lines);
             state.github_identity_view_error <- None
         | Error detail -> state.github_identity_view_error <- Some detail)
+  | Identity_providers_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok providers ->
+            state.identity_view <- Some (keeper_name, providers);
+            state.identity_view_error <- None
+        | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_login_started (keeper_name, result) -> (
+      match result with
+      | Ok (label, url) ->
+          state.identity_login <-
+            Some { ils_keeper = keeper_name; ils_label = label; ils_url = url };
+          state.identity_view_error <- None
+      (* Shown on the tab rather than swallowed: the operator pressed a key
+         and has to learn that nothing is going to open. *)
+      | Error detail -> state.identity_view_error <- Some detail)
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -7432,6 +7516,10 @@ let main () =
                 state.github_identity_view_error <- None;
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
+            | Some keeper, Detail_identity ->
+                state.identity_view <- None;
+                state.identity_view_error <- None;
+                launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
        | Some (("[" | "]") as bracket)
          when state.view = Changes && not compact_viewport ->
@@ -7451,6 +7539,32 @@ let main () =
                   Some (keeper.k_name, [ "# github login"; "(starting gh device flow\xe2\x80\xa6)" ]);
                 launch_github_login state ~mailbox:async_messages keeper.k_name
             | None -> ())
+       (* The number the Identity tab printed. Both sides index
+          [identity_connectable], so what the screen numbered and what this
+          starts are the same list. *)
+       | Some digit
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport
+              && String.length digit = 1
+              && digit.[0] >= '1'
+              && digit.[0] <= '9' -> (
+           let wanted = Char.code digit.[0] - Char.code '1' in
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 List.nth_opt
+                   (Masc_tui_types.identity_connectable providers)
+                   wanted
+               with
+               | Some (provider_id, label) ->
+                   state.identity_login <- None;
+                   state.identity_view_error <- None;
+                   launch_identity_login state ~mailbox:async_messages
+                     ~keeper_name:keeper.k_name ~provider_id ~label
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" when state.view = Resources && not compact_viewport ->
            (match
               Option.bind state.resources_list (fun rows ->
@@ -8830,7 +8944,12 @@ let main () =
                           state.github_identity_view <- None;
                           state.github_identity_view_error <- None;
                           launch_github_identity_view state
-                            ~mailbox:async_messages k.k_name)
+                            ~mailbox:async_messages k.k_name
+                      | Detail_identity ->
+                          state.identity_view <- None;
+                          state.identity_view_error <- None;
+                          launch_identity_view state ~mailbox:async_messages
+                            k.k_name)
                  | None -> ())
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole

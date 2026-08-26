@@ -215,6 +215,12 @@ let test_projection_names_equal_turn_surface_authority () =
       (Option.is_some surface.tool_surface_sha256);
     check (option int) "resource bound follows frozen snapshot" (Some 65536)
       surface.skill_resource_read_max_bytes;
+    check string
+      "surface names the frozen Skill snapshot"
+      (Skill_catalog_snapshot.snapshot_revision snapshot
+       |> Skill_catalog_snapshot.snapshot_revision_to_string)
+      (Skill_catalog_snapshot.snapshot_revision_to_string
+         surface.skill_snapshot_revision);
     let instruction_entries = task_instruction_skills in
     let schema_tool =
       Keeper_tool_composition_surface.schema_tools
@@ -269,6 +275,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~native_posture:None
       ~tool_groups:None
       ~current_task_id:None
+      ~skills_left_out:[]
       ~task_skill_references:[]
       ~skill_snapshot:(configured_external_skill_snapshot ())
   with
@@ -603,6 +610,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       ~native_posture:None
       ~tool_groups:None
       ~current_task_id:(Some "task-001")
+      ~skills_left_out:[]
       ~task_skill_references:[ reference_by_name skill_snapshot "guide" ]
       ~skill_snapshot
   with

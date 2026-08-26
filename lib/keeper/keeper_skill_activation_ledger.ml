@@ -3,14 +3,14 @@ open Result.Syntax
 type ledger_revision = string
 type workspace_key = string
 
-type origin =
+type instruction_origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
   | Session_instruction
+
+type composition_origin =
   | Task_composition of
-      { task_id : Keeper_id.Task_id.t
-      ; tool_name : string
-      }
-  | Session_composition of { tool_name : string }
+      { task_id : Keeper_id.Task_id.t }
+  | Session_composition
 
 type delivery =
   { agent_core_turn : int
@@ -35,6 +35,42 @@ type served_content =
       ; sha256 : string
       }
 
+type invocation =
+  | Instruction_invocation of
+      { origin : instruction_origin
+      ; served_content : served_content
+      }
+  | Composition_invocation of
+      { origin : composition_origin
+      ; tool_name : string
+      }
+
+type transition_rejection =
+  | Delivery_order_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; activation_agent_core_turn : int
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+  | Delivery_conflict_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+  | Action_before_delivery_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; action_tool_use_id : string
+      ; tool_name : string
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+
 type activation =
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
@@ -43,17 +79,17 @@ type activation =
   ; runtime_id : string
   ; skill_tool_use_id : string
   ; agent_core_turn : int
-  ; served_content : served_content
+  ; invocation : invocation
   ; delivery : delivery option
   ; actions : action list
   ; activated_at : string
-  ; origin : origin
   }
 
 type t =
   { workspace_key : workspace_key
   ; session_id : Keeper_id.Trace_id.t
   ; activations : activation list
+  ; transition_rejections : transition_rejection list
   ; revision : ledger_revision
   }
 
@@ -67,6 +103,18 @@ type summary =
   ; composition_deliveries : int
   ; composition_actions_observed : int
   ; invalid_transitions : int
+  }
+
+type summary_scope =
+  { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+  ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; reference : Skill_reference.t
+  }
+
+type scoped_summary =
+  { scope : summary_scope
+  ; summary : summary
   }
 
 type record_outcome =
@@ -110,6 +158,9 @@ type decode_error =
   | Invalid_action_tool_name_field of string
   | Invalid_action_agent_core_turn of int
   | Invalid_action_time of string
+  | Invalid_transition_rejection_kind of string
+  | Orphan_transition_rejection of string
+  | Transition_rejection_activation_mismatch of string
   | Duplicate_action_tool_use_id
   | Invalid_activated_at of string
   | Duplicate_skill_tool_use_id
@@ -168,6 +219,10 @@ let decode_error_code = function
   | Invalid_action_tool_name_field _ -> "invalid_action_tool_name"
   | Invalid_action_agent_core_turn _ -> "invalid_action_agent_core_turn"
   | Invalid_action_time _ -> "invalid_action_time"
+  | Invalid_transition_rejection_kind _ -> "invalid_transition_rejection_kind"
+  | Orphan_transition_rejection _ -> "orphan_transition_rejection"
+  | Transition_rejection_activation_mismatch _ ->
+    "transition_rejection_activation_mismatch"
   | Duplicate_action_tool_use_id -> "duplicate_action_tool_use_id"
   | Invalid_activated_at _ -> "invalid_activated_at"
   | Duplicate_skill_tool_use_id -> "duplicate_skill_tool_use_id"
@@ -222,15 +277,16 @@ let store_error_to_string = function
   | Readback_mismatch -> "readback mismatch"
 ;;
 
-let schema = "masc.skill-activations/v2"
+let schema = "masc.skill-activations/v3"
 let filename = "skill-activations.json"
 let activations ledger = ledger.activations
+let transition_rejections ledger = ledger.transition_rejections
 let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 
-let empty_summary =
+let empty_summary invalid_transitions =
   { instruction_invocations = 0
   ; skill_bodies_served = 0
   ; skill_resources_served = 0
@@ -239,7 +295,7 @@ let empty_summary =
   ; composition_invocations = 0
   ; composition_deliveries = 0
   ; composition_actions_observed = 0
-  ; invalid_transitions = 0
+  ; invalid_transitions
   }
 ;;
 
@@ -252,11 +308,10 @@ let summarize ledger =
          | None -> 0
        in
        let actions = List.length activation.actions in
-       match activation.origin with
-       | Task_instruction _
-       | Session_instruction ->
+       match activation.invocation with
+       | Instruction_invocation { served_content; _ } ->
          let skill_bodies_served, skill_resources_served =
-           match activation.served_content with
+           match served_content with
            | Skill_body _ -> summary.skill_bodies_served + 1, summary.skill_resources_served
            | Skill_resource _ ->
              summary.skill_bodies_served, summary.skill_resources_served + 1
@@ -269,15 +324,14 @@ let summarize ledger =
          ; instruction_actions_observed =
              summary.instruction_actions_observed + actions
          }
-       | Task_composition _
-       | Session_composition _ ->
+       | Composition_invocation _ ->
          { summary with
            composition_invocations = summary.composition_invocations + 1
          ; composition_deliveries = summary.composition_deliveries + delivered
          ; composition_actions_observed =
              summary.composition_actions_observed + actions
          })
-    empty_summary
+    (empty_summary (List.length ledger.transition_rejections))
     ledger.activations
 ;;
 
@@ -292,6 +346,89 @@ let summary_to_yojson summary =
     ; "composition_deliveries", `Int summary.composition_deliveries
     ; "composition_actions_observed", `Int summary.composition_actions_observed
     ; "invalid_transitions", `Int summary.invalid_transitions
+    ]
+;;
+
+let rejection_skill_tool_use_id = function
+  | Delivery_order_rejected { skill_tool_use_id; _ }
+  | Delivery_conflict_rejected { skill_tool_use_id; _ }
+  | Action_before_delivery_rejected { skill_tool_use_id; _ } ->
+    skill_tool_use_id
+;;
+
+let rejection_activation_turn_ref = function
+  | Delivery_order_rejected { activation_turn_ref; _ }
+  | Delivery_conflict_rejected { activation_turn_ref; _ }
+  | Action_before_delivery_rejected { activation_turn_ref; _ } ->
+    activation_turn_ref
+;;
+
+let scope_of_activation (activation : activation) =
+  { snapshot_revision = activation.snapshot_revision
+  ; turn_ref = activation.turn_ref
+  ; runtime_id = activation.runtime_id
+  ; reference =
+      Skill_reference.make
+        ~identity:activation.identity
+        ~content_revision:activation.content_revision
+  }
+;;
+
+let equal_summary_scope left right =
+  Skill_catalog_snapshot.equal_snapshot_revision
+    left.snapshot_revision
+    right.snapshot_revision
+  && Ids.Turn_ref.equal left.turn_ref right.turn_ref
+  && String.equal left.runtime_id right.runtime_id
+  && Skill_reference.equal left.reference right.reference
+;;
+
+let summarize_by_scope ledger =
+  let scopes =
+    List.fold_left
+      (fun scopes activation ->
+         let scope = scope_of_activation activation in
+         if List.exists (equal_summary_scope scope) scopes
+         then scopes
+         else scopes @ [ scope ])
+      []
+      ledger.activations
+  in
+  List.map
+    (fun scope ->
+       let activations =
+         List.filter
+           (fun activation ->
+              equal_summary_scope scope (scope_of_activation activation))
+           ledger.activations
+       in
+       let invocation_ids =
+         List.map (fun activation -> activation.skill_tool_use_id) activations
+       in
+       let transition_rejections =
+         List.filter
+           (fun rejection ->
+              List.mem (rejection_skill_tool_use_id rejection) invocation_ids)
+           ledger.transition_rejections
+       in
+       let scoped_ledger = { ledger with activations; transition_rejections } in
+       { scope; summary = summarize scoped_ledger })
+    scopes
+;;
+
+let scoped_summary_to_yojson scoped =
+  `Assoc
+    [ ( "scope"
+      , `Assoc
+          [ ( "snapshot_revision"
+            , `String
+                (Skill_catalog_snapshot.snapshot_revision_to_string
+                   scoped.scope.snapshot_revision) )
+          ; "turn_ref", Ids.Turn_ref.to_yojson scoped.scope.turn_ref
+          ; "runtime_id", `String scoped.scope.runtime_id
+          ; "reference", Skill_reference.to_yojson scoped.scope.reference
+          ] )
+    ; "summary", summary_to_yojson scoped.summary
     ]
 ;;
 
@@ -323,9 +460,8 @@ let make_activation_evidence
       ~runtime_id
       ~skill_tool_use_id
       ~agent_core_turn
-      ~served_content
+      ~invocation
       ~activated_at
-      ~origin
   =
   let trace_id = Ids.Turn_ref.trace_id turn_ref in
   let* canonical_name =
@@ -337,16 +473,16 @@ let make_activation_evidence
     then Ok ()
     else Error (Invalid_skill_name identity.name)
   in
-  let origin_valid =
-    match origin with
-    | Task_instruction _ | Session_instruction -> Ok ()
-    | Task_composition { tool_name; _ }
-    | Session_composition { tool_name } ->
+  let invocation_valid =
+    match invocation with
+    | Instruction_invocation { served_content; _ } ->
+      validate_served_content served_content
+    | Composition_invocation { tool_name; _ } ->
       if Safe_identifier.is_portable_name tool_name
       then Ok ()
       else Error (Invalid_tool_name tool_name)
   in
-  let* () = origin_valid in
+  let* () = invocation_valid in
   let* () =
     if String.equal (String.trim runtime_id) ""
     then Error Invalid_runtime_id
@@ -362,7 +498,6 @@ let make_activation_evidence
     then Error (Invalid_agent_core_turn agent_core_turn)
     else Ok ()
   in
-  let* () = validate_served_content served_content in
   let* () =
     if String.equal trace_id "" || Ids.Turn_ref.absolute_turn turn_ref <= 0
     then Error (Invalid_turn_ref (Ids.Turn_ref.to_string turn_ref))
@@ -381,11 +516,10 @@ let make_activation_evidence
     ; runtime_id
     ; skill_tool_use_id
     ; agent_core_turn
-    ; served_content
+    ; invocation
     ; delivery = None
     ; actions = []
     ; activated_at
-    ; origin
     }
 ;;
 
@@ -397,9 +531,8 @@ let make_activation
       ~runtime_id
       ~skill_tool_use_id
       ~agent_core_turn
-      ~served_content
+      ~invocation
       ~activated_at
-      ~origin
   =
   make_activation_evidence
     ~identity
@@ -409,30 +542,26 @@ let make_activation
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~served_content
+    ~invocation
     ~activated_at
-    ~origin
 ;;
 
-let origin_to_yojson = function
+let instruction_origin_to_yojson = function
   | Task_instruction { task_id } ->
     `Assoc
       [ "kind", `String "task_instruction"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
       ]
-  | Session_instruction ->
-    `Assoc [ "kind", `String "session_instruction" ]
-  | Task_composition { task_id; tool_name } ->
+  | Session_instruction -> `Assoc [ "kind", `String "session_instruction" ]
+;;
+
+let composition_origin_to_yojson = function
+  | Task_composition { task_id } ->
     `Assoc
       [ "kind", `String "task_composition"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
-      ; "tool_name", `String tool_name
       ]
-  | Session_composition { tool_name } ->
-    `Assoc
-      [ "kind", `String "session_composition"
-      ; "tool_name", `String tool_name
-      ]
+  | Session_composition -> `Assoc [ "kind", `String "session_composition" ]
 ;;
 
 let delivery_to_yojson (delivery : delivery) =
@@ -467,6 +596,75 @@ let served_content_to_yojson = function
       ]
 ;;
 
+let invocation_to_yojson = function
+  | Instruction_invocation { origin; served_content } ->
+    `Assoc
+      [ "kind", `String "instruction"
+      ; "origin", instruction_origin_to_yojson origin
+      ; "served_content", served_content_to_yojson served_content
+      ]
+  | Composition_invocation { origin; tool_name } ->
+    `Assoc
+      [ "kind", `String "composition"
+      ; "origin", composition_origin_to_yojson origin
+      ; "tool_name", `String tool_name
+      ]
+;;
+
+let transition_rejection_to_yojson = function
+  | Delivery_order_rejected
+      { skill_tool_use_id
+      ; activation_turn_ref
+      ; observed_turn_ref
+      ; activation_agent_core_turn
+      ; observed_agent_core_turn
+      ; observed_at
+      } ->
+    `Assoc
+      [ "kind", `String "delivery_order"
+      ; "skill_tool_use_id", `String skill_tool_use_id
+      ; "activation_turn_ref", Ids.Turn_ref.to_yojson activation_turn_ref
+      ; "observed_turn_ref", Ids.Turn_ref.to_yojson observed_turn_ref
+      ; "activation_agent_core_turn", `Int activation_agent_core_turn
+      ; "observed_agent_core_turn", `Int observed_agent_core_turn
+      ; "observed_at", `String observed_at
+      ]
+  | Delivery_conflict_rejected
+      { skill_tool_use_id
+      ; activation_turn_ref
+      ; observed_turn_ref
+      ; observed_agent_core_turn
+      ; observed_at
+      } ->
+    `Assoc
+      [ "kind", `String "delivery_conflict"
+      ; "skill_tool_use_id", `String skill_tool_use_id
+      ; "activation_turn_ref", Ids.Turn_ref.to_yojson activation_turn_ref
+      ; "observed_turn_ref", Ids.Turn_ref.to_yojson observed_turn_ref
+      ; "observed_agent_core_turn", `Int observed_agent_core_turn
+      ; "observed_at", `String observed_at
+      ]
+  | Action_before_delivery_rejected
+      { skill_tool_use_id
+      ; activation_turn_ref
+      ; observed_turn_ref
+      ; action_tool_use_id
+      ; tool_name
+      ; observed_agent_core_turn
+      ; observed_at
+      } ->
+    `Assoc
+      [ "kind", `String "action_before_delivery"
+      ; "skill_tool_use_id", `String skill_tool_use_id
+      ; "activation_turn_ref", Ids.Turn_ref.to_yojson activation_turn_ref
+      ; "observed_turn_ref", Ids.Turn_ref.to_yojson observed_turn_ref
+      ; "action_tool_use_id", `String action_tool_use_id
+      ; "tool_name", `String tool_name
+      ; "observed_agent_core_turn", `Int observed_agent_core_turn
+      ; "observed_at", `String observed_at
+      ]
+;;
+
 let activation_to_yojson activation =
   `Assoc
     [ "identity", Skill_reference.identity_to_yojson activation.identity
@@ -481,14 +679,13 @@ let activation_to_yojson activation =
     ; "runtime_id", `String activation.runtime_id
     ; "skill_tool_use_id", `String activation.skill_tool_use_id
     ; "agent_core_turn", `Int activation.agent_core_turn
-    ; "served_content", served_content_to_yojson activation.served_content
+    ; "invocation", invocation_to_yojson activation.invocation
     ; ( "delivery"
       , match activation.delivery with
         | Some delivery -> delivery_to_yojson delivery
         | None -> `Null )
     ; "actions", `List (List.map action_to_yojson activation.actions)
     ; "activated_at", `String activation.activated_at
-    ; "origin", origin_to_yojson activation.origin
     ]
 ;;
 
@@ -496,27 +693,39 @@ let workspace_key_of_root root =
   Digestif.SHA256.(digest_string root |> to_hex)
 ;;
 
-let revision_of_ledger ~workspace_key ~session_id activations =
+let revision_of_ledger ~workspace_key ~session_id ~activations ~transition_rejections =
   let canonical =
     `Assoc
       [ "workspace_key", `String workspace_key
       ; "session_id", `String (Keeper_id.Trace_id.to_string session_id)
       ; "activations", `List (List.map activation_to_yojson activations)
+      ; ( "transition_rejections"
+        , `List (List.map transition_rejection_to_yojson transition_rejections) )
       ]
   in
   Digestif.SHA256.(digest_string (Yojson.Safe.to_string canonical) |> to_hex)
 ;;
 
-let make ~workspace_key ~session_id activations =
+let make ~workspace_key ~session_id ~activations ~transition_rejections =
   { workspace_key
   ; session_id
   ; activations
-  ; revision = revision_of_ledger ~workspace_key ~session_id activations
+  ; transition_rejections
+  ; revision =
+      revision_of_ledger
+        ~workspace_key
+        ~session_id
+        ~activations
+        ~transition_rejections
   }
 ;;
 
 let empty ~workspace_root ~trace_id =
-  make ~workspace_key:(workspace_key_of_root workspace_root) ~session_id:trace_id []
+  make
+    ~workspace_key:(workspace_key_of_root workspace_root)
+    ~session_id:trace_id
+    ~activations:[]
+    ~transition_rejections:[]
 ;;
 
 let to_yojson ledger =
@@ -526,6 +735,9 @@ let to_yojson ledger =
     ; "session_id", `String (Keeper_id.Trace_id.to_string ledger.session_id)
     ; "revision", `String ledger.revision
     ; "activations", `List (List.map activation_to_yojson ledger.activations)
+    ; ( "transition_rejections"
+      , `List
+          (List.map transition_rejection_to_yojson ledger.transition_rejections) )
     ]
 ;;
 
@@ -590,7 +802,7 @@ let decode_identity json =
   Ok (Skill_reference.make_identity ~source_id ~package_id ~name)
 ;;
 
-let decode_origin json =
+let decode_instruction_origin json =
   let* fields = object_field "origin" json in
   let* kind = string_field "kind" fields in
   let* () =
@@ -602,16 +814,6 @@ let decode_origin json =
         fields
     | "session_instruction" ->
       exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
-    | "task_composition" ->
-      exact_fields
-        ~object_name:"origin"
-        ~allowed:[ "kind"; "task_id"; "tool_name" ]
-        fields
-    | "session_composition" ->
-      exact_fields
-        ~object_name:"origin"
-        ~allowed:[ "kind"; "tool_name" ]
-        fields
     | kind -> Error (Invalid_origin_kind kind)
   in
   match kind with
@@ -623,17 +825,29 @@ let decode_origin json =
     in
     Ok (Task_instruction { task_id })
   | "session_instruction" -> Ok Session_instruction
+  | kind -> Error (Invalid_origin_kind kind)
+;;
+
+let decode_composition_origin json =
+  let* fields = object_field "origin" json in
+  let* kind = string_field "kind" fields in
+  let* () =
+    match kind with
+    | "task_composition" ->
+      exact_fields ~object_name:"origin" ~allowed:[ "kind"; "task_id" ] fields
+    | "session_composition" ->
+      exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
+    | kind -> Error (Invalid_origin_kind kind)
+  in
+  match kind with
   | "task_composition" ->
     let* task_id_text = string_field "task_id" fields in
     let* task_id =
       Keeper_id.Task_id.of_string task_id_text
       |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
     in
-    let* tool_name = string_field "tool_name" fields in
-    Ok (Task_composition { task_id; tool_name })
-  | "session_composition" ->
-    let* tool_name = string_field "tool_name" fields in
-    Ok (Session_composition { tool_name })
+    Ok (Task_composition { task_id })
+  | "session_composition" -> Ok Session_composition
   | kind -> Error (Invalid_origin_kind kind)
 ;;
 
@@ -726,6 +940,177 @@ let decode_served_content json =
   Ok served_content
 ;;
 
+let decode_invocation json =
+  let* fields = object_field "invocation" json in
+  let* kind = string_field "kind" fields in
+  let* () =
+    match kind with
+    | "instruction" ->
+      exact_fields
+        ~object_name:"invocation"
+        ~allowed:[ "kind"; "origin"; "served_content" ]
+        fields
+    | "composition" ->
+      exact_fields
+        ~object_name:"invocation"
+        ~allowed:[ "kind"; "origin"; "tool_name" ]
+        fields
+    | observed -> Error (Invalid_served_content_kind observed)
+  in
+  let* origin_json =
+    match List.assoc_opt "origin" fields with
+    | Some value -> Ok value
+    | None -> Error (Expected_object { field = "origin" })
+  in
+  match kind with
+  | "instruction" ->
+    let* origin = decode_instruction_origin origin_json in
+    let* served_content_json =
+      match List.assoc_opt "served_content" fields with
+      | Some value -> Ok value
+      | None -> Error (Expected_object { field = "served_content" })
+    in
+    let* served_content = decode_served_content served_content_json in
+    Ok (Instruction_invocation { origin; served_content })
+  | "composition" ->
+    let* origin = decode_composition_origin origin_json in
+    let* tool_name = string_field "tool_name" fields in
+    if Safe_identifier.is_portable_name tool_name
+    then Ok (Composition_invocation { origin; tool_name })
+    else Error (Invalid_tool_name tool_name)
+  | observed -> Error (Invalid_served_content_kind observed)
+;;
+
+let decode_transition_turn_ref ~expected_trace_id field fields =
+  let* text = string_field field fields in
+  let* turn_ref =
+    match Ids.Turn_ref.of_string text with
+    | Some turn_ref -> Ok turn_ref
+    | None -> Error (Invalid_turn_ref text)
+  in
+  if
+    String.equal
+      (Ids.Turn_ref.trace_id turn_ref)
+      (Keeper_id.Trace_id.to_string expected_trace_id)
+  then Ok turn_ref
+  else Error Turn_ref_session_mismatch
+;;
+
+let decode_transition_rejection ~expected_trace_id json =
+  let* fields = object_field "transition_rejection" json in
+  let* kind = string_field "kind" fields in
+  let* () =
+    let allowed =
+      match kind with
+      | "delivery_order" ->
+        [ "kind"
+        ; "skill_tool_use_id"
+        ; "activation_turn_ref"
+        ; "observed_turn_ref"
+        ; "activation_agent_core_turn"
+        ; "observed_agent_core_turn"
+        ; "observed_at"
+        ]
+      | "delivery_conflict" ->
+        [ "kind"
+        ; "skill_tool_use_id"
+        ; "activation_turn_ref"
+        ; "observed_turn_ref"
+        ; "observed_agent_core_turn"
+        ; "observed_at"
+        ]
+      | "action_before_delivery" ->
+        [ "kind"
+        ; "skill_tool_use_id"
+        ; "activation_turn_ref"
+        ; "observed_turn_ref"
+        ; "action_tool_use_id"
+        ; "tool_name"
+        ; "observed_agent_core_turn"
+        ; "observed_at"
+        ]
+      | _ -> []
+    in
+    match allowed with
+    | [] -> Error (Invalid_transition_rejection_kind kind)
+    | allowed -> exact_fields ~object_name:"transition_rejection" ~allowed fields
+  in
+  let* skill_tool_use_id = string_field "skill_tool_use_id" fields in
+  let* () =
+    if String.equal (String.trim skill_tool_use_id) ""
+    then Error Invalid_skill_tool_use_id
+    else Ok ()
+  in
+  let* activation_turn_ref =
+    decode_transition_turn_ref ~expected_trace_id "activation_turn_ref" fields
+  in
+  let* observed_turn_ref =
+    decode_transition_turn_ref ~expected_trace_id "observed_turn_ref" fields
+  in
+  let* observed_agent_core_turn = int_field "observed_agent_core_turn" fields in
+  let* () =
+    if observed_agent_core_turn < 0
+    then Error (Invalid_action_agent_core_turn observed_agent_core_turn)
+    else Ok ()
+  in
+  let* observed_at = string_field "observed_at" fields in
+  let* () =
+    Time_codec.parse_rfc3339 observed_at
+    |> Result.map ignore
+    |> Result.map_error (fun _ -> Invalid_action_time observed_at)
+  in
+  match kind with
+  | "delivery_order" ->
+    let* activation_agent_core_turn =
+      int_field "activation_agent_core_turn" fields
+    in
+    if activation_agent_core_turn < 0
+    then Error (Invalid_agent_core_turn activation_agent_core_turn)
+    else
+      Ok
+        (Delivery_order_rejected
+           { skill_tool_use_id
+           ; activation_turn_ref
+           ; observed_turn_ref
+           ; activation_agent_core_turn
+           ; observed_agent_core_turn
+           ; observed_at
+           })
+  | "delivery_conflict" ->
+    Ok
+      (Delivery_conflict_rejected
+         { skill_tool_use_id
+         ; activation_turn_ref
+         ; observed_turn_ref
+         ; observed_agent_core_turn
+         ; observed_at
+         })
+  | "action_before_delivery" ->
+    let* action_tool_use_id = string_field "action_tool_use_id" fields in
+    let* () =
+      if String.equal (String.trim action_tool_use_id) ""
+      then Error Invalid_action_tool_use_id_field
+      else Ok ()
+    in
+    let* tool_name = string_field "tool_name" fields in
+    let* () =
+      if Safe_identifier.is_portable_name tool_name
+      then Ok ()
+      else Error (Invalid_action_tool_name_field tool_name)
+    in
+    Ok
+      (Action_before_delivery_rejected
+         { skill_tool_use_id
+         ; activation_turn_ref
+         ; observed_turn_ref
+         ; action_tool_use_id
+         ; tool_name
+         ; observed_agent_core_turn
+         ; observed_at
+         })
+  | observed -> Error (Invalid_transition_rejection_kind observed)
+;;
+
 let decode_activation ~expected_trace_id json =
   let* fields = object_field "activation" json in
   let* () =
@@ -739,11 +1124,10 @@ let decode_activation ~expected_trace_id json =
         ; "runtime_id"
         ; "skill_tool_use_id"
         ; "agent_core_turn"
-        ; "served_content"
+        ; "invocation"
         ; "delivery"
         ; "actions"
         ; "activated_at"
-        ; "origin"
         ]
       fields
   in
@@ -780,12 +1164,12 @@ let decode_activation ~expected_trace_id json =
   let* runtime_id = string_field "runtime_id" fields in
   let* skill_tool_use_id = string_field "skill_tool_use_id" fields in
   let* agent_core_turn = int_field "agent_core_turn" fields in
-  let* served_content_json =
-    match List.assoc_opt "served_content" fields with
+  let* invocation_json =
+    match List.assoc_opt "invocation" fields with
     | Some value -> Ok value
-    | None -> Error (Expected_object { field = "served_content" })
+    | None -> Error (Expected_object { field = "invocation" })
   in
-  let* served_content = decode_served_content served_content_json in
+  let* invocation = decode_invocation invocation_json in
   let* delivery_json =
     match List.assoc_opt "delivery" fields with
     | Some value -> Ok value
@@ -819,12 +1203,6 @@ let decode_activation ~expected_trace_id json =
     |> Result.map ignore
     |> Result.map_error (fun _ -> Invalid_activated_at activated_at)
   in
-  let* origin_json =
-    match List.assoc_opt "origin" fields with
-    | Some value -> Ok value
-    | None -> Error (Expected_object { field = "origin" })
-  in
-  let* origin = decode_origin origin_json in
   let* activation =
     make_activation_evidence
     ~identity
@@ -834,9 +1212,8 @@ let decode_activation ~expected_trace_id json =
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~served_content
+    ~invocation
     ~activated_at
-    ~origin
   in
   (match delivery with
    | Some observed when observed.agent_core_turn <= activation.agent_core_turn ->
@@ -856,7 +1233,7 @@ let decode_activation ~expected_trace_id json =
    | None -> Ok { activation with delivery; actions })
 ;;
 
-let exact_key_equal left right =
+let exact_key_equal (left : activation) (right : activation) =
   String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
 
@@ -865,7 +1242,14 @@ let of_projection_yojson json =
   let* () =
     exact_fields
       ~object_name:"ledger"
-      ~allowed:[ "schema"; "workspace_key"; "session_id"; "revision"; "activations" ]
+      ~allowed:
+        [ "schema"
+        ; "workspace_key"
+        ; "session_id"
+        ; "revision"
+        ; "activations"
+        ; "transition_rejections"
+        ]
       fields
   in
   let* observed_schema = string_field "schema" fields in
@@ -912,11 +1296,51 @@ let of_projection_yojson json =
       else ensure_unique rest
   in
   let* () = ensure_unique activations in
+  let* transition_rejections =
+    match List.assoc_opt "transition_rejections" fields with
+    | Some (`List values) ->
+      List.fold_left
+        (fun result value ->
+           let* reversed = result in
+           let* rejection =
+             decode_transition_rejection ~expected_trace_id:session_id value
+           in
+           Ok (rejection :: reversed))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | Some _ | None -> Error (Expected_object { field = "transition_rejections" })
+  in
+  let* () =
+    List.fold_left
+      (fun result rejection ->
+         let* () = result in
+         let skill_tool_use_id = rejection_skill_tool_use_id rejection in
+         match
+           List.find_opt
+             (fun (activation : activation) ->
+                String.equal activation.skill_tool_use_id skill_tool_use_id)
+             activations
+         with
+         | None -> Error (Orphan_transition_rejection skill_tool_use_id)
+         | Some activation ->
+           if
+             Ids.Turn_ref.equal
+               activation.turn_ref
+               (rejection_activation_turn_ref rejection)
+           then Ok ()
+           else
+             Error
+               (Transition_rejection_activation_mismatch skill_tool_use_id))
+      (Ok ())
+      transition_rejections
+  in
   let ledger =
     make
       ~workspace_key
       ~session_id
-      activations
+      ~activations
+      ~transition_rejections
   in
   if String.equal ledger.revision declared_revision
   then Ok ledger
@@ -973,12 +1397,19 @@ let load ~config ~trace_id =
     read_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
 ;;
 
-let persist_locked ~ownership_root ~trace_id session_dir activations =
+let persist_locked
+      ~ownership_root
+      ~trace_id
+      session_dir
+      ~activations
+      ~transition_rejections
+  =
   let next =
     make
       ~workspace_key:(workspace_key_of_root ownership_root)
       ~session_id:trace_id
-      activations
+      ~activations
+      ~transition_rejections
   in
   let path = ledger_path session_dir in
   let* () =
@@ -997,7 +1428,7 @@ let persist_locked ~ownership_root ~trace_id session_dir activations =
   else Error Readback_mismatch
 ;;
 
-let record ~config ~trace_id activation =
+let record ~config ~trace_id (activation : activation) =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     let* () =
       if
@@ -1021,9 +1452,29 @@ let record ~config ~trace_id activation =
           ~ownership_root
           ~trace_id
           session_dir
-          (current.activations @ [ activation ])
+          ~activations:(current.activations @ [ activation ])
+          ~transition_rejections:current.transition_rejections
       in
       Ok (readback, Recorded activation))
+;;
+
+let persist_transition_rejection
+      ~ownership_root
+      ~trace_id
+      session_dir
+      current
+      rejection
+      error
+  =
+  let* _stored =
+    persist_locked
+      ~ownership_root
+      ~trace_id
+      session_dir
+      ~activations:current.activations
+      ~transition_rejections:(current.transition_rejections @ [ rejection ])
+  in
+  Error error
 ;;
 
 let observe_delivery
@@ -1045,32 +1496,76 @@ let observe_delivery
       read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
     in
     let requested = List.sort_uniq String.compare tool_result_ids in
-    let* reversed, matched, changed =
-      List.fold_left
-        (fun result activation ->
-           let* reversed, matched, changed = result in
+    let rejected =
+      List.find_map
+        (fun activation ->
            if not (List.mem activation.skill_tool_use_id requested)
-           then Ok (activation :: reversed, matched, changed)
+           then None
            else if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
-           then Error (Conflicting_delivery activation.skill_tool_use_id)
+           then
+             Some
+               ( Delivery_conflict_rejected
+                   { skill_tool_use_id = activation.skill_tool_use_id
+                   ; activation_turn_ref = activation.turn_ref
+                   ; observed_turn_ref = turn_ref
+                   ; observed_agent_core_turn = agent_core_turn
+                   ; observed_at = delivered_at
+                   }
+               , Conflicting_delivery activation.skill_tool_use_id )
            else if agent_core_turn <= activation.agent_core_turn
            then
-             Error
-               (Invalid_delivery_order
-                  { skill_tool_use_id = activation.skill_tool_use_id
-                  ; activation_turn = activation.agent_core_turn
-                  ; delivery_turn = agent_core_turn
-                  })
+             Some
+               ( Delivery_order_rejected
+                   { skill_tool_use_id = activation.skill_tool_use_id
+                   ; activation_turn_ref = activation.turn_ref
+                   ; observed_turn_ref = turn_ref
+                   ; activation_agent_core_turn = activation.agent_core_turn
+                   ; observed_agent_core_turn = agent_core_turn
+                   ; observed_at = delivered_at
+                   }
+               , Invalid_delivery_order
+                   { skill_tool_use_id = activation.skill_tool_use_id
+                   ; activation_turn = activation.agent_core_turn
+                   ; delivery_turn = agent_core_turn
+                   } )
+           else
+             match activation.delivery with
+             | Some delivery when delivery.agent_core_turn <> agent_core_turn ->
+               Some
+                 ( Delivery_conflict_rejected
+                     { skill_tool_use_id = activation.skill_tool_use_id
+                     ; activation_turn_ref = activation.turn_ref
+                     ; observed_turn_ref = turn_ref
+                     ; observed_agent_core_turn = agent_core_turn
+                     ; observed_at = delivered_at
+                     }
+                 , Conflicting_delivery activation.skill_tool_use_id )
+             | None | Some _ -> None)
+        current.activations
+    in
+    match rejected with
+    | Some (rejection, error) ->
+      persist_transition_rejection
+        ~ownership_root
+        ~trace_id
+        session_dir
+        current
+        rejection
+        error
+    | None ->
+    let reversed, matched, changed =
+      List.fold_left
+        (fun (reversed, matched, changed) activation ->
+           if not (List.mem activation.skill_tool_use_id requested)
+           then activation :: reversed, matched, changed
            else
              let matched = activation.skill_tool_use_id :: matched in
              match activation.delivery with
              | None ->
                let delivery = Some { agent_core_turn; delivered_at } in
-               Ok ({ activation with delivery } :: reversed, matched, true)
-             | Some delivery when delivery.agent_core_turn = agent_core_turn ->
-               Ok (activation :: reversed, matched, changed)
-             | Some _ -> Error (Conflicting_delivery activation.skill_tool_use_id))
-        (Ok ([], [], false))
+               { activation with delivery } :: reversed, matched, true
+             | Some _ -> activation :: reversed, matched, changed)
+        ([], [], false)
         current.activations
     in
     let activations = List.rev reversed in
@@ -1078,7 +1573,14 @@ let observe_delivery
     if not changed
     then Ok (current, matched)
     else
-      let* stored = persist_locked ~ownership_root ~trace_id session_dir activations in
+      let* stored =
+        persist_locked
+          ~ownership_root
+          ~trace_id
+          session_dir
+          ~activations
+          ~transition_rejections:current.transition_rejections
+      in
       Ok (stored, matched))
 ;;
 
@@ -1108,19 +1610,55 @@ let observe_action
         in
         let active = List.sort_uniq String.compare active_skill_tool_use_ids in
         let action = { tool_use_id = action_tool_use_id; tool_name; agent_core_turn; observed_at } in
+        let rejected =
+          List.find_map
+            (fun activation ->
+               if not (List.mem activation.skill_tool_use_id active)
+               then None
+               else
+                 let before_delivery =
+                   not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
+                   || Option.is_none activation.delivery
+                   || Option.exists
+                        (fun (delivery : delivery) ->
+                           agent_core_turn < delivery.agent_core_turn)
+                        activation.delivery
+                 in
+                 if before_delivery
+                 then
+                   Some
+                     ( Action_before_delivery_rejected
+                         { skill_tool_use_id = activation.skill_tool_use_id
+                         ; activation_turn_ref = activation.turn_ref
+                         ; observed_turn_ref = turn_ref
+                         ; action_tool_use_id
+                         ; tool_name
+                         ; observed_agent_core_turn = agent_core_turn
+                         ; observed_at
+                         }
+                     , Action_before_delivery activation.skill_tool_use_id )
+                 else None)
+            current.activations
+        in
+        match rejected with
+        | Some (rejection, error) ->
+          persist_transition_rejection
+            ~ownership_root
+            ~trace_id
+            session_dir
+            current
+            rejection
+            error
+        | None ->
         let* reversed, added =
           List.fold_left
             (fun result activation ->
                let* reversed, added = result in
                if not (List.mem activation.skill_tool_use_id active)
                then Ok (activation :: reversed, added)
-               else if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
-               then Error (Action_before_delivery activation.skill_tool_use_id)
                else
                  match activation.delivery with
-                 | None -> Error (Action_before_delivery activation.skill_tool_use_id)
-                 | Some delivery when agent_core_turn < delivery.agent_core_turn ->
-                   Error (Action_before_delivery activation.skill_tool_use_id)
+                 | None -> Ok (activation :: reversed, added)
                  | Some _ ->
                    (match
                       List.find_opt
@@ -1148,7 +1686,8 @@ let observe_action
               ~ownership_root
               ~trace_id
               session_dir
-              (List.rev reversed)
+              ~activations:(List.rev reversed)
+              ~transition_rejections:current.transition_rejections
           in
           Ok (stored, added))
 ;;

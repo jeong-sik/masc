@@ -1,5 +1,5 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body by its canonical exact reference. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes` is rejected whole. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
+description = "Read one frozen instruction Skill body by its canonical exact reference. When that body names a bundled file needed for the current work, call again with its relative `file` path. A file larger than the turn's configured `[skills].resource-read-max-bytes`, or content that cannot fit the provider's shared inline tool-result boundary, is rejected before activation is recorded. Use the exact reference projected by the current Task or this tool's Available list; names alone are never accepted."
 additional_properties = false
 
 [[params]]

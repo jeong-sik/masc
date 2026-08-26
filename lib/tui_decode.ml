@@ -1469,6 +1469,7 @@ type effective_tool_surface =
       ets_tool_delivery : effective_tool_delivery;
       ets_native_posture : string option;
       ets_tool_groups : string list;
+      ets_skill_snapshot_revision : string;
       ets_skill_resource_read_max_bytes : int option;
       ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
@@ -1758,6 +1759,9 @@ let decode_effective_tool_surface json =
       let* ets_tool_delivery = decode_effective_tool_delivery tool_delivery in
       let* ets_native_posture = optional_string_field json "native_posture" in
       let* ets_tool_groups = decode_string_name_list json "tool_groups" in
+      let* ets_skill_snapshot_revision =
+        required_string_field json "skill_snapshot_revision"
+      in
       let* ets_skill_resource_read_max_bytes =
         optional_int_field json "skill_resource_read_max_bytes"
       in
@@ -1786,6 +1790,7 @@ let decode_effective_tool_surface json =
              ets_tool_delivery;
              ets_native_posture;
              ets_tool_groups;
+             ets_skill_snapshot_revision;
              ets_skill_resource_read_max_bytes;
              ets_instruction_skills;
              ets_skills_left_out;

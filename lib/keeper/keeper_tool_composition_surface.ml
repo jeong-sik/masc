@@ -1287,6 +1287,7 @@ let make_instruction_skill_tool
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
+    ~model_projection:Tool_output.bounded_inline_model_projection
     ~name
     ~description
     ~input_schema:skill_reference_input_schema
@@ -1336,34 +1337,66 @@ let make_instruction_skill_tool
               let skill_tool_use_id =
                 Agent_core.Tool_contract.Invocation.tool_use_id invocation
               in
-              let success data =
-                Tool_result.make_ok ~tool_name:name ~start_time
-                  ~data:(`Assoc (("reference", Skill_reference.to_yojson reference)
-                                 :: ("skill_tool_use_id", `String skill_tool_use_id)
-                                 :: data))
+              let success ~wire_content metadata =
+                Tool_result.make_ok
+                  ~tool_name:name
+                  ~start_time
+                  ~data:(`String wire_content)
+                  ~metadata:
+                    (`Assoc
+                       (("reference", Skill_reference.to_yojson reference)
+                        :: ("skill_tool_use_id", `String skill_tool_use_id)
+                        :: metadata))
                   ()
               in
-              let record_and_return ~content data =
-                match record_activation with
-                | Some record ->
-                  (match record ~invocation ~content reference with
-                   | Error error ->
-                     activation_failure
-                       ~reference
-                       ~tool_name:name
-                       ~start_time
-                       error
-                   | Ok
-                       ( Activation_ledger.Recorded _
-                       | Activation_ledger.Already_recorded _ ) ->
-                     success data)
-                | None -> success data
+              let record_and_return ~content ~wire_content metadata =
+                let wire_bytes = String.length wire_content in
+                if wire_bytes > Common.max_tool_output_bytes
+                then
+                  Tool_result.make_err
+                    ~tool_name:name
+                    ~class_:Tool_result.Workflow_rejection
+                    ~start_time
+                    ~data:
+                      (`Assoc
+                         [ ( "skill_content_error"
+                           , `Assoc
+                               [ "kind", `String "provider_inline_too_large"
+                               ; "observed_bytes", `Int wire_bytes
+                               ; "max_bytes", `Int Common.max_tool_output_bytes
+                               ] )
+                         ])
+                    (Printf.sprintf
+                       "Skill content does not fit the provider inline tool-result boundary: observed_bytes=%d max_bytes=%d"
+                       wire_bytes
+                       Common.max_tool_output_bytes)
+                else
+                  match record_activation with
+                  | Some record ->
+                    (match record ~invocation ~content reference with
+                     | Error error ->
+                       activation_failure
+                         ~reference
+                         ~tool_name:name
+                         ~start_time
+                         error
+                     | Ok
+                         ( Activation_ledger.Recorded _
+                         | Activation_ledger.Already_recorded _ ) ->
+                       success ~wire_content metadata)
+                  | None -> success ~wire_content metadata
               in
               (match resource_path with
                | None ->
                  record_and_return
                    ~content:(Keeper_skill_activation_recorder.Body skill.body)
-                   [ "body", `String skill.body ]
+                   ~wire_content:skill.body
+                   [ "kind", `String "skill_body"
+                   ; "bytes", `Int (String.length skill.body)
+                   ; ( "sha256"
+                     , `String
+                         Digestif.SHA256.(digest_string skill.body |> to_hex) )
+                   ]
                | Some relative_path ->
                  (match skill.resource_location with
                   | None ->
@@ -1419,10 +1452,11 @@ let make_instruction_skill_tool
                          ~content:
                            (Keeper_skill_activation_recorder.Resource
                               { relative_path; contents })
+                         ~wire_content:contents
                          [ "file", `String relative_path_text
+                         ; "kind", `String "skill_resource"
                          ; "bytes", `Int (String.length contents)
                          ; "sha256", `String sha256
-                         ; "contents", `String contents
                          ])))
             | (* A reference the frozen catalog does not carry is the caller's
                  error and says so with the exact references it does carry,

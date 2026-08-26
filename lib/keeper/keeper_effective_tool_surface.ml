@@ -23,6 +23,7 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
+  ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
@@ -241,6 +242,8 @@ let project
       ; native_posture
       ; tool_groups = Option.value ~default:[] tool_groups
       ; current_task_id
+      ; skill_snapshot_revision =
+          Skill_catalog_snapshot.snapshot_revision skill_snapshot
       ; skill_resource_read_max_bytes
       ; instruction_skills
       ; composition_skills
@@ -463,6 +466,10 @@ let to_yojson = function
         , match surface.current_task_id with
           | None -> `Null
           | Some task_id -> `String task_id )
+      ; ( "skill_snapshot_revision"
+        , `String
+            (Skill_catalog_snapshot.snapshot_revision_to_string
+               surface.skill_snapshot_revision) )
       ; ( "skill_resource_read_max_bytes"
         , match surface.skill_resource_read_max_bytes with
           | Some max_bytes -> `Int max_bytes

@@ -329,14 +329,25 @@ let build_entries sources =
            (fun (entries, rejections) candidate ->
               match candidate with
               | Candidate_unreadable { directory; path; detail } ->
-                ( entries
-                , { source_index
-                  ; source_id
-                  ; package_id = Result.to_option (package_id_of_directory directory)
-                  ; directory
-                  ; reason = Document_unreadable { path; detail }
-                  }
-                  :: rejections )
+                (match package_id_of_directory directory with
+                 | Error package_error ->
+                   ( entries
+                   , { source_index
+                     ; source_id
+                     ; package_id = None
+                     ; directory
+                     ; reason = Invalid_package_id package_error
+                     }
+                     :: rejections )
+                 | Ok package_id ->
+                   ( entries
+                   , { source_index
+                     ; source_id
+                     ; package_id = Some package_id
+                     ; directory
+                     ; reason = Document_unreadable { path; detail }
+                     }
+                     :: rejections ))
               | Candidate_document { directory; source_text } ->
                 (match package_id_of_directory directory with
                  | Error package_error ->

@@ -22,11 +22,18 @@ type tool_result = Tool_result.result
 
 val tool_result_ok : ?tool_name:string -> string -> tool_result
 val tool_result_ok_data : ?tool_name:string -> Yojson.Safe.t -> tool_result
+(** [class_] is required on purpose. It defaulted to [Runtime_failure] until
+    2026-08-26, so 80 of 83 call sites labelled every refusal a crash without
+    deciding: argument validation, not-found, and genuine faults all arrived
+    the same. [Tool_bridge] lowers a fault to [Unknown] instead of
+    [Deterministic], so an agent retried calls that could never succeed. The
+    layer below ([Tool_result.error]) already requires the class; a default
+    here took that back. *)
 val tool_result_error :
-  ?tool_name:string -> ?class_:Tool_result.tool_failure_class -> string -> tool_result
+  ?tool_name:string -> class_:Tool_result.tool_failure_class -> string -> tool_result
 val tool_result_error_data :
   ?tool_name:string ->
-  ?class_:Tool_result.tool_failure_class ->
+  class_:Tool_result.tool_failure_class ->
   Yojson.Safe.t ->
   tool_result
 

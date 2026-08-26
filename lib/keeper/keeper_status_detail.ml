@@ -304,13 +304,13 @@ let model_observability_json = Keeper_status_detail_observability.model_observab
    counters in the downstream runtime and bridge calls. *)
 let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
   match status_argument_fields args with
-  | Error err -> tool_result_error err
+  | Error err -> tool_result_error ~class_:Tool_result.Policy_rejection err
   | Ok fields ->
       (match status_options_of_fields fields with
-       | Error err -> tool_result_error err
+       | Error err -> tool_result_error ~class_:Tool_result.Policy_rejection err
        | Ok options ->
       (match resolve_status_target_config ~config ~agent_name fields with
-       | Error err -> tool_result_error err
+       | Error err -> tool_result_error ~class_:Tool_result.Workflow_rejection err
        | Ok (name, m) ->
       let chat_operation_status =
         chat_operation_status_to_json

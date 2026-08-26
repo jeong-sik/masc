@@ -6,12 +6,6 @@ tool never auto-retries."""
 additional_properties = false
 
 [[params]]
-name = "schema"
-type = "string"
-required = true
-enum = ["keeper.board_attention.quarantine.recovery.command.v1"]
-
-[[params]]
 name = "keeper_name"
 type = "string"
 required = true

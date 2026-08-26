@@ -1,4 +1,3 @@
-let tool_command_schema = "workspace.task.operator_recovery.command.v1"
 let result_schema = "workspace.task.operator_recovery.result.v1"
 
 type t =
@@ -17,7 +16,6 @@ type input_error =
       { field : string
       ; expectation : string
       }
-  | Unsupported_schema of string
 
 let input_error_to_string = function
   | Object_required observed_kind ->
@@ -35,8 +33,6 @@ let input_error_to_string = function
       "operator task recovery command is missing required field(s): %s"
       (String.concat ", " fields)
   | Invalid_field { field; expectation } -> Printf.sprintf "%s %s" field expectation
-  | Unsupported_schema schema ->
-    Printf.sprintf "unsupported operator task recovery schema %S" schema
 ;;
 
 let input_error_to_json error =
@@ -55,8 +51,6 @@ let input_error_to_json error =
       , [ "fields", `List (List.map (fun field -> `String field) fields) ] )
     | Invalid_field { field; expectation } ->
       "invalid_field", [ "field", `String field; "expectation", `String expectation ]
-    | Unsupported_schema schema ->
-      "unsupported_schema", [ "schema", `String schema ]
   in
   `Assoc
     ([ "error", `String "operator_task_recovery_invalid_input"
@@ -66,9 +60,7 @@ let input_error_to_json error =
      @ details)
 ;;
 
-let expected_fields =
-  [ "schema"; "task_id"; "expected_assignee"; "expected_version"; "reason" ]
-;;
+let expected_fields = [ "task_id"; "expected_assignee"; "expected_version"; "reason" ]
 
 let duplicate_fields fields =
   let rec loop seen duplicates = function
@@ -140,13 +132,6 @@ let parse_tool_command = function
   | `Assoc fields ->
     let open Result.Syntax in
     let* () = validate_exact_fields fields in
-    let* schema_json = required "schema" fields in
-    let* schema = exact_nonblank_string ~field:"schema" schema_json in
-    let* () =
-      if String.equal schema tool_command_schema
-      then Ok ()
-      else Error (Unsupported_schema schema)
-    in
     let* task_id_json = required "task_id" fields in
     let* task_id = exact_nonblank_string ~field:"task_id" task_id_json in
     let* expected_assignee_json = required "expected_assignee" fields in

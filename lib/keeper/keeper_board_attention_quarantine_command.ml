@@ -3,7 +3,6 @@ module Partition = Keeper_board_attention_partition
 module Wake = Keeper_board_attention_worker_wake
 
 let request_schema = "keeper.board_attention.quarantine.recovery.request.v1"
-let tool_command_schema = "keeper.board_attention.quarantine.recovery.command.v1"
 let result_schema = "keeper.board_attention.quarantine.recovery.result.v1"
 
 type decision = Acknowledge_and_requeue
@@ -133,8 +132,7 @@ let parse_tool_command json =
   let* fields =
     validate_exact_object
       ~expected:
-        [ "schema"
-        ; "keeper_name"
+        [ "keeper_name"
         ; "partition_id"
         ; "candidate_id"
         ; "expected_quarantine_id"
@@ -142,7 +140,6 @@ let parse_tool_command json =
         ]
       json
   in
-  let* () = schema tool_command_schema fields in
   let* keeper_name = nonblank "keeper_name" (List.assoc "keeper_name" fields) in
   let* partition_id = nonblank "partition_id" (List.assoc "partition_id" fields) in
   let* request = request_of_fields fields in

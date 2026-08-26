@@ -6,7 +6,6 @@
     generation on the same singleton partition. *)
 
 val request_schema : string
-val tool_command_schema : string
 val result_schema : string
 
 type decision = Acknowledge_and_requeue

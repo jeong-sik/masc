@@ -95,6 +95,10 @@ type load_outcome =
       }
   | Unloadable of diagnostic list
 
+val canonical_name : string -> (string, name_violation list) result
+(** Parse one Agent Skills name with the same normalization and grammar used by
+    {!decode}. The returned value is the canonical NFKC spelling. *)
+
 val decode : directory_name:string -> string -> load_outcome
 (** Decode one complete [SKILL.md]. Strictly conforming documents have both
     required fields and satisfy the Agent Skills naming and length rules.

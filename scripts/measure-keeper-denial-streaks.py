@@ -44,6 +44,32 @@ def failed(record: dict) -> bool:
     return radius.get("success") is False
 
 
+def outside_playground(record: dict, target: str) -> bool:
+    """Did the ask name something the keeper's own sandbox does not contain?
+
+    The keeper's root is in its own runtime contract, so this compares an
+    absolute target against the root the runtime told it about. A relative
+    target resolves inside the sandbox by construction and is never outside.
+
+    This split is what makes the streak count usable. Measured on the three
+    keepers already running containers, both kinds appear together: polisher
+    retries `Read lib/config/env_config_core.ml` (relative, inside) and
+    `Execute cwd=/tmp/masc-main-check` (absolute, outside). Only the second
+    kind is evidence about the boundary; counting them as one number says the
+    container is failing when half of it is ordinary work failing.
+    """
+    if "=" not in target:
+        return False
+    value = target.split("=", 1)[1]
+    if not value.startswith("/"):
+        return False
+    contract = record.get("runtime_contract") or {}
+    root = contract.get("sandbox_root")
+    if not isinstance(root, str) or not root:
+        return False
+    return not value.startswith(root.rstrip("/") + "/") and value != root.rstrip("/")
+
+
 def target_of(record: dict) -> str:
     """What the call was aimed at, as the record already states it.
 
@@ -68,6 +94,7 @@ def scan(trajectory_dir: Path, since: float):
     longest: dict[str, int] = {}
     turns = set()
     failures = 0
+    outside = 0
 
     files = sorted(
         (p for p in trajectory_dir.glob("*.jsonl") if p.stat().st_mtime >= since),
@@ -90,14 +117,17 @@ def scan(trajectory_dir: Path, since: float):
                     current_key, current_run = None, 0
                     continue
                 failures += 1
-                key = f"{record.get('tool_name')} {target_of(record)}"
+                target = target_of(record)
+                if outside_playground(record, target):
+                    outside += 1
+                key = f"{record.get('tool_name')} {target}"
                 streaks[key] += 1
                 if key == current_key:
                     current_run += 1
                 else:
                     current_key, current_run = key, 1
                 longest[key] = max(longest.get(key, 0), current_run)
-    return streaks, longest, len(turns), failures
+    return streaks, longest, len(turns), failures, outside
 
 
 def main() -> int:
@@ -123,7 +153,7 @@ def main() -> int:
             continue
         if wanted and keeper_dir.name not in wanted:
             continue
-        streaks, longest, turns, failures = scan(keeper_dir, since)
+        streaks, longest, turns, failures, outside = scan(keeper_dir, since)
         if not streaks and turns == 0:
             continue
         worst = sorted(longest.items(), key=lambda kv: -kv[1])[: args.top]
@@ -132,6 +162,7 @@ def main() -> int:
                 "keeper": keeper_dir.name,
                 "turns": turns,
                 "failures": failures,
+                "outside_playground": outside,
                 "longest_streak": worst[0][1] if worst else 0,
                 "worst": [{"ask": k, "streak": v, "total": streaks[k]} for k, v in worst],
             }
@@ -146,11 +177,14 @@ def main() -> int:
         return 0
 
     print(f"window: last {args.window:g}h")
-    print(f"{'keeper':<28}{'turns':>7}{'failures':>10}{'longest streak':>16}")
+    print(
+        f"{'keeper':<28}{'turns':>7}{'failures':>10}{'outside':>9}"
+        f"{'longest streak':>16}"
+    )
     for row in sorted(report, key=lambda r: -r["longest_streak"]):
         print(
             f"{row['keeper']:<28}{row['turns']:>7}{row['failures']:>10}"
-            f"{row['longest_streak']:>16}"
+            f"{row['outside_playground']:>9}{row['longest_streak']:>16}"
         )
     for row in sorted(report, key=lambda r: -r["longest_streak"]):
         if row["longest_streak"] < 2:

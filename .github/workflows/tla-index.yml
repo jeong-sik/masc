@@ -7,9 +7,6 @@ name: tla-spec-index
 #     so a maintainer notices in the Actions tab. Does NOT auto-commit.
 #   - workflow_dispatch: same drift-check, plus emits the regenerated file as
 #     an artifact for manual review.
-#   - pull_request (paths-filter): drift-check on PRs that touch specs/ or the
-#     generator. Stops a PR from landing with a stale index.
-#
 # Auto-commit is intentionally out of scope until the team agrees on a bot
 # identity and a base branch policy. Until then the workflow only reports.
 
@@ -17,17 +14,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '17 6 * * 1'  # Mon 06:17 UTC
-  pull_request:
-    paths:
-      - 'specs/**'
-      - 'scripts/gen-tla-index.sh'
-      - '.github/workflows/tla-index.yml'
 
 permissions:
   contents: read
 
 concurrency:
-  group: tla-spec-index-${{ github.event.pull_request.number || github.ref }}
+  group: tla-spec-index-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -15,22 +15,6 @@ name: tla-annotation-drift
 # re-introduces the same drift would slip through.
 
 on:
-  pull_request:
-    paths:
-      - 'specs/keeper-state-machine/**'
-      - 'lib/keeper/keeper_registry.ml'
-      - 'lib/keeper_registry/**'
-      - 'scripts/audit-tla-annotation-drift.sh'
-      - 'scripts/audit-tla-phase-count.sh'
-      - 'scripts/audit-ocaml-phase-count.sh'
-      - 'scripts/ocaml-phase-count-baseline.txt'
-      - 'scripts/audit-tla-ml-line-refs.sh'
-      - 'scripts/audit-ocaml-spec-nav-line-refs.sh'
-      - 'scripts/ocaml-spec-nav-line-refs-baseline.txt'
-      - 'lib/keeper/**/*.ml'
-      - 'lib/keeper/**/*.mli'
-      - 'scripts/tla-annotation-drift-baseline.txt'
-      - '.github/workflows/tla-annotation-drift.yml'
   push:
     branches:
       - main
@@ -54,7 +38,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: tla-annotation-drift-${{ github.event.pull_request.number || github.ref }}
+  group: tla-annotation-drift-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

@@ -395,22 +395,29 @@ let framed_divider buf cols =
   Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset)
 
+(* Cells a row's content gets inside the frame: two of border and two of
+   padding. Every helper below already spelled [cols - 4] itself, and a
+   caller that lays a row out before handing it over has to measure against
+   the same number -- the agenda panel's right-hand column was cut on the way
+   through here because it had been laid out against the terminal instead. *)
+let framed_inner_width cols = max 0 (cols - 4)
+
 let framed_line buf cols content =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
 
 let framed_line_styled buf cols ~style content =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   let content = fit_width content inner in
   Buffer.add_string buf
     (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
        Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
 let framed_empty buf cols =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     (String.make inner ' ')
@@ -433,11 +440,11 @@ let box_divider buf cols =
    width [cols - 4] -- and still span the full [cols], so anything that
    measures a row (the PTY suite does) reads the same width either way. *)
 let box_line buf cols content =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   Buffer.add_string buf (Printf.sprintf "  %s  \n" (fit_width content inner))
 
 let box_line_styled buf cols ~style content =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   let content = fit_width content inner in
   Buffer.add_string buf
     (Printf.sprintf "  %s%s%s  \n" style content Ansi.reset)
@@ -449,7 +456,7 @@ let box_line_styled buf cols ~style content =
    of its own -- an inner reset would cut the band short; callers fold a
    styled row with [Masc_tui_theme.strip_sgr] first. *)
 let box_line_selected buf cols content =
-  let inner = cols - 4 in
+  let inner = framed_inner_width cols in
   Buffer.add_string buf
     (Printf.sprintf "%s  %s  %s\n" Masc_tui_theme.selection
        (fit_width content inner) Ansi.reset)

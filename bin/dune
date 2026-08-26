@@ -309,6 +309,12 @@
  (modules masc_tui_scroll))
 
 (library
+ (name masc_tui_agenda)
+ (wrapped false)
+ (modules masc_tui_agenda)
+ (libraries masc masc.time_codec masc_tui_message_layout unix))
+
+(library
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
@@ -573,6 +579,7 @@
   masc.masc_goal
   masc.masc_types
   masc_tui_acting
+  masc_tui_agenda
   masc_tui_board_detail
   masc_tui_attachment
   masc_tui_code_lexer
@@ -618,6 +625,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_agenda
   masc_tui_attachment
   masc_tui_keys
   masc_tui_theme

@@ -14,6 +14,7 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
@@ -582,6 +583,35 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
   Buffer.add_buffer framed buf;
   finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
 
+(* The agenda strip: one row above the composer, on every surface.
+
+   Colour splits it the way the layout does. The wake recedes -- a schedule
+   that fires in an hour is ambient, and painting it warn would make the
+   screen shout every hour. The badge does not: a keeper stopped on the
+   operator is the half that has to be read now. *)
+let agenda_line agenda ~cols =
+  match
+    Agenda.strip
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols
+      agenda
+  with
+  | None -> None
+  | Some { Agenda.clock; waiting } ->
+    let used =
+      Message_layout.display_width clock + Message_layout.display_width waiting
+    in
+    let gap = String.make (max 0 (cols - used)) ' ' in
+    let painted = function "" -> "" | text -> text in
+    Some
+      (Ansi.gray
+      ^ painted clock
+      ^ Ansi.reset
+      ^ gap
+      ^ (if waiting = "" then "" else (Theme.bad ()) ^ waiting ^ Ansi.reset))
+;;
+
 (* Close a surface: pad its frame to the row above the composer, then draw the
    composer on the terminal's last row.
 
@@ -590,7 +620,14 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
-  let body_rows = max 0 (rows - Composer.rows_for ~terminal_rows:rows) in
+  (* The strip's rows come off the body here and off the scroll bound in
+     [scrolled_surface], both from [Agenda.rows_taken] on the same projection.
+     Two readers of one number: the row the frame draws is the row the
+     keypress stops short of. *)
+  let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
+  let body_rows =
+    max 0 (rows - Composer.rows_for ~terminal_rows:rows - agenda_rows)
+  in
   let drawn = frame_lines buf in
   let body =
     if List.length drawn <= body_rows then
@@ -608,6 +645,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_string framed line;
        Buffer.add_char framed '\n')
     body;
+  (if agenda_rows > 0 then
+     match agenda_line (Masc_tui_types.agenda state) ~cols with
+     | Some line -> Buffer.add_string framed (line ^ "\n")
+     | None -> ());
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
   finish_frame_with_strip state ?clamped ~surface_key
     ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
@@ -7905,6 +7946,68 @@ let render_help (state : state) =
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
+(* Rows the agenda panel can show, and how many it has. The keypress bounds
+   the scroll from the same pair the frame draws with -- the shape
+   [Masc_tui_scroll] exists to keep in one place. *)
+let agenda_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let lines =
+    Agenda.overlay
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols:(framed_inner_width cols)
+      (Masc_tui_types.agenda state)
+  in
+  (List.length lines, Masc_tui_help.content_height ~rows)
+;;
+
+(* The panel behind [;]. The strip above the composer says whether anything is
+   coming; this says what, and who is stopped waiting for an answer.
+
+   Tone rather than a colour per row: the headings carry the structure, a
+   held call is the one thing that needs answering now, and the wakes recede
+   the same way they do on the strip. *)
+let render_agenda (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 2048 in
+  framed_top buf cols;
+  framed_line
+    buf
+    cols
+    (screen_title " Agenda" ^ "  " ^ Ansi.dim ^ "Esc or ; to close" ^ Ansi.reset);
+  framed_divider buf cols;
+  let lines =
+    Agenda.overlay
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols:(framed_inner_width cols)
+      (Masc_tui_types.agenda state)
+  in
+  let content_height = Masc_tui_help.content_height ~rows in
+  let scroll =
+    Masc_tui_scroll.normalize
+      ~count:(List.length lines)
+      ~height:content_height
+      state.agenda_scroll
+  in
+  let paint (line : Agenda.line) =
+    match line.Agenda.tone with
+    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Wake -> Ansi.gray ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+  in
+  lines
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> framed_line buf cols (paint line));
+  framed_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+  finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
+;;
+
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in
   Buffer.add_string buf
@@ -7929,4 +8032,5 @@ let render (state : state) =
   else if state.palette_open then render_palette state
   else if state.context_inspector_open then render_context_inspector state
   else if state.help_open then render_help state
+  else if state.agenda_open then render_agenda state
   else render_surface state

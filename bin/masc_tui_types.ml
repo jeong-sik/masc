@@ -755,6 +755,11 @@ type state = {
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
+  (* The [;] agenda overlay: the strip above the composer says whether there
+     is anything, and this says what. Modal like the help sheet, and like it
+     the scroll survives only while it is open. *)
+  mutable agenda_open: bool;
+  mutable agenda_scroll: int;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -1312,6 +1317,8 @@ let create_state
   tasks_domain = [];
   task_focus = Left_pane;
   help_open = false;
+  agenda_open = false;
+  agenda_scroll = 0;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -1704,7 +1711,59 @@ let changes_budget_note_rows (state : state) =
   | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
   | Some _ | None -> 0
 
-let scrolled_surface (state : state) : surface -> scrolled option =
+(* The strip above the composer: what fires next, and who is blocked on the
+   operator. Both are already in the state and neither was readable from the
+   surface where the question comes up, so this is a projection rather than a
+   new reading.
+
+   A schedule with no due time is not on the clock half. It keeps its row on
+   the Schedules surface, which is where a schedule without a time is still
+   worth seeing; a strip that draws one wake has to draw the one it can say a
+   time for. *)
+let agenda (state : state) : Masc_tui_agenda.t =
+  let scheduled =
+    match state.schedules with
+    | None -> []
+    | Some snapshot ->
+      List.filter_map
+        (fun (row : schedule_row) ->
+           match row.sch_due_at_iso with
+           | None -> None
+           | Some at_iso ->
+             Some
+               { Masc_tui_agenda.at_iso
+               ; standing = Masc_tui_agenda.standing_of_wire row.sch_status
+               ; who = Option.value row.sch_payload_target ~default:""
+               ; what = Option.value row.sch_payload_summary ~default:""
+               ; recurrence = row.sch_recurrence_summary
+               })
+        snapshot.scs_rows
+  in
+  let awaiting =
+    List.map
+      (fun (held : Tui_decode.keeper_tool_approval) ->
+         { Masc_tui_agenda.asked_by = held.kta_keeper
+         ; question = held.kta_tool
+         ; asked_at = held.kta_asked_at
+         ; timeout_sec = held.kta_timeout_sec
+         })
+      state.keeper_tool_approvals
+  in
+  Masc_tui_agenda.project ~scheduled ~awaiting
+;;
+
+(* Rows the agenda strip takes from every surface. Added once, here, rather
+   than per surface: the strip is drawn by [finish_surface], which every
+   surface ends in, so a bound that forgot it would be a bound no surface
+   remembered to fix. *)
+let agenda_chrome_rows (state : state) =
+  (* The overlay lists the same wakes the strip names one of, so the strip
+     stands down while it is open rather than saying the first row twice --
+     and the panel gets the row. *)
+  if state.agenda_open then 0 else Masc_tui_agenda.rows_taken (agenda state)
+;;
+
+let scrolled_surface_rows (state : state) : surface -> scrolled option =
   let listing ~error count =
     Some { sc_count = count; sc_chrome = listing_chrome ~error; sc_preview_keep = None }
   in
@@ -1783,6 +1842,17 @@ let scrolled_surface (state : state) : surface -> scrolled option =
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Code ->
       None
+
+(* Every counted surface pays for the agenda strip, and it pays once. The
+   drawing subtracts the same rows in [finish_surface]; a bound worked out
+   from fewer chrome rows than the frame uses lets the cursor name a row the
+   frame will not draw, which is how Changes lost the tail of its own list. *)
+let scrolled_surface (state : state) (surface : surface) : scrolled option =
+  let taken = agenda_chrome_rows state in
+  Option.map
+    (fun s -> { s with sc_chrome = s.sc_chrome + taken })
+    (scrolled_surface_rows state surface)
+;;
 
 (* The text a "/" search reads for each row: the identifiers an operator
    would type, not the drawn bytes. [Some texts] means the surface is

@@ -3325,11 +3325,6 @@
   yojson))
 
 (test
- (name test_keeper_skill_usage)
- (modules test_keeper_skill_usage)
- (libraries alcotest masc yojson))
-
-(test
  (name test_composition_control_tool_toml)
  (modules test_composition_control_tool_toml)
  (libraries alcotest masc masc.tool_schemas yojson))

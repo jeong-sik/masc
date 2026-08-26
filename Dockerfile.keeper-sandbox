@@ -189,7 +189,20 @@ USER root
 # The switch name is fixed by the base image tag above (ocaml-5.5 yields switch
 # "5.5"). The check below fails the build if that stops holding, instead of
 # shipping an image whose dune silently cannot see any library.
-ENV OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
+# OPAMROOT is stated here rather than discovered. The entrypoint inherited from
+# the base image is `opam exec --`, and opam looks for its root at $HOME/.opam
+# when nothing says otherwise. masc deliberately overrides HOME to /tmp for
+# every container it starts (keeper_sandbox_runtime_setup.ml, added in #12036 to
+# fix a sandbox UID mismatch), so that lookup goes to /tmp/.opam and finds
+# nothing. The entrypoint then exits 50 with "Opam has not been initialised"
+# before the requested command runs at all, and because masc starts turn
+# containers with --rm the container is gone by the time anything inspects it --
+# the keeper sees "no such object", which names the symptom and not the cause.
+#
+# Where opam lives is a fact about this image, not about whoever runs it. Saying
+# so makes the entrypoint independent of HOME.
+ENV OPAMROOT=/home/opam/.opam \
+    OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
     OCAML_TOPLEVEL_PATH=/home/opam/.opam/5.5/lib/toplevel \
     OCAMLTOP_INCLUDE_PATH=/home/opam/.opam/5.5/lib/toplevel \
     CAML_LD_LIBRARY_PATH=/home/opam/.opam/5.5/lib/stublibs:/home/opam/.opam/5.5/lib/ocaml/stublibs:/home/opam/.opam/5.5/lib/ocaml \
@@ -197,6 +210,14 @@ ENV OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
 
 RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
  || { echo "opam switch prefix drift: ${OPAM_SWITCH_PREFIX} has no lib/yojson" >&2; exit 1; }
+
+# Prove the entrypoint survives the HOME masc actually passes. Running `opam
+# exec` with HOME pointed somewhere empty is the exact shape of a keeper turn,
+# so if OPAMROOT ever stops covering it this fails here rather than in a
+# container that vanishes before anyone can look at it. The version it prints
+# lands in the build log, which is the cheapest place to read what shipped.
+RUN HOME=/tmp opam exec -- dune --version \
+ || { echo "opam exec fails when HOME is not /home/opam -- OPAMROOT is not covering it" >&2; exit 1; }
 
 # The container runs as the host uid (`--user <uid>:<gid>`), which matches no
 # account in the image, so every path it reads has to be world-readable.

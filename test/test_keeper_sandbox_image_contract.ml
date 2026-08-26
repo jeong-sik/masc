@@ -313,6 +313,46 @@ let test_the_opam_switch_is_traversable () =
      || has "traversable" set)
 ;;
 
+(* The entrypoint inherited from the base image is `opam exec --`, and masc
+   starts every container with HOME=/tmp. opam then looks for /tmp/.opam, finds
+   nothing, and exits 50 before the keeper's command runs -- with --rm the
+   container is already gone, so the keeper is told "no such object" and the
+   cause never reaches it.
+
+   Two things have to hold together and neither is sufficient alone: OPAMROOT
+   says where the root is regardless of HOME, and the chmod above makes that
+   path readable by a non-root uid. Measured on this machine: with only the
+   chmod the entrypoint still exits 50, and with only OPAMROOT it exits 50 too. *)
+let test_the_entrypoint_survives_the_home_masc_passes () =
+  (* Asked line by line rather than through [tokens], which splits on [=] and
+     [/] so tool names stay findable -- [OPAMROOT=/home/opam/.opam] comes out
+     there as unrelated pieces, and the bare word also appears in the failure
+     message of the RUN below. Deleting the ENV then left this green, which is
+     the second time in this file that prose satisfied a check about an
+     instruction. A declaration is a line, so the line is what gets asked. *)
+  let line_has ~needles line =
+    List.for_all
+      (fun needle ->
+         let n = String.length needle and l = String.length line in
+         let rec go i = i + n <= l && (String.sub line i n = needle || go (i + 1)) in
+         go 0)
+      needles
+  in
+  let lines =
+    instruction_lines (read_file (dockerfile_path ())) |> String.split_on_char '\n'
+  in
+  check
+    bool
+    "the image states where its opam root is"
+    true
+    (List.exists (line_has ~needles:[ "ENV"; "OPAMROOT=/home/opam/.opam" ]) lines);
+  check
+    bool
+    "and the build exercises the entrypoint under that HOME"
+    true
+    (List.exists (line_has ~needles:[ "HOME=/tmp"; "opam exec" ]) lines)
+;;
+
 (* apt's nodejs is 18.19 on this base, so resolving node from apt alone cannot
    satisfy engines.node >= 22. The nodesource repository has to be present. *)
 let test_node_does_not_come_from_apt_alone () =
@@ -339,6 +379,10 @@ let () =
             "versions are pinned to the project"
             `Quick
             test_versions_are_pinned_to_the_project
+        ; test_case
+            "the entrypoint survives the HOME masc passes"
+            `Quick
+            test_the_entrypoint_survives_the_home_masc_passes
         ; test_case
             "node does not come from apt alone"
             `Quick

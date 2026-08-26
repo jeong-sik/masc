@@ -15,6 +15,7 @@ module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Composer = Masc_tui_composer
 module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
+module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
@@ -1083,6 +1084,13 @@ type async_msg =
       * approval_decision
       * (Approval.confirm_outcome, string) result
       * approval_observation
+  (* The answer that came back, and the list re-read behind it. The store
+     settles on first write, so the response says what was actually recorded
+     -- which may be someone else's answer. *)
+  | Ask_answer_done of
+      string
+      * (Yojson.Safe.t, string) result
+      * (Tui_decode.asks_snapshot, string) result
   | Keeper_chat_dispatch_started of
       Keeper_chat.request * bool * bool Eio.Promise.u
   | Keeper_chat_done of
@@ -4272,6 +4280,188 @@ let handle_approval_decision state approval decision ~mailbox =
            (approval_decision_key decision)
            approval.ap_summary)
 
+(* The asks an operator can act on: the open ones, in the order the server
+   sent them. The pane draws the same filter, so this cursor and those rows
+   are one list rather than two that drift. *)
+let open_ask_rows state =
+  match state.asks_snapshot with
+  | None -> []
+  | Some snapshot ->
+      List.filter
+        (fun (row : Tui_decode.ask_row) ->
+          match row.Tui_decode.ar_resolution with
+          | Tui_decode.Ask_open -> true
+          | Tui_decode.Ask_answered _ | Tui_decode.Ask_withdrawn _ -> false)
+        snapshot.Tui_decode.asn_rows
+
+let selected_ask_row state = List.nth_opt (open_ask_rows state) state.ask_cursor
+
+let selected_ask_question state =
+  match selected_ask_row state with
+  | None -> None
+  | Some (row : Tui_decode.ask_row) ->
+      List.nth_opt row.Tui_decode.ar_questions state.ask_question_cursor
+
+(* Leaving the mode drops the draft. An answer half-written against a question
+   the operator walked away from is not a thing to restore later; the Keeper
+   is still waiting either way, and the row says so. *)
+let leave_ask_answering state =
+  state.ask_answer_mode <- Ask_browsing;
+  state.ask_draft <- None;
+  state.pending_ask_submit <- None
+
+let enter_ask_answering state =
+  match selected_ask_row state with
+  | None -> add_event state "system" "No question is waiting on you"
+  | Some (row : Tui_decode.ask_row) ->
+      state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+      state.ask_question_cursor <- 0;
+      state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
+      state.pending_ask_submit <- None
+
+(* Walking to another ask starts a new draft rather than carrying the old one
+   across: [draft_for] keys on the ask id, so the answer cannot land under a
+   question the operator never read. *)
+let move_ask_cursor state delta =
+  let rows = open_ask_rows state in
+  let count = List.length rows in
+  if count = 0 then ()
+  else begin
+    let next = max 0 (min (count - 1) (state.ask_cursor + delta)) in
+    if next <> state.ask_cursor then begin
+      state.ask_cursor <- next;
+      state.ask_question_cursor <- 0;
+      state.pending_ask_submit <- None;
+      match List.nth_opt rows next with
+      | None -> ()
+      | Some (row : Tui_decode.ask_row) ->
+          state.ask_answer_mode <- Ask_answering { aam_ask_id = row.Tui_decode.ar_id };
+          state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
+    end
+  end
+
+let move_ask_question_cursor state delta =
+  match selected_ask_row state with
+  | None -> ()
+  | Some (row : Tui_decode.ask_row) ->
+      let count = List.length row.Tui_decode.ar_questions in
+      if count > 0 then
+        state.ask_question_cursor <-
+          max 0 (min (count - 1) (state.ask_question_cursor + delta))
+
+let with_ask_draft state f =
+  match (selected_ask_row state, selected_ask_question state) with
+  | Some row, Some question ->
+      let draft = Ask.draft_for state.ask_draft ~row in
+      state.ask_draft <- Some (f draft question);
+      (* Editing after arming means the armed answer is not the one on screen
+         any more, so the next press arms again rather than sending. *)
+      state.pending_ask_submit <- None
+  | (Some _ | None), _ -> ()
+
+let toggle_ask_choice state index =
+  match selected_ask_question state with
+  | None -> ()
+  | Some (question : Tui_decode.ask_question) -> (
+      match List.nth_opt question.Tui_decode.aq_choices index with
+      | None -> ()
+      | Some choice ->
+          with_ask_draft state (fun draft question ->
+              Ask.toggle_choice draft ~question ~choice))
+
+let skip_ask_question state =
+  with_ask_draft state (fun draft question -> Ask.skip draft ~question)
+
+let clear_ask_question state =
+  with_ask_draft state (fun draft question -> Ask.clear draft ~question)
+
+let apply_ask_answer_completion state ask_id result asks =
+  state.ask_submit_inflight <- false;
+  state.pending_ask_submit <- None;
+  (match result with
+   | Ok _ ->
+       state.ask_draft <- None;
+       state.ask_answer_mode <- Ask_browsing;
+       add_event state "system" (Printf.sprintf "Answered %s" ask_id)
+   | Error err ->
+       (* The mode stays open on failure: the draft is still the operator's
+          work, and a conflict means someone else answered, which the reloaded
+          rows will show. *)
+       add_event state "error" (Printf.sprintf "Answer not recorded: %s" err));
+  apply_asks_load state asks
+
+(* TEL-OK: the TUI-local submit gate emits user-visible events here; the
+   ask-answer endpoint owns the durable answer telemetry. *)
+let start_ask_answer state ~keeper_name ~ask_id ~answers ~mailbox =
+  state.ask_submit_inflight <- true;
+  let host = server_peer_host in
+  let port = state.port in
+  let run_action () =
+    let result =
+      try
+        Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
+          ~answers ~actor_id:None ~session_id:None
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    let asks =
+      try Masc_tui_http.fetch_keeper_asks ~host ~port () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Ask_answer_done (ask_id, result, asks))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw -> Eio.Fiber.fork ~sw run_action
+  | None ->
+      let result =
+        try
+          Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id
+            ~answers ~actor_id:None ~session_id:None
+        with exn -> Error (Printexc.to_string exn)
+      in
+      let asks =
+        try Masc_tui_http.fetch_keeper_asks ~host ~port () with
+        | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
+      in
+      apply_ask_answer_completion state ask_id result asks
+
+let handle_ask_submit state ~mailbox =
+  match selected_ask_row state with
+  | None -> ()
+  | Some (row : Tui_decode.ask_row) -> (
+      let draft = Ask.draft_for state.ask_draft ~row in
+      match Ask.readiness draft ~row with
+      | Ask.Not_open ->
+          add_event state "system" "That question already has an answer"
+      | Ask.Missing questions ->
+          (* Every gap at once: the domain reports them together, so an
+             operator does not learn about the second one after fixing the
+             first. *)
+          add_event state "system"
+            (Printf.sprintf "Still unanswered: %s"
+               (String.concat ", "
+                  (List.map
+                     (fun (q : Tui_decode.ask_question) -> q.Tui_decode.aq_header)
+                     questions)))
+      | Ask.Ready answers -> (
+          match
+            Ask.gate_transition ~inflight:state.ask_submit_inflight
+              ~pending:state.pending_ask_submit ~ask_id:row.Tui_decode.ar_id
+          with
+          | Ask.Ask_gate_blocked_inflight ->
+              state.pending_ask_submit <- None;
+              add_event state "system" "An answer is already on its way"
+          | Ask.Ask_gate_arm ask_id ->
+              state.pending_ask_submit <- Some ask_id;
+              add_event state "system"
+                (Printf.sprintf "Press enter again to answer %s"
+                   row.Tui_decode.ar_keeper)
+          | Ask.Ask_gate_submit ->
+              start_ask_answer state ~keeper_name:row.Tui_decode.ar_keeper
+                ~ask_id:row.Tui_decode.ar_id ~answers ~mailbox))
+
 (* Run one lifecycle action's steps against the server.
 
    The steps come from [Keeper_control.plan]; this only performs them and
@@ -5436,6 +5626,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Approval_decision_done (approval, decision, result, approvals) ->
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
+  | Ask_answer_done (ask_id, result, asks) ->
+      apply_ask_answer_completion state ask_id result asks
   | Keeper_chat_dispatch_started (request, was_replay, acknowledge) ->
       let proceed = ref false in
       Fun.protect
@@ -6852,6 +7044,36 @@ let main () =
            state.roster_pane_hidden <- not state.roster_pane_hidden;
            if state.roster_pane_hidden then
              state.keeper_message_focus <- Right_pane;
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* Answering is modal. A question needs a key per choice, and this
+          surface already spent its arrows and its y/n on the approval queue,
+          so the keys have to come from somewhere. Quit and the chrome
+          toggles stay above this on purpose: an operator who wants out of
+          the terminal should not have to leave a draft first. *)
+       | Some k
+         when state.view = Approvals
+              && (match state.ask_answer_mode with
+                  | Ask_answering _ -> true
+                  | Ask_browsing -> false)
+              && not state.context_inspector_open ->
+           (match k with
+            | "esc" -> leave_ask_answering state
+            | "up" | "k" | "wheel-up" -> move_ask_question_cursor state (-1)
+            | "down" | "j" | "wheel-down" -> move_ask_question_cursor state 1
+            | "[" -> move_ask_cursor state (-1)
+            | "]" -> move_ask_cursor state 1
+            | "s" | "S" -> skip_ask_question state
+            | "c" | "C" -> clear_ask_question state
+            | "enter" -> handle_ask_submit state ~mailbox:async_messages
+            | digit when String.length digit = 1 -> (
+                (* Parsed, not matched: a choice is picked by its position in
+                   the list the server sent, and anything that is not a
+                   position is not a choice. *)
+                match int_of_string_opt digit with
+                | Some position when position >= 1 && position <= 9 ->
+                    toggle_ask_choice state (position - 1)
+                | Some _ | None -> ())
+            | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact prompt text must not leak
           keys into the composer underneath. The quit confirmation and chrome
@@ -9086,9 +9308,13 @@ let main () =
                 (* Two presses, like every irreversible action here: the
                    first names the task, the second sends the approval. *)
                 handle_verification_approve_key state ~mailbox:async_messages
+            | Approvals ->
+                (* The approval queue owns this surface's arrows and its y/n,
+                   so answering a Keeper's question opens as its own mode. *)
+                enter_ask_answering state
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Harness
+            | Board | Planning | Schedules | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
       | _ -> ());
 

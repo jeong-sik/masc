@@ -5,6 +5,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Frame_presenter = Masc_tui_frame_presenter
+module Ask_projection = Masc_tui_ask_projection
 module Board_detail = Masc_tui_board_detail
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
@@ -1391,6 +1392,11 @@ let render_approvals (state : state) =
      in it. Nothing is held waiting on them -- the Keeper that asked kept
      working -- so they are not a queue of blocked calls, but an operator
      deciding things belongs in one place either way. *)
+  let answering_ask_id =
+    match state.ask_answer_mode with
+    | Ask_answering { aam_ask_id } -> Some aam_ask_id
+    | Ask_browsing -> None
+  in
   (match state.asks_snapshot with
    | None -> ()
    | Some snapshot ->
@@ -1412,32 +1418,105 @@ let render_approvals (state : state) =
               (Printf.sprintf "  %snone -- no Keeper is waiting on a decision%s" Ansi.dim
                  Ansi.reset)
         | rows ->
-            List.iter
-              (fun (row : Masc.Tui_decode.ask_row) ->
-                List.iter
-                  (fun (question : Masc.Tui_decode.ask_question) ->
+            List.iteri
+              (fun row_index (row : Masc.Tui_decode.ask_row) ->
+                let answering =
+                  match answering_ask_id with
+                  | Some ask_id -> String.equal ask_id row.Masc.Tui_decode.ar_id
+                  | None -> false
+                in
+                let draft = Ask_projection.draft_for state.ask_draft ~row in
+                let selected_row = answering && row_index = state.ask_cursor in
+                List.iteri
+                  (fun question_index (question : Masc.Tui_decode.ask_question) ->
+                    let selected_question =
+                      selected_row && question_index = state.ask_question_cursor
+                    in
+                    (* The caret is the only thing saying which question the
+                       digits will land on, so it is drawn even when the row
+                       is not the selected one -- a blank there reads as no
+                       selection at all. *)
+                    let caret = if selected_question then ">" else " " in
                     box_line buf cols
-                      (Printf.sprintf "  %s%s%s  %s"
-                         Ansi.bold
+                      (Printf.sprintf " %s%s%s%s%s  %s" caret
+                         (if selected_question then Ansi.bold else "")
                          (fit_width
                             (Terminal_text.single_line row.Masc.Tui_decode.ar_keeper)
                             16)
+                         (if selected_question then Ansi.reset else "")
                          Ansi.reset
                          (fit_width
                             (Terminal_text.single_line question.Masc.Tui_decode.aq_prompt)
                             (max 8 (cols - 24))));
-                    List.iter
-                      (fun (choice : Masc.Tui_decode.ask_choice) ->
+                    let chosen =
+                      match Ask_projection.response_for draft ~question with
+                      | Some (Ask_projection.Draft_chose ids) -> ids
+                      | Some (Ask_projection.Draft_wrote _)
+                      | Some Ask_projection.Draft_skipped
+                      | None -> []
+                    in
+                    List.iteri
+                      (fun choice_index (choice : Masc.Tui_decode.ask_choice) ->
+                        let picked =
+                          List.exists
+                            (String.equal choice.Masc.Tui_decode.ac_id)
+                            chosen
+                        in
+                        (* One mark shape per mode: a round one where only one
+                           answer fits, a square one where several do. The
+                           operator should not have to read the header to know
+                           whether picking a second choice replaces the first. *)
+                        let mark =
+                          match (question.Masc.Tui_decode.aq_mode, picked) with
+                          | Masc.Tui_decode.Ask_single, true -> "(o)"
+                          | Masc.Tui_decode.Ask_single, false -> "( )"
+                          | Masc.Tui_decode.Ask_multi, true -> "[x]"
+                          | Masc.Tui_decode.Ask_multi, false -> "[ ]"
+                        in
+                        (* Numbers only where they do something: the digits
+                           answer the question under the caret. A number on
+                           every row would promise a key that does nothing. *)
+                        let position =
+                          if selected_question && choice_index < 9 then
+                            Printf.sprintf "%d" (choice_index + 1)
+                          else " "
+                        in
                         box_line buf cols
-                          (Printf.sprintf "    %s%s%s  %s" Ansi.dim
+                          (Printf.sprintf "    %s %s %s%s%s  %s" position mark
+                             (if picked then Ansi.bold else Ansi.dim)
                              (fit_width
                                 (Terminal_text.single_line choice.Masc.Tui_decode.ac_id)
                                 12)
                              Ansi.reset
                              (fit_width
                                 (Terminal_text.single_line choice.Masc.Tui_decode.ac_label)
-                                (max 8 (cols - 22)))))
-                      question.Masc.Tui_decode.aq_choices)
+                                (max 8 (cols - 28)))))
+                      question.Masc.Tui_decode.aq_choices;
+                    (* What the operator has put down so far, in the two shapes
+                       a list of choices cannot show. *)
+                    (match Ask_projection.response_for draft ~question with
+                     | Some (Ask_projection.Draft_wrote text) ->
+                         box_line buf cols
+                           (Printf.sprintf "      %swrote: %s%s" Ansi.bold
+                              (fit_width (Terminal_text.single_line text) (max 8 (cols - 16)))
+                              Ansi.reset)
+                     | Some Ask_projection.Draft_skipped ->
+                         box_line buf cols
+                           (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
+                     | Some (Ask_projection.Draft_chose _) | None -> ());
+                    match question.Masc.Tui_decode.aq_free_text with
+                    | Masc.Tui_decode.Ask_choices_only -> ()
+                    | Masc.Tui_decode.Ask_free_text_allowed { aft_hint } ->
+                        box_line buf cols
+                          (Printf.sprintf "      %sfree text welcome%s%s" Ansi.dim
+                             (match aft_hint with
+                              | None -> ""
+                              | Some hint ->
+                                  " -- "
+                                  ^ fit_width
+                                      (Terminal_text.single_line hint)
+                                      (max 8 (cols - 32)))
+                             Ansi.reset))
                   row.Masc.Tui_decode.ar_questions;
                 (* The reason is what separates a decision that matters from
                    one that does not, so it is drawn, not hidden behind a
@@ -1451,8 +1530,14 @@ let render_approvals (state : state) =
                          Ansi.reset))
               rows));
 
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next");
+  let hints =
+    match state.ask_answer_mode with
+    | Ask_browsing ->
+        "j/k:move  y/n:decide  a:answer a question  r:refresh  Tab:next"
+    | Ask_answering _ ->
+        "j/k:question  [/]:ask  1-9:pick  s:skip  c:clear  Enter:answer  Esc:back"
+  in
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints);
 
   finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf

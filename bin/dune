@@ -580,6 +580,7 @@
   masc.masc_types
   masc_tui_acting
   masc_tui_agenda
+  masc_tui_ask_projection
   masc_tui_board_detail
   masc_tui_attachment
   masc_tui_code_lexer
@@ -626,6 +627,7 @@
  (package masc)
  (libraries
   masc_tui_agenda
+  masc_tui_ask_projection
   masc_tui_attachment
   masc_tui_keys
   masc_tui_theme

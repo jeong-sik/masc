@@ -1208,7 +1208,8 @@ let keeper_request_terminal_status_is_routine = function
 ;;
 
 type keeper_stream_worker_event =
-  | Stream_runtime_attempt_started of { abandon_previous_scope : bool }
+  | Stream_runtime_attempt_started of
+      Keeper_chat_events.runtime_attempt_scope_disposition
   | Stream_event of int * Agent_core.Types.sse_event
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
   | Stream_client_disconnected
@@ -1572,12 +1573,10 @@ let process_single_turn ~user_row_origin ~submission
       match observation with
       | Keeper_hooks_agent_core.Runtime_attempt_started _ ->
         Keeper_stream_media_accum.start_runtime_attempt worker_media_accum;
-        let transition =
+        let previous_scope =
           Keeper_stream_tool_accum.start_runtime_attempt worker_tool_accum
         in
-        push_worker_event
-          (Stream_runtime_attempt_started
-             { abandon_previous_scope = transition.abandon_previous_scope });
+        push_worker_event (Stream_runtime_attempt_started previous_scope);
         Ok ()
       | Keeper_hooks_agent_core.Turn_collected { turn; tool_source_map } ->
         Keeper_stream_tool_accum.seal_turn worker_tool_accum ~turn
@@ -2202,10 +2201,10 @@ let process_single_turn ~user_row_origin ~submission
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
-    | `Worker_event (Stream_runtime_attempt_started { abandon_previous_scope }) ->
+    | `Worker_event (Stream_runtime_attempt_started previous_scope) ->
         let translated =
           Keeper_chat_agent_core_stream_bridge.start_runtime_attempt
-            ~abandon_current_scope:abandon_previous_scope bridge_state
+            ~previous_scope bridge_state
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state

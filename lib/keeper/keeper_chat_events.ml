@@ -25,6 +25,10 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
 
+type runtime_attempt_scope_disposition =
+  | Preserve_previous_scope
+  | Abandon_previous_scope
+
 type tool_stream_occurrence =
   { stream_scope : int
   ; provider_message_id : string option

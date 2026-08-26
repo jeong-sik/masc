@@ -9,7 +9,9 @@ module A = Keeper_stream_tool_accum
 module S = Agent_core.Llm_provider.Complete_stream_acc
 
 let start_runtime_attempt t =
-  ignore (A.start_runtime_attempt t : A.runtime_attempt_transition)
+  ignore
+    (A.start_runtime_attempt t
+      : Keeper_chat_events.runtime_attempt_scope_disposition)
 ;;
 
 let record_execution_id ?(turn = 0) ?(planned_index = 0) t ~tool_call_id
@@ -778,7 +780,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   let sealed = A.create () in
   let first = A.start_runtime_attempt sealed in
   check bool "first attempt has no prior scope to abandon" false
-    first.abandon_previous_scope;
+    (first = Keeper_chat_events.Abandon_previous_scope);
   A.on_event sealed
     (start ~index:0 ~tool_id:(Some "sealed-call") ~tool_name:(Some "Read"));
   A.on_event sealed (json_snapshot ~index:0 {|{"path":"sealed.ml"}|});
@@ -786,7 +788,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   seal_turn sealed [ 0 ];
   let fallback = A.start_runtime_attempt sealed in
   check bool "sealed prior scope is preserved" false
-    fallback.abandon_previous_scope;
+    (fallback = Keeper_chat_events.Abandon_previous_scope);
   let unsealed = A.create () in
   start_runtime_attempt unsealed;
   A.on_event unsealed
@@ -794,7 +796,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   A.on_event unsealed (stop ~index:0);
   let fallback = A.start_runtime_attempt unsealed in
   check bool "unsealed finalized prior scope is abandoned" true
-    fallback.abandon_previous_scope
+    (fallback = Keeper_chat_events.Abandon_previous_scope)
 ;;
 
 let test_failure_preserves_official_closed_scope () =

@@ -28,6 +28,11 @@ type stream_phase =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
+type tool_quarantine =
+  { occurrence : Keeper_chat_events.tool_stream_occurrence
+  ; kind : Keeper_chat_events.stream_protocol_error_kind
+  }
+
 type state =
   { blocks_by_index : (int * block_state) list
   ; current_stream_scope : int option
@@ -41,6 +46,7 @@ type state =
   ; current_message_start :
       (string * string * Agent_core.Types.api_usage option) option
   ; finalized_tools : tool_ref list
+  ; tool_quarantines : tool_quarantine list
   ; max_wire_bytes : int
         (* Read once per stream. [Keeper_chat_media_store.max_wire_bytes]
            resolves an env var on every call, so reading it again at finalize
@@ -64,6 +70,7 @@ let empty_state () =
   ; current_provider_message_id = None
   ; current_message_start = None
   ; finalized_tools = []
+  ; tool_quarantines = []
   ; max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
   }
 
@@ -142,6 +149,40 @@ let same_occurrence left right =
   Int.equal left.Keeper_chat_events.stream_scope right.stream_scope
   && Int.equal left.block_index right.block_index
 
+let occurrence_is_quarantined state occurrence =
+  List.exists
+    (fun { occurrence = recorded; kind = _ } ->
+       same_occurrence recorded occurrence)
+    state.tool_quarantines
+  || List.exists
+       (fun (_, block) ->
+          match block with
+          | Invalid_tool_block { quarantined_occurrence = Some recorded; _ } ->
+            same_occurrence recorded occurrence
+          | Active_tool _
+          | Occupied_non_tool_block
+          | Invalid_tool_block { quarantined_occurrence = None; _ }
+          | Invalid_media_block
+          | Active_media _ -> false)
+       state.blocks_by_index
+;;
+
+let remember_tool_quarantines state ~kind tools =
+  let tool_quarantines =
+    List.fold_left
+      (fun quarantines tool ->
+         if
+           List.exists
+             (fun quarantine ->
+                same_occurrence quarantine.occurrence tool.occurrence)
+             quarantines
+         then quarantines
+         else { occurrence = tool.occurrence; kind } :: quarantines)
+      state.tool_quarantines tools
+  in
+  { state with tool_quarantines }
+;;
+
 let finalized_tool_for_occurrence state occurrence =
   List.find_opt
     (fun finalized ->
@@ -204,7 +245,9 @@ let tools_in_current_scope state =
     |> List.filter (fun tool ->
       Option.equal Int.equal current_scope (Some tool.occurrence.stream_scope))
   in
-  active @ finalized
+  (active @ finalized)
+  |> List.filter (fun tool ->
+    not (occurrence_is_quarantined state tool.occurrence))
   |> List.sort_uniq (fun left right ->
     let scope =
       Int.compare left.occurrence.stream_scope right.occurrence.stream_scope
@@ -243,6 +286,7 @@ let poison_scope state ~kind ~reason =
          | Invalid_media_block -> index, block)
       state.blocks_by_index
   in
+  let state = remember_tool_quarantines state ~kind tools in
   { bridge_state =
       { state with
         blocks_by_index
@@ -262,14 +306,18 @@ let poison_scope_with state ~kind ~reason ~diagnostic extra_events =
   }
 ;;
 
-let start_runtime_attempt ~abandon_current_scope state =
+let start_runtime_attempt ~previous_scope state =
   let reason = "tool occurrence superseded by a new runtime attempt" in
   let terminalized =
-    if (not abandon_current_scope) || tools_in_current_scope state = []
-    then { bridge_state = state; chat_events = [] }
-    else
-      poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded
-        ~reason
+    match previous_scope with
+    | Keeper_chat_events.Preserve_previous_scope ->
+      { bridge_state = state; chat_events = [] }
+    | Keeper_chat_events.Abandon_previous_scope ->
+      if tools_in_current_scope state = []
+      then { bridge_state = state; chat_events = [] }
+      else
+        poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded
+          ~reason
   in
   { terminalized with
     bridge_state = reset_runtime_attempt_state terminalized.bridge_state

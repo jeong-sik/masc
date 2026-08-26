@@ -46,8 +46,6 @@ type stream_phase =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
-type runtime_attempt_transition = { abandon_previous_scope : bool }
-
 type t = {
   mutable blocks : (int * open_block) list;
   (* A conflicting start makes the whole provider block untrustworthy.  Keep
@@ -156,8 +154,10 @@ let fail_current_scope t =
 ;;
 
 let start_runtime_attempt t =
-  let abandon_previous_scope =
-    t.runtime_attempt_seen && not (current_scope_is_sealed t)
+  let previous_scope =
+    if t.runtime_attempt_seen && not (current_scope_is_sealed t)
+    then Keeper_chat_events.Abandon_previous_scope
+    else Keeper_chat_events.Preserve_previous_scope
   in
   (if t.runtime_attempt_seen
    then (
@@ -174,7 +174,7 @@ let start_runtime_attempt t =
     t.turns <- [];
     t.unmapped_turns <- [])
    else t.runtime_attempt_seen <- true);
-  { abandon_previous_scope }
+  previous_scope
 ;;
 
 let record_protocol_error t kind occurrence detail =

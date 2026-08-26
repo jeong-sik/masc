@@ -35,6 +35,13 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
 
+type runtime_attempt_scope_disposition =
+  | Preserve_previous_scope
+  | Abandon_previous_scope
+(** Pre-advance authority for a runtime fallback boundary. The durable stream
+    accumulator decides whether the prior scope was sealed; worker transport
+    and live projection carry this closed value without recomputing it. *)
+
 type tool_stream_occurrence =
   { stream_scope : int
   ; provider_message_id : string option

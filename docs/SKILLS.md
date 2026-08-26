@@ -8,6 +8,8 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `<base_path>/.mas
 `#30156` skills-declared-not-discovered (task 라우팅). 파서는
 `lib/skill/skill_definition.ml` (파일 한 장) + `lib/keeper/keeper_skill_catalog.ml` (카탈로그)다.
 
+런타임에서 **어떻게 도는가**(순서도 + 코드 경로)는 `docs/SKILLS-FLOW.md`.
+
 ## 1. 파일 규칙
 
 ```markdown

@@ -334,15 +334,6 @@ module Terminal_text = struct
     Masc.Tui_decode.clock_timestamp_for_terminal ~localtime:Unix.localtime text
 end
 
-(** Status color *)
-let status_color status =
-  match status with
-  | "working" | "in_progress" -> Ansi.yellow
-  | "idle" | "online" -> Ansi.green
-  | "offline" -> Ansi.gray
-  | "error" -> Ansi.red
-  | _ -> Ansi.default_fg
-
 (** Task status icon *)
 let task_status_icon status =
   match status with
@@ -355,16 +346,17 @@ let task_status_icon status =
 
 (** Priority indicator *)
 let priority_indicator p =
-  if p <= 1 then Ansi.red ^ "!!!" ^ Ansi.reset
-  else if p <= 2 then Ansi.red ^ "!!" ^ Ansi.reset
-  else if p <= 3 then Ansi.yellow ^ "!" ^ Ansi.reset
-  else ""
+  let glyph = Masc_tui_theme.Glyph.priority p in
+  if p <= 2 then Theme.bad () ^ glyph ^ Ansi.reset
+  else if p <= 3 then Theme.warn () ^ glyph ^ Ansi.reset
+  else glyph
 
-(** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
+(** Context ratio tone: healthy capacity recedes; only pressure and danger
+    claim an attention colour. All three resolve against the terminal palette. *)
 let ctx_color ratio =
-  if ratio >= 0.8 then Ansi.red
-  else if ratio >= 0.5 then Ansi.yellow
-  else Ansi.green
+  if ratio >= 0.8 then Theme.bad ()
+  else if ratio >= 0.5 then Theme.warn ()
+  else Theme.muted ()
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =

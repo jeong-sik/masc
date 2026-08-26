@@ -109,7 +109,56 @@ let test_tui_status_colors_use_theme_tokens () =
       "bin/masc_tui_render.ml bypasses semantic Theme status tokens:\n%s"
       (violations
        |> List.map status_color_violation_to_string
-       |> String.concat "\n")
+      |> String.concat "\n")
+;;
+
+let test_tui_ansi_status_helpers_use_theme_tokens () =
+  let module_path = "bin/masc_tui_ansi.ml" in
+  let raw_status_identifiers =
+    [ "Ansi.red"
+    ; "Ansi.yellow"
+    ; "Ansi.green"
+    ; "Ansi.bright_red"
+    ; "Ansi.bright_yellow"
+    ; "Ansi.bright_green"
+    ; "Masc_tui_theme.Sgr.red"
+    ; "Masc_tui_theme.Sgr.yellow"
+    ; "Masc_tui_theme.Sgr.green"
+    ; "Masc_tui_theme.Sgr.bright_red"
+    ; "Masc_tui_theme.Sgr.bright_yellow"
+    ; "Masc_tui_theme.Sgr.bright_green"
+    ]
+  in
+  check int "the unused stringly status classifier is gone" 0
+    (Ast_grep.count_value_bindings ~module_path ~name:"status_color");
+  List.iter
+    (fun binding_name ->
+      check int (binding_name ^ " does not bypass semantic status tokens") 0
+        (Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
+           ~binding_name ~callees:[] ~identifiers:raw_status_identifiers))
+    [ "priority_indicator"; "ctx_color"; "ctx_bar" ];
+  check int "priority glyph has one owner" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"priority_indicator"
+       ~callee:"Masc_tui_theme.Glyph.priority");
+  check int "critical priority uses the readable bad token" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"priority_indicator" ~callee:"Theme.bad");
+  check int "warning priority uses the readable warn token" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"priority_indicator" ~callee:"Theme.warn");
+  List.iter
+    (fun (label, callee) ->
+      check int ("context " ^ label ^ " tone has one owner") 1
+        (Ast_grep.count_calls_in_value_binding ~module_path
+           ~binding_name:"ctx_color" ~callee))
+    [ "healthy", "Theme.muted"
+    ; "pressure", "Theme.warn"
+    ; "danger", "Theme.bad"
+    ];
+  check int "the context bar consumes the shared tone once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"ctx_bar" ~callee:"ctx_color")
 ;;
 
 (* The chat pane's role colours draw through the readable path, not out of the
@@ -1863,6 +1912,10 @@ let () =
           "TUI status colors use semantic Theme tokens"
           `Quick
           test_tui_status_colors_use_theme_tokens;
+        test_case
+          "TUI ANSI status helpers use semantic Theme tokens"
+          `Quick
+          test_tui_ansi_status_helpers_use_theme_tokens;
         test_case
           "TUI status color AST guard fixtures"
           `Quick

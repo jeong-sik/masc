@@ -21,6 +21,7 @@ module Async = Masc.Keeper_msg_async
 module Keeper_registry = Masc.Keeper_registry
 module Event_queue = Keeper_event_queue
 module WO = Masc.Keeper_world_observation
+module Prompt = Masc.Keeper_unified_prompt
 
 let submitter = "alpha"
 let request_id = "kmsg-0001"
@@ -215,6 +216,49 @@ let the_turn_can_read_the_result () =
     | _ -> fail "the submitter's queue holds no result")
 ;;
 
+(* The row the Keeper actually reads in its turn prompt.
+
+   [board_event_fields] is the last step before prompt quoting, so this is the
+   text the model sees. Pinned because the whole change is worth nothing if
+   the Keeper is woken and the row does not say which composition settled or
+   under which id it can read the result. *)
+let the_prompt_row_says_what_settled () =
+  with_workspace (fun config ->
+    ensure_keeper config ~keeper_name:submitter;
+    deliver_or_fail config ~terminal:Event_queue.Composition_succeeded;
+    match
+      queued_results ~base_path:config.Workspace.base_path ~keeper_name:submitter
+    with
+    | [ (stimulus, _) ] ->
+      let meta =
+        match Keeper_meta_store.read_meta config submitter with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "the submitter has no meta"
+        | Error err -> fail ("meta load failed: " ^ err)
+      in
+      (match WO.pending_board_event_of_stimulus ~meta stimulus with
+       | Ok (Some event) ->
+         let fields = Prompt.For_testing.board_event_fields event in
+         let field name =
+           match List.assoc_opt name fields with
+           | Some value -> value
+           | None -> fail ("the prompt row carries no " ^ name ^ " field")
+         in
+         check string "the row is labelled as a settled composition"
+           "keeper_composition_completed" (field "event");
+         check string "and addressed by the request id the tool handed back"
+           ("keeper-composition:" ^ request_id) (field "post_id");
+         check string "the title names the composition, the outcome, and the id"
+           (composition_tool ^ " succeeded " ^ request_id) (field "title");
+         (* No preview on success: the result is in the async request record,
+            and the id to read it with is in the title above. Same as
+            Delegate_no_reply, which also has no text to show. *)
+         check string "a success shows no body" "" (field "preview")
+       | Ok None -> fail "the result projects to nothing the turn can read"
+       | Error _ -> fail "the result must project without a Board read")
+    | _ -> fail "the submitter's queue holds no result")
+;;
+
 (* The queue is durable, so a result that cannot be read back is lost on the
    next restart — silently, because the reader has no other copy. *)
 let the_result_survives_a_round_trip () =
@@ -346,6 +390,8 @@ let () =
         ] )
     ; ( "the turn"
       , [ test_case "can read the result" `Quick the_turn_can_read_the_result
+        ; test_case "the prompt row says what settled" `Quick
+            the_prompt_row_says_what_settled
         ; test_case "the result survives a round trip" `Quick
             the_result_survives_a_round_trip
         ] )

@@ -368,25 +368,46 @@ let fit_width text width =
       prefix ^ reset ^ String.make (width - 1 - prefix_cells) ' ' ^ "~"
     else text ^ String.make (width - cells) ' '
 
-let dress_bare_links ~open_style ~close_style text =
-  let is_url_end ch =
-    match ch with
-    | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
-    | _ -> Char.code ch < 0x20
+(* Where a bare URL begins and where it stops. Two readers ask -- the one that
+   underlines them and the one that names what they point at -- and they get
+   one answer, since a URL ending in one place for the underline and another
+   for the name would underline text the name had not read. *)
+let url_ends_at ch =
+  match ch with
+  | ' ' | '\t' | '\x1b' | '"' | '\'' | ')' | ']' | '>' | '<' -> true
+  | _ -> Char.code ch < 0x20
+
+let url_begins_at text index =
+  let begins prefix =
+    let plen = String.length prefix in
+    index + plen <= String.length text
+    && String.equal (String.sub text index plen) prefix
   in
+  begins "http://" || begins "https://"
+
+let url_end text index =
+  let length = String.length text in
+  let rec go i = if i < length && not (url_ends_at text.[i]) then go (i + 1) else i in
+  go index
+
+let bare_urls text =
+  let length = String.length text in
+  let rec loop index found =
+    if index >= length then List.rev found
+    else if url_begins_at text index then
+      let stop = url_end text index in
+      loop stop (String.sub text index (stop - index) :: found)
+    else loop (index + 1) found
+  in
+  loop 0 []
+
+let dress_bare_links ~open_style ~close_style text =
   let length = String.length text in
   let buffer = Buffer.create (length + 16) in
-  let starts_at index prefix =
-    let plen = String.length prefix in
-    index + plen <= length && String.equal (String.sub text index plen) prefix
-  in
   let rec loop index =
     if index >= length then ()
-    else if starts_at index "http://" || starts_at index "https://" then begin
-      let rec url_end i =
-        if i < length && not (is_url_end text.[i]) then url_end (i + 1) else i
-      in
-      let stop = url_end index in
+    else if url_begins_at text index then begin
+      let stop = url_end text index in
       Buffer.add_string buffer open_style;
       Buffer.add_string buffer (String.sub text index (stop - index));
       Buffer.add_string buffer close_style;

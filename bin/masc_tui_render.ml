@@ -4408,6 +4408,42 @@ let render_keeper_message (state : state) =
             | Message_status | Message_error | Message_memory ->
                 message.me_text
           in
+          (* What the links in this message point at, on rows of their own
+             under it. Added here because this is before the layout wraps:
+             the pane's own link styling runs after wrapping and cannot add a
+             cell without moving the row it sits on.
+
+             Read out of the URL and never fetched. A keeper writes these
+             links, and following one because it was mentioned would turn
+             anything a keeper says into traffic this process sends.
+
+             Not on a tool block. Tool output arrives already structured and
+             already long, and a bare URL there sits in a row that says what
+             it is; a URL in prose is the one standing on its own. *)
+          let body =
+            match message.me_role with
+            | Message_tool -> body
+            | Message_thinking | Message_user _ | Message_keeper
+            | Message_autonomous | Message_status | Message_error
+            | Message_memory -> (
+                let seen = Hashtbl.create 4 in
+                let labels =
+                  Message_layout.bare_urls body
+                  |> List.filter_map Masc_tui_link_label.label
+                  |> List.filter (fun label ->
+                         if Hashtbl.mem seen label then false
+                         else begin
+                           Hashtbl.add seen label ();
+                           true
+                         end)
+                in
+                match labels with
+                | [] -> body
+                | labels ->
+                    body ^ "\n"
+                    ^ String.concat "\n"
+                        (List.map (fun label -> "\xe2\x95\xb0 " ^ label) labels))
+          in
           ({ style;
                timestamp = message.me_timestamp;
                role_label;

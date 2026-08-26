@@ -52,24 +52,28 @@ let every_dispatched_operation_has_a_schema () =
 
 (* A live Keeper reaches its own tools under the agent alias its runtime was
    spawned with, not under the bare name the registry holds. Measured against
-   a running server on 2026-08-26: every unit test passed while a real
-   taskmaster keeper was refused with "keeper-taskmaster-agent is not a
-   registered keeper", because the tool read the alias straight through. The
-   guard is right; the name it was handed was not. *)
+   a running server on 2026-08-26: every unit test passed while a real keeper
+   was refused as an unregistered keeper -- the message named its alias, not
+   its registry name -- because the tool read the alias straight through. The
+   guard is right; the name it was handed was not.
+
+   The keeper this happened to is not named here. The rule does not depend on
+   which name it was, and the identity guard forbids a live one in tracked
+   source: an ordinary word eventually picks somebody's. *)
 let the_agent_alias_resolves_to_the_registered_name () =
   Alcotest.(check (option string))
-    "the alias a Keeper runtime spawns under" (Some "taskmaster")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper-taskmaster-agent");
+    "the alias a Keeper runtime spawns under" (Some "orrery")
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper-orrery-agent");
   Alcotest.(check (option string))
-    "underscore spelling" (Some "taskmaster")
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper_taskmaster_agent")
+    "underscore spelling" (Some "orrery")
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper_orrery_agent")
 
 let a_bare_name_is_left_alone () =
   (* An operator and these tests call under the registry name itself. It is
      not an alias, so it must pass through rather than resolve to nothing. *)
   Alcotest.(check (option string))
     "not an alias" None
-    (Masc.Keeper_identity.keeper_name_of_agent_alias "taskmaster")
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "orrery")
 
 (* Asking and reading back are two tools because they are two acts: one writes
    a question, the other only looks. Both have to be reachable, and the read

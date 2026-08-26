@@ -47,7 +47,8 @@ flowchart TD
   (`docs/SKILLS.md`가 정한 주인 — task가 스킬을 부를 때 쓰는 이름이 디렉터리라서).
   `Name_mismatch`는 진단으로 남지만 로드는 된다(RFC #30680이 #30205의 hard-reject를
   완화). 프론트매터에 `name`이 없으면 `Missing_name` + 디렉터리 이름 사용.
-- 이름이 문법적으로 깨졌으면(`Invalid_name`) 로드 거부.
+- 선언 이름이 문법적으로 깨져도 디렉토리 이름이 유효하면 디렉토리 이름으로 로드하고
+  `Invalid_name` 진단을 남긴다. 둘 다 잘못됐을 때만 로드 거부.
 
 **문서 → 스킬**: `Keeper_skill_catalog.parse_skill`
 (`lib/keeper/keeper_skill_catalog.ml:83`)가 본문의 composition fence를 본다.
@@ -70,10 +71,11 @@ fence 개수가 유일한 갈림길은 아니다. frontmatter `disable-model-inv
 파일로 남기되 모델이 스스로 집어들지 않게 하는 손잡이다. `docs/SKILLS.md §1`이 유일하게
 무시하지 않는 확장 키로 적어둔 그 값이다.
 
-**오류는 턴을 막는다**: `of_documents`(`keeper_skill_catalog.ml:112`)가 하나라도
-파싱 실패하면 카탈로그 전체가 `Error`. 필수 키 누락·이름 불일치·fence 문법 오류·중복
-스킬(`Duplicate_skill`)은 각각 파일과 위치를 가리키는 turn-blocking 오류다. SKILL.md가
-없는 디렉터리는 스킬이 아니므로 조용히 건너뛴다(`keeper_run_tools_setup.ml`의
+**실패와 편차는 다르다**: `of_documents`가 문서를 실제로 파싱하지 못하면 카탈로그
+전체가 `Error`다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/
+plan 오류·중복 스킬은 turn-blocking이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
+`Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
+디렉터리는 스킬이 아니므로 조용히 건너뛴다(`keeper_run_tools_setup.ml`의
 `Exact_missing → Keeper_skill_catalog.empty`).
 
 ## 2. 카탈로그를 읽는 세 소비자
@@ -135,23 +137,24 @@ config error, 지시 스킬인데 `Read` 도구가 없으면 → config error. �
 (`masc.skill-snapshot/v1`, `lib/skill_snapshot`)을 그대로 투영하고, 그 옆에 **사용
 횟수**를 붙인다: `effective_entries`마다 턴과 같은 파서(`parse_skill`)로 종류·도구
 이름을 정하고, tool-call 로그 꼬리 N행(`Keeper_skill_usage`)에서 합성은 도구 이름으로,
-지시는 `keeper_skill`의 `name` 인자로 센다. 깨진 워크스페이스는 빈 목록이 아니라
-턴을 막는 오류 문자열 그대로를 돌려준다. 대시보드 Monitor › Skills 패널이 소비.
+지시는 `keeper_skill`의 `name` 인자로 센다. 스냅샷의 conformance diagnostics도
+같이 돌려 대시보드 Monitor › Skills 패널이 경고로 표시한다.
 
 ## 3. 실행과 관측
 
 ```mermaid
 flowchart TD
   M["모델이 도구 호출"] --> K{"어느 도구?"}
-  K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan = 노드 목록(의존없으면 동시)<br/>execution=async면 durable broker"]
-  K -->|"keeper_skill(name)"| IR["지시 본문 반환<br/>Read 호출로 기록"]
+  K -->|"keeper_compose_&lt;name&gt;"| CR["합성 실행<br/>plan + descriptor가 동시성 결정<br/>execution=async면 durable broker"]
+  K -->|"keeper_skill(name)"| IR["지시 본문 반환<br/>keeper_skill 호출로 기록"]
   CR --> EV["tool_calls 스토어<br/>composition_tool / composition_run_id / composition_node_id"]
   IR --> EV
   EV --> SSE["SSE keeper_tool_call_evidence_committed"]
   CR -.->|"async"| ST["keeper_composition_status / _cancel 로 조회·취소"]
 ```
 
-- 합성 스킬은 plan이다: 의존 없는 노드는 동시 실행(Parallel as a Tool). `execution =
+- 합성 스킬은 plan이다. 같은 dependency layer에서도 `Ordinary Concurrent` descriptor
+  노드만 동시 실행되고 `Ordinary Serial`/`Terminal`은 각자 직렬 batch다. `execution =
   "async"`면 기존 durable broker로 흐르고 `keeper_composition_status`/`_cancel`로
   조회·취소. "정적 read-only 노드만" 제약은 게이트가 아니라 effect 재실행 안전이다.
 - 모든 실행은 `tool_calls` 스토어(`lib/keeper_tool_call_log.ml`)에 노드 단위로 남고

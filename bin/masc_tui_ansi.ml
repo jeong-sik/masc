@@ -18,6 +18,7 @@ module Ansi = struct
   let bold = Masc_tui_theme.Sgr.bold
   let dim = Masc_tui_theme.Sgr.dim
   let underline = Masc_tui_theme.Sgr.underline
+  let no_underline = Masc_tui_theme.Sgr.no_underline
 
   let red = Masc_tui_theme.Sgr.red
   let green = Masc_tui_theme.Sgr.green
@@ -177,6 +178,7 @@ module Theme = struct
     let diff_removed = Masc_tui_theme.Syntax.diff_removed
     let diff_added_bg = Masc_tui_theme.Syntax.diff_added_bg
     let diff_removed_bg = Masc_tui_theme.Syntax.diff_removed_bg
+    let diff_row_foreground = Masc_tui_theme.Syntax.diff_row_foreground
   end
 end
 
@@ -195,7 +197,12 @@ module Chat_theme = struct
   type body_context =
     { opening : string
     ; markdown_close : string
+    (* Full reset and reopen for the folded-origin gutter, whose own spans can
+       change weight, foreground, and background. *)
     ; inline_restore : string
+    (* A bare link changes only underline and foreground. Closing only those
+       two attributes preserves an enclosing diff background and any weight. *)
+    ; link_restore : string
     ; palette_generation : int
     ; ambient_background : bool
     }
@@ -214,6 +221,16 @@ module Chat_theme = struct
     | Masc_tui_message_layout.Error -> Theme.bad ()
     | Masc_tui_message_layout.Tool -> Ansi.reset
     | Masc_tui_message_layout.Thinking -> Ansi.dim
+
+  let link_foreground : Masc_tui_message_layout.style -> string = function
+    | Masc_tui_message_layout.Status -> Theme.warn ()
+    | Masc_tui_message_layout.Error -> Theme.bad ()
+    | Masc_tui_message_layout.User | Masc_tui_message_layout.Keeper
+    | Masc_tui_message_layout.Tool | Masc_tui_message_layout.Thinking ->
+      Ansi.default_fg
+
+  let link_style_restore style =
+    Ansi.no_underline ^ link_foreground style
 
   let snapshot_cache : snapshot option Atomic.t = Atomic.make None
 
@@ -240,6 +257,7 @@ module Chat_theme = struct
 
   let body_context snapshot style =
     let opening = body style in
+    let link_restore = link_style_restore style in
     match style, snapshot.user_background with
     | Masc_tui_message_layout.User, background
       when String.length background > 0 ->
@@ -247,6 +265,7 @@ module Chat_theme = struct
       { opening = ambient
       ; markdown_close = ambient
       ; inline_restore = ambient
+      ; link_restore
       ; palette_generation = snapshot.palette_generation
       ; ambient_background = true
       }
@@ -254,6 +273,7 @@ module Chat_theme = struct
       { opening
       ; markdown_close = Ansi.reset
       ; inline_restore = Ansi.reset ^ opening
+      ; link_restore
       ; palette_generation = snapshot.palette_generation
       ; ambient_background = false
       }
@@ -265,6 +285,7 @@ module Chat_theme = struct
       { opening
       ; markdown_close = Ansi.reset
       ; inline_restore = Ansi.reset ^ opening
+      ; link_restore
       ; palette_generation = 0
       ; ambient_background = false
       }

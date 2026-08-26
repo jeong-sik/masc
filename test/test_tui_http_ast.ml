@@ -523,19 +523,46 @@ let test_user_message_background_has_one_render_snapshot () =
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"cached_chat_markdown" ~callees:[]
        ~fields:[ "palette_generation" ]);
-  (* Two sites close back onto the row's own style rather than resetting: a
-     bare link and the folded-origin margin. A reset at either would strip the
-     ambient background from everything after it on the row.
-
-     There were three. #30654 stopped drawing the rule between the margin and
-     the body -- a rail on every row gave a continuation the same weight as a
-     new event -- so the site that closed after the rule went with it. The
-     count is what is drawn, so removing a drawn thing lowers it; a reset
-     appearing at either surviving site is still what this catches. *)
-  check int "link and margin each restore the captured row" 2
+  (* The folded-origin margin changes several attributes, so it still closes
+     by fully restoring the captured row. A bare link has a narrower typed
+     closer below: resetting it would cut an enclosing diff background. *)
+  check int "the margin fully restores the captured row" 1
     (Ast_grep.count_field_accesses_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
        ~fields:[ "inline_restore" ]);
+  check int "the link uses its selective row restore" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_chat_row" ~callees:[]
+       ~fields:[ "link_restore" ]);
+  check int "the selective closer turns off underline" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"link_style_restore" ~callees:[]
+       ~identifiers:[ "Ansi.no_underline" ]);
+  check int "the selective closer restores the row foreground" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"link_style_restore" ~callee:"link_foreground");
+  check int "Status links restore the warning foreground" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"link_foreground" ~callee:"Theme.warn");
+  check int "Error links restore the error foreground" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"link_foreground" ~callee:"Theme.bad");
+  check int "neutral links restore only the default foreground" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"link_foreground" ~callees:[]
+       ~identifiers:[ "Ansi.default_fg" ]);
+  check int "the selective closer never resets the enclosing row" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"link_style_restore" ~callees:[]
+       ~identifiers:[ "Ansi.reset" ]);
+  check int "both chat diff rows use the paired foreground" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~callees:[] ~identifiers:[ "Theme.Syntax.diff_row_foreground" ]);
+  check int "chat diff rows do not borrow the terminal default foreground" 0
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"chat_markdown_palette"
+       ~callees:[] ~identifiers:[ "Ansi.default_fg" ]);
   check int "Markdown palette has no hard-coded reset closer" 0
     (Ast_grep.count_identifiers_outside_calls_in_value_binding
        ~module_path:render_path ~binding_name:"chat_markdown_palette"

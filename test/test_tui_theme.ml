@@ -23,6 +23,7 @@ let conditional_tokens =
     [ ("bold", bold, "\027[1m")
     ; ("dim", dim, "\027[2m")
     ; ("underline", underline, "\027[4m")
+    ; ("no_underline", no_underline, "\027[24m")
     ; ("red", red, "\027[31m")
     ; ("green", green, "\027[32m")
     ; ("yellow", yellow, "\027[33m")
@@ -335,7 +336,23 @@ let test_diff_backgrounds_are_named_as_content () =
   check str "added names the Sgr entry" Masc_tui_theme.Sgr.bg_added
     Masc_tui_theme.Syntax.diff_added_bg;
   check str "removed names the Sgr entry" Masc_tui_theme.Sgr.bg_removed
-    Masc_tui_theme.Syntax.diff_removed_bg
+    Masc_tui_theme.Syntax.diff_removed_bg;
+  check str "row text names the fixed light entry"
+    (if Masc_tui_theme.colors_enabled then "\027[38;5;255m" else "")
+    Masc_tui_theme.Syntax.diff_row_foreground
+
+(* Xterm 255 is RGB 238,238,238; the two fixed row backgrounds are xterm 22
+   (0,95,0) and 52 (95,0,0). The semantic tokens are a pair, so pin the text
+   contrast of both rather than accepting either byte in isolation. *)
+let test_diff_row_palette_clears_text_contrast () =
+  let foreground = rgb 238 238 238 in
+  List.iter
+    (fun (name, background) ->
+       let ratio = contrast_ratio foreground background in
+       check bool
+         (Printf.sprintf "%s diff row clears 4.5:1 (%.2f)" name ratio)
+         true (ratio >= 4.5))
+    [ ("added", rgb 0 95 0); ("removed", rgb 95 0 0) ]
 
 let () =
   Alcotest.run "masc_tui_theme"
@@ -358,6 +375,8 @@ let () =
     ; ( "semantic"
       , [ Alcotest.test_case "diff backgrounds are named as content" `Quick
             test_diff_backgrounds_are_named_as_content
+        ; Alcotest.test_case "diff row palette clears text contrast" `Quick
+            test_diff_row_palette_clears_text_contrast
         ; Alcotest.test_case "status names the exact hues" `Quick
             test_status_names_the_exact_hues
         ; Alcotest.test_case "tone has three values" `Quick

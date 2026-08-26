@@ -131,13 +131,15 @@ let chat_markdown_palette ~closing : Markdown.palette =
   ; code_comment = (Ansi.gray, closing)
   ; code_number = (Ansi.magenta, closing)
   ; code_type = (Ansi.bold ^ Ansi.blue, closing)
-  (* A diff's two answers, in the foreground rather than the background the
-     Changes surface uses. A background paints the row to its full width, and
-     inside a chat fence that would draw a green band across the pane for
-     every added line. The hue is the same question either way: is this
-     arriving or leaving. *)
-  ; code_diff_added = (Theme.Syntax.diff_added, closing)
-  ; code_diff_removed = (Theme.Syntax.diff_removed, closing)
+  (* Changed rows follow the dedicated diff surfaces: their background runs
+     through the code gutter and the unused cells, so lines of different
+     lengths still read as one patch. The fixed light foreground is paired
+     with the two fixed dark backgrounds by Theme; the +/- source marker and
+     the background already say which side of the change this is. *)
+  ; code_diff_added =
+      (Theme.Syntax.diff_added_bg ^ Theme.Syntax.diff_row_foreground, closing)
+  ; code_diff_removed =
+      (Theme.Syntax.diff_removed_bg ^ Theme.Syntax.diff_row_foreground, closing)
   }
 
 let markdown_with_closing ~closing ~width body =
@@ -253,12 +255,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
       let text = row.text in
       let context = Chat_theme.body_context theme row.style in
       let dress rest =
-        (* A pasted URL reads as a link, not prose. Closed by restoring the
-           row's own style — a bare reset would strip it from everything
-           after the link. *)
+        (* A pasted URL reads as a link, not prose. Its closer turns off only
+           the underline and link foreground; resetting here would cut an
+           enclosing diff background before the row's tail and padding. *)
         Masc_tui_message_layout.dress_bare_links
           ~open_style:(Ansi.underline ^ Ansi.blue)
-          ~close_style:context.inline_restore
+          ~close_style:context.link_restore
           rest
       in
       (* Folded origins are the heading of each activity block. Keep them in

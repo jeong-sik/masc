@@ -320,6 +320,12 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_theme_catalog)
+ (wrapped false)
+ (modules masc_tui_theme_catalog)
+ (libraries masc_tui_terminal_palette))
+
+(library
  (name masc_tui_color)
  (wrapped false)
  (modules masc_tui_color)

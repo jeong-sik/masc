@@ -1,10 +1,37 @@
 name = "keeper_skill"
-description = "Read one instruction skill whole, by name. Read a skill before you act on a task that names it."
+description = "Read one frozen instruction Skill body by its canonical exact reference. Use the exact object projected by the current Task or this tool's Available list; names alone are never accepted."
 additional_properties = false
 
 [[params]]
+name = "identity"
+type = "object"
+required = true
+additional_properties = false
+description = "Exact Skill identity from the frozen turn snapshot."
+
+[[params.params]]
+name = "source_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
+name = "package_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.params]]
 name = "name"
 type = "string"
 required = true
 min_length = 1
-description = "Name of the skill to read, exactly as the Available list spells it."
+
+[[params]]
+name = "content_revision"
+type = "string"
+required = true
+min_length = 64
+max_length = 64
+pattern = "^[0-9a-f]{64}$"
+description = "Canonical domain-separated SHA-256 content revision derived from the exact frozen SKILL.md bytes."

@@ -22,8 +22,8 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
-  ; instruction_skills : string list
-  ; composition_skills : string list
+  ; instruction_skills : Skill_reference.t list
+  ; composition_skills : Skill_reference.t list
   ; tools : tool list
   ; tool_surface_sha256 : string option
   }
@@ -49,8 +49,8 @@ module For_testing : sig
     native_posture:Runtime_native_tools.posture option ->
     tool_groups:string list option ->
     current_task_id:string option ->
-    task_skill_names:string list ->
-    skill_catalog:Keeper_skill_catalog.t ->
-    (t, string * string) result
-  (** Pure projection seam.  The error pair is [(reason, detail)]. *)
+    task_skill_references:Skill_reference.t list ->
+    skill_snapshot:Skill_catalog_snapshot.t ->
+    (t, Keeper_task_skill_turn.error) result
+  (** Pure projection seam over one frozen Task/snapshot pair. *)
 end

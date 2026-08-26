@@ -15,6 +15,7 @@ type skill =
   ; description : string
   ; body : string
   ; model_invocable : bool
+  ; reference : Skill_reference.t option
   ; provenance : provenance option
   ; surface : surface
   }
@@ -113,6 +114,7 @@ let parse_document (document : Agent_core.Skill_document.t) =
          ; description
          ; body
          ; model_invocable
+         ; reference = None
          ; provenance = None
          ; surface = Instruction
          }
@@ -125,6 +127,7 @@ let parse_document (document : Agent_core.Skill_document.t) =
             ; description
             ; body
             ; model_invocable
+            ; reference = None
             ; provenance = None
             ; surface = Composition entry
             })
@@ -170,14 +173,22 @@ let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     })
 ;;
 
+let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
+  parse_document entry.document
+  |> Result.map (fun skill ->
+    { skill with
+      reference = Some (Skill_catalog_snapshot.entry_reference entry)
+    ; provenance = provenance_of_entry snapshot entry
+    })
+;;
+
 let of_snapshot snapshot =
   Skill_catalog_snapshot.effective_entries snapshot
   |> List.fold_left
        (fun (catalog, diagnostics) entry ->
-          match parse_document entry.Skill_catalog_snapshot.document with
+          match project_entry snapshot entry with
           | Ok skill ->
-            ( { skill with provenance = provenance_of_entry snapshot entry } :: catalog
-            , diagnostics )
+            skill :: catalog, diagnostics
           | Error error ->
             catalog, { identity = entry.identity; error } :: diagnostics)
        ([], [])

@@ -109,6 +109,30 @@ let skill_catalog () =
       (Keeper_skill_catalog.error_to_string e)
 ;;
 
+let instruction_reference () =
+  let source_id =
+    match Skill_source_config.source_id_of_string "bundle-fixture" with
+    | Ok source_id -> source_id
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory "gate-instruction" with
+    | Ok package_id -> package_id
+    | Error _ -> fail "invalid instruction fixture package"
+  in
+  let source_text =
+    "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
+  in
+  Skill_reference.make
+    ~identity:
+      (Skill_reference.make_identity
+         ~source_id
+         ~package_id
+         ~name:"gate-instruction")
+    ~content_revision:
+      (Skill_reference.content_revision_of_source_text source_text)
+;;
+
 let contains ~needle haystack =
   let n = String.length needle and h = String.length haystack in
   let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
@@ -145,6 +169,8 @@ let with_bundle_tools f =
            ~publication_recovery
            ~ctx_snapshot
            ~skill_catalog:(skill_catalog ())
+           ~task_instruction_skills:
+             [ instruction_reference (), "what the gate reads", "body" ]
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () -> f bundle.tools))

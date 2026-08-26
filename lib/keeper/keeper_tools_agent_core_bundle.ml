@@ -50,6 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
+      ?(task_instruction_skills = [])
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -373,14 +374,31 @@ let make_tool_bundle_for_descriptors
       descriptors
   in
   let composition_tools =
+    let global_instruction_skills =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.model_invocable, skill.surface with
+           | Some reference, true, Keeper_skill_catalog.Instruction ->
+             Some (reference, skill.description, skill.body)
+           | None, _, _
+           | Some _, false, _
+           | Some _, true, Keeper_skill_catalog.Composition _ ->
+             None)
+    in
+    let instruction_skills =
+      List.fold_left
+        (fun selected ((reference, _, _) as skill) ->
+           if
+             List.exists
+               (fun (known, _, _) -> Skill_reference.equal reference known)
+               selected
+           then selected
+           else selected @ [ skill ])
+        task_instruction_skills
+        global_instruction_skills
+    in
     Keeper_tool_composition_surface.make_tools
-        ~instruction_skills:
-          (Keeper_skill_catalog.skills skill_catalog
-           |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
-                match skill.model_invocable, skill.surface with
-                | true, Keeper_skill_catalog.Instruction ->
-                  Some (skill.name, skill.description, skill.body)
-                | false, _ | true, Keeper_skill_catalog.Composition _ -> None))
+        ~instruction_skills
         ~skill_composition_entries:
           (Keeper_skill_catalog.composition_entries skill_catalog)
         ~config
@@ -429,6 +447,7 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?skill_catalog
+      ?task_instruction_skills
       ?turn_ctx_cell
       ()
   =
@@ -449,6 +468,7 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?skill_catalog
+    ?task_instruction_skills
     ?turn_ctx_cell
     ~descriptors
     ()
@@ -462,6 +482,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?skill_catalog
+      ?task_instruction_skills
       ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
@@ -472,7 +493,8 @@ let make_tools
      ~publication_recovery
      ~ctx_snapshot
      ?clock
-     ?skill_catalog
+      ?skill_catalog
+      ?task_instruction_skills
      ?turn_ctx_cell
      ())
     .tools

@@ -37,30 +37,13 @@ Use the repository's focused validation wrapper.
     name
 ;;
 
-let skill_catalog () =
-  match
-    Keeper_skill_catalog.of_documents
-      [ "guide", instruction_skill "guide"
-      ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
-      ]
-  with
-  | Ok catalog -> catalog
-  | Error error ->
-    failf "fixture catalog rejected: %s"
-      (Keeper_skill_catalog.error_to_string error)
-;;
-
-let configured_external_skill_catalog () =
+let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
-    {|[skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
-[[skills.sources]]
-id = "shared-catalog"
-anchor = "absolute"
-path = "/srv/shared-agent-skills"
-access = "read-only"
-|}
+    Printf.sprintf
+      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      source_id
+      anchor
+      path
   in
   let config =
     match Skill_source_config.parse_text config_text with
@@ -75,16 +58,16 @@ access = "read-only"
   let resolved =
     Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
   in
-  let document = composition_skill ~name:"snapshot" ~execution:"async" in
   let scan : Skill_catalog_snapshot.source_scan =
     { source = resolved
     ; observation =
         Skill_catalog_snapshot.Source_ready
-          { resolved_path = "/srv/shared-agent-skills"; candidates = 1 }
+          { resolved_path = path; candidates = List.length documents }
     ; candidates =
-        [ Skill_catalog_snapshot.Candidate_document
-            { directory = "snapshot"; source_text = document }
-        ]
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
     }
   in
   let snapshot =
@@ -92,10 +75,31 @@ access = "read-only"
     | Ok snapshot -> snapshot
     | Error _ -> fail "external Skill snapshot fixture was rejected"
   in
-  match Keeper_skill_catalog.of_snapshot snapshot with
-  | catalog, [] -> catalog
-  | _, diagnostics ->
-    failf "external Skill projection returned %d diagnostics" (List.length diagnostics)
+  snapshot
+;;
+
+let skill_snapshot () =
+  configured_snapshot
+    ~source_id:"fixture-catalog"
+    ~anchor:"base-path"
+    ~path:"skills"
+    [ "guide", instruction_skill "guide"
+    ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
+    ]
+;;
+
+let configured_external_skill_snapshot () =
+  configured_snapshot
+    ~source_id:"shared-catalog"
+    ~anchor:"absolute"
+    ~path:"/srv/shared-agent-skills"
+    [ "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ]
+;;
+
+let reference_by_name snapshot name =
+  match Skill_catalog_snapshot.find_effective_by_name snapshot name with
+  | Some entry -> Skill_catalog_snapshot.entry_reference entry
+  | None -> failf "fixture Skill %S is absent" name
 ;;
 
 let names (surface : Keeper_effective_tool_surface.t) =
@@ -104,7 +108,8 @@ let names (surface : Keeper_effective_tool_surface.t) =
   |> List.sort String.compare
 ;;
 
-let project ~tool_groups ~task_skill_names ~native_posture =
+let project ~tool_groups ~task_skill_references ~native_posture =
+  let skill_snapshot = skill_snapshot () in
   Keeper_effective_tool_surface.For_testing.project
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
@@ -112,8 +117,8 @@ let project ~tool_groups ~task_skill_names ~native_posture =
     ~native_posture:(Some native_posture)
     ~tool_groups
     ~current_task_id:(Some "task-001")
-    ~task_skill_names
-    ~skill_catalog:(skill_catalog ())
+    ~task_skill_references
+    ~skill_snapshot
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
@@ -121,21 +126,25 @@ let test_projection_names_equal_turn_surface_authority () =
   match
     project
       ~tool_groups:None
-      ~task_skill_names:[ "guide" ]
+      ~task_skill_references:[ reference_by_name (skill_snapshot ()) "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
-        ~skill_catalog:(skill_catalog ())
+        ~skill_catalog:(Keeper_skill_catalog.of_snapshot (skill_snapshot ()) |> fst)
         ~model_visible_descriptors:descriptors
     in
     check (list string) "projection and turn setup names are identical"
       expected (names surface);
-    check (list string) "instruction skill is explicit" [ "guide" ]
-      surface.instruction_skills;
+    check string
+      "instruction skill is exact"
+      (Skill_reference.list_to_yojson [ reference_by_name (skill_snapshot ()) "guide" ]
+       |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+       |> Yojson.Safe.to_string);
     check bool "composition provenance exists" true
       (List.exists
          (fun (tool : Keeper_effective_tool_surface.tool) ->
@@ -157,10 +166,10 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~native_posture:None
       ~tool_groups:None
       ~current_task_id:None
-      ~task_skill_names:[]
-      ~skill_catalog:(configured_external_skill_catalog ())
+      ~task_skill_references:[]
+      ~skill_snapshot:(configured_external_skill_snapshot ())
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     let provenance =
       List.find_map
@@ -211,13 +220,13 @@ let test_two_surfaces_have_different_names_and_digests () =
   let all =
     project
       ~tool_groups:None
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
   in
   let narrow =
     project
       ~tool_groups:(Some [ "fs" ])
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_full
   in
   match all, narrow with
@@ -225,7 +234,8 @@ let test_two_surfaces_have_different_names_and_digests () =
     check bool "effective names differ" true (names left <> names right);
     check bool "session digests differ" true
       (left.tool_surface_sha256 <> right.tool_surface_sha256)
-  | Error (_, detail), _ | _, Error (_, detail) -> fail detail
+  | Error error, _ | _, Error error ->
+    fail (Keeper_task_skill_turn.error_to_string error)
 ;;
 
 let test_instruction_skill_does_not_require_a_named_read_tool () =
@@ -233,13 +243,13 @@ let test_instruction_skill_does_not_require_a_named_read_tool () =
   match
     project
       ~tool_groups:(Some [ "board" ])
-      ~task_skill_names:[ "guide" ]
+      ~task_skill_references:[ reference_by_name (skill_snapshot ()) "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
-    check (list string) "instruction remains declared" [ "guide" ]
-      surface.instruction_skills
+    check int "instruction remains declared" 1
+      (List.length surface.instruction_skills)
 ;;
 
 let () =

@@ -30,6 +30,9 @@ type skill = private
         (** Everything after the frontmatter, including any composition
             fence, exactly as {!Agent_core.Skill_document} returned it. *)
   ; model_invocable : bool
+  ; reference : Skill_reference.t option
+        (** Exact snapshot identity. [None] exists only for document-only test
+            catalogs that have no snapshot authority. *)
   ; provenance : provenance option
   ; surface : surface
   }
@@ -88,6 +91,11 @@ val of_snapshot :
     catalog. Snapshot order is preserved. A composition projection failure
     keeps the standard Skill as an instruction and returns a diagnostic; it
     never rejects the snapshot or turn. *)
+
+val project_entry :
+  Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> (skill, error) result
+(** Project one exact snapshot entry, including a shadowed entry. The returned
+    Skill preserves the entry's exact reference and source provenance. *)
 
 val empty : t
 val skills : t -> skill list

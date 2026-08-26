@@ -155,19 +155,21 @@ let format_goal_summaries (summaries : goal_summary list) : string =
        summaries)
 
 let format_task_skills skills =
-  let skill_names = String.concat ", " skills in
+  let skill_references =
+    Skill_reference.list_to_yojson skills |> Yojson.Safe.to_string
+  in
   match
     Prompt_registry.render_prompt_template
       Prompt_names.keeper_current_task_skills
-      [ "skill_names", skill_names ]
+      [ "skill_references", skill_references ]
   with
   | Ok text -> String.trim text
   | Error detail ->
     Log.Misc.error
-      "keeper current-task skills prompt %s did not render, falling back to skill names: %s"
+      "keeper current-task skills prompt %s did not render, falling back to exact references: %s"
       Prompt_names.keeper_current_task_skills
       detail;
-    "- skills=" ^ skill_names
+    "- skills=" ^ skill_references
 ;;
 
 (** Render the keeper's own claimed task as standing context (RFC-0315).
@@ -231,7 +233,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
      block does not list what is available and let the model match — there is
      nothing to choose between by the time the turn starts.
 
-     Names and a path, not the instruction itself. A skill body is written to
+     Exact references, not the instruction itself. A skill body is written to
      be read whole and some run to tens of kilobytes (the published
      im-ai-copyeditor carries an 80 KB reference pack), which would land on
      every turn of the task rather than the one turn that uses it. The keeper

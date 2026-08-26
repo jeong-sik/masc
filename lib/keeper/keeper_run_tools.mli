@@ -101,6 +101,9 @@ val prepare_agent_setup
   -> config_root:string
   -> runtime_config_path:string option
   -> skill_snapshot:Skill_catalog_snapshot.t
+  -> task_skill_references:Skill_reference.t list
+       (** Exact refs captured with the current-task observation before any
+           provider attempt. Retries reuse this list and [skill_snapshot]. *)
   -> trajectory_acc:Trajectory.accumulator option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)

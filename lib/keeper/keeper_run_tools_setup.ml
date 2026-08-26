@@ -97,7 +97,11 @@ let gate_causal_initial
     ]
 ;;
 
-let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
+let expected_model_tool_names
+      ?(task_instruction_skills = [])
+      ~skill_catalog
+      ~model_visible_descriptors
+  =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
@@ -105,6 +109,20 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   let entries = Keeper_skill_catalog.composition_entries skill_catalog in
   let composition_names =
     List.map Keeper_tool_composition_catalog.tool_name entries
+  in
+  let instruction_names =
+    if task_instruction_skills <> [] ||
+      List.exists
+        (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.model_invocable, skill.surface with
+           | Some _, true, Keeper_skill_catalog.Instruction -> true
+           | None, _, _
+           | Some _, false, _
+           | Some _, true, Keeper_skill_catalog.Composition _ ->
+             false)
+        (Keeper_skill_catalog.skills skill_catalog)
+    then [ Keeper_tool_composition_catalog.skill_tool_name ]
+    else []
   in
   (* The shared async controls join the surface when any skill declares an
      async composition. *)
@@ -123,7 +141,7 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: (descriptor_names @ composition_names @ control_names))
+     :: (descriptor_names @ instruction_names @ composition_names @ control_names))
 ;;
 
 let prepare_agent_setup
@@ -149,6 +167,7 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
+      ~(task_skill_references : Skill_reference.t list)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -160,6 +179,20 @@ let prepare_agent_setup
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
+  let* task_skill_selection =
+    Keeper_task_skill_turn.resolve
+      ~snapshot:skill_snapshot
+      task_skill_references
+    |> Result.map_error Keeper_task_skill_turn.core_error
+  in
+  let task_instruction_skills =
+    List.map
+      (fun (selected : Keeper_task_skill_turn.selected) ->
+         ( selected.reference
+         , selected.skill.description
+         , selected.skill.body ))
+      task_skill_selection.selected
+  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
@@ -220,6 +253,7 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ~skill_catalog
+      ~task_instruction_skills
       ~turn_ctx_cell
       ()
   in
@@ -344,7 +378,10 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names ~skill_catalog ~model_visible_descriptors
+    expected_model_tool_names
+      ~task_instruction_skills
+      ~skill_catalog
+      ~model_visible_descriptors
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

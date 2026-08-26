@@ -910,11 +910,6 @@ let cancel_result
       data
 ;;
 
-module For_testing = struct
-  let status_result = status_result
-  let cancel_result = cancel_result
-end
-
 let make_request_control_tool
       ~(config : Workspace.config)
       ~name
@@ -965,23 +960,17 @@ let make_request_control_tool
    appended below; the argument's shape and the sentence saying when to reach
    for the tool are not, and the model-prose ratchet is what says so. *)
 let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
-let skill_name_input_schema = skill_tool_schema.input_schema
-
-let skill_name_of_validated_input input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "name" fields with
-     | Some (`String name) -> Some name
-     | Some _ | None -> None)
-  | _ -> None
-;;
+let skill_reference_input_schema = skill_tool_schema.input_schema
 
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
   let name = Catalog.skill_tool_name in
   let listed =
     instruction_skills
-    |> List.map (fun (skill_name, description, _body) ->
-         Printf.sprintf "%s: %s" skill_name description)
+    |> List.map (fun (reference, description, _body) ->
+         Printf.sprintf
+           "%s: %s"
+           (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+           description)
     |> String.concat "
 "
   in
@@ -993,44 +982,62 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
     ~base_path:config.base_path
     ~name
     ~description
-    ~input_schema:skill_name_input_schema
+    ~input_schema:skill_reference_input_schema
     (fun _execution_env input ->
       let start_time = Time_compat.now () in
       match
-        Tool_input_validation.validate_args ~schema:skill_name_input_schema ~name
+        Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
           ~args:input ()
       with
       | Error rejection -> rejection
       | Ok _ ->
-        (match skill_name_of_validated_input input with
-         | None ->
-           Tool_result.runtime_err ~tool_name:name ~start_time
-             "validated skill input lost name"
-         | Some asked ->
+        (match Skill_reference.of_yojson input with
+         | Error _ ->
+           Tool_result.make_err
+             ~tool_name:name
+             ~class_:Tool_result.Workflow_rejection
+             ~start_time
+             "keeper_skill requires one canonical exact Skill reference"
+         | Ok asked ->
            (match
               List.find_opt
-                (fun (skill_name, _, _) -> String.equal skill_name asked)
+                (fun (reference, _, _) -> Skill_reference.equal reference asked)
                 instruction_skills
             with
-            | Some (_, _, body) ->
+            | Some (reference, _, body) ->
               Tool_result.make_ok ~tool_name:name ~start_time
-                ~data:(`Assoc [ "name", `String asked; "body", `String body ])
+                ~data:
+                  (`Assoc
+                     [ "reference", Skill_reference.to_yojson reference
+                     ; "body", `String body
+                     ])
                 ()
-            | (* A name the catalog does not carry is the caller's error and
-                 says so with the names it does carry, rather than an empty
+            | (* A reference the frozen catalog does not carry is the caller's
+                 error and says so with the exact references it does carry,
+                 rather than an empty
                  body the model would read as "this skill says nothing". *)
               None ->
               Tool_result.make_err ~tool_name:name
                 ~class_:Tool_result.Workflow_rejection ~start_time
                 (Printf.sprintf
-                   "no instruction skill named %S; this keeper carries: %s"
-                   asked
+                   "no instruction Skill matches exact reference %s; this keeper carries: %s"
+                   (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
                    (match instruction_skills with
                     | [] -> "(none)"
                     | skills ->
                       String.concat ", "
-                        (List.map (fun (n, _, _) -> n) skills))))))
+                        (List.map
+                           (fun (reference, _, _) ->
+                              Skill_reference.to_yojson reference
+                              |> Yojson.Safe.to_string)
+                           skills))))))
 ;;
+
+module For_testing = struct
+  let make_instruction_skill_tool = make_instruction_skill_tool
+  let status_result = status_result
+  let cancel_result = cancel_result
+end
 
 let make_tools
       ?(instruction_skills = [])

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SkillSnapshotEntry, SkillUsage } from '../api/dashboard-skills'
 import {
   formatBytes,
+  referenceLabel,
   kindLabel,
   mergeSkillRows,
   sortSkillRows,
@@ -71,6 +72,16 @@ describe('labels', () => {
 
   it('does not claim a window the server never reported', () => {
     expect(usageLabel(usage[1]!, undefined)).toBe('1 (window unreported)')
+  })
+
+  it('shows file reads beside the body count, and stays silent when there are none', () => {
+    const withFiles = { ...usage[1]!, recent_reference_reads: 3 } as SkillUsage
+    expect(referenceLabel(withFiles)).toBe(' · 3 files')
+    expect(referenceLabel({ ...usage[1]!, recent_reference_reads: 1 } as SkillUsage)).toBe(' · 1 file')
+    expect(referenceLabel({ ...usage[1]!, recent_reference_reads: 0 } as SkillUsage)).toBe('')
+    expect(referenceLabel(usage[1]!)).toBe('')
+    expect(referenceLabel(usage[0]!)).toBe('')
+    expect(referenceLabel(null)).toBe('')
   })
 
   it('shows the parsed kind, the refusal, or the absence', () => {

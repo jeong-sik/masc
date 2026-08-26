@@ -77,6 +77,16 @@ export function usageLabel(usage: SkillUsage | null, windowRows?: number): strin
   return `${usage.recent_use_count} in last ${windowRows} calls`
 }
 
+/** Reads of the skill's own files, shown beside the body count. Silent when
+ *  the skill has no bundled files or the server does not report the field —
+ *  a zero would read as "nobody opens them", which is a different claim. */
+export function referenceLabel(usage: SkillUsage | null): string {
+  if (!usage || usage.kind !== 'instruction') return ''
+  const reads = usage.recent_reference_reads
+  if (reads === undefined || reads === 0) return ''
+  return ` · ${reads} file${reads === 1 ? '' : 's'}`
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024).toFixed(1)} KB`
@@ -159,7 +169,7 @@ export function SkillsPanel() {
                 <td><strong>${row.name}</strong><div class="ss-muted">${row.description}</div></td>
                 <td>${kindLabel(row.usage)}</td>
                 <td class="mono">${row.usage?.kind === 'composition' ? row.usage.tool_name : '—'}</td>
-                <td>${usageLabel(row.usage, res.recent_window_rows)}</td>
+                <td>${usageLabel(row.usage, res.recent_window_rows)}${referenceLabel(row.usage)}</td>
                 <td>${formatBytes(row.body_bytes)}</td>
                 <td class="mono">${row.source}</td>
               </tr>

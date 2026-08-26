@@ -949,7 +949,14 @@ let make_request_control_tool
    The body comes through a tool instead. Progressive disclosure is kept --
    names and descriptions ride the tool description, the body arrives only
    when asked for -- but the harness serves it from the catalog it already
-   parsed, so no path is resolved and the call is on the record. *)
+   parsed, so no path is resolved and the call is on the record.
+
+   [file] adds the third disclosure stage the format specifies: a body that
+   says "see references/REFERENCE.md" needs that file, and 43 of the 62
+   ecosystem skills on this machine say exactly that. Only that argument
+   resolves a path, and only under the skills directory the loader already
+   listed -- see [bundled_file_path] for what it refuses. The body still
+   comes from the parsed catalog. *)
 (* Declared in [config/tools/keeper_skill.toml] with every other tool rather
    than built here. Which skills are readable is workspace state and is
    appended below; the argument's shape and the sentence saying when to reach
@@ -957,13 +964,55 @@ let make_request_control_tool
 let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
 let skill_name_input_schema = skill_tool_schema.input_schema
 
-let skill_name_of_validated_input input =
+let skill_string_field input field =
   match input with
   | `Assoc fields ->
-    (match List.assoc_opt "name" fields with
-     | Some (`String name) -> Some name
+    (match List.assoc_opt field fields with
+     | Some (`String value) -> Some value
      | Some _ | None -> None)
   | _ -> None
+;;
+
+let skill_name_of_validated_input input = skill_string_field input "name"
+
+(* A bundled file is read whole, so it is the turn's context that pays for it.
+   The format recommends keeping reference files small for exactly this
+   reason; refusing an oversized one by name and size beats truncating it into
+   something that reads as complete but is not. *)
+let max_bundled_file_bytes = 262_144
+
+type bundled_file_rejection =
+  | Not_relative
+  | Parent_segment
+  | Empty_segment
+
+(* The path comes from the model, so it is checked before it is joined, not
+   after: no absolute path, no [..] segment, no empty segment. A symlink is
+   refused where the file is opened -- a skill installed from a public
+   registry is not trusted content, and a link pointing out of the directory
+   is the one way a relative path still escapes it. *)
+let bundled_file_path ~skills_dir ~skill ~file =
+  if not (Filename.is_relative file)
+  then Error Not_relative
+  else (
+    let segments = String.split_on_char '/' file in
+    if List.exists (String.equal Filename.parent_dir_name) segments
+    then Error Parent_segment
+    else if List.exists (String.equal "") segments
+    then Error Empty_segment
+    else
+      Ok
+        (List.fold_left
+           Filename.concat
+           (Filename.concat skills_dir skill)
+           segments))
+;;
+
+let bundled_file_rejection_to_string = function
+  | Not_relative -> "must be relative to the skill directory"
+  | Parent_segment ->
+    Printf.sprintf "must not contain a %S segment" Filename.parent_dir_name
+  | Empty_segment -> "must not contain an empty path segment"
 ;;
 
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
@@ -1003,9 +1052,58 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
                 instruction_skills
             with
             | Some (_, _, body) ->
-              Tool_result.make_ok ~tool_name:name ~start_time
-                ~data:(`Assoc [ "name", `String asked; "body", `String body ])
-                ()
+              (match skill_string_field input "file" with
+               | None ->
+                 Tool_result.make_ok ~tool_name:name ~start_time
+                   ~data:(`Assoc [ "name", `String asked; "body", `String body ])
+                   ()
+               | Some file ->
+                 let skills_dir =
+                   Common.skills_dir_from_base_path ~base_path:config.base_path
+                 in
+                 (match bundled_file_path ~skills_dir ~skill:asked ~file with
+                  | Error rejection ->
+                    Tool_result.make_err ~tool_name:name
+                      ~class_:Tool_result.Workflow_rejection ~start_time
+                      (Printf.sprintf
+                         "file %S %s"
+                         file
+                         (bundled_file_rejection_to_string rejection))
+                  | Ok path ->
+                    (match
+                       Fs_compat.load_owned_regular_file ~ownership_root:skills_dir path
+                     with
+                     | Error error ->
+                       Tool_result.runtime_err ~tool_name:name ~start_time
+                         (Fs_compat.owned_regular_file_read_error_to_string error)
+                     | Ok None ->
+                       Tool_result.make_err ~tool_name:name
+                         ~class_:Tool_result.Workflow_rejection ~start_time
+                         (Printf.sprintf
+                            "skill %S carries no file %S; the body names the files \
+                             it expects"
+                            asked
+                            file)
+                     | Ok (Some contents)
+                       when String.length contents > max_bundled_file_bytes ->
+                       Tool_result.make_err ~tool_name:name
+                         ~class_:Tool_result.Workflow_rejection ~start_time
+                         (Printf.sprintf
+                            "%s/%s is %d bytes, over the %d this tool serves; split \
+                             it or point at the part you need"
+                            asked
+                            file
+                            (String.length contents)
+                            max_bundled_file_bytes)
+                     | Ok (Some contents) ->
+                       Tool_result.make_ok ~tool_name:name ~start_time
+                         ~data:
+                           (`Assoc
+                              [ "name", `String asked
+                              ; "file", `String file
+                              ; "contents", `String contents
+                              ])
+                         ())))
             | (* A name the catalog does not carry is the caller's error and
                  says so with the names it does carry, rather than an empty
                  body the model would read as "this skill says nothing". *)

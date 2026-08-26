@@ -1420,6 +1420,14 @@ let add_routes ~sw ~clock router =
                                , `Int
                                    (Keeper_skill_usage.count ~rows
                                       (Keeper_skill_usage.Instruction_read skill.name)) )
+                               (* Reads of the skill's own files, counted apart
+                                  from body reads: a skill whose body is read
+                                  often and whose references never are is
+                                  carrying files nobody needs. *)
+                             ; ( "recent_reference_reads"
+                               , `Int
+                                   (Keeper_skill_usage.count ~rows
+                                      (Keeper_skill_usage.Reference_read skill.name)) )
                              ])
                        | Keeper_skill_catalog.Composition composition ->
                          let tool_name =

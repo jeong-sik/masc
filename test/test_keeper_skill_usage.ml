@@ -13,6 +13,13 @@ let rows =
   ; row ~input:(`Assoc [ "name", `String "work-intake" ]) "keeper_skill"
   ; row ~input:(`Assoc [ "name", `String "work-intake" ]) "keeper_skill"
   ; row ~input:(`Assoc [ "name", `String "turn-opening" ]) "keeper_skill"
+  ; row
+      ~input:
+        (`Assoc
+           [ "name", `String "work-intake"
+           ; "file", `String "references/REFERENCE.md"
+           ])
+      "keeper_skill"
   ; row ~input:(`Assoc [ "name", `Int 3 ]) "keeper_skill"
   ; row "Read"
   ; `Assoc [ "keeper", `String "no-tool-field" ]
@@ -41,6 +48,18 @@ let test_instruction_counts_keeper_skill_reads_by_name () =
     (Keeper_skill_usage.count ~rows (Keeper_skill_usage.Instruction_read "Read"))
 ;;
 
+(* The two answer different questions, so a file read must not land in the body
+   count: a skill read twice whose references were opened once is 2 and 1, not
+   3 and 1. *)
+let test_a_file_read_is_counted_apart_from_the_body () =
+  check_int "body reads stay at two" 2
+    (Keeper_skill_usage.count ~rows (Keeper_skill_usage.Instruction_read "work-intake"));
+  check_int "the file read is its own count" 1
+    (Keeper_skill_usage.count ~rows (Keeper_skill_usage.Reference_read "work-intake"));
+  check_int "a skill whose files were never opened" 0
+    (Keeper_skill_usage.count ~rows (Keeper_skill_usage.Reference_read "turn-opening"))
+;;
+
 let () =
   Alcotest.run
     "keeper-skill-usage"
@@ -49,6 +68,8 @@ let () =
             test_composition_counts_its_tool
         ; Alcotest.test_case "instruction counts keeper_skill reads by name" `Quick
             test_instruction_counts_keeper_skill_reads_by_name
+        ; Alcotest.test_case "a file read is counted apart from the body" `Quick
+            test_a_file_read_is_counted_apart_from_the_body
         ] )
     ]
 ;;

@@ -33,7 +33,16 @@ export interface SkillSnapshot {
 }
 
 export type SkillUsage =
-  | { name: string; directory: string; kind: 'instruction'; recent_use_count: number }
+  | {
+      name: string
+      directory: string
+      kind: 'instruction'
+      recent_use_count: number
+      // Reads of the skill's own files (references/, scripts/, assets/),
+      // counted apart from body reads. Optional on the wire for the same
+      // reason usage itself is: a server older than this field.
+      recent_reference_reads?: number
+    }
   | {
       name: string
       directory: string

@@ -1,5 +1,5 @@
 name = "keeper_skill"
-description = "Read one instruction skill whole, by name. Read a skill before you act on a task that names it."
+description = "Read one instruction skill whole, by name. Read a skill before you act on a task that names it. When the body points at one of the skill's own files, pass that relative path as `file` to read it."
 additional_properties = false
 
 [[params]]
@@ -8,3 +8,10 @@ type = "string"
 required = true
 min_length = 1
 description = "Name of the skill to read, exactly as the Available list spells it."
+
+[[params]]
+name = "file"
+type = "string"
+required = false
+min_length = 1
+description = "Optional path to one of the skill's own files, relative to the skill directory, exactly as the body spells it (for example references/REFERENCE.md). Omit it to read the body."

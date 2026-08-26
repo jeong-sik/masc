@@ -334,6 +334,7 @@
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
   test_keeper_skill_catalog
+  test_keeper_skill_bundled_file
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
@@ -396,6 +397,7 @@
   test_keeper_chat_delivery_identity
   test_keeper_librarian_retry
   test_keeper_skill_catalog
+  test_keeper_skill_bundled_file
   test_surface_ref
   test_inference_inflight_observation
   test_audit_projection
@@ -680,6 +682,7 @@
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
   test_keeper_skill_catalog
+  test_keeper_skill_bundled_file
   test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script

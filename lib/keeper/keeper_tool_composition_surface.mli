@@ -4,6 +4,23 @@
 
 (** Model-visible name of the model-defined plan tool. Registered even when no
     composition catalog exists. *)
+type bundled_file_rejection =
+  | Not_relative
+  | Parent_segment
+  | Empty_segment
+
+val bundled_file_path
+  :  skills_dir:string
+  -> skill:string
+  -> file:string
+  -> (string, bundled_file_rejection) result
+(** Where [keeper_skill]'s [file] argument resolves, or why it will not. The
+    path comes from the model, so this is the escape check and it is exposed
+    for the test that pins it: absolute paths, [..] segments, and empty
+    segments are refused before anything is joined. A symlink is refused later,
+    by {!Fs_compat.load_owned_regular_file}, which is also what makes the read
+    atomic. *)
+
 val plan_execute_tool_name : string
 
 val plan_execute_input_schema : Yojson.Safe.t

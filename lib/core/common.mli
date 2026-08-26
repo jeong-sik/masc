@@ -41,6 +41,12 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
+val skills_dir_from_base_path : base_path:string -> string
+(** [<base_path>/.masc/skills] — the Agent Skills root a keeper turn loads.
+    Two modules need it and they cannot see each other: the catalog loader
+    lists it, and the [keeper_skill] tool resolves a skill's bundled files
+    under it. Spelling it once here keeps those from drifting apart. *)
+
 val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)

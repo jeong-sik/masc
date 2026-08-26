@@ -8,7 +8,15 @@
 
 type use =
   | Composition_tool of string  (** the composition's tool name *)
-  | Instruction_read of string  (** the instruction skill's name *)
+  | Instruction_read of string
+      (** the instruction skill's name, body only -- a [keeper_skill] call
+          that also carries [file] read one of the skill's own files and is
+          counted as {!Reference_read} instead. Keeping them apart is what
+          makes the two numbers answer different questions: whether the skill
+          gets picked up at all, and whether its bundled files earn their
+          place. *)
+  | Reference_read of string
+      (** the instruction skill's name, one of its own files *)
 
 val count : rows:Yojson.Safe.t list -> use -> int
 (** [count ~rows use] counts the rows that record [use]. A row without a

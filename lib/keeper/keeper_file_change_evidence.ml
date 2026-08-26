@@ -98,3 +98,103 @@ let to_yojson = function
         [ "kind", `String "write";
           "new_range", optional_line_range_to_yojson new_range;
         ]
+
+let required_int fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some value ->
+    Error
+      (Printf.sprintf "%s must be an integer, got %s" name
+         (Json_util.kind_name value))
+  | None -> Error (name ^ " is absent")
+
+let line_range_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let* start_line = required_int fields "start_line" in
+    let* end_line = required_int fields "end_line" in
+    if start_line < 1
+    then Error "start_line must be at least 1"
+    else if end_line < start_line
+    then Error "end_line must not precede start_line"
+    else Ok { start_line; end_line }
+  | value ->
+    Error
+      (Printf.sprintf "line range must be an object, got %s"
+         (Json_util.kind_name value))
+
+let optional_line_range_of_yojson = function
+  | `Null -> Ok None
+  | value -> Result.map Option.some (line_range_of_yojson value)
+
+let occurrence_of_yojson = function
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let* old_range =
+      match List.assoc_opt "old_range" fields with
+      | Some value -> line_range_of_yojson value
+      | None -> Error "old_range is absent"
+    in
+    let* new_range =
+      match List.assoc_opt "new_range" fields with
+      | Some value -> optional_line_range_of_yojson value
+      | None -> Error "new_range is absent"
+    in
+    Ok { old_range; new_range }
+  | value ->
+    Error
+      (Printf.sprintf "edit occurrence must be an object, got %s"
+         (Json_util.kind_name value))
+
+let decode_occurrences values =
+  let rec loop decoded = function
+    | [] -> Ok (List.rev decoded)
+    | value :: rest ->
+      (match occurrence_of_yojson value with
+       | Ok occurrence -> loop (occurrence :: decoded) rest
+       | Error _ as error -> error)
+  in
+  loop [] values
+
+let of_yojson = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "edit") ->
+       let ( let* ) = Result.bind in
+       let* occurrence_count = required_int fields "occurrence_count" in
+       if occurrence_count < 1
+       then Error "edit occurrence_count must be positive"
+       else
+         (match List.assoc_opt "occurrences" fields with
+          | Some `Null ->
+            if occurrence_count <= max_recorded_edit_occurrences
+            then Error "edit ranges may be omitted only above the durable limit"
+            else Ok (Edited { occurrence_count; occurrences = None })
+          | Some (`List values) ->
+            let* occurrences = decode_occurrences values in
+            if List.length occurrences <> occurrence_count
+            then Error "edit occurrence_count does not match occurrences"
+            else if occurrence_count > max_recorded_edit_occurrences
+            then Error "edit occurrence list exceeds the durable limit"
+            else Ok (Edited { occurrence_count; occurrences = Some occurrences })
+          | Some value ->
+            Error
+              (Printf.sprintf "occurrences must be an array or null, got %s"
+                 (Json_util.kind_name value))
+          | None -> Error "occurrences is absent")
+     | Some (`String "write") ->
+       (match List.assoc_opt "new_range" fields with
+        | Some value ->
+          Result.map
+            (fun new_range -> Written { new_range })
+            (optional_line_range_of_yojson value)
+        | None -> Error "new_range is absent")
+     | Some (`String kind) -> Error (Printf.sprintf "unknown evidence kind %S" kind)
+     | Some value ->
+       Error
+         (Printf.sprintf "kind must be a string, got %s" (Json_util.kind_name value))
+     | None -> Error "kind is absent")
+  | value ->
+    Error
+      (Printf.sprintf "file change evidence must be an object, got %s"
+         (Json_util.kind_name value))

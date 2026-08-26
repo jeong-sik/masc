@@ -57,3 +57,7 @@ val written : string -> t
 
 val to_yojson : t -> Yojson.Safe.t
 (** Stable durable representation stored independently of opaque tool output. *)
+
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Decode the durable representation and re-check its 1-based ranges,
+    occurrence count, and bounded-list invariant. *)

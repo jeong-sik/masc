@@ -786,6 +786,43 @@ let empty_tool_args = function
   | _ -> false
 ;;
 
+(* Empty input on a schema that cannot accept it is almost never a deliberate
+   call: in the masc#29337 family the wire carried an empty object because the
+   arguments never arrived (2026-08-26, keeper edgar.a.poe on GLM-5-turbo:
+   Execute rejected on 5/5 attempts, masc_schedule_create 48 times), and the
+   model looped on the generic shape error without learning that its arguments
+   were lost, not merely wrong.  Say so explicitly, name the field(s) the call
+   needed, and reject under a dedicated telemetry reason so the fleet-wide rate
+   is measurable.  [one_of_branch_constraints] is [] unless every branch
+   requires a field, which is exactly when empty input cannot match any
+   branch; a schema with an all-optional branch keeps the generic path. *)
+let empty_args_rejection schema args =
+  if not (empty_tool_args args)
+  then None
+  else
+    match required_names schema with
+    | [] ->
+      (match one_of_branch_constraints schema with
+       | [] -> None
+       | branches ->
+         let options =
+           branches |> List.map branch_label |> String.concat " | "
+         in
+         Some
+           (Printf.sprintf
+              "received an empty input object: the arguments did not arrive with \
+               the call. The input must include exactly one of: %s. Re-emit the \
+               tool call with the input object populated."
+              options))
+    | required ->
+      Some
+        (Printf.sprintf
+           "received an empty input object: the arguments did not arrive with \
+            the call. Required field(s): %s. Re-emit the tool call with the \
+            input object populated."
+           (String.concat ", " required))
+;;
+
 let emit_validation_telemetry ~tool ~result ~reason =
   Otel_metric_store.inc_counter
     Otel_metric_store.metric_tool_input_validation
@@ -924,6 +961,13 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                 name
                 aliases)
        | [] ->
+      (match empty_args_rejection schema prepared_args with
+       | Some message ->
+         reject_validation
+           ~name
+           ~reason:"empty_args_required"
+           ~message:(Printf.sprintf "Tool '%s' %s" name message)
+       | None ->
       (match schema_shape_error schema prepared_args with
        | Some message ->
          reject_validation
@@ -990,7 +1034,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
            ; tool_name = name
            ; duration_ms = 0.0
            })
-      )))
+      ))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

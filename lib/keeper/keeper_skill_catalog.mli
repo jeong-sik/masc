@@ -112,6 +112,12 @@ val of_snapshot :
     that entry; neither failure rejects the snapshot or an unrelated Keeper
     turn. *)
 
+val all_entries_of_snapshot :
+  Skill_catalog_snapshot.t -> t * projection_diagnostic list
+(** Project every exact snapshot entry, including shadowed identities. This is
+    the operator-surface projection; executable turn catalogs continue to use
+    {!of_snapshot} and therefore contain effective entries only. *)
+
 val project_entry :
   Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> (skill, error) result
 (** Project one exact snapshot entry, including a shadowed entry. The returned

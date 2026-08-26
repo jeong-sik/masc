@@ -1384,7 +1384,7 @@ let add_routes ~sw ~clock router =
                ]
            | Ok (Ready snapshot) ->
              let catalog, diagnostics =
-               Keeper_skill_catalog.of_snapshot snapshot
+               Keeper_skill_catalog.all_entries_of_snapshot snapshot
              in
              let diagnostic_messages identity =
                diagnostics

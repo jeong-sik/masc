@@ -1,7 +1,7 @@
 ---
 rfc: "skills-as-tools"
 title: "Skill 과 Tool 은 한 카탈로그의 두 표면 — SKILL.md 가 지시·합성·비동기를 선언한다"
-status: Draft
+status: Active
 created: 2026-08-25
 updated: 2026-08-25
 author: claude

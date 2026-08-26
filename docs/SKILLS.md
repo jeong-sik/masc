@@ -6,7 +6,9 @@ masc 의 스킬은 파일 하나로 선언되는 능력이다. `<base_path>/.mas
 
 관련 RFC: `docs/rfc/RFC-skills-as-tools.md` (합성·도구 승격),
 `#30156` skills-declared-not-discovered (task 라우팅). 파서는
-`lib/skill/skill_definition.ml` (파일 한 장) + `lib/keeper/keeper_skill_catalog.ml` (카탈로그)다.
+`packages/agent_core/lib/skill_document.ml` (frontmatter 계약) + `lib/keeper/keeper_skill_catalog.ml` (fence·카탈로그)다.
+
+런타임에서 **어떻게 도는가**(순서도 + 코드 경로)는 `docs/SKILLS-FLOW.md`.
 
 ## 1. 파일 규칙
 
@@ -27,7 +29,7 @@ description: Walk the release checklist before shipping.
 - 그 밖의 frontmatter 키는 Agent Skills 표준대로 무시한다. `metadata.openclaw` 같은
   다른 런타임의 네임스페이스가 있어도 그대로 동작한다 — 공개된 스킬 파일을 수정 없이
   설치할 수 있다.
-- 본문은 통째로 보존된다. keeper 는 본문을 `Read` 로 읽는다.
+- 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다
 

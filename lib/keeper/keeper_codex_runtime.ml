@@ -140,24 +140,48 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
 (* Keep the first official-client attempt byte-identical. Only the provider's
    exact typed overflow opens a bounded retry, and that retry windows the
    provider-bound copy without rewriting the durable conversation. *)
+(* Same cut the Agent Core path makes, and the same reading it reports:
+   [project_with_drop] keeps how much of the history survived, [project]
+   throws it away. Discarding it wrote every official-client turn record with
+   no window and no input composition, which is what [/context] reads. *)
 let model_input_projection_for_capacity
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
+    ?on_model_input_window_observation
     source_projection
     messages =
+  let history_atom_count = List.length messages in
   let windowed =
     if capacity_bytes = unbounded_model_input_capacity_bytes
-    then Ok messages
+    then (
+      (* No cut is still a reading: everything offered was carried. *)
+      Option.iter
+        (fun observe ->
+           observe
+             { Runtime_model_input_tail_window.transmitted_atoms =
+                 history_atom_count
+             ; total_atoms = history_atom_count
+             })
+        on_model_input_window_observation;
+      Ok messages)
     else
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
-          Runtime_model_input_tail_window.project
+          Runtime_model_input_tail_window.project_with_drop
             ~measure_message_bytes:measure_model_input_message_bytes
             ~capacity_bytes
             ~reserved_bytes:0
             messages
         with
-        | Ok projected -> Ok projected
+        | Ok projection ->
+          Option.iter
+            (fun observe ->
+               observe
+                 (Runtime_model_input_tail_window.observe
+                    ~history_atom_count
+                    projection))
+            on_model_input_window_observation;
+          Ok projection.Runtime_model_input_tail_window.messages
         | Error error ->
           Error
             (Runtime_model_input_tail_window.budget_error_to_core_error error))
@@ -1093,6 +1117,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ?on_model_input_window_observation
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1159,6 +1184,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
                (model_input_projection_for_capacity
                   ~capacity_bytes
                   ~observed_next_shrink_capacity_bytes
+                  ?on_model_input_window_observation
                   model_input_projection))
           ~hooks
           ~context_injector

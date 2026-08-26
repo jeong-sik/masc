@@ -904,6 +904,14 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            (* Codex assembles the wire itself, so the shape masc can report
+               is the list it handed over. Same reading the Agent Core path
+               publishes; without it the turn record has no window. *)
+            ?on_model_input_window_observation:
+              (Option.map
+                 (fun observe observation ->
+                    observe ~measurement:Turn_record.Durable_shape observation)
+                 on_model_input_window_observation)
             ~hooks
             ~context_injector
             ~context
@@ -996,6 +1004,13 @@ let run_named
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            (* Antigravity's CLI assembles the wire, so the shape masc can
+               report is the list it handed over. *)
+            ?on_model_input_window_observation:
+              (Option.map
+                 (fun observe observation ->
+                    observe ~measurement:Turn_record.Durable_shape observation)
+                 on_model_input_window_observation)
             ~pre_tool_rejects
             ~base_path
             ~goal
@@ -1084,6 +1099,16 @@ let run_named
             ~tools
             ~initial_messages
             ~model_input_projection
+            (* [Durable_shape] because that is what was measured: the official
+               client assembles the wire itself, so masc can only report the
+               list it handed over. The Agent Core path reports [Wire_shape]
+               when its own serializer produced the bytes and falls back to
+               this same shape when it could not. *)
+            ?on_model_input_window_observation:
+              (Option.map
+                 (fun observe observation ->
+                    observe ~measurement:Turn_record.Durable_shape observation)
+                 on_model_input_window_observation)
             ~hooks
             ~context_injector
             ~context

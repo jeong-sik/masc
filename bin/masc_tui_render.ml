@@ -2372,8 +2372,12 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
      a strip_sgr'd copy of this row), so the row itself carries no marker.
      The caret's three gutter cells stay as spaces so columns do not shift
      between the selected row and its neighbours. *)
+  (* Names, not prose: the Keepers table is where two keepers sharing a prefix
+     have to be told apart, and the tail is what does it. See
+     [Message_layout.fit_middle]. *)
   let name =
-    fit_width (Terminal_text.single_line keeper.k_name) columns.kcol_name
+    Message_layout.fit_middle columns.kcol_name
+      (Terminal_text.single_line keeper.k_name)
   in
   let task =
     fit_width

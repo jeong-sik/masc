@@ -113,6 +113,18 @@ val dress_bare_links :
     link. *)
 
 val fit_width : string -> int -> string
+
+val fit_middle : int -> string -> string
+(** [fit_middle column label] keeps both ends of [label] in [column] cells,
+    dropping the middle and marking the cut with ["…"].
+
+    Use this for identifiers. {!fit_width} keeps the head and loses the tail
+    that tells two Keepers apart; {!fit_name} keeps the tail and loses the head
+    that says which family they share. The tail takes two thirds of the budget,
+    so a narrow column degrades into {!fit_name}'s shape rather than into
+    {!fit_width}'s.
+
+    Left-aligned and padded to [column]. *)
 (** Fit UTF-8 text to an exact terminal-cell budget without splitting a scalar
     or renderer-owned ANSI CSI sequence. Short text is padded to the budget. *)
 

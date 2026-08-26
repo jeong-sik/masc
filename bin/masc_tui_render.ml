@@ -8194,6 +8194,23 @@ let binary_age_text = function
    Some prompts feed a Keeper turn while others, such as Librarian, belong to
    separate exact lanes. The detail pane keeps that distinction visible before
    an operator chooses to hand the same text to [$EDITOR]. *)
+(* Which of the three the Config surface is showing, and that [p] moves
+   between them. This used to appear on Themes alone, as a list of names with
+   no mark on it: it said the key exists and not where pressing it lands, and
+   a reader on runtime.toml was told neither. *)
+let config_pane_strip (state : state) =
+  let name pane label =
+    if state.config_pane = pane then
+      Ansi.bold ^ "\xe2\x96\xb8" ^ label ^ Ansi.reset
+    else Ansi.dim ^ " " ^ label ^ Ansi.reset
+  in
+  String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
+    [ name Config_runtime "runtime.toml"
+    ; name Config_prompts "prompts"
+    ; name Config_themes "themes"
+    ]
+  ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+
 let render_prompts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -8208,9 +8225,10 @@ let render_prompts (state : state) =
   let selected = List.nth_opt prompt_rows cursor in
   box_top buf cols;
   box_line buf cols
-    (Printf.sprintf "%s  %s%d prompt(s)%s  %s"
+    (Printf.sprintf "%s  %s%d prompt(s)%s  %s  %s"
        (screen_title " MASC Prompts")
        Ansi.dim total Ansi.reset
+       (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
   let error_rows = if Option.is_some state.prompts_error then 1 else 0 in
@@ -8336,7 +8354,7 @@ let render_themes (state : state) =
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
        (screen_title " MASC Themes")
-       (Ansi.dim ^ "p: runtime.toml / prompts / themes" ^ Ansi.reset)
+       (config_pane_strip state)
        (connection_badge state));
   box_divider buf cols;
   let chosen = state.theme_choice in
@@ -8395,7 +8413,8 @@ let render_config (state : state) =
     | None -> Ansi.dim ^ "(not loaded)" ^ Ansi.reset
   in
   box_line buf cols
-    (Printf.sprintf "%s  %s  %s  %s" (screen_title " MASC Config") path_note
+    (Printf.sprintf "%s  %s  %s  %s  %s" (screen_title " MASC Config")
+       (config_pane_strip state) path_note
        (Printf.sprintf "%s%s%s" Ansi.dim
           (let now = Unix.localtime (Unix.gettimeofday ()) in
            Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min

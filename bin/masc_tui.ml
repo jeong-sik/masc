@@ -954,7 +954,7 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
-    ~(open_named_image : unit -> unit)
+    ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
     ~(load_tool_changes : unit -> unit)
     (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
@@ -1122,6 +1122,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          this byte and passes the next one through raw, so the composer would
          see the letter after Ctrl-V and never Ctrl-V itself. *)
       paste_image ();
+      true
+    end else if c = Some 24 then begin
+      (* Ctrl-X: the breakdown behind the figure in the header. The header
+         names this key beside the number, so the place that shows how full
+         the context is is also the place that opens what filled it. *)
+      inspect_context ();
       true
     end else if c = Some 15 then begin
       (* Ctrl-O: look at the picture this conversation last named. The path is
@@ -5640,6 +5646,11 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
                    ~open_named_image:(fun () -> open_named_image state)
+                   ~inspect_context:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         open_context_inspector state ~mailbox ~keeper_name
+                     | None -> ())
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
             | Some keeper_name ->
@@ -8449,6 +8460,12 @@ let main () =
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
                    ~open_named_image:(fun () -> open_named_image state)
+                   ~inspect_context:(fun () ->
+                     match state.msg_target_keeper_name with
+                     | Some keeper_name ->
+                         open_context_inspector state ~mailbox:async_messages
+                           ~keeper_name
+                     | None -> ())
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->

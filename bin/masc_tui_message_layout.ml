@@ -753,6 +753,11 @@ let short_clock timestamp =
    the body still reads as a block. [Origin_bare] drops the clock and keeps
    the speaker, never the other way round -- losing track of who is talking
    costs more than losing track of when. *)
+(* The quietest glyph in the speaker vocabulary, used where a row continues the
+   speaker above it. [Thinking] already draws it, and reusing it keeps the
+   column's alphabet closed rather than inventing a mark for continuation. *)
+let continued_mark = speaker_mark Thinking
+
 (* A tool's output and a recalled memory arrive as text the Keeper did not
    write, so they are quoted rather than said. Everything else the pane draws
    is either the Keeper talking or the operator talking, and that is prose.
@@ -796,8 +801,18 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            the same second has nothing new to say, and [fit_width] measures the
            cells a label actually occupies where [String.make] would count its
            bytes. *)
-        (* A blank continuation has no label to hold back. *)
-        Some (fit_width "" (display_width filled), 0)
+        (* The clock stays. A continuation says the same speaker is still
+           talking, not that time stopped: the gap between two things one
+           Keeper said is exactly what a reader checks here, and blanking the
+           whole margin took it away along with the name.
+
+           The name is what goes, since repeating it says nothing, and the mark
+           drops to the quietest glyph so a row that continues reads as lower
+           than the row that started. What is left is the speaker column doing
+           the telling -- a name appears only where the speaker changes. *)
+        (* No label to hold back on a row that draws no name. *)
+        let continued = clock ^ continued_mark ^ " " in
+        Some (fit_width continued (display_width filled), 0)
       else Some (filled, label_at)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =

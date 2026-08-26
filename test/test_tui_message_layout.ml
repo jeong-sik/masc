@@ -1120,9 +1120,18 @@ let test_a_second_message_from_one_speaker_stays_blank () =
   | [ first; second ] ->
       check bool "the first names the speaker" true
         (String.trim first.Layout.gutter <> "");
-      check string "the second repeats nothing"
-        (Layout.fit_width "" (Layout.display_width first.Layout.gutter))
-        second.Layout.gutter
+      (* A continuation drops the name and keeps the clock. The name is what
+         repeats and says nothing; the gap between two things one speaker said
+         is what a reader checks in this column, and blanking the whole margin
+         took that away too. The mark drops to the quietest glyph so the row
+         still reads as lower than the one that started. *)
+      check int "the second keeps the column's width" 
+        (Layout.display_width first.Layout.gutter)
+        (Layout.display_width second.Layout.gutter);
+      check bool "the second keeps its clock" true
+        (String.length (String.trim second.Layout.gutter) > 0);
+      check bool "the second does not repeat the name" true
+        (not (String.equal first.Layout.gutter second.Layout.gutter))
   | _ -> failwith "expected two rows"
 
 (* The margin is paid for out of the body, not out of the frame. A row that

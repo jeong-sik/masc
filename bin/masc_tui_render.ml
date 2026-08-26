@@ -3687,7 +3687,18 @@ let render_keeper_message (state : state) =
             let role_label =
               if not grouped then base
               else if starts_turn then "TURN · " ^ base
-              else "↳ " ^ base
+              else
+                (* A continuation carries the same name as the row above it,
+                   and a name repeated says nothing. Marking it inside the
+                   label put "who is still talking" at the same weight as
+                   "what kind of row this is"; the gutter now blanks the name
+                   and quiets the glyph instead, so a name in this column
+                   always means the speaker changed.
+
+                   Kept equal to [base] rather than emptied: [continues_previous]
+                   compares labels to decide what a continuation keeps, and two
+                   consecutive rows have to match for it to fire. *)
+                base
             in
             let next_previous =
               if grouped then Some turn_id else previous_turn
@@ -3803,7 +3814,9 @@ let render_keeper_message (state : state) =
                timestamp = "live";
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
-                   ~style ("↳ " ^ role_label);
+                   (* Same reasoning as the history rows above: the column
+                      says who, not a mark inside the label. *)
+                   ~style role_label;
                role_label_mark_cells =
                  Message_layout.role_label_mark_cells
                    ~column:role_label_column ~style ();

@@ -250,6 +250,87 @@ let test_persist_round_trips_wake_prompt () =
     None
     (read_back ())
 
+let test_tools_patch_round_trips_and_rejects_invalid_values () =
+  with_persisting_context @@ fun ctx ->
+  let name = "tools-persist-fixture" in
+  let base_meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse json = Keeper_turn_up_args.parse ctx json in
+  let parse_or_fail json =
+    match parse json with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed meta =
+    match
+      Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta
+    with
+    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
+    | Error error -> failf "persist: %s" error
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Ok defaults -> defaults
+    | Error error ->
+      failf "read back: %s"
+        (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  let parsed =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "instructions", `String "fixture instructions"
+         ; ( "tools"
+           , `Assoc
+               [ "groups", `List [ `String "fs"; `String "core" ]
+               ; "native", `String "full"
+               ] )
+         ])
+  in
+  let meta = { base_meta with tool_groups = parsed.tool_groups_opt } in
+  persist parsed meta;
+  let defaults = read_back () in
+  check (option (list string)) "groups round-trip"
+    (Some [ "fs"; "core" ]) defaults.tool_groups;
+  check (option string) "native full round-trip" (Some "full")
+    (Option.map Runtime_native_tools.to_string defaults.native_tool_posture);
+  let clear =
+    parse_or_fail
+      (`Assoc
+         [ "name", `String name
+         ; "tools", `Assoc [ "groups", `Null; "native", `Null ]
+         ])
+  in
+  persist clear meta;
+  let cleared = read_back () in
+  check (option (list string)) "groups null clears" None cleared.tool_groups;
+  check (option string) "native null clears" None
+    (Option.map Runtime_native_tools.to_string cleared.native_tool_posture);
+  List.iter
+    (fun (label, tools) ->
+       match parse (`Assoc [ "name", `String name; "tools", tools ]) with
+       | Error _ -> ()
+       | Ok _ -> failf "%s was accepted" label)
+    [ "invalid native", `Assoc [ "native", `String "yolo" ]
+    ; "unknown group", `Assoc [ "groups", `List [ `String "filesystem" ] ]
+    ; "unknown tools field", `Assoc [ "posture", `String "read" ]
+    ]
+;;
+
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
    does not write. The argument was parsed and honoured on update but ignored by the
@@ -338,6 +419,12 @@ let () =
             "persist round-trips the keeper TOML and null removes the key"
             `Quick
             test_persist_round_trips_wake_prompt
+        ] )
+    ; ( "tools"
+      , [ test_case
+            "groups/native round-trip, clear, and invalid rejection"
+            `Quick
+            test_tools_patch_round_trips_and_rejects_invalid_values
         ] )
     ; ( "keeper_name"
       , [ test_case

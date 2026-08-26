@@ -4,8 +4,21 @@
 module Composer = Masc_tui_composer
 
 let make ?(target = Composer.Ready "analyst") ?(focus = Composer.Unfocused)
-    ?(draft = "") () : Composer.t =
-  { target; focus; draft }
+    ?(draft = "") ?(staged_images = 0) () : Composer.t =
+  { target; focus; draft; staged_images }
+
+(* An attachment the prompt does not name is an attachment the operator forgets
+   before pressing enter. The count is the only place it shows. *)
+let test_prompt_names_staged_images () =
+  Alcotest.(check string)
+    "no marker with nothing staged"
+    "to analyst"
+    (Composer.prompt (make ()));
+  Alcotest.(check string)
+    "marker with an image staged"
+    "to analyst [1 image]"
+    (Composer.prompt (make ~staged_images:1 ()))
+;;
 
 let outcome_testable =
   Alcotest.testable
@@ -134,6 +147,8 @@ let () =
             test_focused_composer_takes_the_printable_keys
         ; Alcotest.test_case "focused it releases and sends" `Quick
             test_focused_composer_releases_and_sends
+        ; Alcotest.test_case "prompt names staged images" `Quick
+            test_prompt_names_staged_images
         ; Alcotest.test_case "input needs a recipient" `Quick
             test_input_is_refused_without_a_recipient
         ] )

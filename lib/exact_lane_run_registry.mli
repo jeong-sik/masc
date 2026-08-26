@@ -126,7 +126,8 @@ val get : t -> run_id:string -> run option
 val outcome_label : outcome -> string
 val status_label : run_status -> string
 (** Identity and outcome without either exact payload. A lane run embeds the
-    whole rendered prompt, so a list that carried payloads shipped hundreds of
+    captured template and actual input material needed to reconstruct its
+    rendered prompt, so a list that carried payloads shipped hundreds of
     megabytes to draw a table of timestamps. *)
 val run_summary_to_yojson : run -> Yojson.Safe.t
 

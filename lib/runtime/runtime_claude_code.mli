@@ -130,6 +130,8 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 val dynamic_tool_bytes : dynamic_tool list -> int

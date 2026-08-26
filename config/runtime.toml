@@ -9,6 +9,36 @@
 # sustained turns prove the local box can absorb more load. AGENT_CORE handles Gemma 4
 # thinking through the chat-template control token path, not Ollama think:true.
 
+[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+
+# Skill sources are searched in this declared order. The runtime has no hidden
+# source roots; existing workspaces must add the sources they want explicitly.
+[[skills.sources]]
+id = "project-masc"
+anchor = "base-path"
+path = ".masc/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "project-agents"
+anchor = "base-path"
+path = ".agents/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "user-masc"
+anchor = "user-home"
+path = ".masc/skills"
+access = "read-write"
+
+[[skills.sources]]
+id = "user-agents"
+anchor = "user-home"
+path = ".agents/skills"
+access = "read-write"
+
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
@@ -124,10 +154,11 @@ path = "/api/tags"
 # api-name = "claude-sonnet-4-5"
 # max-context = 200000
 #
-# Claude Code carries images over the stream-json content-block array, so a
-# model that reads them says so here. Without this key the turn's images are
-# read by the analyze_image sub-call instead, which costs a provider round-trip
-# and leaves later questions about the same image unanswerable.
+# Claude Code carries images over the stream-json content-block array, and Codex
+# over its turn/start input list, so a model that reads them says so here. Both
+# halves are required: without this key the turn's images are read by the
+# analyze_image sub-call instead, which costs a provider round-trip and leaves
+# later questions about the same image unanswerable.
 # [models.claude-code-sonnet.capabilities]
 # supports-image-input = true
 #
@@ -1031,7 +1062,12 @@ supports-reasoning-budget = false
 # Reasoning is inherent/default-on and no explicit thinking-control field is
 # accepted on this wire. The native provider keeps the catalog's Ollama control.
 thinking-control-format = "none"
-reasoning-streaming-format = "delta:reasoning_content"
+# Measured 2026-08-25 against ollama.com/v1/chat/completions with stream=true:
+# the delta keys are content / reasoning / role. The field is "reasoning", not
+# "reasoning_content", so the previous value read a key the server never sends
+# and this runtime's thinking arrived empty. Nothing failed loudly because
+# delta.content is unaffected.
+reasoning-streaming-format = "delta:reasoning"
 supports-image-input = true
 supports-multimodal-inputs = true
 

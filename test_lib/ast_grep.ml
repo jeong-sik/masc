@@ -526,6 +526,27 @@ let count_field_clears_to_none ~module_path ~binding_name ~field_name =
   !count
 ;;
 
+(* Every [x.field <- _] in a module, wherever it sits. A field whose writes
+   are meant to funnel through one setter has a count of zero everywhere else,
+   and that is a claim a reader can check rather than trust. *)
+let count_field_writes_in_module ~module_path ~field =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self expression ->
+          (match expression.Parsetree.pexp_desc with
+           | Parsetree.Pexp_setfield (_, { txt; _ }, _)
+             when String.equal (longident_leaf txt) field -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self expression)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
 let rec strip_function_parameters (expression : Parsetree.expression) =
   match expression.pexp_desc with
   | Pexp_function (_, _, Pfunction_body body) -> strip_function_parameters body

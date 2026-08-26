@@ -212,7 +212,7 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ~prompt () =
                (Runtime_claude_code.error_to_string error))))
   | Runtime_execution.Codex_app_server execution ->
     let config = codex_config ~runtime_id ~system_prompt ~override_s:timeout_s execution in
-    (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt with
+    (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt ~images:[] with
      | Ok (result : Runtime_codex_app_server.turn_result) -> Ok result.text
      | Error error ->
        Error

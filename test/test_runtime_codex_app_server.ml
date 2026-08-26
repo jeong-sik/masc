@@ -153,7 +153,8 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
-    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event path =
+    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
+    ?(images = []) path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -188,7 +189,8 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ?on_turn_started
       ?on_stream_event
       config
-      ~prompt:"Return the fixture marker")
+      ~prompt:"Return the fixture marker"
+      ~images)
 ;;
 
 let test_dispatch_validation_is_process_free () =
@@ -201,6 +203,7 @@ let test_dispatch_validation_is_process_free () =
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
         config
         ~prompt:"fixture"
+        ~images:[]
     with
     | Error (Runtime_codex_app_server.Invalid_config "cli_path must not be empty") -> ()
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -209,6 +212,14 @@ let test_dispatch_validation_is_process_free () =
 
 let tool_call_request =
   {|{"id":"tool-request-1","method":"item/tool/call","params":{"threadId":"thread-1","turnId":"turn-1","callId":"call-1","tool":"masc_probe","namespace":null,"arguments":{"marker":"from-codex"}}}|}
+;;
+
+let native_command_started =
+  {|{"method":"item/started","params":{"threadId":"thread-1","turnId":"turn-1","startedAtMs":1,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"inProgress"}}}|}
+;;
+
+let native_command_completed =
+  {|{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":2,"item":{"type":"commandExecution","id":"native-command-1","command":"pwd","commandActions":[],"cwd":"/tmp","status":"completed","aggregatedOutput":"/tmp"}}}|}
 ;;
 
 let test_dynamic_tool_callback () =
@@ -270,6 +281,45 @@ let test_dynamic_tool_callback () =
               {|{"marker":"from-codex"}|}
               (Yojson.Safe.to_string arguments)
           | _ -> fail "Codex live stream events were not projected in wire order"))
+;;
+
+let test_native_command_events_stay_distinct_from_dynamic_tools () =
+  let stream_events = ref [] in
+  with_fixture
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; native_command_started
+    ; native_command_completed
+    ; agent_message_delta
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~on_stream_event:(fun event -> stream_events := event :: !stream_events)
+           path
+       with
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok result ->
+         check int "no MASC dynamic calls" 0 result.dynamic_tool_calls;
+         let open Runtime_codex_app_server in
+         match List.rev !stream_events with
+         | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
+           ; Native_tool_started
+               { call_id = Some "native-command-1"
+               ; tool_name = Some "commandExecution"
+               }
+           ; Native_tool_finished
+               { call_id = Some "native-command-1"
+               ; tool_name = Some "commandExecution"
+               }
+           ; Text_delta "MASC_"
+           ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
+           ] -> ()
+         | _ -> fail "Codex native command activity was projected as a MASC tool")
 ;;
 
 let test_dynamic_tool_abort_stops_the_provider_loop () =
@@ -356,6 +406,84 @@ let test_history_is_injected_before_turn () =
        match run_fixture ~history path with
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok result -> check string "text" "MASC_SUBSCRIPTION_OK" result.text)
+;;
+
+(* The image has to land in the turn/start input list as an inline data URL --
+   the app-server README rejects remote HTTP(S) urls, so the encoding is part of
+   the contract, not a detail. Reading the captured request means a projection
+   that drops the image fails here instead of passing on a fixture reply that
+   never depended on it. *)
+let test_image_reaches_the_turn_input () =
+  let capture_path = Filename.temp_file "masc-codex-image-" ".jsonl" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove capture_path with _ -> ())
+    (fun () ->
+      with_fixture
+        ~capture_path
+        [ init_result
+        ; account_chatgpt
+        ; thread_result
+        ; turn_result
+        ; item_completed
+        ; turn_completed
+        ]
+        (fun path ->
+          let image =
+            { Runtime_codex_app_server.media_type = "image/png"
+            ; base64_data = "aGVsbG8="
+            }
+          in
+          match run_fixture ~images:[ image ] path with
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+          | Ok _ ->
+            let input =
+              Masc_test_deps.read_file capture_path
+              |> String.split_on_char '\n'
+              |> List.filter (fun line -> String.trim line <> "")
+              |> List.map Yojson.Safe.from_string
+              |> List.find (fun json ->
+                   Yojson.Safe.Util.member "method" json = `String "turn/start")
+              |> Yojson.Safe.Util.member "params"
+              |> Yojson.Safe.Util.member "input"
+              |> Yojson.Safe.Util.to_list
+            in
+            (match
+               List.find_opt
+                 (fun item -> Yojson.Safe.Util.member "type" item = `String "image")
+                 input
+             with
+             | None -> fail "turn/start input carried no image item"
+             | Some item ->
+               check
+                 string
+                 "inline data url"
+                 "data:image/png;base64,aGVsbG8="
+                 (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "url" item)))))
+;;
+
+(* A media type the item cannot carry is rejected before the process boundary,
+   so the caller learns which image is wrong instead of reading a turn rejection
+   attributed to the thread. *)
+let test_unsupported_image_media_type_is_rejected () =
+  Eio_main.run (fun env ->
+    let config =
+      { (Runtime_codex_app_server.default_config ()) with cli_path = "/bin/true" }
+    in
+    let image =
+      { Runtime_codex_app_server.media_type = "image/tiff"; base64_data = "AAAA" }
+    in
+    match
+      Runtime_codex_app_server.validate_turn
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        config
+        ~prompt:"x"
+        ~images:[ image ]
+    with
+    | Ok () -> fail "an unsupported media type must not validate"
+    | Error (Runtime_codex_app_server.Invalid_config detail) ->
+      check bool "names the media type" true
+        (String_util.contains_substring detail "image/tiff")
+    | Error other -> fail (Runtime_codex_app_server.error_to_string other))
 ;;
 
 let test_chatgpt_subscription_turn () =
@@ -905,7 +1033,8 @@ let test_no_deadline_keeps_admission_bounded () =
             Eio.Time.sleep clock 0.2;
             Ok ())
           config
-          ~prompt:"fixture")
+          ~prompt:"fixture"
+          ~images:[])
     in
     match outcome with
     | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = false }) ->
@@ -935,7 +1064,8 @@ let test_no_deadline_begins_after_turn_dispatch () =
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
              config
-             ~prompt:"fixture")
+             ~prompt:"fixture"
+             ~images:[])
        in
        match outcome with
        | Ok turn -> check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text
@@ -1033,6 +1163,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ~on_thread_ready:(fun ~thread_id:_ -> raise Eio.Time.Timeout)
              config
              ~prompt:"fixture"
+             ~images:[]
            |> ignore)))
 ;;
 
@@ -2068,6 +2199,73 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 finished.final_text))
 ;;
 
+let test_keeper_codex_raw_trace_separates_native_tool_observation () =
+  let base_path = temp_workspace "masc-codex-native-raw-trace-" in
+  let raw_trace_path = Filename.concat base_path "official-codex-native-raw.jsonl" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ init_result
+         ; account_chatgpt
+         ; thread_result
+         ; turn_result
+         ; native_command_started
+         ; native_command_completed
+         ; item_completed
+         ; turn_completed
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~raw_trace_path
+                ~cli_path
+                ~model:"gpt-fixture"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok _ ->
+              let records =
+                match Agent_core.Raw_trace.read_all ~path:raw_trace_path () with
+                | Ok records -> records
+                | Error error -> fail (Agent_core.Error.to_string error)
+              in
+              let records_of_type record_type =
+                List.filter
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.record_type = record_type)
+                  records
+              in
+              check int
+                "one native start"
+                1
+                (List.length (records_of_type Native_tool_started));
+              check int
+                "one native finish"
+                1
+                (List.length (records_of_type Native_tool_finished));
+              check int
+                "no MASC execution start"
+                0
+                (List.length (records_of_type Tool_execution_started));
+              check int
+                "no MASC execution finish"
+                0
+                (List.length (records_of_type Tool_execution_finished));
+              let native_start = List.hd (records_of_type Native_tool_started) in
+              check
+                (option string)
+                "native call id"
+                (Some "native-command-1")
+                native_start.tool_use_id;
+              check
+                (option string)
+                "native tool name"
+                (Some "commandExecution")
+                native_start.tool_name))
+;;
+
 let test_keeper_protocol_failure_enters_recovery () =
   let base_path = temp_workspace "masc-codex-runtime-recovery-" in
   Fun.protect
@@ -2532,7 +2730,9 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
     |> Yojson.Safe.Util.member "params"
     |> Yojson.Safe.Util.member "input"
     |> Yojson.Safe.Util.to_list
-    |> List.hd
+    (* Not [List.hd]: images precede the text in the input list, so a head that
+       happens to be the text today would read an image url on an image turn. *)
+    |> List.find (fun item -> Yojson.Safe.Util.member "type" item = `String "text")
     |> Yojson.Safe.Util.member "text"
     |> Yojson.Safe.Util.to_string
   in
@@ -2596,7 +2796,42 @@ let test_keeper_dynamic_context_stays_on_codex_instruction_wire () =
          "start and resume receive identical developer instructions"
          start_instructions
          resume_instructions;
-       let context_envelope = Yojson.Safe.from_string start_instructions in
+       (* This fixture has two non-empty instruction sections, in this order:
+          the Native_read posture note and the typed dynamic-context envelope.
+          Read both from their production owners. Searching for a JSON-looking
+          paragraph would let the posture note disappear or move unnoticed. *)
+       let posture_note =
+         match
+           Keeper_codex_runtime.For_testing.native_posture_note
+             Runtime_native_tools.Native_read
+         with
+         | [] -> fail "Native_read posture note disappeared"
+         | sections -> String.concat "\n\n" sections
+       in
+       let instruction_prefix = posture_note ^ "\n\n" in
+       let prefix_bytes = String.length instruction_prefix in
+       let context_envelope_text =
+         if String.length start_instructions < prefix_bytes then
+           fail "developer instructions are shorter than the posture prefix"
+         else (
+           check string
+             "Native_read posture note is the developer-instruction prefix"
+             instruction_prefix
+             (String.sub start_instructions 0 prefix_bytes);
+           String.sub start_instructions prefix_bytes
+             (String.length start_instructions - prefix_bytes))
+       in
+       let expected_context_envelope =
+         { (Agent_core.Types.system_msg dynamic_context) with
+           metadata = Agent_core.Types.Extra_system_context_provenance.metadata
+         }
+         |> Keeper_official_client_host.encode_history_message
+       in
+       check string
+         "dynamic context uses the canonical instruction envelope"
+         expected_context_envelope
+         context_envelope_text;
+       let context_envelope = Yojson.Safe.from_string context_envelope_text in
        let open Yojson.Safe.Util in
        check string
          "dynamic context envelope schema"
@@ -2963,7 +3198,8 @@ let test_live_chatgpt_subscription () =
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           config
-          ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools.")
+          ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3003,7 +3239,8 @@ let test_live_dynamic_tool_subscription () =
           ~dynamic_tools:[ tool ]
           config
           ~prompt:
-            "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK.")
+            "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3033,7 +3270,8 @@ let test_live_history_injection_subscription () =
             ; { role = Assistant; text = "I will retain that marker." }
             ]
           config
-          ~prompt:"Reply with exactly the continuity marker from the prior history.")
+          ~prompt:"Reply with exactly the continuity marker from the prior history."
+          ~images:[])
     in
     match result with
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3249,7 +3487,13 @@ let test_official_client_host_text_projection_is_hard_cut () =
 
 let () =
   run "runtime codex app-server"
-    [ ( "subscription boundary"
+    [ ( "images"
+      , [ test_case "image reaches the turn input" `Quick
+            test_image_reaches_the_turn_input
+        ; test_case "unsupported media type is rejected" `Quick
+            test_unsupported_image_media_type_is_rejected
+        ] )
+    ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case
             "probe stops before thread"
@@ -3356,6 +3600,10 @@ let () =
             test_dispatch_validation_is_process_free
         ; test_case "dynamic tool callback" `Quick test_dynamic_tool_callback
         ; test_case
+            "native command stays distinct from dynamic tools"
+            `Quick
+            test_native_command_events_stay_distinct_from_dynamic_tools
+        ; test_case
             "dynamic tool abort stops provider loop"
             `Quick
             test_dynamic_tool_abort_stops_the_provider_loop
@@ -3408,6 +3656,10 @@ let () =
             "Keeper Codex RAW contains tool and response"
             `Quick
             test_keeper_codex_raw_trace_contains_actual_tool_and_response
+        ; test_case
+            "Keeper Codex RAW separates native tools"
+            `Quick
+            test_keeper_codex_raw_trace_separates_native_tool_observation
         ; test_case
             "Keeper protocol failure enters recovery"
             `Quick

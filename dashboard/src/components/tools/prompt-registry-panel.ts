@@ -42,6 +42,55 @@ export interface PromptDestination {
   summary: string
 }
 
+const LIBRARIAN_INPUT_CONTRACT: ReadonlyArray<{ name: string; meaning: string }> = [
+  { name: 'keeper_instructions', meaning: '이 Keeper의 현재 instructions 원문' },
+  { name: 'current_memory', meaning: 'commit 직전의 complete current-memory snapshot' },
+  { name: 'conversation_history', meaning: 'cadence 시점에 선택된 bounded recent message window' },
+  { name: 'counterpart_observations', meaning: 'host provenance가 붙은 최근 상대 관측' },
+  { name: 'max_recall_fact_bytes', meaning: '새 current memory 전체가 지켜야 하는 byte 상한' },
+]
+
+function LibrarianRuntimeContract({
+  prompt,
+  onOpen,
+}: {
+  prompt: DashboardPromptItem | null
+  onOpen: (prompt: DashboardPromptItem) => void
+}) {
+  return html`
+    <div class="v2-lab-card mb-4 rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-8)] p-3" data-librarian-runtime-contract>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Librarian runtime · read-only contract</div>
+          <div class="mt-1 text-sm font-semibold text-[var(--color-fg-primary)]">Memory OS commit을 결정하는 별도 exact-output 호출</div>
+          <div class="mt-1 text-xs leading-relaxed text-[var(--color-fg-muted)]">
+            keeper turn recipe에 합쳐지는 프롬프트가 아닙니다. <code>librarian_exact</code> lane이 아래 effective template을 <code>user</code> message 한 개로 보냅니다.
+          </div>
+        </div>
+        ${prompt
+          ? html`<${ActionButton} variant="ghost" size="sm" onClick=${() => onOpen(prompt)}>effective 원문 열기<//>`
+          : html`<${StatusChip} tone="warn">librarian prompt 누락<//>`}
+      </div>
+      ${prompt ? html`
+        <div class="mt-3 grid gap-2 md:grid-cols-3">
+          <div><span class="text-3xs text-[var(--color-fg-disabled)]">KEY</span><div class="font-mono text-xs">${prompt.key}</div></div>
+          <div><span class="text-3xs text-[var(--color-fg-disabled)]">EFFECTIVE SOURCE</span><div class="font-mono text-xs">${prompt.source}${prompt.has_override ? ' · override active' : ''}</div></div>
+          <div class="min-w-0"><span class="text-3xs text-[var(--color-fg-disabled)]">FILE</span><div class="truncate font-mono text-xs" title=${prompt.file_path ?? ''}>${prompt.file_path ?? 'missing'}</div></div>
+        </div>
+      ` : null}
+      <div class="mt-3 grid gap-2 md:grid-cols-2">
+        ${LIBRARIAN_INPUT_CONTRACT.map(input => html`
+          <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2" key=${input.name}>
+            <code class="text-xs">${input.name}</code>
+            <div class="mt-0.5 text-2xs leading-relaxed text-[var(--color-fg-muted)]">${input.meaning}</div>
+          </div>
+        `)}
+      </div>
+      <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">실행별 실제 값은 Internal Agents → Librarian run → 실제 입력에서 확인합니다.</div>
+    </div>
+  `
+}
+
 const SOURCE_CHIP_ORDER: PromptSourceFilter[] = ['all', 'file', 'override', 'missing']
 
 const SOURCE_LABELS: Record<PromptSourceFilter, string> = {
@@ -235,6 +284,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const selectedPrompt = selectedPromptFromKey ?? visiblePrompts[0] ?? null
   const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
+  const librarianPrompt = prompts.find(prompt => prompt.category === 'librarian') ?? null
   const draftDirty = selectedPrompt
     ? draftPromptKey === selectedPrompt.key
       ? draft !== normalizeDraft(selectedPrompt)
@@ -361,6 +411,16 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
         <div>기준 원문은 resolved config root의 <code>prompts/*.md</code>입니다. 경로는 설정 경로 상세 패널에서 확인할 수 있습니다.</div>
         <div>이 화면에서는 현재 effective 값 확인과 runtime override 적용/해제만 합니다.</div>
       </div>
+
+      <${LibrarianRuntimeContract}
+        prompt=${librarianPrompt}
+        onOpen=${(prompt: DashboardPromptItem) => {
+          setPreset('all')
+          sourceFilter.value = 'all'
+          searchQuery.value = ''
+          selectPrompt(prompt)
+        }}
+      />
 
       <div class="mb-4 grid gap-2 md:grid-cols-4" data-prompt-registry-summary>
         <div class="v2-lab-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">

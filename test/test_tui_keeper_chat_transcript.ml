@@ -39,6 +39,7 @@ let call_to_string (call : Transcript.tool_activity) =
     (Option.value ~default:"-" call.duration)
 
 let tool_call = testable (Fmt.of_to_string call_to_string) ( = )
+let tool_outcome = testable (Fmt.of_to_string outcome_to_string) ( = )
 
 let read_file_call =
   [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
@@ -370,13 +371,15 @@ let test_progress_row_counts_the_tool_calls () =
           matching the whole string here would tie tool-call counting to
           the age format. *)
        check bool "a turn with no calls does not mention them" false
-         (contains ~needle:"tool call" text)
+         (contains ~needle:"tool" text)
    | rows -> failf "expected a progress row, got %d rows" (List.length rows));
   feed t read_file_call;
   match rows t with
   | (Transcript.Progress, text) :: _ ->
       check bool "once it calls tools the row counts them" true
-        (contains ~needle:"1 tool call" text)
+        (contains ~needle:"1 tool" text);
+      check bool "and says which tool kind is active" true
+        (contains ~needle:"read_file 1" text)
   | rows -> failf "expected a progress row, got %d rows" (List.length rows)
 
 let test_interrupt_row_does_not_claim_the_turn_stopped () =
@@ -435,6 +438,51 @@ let test_tool_rows_mark_how_far_each_call_got () =
         (contains ~needle:"a.ml" open_call)
   | rows -> failf "expected three rows, got %d" (List.length rows)
 
+(* A folded block hides its calls behind one row, and the chat body is
+   sanitized before it is drawn, so the marker inside that row cannot carry a
+   colour. The row's own style is the only channel left, and it needs the
+   outcome as a value. Same precedence as the summary glyph, so the two cannot
+   disagree about one block. *)
+let activity ~name ~outcome =
+  Transcript.make_tool_activity ~call_id:(Some name) ~tool_name:name ~args:""
+    ~outcome ~duration:None
+
+let summary_outcome mode activities =
+  (Transcript.project_tool_block mode (Transcript.tool_block ~omitted_steps:0 activities))
+    .Transcript.summary_outcome
+
+let test_a_fold_reports_the_outcome_its_marker_stands_for () =
+  let outcome = tool_outcome in
+  check (option outcome) "a fold holding a failure reports it"
+    (Some Transcript.Failed)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"edit_file" ~outcome:Transcript.Failed
+       ]);
+  check (option outcome) "one call still out outranks the ones that returned"
+    (Some Transcript.Awaiting_result)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"glob" ~outcome:Transcript.Awaiting_result
+       ]);
+  check (option outcome) "a fold where every call returned reports that"
+    (Some Transcript.Returned)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"glob" ~outcome:Transcript.Returned
+       ]);
+  (* Expanded, every call keeps a row and a marker of its own, so there is no
+     one outcome the entry stands for and nothing to colour it by. *)
+  check (option outcome) "an expanded block reports no summary outcome" None
+    (summary_outcome Transcript.Full
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"edit_file" ~outcome:Transcript.Failed
+       ]);
+  (* A single call is not folded in either mode: it already has its own row. *)
+  check (option outcome) "a lone call is never a fold" None
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"edit_file" ~outcome:Transcript.Failed ])
+
 let test_compact_and_full_keep_the_same_typed_facts () =
   let activities =
     [ Transcript.make_tool_activity ~call_id:(Some "c1")
@@ -475,11 +523,30 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   check bool "the compact row does not hide the failure" true
     (contains ~needle:"1 failed" summary);
   check bool "the compact row reads as one activity summary" true
-    (String.starts_with ~prefix:"✗ Ran 3 tools" summary);
+    (String.starts_with ~prefix:"✗ Tools 3" summary);
   check bool "the compact row carries the exact folded count" true
     (contains ~needle:"3 details folded" summary);
   check string "compact does not count the visible omission as hidden"
     (List.nth full.rows 3) (List.nth compact.rows 1)
+
+let test_compact_summary_counts_registered_public_names () =
+  let activity name =
+    Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
+      ~outcome:Transcript.Returned ~duration:None
+  in
+  let projection =
+    Transcript.tool_block
+      [ activity "Read"; activity "Read"; activity "Edit"; activity "Execute" ]
+    |> Transcript.project_tool_block Transcript.Compact
+  in
+  match projection.rows with
+  | [ summary ] ->
+      List.iter
+        (fun expected ->
+          check bool ("summary contains " ^ expected) true
+            (contains ~needle:expected summary))
+        [ "Tools 4"; "Read 2"; "Edit 1"; "Execute 1" ]
+  | rows -> failf "expected one compact row, got %d" (List.length rows)
 
 let full_tool_rows block =
   (Transcript.project_tool_block Transcript.Full block).Transcript.rows
@@ -605,6 +672,10 @@ let () =
             test_fragment_for_an_unopened_call_is_dropped
         ; test_case "compact and full keep the same typed facts" `Quick
             test_compact_and_full_keep_the_same_typed_facts
+        ; test_case "compact summary counts registered public names" `Quick
+            test_compact_summary_counts_registered_public_names
+        ; test_case "a fold reports the outcome its marker stands for" `Quick
+            test_a_fold_reports_the_outcome_its_marker_stands_for
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick

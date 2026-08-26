@@ -241,6 +241,7 @@ type keeper_tool_approval = {
   kta_tool : string;
   kta_args : string;
   kta_question : string;
+  kta_because : string option;
   kta_asked_at : float;
   kta_timeout_sec : float;
 }
@@ -292,6 +293,18 @@ type context_unavailable_reason =
   | Context_turn_record_read_failed
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
+  | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_usage_scope_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_tokens_exceed_window of
+      { raw_input_tokens : int
+      ; context_window : int
+      }
 
 type context_observation =
   | Context_observed of {
@@ -809,12 +822,42 @@ let parse_log_entry line =
   let* json = json in
   decode_log_entry json
 
-let context_unavailable_reason_of_string = function
+let optional_int_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) -> Ok (Some value)
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "field '%s' must be an integer or null (received %s)"
+         key
+         (Json_util.kind_name other))
+;;
+
+let context_unavailable_reason_of_json json raw =
+  let* raw_input_tokens = optional_int_field json "raw_input_tokens" in
+  let* context_window = optional_int_field json "context_window" in
+  let usage_scope =
+    match Json_util.assoc_member_opt "usage_scope" json with
+    | Some (`String value) -> Some value
+    | Some _ | None -> None
+  in
+  match raw with
   | "context_measurement_missing" -> Ok Context_measurement_missing
   | "turn_record_undecodable" -> Ok Context_turn_record_undecodable
   | "turn_record_read_failed" -> Ok Context_turn_record_read_failed
   | "turn_record_without_usage" -> Ok Context_turn_record_without_usage
   | "turn_record_trace_mismatch" -> Ok Context_turn_record_trace_mismatch
+  | "conversation_cumulative_usage"
+    when usage_scope = Some "conversation_cumulative" ->
+    Ok (Context_conversation_cumulative_usage { raw_input_tokens; context_window })
+  | "usage_scope_unavailable" when usage_scope = Some "unavailable" ->
+    Ok (Context_usage_scope_unavailable { raw_input_tokens; context_window })
+  | "context_tokens_exceed_window" ->
+    (match usage_scope, raw_input_tokens, context_window with
+     | Some "per_request", Some raw_input_tokens, Some context_window ->
+       Ok (Context_tokens_exceed_window { raw_input_tokens; context_window })
+     | _ -> Error "context token overflow diagnostics are incomplete")
   | raw -> Error (Printf.sprintf "unknown context unavailable reason %S" raw)
 
 let context_unavailable_reason_to_string = function
@@ -823,6 +866,21 @@ let context_unavailable_reason_to_string = function
   | Context_turn_record_read_failed -> "turn record read failed"
   | Context_turn_record_without_usage -> "turn record has no provider usage"
   | Context_turn_record_trace_mismatch -> "turn record belongs to a prior trace"
+  | Context_conversation_cumulative_usage { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "cumulative usage %s tokens (window %s); occupancy not observed"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_usage_scope_unavailable { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "usage scope unavailable (input %s, window %s)"
+      (Option.fold ~none:"unknown" ~some:string_of_int raw_input_tokens)
+      (Option.fold ~none:"unknown" ~some:string_of_int context_window)
+  | Context_tokens_exceed_window { raw_input_tokens; context_window } ->
+    Printf.sprintf
+      "per-request usage exceeds window: %d / %d tokens"
+      raw_input_tokens
+      context_window
 
 let require_object_member json key =
   let* value = required_member json key in
@@ -839,7 +897,7 @@ let decode_context_unavailable_payload json =
     Error (Printf.sprintf "unknown context unavailable kind %S" kind)
   else
     let* reason = require_string_field json "reason" in
-    context_unavailable_reason_of_string reason
+    context_unavailable_reason_of_json json reason
 
 let validate_context_ratio ~tokens ~maximum ~ratio =
   match maximum, ratio with
@@ -1366,10 +1424,37 @@ type inventory_freshness =
   | Warming
   | Settled
 
+type effective_tool = {
+  et_name : string;
+  et_origin : string;
+  et_group : string option;
+  et_skill_source : string option;
+}
+
+type effective_tool_surface =
+  | Effective_surface_available of {
+      ets_keeper_name : string;
+      ets_runtime_id : string;
+      ets_official_client_kind : string;
+      ets_native_posture : string option;
+      ets_tool_groups : string list;
+      ets_instruction_skills : string list;
+      ets_composition_skills : string list;
+      ets_tools : effective_tool list;
+      ets_tool_surface_sha256 : string option;
+    }
+  | Effective_surface_unavailable of {
+      ets_keeper_name : string;
+      ets_reason : string;
+      ets_detail : string;
+    }
+  | Effective_surface_warming of { ets_keeper_name : string }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
+  ts_effective : effective_tool_surface option;
 }
 
 type connector = {
@@ -1505,6 +1590,8 @@ type repository = {
      (RFC-0378: clients carry this value, they do not re-derive it from the
      url). [None] when the remote cannot canonicalize. *)
   rp_codebase : string option;
+  (* The remote as registered, for building links to it. *)
+  rp_url : string;
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -1573,6 +1660,63 @@ let decode_tool_entry json =
   in
   Ok { tl_name; tl_description; tl_surfaces; tl_direct_call }
 
+let decode_effective_tool json =
+  let* et_name = required_string_field json "name" in
+  let* origin = required_object_field json "origin" in
+  let* et_origin = required_string_field origin "kind" in
+  let* et_group = optional_string_field origin "group" in
+  let* et_skill_source = optional_string_field origin "skill_source" in
+  Ok { et_name; et_origin; et_group; et_skill_source }
+
+let decode_effective_tool_surface json =
+  let* status = required_string_field json "status" in
+  let* ets_keeper_name = required_string_field json "keeper_name" in
+  match status with
+  | "warming" -> Ok (Effective_surface_warming { ets_keeper_name })
+  | "unavailable" ->
+      let* ets_reason = required_string_field json "reason" in
+      let* ets_detail = required_string_field json "detail" in
+      Ok
+        (Effective_surface_unavailable
+           { ets_keeper_name; ets_reason; ets_detail })
+  | "available" ->
+      let* ets_runtime_id = required_string_field json "runtime_id" in
+      let* ets_official_client_kind =
+        required_string_field json "official_client_kind"
+      in
+      let* ets_native_posture = optional_string_field json "native_posture" in
+      let* ets_tool_groups = decode_string_name_list json "tool_groups" in
+      let* ets_instruction_skills =
+        decode_string_name_list json "instruction_skills"
+      in
+      let* ets_composition_skills =
+        decode_string_name_list json "composition_skills"
+      in
+      let* tools_json = required_list_field json "tools" in
+      let* ets_tools =
+        decode_list "effective_keeper_surface.tools" decode_effective_tool
+          tools_json
+      in
+      let* ets_tool_surface_sha256 =
+        optional_string_field json "tool_surface_sha256"
+      in
+      Ok
+        (Effective_surface_available
+           { ets_keeper_name;
+             ets_runtime_id;
+             ets_official_client_kind;
+             ets_native_posture;
+             ets_tool_groups;
+             ets_instruction_skills;
+             ets_composition_skills;
+             ets_tools;
+             ets_tool_surface_sha256;
+           })
+  | unknown ->
+      Error
+        (Printf.sprintf
+           "effective_keeper_surface.status has unknown value %S" unknown)
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
      inventory; this reads the inventory and leaves the rest to the dashboard,
@@ -1590,7 +1734,13 @@ let decode_tool_snapshot json =
   let ts_freshness =
     match warming with Some true -> Warming | Some false | None -> Settled
   in
-  Ok { ts_tools; ts_count; ts_freshness }
+  let* effective_json = optional_object_field json "effective_keeper_surface" in
+  let* ts_effective =
+    match effective_json with
+    | None -> Ok None
+    | Some value -> Result.map Option.some (decode_effective_tool_surface value)
+  in
+  Ok { ts_tools; ts_count; ts_freshness; ts_effective }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in
@@ -2201,6 +2351,7 @@ let decode_repository json =
   let* rp_id = required_string_field json "id" in
   let* rp_name = required_string_field json "name" in
   let* rp_codebase = optional_string_field json "codebase" in
+  let* rp_url = required_string_field json "url" in
   let* rp_local_path = required_string_field json "local_path" in
   let* rp_default_branch = required_string_field json "default_branch" in
   let* rp_status = required_string_field json "status" in
@@ -2212,8 +2363,8 @@ let decode_repository json =
     | bad -> field_type_error "auto_sync" "a bool or null" bad
   in
   Ok
-    { rp_id; rp_name; rp_codebase; rp_local_path; rp_default_branch
-    ; rp_status; rp_keepers; rp_auto_sync
+    { rp_id; rp_name; rp_codebase; rp_url; rp_local_path
+    ; rp_default_branch; rp_status; rp_keepers; rp_auto_sync
     }
 
 let decode_repository_snapshot json =
@@ -2737,6 +2888,7 @@ let decode_keeper_tool_approval json =
   let* kta_tool = required_string_field json "tool" in
   let* kta_args = required_string_field json "args" in
   let* kta_question = required_string_field json "question" in
+  let* kta_because = optional_string_field json "because" in
   let* kta_asked_at = require_float_field json "asked_at" in
   let* kta_timeout_sec = require_float_field json "timeout_sec" in
   Ok
@@ -2745,6 +2897,7 @@ let decode_keeper_tool_approval json =
     ; kta_tool
     ; kta_args
     ; kta_question
+    ; kta_because
     ; kta_asked_at
     ; kta_timeout_sec
     }
@@ -2876,6 +3029,8 @@ type prompt_row = {
   pr_has_override : bool;
   pr_file_exists : bool;
   pr_file_path : string;
+  pr_source : string;
+  pr_template_variables : string list;
 }
 
 type prompts_snapshot = { ps_rows : prompt_row list }
@@ -2894,6 +3049,18 @@ let decode_prompt_row json =
     | `Bool value -> value
     | _ -> false
   in
+  let string_list_or_empty field =
+    match member field json with
+    | `Null -> Ok []
+    | `List _ -> require_string_list json field
+    | value ->
+        Error
+          (Printf.sprintf
+             "field '%s' must be a string list (received %s)"
+             field
+             (Yojson.Safe.to_string value))
+  in
+  let* pr_template_variables = string_list_or_empty "template_variables" in
   Ok
     { pr_key
     ; pr_category = string_or "category"
@@ -2902,6 +3069,8 @@ let decode_prompt_row json =
     ; pr_has_override = bool_or "has_override"
     ; pr_file_exists = bool_or "file_exists"
     ; pr_file_path = string_or "file_path"
+    ; pr_source = string_or "source"
+    ; pr_template_variables
     }
 ;;
 
@@ -2916,6 +3085,61 @@ let decode_prompts json =
       (Ok []) rows_json
   in
   Ok { ps_rows = List.rev reversed }
+;;
+
+type librarian_run_page =
+  { lrp_run_id : string option
+  ; lrp_next : (float * string) option
+  }
+
+let decode_librarian_run_page json =
+  let* runs = required_list_field json "runs" in
+  let* has_more = required_bool_field json "has_more" in
+  let rec find_librarian = function
+    | [] -> Ok None
+    | run :: rest ->
+        let* lane = required_string_field run "lane" in
+        if String.equal lane "librarian_exact" then
+          let* run_id = required_string_field run "run_id" in
+          Ok (Some run_id)
+        else find_librarian rest
+  in
+  let* run_id = find_librarian runs in
+  let* lrp_next =
+    if not has_more then Ok None
+    else
+      match List.rev runs with
+      | [] -> Error "exact lane page says has_more but has no cursor row"
+      | last :: _ ->
+          let* started_at = require_float_field last "started_at" in
+          let* last_run_id = required_string_field last "run_id" in
+          Ok (Some (started_at, last_run_id))
+  in
+  Ok { lrp_run_id = run_id; lrp_next }
+;;
+
+let decode_latest_librarian_run_id json =
+  let* page = decode_librarian_run_page json in
+  page.lrp_run_id
+  |> Option.to_result ~none:"no Librarian exact run on this page"
+;;
+
+let decode_librarian_actual_input ~run_id json =
+  let* run = required_object_field json "run" in
+  let* actor = required_string_field run "actor" in
+  let* status = required_string_field run "status" in
+  let* input = required_object_field run "input" in
+  let* payload = required_object_field input "payload" in
+  match member "actual_input" payload with
+  | `Assoc _ as actual_input ->
+      Ok
+        ((Printf.sprintf
+            "LATEST LIBRARIAN RUN  %s \xc2\xb7 %s \xc2\xb7 %s"
+            run_id actor status)
+         :: (Yojson.Safe.pretty_to_string actual_input
+             |> String.split_on_char '\n'))
+  | `Null -> Error "latest Librarian run has no actual_input"
+  | _ -> Error "latest Librarian actual_input is not an object"
 ;;
 
 let decode_fleet_safety json =
@@ -3348,19 +3572,31 @@ let decode_git_diff json =
 
 (* ── git log: who touched this file, most recent first ─────────────── *)
 
+(* Both the git-log route and the ide-regions route stamp their rows with
+   [timestamp_ms]; the history view sorts the two kinds into one timeline
+   by this number. *)
+let timestamp_ms_field json =
+  match member "timestamp_ms" json with
+  | `Intlit s -> (
+      match Float.of_string_opt s with
+      | Some f -> Ok f
+      | None -> Error "timestamp_ms is not a number")
+  | `Int n -> Ok (float_of_int n)
+  | bad -> field_type_error "timestamp_ms" "an integer" bad
+
 type git_log_row = {
   gl_hash : string;
-  gl_date : string;  (** --date=short, as the route formats it *)
+  gl_at_ms : float;
   gl_author : string;
   gl_subject : string;
 }
 
 let decode_git_log_row json =
   let* gl_hash = required_string_field json "hash" in
-  let* gl_date = required_string_field json "date" in
+  let* gl_at_ms = timestamp_ms_field json in
   let* gl_author = required_string_field json "author" in
   let* gl_subject = required_string_field json "subject" in
-  Ok { gl_hash; gl_date; gl_author; gl_subject }
+  Ok { gl_hash; gl_at_ms; gl_author; gl_subject }
 
 let decode_git_log json =
   let* ok = required_bool_field json "ok" in
@@ -3416,15 +3652,7 @@ let decode_ide_region json =
   let* ir_line_start = required_int_field json "line_start" in
   let* ir_line_end = required_int_field json "line_end" in
   let* ir_keeper = required_string_field json "keeper_id" in
-  let* ir_at_ms =
-    match member "timestamp_ms" json with
-    | `Intlit s -> (
-        match Float.of_string_opt s with
-        | Some f -> Ok f
-        | None -> Error "timestamp_ms is not a number")
-    | `Int n -> Ok (float_of_int n)
-    | bad -> field_type_error "timestamp_ms" "an integer" bad
-  in
+  let* ir_at_ms = timestamp_ms_field json in
   let* ir_source =
     match member "source" json with
     | `Assoc _ as source -> (

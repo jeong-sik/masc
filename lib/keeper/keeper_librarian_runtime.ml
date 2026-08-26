@@ -221,6 +221,21 @@ let render_librarian_prompt input =
     (Keeper_librarian.prompt_variables input)
 ;;
 
+type librarian_prompt_material =
+  { resolution : Prompt_registry.prompt_resolution
+  ; rendered : string
+  }
+
+let resolve_librarian_prompt input =
+  let variables = Keeper_librarian.prompt_variables input in
+  ( variables
+  , Result.map
+      (fun (resolution, rendered) -> { resolution; rendered })
+      (Prompt_registry.resolve_and_render_prompt_template
+         Prompt_names.librarian
+         variables) )
+;;
+
 let prompt_and_input_for_librarian (inp : Keeper_librarian.input) =
   let input = prompt_input_for_librarian inp in
   let open Result.Syntax in
@@ -441,16 +456,42 @@ let current_selection_registry_summary = function
       ]
 ;;
 
-let exact_input_payload (inp : Keeper_librarian.input) =
+let prompt_material_payload = function
+  | Ok ({ resolution; rendered } : librarian_prompt_material) ->
+    `Assoc
+      [ "key", `String Prompt_names.librarian
+      ; "source", `String resolution.source
+      ; ( "file_path"
+        , match resolution.file_path with
+          | None -> `Null
+          | Some path -> `String path )
+      ; "effective_template", `String resolution.effective
+      ; "rendered_bytes", `Int (String.length rendered)
+      ; ( "rendered_sha256"
+        , `String Digestif.SHA256.(digest_string rendered |> to_hex) )
+      ]
+  | Error detail ->
+    `Assoc
+      [ "key", `String Prompt_names.librarian
+      ; "render_error", `String detail
+      ]
+;;
+
+let exact_input_payload
+      (inp : Keeper_librarian.input)
+      ~(prompt_variables : (string * string) list)
+      (prompt_material : (librarian_prompt_material, string) result)
+  =
   `Assoc
     [ "turn_ref", Ids.Turn_ref.to_yojson inp.turn_ref
     ; "keeper_instructions", `String inp.keeper_instructions
     ; "max_recall_fact_bytes", `Int inp.max_recall_fact_bytes
+    ; "prompt", prompt_material_payload prompt_material
     ; ( "rendered_prompt_variables"
       , `Assoc
           (List.map
              (fun (name, value) -> name, `String value)
-             (Keeper_librarian.prompt_variables inp)) )
+             prompt_variables) )
     ]
 ;;
 
@@ -502,6 +543,9 @@ let run_best_effort
           | Some current -> List.length current.facts
         in
         let prompt_input = prompt_input_for_librarian inp in
+        let prompt_variables, prompt_material =
+          resolve_librarian_prompt prompt_input
+        in
         Exact_lane_run_registry.register_running
           registry
           ~run_id
@@ -511,7 +555,8 @@ let run_best_effort
           ~input:
             (Exact_lane_run_registry.Exact_input
                (`Assoc
-                  [ "actual_input", exact_input_payload prompt_input
+                  [ "actual_input", exact_input_payload prompt_input ~prompt_variables
+                      prompt_material
                   ; "message_count", `Int (List.length prompt_input.messages)
                   ; "current_fact_count", `Int current_fact_count
                   ; ( "max_recall_fact_bytes"
@@ -541,7 +586,8 @@ let run_best_effort
            let result =
              let open Result.Syntax in
              let* prompt =
-               render_librarian_prompt prompt_input
+               prompt_material
+               |> Result.map (fun material -> material.rendered)
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
              let* (selection, exact_output), selected_slot =

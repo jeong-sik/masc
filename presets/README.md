@@ -21,12 +21,13 @@ root — they are install-time seed sources, not runtime config.
 ```
 presets/<preset>/
   manifest.txt                 # SSOT file list (seed-team.sh + install.sh read it)
-  keepers/<name>.toml          # operational config, autoboot_enabled = true
-  keepers/<name>/AGENT.md      # complete Keeper instructions
+  keepers/<name>.toml          # operational config and keeper.instructions
 ```
 
 Each keeper TOML is self-contained: every field the keeper gets is written in its
-own file. There is no shared defaults file and no cross-file inheritance.
+own file, prompt included. There is no shared defaults file and no cross-file
+inheritance. `keeper.instructions` must be non-empty or the Keeper is rejected at
+load (`lib/keeper/keeper_types_profile.ml`).
 
 `manifest.txt` is the single source of truth for which files a preset ships.
 `seed-team.sh` copies them from the local repo/image; `install.sh --team` fetches

@@ -62,18 +62,144 @@ let measured ~surface =
   (List.length schemas, bytes)
 ;;
 
-(* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools] declaration
-   (surface = All) must keep the exact same tool surface it had before this
-   feature. Pinned on 2026-08-23 from the pre-feature surface; re-pinned on
-   2026-08-24 to 68,881 bytes because main's other tool refactors grew the All
-   surface by 567 bytes (count unchanged at 82). *)
-let all_surface_golden_count = 86
-let all_surface_golden_bytes = 72_787
+(* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools]
+   declaration (surface = All) must keep the tool surface it had before that
+   feature, so a later refactor cannot quietly take a tool away from the
+   Keepers that never opted in. Pinned on 2026-08-23 from the pre-feature
+   surface.
+
+   The names, not a byte total. The invariant above is about which tools a
+   Keeper can still call, and a byte count answers that only by accident. It
+   was re-pinned four times in two days (#30679): #30539 added
+   [keeper_code_query] and #30588 re-measured it, which is the surface really
+   moving and what this golden is for; #30571 and #30658 only edited a
+   description, and the surface they were asked to re-pin was the same one.
+
+   All four landed red on main rather than on the PR that caused them. Someone
+   editing config/tools/*.toml has no reason to run this file, and no type
+   changes to make [dune build @check] say so -- the failure arrives after the
+   merge, on everyone. Naming the tools cuts that to the two occasions where a
+   Keeper's callable set actually changed, and those are worth stopping for.
+
+   Sizing is not lost by the change: [ceiling_bytes] above bounds the same
+   surface, and the slack check next to it fails when that ceiling drifts far
+   enough to stop measuring. Those two are shaped as a ratchet on purpose --
+   the doc at the top of this file argues that a golden which fails on its own
+   improvement takes main red for the duration, which is exactly what this one
+   did.
+
+   A tool added or removed still fails here, and now says which one. *)
+let all_surface_golden_names =
+  [ "Edit"
+  ; "Execute"
+  ; "Grep"
+  ; "Read"
+  ; "WebFetch"
+  ; "WebSearch"
+  ; "Write"
+  ; "analyze_image"
+  ; "keeper_artifact_read"
+  ; "keeper_broadcast"
+  ; "keeper_code_query"
+  ; "keeper_context_status"
+  ; "keeper_ide_annotate"
+  ; "keeper_library_read"
+  ; "keeper_library_search"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_person_note_set"
+  ; "keeper_spawn"
+  ; "keeper_spawn_read"
+  ; "keeper_spawn_stop"
+  ; "keeper_spawn_wait"
+  ; "keeper_surface_post"
+  ; "keeper_surface_read"
+  ; "keeper_task_claim"
+  ; "keeper_task_create"
+  ; "keeper_task_done"
+  ; "keeper_tasks_audit"
+  ; "keeper_tasks_list"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ; "keeper_voice_agent"
+  ; "keeper_voice_listen"
+  ; "keeper_voice_session_end"
+  ; "keeper_voice_session_start"
+  ; "keeper_voice_sessions"
+  ; "keeper_voice_speak"
+  ; "masc_agent_fitness"
+  ; "masc_board_cleanup"
+  ; "masc_board_comment"
+  ; "masc_board_comment_vote"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_delete"
+  ; "masc_board_hearths"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_post_get"
+  ; "masc_board_post_update"
+  ; "masc_board_profile"
+  ; "masc_board_reaction"
+  ; "masc_board_search"
+  ; "masc_board_stats"
+  ; "masc_board_sub_board_create"
+  ; "masc_board_sub_board_delete"
+  ; "masc_board_sub_board_get"
+  ; "masc_board_sub_board_list"
+  ; "masc_board_sub_board_update"
+  ; "masc_board_vote"
+  ; "masc_config"
+  ; "masc_dashboard"
+  ; "masc_deliver"
+  ; "masc_fusion"
+  ; "masc_fusion_status"
+  ; "masc_gc"
+  ; "masc_get_metrics"
+  ; "masc_goal_list"
+  ; "masc_goal_transition"
+  ; "masc_goal_upsert"
+  ; "masc_keeper_delegate"
+  ; "masc_keeper_delegate_cancel"
+  ; "masc_keeper_delegate_status"
+  ; "masc_library_add"
+  ; "masc_library_list"
+  ; "masc_note_add"
+  ; "masc_plan_clear_task"
+  ; "masc_plan_get_task"
+  ; "masc_run_get"
+  ; "masc_run_init"
+  ; "masc_run_list"
+  ; "masc_run_plan"
+  ; "masc_schedule_cancel"
+  ; "masc_schedule_create"
+  ; "masc_schedule_get"
+  ; "masc_schedule_list"
+  ; "masc_task_history"
+  ; "masc_task_set_goal"
+  ]
+;;
 
 let test_all_surface_is_unchanged () =
-  let count, bytes = measured ~surface:All in
-  check int "All surface tool count unchanged" all_surface_golden_count count;
-  check int "All surface bytes unchanged" all_surface_golden_bytes bytes
+  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas ~surface:All in
+  let names = List.sort String.compare (List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas) in
+  let missing = List.filter (fun n -> not (List.mem n names)) all_surface_golden_names in
+  let added = List.filter (fun n -> not (List.mem n all_surface_golden_names)) names in
+  (match missing, added with
+   | [], [] -> ()
+   | _ ->
+     failf
+       "the default (All) tool surface changed.\n\
+        gone: %s\n\
+        new:  %s\n\
+        A Keeper with no [keeper.tools] declaration gets this list. Update \
+        all_surface_golden_names in this file with the PR that moves it and say \
+        what the move bought."
+       (if missing = [] then "(none)" else String.concat ", " missing)
+       (if added = [] then "(none)" else String.concat ", " added));
+  check int "All surface tool count unchanged"
+    (List.length all_surface_golden_names)
+    (List.length names)
 ;;
 
 (* RFC-0389: a Declared surface must be strictly smaller than All — that is the

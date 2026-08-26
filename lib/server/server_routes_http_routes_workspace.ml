@@ -779,20 +779,26 @@ end
 
 (* --- Log parsing --- *)
 
-(* One [git log --pretty=format:%h%x09%ad%x09%an%x09%s] row. Only the first
+(* One [git log --pretty=format:%h%x09%at%x09%an%x09%s] row. Only the first
    three tabs split -- a subject may carry tabs of its own. A row that does
-   not hold four fields is dropped rather than filled in. *)
+   not hold four fields, or whose second field is not an epoch-seconds
+   integer, is dropped rather than filled in. The epoch rides out as
+   [timestamp_ms] so the TUI can weave commits and recorded keeper edits
+   into one timeline without parsing a date string. *)
 let git_log_row_of_line line =
   match String.split_on_char '\t' line with
-  | hash :: date :: author :: subject_first :: subject_rest ->
-      let subject = String.concat "\t" (subject_first :: subject_rest) in
-      Some
-        (`Assoc
-           [ ("hash", `String hash)
-           ; ("date", `String date)
-           ; ("author", `String author)
-           ; ("subject", `String subject)
-           ])
+  | hash :: at :: author :: subject_first :: subject_rest -> (
+      match int_of_string_opt at with
+      | None -> None
+      | Some seconds ->
+          let subject = String.concat "\t" (subject_first :: subject_rest) in
+          Some
+            (`Assoc
+               [ ("hash", `String hash)
+               ; ("timestamp_ms", `Int (seconds * 1000))
+               ; ("author", `String author)
+               ; ("subject", `String subject)
+               ]))
   | _ -> None
 
 module For_testing_log = struct
@@ -1273,8 +1279,7 @@ let add_routes router =
                                 git_run_lines ~cwd:repo_root
                                   [ "log"
                                   ; Printf.sprintf "-n%d" limit
-                                  ; "--pretty=format:%h%x09%ad%x09%an%x09%s"
-                                  ; "--date=short"
+                                  ; "--pretty=format:%h%x09%at%x09%an%x09%s"
                                   ; "--"
                                   ; rel
                                   ]

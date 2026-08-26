@@ -305,11 +305,15 @@ let repo_query_suffix = function
 let fetch_workspace_entries ?keeper ?repo ~(host : string) ~(port : int)
     ~(path : string) () :
     (Masc.Tui_decode.workspace_tree_node list, string) result =
+  (* One route for every level, the root included: [tree?depth=0] walks the
+     whole workspace and returned nested files under a 200-node cap, so the
+     root pane showed ".ci/hardening-baseline.json" beside ".ci". The server
+     answers a bare list, so ask for its maximum and let the pane read a full
+     page as truncated. *)
   let route =
-    (if String.equal path "" then "/api/v1/workspace/tree?depth=0&limit=200"
-     else
-       Printf.sprintf "/api/v1/workspace/children?path=%s&limit=500"
-         (percent_encode_query_value path))
+    Printf.sprintf "/api/v1/workspace/children?path=%s&limit=%d"
+      (percent_encode_query_value path)
+      Server_routes_http_routes_workspace.max_tree_node_limit
     ^ keeper_query_suffix keeper
     ^ repo_query_suffix repo
   in
@@ -611,6 +615,53 @@ let fetch_keeper_memory_journal ~(host : string) ~(port : int)
        | json -> Masc_tui_keeper_chat_history.memory_rows_of_json json
        | exception Yojson.Json_error detail ->
            Error ("memory journal was not JSON: " ^ detail))
+
+(** Fetch one actual Librarian input only when the operator asks from Config.
+    The run listing deliberately omits payloads; first resolve the newest
+    Librarian run id, then open that one Admin-only detail record. This keeps a
+    normal prompt-list refresh from downloading the potentially large bounded
+    conversation input of every retained run. *)
+let fetch_latest_librarian_input ~(host : string) ~(port : int) :
+    (string list, string) result =
+  let get_json ~label path =
+    match http_get ~host ~port ~path with
+    | Error detail -> Error (label ^ " request failed: " ^ detail)
+    | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+        Error (Printf.sprintf "%s returned %d: %s" label status body)
+    | Ok (_, body) ->
+        (match Yojson.Safe.from_string body with
+         | json -> Ok json
+         | exception Yojson.Json_error detail ->
+             Error (label ^ " was not JSON: " ^ detail))
+  in
+  let open Result.Syntax in
+  let rec find_run_id ~pages_left before =
+    if pages_left <= 0 then
+      Error "Librarian run search exceeded 50 exact-lane pages"
+    else
+      let path =
+        match before with
+        | None -> "/api/v1/dashboard/exact-lane-runs?limit=200"
+        | Some (started_at, run_id) ->
+            Printf.sprintf
+              "/api/v1/dashboard/exact-lane-runs?limit=200&before_started_at=%.17g&before_run_id=%s"
+              started_at
+              (percent_encode_path_segment run_id)
+      in
+      let* listing = get_json ~label:"exact lane run listing" path in
+      let* page = Masc.Tui_decode.decode_librarian_run_page listing in
+      match page.lrp_run_id, page.lrp_next with
+      | Some run_id, _ -> Ok run_id
+      | None, Some cursor -> find_run_id ~pages_left:(pages_left - 1) (Some cursor)
+      | None, None -> Error "no retained Librarian exact run"
+  in
+  let* run_id = find_run_id ~pages_left:50 None in
+  let* detail =
+    get_json
+      ~label:"Librarian exact run detail"
+      ("/api/v1/dashboard/exact-lane-runs/" ^ percent_encode_path_segment run_id)
+  in
+  Masc.Tui_decode.decode_librarian_actual_input ~run_id detail
 
 (** Fetch the two independent observations the context inspector joins. A
     failure on one stays beside the other instead of blanking the whole view:
@@ -1054,10 +1105,18 @@ let fetch_dashboard_logs ~(host : string) ~(port : int) ~(limit : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/logs?limit=%d" (max 1 (min 3000 limit)))
 
-(** Fetch /api/v1/dashboard/tools. *)
-let fetch_dashboard_tools ~(host : string) ~(port : int) :
+(** Fetch /api/v1/dashboard/tools, optionally including one Keeper's exact
+    effective turn surface beside the global registered catalog. *)
+let fetch_dashboard_tools ~(host : string) ~(port : int) ?keeper () :
     (Yojson.Safe.t, string) result =
-  get_json ~host ~port ~path:"/api/v1/dashboard/tools"
+  let path =
+    match keeper with
+    | None -> "/api/v1/dashboard/tools"
+    | Some keeper_name ->
+        "/api/v1/dashboard/tools?keeper="
+        ^ percent_encode_query_value keeper_name
+  in
+  get_json ~host ~port ~path
 
 (** Fetch /api/v1/gate/connectors. *)
 let fetch_connectors ~(host : string) ~(port : int) :

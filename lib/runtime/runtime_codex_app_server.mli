@@ -38,6 +38,14 @@ type config =
 val default_timeout_s : float
 val default_config : unit -> config
 
+(** One image attached to a turn. [base64_data] is the raw base64 payload with
+    no data-URL prefix and no newlines; the app-server [image] input variant
+    takes an inline data URL, which this module builds. *)
+type image_input =
+  { media_type : string
+  ; base64_data : string
+  }
+
 type thread_mode =
   | Start
   | Resume of { thread_id : string }
@@ -98,6 +106,8 @@ type stream_event =
       ; arguments : Yojson.Safe.t
       }
   | Dynamic_tool_finished of { call_id : string }
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 type history_role =
@@ -159,6 +169,7 @@ val validate_turn :
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
   config ->
   prompt:string ->
+  images:image_input list ->
   (unit, error) result
 (** Validate every deterministic client-side admission condition. Keeper calls
     this before it durably claims a session; [run_turn] repeats the same check
@@ -187,6 +198,7 @@ val run_turn :
   ?on_stream_event:(stream_event -> unit) ->
   config ->
   prompt:string ->
+  images:image_input list ->
   (turn_result, error) result
 (** [config.admission_timeout_s] finitely bounds initialization, account
     admission, thread preparation, and the complete [turn/start] write. The

@@ -21,3 +21,6 @@ let ensure_visible ~cursor ~height scroll =
   if cursor < scroll then cursor
   else if cursor > scroll + height - 1 then cursor - height + 1
   else max 0 scroll
+
+let preview_height ~total ~keep = max 0 (min (total - keep) (total / 2))
+let body_height ~total ~keep = max 1 (total - preview_height ~total ~keep)

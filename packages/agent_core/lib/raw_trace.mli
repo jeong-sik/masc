@@ -8,6 +8,8 @@ type record_type =
   | Assistant_block
   | Tool_execution_started
   | Tool_execution_finished
+  | Native_tool_started
+  | Native_tool_finished
   | Hook_invoked
   | Run_finished
 [@@deriving yojson, show]
@@ -186,6 +188,20 @@ val record_tool_execution_finished
   -> tool_result:string
   -> tool_error:bool
   -> unit
+  -> (unit, Error.t) result
+
+val record_native_tool_started
+  :  active_run
+  -> call_id:string option
+  -> tool_name:string option
+  -> (unit, Error.t) result
+(** Record observation of an official client's built-in tool. This is not a
+    MASC tool execution and carries no approval or effect claim. *)
+
+val record_native_tool_finished
+  :  active_run
+  -> call_id:string option
+  -> tool_name:string option
   -> (unit, Error.t) result
 
 val record_hook_invoked

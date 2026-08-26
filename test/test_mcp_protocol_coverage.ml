@@ -345,6 +345,103 @@ let test_handshake_identity_comes_from_the_same_place () =
     [ "name"; "title"; "version" ]
 ;;
 
+module Subs = Mcp_subscriptions
+module TP = Mcp_transport_protocol
+
+let listen_params json = Some (`Assoc [ ("notifications", json) ])
+
+(* "All fields are optional. Omitting a field is equivalent to not subscribing
+   to that notification type." An absent object is a subscription to nothing,
+   not an error. *)
+let test_an_absent_filter_subscribes_to_nothing () =
+  let f = TP.subscription_filter_of_params None in
+  Alcotest.(check bool) "nothing is on" true
+    (f = TP.empty_subscription_filter);
+  Alcotest.(check bool) "an empty notifications object is the same" true
+    (TP.subscription_filter_of_params (listen_params (`Assoc []))
+     = TP.empty_subscription_filter)
+
+(* The acknowledgement reports the subset the server honours, and a type that
+   was not asked for is absent rather than false. *)
+let test_the_acknowledged_filter_omits_what_was_not_asked_for () =
+  let f =
+    TP.subscription_filter_of_params
+      (listen_params (`Assoc [ ("toolsListChanged", `Bool true) ]))
+  in
+  Alcotest.(check string)
+    "only the requested type appears"
+    {|{"toolsListChanged":true}|}
+    (Yojson.Safe.to_string (TP.subscription_filter_to_json f))
+
+let test_a_notification_carries_the_subscription_id () =
+  let tagged =
+    TP.tag_notification_with_subscription ~subscription_id:(`Int 7)
+      (TP.jsonrpc_notification "notifications/tools/list_changed")
+  in
+  Alcotest.(check string)
+    "the id of the listen request rides in params._meta"
+    "7"
+    (Yojson.Safe.to_string
+       Yojson.Safe.Util.(
+         tagged |> member "params" |> member "_meta"
+         |> member TP.subscription_id_meta_key))
+
+(* The server MUST NOT send a type the client did not request. Asserted by
+   opening two streams that asked for different things and counting what each
+   one received. *)
+let test_a_stream_receives_only_what_it_asked_for () =
+  Subs.reset_for_test ();
+  let tools_got = ref 0 and resource_got = ref 0 in
+  let tools_only =
+    TP.subscription_filter_of_params
+      (listen_params (`Assoc [ ("toolsListChanged", `Bool true) ]))
+  in
+  let resource_only =
+    TP.subscription_filter_of_params
+      (listen_params
+         (`Assoc
+           [ ("resourceSubscriptions", `List [ `String "masc://status" ]) ]))
+  in
+  let _ =
+    Subs.register ~subscription_id:(`Int 1) ~filter:tools_only
+      ~send:(fun _ -> incr tools_got; true)
+  in
+  let _ =
+    Subs.register ~subscription_id:(`Int 2) ~filter:resource_only
+      ~send:(fun _ -> incr resource_got; true)
+  in
+  Subs.notify_tools_list_changed
+    (TP.jsonrpc_notification "notifications/tools/list_changed");
+  Alcotest.(check int) "the tools stream got it" 1 !tools_got;
+  Alcotest.(check int) "the resource stream did not" 0 !resource_got;
+  Subs.notify_resource_updated ~uri:"masc://status"
+    (TP.jsonrpc_notification "notifications/resources/updated");
+  Alcotest.(check int) "the resource stream got its uri" 1 !resource_got;
+  Subs.notify_resource_updated ~uri:"masc://other"
+    (TP.jsonrpc_notification "notifications/resources/updated");
+  Alcotest.(check int) "a uri it did not name does not reach it" 1 !resource_got;
+  Subs.reset_for_test ()
+
+(* A send that fails means the peer is gone. Retiring the entry there keeps a
+   dead stream from being retried on every later notification. *)
+let test_a_dead_stream_is_retired () =
+  Subs.reset_for_test ();
+  let attempts = ref 0 in
+  let filter =
+    TP.subscription_filter_of_params
+      (listen_params (`Assoc [ ("toolsListChanged", `Bool true) ]))
+  in
+  let _ =
+    Subs.register ~subscription_id:(`Int 1) ~filter
+      ~send:(fun _ -> incr attempts; false)
+  in
+  let note = TP.jsonrpc_notification "notifications/tools/list_changed" in
+  Subs.notify_tools_list_changed note;
+  Subs.notify_tools_list_changed note;
+  Alcotest.(check int) "the failed send is not repeated" 1 !attempts;
+  Alcotest.(check int) "and the entry is gone" 0 (Subs.count ());
+  Subs.reset_for_test ()
+
 let () =
   run "Mcp_transport_protocol Coverage" [
     "constants", [
@@ -419,5 +516,14 @@ let () =
         test_every_result_carries_the_server_identity;
       test_case "handshake identity has one owner" `Quick
         test_handshake_identity_comes_from_the_same_place;
+      test_case "an absent filter subscribes to nothing" `Quick
+        test_an_absent_filter_subscribes_to_nothing;
+      test_case "the acknowledgement omits what was not asked for" `Quick
+        test_the_acknowledged_filter_omits_what_was_not_asked_for;
+      test_case "a notification carries the subscription id" `Quick
+        test_a_notification_carries_the_subscription_id;
+      test_case "a stream receives only what it asked for" `Quick
+        test_a_stream_receives_only_what_it_asked_for;
+      test_case "a dead stream is retired" `Quick test_a_dead_stream_is_retired;
     ];
   ]

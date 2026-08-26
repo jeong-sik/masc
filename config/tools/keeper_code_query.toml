@@ -1,13 +1,13 @@
 name = "keeper_code_query"
-description = "Ask the language server about a name in a file: where it is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. This does not answer where a name is used; Grep still does that."
+description = "Ask the language server about a name in a file: where it is defined, or what its type and documentation are. The answer comes from the compiler's view of the code, so a same-named binding in an unrelated module is not confused with this one, and a name inside a comment or a string is not an occurrence. Find the line with Grep first, then ask about that line. Every answer is as fresh as the last build of the project: this reads what the compiler recorded, not the file on disk."
 additional_properties = false
 
 [[params]]
 name = "question"
 type = "string"
-enum = ["definition", "hover"]
+enum = ["definition", "hover", "references"]
 required = true
-description = "definition is where the name comes from. hover is its type and its documentation comment."
+description = "definition is where the name comes from. hover is its type and its documentation comment. references is every place the name is used, which needs the project's reference index built; if it is missing the answer says which command builds it rather than returning a short list."
 
 [[params]]
 name = "path"

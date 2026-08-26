@@ -14,6 +14,9 @@ export interface RuntimeTomlProvider {
   credentialPath: string
   credentialValue: string
   isNonInteractive: boolean
+  agent: string
+  effort: string
+  timeoutS: number | null
 }
 
 export interface RuntimeTomlModel {
@@ -296,6 +299,9 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
     credentialPath: asString(credentials.path),
     credentialValue: asString(credentials.value),
     isNonInteractive: asBoolean(values['is-non-interactive']),
+    agent: asString(values.agent),
+    effort: asString(values.effort),
+    timeoutS: asNumber(values['timeout-s']),
   }
 }
 
@@ -656,10 +662,13 @@ export function setRuntimeTomlDefault(sourceText: string, runtimeId: string): st
 export function setRuntimeTomlProviderField(
   sourceText: string,
   providerId: string,
-  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive',
-  value: string | boolean,
+  field: 'enabled' | 'display-name' | 'protocol' | 'endpoint' | 'command' | 'is-non-interactive' | 'agent' | 'effort' | 'timeout-s',
+  value: string | number | boolean | null,
 ): string {
   const section = `providers.${providerId}`
+  if (value === null || value === '') {
+    return deleteRuntimeTomlKey(sourceText, section, field)
+  }
   if (field === 'endpoint') {
     const withEndpoint = setRuntimeTomlKey(sourceText, section, 'endpoint', value)
     return deleteRuntimeTomlKey(withEndpoint, section, 'command')

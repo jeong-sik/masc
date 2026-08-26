@@ -1003,6 +1003,7 @@ let handle_keeper_get_subroutes state req request reqd =
               let entries =
                 Keeper_tool_call_log.filter_rows_for_keeper
                   ~keeper_name:name ~n:limit fleet_rows
+                |> List.map Keeper_tool_definition_source.annotate_row
               in
               let latest_ts =
                 List.fold_left

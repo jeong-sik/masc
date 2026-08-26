@@ -17,18 +17,18 @@ env  >  runtime TOML  >  field defaults
 - Dashboard should **write the TOML**, not the `.env` — TOML is the persistent
   surface, `.env` is developer scratch.
 
-Discord and Slack are not sidecars. Their in-process OCaml gateways read
-credentials and the trigger-policy override from the server environment as
-documented in their sections below.
+Discord, Slack and iMessage are not sidecars. Their in-process OCaml gateways
+read what they need from the server environment, as documented in their
+sections below. Telegram is the one external sidecar left.
 
 ## Common fields (all sidecars)
 
 | Field | Env alias | Default | Notes |
 |---|---|---|---|
-| `gate_base_url` | `GATE_BASE_URL` (Telegram), `MASC_GATE_URL` (iMessage) | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
-| `gate_api_token` | `GATE_API_TOKEN`, `MASC_GATE_API_TOKEN` (iMessage) | `""` | Required unless `gate_base_url` is loopback. |
-| `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 (30 for iMessage) | int/float seconds, must be positive. |
-| `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 (10 for iMessage) | gate status cache. |
+| `gate_base_url` | `GATE_BASE_URL` | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
+| `gate_api_token` | `GATE_API_TOKEN` | `""` | Required unless `gate_base_url` is loopback. |
+| `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 | int/float seconds, must be positive. |
+| `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 | gate status cache. |
 | `keeper_cache_ttl_sec` | `KEEPER_CACHE_TTL_SEC` | 30 | keeper discovery cache. |
 | `binding_store_path` | `<NAME>_BINDING_STORE_PATH` | `.gate/runtime/<name>/bindings.json` | runtime-bind file. |
 | `status_path` | `<NAME>_STATUS_PATH` | `.gate/runtime/<name>/status.json` | heartbeat written by sidecar. |
@@ -72,23 +72,83 @@ Discord-specific setup (cannot be driven from dashboard — operator must do):
 4. OAuth2 URL Generator → `bot` scope, permissions: Send Messages, Embed Links, Read Message History → invite.
 5. Restart the server so the new token is picked up at the next gateway connect.
 
-### iMessage (`sidecars/imessage-bot/src/config.py`)
+### iMessage (in-process gateway)
 
-No auth token — local `chat.db` access. Runs only on macOS.
+The iMessage connector runs **inside the server process**, not as an external
+sidecar (`sidecars/imessage-bot/` was deleted in #30531). Modules:
+`lib/server/server_imessage_in_process_gateway.{ml,mli}`, the gate-state module
+`lib/gate/channel_gate_imessage_state.{ml,mli}`, the chat.db reader
+`lib/gate/imessage_chat_db.{ml,mli}`, and the sender
+`lib/gate/imessage_applescript.{ml,mli}`; env reads live in
+`lib/config/env_config_imessage.{ml,mli}`.
 
-| Field | Env alias | Type | Default | Notes |
-|---|---|---|---|---|
-| `poll_interval_sec` | `IMESSAGE_POLL_INTERVAL` | float | 2.0 | min 0.5. |
-| `reply_mode` | `IMESSAGE_REPLY_MODE` | enum | `self-chat` | `self-chat` or `source-chat`. |
-| `self_chat_guid` | `IMESSAGE_SELF_CHAT_GUID` | str | `""` | optional Messages.app chat guid when reply_mode=self-chat. |
-| `chat_db_path` | — | path | `~/Library/Messages/chat.db` | rarely changed. |
-| `cursor_path` | — | path | `.gate/runtime/imessage/cursor.json` | read cursor. |
+macOS only, and there is no token. macOS authorizes the process itself, so what
+this connector needs is a permission grant rather than a credential.
 
-iMessage-specific setup (dashboard can guide, not automate):
+| Env var | Required | Notes |
+|---|---|---|
+| `MASC_IMESSAGE_REPLY_MODE` | no (default `self-chat`) | `self-chat` or `source-chat`. An unrecognised value is a configuration error and the gateway does not start; it is never coerced to the default. A typo that quietly routed replies elsewhere would only be visible to whoever wrongly received them. |
+| `MASC_IMESSAGE_SELF_CHAT_GUID` | no | The note-to-self chat to answer in. Left unset, the connector resolves it from chat.db and keeps looking on every poll, because that conversation may not exist yet when the server boots. |
+| `MASC_IMESSAGE_POLL_INTERVAL_SEC` | no (default `2`) | Accepted range 0.5–300 seconds. Unparseable or out of range is a configuration error, not a silent fallback to the default. |
+| `MASC_IMESSAGE_CURSOR_PATH` | no | Default `.gate/runtime/imessage/cursor.json` under the base path. Holds the last delivered `message.ROWID`. A cursor file that cannot be read stops startup rather than restarting from zero, which would redeliver every message Messages.app has ever stored. |
+| `MASC_IMESSAGE_CHAT_DB_PATH` | no | Default `$HOME/Library/Messages/chat.db`. Exists so tests can read a fixture. |
 
-- Terminal/iTerm needs Full Disk Access (System Settings → Privacy → Full Disk Access).
-- Messages.app must be signed in and open for chat.db to contain recent rows.
-- For `reply_mode=self-chat`, create a self-chat in Messages first and paste its GUID.
+Bindings work like every other connector:
+`.gate/runtime/imessage/bindings.json` (overridable via
+`MASC_IMESSAGE_BINDING_STORE_PATH`), mutated through
+`/api/v1/gate/connector/bind?name=imessage` and the matching `unbind`.
+
+The sidecar's `IMESSAGE_*` spellings, `MASC_GATE_URL`, `MASC_GATE_API_TOKEN`
+and `status.json` are gone, and so is `/api/v1/sidecar/*?name=imessage`, which
+now 404s. There is no process to start or stop.
+
+#### Setting it up
+
+1. Give **the terminal that runs the masc server** Full Disk Access: System
+   Settings → Privacy & Security → Full Disk Access. The grant follows the
+   process that reads the file, and that is now the server rather than a bot.
+2. Sign in to Messages.app and leave it open, so chat.db keeps receiving rows.
+3. Start the server. Without the grant it boots normally and this connector
+   alone stays down, with the reason in the log and in the connector's `error`
+   field.
+4. Bind a conversation to a Keeper. In the TUI: the **Connectors** surface,
+   `b` opens the bind form and `u` unbinds. In the dashboard:
+   **Connectors → iMessage → Quick Bind**. Both write the same file.
+
+The channel id is the conversation's `chat_identifier`. For a one-to-one chat
+that is the other party's phone number or email address.
+
+#### Two things that surprise people
+
+**Replies do not go back to the sender by default.** `self-chat` answers in
+your own note-to-self conversation. That is the quiet default on purpose: a
+Keeper answering in `source-chat` writes into whatever conversation asked,
+including a group chat. Set `MASC_IMESSAGE_REPLY_MODE=source-chat` to answer
+where the message came from. In `self-chat` with no note-to-self conversation
+resolved, the connector reports `available: false` and refuses to send rather
+than picking a conversation for you.
+
+**An unbound conversation leaves no trace.** Messages.app holds the operator's
+whole personal correspondence, so a conversation nobody bound is dropped
+without a log line. The cost is that a group chat's opaque `chat_identifier`
+cannot be discovered from masc — see #30596.
+
+#### Checking that it works
+
+`GET /api/v1/gate/connectors`, or the same fields in the TUI and the dashboard:
+
+| Field | Healthy |
+|---|---|
+| `chat_db_readable` | `true` — the grant is in place |
+| `poll_state` | `polling` |
+| `connected` | `true` |
+| `cursor_rowid` | rising as messages arrive |
+| `self_chat_guid` | redacted but non-empty, in `self-chat` mode |
+| `runtime_bindings_count` | at least 1 |
+| `error` | empty |
+
+This connector never reports `stale`. Liveness is a value the poll fiber
+publishes, not a heartbeat file that can age out.
 
 ### Slack (in-process gateway — RFC-0317)
 

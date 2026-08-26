@@ -52,6 +52,7 @@ type tool_projection =
   ; rows : string list
   ; hidden_activity_rows : int
   ; omitted_steps : int
+  ; summary_outcome : tool_outcome option
   }
 
 (* Mutable stream state stays private. The typed activity handed to history
@@ -289,24 +290,63 @@ let compact_outcome_parts (activities : tool_activity list) =
          | 0 -> None
          | count -> Some (Printf.sprintf "%d %s" count label))
 
-let compact_marker (activities : tool_activity list) =
+(* The one outcome a folded block reads as. The order is the order of what a
+   reader needs to know first: a call that failed outranks one still out,
+   which outranks one whose end was never recorded. Both the summary glyph and
+   the summary colour come from here, so the two cannot say different things
+   about the same block. *)
+let compact_outcome (activities : tool_activity list) =
   if List.exists (fun activity -> activity.outcome = Failed) activities then
-    marker_of_outcome Failed
+    Failed
   else if
     List.exists (fun activity -> activity.outcome = Awaiting_result) activities
-  then marker_of_outcome Awaiting_result
+  then Awaiting_result
   else if
     List.exists
       (fun activity ->
         activity.outcome = Started || activity.outcome = Never_returned)
       activities
-  then marker_of_outcome Started
+  then Started
   else if
     List.exists
       (fun activity -> activity.outcome = Outcome_unrecorded)
       activities
-  then marker_of_outcome Outcome_unrecorded
-  else marker_of_outcome Returned
+  then Outcome_unrecorded
+  else Returned
+
+let compact_marker activities = marker_of_outcome (compact_outcome activities)
+
+(* The descriptor registry already owns the model-facing name. Reusing it
+   here keeps the summary on the same vocabulary the Keeper saw (Read, Edit,
+   Execute, ...), instead of deriving categories from spelling conventions.
+   A trace from an older or external provider may name no registered tool; in
+   that case the exact safe name is more useful than an invented "Other". *)
+let canonical_tool_name (activity : tool_activity) =
+  match Masc.Keeper_tool_descriptor.find_public activity.tool_name with
+  | Some descriptor -> descriptor.public_name
+  | None -> (
+      match
+        Masc.Keeper_tool_descriptor.public_name_for_internal activity.tool_name
+      with
+      | Some public_name -> public_name
+      | None -> safe_line activity.tool_name)
+
+let compact_tool_parts (activities : tool_activity list) =
+  let add counts activity =
+    let name = canonical_tool_name activity in
+    let rec increment reversed = function
+      | [] -> List.rev ((name, 1) :: reversed)
+      | (existing, count) :: rest when String.equal existing name ->
+          List.rev_append reversed ((existing, count + 1) :: rest)
+      | entry :: rest -> increment (entry :: reversed) rest
+    in
+    increment [] counts
+  in
+  List.fold_left add [] activities
+  |> List.map (fun (name, count) -> Printf.sprintf "%s %d" name count)
+
+let compact_tool_mix activities =
+  String.concat " · " (compact_tool_parts activities)
 
 (* Both projections retain the same typed activities. [Full] is the shipping
    view and therefore stays byte-compatible with the old formatter. [Compact]
@@ -315,21 +355,23 @@ let compact_marker (activities : tool_activity list) =
 let project_tool_block mode (block : tool_block) =
   let activity_count = List.length block.activities in
   let full_activity_rows = render_activity_rows block.activities in
-  let activity_rows, hidden_activity_rows =
+  let activity_rows, hidden_activity_rows, summary_outcome =
     match mode, block.activities with
     | (Full | Compact), ([] | [ _ ]) ->
-        full_activity_rows, 0
-    | Full, _ -> full_activity_rows, 0
+        full_activity_rows, 0, None
+    | Full, _ -> full_activity_rows, 0, None
     | Compact, activities ->
         let outcomes = String.concat ", " (compact_outcome_parts activities) in
+        let mix = compact_tool_mix activities in
         let hidden_activity_rows = List.length full_activity_rows in
         ( [ safe_line
-              (Printf.sprintf "%s Ran %s · %s · %s folded"
+              (Printf.sprintf "%s Tools %d · %s · %s · %s folded"
                  (compact_marker activities)
-                 (plural activity_count "tool") outcomes
+                 activity_count mix outcomes
                  (plural hidden_activity_rows "detail"))
           ]
-        , hidden_activity_rows )
+        , hidden_activity_rows
+        , Some (compact_outcome activities) )
   in
   let rows =
     if block.omitted_steps = 0 then activity_rows
@@ -339,6 +381,7 @@ let project_tool_block mode (block : tool_block) =
   ; rows
   ; hidden_activity_rows
   ; omitted_steps = block.omitted_steps
+  ; summary_outcome
   }
 
 let tool_rows t =
@@ -411,10 +454,13 @@ let phase_text t =
          here would read as a slow tool rather than a question on screen. *)
       "held at a tool call, waiting for your answer"
   | Working ->
-      let calls = List.length t.reversed_tool_calls in
+      let activities = tool_calls t in
+      let calls = List.length activities in
       let work =
         if calls = 0 then "working"
-        else Printf.sprintf "working, %d tool call(s)" calls
+        else
+          Printf.sprintf "working · %s · %s"
+            (plural calls "tool") (compact_tool_mix activities)
       in
       (* A checkpoint means the turn ran out of context and carried on rather
          than stopping. An operator watching a turn take a long time is owed

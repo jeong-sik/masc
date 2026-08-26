@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_skill_config)
+ (public_name masc.skill_config)
+ (wrapped false)
+ (modules skill_source_config)
+ (libraries masc.keeper_toml masc.masc_core yojson))

@@ -96,6 +96,11 @@ let skill_catalog () =
     Keeper_skill_catalog.of_documents
       [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
       ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
+      ; ( "gate-instruction"
+          (* An instruction skill puts [keeper_skill] on the surface. It is a
+             third shape the policy has to place, and it reaches the bundle
+             the same way the composition ones do. *)
+        , "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n" )
       ]
   with
   | Ok catalog -> catalog
@@ -104,7 +109,13 @@ let skill_catalog () =
       (Keeper_skill_catalog.error_to_string e)
 ;;
 
-let with_bundle f =
+let contains ~needle haystack =
+  let n = String.length needle and h = String.length haystack in
+  let rec scan i = i + n <= h && (String.sub haystack i n = needle || scan (i + 1)) in
+  n = 0 || scan 0
+;;
+
+let with_bundle_tools f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
     Filename.concat
@@ -136,11 +147,19 @@ let with_bundle f =
            ~skill_catalog:(skill_catalog ())
            ()
        in
-       Fun.protect ~finally:bundle.cleanup (fun () ->
-         f
-           (List.map
-              (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-              bundle.tools)))
+       Fun.protect ~finally:bundle.cleanup (fun () -> f bundle.tools))
+;;
+
+let with_bundle f = with_bundle_tools (fun tools ->
+  f (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
+;;
+
+(* The handler is the tool. Reading only its schema would let a tool that
+   answers nothing pass for one that works. *)
+let run_tool (tool : Agent_core.Tool.t) input =
+  match tool.handler (Agent_core.Tool.Execution_env.create ()) input with
+  | Ok output -> output.Agent_core.Llm_provider.Types.content
+  | Error err -> err.Agent_core.Llm_provider.Types.message
 ;;
 
 (* Guards against an empty-list false pass: a bundle that produced nothing
@@ -160,7 +179,34 @@ let test_the_bundle_is_not_empty () =
       ; Keeper_tool_composition_catalog.plan_execute_tool_name
       ; Keeper_tool_composition_catalog.status_tool_name
       ; Keeper_tool_composition_catalog.cancel_tool_name
+      ; Keeper_tool_composition_catalog.skill_tool_name
       ])
+;;
+
+(* The point of the tool is that a body reaches the keeper. A tool that is on
+   the surface and classifiable but answers nothing would pass every other
+   assertion here. *)
+let test_the_skill_tool_serves_the_body () =
+  with_bundle_tools (fun tools ->
+    match
+      List.find_opt
+        (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name
+             Keeper_tool_composition_catalog.skill_tool_name)
+        tools
+    with
+    | None -> fail "the instruction skill put no tool on the surface"
+    | Some tool ->
+      check bool "the description names the skill it can serve" true
+        (contains ~needle:"gate-instruction" tool.schema.description);
+      let served = run_tool tool (`Assoc [ "name", `String "gate-instruction" ]) in
+      check bool "asking by name returns the body" true
+        (contains ~needle:"body" served);
+      let missing = run_tool tool (`Assoc [ "name", `String "no-such-skill" ]) in
+      check bool "a name the catalog does not carry is refused" true
+        (contains ~needle:"no instruction skill named" missing);
+      check bool "and the refusal lists what it does carry" true
+        (contains ~needle:"gate-instruction" missing))
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
@@ -202,6 +248,8 @@ let () =
     [ ( "the bundle"
       , [ test_case "is not empty" `Quick test_the_bundle_is_not_empty
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
+        ; test_case "the skill tool serves the body" `Quick
+            test_the_skill_tool_serves_the_body
         ] )
     ; ( "the approval policy"
       , [ test_case "can classify every tool in it" `Quick

@@ -38,5 +38,5 @@
 - recall injection ledger **schema v3** — 필수 typed `reset` 마커, keeper process 첫 행이 replay 상태 리셋. v2 거부.
 - host FD pressure override 는 `MASC_HOST_FD_PRESSURE_STATE_FILE` 하나 (+ `--base-path`).
 - workspace root marker = `.masc/root-state.json` 만.
-- config 카탈로그: OAS embedded catalog + `oas-models-overlay.toml` (deployment-local rows). `MASC_MODEL_CATALOG` discovery 제거, `OAS_MODEL_CATALOG` 만 명시적 override.
+- config 카탈로그: AGENT_CORE embedded catalog + `agent-core-models-overlay.toml` (deployment-local rows). `MASC_MODEL_CATALOG` discovery 제거, `MASC_MODEL_CATALOG` 만 명시적 override.
 - README 신규 언급: `prompts/keeper.world.md` = 모든 keeper 에 주입되는 공용 **World prompt**; `personas/<name>/profile.json` overlay (replace-if-non-empty).

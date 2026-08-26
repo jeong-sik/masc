@@ -84,6 +84,8 @@ type stream_event =
       ; model : string
       }
   | Text_delta of string
+  | Native_tool_started of Runtime_native_tools.observation
+  | Native_tool_finished of Runtime_native_tools.observation
   | Turn_finished of { text : string }
 
 type error =

@@ -40,6 +40,35 @@ let server_identity_of_refresh
   | Error _ -> None
 ;;
 
+type workspace_identity =
+  | Workspace_identity_unread
+  | Workspace_identity_match
+  | Workspace_identity_mismatch of
+      { local_base_path : string
+      ; server_base_path : string
+      }
+
+let canonical_path path =
+  if String.equal path ""
+  then ""
+  else
+    try Unix.realpath path with
+    | Unix.Unix_error _ -> path
+;;
+
+let workspace_identity_of_refresh ~local_base_path reading =
+  match reading with
+  | Error _ -> Workspace_identity_unread
+  | Ok identity ->
+    let local_base_path = canonical_path local_base_path in
+    let server_base_path = canonical_path identity.Tui_decode.sid_base_path in
+    if String.equal local_base_path "" || String.equal server_base_path ""
+    then Workspace_identity_unread
+    else if String.equal local_base_path server_base_path
+    then Workspace_identity_match
+    else Workspace_identity_mismatch { local_base_path; server_base_path }
+;;
+
 type event = {
   timestamp: string;
   event_type: string;
@@ -129,9 +158,13 @@ let chat_visibility_summary ~memory_visible ~reasoning ~tools ~origin =
   let parts =
     List.filter_map Fun.id
       [ (if memory_visible then None else Some "memory:off")
-      ; (match origin with
-         | Masc_tui_message_layout.Origin_row -> None
-         | Masc_tui_message_layout.Origin_inline -> Some "clock:inline"
+      ; (* The default is the inline margin, so it is the one that says
+           nothing. [Origin_row] is now the deviation: it is the older, roomier
+           layout an operator can go back to, and the header should say when
+           they have. *)
+        (match origin with
+         | Masc_tui_message_layout.Origin_inline -> None
+         | Masc_tui_message_layout.Origin_row -> Some "clock:row"
          | Masc_tui_message_layout.Origin_bare -> Some "clock:off")
       ; (match reasoning with
          | Reasoning_hidden -> None
@@ -298,9 +331,11 @@ type board_mode =
           two-step arm, not a key: [esc] offers send-or-discard, so a stray
           Enter during writing cannot publish. *)
 
-type board_focus =
-  | Board_posts_pane
-  | Board_detail_pane
+(** Shared horizontal pane vocabulary.  Every split surface stores one of
+    these instead of inventing a bool or a surface-specific variant. *)
+type pane_focus =
+  | Left_pane
+  | Right_pane
 
 (** Planning surface sub-mode *)
 type planning_mode =
@@ -470,21 +505,8 @@ type planning_snapshot = Tui_decode.planning_snapshot
   pl_generated_at: string;
 }
 
-(* Goals no longer nest, so every goal sits at depth 0. *)
-let planning_goal_depth (_goals : planning_goal list) (_goal : planning_goal) = 0
-
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
   goals
-  |> List.mapi (fun index goal -> (index, goal))
-  |> List.stable_sort (fun (left_index, left_goal) (right_index, right_goal) ->
-         match
-           Int.compare
-             (planning_goal_depth goals left_goal)
-             (planning_goal_depth goals right_goal)
-         with
-         | 0 -> Int.compare left_index right_index
-         | depth_cmp -> depth_cmp)
-  |> List.map snd
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -508,7 +530,7 @@ let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
-  | Detail_instructions -> "Instructions"
+  | Detail_instructions -> "Settings"
   | Detail_github -> "GitHub"
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
@@ -662,6 +684,12 @@ let surface_needs : surface -> surface_needs = function
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
+  sc_preview_keep : int option;
+      (** rows the list keeps when the surface draws a preview under it, or
+          [None] when the list has the whole body. A surface that adds a
+          preview says so here: the keypress works its bound out from this,
+          and a field the record demands cannot be forgotten the way a
+          wildcard branch can. *)
 }
 
 (* These seven draw the same frame: a title, a column row, three dividers, the
@@ -693,6 +721,22 @@ type code_workspace_scope =
   | Code_scope_keeper of string
   | Code_scope_repo of string
 
+(* One row of the file pane's history view: the work over the open file is
+   the commits that touched it and the recorded keeper edits, woven into one
+   timeline by their shared timestamp. *)
+type code_history_entry =
+  | Hist_commit of Tui_decode.git_log_row
+  | Hist_edit of Tui_decode.ide_region
+
+type code_history_listing = {
+  chl_entries: code_history_entry list;
+  (* Why the keeper edits are missing when they are: the scope carries no
+     codebase slug, or their fetch failed. The commits still show; the view
+     says what it could not weave in rather than showing a shorter history
+     as if it were the whole one. *)
+  chl_edits_note: string option;
+}
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -700,7 +744,7 @@ type state = {
      detail view can show a task after it turns terminal -- the active list
      drops exactly those rows. Replaced wholesale with [tasks] on each load. *)
   mutable tasks_domain: Masc_domain.task list;
-  mutable task_focus: bool;
+  mutable task_focus: pane_focus;
   (* The [?] help overlay: open replaces the surface body until Esc/? closes
      it. The scroll survives only while it is open. *)
   mutable help_open: bool;
@@ -723,10 +767,17 @@ type state = {
      list the reader may already know. Hidden is a choice they make, not a
      width the terminal forces, so it survives resizing. *)
   mutable roster_pane_hidden: bool;
+  (* Derived display phase for the selected long name in the narrow roster.
+     The main loop advances it only while that roster is visible. *)
+  mutable roster_marquee_frame: int;
+  mutable keeper_detail_focus: pane_focus;
+  mutable keeper_message_focus: pane_focus;
   (* Current successful /health identity. Every HTTP refresh revalidates it so
      a different process on the same endpoint replaces this projection, while
      a failed probe returns the display to unread rather than showing stale. *)
   mutable server_identity: Tui_decode.server_identity option;
+  local_base_path: string;
+  mutable workspace_identity: workspace_identity;
   mutable help_scroll: int;
   (* An image the operator asked to see, drawn over the whole terminal rather
      than into a frame. A picture does not live in a row: the terminal keeps
@@ -760,7 +811,7 @@ type state = {
   mutable resource_content: (string * string list) option;
   mutable resource_content_error: string option;
   mutable resource_scroll: int;
-  mutable resource_focus: bool;
+  mutable resource_focus: pane_focus;
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
@@ -768,6 +819,9 @@ type state = {
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
+  mutable prompts_librarian_input: (string * string list) option;
+  mutable prompts_librarian_input_error: string option;
+  mutable prompts_librarian_input_loading: bool;
   mutable runtime_config_view: (string * string list) option;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
@@ -859,7 +913,7 @@ type state = {
   mutable board_cursor: int;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
-  mutable board_focus: board_focus;
+  mutable board_focus: pane_focus;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -943,16 +997,22 @@ type state = {
   (* The last language-server answer (or refusal), shown beside the title
      until the next question or file replaces it. *)
   mutable code_lsp_note: string option;
+  (* Where a definition jump left from, newest first: scope, directory,
+     open file (if any), its cursor and scroll. B walks back through it.
+     Bounded so a long session cannot grow it without limit. *)
+  mutable code_jump_back:
+    (code_workspace_scope * string * string option * int * int) list;
   (* Horizontal offset in display cells, and the widest row's width -- the
      clamp. Measured once at load: measuring ten thousand rows on every
      keypress is what this field exists to avoid. *)
   mutable code_file_hscroll: int;
   mutable code_file_max_width: int;
-  mutable code_focus_file: bool;
+  mutable code_focus_file: pane_focus;
   (* The file pane's history view: H on an open file swaps the content for
-     the commits that touched it, keyed by the path they were fetched for so
+     the work over it -- the commits that touched it woven with the recorded
+     keeper edits, newest first -- keyed by the path they were fetched for so
      opening another file drops a stale listing rather than captioning it. *)
-  mutable code_history: (string * Tui_decode.git_log_row list) option;
+  mutable code_history: (string * code_history_listing) option;
   mutable code_history_error: string option;
   mutable code_history_open: bool;
   mutable code_history_scroll: int;
@@ -971,13 +1031,6 @@ type state = {
   mutable code_notes_error: string option;
   mutable code_notes_open: bool;
   mutable code_notes_scroll: int;
-  (* The file pane's activity view: c on an open file (repository scope,
-     like the notes) swaps the content for which keeper wrote which lines,
-     through what, and when. *)
-  mutable code_activity: (string * Tui_decode.ide_region list) option;
-  mutable code_activity_error: string option;
-  mutable code_activity_open: bool;
-  mutable code_activity_scroll: int;
   (* Whose workspace the surface reads. One field, one value: a keeper's
      playground and a project repository at the same time is not a
      representable state. *)
@@ -993,6 +1046,11 @@ type state = {
   mutable changes_keeper: string option;
   mutable changes: Tui_decode.file_change_snapshot option;
   mutable changes_error: string option;
+  (* Which row the list marks, and where the window on that list sits. Two
+     fields rather than one: the marked row was the window's top row, so the
+     rows the window already showed below it could not be marked, and Enter,
+     d, v and o all read whichever change happened to be drawn first. *)
+  mutable changes_cursor: int;
   mutable changes_scroll: int;
   (* The row whose diff is open, as an index into the loaded list, and how far
      that diff is scrolled. An index rather than a copy of the change: a
@@ -1047,6 +1105,11 @@ type state = {
   mutable verification_error: string option;
   mutable verification_scroll: int;
   mutable verification_cursor: int;
+  (* The request being read, not merely the current cursor position. A refresh
+     may reorder the queue; retaining the request id prevents the detail pane
+     and verdict keys from silently moving to a different task. *)
+  mutable verification_detail_request_id: string option;
+  mutable verification_detail_scroll: int;
   (* An approve armed for a second keypress: which task. The cursor can move
      between the two presses, so the task id is captured at arm time and a
      press on a different row re-arms for that row. Reject carries no arm --
@@ -1058,6 +1121,11 @@ type state = {
   mutable system_logs_scroll: int;
   mutable system_logs_cursor: int;
   mutable msg_input: Buffer.t;
+  (* Images staged with :attach, sent with the next message and cleared by the
+     send. Held next to the draft because they are part of the same unsent
+     message: switching keepers or abandoning the draft must not leave an image
+     attached to whatever is typed later. *)
+  mutable msg_attachments: Masc_tui_keeper_chat_projection.attachment list;
   mutable msg_target_keeper_name: string option;
   mutable msg_return: keeper_chat_return;
   mutable msg_drafts: (string * string) list;
@@ -1087,6 +1155,14 @@ type state = {
      not enough after alpha -> beta -> alpha: the first alpha response can
      arrive after the second alpha request and still name the visible Keeper. *)
   mutable msg_history_load_generation: int;
+  (* The newest row [msg_scroll] counts back from, as [me_at], while the
+     operator is reading back. Counting from whatever is newest right now made
+     the count mean something different every time a reply landed: the new rows
+     go on that end, so the same count lands further down and the window slides
+     toward text nobody asked to see. Pinned when they scroll off the bottom
+     and released when they return to it, which is also how they get back to
+     following the turn. *)
+  mutable msg_scroll_pin: float option;
   (* How many rows above the newest the chat pane is showing. 0 is the bottom,
      where the pane follows a running turn. Held rather than derived: an
      operator reading back should stay where they are while the keeper keeps
@@ -1214,6 +1290,7 @@ let create_state
     ?(reasoning_visibility = Reasoning_hidden)
     ?(tool_visibility = Tools_compact)
     ~workspace
+    ?(local_base_path = "")
     ~port
     ~refresh_interval
     ()
@@ -1222,7 +1299,7 @@ let create_state
   agents = [];
   tasks = [];
   tasks_domain = [];
-  task_focus = false;
+  task_focus = Left_pane;
   help_open = false;
   context_inspector_open = false;
   context_inspector_keeper = None;
@@ -1234,7 +1311,15 @@ let create_state
   context_inspector_scroll = 0;
   context_inspector_exact = None;
   roster_pane_hidden = false;
+  roster_marquee_frame = 0;
+  keeper_detail_focus = Right_pane;
+  keeper_message_focus = Right_pane;
   server_identity = None;
+  local_base_path;
+  workspace_identity =
+    (if String.equal local_base_path ""
+     then Workspace_identity_match
+     else Workspace_identity_unread);
   help_scroll = 0;
   image_open = None;
   palette_open = false;
@@ -1248,11 +1333,14 @@ let create_state
   resource_content = None;
   resource_content_error = None;
   resource_scroll = 0;
-  resource_focus = false;
+  resource_focus = Left_pane;
   config_prompts = false;
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;
+  prompts_librarian_input = None;
+  prompts_librarian_input_error = None;
+  prompts_librarian_input_loading = false;
   runtime_config_view = None;
   runtime_config_view_error = None;
   config_scroll = 0;
@@ -1315,7 +1403,7 @@ let create_state
   board_cursor = 0;
   board_scroll = 0;
   board_mode = Board_list;
-  board_focus = Board_detail_pane;
+  board_focus = Right_pane;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
@@ -1369,9 +1457,10 @@ let create_state
   code_file_scroll = 0;
   code_file_cursor = 0;
   code_lsp_note = None;
+  code_jump_back = [];
   code_file_hscroll = 0;
   code_file_max_width = 0;
-  code_focus_file = false;
+  code_focus_file = Left_pane;
   code_history = None;
   code_history_error = None;
   code_history_open = false;
@@ -1384,15 +1473,12 @@ let create_state
   code_notes_error = None;
   code_notes_open = false;
   code_notes_scroll = 0;
-  code_activity = None;
-  code_activity_error = None;
-  code_activity_open = false;
-  code_activity_scroll = 0;
   code_scope = Code_scope_project;
   code_target_line = None;
   changes_keeper = None;
   changes = None;
   changes_error = None;
+  changes_cursor = 0;
   changes_scroll = 0;
   changes_diff_row = None;
   changes_diff_scroll = 0;
@@ -1427,11 +1513,14 @@ let create_state
   verification_error = None;
   verification_scroll = 0;
   verification_cursor = 0;
+  verification_detail_request_id = None;
+  verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
   system_logs_scroll = 0;
   system_logs_cursor = 0;
   msg_input = Buffer.create 256;
+  msg_attachments = [];
   msg_target_keeper_name = None;
   msg_return = Keeper_chat_return_detail;
   msg_drafts = [];
@@ -1448,12 +1537,17 @@ let create_state
   msg_memory_dropped = 0;
   msg_history_load_generation = 0;
   msg_scroll = 0;
+  msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
   msg_older_loading = false;
   msg_older_error = None;
   msg_reasoning_visibility = reasoning_visibility;
-  msg_origin_display = Masc_tui_message_layout.Origin_row;
+  (* The origin folds into the body's left margin by default. On a row of its
+     own it cost one row per message: eight speakers taking turns spent eight
+     of a forty-row pane saying who was talking. Ctrl-F cycles back to the
+     roomier layout for anyone who wants it. *)
+  msg_origin_display = Masc_tui_message_layout.Origin_inline;
   msg_tool_visibility = tool_visibility;
   msg_spill = None;
   msg_queued = Masc_tui_keeper_chat_queue.empty;
@@ -1506,6 +1600,28 @@ let chat_rows_for (state : state) keeper_name =
     (fun left right -> Float.compare left.me_at right.me_at)
     (loaded @ session)
 
+(* The one place [msg_scroll] moves, so the pin it counts back from cannot be
+   forgotten at one of the dozen keys that scroll. Leaving the bottom takes the
+   pin; returning to it releases the pin, which is also the gesture for going
+   back to following the turn. *)
+let set_msg_scroll (state : state) rows =
+  let rows = max 0 rows in
+  if rows = 0 then begin
+    state.msg_scroll <- 0;
+    state.msg_scroll_pin <- None
+  end
+  else begin
+    if state.msg_scroll = 0 then
+      state.msg_scroll_pin <-
+        (match state.msg_target_keeper_name with
+         | None -> None
+         | Some keeper_name ->
+           (match List.rev (chat_rows_for state keeper_name) with
+            | newest :: _ -> Some newest.me_at
+            | [] -> None));
+    state.msg_scroll <- rows
+  end
+
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
    row, so a composer that grew would otherwise push the cursor off the line it
@@ -1536,23 +1652,50 @@ type clamped_scroll =
   | Keeper_detail of int
   | Keeper_calls of int
   | Acting of int
+  | Verification_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
+  (* An open diff's rows are built by the drawing, out of the recorded before
+     and after text, so the keypress cannot count them. It steps unbounded and
+     the frame reports back what it could actually use: without that report
+     the stored value kept climbing past the end of the diff, and coming back
+     up took one keypress per step taken past it. *)
+  | Changes_diff_scroll of int
 
 let apply_clamped_scroll (state : state) = function
   | Overview_events value -> state.overview_event_scroll <- value
   | Task_detail value -> state.task_detail_scroll <- value
   | Board_read value -> state.board_scroll <- value
-  | Message_scroll value -> state.msg_scroll <- value
+  | Message_scroll value -> set_msg_scroll state value
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value
   | Keeper_calls value -> state.keeper_calls_scroll <- value
   | Acting value -> state.acting_scroll <- value
+  | Verification_detail_scroll value ->
+      state.verification_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
+  | Changes_diff_scroll value -> state.changes_diff_scroll <- value
+
+(* Changes draws a preview under its list, so the rows the list can use are
+   fewer than the chrome alone says. The number of rows the list keeps lives
+   here because both the drawing and the keypress need it; Masc_tui_scroll
+   works the split out from it. *)
+let changes_preview_keep_rows = 5
+
+(* The over-budget note and its divider, which the Changes drawing puts above
+   the list. Chrome the drawing adds conditionally has to be counted here too
+   -- a bound worked out from fewer chrome rows than the frame uses lets the
+   cursor name a row the frame will not draw. *)
+let changes_budget_note_rows (state : state) =
+  match state.changes with
+  | Some s when s.Tui_decode.fcs_over_budget > 0 -> 2
+  | Some _ | None -> 0
 
 let scrolled_surface (state : state) : surface -> scrolled option =
-  let listing ~error count = Some { sc_count = count; sc_chrome = listing_chrome ~error } in
+  let listing ~error count =
+    Some { sc_count = count; sc_chrome = listing_chrome ~error; sc_preview_keep = None }
+  in
   function
   | System_logs ->
       Some
@@ -1561,12 +1704,15 @@ let scrolled_surface (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.sys_entries)
         ; sc_chrome = system_log_listing_chrome ~error:state.system_logs_error
+        ; sc_preview_keep = None
         }
   | Verification ->
-      listing ~error:state.verification_error
-        (match state.verification with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.vs_requests)
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        listing ~error:state.verification_error
+          (match state.verification with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.vs_requests)
   | Lanes ->
       listing ~error:state.lanes_error
         (match state.lanes with
@@ -1583,10 +1729,16 @@ let scrolled_surface (state : state) : surface -> scrolled option =
          | None -> 0
          | Some s -> List.length s.Tui_decode.rs_repositories)
   | Changes ->
-      listing ~error:state.changes_error
-        (match state.changes with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.fcs_changes)
+      Some
+        { sc_count =
+            (match state.changes with
+             | None -> 0
+             | Some s -> List.length s.Tui_decode.fcs_changes)
+        ; sc_chrome =
+            listing_chrome ~error:state.changes_error
+            + changes_budget_note_rows state
+        ; sc_preview_keep = Some changes_preview_keep_rows
+        }
   | Connectors ->
       listing ~error:state.connectors_error
         (match state.connectors with
@@ -1599,6 +1751,7 @@ let scrolled_surface (state : state) : surface -> scrolled option =
              | None -> 0
              | Some s -> List.length s.Tui_decode.rss_candidates)
         ; sc_chrome = runtime_listing_chrome ~error:state.runtime_surface_error
+        ; sc_preview_keep = None
         }
   | Tools ->
       listing ~error:state.tools_error
@@ -1633,14 +1786,16 @@ let surface_row_texts (state : state) : surface -> string list option = function
           List.map (fun l -> l.Tui_decode.kl_keeper) s.Tui_decode.kls_lanes)
         state.lanes
   | Verification ->
-      Option.map
-        (fun s ->
-          List.map
-            (fun r ->
-              r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
-              ^ r.Tui_decode.vr_submitted_by)
-            s.Tui_decode.vs_requests)
-        state.verification
+      if Option.is_some state.verification_detail_request_id then None
+      else
+        Option.map
+          (fun s ->
+            List.map
+              (fun r ->
+                r.Tui_decode.vr_task_id ^ " " ^ r.Tui_decode.vr_task_title ^ " "
+                ^ r.Tui_decode.vr_submitted_by)
+              s.Tui_decode.vs_requests)
+          state.verification
   | Harness ->
       Option.map
         (fun s ->
@@ -1683,10 +1838,24 @@ let surface_row_texts (state : state) : surface -> string list option = function
             s.Tui_decode.sys_entries)
         state.system_logs
   | Code ->
-      Some
-        (List.map
-           (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
-           state.code_entries)
+      (* With a file focused (and no overlay over it), "/" searches the
+         file's own lines; otherwise it searches the tree, as it always
+         has. The overlays keep their own j/k and are not searched. *)
+      if
+        state.code_focus_file = Right_pane && not state.code_history_open
+        && not state.code_diff_open && not state.code_notes_open
+      then
+        Option.map
+          (fun (_, rows) ->
+            List.map
+              (fun segments -> String.concat "" (List.map fst segments))
+              rows)
+          state.code_file
+      else
+        Some
+          (List.map
+             (fun (n : Tui_decode.workspace_tree_node) -> n.Tui_decode.wt_label)
+             state.code_entries)
   (* Cursorless or otherwise-navigated surfaces: no row list to search. *)
   | Overview | Acting | Keepers _ | Board | Approvals | Planning | Schedules
   | Fusion | Resources | Changes | Config | Tools ->
@@ -1756,6 +1925,17 @@ type palette_action =
   | Palette_chat of string
   | Palette_task of string
   | Palette_board_post of string
+  (* (question, symbol): a language-server question about a name on the
+     Code pane's cursor line — the K/D candidates ride the palette as
+     entries so one keypress can also be a choice among several names. *)
+  | Palette_lsp of string * string
+
+(* Prefix match: the lowercased label starts with the query. An empty query
+   is a prefix of everything. *)
+let palette_starts_with ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.length needle in
+  String.length h >= n && String.equal (String.sub h 0 n) needle
 
 let palette_contains ~needle haystack =
   let h = String.lowercase_ascii haystack in
@@ -1769,6 +1949,68 @@ let palette_contains ~needle haystack =
     done;
     !found
   end
+
+(* The identifier names on the file pane's cursor line, in reading order,
+   first occurrence only. The open file already carries its lexed segments,
+   so the scan skips what the lexer called a keyword, a string, a comment,
+   or a number -- those offer no name a language server answers about --
+   rather than keeping a second keyword list that could drift. *)
+let code_cursor_line_symbols (state : state) =
+  match state.code_file with
+  | None -> []
+  | Some (_, rows) -> (
+      match List.nth_opt rows state.code_file_cursor with
+      | None -> []
+      | Some segments ->
+          let name_kind kind =
+            not
+              (List.exists (String.equal kind)
+                 [ Masc_tui_code_lexer.kind_keyword;
+                   Masc_tui_code_lexer.kind_string;
+                   Masc_tui_code_lexer.kind_comment;
+                   Masc_tui_code_lexer.kind_number ])
+          in
+          let starts c =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+          in
+          let continues c =
+            starts c || (c >= '0' && c <= '9') || c = '\''
+          in
+          let names = ref [] in
+          List.iter
+            (fun (text, kind) ->
+              if name_kind kind then begin
+                let n = String.length text in
+                let i = ref 0 in
+                while !i < n do
+                  if starts text.[!i] then begin
+                    let j = ref (!i + 1) in
+                    while !j < n && continues text.[!j] do
+                      incr j
+                    done;
+                    let name = String.sub text !i (!j - !i) in
+                    if not (List.exists (String.equal name) !names) then
+                      names := name :: !names;
+                    i := !j
+                  end
+                  else incr i
+                done
+              end)
+            segments;
+          List.rev !names)
+
+(* The Code pane asks the server for at most this many entries per directory
+   and the server answers a bare list, so a full page is the only sign that a
+   directory holds more. The title says so rather than presenting the page as
+   the total: masc's own test/ has 955 entries. *)
+let workspace_entries_limit =
+  Server_routes_http_routes_workspace.max_tree_node_limit
+
+let workspace_entries_count_label total =
+  if total = 0 then ""
+  else if total >= workspace_entries_limit then
+    Printf.sprintf " (%d+, more not listed)" total
+  else Printf.sprintf " (%d)" total
 
 let palette_entries (state : state) =
   List.map
@@ -1785,6 +2027,16 @@ let palette_entries (state : state) =
       (fun (p : board_post) ->
         ("post " ^ p.bp_title, Palette_board_post p.bp_id))
       state.board_posts
+  @ (* With a file focused on the Code surface, the cursor line's names are
+       askable: K/D pre-fill the matching prefix, and [palette_matches] ranks
+       a label that starts with the query first, so these lead the list. *)
+  (if state.view = Code && state.code_focus_file = Right_pane then
+     List.concat_map
+       (fun name ->
+         [ ("def " ^ name, Palette_lsp ("definition", name));
+           ("hover " ^ name, Palette_lsp ("hover", name)) ])
+       (code_cursor_line_symbols state)
+   else [])
 
 (* Subsequence match: every query character appears in order. "kadm" finds
    "keeper adm-race". *)
@@ -1804,16 +2056,18 @@ let palette_matches (state : state) =
     String.lowercase_ascii (String.trim state.palette_query)
   in
   let entries = palette_entries state in
-  (* Substring hits rank above subsequence-only hits, both keep entry
-     order inside their rank. *)
-  let substring_hits =
-    List.filter (fun (label, _) -> palette_contains ~needle label) entries
+  (* Three ranks, entry order kept inside each: a label that starts with the
+     query, then one that contains it, then one that only has its characters
+     in order. A K/D pre-fill of "def " therefore lists the cursor line's
+     names before a post that merely mentions "deferred". *)
+  let rank (label, _) =
+    if palette_starts_with ~needle label then Some 0
+    else if palette_contains ~needle label then Some 1
+    else if palette_subsequence ~needle label then Some 2
+    else None
   in
-  let subsequence_hits =
-    List.filter
-      (fun (label, _) ->
-        (not (palette_contains ~needle label))
-        && palette_subsequence ~needle label)
-      entries
-  in
-  substring_hits @ subsequence_hits
+  entries
+  |> List.filter_map (fun entry ->
+         Option.map (fun r -> (r, entry)) (rank entry))
+  |> List.stable_sort (fun (a, _) (b, _) -> Int.compare a b)
+  |> List.map snd

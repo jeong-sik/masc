@@ -71,6 +71,46 @@ val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
     [capabilities] objects. Returns a human-readable error string on
     missing or wrong-typed fields. *)
 
+(** {1 subscriptions/listen (2026-07-28)} *)
+
+type subscription_filter =
+  { tools_list_changed : bool
+  ; prompts_list_changed : bool
+  ; resources_list_changed : bool
+  ; resource_subscriptions : string list
+  }
+(** The notification types one [subscriptions/listen] request asked for. A
+    record of the four the specification defines rather than a list of strings:
+    an unrecognised key in the request cannot become a subscription, and a type
+    added later is a compile error at every match instead of a silent no-op.
+
+    The server {b MUST NOT} send a type the client did not request. *)
+
+val empty_subscription_filter : subscription_filter
+(** Subscribed to nothing. What an absent [notifications] object means. *)
+
+val subscription_filter_of_params : Yojson.Safe.t option -> subscription_filter
+(** Reads [params.notifications]. Every field is optional and omitting one is
+    "equivalent to not subscribing to that notification type", so a missing
+    object is {!empty_subscription_filter} rather than an error. *)
+
+val subscription_filter_to_json : subscription_filter -> Yojson.Safe.t
+(** The subset the server agreed to honour, for the acknowledgement. A type
+    that was not asked for is {b absent} rather than [false], matching "types
+    the server does not support are omitted". *)
+
+val subscription_id_meta_key : string
+(** ["io.modelcontextprotocol/subscriptionId"] — the [_meta] key every message
+    on a subscription stream carries, whose value is the JSON-RPC id of the
+    [subscriptions/listen] request that opened it. *)
+
+val tag_notification_with_subscription :
+  subscription_id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
+(** Adds {!subscription_id_meta_key} to a notification's [params._meta],
+    creating [params] or [_meta] if absent and leaving an id already present
+    alone. On stdio one channel carries every subscription, so a client
+    {b MUST} use this field to demultiplex. *)
+
 (** {1 JSON-RPC Response Builders} *)
 
 val server_info_meta_key : string

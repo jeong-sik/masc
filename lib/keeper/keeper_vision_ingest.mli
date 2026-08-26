@@ -38,9 +38,9 @@ val delegates_media : runtime_id:string -> bool
     [false] as soon as one candidate takes an [Image] itself — RFC-0265 then
     reroutes the turn to that candidate and the answering model sees the pixels.
     A candidate takes one when its transport carries images (Agent Core content
-    blocks, or the Claude Code stream-json array) AND its model declares image
-    input; Codex and Antigravity send prompt text only, so an [Image] cannot
-    reach them whatever the model declares. [true] when no candidate qualifies,
+    blocks, the Claude Code stream-json array, or the Codex turn/start input
+    list) AND its model declares image input; Antigravity sends prompt text
+    only, so an [Image] cannot reach it whatever the model declares. [true] when no candidate qualifies,
     and for an id that resolves to no lane — evicting keeps the image, and the
     alternative (RFC-0265 [No_capable_runtime]) drops it. *)
 

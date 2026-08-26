@@ -532,6 +532,9 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
        ; "projection", `String "full"
+       ; "matching_count", `Int 1
+       ; "returned_count", `Int 1
+       ; "truncated", `Bool false
        ; "kind", `String "snapshot"
        ; "revision", `String "tasks:r1"
        ; "snapshot", `List [ task_item ]
@@ -542,6 +545,9 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
        ; "projection", `String "compact"
+       ; "matching_count", `Int 1
+       ; "returned_count", `Int 1
+       ; "truncated", `Bool false
        ; "kind", `String "snapshot"
        ; "revision", `String "tasks:r1"
        ; "snapshot", `List [ compact_task_item ]
@@ -552,6 +558,9 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        [ "backlog_authority", `String "primary"
        ; "degraded", `Bool false
        ; "projection", `String "compact"
+       ; "matching_count", `Int 1
+       ; "returned_count", `Int 1
+       ; "truncated", `Bool false
        ; "kind", `String "unchanged"
        ; "revision", `String "tasks:r1"
        ]);
@@ -618,7 +627,6 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        ; ( "rollup"
          , `Assoc
              [ "active_count", `Int 1
-             ; "paused_count", `Int 0
              ; "verifying_count", `Int 0
              ; "done_count", `Int 0
              ; "dropped_count", `Int 0

@@ -694,7 +694,10 @@ workspace, so `v` says so and leaves that row to `o`.
 A file browser over the workspace the server serves, one directory level at
 a time (the tree route is lazy). `j`/`k` move the cursor, `/` jumps it to a
 matching entry, Right or `Enter` drills into a directory or opens the file,
-and Left or `Esc` walks back out the way Enter came in.
+and Left or `Esc` walks back out the way Enter came in. With a file
+focused, `/` searches the file's own lines instead of the tree — typing
+moves the line cursor to the first match, Enter keeps the query for
+`n`/`N`, and the view follows the cursor.
 
 Which workspace is a scope the header always names: the project tree by
 default, a keeper's playground after a Changes `v` jump (`alpha ▸ repos/…`),
@@ -709,9 +712,16 @@ than slowly. The pane then answers three more questions in place:
 - `h`/`l` pan sideways by one display cell — the gutter stays put, the
   title says `(col N)`, and a double-width glyph on the boundary pads
   rather than splits.
-- `H` swaps the content for the commits that touched the file
-  (`/api/v1/git/log`), most recent first. An untracked file honestly
-  answers "no commit touches this file".
+- `H` swaps the content for the work over the file: the commits that
+  touched it (`/api/v1/git/log`) woven with the recorded keeper edits
+  (`/api/v1/ide/regions`) into one timeline, newest first. The edits ride
+  only in repository scope — elsewhere the first row says why they are
+  missing, and the commits still show. `Enter` on the top visible row
+  opens it: a commit answers with its pull request link (its subject's
+  `(#N)` against the repository's registered remote), and a keeper edit
+  closes the history and jumps the cursor to the lines it wrote, with `B`
+  holding the way back. An untracked file honestly answers that no commit
+  or recorded edit touches it.
 - `d` swaps it for the working tree's diff against HEAD, drawn by the same
   renderer the Changes surface uses. A clean file says it matches its last
   commit.
@@ -722,12 +732,16 @@ than slowly. The pane then answers three more questions in place:
   `m` answers in repository scope and says why not in the others. Inside
   the notes view `w` adds one through the `$EDITOR` form (kind: Comment /
   Decision / Question / Bookmark); the acting identity is the bearer's.
-- `c` swaps it for the recorded keeper activity — which keeper wrote which
-  lines, through what tool call (or manual note), and when. Same
-  repository-scope rule as the notes.
+- Once the notes or the history have been read (m or H), the lines they
+  anchor to carry a gutter mark — an accent dot for a note, a dim one for
+  a recorded keeper edit. The pane decorates only what is already loaded;
+  it does not fetch to decorate.
 - `K` asks the language server what a name on the cursor line is, and `D`
-  where it is defined. The palette collects the name (the pane has no
-  character cursor); the answer lands beside the title, and a definition
+  where it is defined. The line's own names are the candidates (the pane
+  has no character cursor): one name is asked about at once, several open
+  the palette with each as an entry — typing narrows them, `Enter` runs
+  the highlighted one, and a typed `def <name>` still works — and a line
+  with none says so. The answer lands beside the title, and a definition
   inside the workspace moves the cursor there — another file opens at the
   answered line, and a location outside the workspace (stdlib, a package)
   is named rather than opened. The reverse-video gutter is the cursor
@@ -836,11 +850,10 @@ Per surface:
 | Left / `Esc` | Code | Close the overlay, then the file, then climb a directory |
 | `/`, `n` / `N` | Code | Jump the tree cursor to a match |
 | `h` / `l` | Code, file open | Pan the file sideways by one cell |
-| `H` | Code, file open | The commits that touched the file |
+| `H` | Code, file open | The work over the file: commits and recorded keeper edits, one timeline |
 | `d` | Code, file open | The working tree's diff against HEAD |
 | `m` | Code, file open, repository scope | The notes anchored to the file |
 | `w` | Code, notes view | Add a note through the `$EDITOR` form |
-| `c` | Code, file open, repository scope | The recorded keeper edits over the file |
 | `K` / `D` | Code, file open | Ask the language server: hover / definition of a name on the cursor line |
 | `l` | Keeper detail | Open logs |
 | `c` / `m` | Keeper list or detail | Open message input for the selected keeper |

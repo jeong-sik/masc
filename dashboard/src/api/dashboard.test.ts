@@ -3219,6 +3219,8 @@ describe('runtime.toml raw config API', () => {
       semantics: 'http_provider',
       credential_policy: 'optional',
       requires_non_interactive: false,
+      provider_fields: [],
+      required_provider_fields: [],
     },
     {
       protocol: 'codex-app-server',
@@ -3226,6 +3228,8 @@ describe('runtime.toml raw config API', () => {
       semantics: 'official_client',
       credential_policy: 'forbidden',
       requires_non_interactive: true,
+      provider_fields: [],
+      required_provider_fields: [],
     },
   ]
 

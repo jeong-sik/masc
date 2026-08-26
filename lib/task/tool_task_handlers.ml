@@ -120,6 +120,28 @@ include Tool_task_contract_gate
 
 (* Handlers *)
 
+let parse_task_skills args =
+  match Json_util.assoc_member_opt "skills" args with
+  | None -> Ok []
+  | Some (`List values) ->
+    let rec collect acc index = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest -> collect (value :: acc) (index + 1) rest
+      | value :: _ ->
+        Error
+          (Printf.sprintf
+             "skills[%d] must be a string (received %s)"
+             index
+             (Json_util.kind_name value))
+    in
+    collect [] 0 values
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "skills must be an array of strings (received %s)"
+         (Json_util.kind_name value))
+;;
+
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
     [ "title"
@@ -159,16 +181,10 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
-  (* Skill directory names under <base-path>/.masc/skills/. Blank entries are
-     dropped rather than stored: a name that trims to nothing can never match
-     a directory, and keeping it would put an empty item in the prompt line
-     the keeper reads. *)
-  let skills =
-    Safe_ops.json_string_list "skills" args
-    |> List.filter_map (fun name ->
-      let trimmed = String.trim name in
-      if String.equal trimmed "" then None else Some trimmed)
-  in
+  (* Skill directory names under <base-path>/.masc/skills/. The authoring
+     contract below rejects blank or non-segment values; silently dropping one
+     would make a malformed declaration look as if it had been accepted. *)
+  let skills_result = parse_task_skills args in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
@@ -200,12 +216,24 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
-    match contract_result with
-    | Error error ->
+    match contract_result, skills_result with
+    | Error error, _ | _, Error error ->
         Tool_result.error
           ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
-    | Ok contract ->
+    | Ok contract, Ok skills ->
+        (match
+           Task_skill_reference.validate_all
+             ~base_path:ctx.config.base_path
+             skills
+         with
+         | Error error ->
+           Tool_result.error
+             ~failure_class:Tool_result.Workflow_rejection
+             ~tool_name
+             ~start_time
+             error
+         | Ok () ->
         let add_result =
           let created_by =
             match created_by with
@@ -242,7 +270,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ~failure_class:Tool_result.Workflow_rejection
              ~tool_name
              ~start_time
-             (Workspace.add_task_error_to_string err))
+             (Workspace.add_task_error_to_string err)))
 
 (* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal] — the single validated backend

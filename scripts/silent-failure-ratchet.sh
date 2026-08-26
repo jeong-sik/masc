@@ -81,10 +81,17 @@ count_exception_catchall_swallow() {
 }
 
 count_byte_sliced_text() {
+  # Two textual shapes of the same defect:
+  #   1. String.sub s 0 (min …)            — the #7690 original
+  #   2. String.sub s 0 <bound> guarded by an explicit length check
+  #      (if String.length s > n then String.sub s 0 n) — link_preview:357
+  #      shape, invisible to pattern 1.
   ( set +o pipefail
     cd "$REPO_ROOT"
-    rg -c 'String\.sub\s+\w+\s+0\s+\(min\b' "${RG_SCOPE[@]}" 2>/dev/null \
-      | awk -F: '{s+=$NF} END {print s+0}'
+    local a b
+    a=$(rg -c 'String\.sub\s+\w+\s+0\s+\(min\b' "${RG_SCOPE[@]}" 2>/dev/null | awk -F: '{s+=$NF} END {print s+0}')
+    b=$(rg -c -U 'String\.length\s+\w+\s*>\s*\w+[^;]*;\s*\n\s*String\.sub\s+\w+\s+0\s' "${RG_SCOPE[@]}" 2>/dev/null | awk -F: '{s+=$NF} END {print s+0}')
+    echo $((a + b))
   )
 }
 
@@ -158,14 +165,15 @@ print_counts() {
 }
 
 regenerate() {
-  local v_eto v_err v_exc v_var
+  local v_eto v_err v_exc v_var v_bst
   v_eto=$(count_error_to_ok_silence)
   v_err=$(count_error_result_silence)
   v_exc=$(count_exception_catchall_swallow)
   v_var=$(count_variant_catchall_default)
-  python3 - "$BASELINE_FILE" "$v_eto" "$v_err" "$v_exc" "$v_var" <<'PYEOF'
+  v_bst=$(count_byte_sliced_text)
+  python3 - "$BASELINE_FILE" "$v_eto" "$v_err" "$v_exc" "$v_var" "$v_bst" <<'PYEOF'
 import json, sys
-path, eto, err, exc, var = sys.argv[1], *map(int, sys.argv[2:])
+path, eto, err, exc, var, bst = sys.argv[1], *map(int, sys.argv[2:])
 data = {
     "_comment": "Silent-failure ratchet baseline. Regenerate with scripts/silent-failure-ratchet.sh --regenerate.",
     "_metrics": "See scripts/silent-failure-ratchet.sh METRICS / DESCRIPTIVE_METRICS arrays.",
@@ -173,6 +181,7 @@ data = {
     "error_to_ok_silence":        eto,
     "error_result_silence":       err,
     "exception_catchall_swallow": exc,
+    "byte_sliced_text":           bst,
     "variant_catchall_default":   var,
 }
 with open(path, "w") as f:

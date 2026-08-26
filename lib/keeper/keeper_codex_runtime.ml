@@ -220,12 +220,14 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
   }
 ;;
 
-let codex_stream_callback on_event =
-  match on_event with
-  | None -> None
-  | Some emit ->
+let codex_stream_callback ~keeper_name ~raw_trace_run on_event =
+  match on_event, raw_trace_run with
+  | None, None -> None
+  | _ ->
+    let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
+    let native_tool_indexes = Hashtbl.create 8 in
     let streamed_text = Buffer.create 256 in
     Some
       (function
@@ -261,6 +263,38 @@ let codex_stream_callback on_event =
                Hashtbl.remove tool_indexes call_id;
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
+        | Runtime_codex_app_server.Native_tool_started observation ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Started
+            observation;
+          let index = !next_tool_index in
+          incr next_tool_index;
+          Option.iter
+            (fun call_id -> Hashtbl.replace native_tool_indexes call_id index)
+            observation.call_id;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = Runtime_native_tools.stream_content_type
+               ; tool_id = observation.call_id
+               ; tool_name = observation.tool_name
+               })
+        | Runtime_codex_app_server.Native_tool_finished observation ->
+          Host.record_raw_native_tool
+            ~keeper_name
+            ~raw_trace_run
+            ~phase:`Finished
+            observation;
+          Option.iter
+            (fun call_id ->
+               Option.iter
+                 (fun index ->
+                    Hashtbl.remove native_tool_indexes call_id;
+                    emit (Agent_core.Types.ContentBlockStop { index }))
+                 (Hashtbl.find_opt native_tool_indexes call_id))
+            observation.call_id
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text
@@ -557,11 +591,21 @@ let run_without_lifecycle ~runtime_id ~keeper_name
           (Llm_provider.Reasoning_effort.to_string effective)
       | _ -> () );
     let* developer_messages, history = project_messages prepared.messages in
-    let* prompt =
+    let* prompt, images =
       match goal_blocks with
-      | None -> Ok goal
+      | None -> Ok (goal, [])
       | Some blocks ->
-        Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+        let* text, images =
+          Host.text_and_images_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+        in
+        Ok
+          ( text
+          , List.map
+              (fun (image : Host.image_block) ->
+                { Runtime_codex_app_server.media_type = image.Host.media_type
+                ; base64_data = image.Host.base64_data
+                })
+              images )
     in
     let developer_instructions =
       (prepared.system_prompt :: native_posture_note native_posture)
@@ -649,6 +693,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
           client_config
           ~prompt
+          ~images
       with
       | Ok () -> Ok ()
       | Error error -> Error (codex_error_to_core_error error)
@@ -817,7 +862,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let turn_result =
       try
-        let on_stream_event = codex_stream_callback on_event in
+        let on_stream_event =
+          codex_stream_callback ~keeper_name ~raw_trace_run on_event
+        in
         (match
        Runtime_codex_app_server.run_turn
          ~mgr:(Eio.Stdenv.process_mgr env)
@@ -856,6 +903,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
                ~updated_at:(Time_compat.now ())))
          client_config
          ~prompt
+         ~images
      with
      | Error (Runtime_codex_app_server.Stopped_by_host stop) ->
        recovery_failure := Keeper_official_client_session_store.Host_hook_failed;
@@ -941,6 +989,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
            ~capture
            ~attempt_details_source:"codex_app_server"
            ~agent_core_internal_runtime_allowed:false
+           ~usage_scope:Runtime_usage_scope.Usage_scope_unavailable
            ()
        in
        Ok

@@ -8,7 +8,7 @@
 
 Verify that `Pipeline.run_turn` emits `Telemetry_event.t` variants into
 `Telemetry_bus` when executing against a mocked LLM provider that produces
-chunks.  This is an end-to-end test of the OAS signal emission layer (Phase 1)
+chunks.  This is an end-to-end test of the agent_core signal emission layer (Phase 1)
 without involving a real network or MASC consumer.
 
 ## 2. Approach

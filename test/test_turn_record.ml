@@ -122,6 +122,7 @@ let sample_record () : Turn_record.t =
       ; output_tokens = Some 412
       ; cache_creation_input_tokens = Some 2048
       ; cache_read_input_tokens = Some 15000
+      ; scope = Runtime_usage_scope.Per_request
       }
   ; ts = 1781200000.5
   }
@@ -157,6 +158,21 @@ let test_cache_counts_round_trip_and_stay_optional () =
       decoded.usage.cache_read_input_tokens;
     check (option int) "the rest of the row is unaffected" (Some 18000)
       decoded.usage.input_tokens
+;;
+
+let test_historical_row_without_usage_scope_is_unavailable () =
+  let historical =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields -> `Assoc (List.remove_assoc "usage_scope" fields)
+    | other -> other
+  in
+  match Turn_record.of_json historical with
+  | Error detail -> failf "historical row failed to decode: %s" detail
+  | Ok decoded ->
+    check bool
+      "missing scope is not guessed"
+      true
+      (decoded.usage.scope = Runtime_usage_scope.Usage_scope_unavailable)
 ;;
 
 let test_codec_roundtrip () =
@@ -276,6 +292,7 @@ let test_codec_optional_fields_absent () =
         ; output_tokens = None
         ; cache_creation_input_tokens = None
         ; cache_read_input_tokens = None
+        ; scope = Runtime_usage_scope.Usage_scope_unavailable
         }
     }
   in
@@ -823,6 +840,8 @@ let () =
       , [ test_case "roundtrip" `Quick test_codec_roundtrip
         ; test_case "cache counts round-trip and stay optional" `Quick
             test_cache_counts_round_trip_and_stay_optional
+        ; test_case "historical row without usage scope is unavailable" `Quick
+            test_historical_row_without_usage_scope_is_unavailable
         ; test_case "optional fields absent" `Quick test_codec_optional_fields_absent
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick

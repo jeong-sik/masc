@@ -14,6 +14,7 @@ type t = {
   target : target;
   focus : focus;
   draft : string;
+  staged_images : int;
 }
 
 (* One row, and only where the surface above can still meet its own fixed-row
@@ -30,7 +31,10 @@ let prompt composer =
   match composer.target with
   | No_target -> "no keeper selected"
   | Unreachable { keeper; reason } -> Printf.sprintf "%s — %s" keeper reason
-  | Ready keeper -> Printf.sprintf "to %s" keeper
+  | Ready keeper ->
+    if composer.staged_images = 0
+    then Printf.sprintf "to %s" keeper
+    else Printf.sprintf "to %s [%d image]" keeper composer.staged_images
 
 let accepts_input composer =
   match (composer.focus, composer.target) with

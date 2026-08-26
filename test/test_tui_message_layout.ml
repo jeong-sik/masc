@@ -6,7 +6,15 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 let entry ?(timestamp = "12:34:56")
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
-  { style; timestamp; role_label = role; request_label; body; markdown_source }
+  { style
+  ; timestamp
+  ; role_label = role
+  ; role_label_mark_cells =
+      Layout.role_label_mark_cells ~style ()
+  ; request_label
+  ; body
+  ; markdown_source
+  }
 
 let test_keeps_latest_reply () =
   let entries =
@@ -259,20 +267,59 @@ let test_input_cursor_uses_visible_terminal_cells () =
     (column 80 (Layout.input_viewport ~max_cells:75 (String.make 100 'a')));
   check int "tiny terminal cursor stays positive" 3 (column 4 "");
   (* Metadata rows align because every role label renders at one cell width. *)
+  let badge ?(style = Layout.Keeper) label =
+    Layout.align_role_label ~style label
+  in
   check int "short role label pads to the column"
-    16 (Layout.display_width (Layout.align_role_label "you"));
+    16 (Layout.display_width (badge "you"));
   check int "wide-char role label pads by cells not bytes"
-    16 (Layout.display_width (Layout.align_role_label "한글"));
+    16 (Layout.display_width (badge "한글"));
   (* Right-aligned, so the cut is at the head: two canaries differ only in
      their tails and a head-preserving cut would draw them identically. *)
-  check string "long role label loses its head, not its tail" "…23456789abcdefg"
-    (Layout.align_role_label "0123456789abcdefg");
+  check string "long role label loses its head, not its tail"
+    ("\xe2\x97\x8f " ^ "…456789abcdefg")
+    (badge "0123456789abcdefg");
   check string "column-width role label only pads"
-    (String.make 1 ' ' ^ "0123456789abcde")
-    (Layout.align_role_label "0123456789abcde");
+    ("\xe2\x97\x8f " ^ "0123456789abcd")
+    (badge "0123456789abcd");
   check string "short role label pads on the left"
-    (String.make 13 ' ' ^ "you")
-    (Layout.align_role_label "you");
+    ("\xe2\x97\x8f " ^ String.make 11 ' ' ^ "you")
+    (badge "you");
+  (* The mark sits outside the truncation. Inside it, the labels that overrun
+     would be the ones that lost their glyph -- and those are the names a
+     reader most needs help telling apart. *)
+  check bool "an overrunning label keeps its speaker mark" true
+    (String.starts_with ~prefix:(Layout.speaker_mark Layout.User)
+       (badge ~style:Layout.User "keeper-canary-10t-cdx-sol-xhigh-r2-agent"));
+  (* Every style is distinguishable with no colour at all, which is what
+     NO_COLOR leaves a reader. *)
+  let marks =
+    List.map Layout.speaker_mark
+      [ Layout.User; Layout.Keeper; Layout.Status; Layout.Error; Layout.Tool;
+        Layout.Thinking ]
+  in
+  check int "every speaker has its own mark" (List.length marks)
+    (List.length (List.sort_uniq String.compare marks));
+  (* The streaming turn says "live" where a settled row says "23:38". The
+     gutter's width is what the body's width is taken from, so one cell of
+     difference wrapped the live body differently from the rows it was about
+     to become, and the text re-wrapped when the turn settled. *)
+  let gutter_width timestamp =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:80 ~height:200
+      [ entry ~timestamp Layout.Keeper (badge "omega") "req" "body" ]
+    |> List.filter_map (fun (row : Layout.row) ->
+         let cells = Layout.display_width row.gutter in
+         if cells = 0 then None else Some cells)
+    |> function
+    | width :: _ -> width
+    | [] -> 0
+  in
+  (* Asserted non-zero first: rows without a margin measure zero on both
+     sides, and a test that compares two zeroes passes whatever the clock
+     does. *)
+  check bool "the row has a margin to measure" true (gutter_width "23:38:42" > 0);
+  check int "a streaming row's gutter matches a settled row's"
+    (gutter_width "23:38:42") (gutter_width "live");
   (* Body width comes from what the badge leaves. Sizing the badge from the
      loaded labels meant one long speaker re-wrapped every body on the pane,
      the row count moved, and [msg_scroll] -- rows back from the newest --
@@ -283,14 +330,14 @@ let test_input_cursor_uses_visible_terminal_cells () =
     Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:80
       ~height:200
       [ entry Layout.Keeper
-          (Layout.align_role_label
+          (Layout.align_role_label ~style:Layout.Keeper
              ~column:(Layout.chat_role_label_width ~pane_cells:80) label)
           "tui-..cccccccc" body
       ]
     |> List.length
   in
   check int "a long speaker name does not re-wrap the pane"
-    (wrapped "rondo")
+    (wrapped "omega")
     (wrapped "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent Â· agent");
   let supported rows cols status_rows =
     Layout.message_viewport_supported ~terminal_rows:rows ~terminal_cols:cols
@@ -391,6 +438,7 @@ let transcript count =
             "turn %d closed and wrote a line long enough that it wraps more \
              than once at the widths this test uses"
             index;
+        role_label_mark_cells = 0;
         markdown_source = Layout.Markdown_streaming;
       })
 
@@ -783,6 +831,37 @@ let test_scrolling_back_moves_the_window () =
   check bool "and not the newest ones" false
     (List.exists (fun text -> String.equal text "  line-9") window)
 
+(* [msg_scroll] counts rows back from the newest, and the field says what it
+   is for:
+
+     Held rather than derived: an operator reading back should stay where
+     they are while the keeper keeps talking.
+
+   Counting from the newest end does the opposite. A reply arriving adds rows
+   at that end, so the same count lands that many rows further down and the
+   window slides toward the new text the operator was not reading. *)
+let test_a_new_message_does_not_move_a_scrolled_window () =
+  let window requested entries =
+    Layout.clamped_scrolled_rows ~inner_width:40 ~height:4 ~requested entries
+    |> snd |> text_of
+  in
+  let before = window 4 ten_entries in
+  let arrival =
+    entry ~timestamp:"12:35:00" Layout.Keeper "keeper.one" "tui-..dddddddd"
+      "a reply the operator has not scrolled to"
+  in
+  let after_arrival = ten_entries @ [ arrival ] in
+  (* The defect: the count alone lands that many rows further down, so the
+     window slides toward the reply. *)
+  check bool "the count alone does not hold the position" false
+    (window 4 after_arrival = before);
+  (* The contract the pane relies on: give the count back the rows that
+     arrived and the operator is looking at the same text. *)
+  let grew = Layout.total_rows ~inner_width:40 [ arrival ] in
+  check bool "and the reply is not free" true (grew > 0);
+  check (list string) "the operator keeps reading the same rows" before
+    (window (4 + grew) after_arrival)
+
 let test_max_scroll_stops_at_the_oldest_row () =
   let height = 6 in
   let limit = Layout.max_scroll ~inner_width:40 ~height ten_entries in
@@ -884,18 +963,31 @@ let test_bare_links_are_dressed_and_bounded () =
 let test_badge_is_a_budget_not_a_measurement () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
   check int "a wide pane spends the budget and no more" 24 width;
-  check string "the name the old constant cut still reads whole"
-    "codex-mcp-client"
-    (String.trim (Layout.align_role_label ~column:width "codex-mcp-client"))
+  (* Whole, not merely present: the assertion is on the tail, because the
+     badge pads between the mark and the name and [String.trim] cannot reach
+     that padding. *)
+  check bool "the name the old constant cut still reads whole" true
+    (String.starts_with ~prefix:(Layout.speaker_mark Layout.Keeper)
+       (Layout.align_role_label ~column:width ~style:Layout.Keeper
+          "codex-mcp-client")
+     && String.ends_with ~suffix:"codex-mcp-client"
+          (Layout.align_role_label ~column:width ~style:Layout.Keeper
+             "codex-mcp-client"))
 
 let test_badge_keeps_the_tail_when_it_cannot_fit () =
   let width = Layout.chat_role_label_width ~pane_cells:200 in
   let long = "keeper-canary-10t-cdx-sol-xhigh-r2-20260820-agent \xc2\xb7 agent" in
-  let drawn = Layout.align_role_label ~column:width long in
+  let drawn = Layout.align_role_label ~column:width ~style:Layout.Keeper long in
   check int "the badge still spends exactly its budget" width
     (Layout.display_width drawn);
+  (* The mark leads and the ellipsis follows it: the cut is still at the head
+     of the name, and the glyph is outside the cut so the longest labels are
+     not the ones that lose it. *)
+  let mark = Layout.speaker_mark Layout.Keeper ^ " " in
+  check bool "the mark leads the badge" true
+    (String.starts_with ~prefix:mark drawn);
   check bool "the head is what goes" true
-    (String.length drawn > 3 && String.sub drawn 0 3 = "\xe2\x80\xa6");
+    (String.starts_with ~prefix:(mark ^ "\xe2\x80\xa6") drawn);
   check bool "the surface survives the cut" true
     (let suffix = "agent" in
      let n = String.length drawn and m = String.length suffix in
@@ -932,7 +1024,7 @@ let test_every_row_gets_the_same_badge () =
   List.iter
     (fun label ->
       check int ("badge width for " ^ label) width
-        (Layout.display_width (Layout.align_role_label ~column:width label)))
+        (Layout.display_width (Layout.align_role_label ~column:width ~style:Layout.Keeper label)))
     [ "you"; "analyst"; "tools"; "thinking" ]
 
 (* The origin heading costs a row per message. Folding it into the margin is
@@ -1171,6 +1263,8 @@ let () =
             test_unscrolled_is_the_existing_window
         ; test_case "scrolling back moves the window" `Quick
             test_scrolling_back_moves_the_window
+        ; test_case "a new message does not move a scrolled window" `Quick
+            test_a_new_message_does_not_move_a_scrolled_window
         ; test_case "max scroll stops at the oldest row" `Quick
             test_max_scroll_stops_at_the_oldest_row
         ; test_case "badge is a budget, not a measurement" `Quick

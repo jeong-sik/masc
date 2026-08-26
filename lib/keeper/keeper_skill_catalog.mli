@@ -1,8 +1,7 @@
 (** SKILL.md-backed catalog of Keeper skills (RFC skills-as-tools).
 
-    {!Skill_definition} is the parse authority for one SKILL.md file: it owns
-    the frontmatter contract (required [name] / [description], unknown keys
-    ignored per the Agent Skills standard, directory-name agreement). This
+    {!Agent_core.Skill_document} is the parse authority for one SKILL.md file.
+    This
     module never reads frontmatter itself. What it adds is the layer above one
     file: assembling documents into a duplicate-free, name-sorted catalog, and
     detecting the composition surface.
@@ -23,7 +22,7 @@ type skill = private
   ; description : string
   ; body : string
         (** Everything after the frontmatter, including any composition
-            fence, exactly as {!Skill_definition} returned it. *)
+            fence, exactly as {!Agent_core.Skill_document} returned it. *)
   ; surface : surface
   }
 
@@ -32,7 +31,7 @@ type t
 type error =
   | Definition_rejected of
       { directory : string
-      ; error : Skill_definition.load_error
+      ; diagnostics : Agent_core.Skill_document.diagnostic list
       }
   | Unterminated_composition_block of { skill : string }
   | Multiple_composition_blocks of
@@ -55,7 +54,7 @@ type error =
 
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
-    {!Skill_definition.load} enforces the frontmatter contract against it. A
+    {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
     composition block must declare exactly one composition and its [name]
     must equal the skill name. *)
 

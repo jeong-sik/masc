@@ -16,7 +16,7 @@ type t = skill list
 type error =
   | Definition_rejected of
       { directory : string
-      ; error : Skill_definition.load_error
+      ; diagnostics : Agent_core.Skill_document.diagnostic list
       }
   | Unterminated_composition_block of { skill : string }
   | Multiple_composition_blocks of
@@ -81,9 +81,15 @@ let composition_of_block ~skill block =
 ;;
 
 let parse_skill ~directory content =
-  match Skill_definition.load ~directory_name:directory ~contents:content with
-  | Error error -> Error (Definition_rejected { directory; error })
-  | Ok { Skill_definition.name; description; body; model_invocable } ->
+  match Agent_core.Skill_document.decode ~directory_name:directory content with
+  | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
+  | Loaded { document; _ } ->
+    let { Agent_core.Skill_document.name; description; body; extensions; _ } = document in
+    let model_invocable =
+      match List.assoc_opt "disable-model-invocation" extensions with
+      | Some (Boolean true) -> false
+      | Some _ | None -> true
+    in
     (match composition_blocks body with
      | Error `Unterminated -> Error (Unterminated_composition_block { skill = name })
      | Ok [] -> Ok { name; description; body; surface = Instruction }
@@ -142,11 +148,13 @@ let surface_to_string = function
 ;;
 
 let error_to_string = function
-  | Definition_rejected { directory; error } ->
+  | Definition_rejected { directory; diagnostics } ->
     Printf.sprintf
       "skill directory %S: %s"
       directory
-      (Skill_definition.load_error_to_string error)
+      (String.concat
+         "; "
+         (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics))
   | Unterminated_composition_block { skill } ->
     Printf.sprintf
       "skill %S: a %s block is never closed"

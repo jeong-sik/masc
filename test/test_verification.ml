@@ -2147,6 +2147,92 @@ let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
         ascii_prefix content
     | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
 
+(* Filling the budget in submission order let one large-but-under-cap artifact
+   spend it all and push every later item to a link, so which evidence the
+   judge could read depended on the order the producer happened to list it in.
+   The big artifact goes first here; the small ones must still arrive with
+   their content. *)
+let test_transport_projection_keeps_the_most_items_it_can () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir = Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    write_keeper_profile
+      ~base_path
+      ~keeper_name:"keeper-omega-agent"
+      ~sandbox_profile:"docker";
+    let cap = VS.verification_evidence_max_bytes in
+    let sizes = [ "big", cap - 1_000; "s1", 400; "s2", 400; "s3", 400 ] in
+    List.iter
+      (fun (name, size) ->
+        Fs_compat.save_file
+          (Filename.concat artifact_dir (name ^ "-proof.json"))
+          (String.make size 'x'))
+      sizes;
+    let request_id = "vrf-transport-most-items" in
+    let evidence_snapshot =
+      VS.snapshot_submitted_evidence_json
+        ~base_path
+        ~worker:"keeper-omega-agent"
+        (List.map (fun (name, _) -> "artifact:" ^ name ^ "-proof.json") sizes)
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"keeper-omega-agent"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available _ as access ->
+      let rendered =
+        match VS.submitted_evidence_access_transport_to_yojson access with
+        | `Assoc fields ->
+          (match List.assoc "items" fields with
+           | `List rendered ->
+             List.map
+               (function
+                 | `Assoc item -> item
+                 | _ -> Alcotest.fail "transport item must be an object")
+               rendered
+           | _ -> Alcotest.fail "transport items must be a list")
+        | _ -> Alcotest.fail "transport access must be an object"
+      in
+      let reference_of item =
+        match List.assoc_opt "reference" item with
+        | Some (`String value) -> value
+        | _ -> ""
+      in
+      let carried =
+        List.filter_map
+          (fun item ->
+            if List.mem_assoc "content" item then Some (reference_of item) else None)
+          rendered
+      in
+      Alcotest.(check int) "three small artifacts keep their content" 3 (List.length carried);
+      List.iter
+        (fun name ->
+          Alcotest.(check bool)
+            ("small artifact " ^ name ^ " is readable")
+            true
+            (List.mem ("artifact:" ^ name ^ "-proof.json") carried))
+        [ "s1"; "s2"; "s3" ];
+      Alcotest.(check bool)
+        "the one that does not fit is the large one"
+        false
+        (List.mem "artifact:big-proof.json" carried);
+      Alcotest.(check bool)
+        "submission order is preserved in the emitted list"
+        true
+        (List.map reference_of rendered
+         = List.map (fun (name, _) -> "artifact:" ^ name ^ "-proof.json") sizes)
+    | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
+;;
+
 (* #29596: the per-item cap bounds one artifact, not their sum. A submission of
    many sub-cap artifacts still built a request no verifier_exact slot could
    carry — 12 artifacts, every one [truncated=false], 1,005,015 bytes in the
@@ -2822,6 +2908,8 @@ let () =
         test_transport_projection_omits_truncated_prefix;
       Alcotest.test_case "transport projection bounds the evidence total" `Quick
         test_transport_projection_bounds_the_evidence_total;
+      Alcotest.test_case "transport projection keeps the most items it can" `Quick
+        test_transport_projection_keeps_the_most_items_it_can;
       Alcotest.test_case "truncated snapshot items names over-cap artifacts"
         `Quick
         test_truncated_snapshot_items_names_only_truncated_artifacts;

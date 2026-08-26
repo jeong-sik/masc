@@ -1218,8 +1218,20 @@ let tasks_list_output_schema =
       ; ( "snapshot"
         , `Assoc
             [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
+      ; "matching_count", `Assoc [ "type", `String "integer" ]
+      ; "returned_count", `Assoc [ "type", `String "integer" ]
+      ; "truncated", `Assoc [ "type", `String "boolean" ]
       ]
-    ~required:[ "backlog_authority"; "degraded"; "projection"; "kind"; "revision" ]
+    ~required:
+      [ "backlog_authority"
+      ; "degraded"
+      ; "projection"
+      ; "kind"
+      ; "revision"
+      ; "matching_count"
+      ; "returned_count"
+      ; "truncated"
+      ]
 ;;
 
 (* Producer: Keeper_artifact_read.page_to_json — the single success path. *)
@@ -1291,13 +1303,12 @@ let goal_list_output_schema =
         , object_output_schema
             ~properties:
               [ "active_count", `Assoc [ "type", `String "integer" ]
-              ; "paused_count", `Assoc [ "type", `String "integer" ]
               ; "verifying_count", `Assoc [ "type", `String "integer" ]
               ; "done_count", `Assoc [ "type", `String "integer" ]
               ; "dropped_count", `Assoc [ "type", `String "integer" ]
               ]
             ~required:
-              [ "active_count"; "paused_count"; "verifying_count"; "done_count"
+              [ "active_count"; "verifying_count"; "done_count"
               ; "dropped_count" ] )
       ]
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]

@@ -58,7 +58,7 @@ type config =
     (** Bound on the silent wait for the FIRST streaming provider event
         (TTFT/prefill). [stream_idle_timeout_s] arms only after that event;
         when [None], AGENT_CORE's resolver falls back to [body_timeout_s],
-        then to [stream_idle_timeout_s] (RFC-OAS-037). *)
+        then to [stream_idle_timeout_s] (RFC-AC-037). *)
   ; body_timeout_s : float option
     (** Total HTTP body-consumption ceiling for non-streaming AGENT_CORE completion
         paths. Streaming paths deliberately ignore this knob so active long

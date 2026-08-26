@@ -32,6 +32,12 @@ let conditional_tokens =
     ; ("white", white, "\027[37m")
     ; ("default_fg", default_fg, "\027[39m")
     ; ("gray", gray, "\027[90m")
+    ; ("bright_red", bright_red, "\027[91m")
+    ; ("bright_green", bright_green, "\027[92m")
+    ; ("bright_yellow", bright_yellow, "\027[93m")
+    ; ("bright_blue", bright_blue, "\027[94m")
+    ; ("bright_magenta", bright_magenta, "\027[95m")
+    ; ("bright_cyan", bright_cyan, "\027[96m")
     ; ("bg_removed", bg_removed, "\027[48;5;52m")
     ; ("bg_added", bg_added, "\027[48;5;22m")
     ]
@@ -78,9 +84,14 @@ let check_rgb label (red, green, blue) color =
     , Masc_tui_terminal_palette.blue color )
 ;;
 
+let no_ansi () =
+  Array.make Masc_tui_terminal_palette.ansi_slot_count None
+;;
+
 let palette background =
   Masc_tui_terminal_palette.of_responses
     ~foreground:(Some (rgb 255 255 255)) ~background:(Some background)
+    ~ansi:(no_ansi ())
 ;;
 
 let user_background ~colors_enabled ~level background =
@@ -90,13 +101,124 @@ let user_background ~colors_enabled ~level background =
     (palette background)
 ;;
 
+(* The one property that matters: a receded row must move toward the
+   background, whichever background that is. SGR 2 only ever moves toward
+   black, so on a light terminal it moves the wrong way. *)
+let two_tone_palette ~foreground ~background =
+  Masc_tui_terminal_palette.of_responses ~foreground:(Some foreground)
+    ~background:(Some background) ~ansi:(no_ansi ())
+;;
+
+let recede ?(theme_mode = None) ~colors_enabled ~level palette =
+  Masc_tui_theme.For_testing.recede ~colors_enabled ~dim:"DIM" ~gray:"GRAY"
+    ~theme_mode
+    ~project:
+      (Masc_tui_terminal_palette.For_testing.best_color_for_level ~level)
+    palette
+;;
+
+let blended ~foreground ~background =
+  match Masc_tui_theme.For_testing.recede_rgb ~foreground ~background with
+  | Some color -> color
+  | None -> Alcotest.fail "expected a receded colour, got none"
+;;
+
+let test_recede_moves_toward_the_background () =
+  (* Dark terminal: white text on black recedes by getting darker, which is
+     also the direction SGR 2 moves, so this case was already right. *)
+  check_rgb "on a dark terminal receding darkens the text" (153, 153, 153)
+    (blended ~foreground:(rgb 255 255 255) ~background:(rgb 0 0 0));
+  (* Light terminal: black text on white recedes by getting lighter. SGR 2
+     blends toward black, so it would have darkened this row instead --
+     the inversion this token exists to remove. *)
+  check_rgb "on a light terminal receding lightens the text" (102, 102, 102)
+    (blended ~foreground:(rgb 0 0 0) ~background:(rgb 255 255 255))
+;;
+
+(* Receded text is still text. Blending it all the way to the background
+   would hide it, so the step has to leave it legible. *)
+let contrast_ratio a b =
+  let channel value =
+    let v = float_of_int value /. 255. in
+    if v <= 0.03928 then v /. 12.92
+    else ((v +. 0.055) /. 1.055) ** 2.4
+  in
+  let luminance color =
+    (0.2126 *. channel (Masc_tui_terminal_palette.red color))
+    +. (0.7152 *. channel (Masc_tui_terminal_palette.green color))
+    +. (0.0722 *. channel (Masc_tui_terminal_palette.blue color))
+  in
+  let x = luminance a and y = luminance b in
+  let lighter = Float.max x y and darker = Float.min x y in
+  (lighter +. 0.05) /. (darker +. 0.05)
+;;
+
+let test_receded_text_stays_legible () =
+  List.iter
+    (fun (name, foreground, background) ->
+      let receded = blended ~foreground ~background in
+      let ratio = contrast_ratio receded background in
+      Alcotest.check bool
+        (Printf.sprintf "%s keeps receded text above the 3:1 floor (%.2f)" name
+           ratio)
+        true (ratio >= 3.0))
+    [ ("black on white", rgb 0 0 0, rgb 255 255 255)
+    ; ("white on black", rgb 255 255 255, rgb 0 0 0)
+    ; ("solarized dark", rgb 131 148 150, rgb 0 43 54)
+    ; ("solarized light", rgb 101 123 131, rgb 253 246 227)
+    ]
+;;
+
+let test_recede_falls_back_where_it_cannot_compute () =
+  let light = two_tone_palette ~foreground:(rgb 0 0 0) ~background:(rgb 255 255 255) in
+  check str "a truecolor terminal gets the computed colour"
+    "\027[38;2;102;102;102m"
+    (recede ~colors_enabled:true
+       ~level:Masc_tui_terminal_palette.True_color light);
+  check str "ANSI256 gets the nearest fixed xterm entry" "\027[38;5;241m"
+    (recede ~colors_enabled:true ~level:Masc_tui_terminal_palette.Ansi256 light);
+  List.iter
+    (fun level ->
+      check str "a capability that cannot carry the colour keeps SGR 2" "DIM"
+        (recede ~colors_enabled:true ~level light))
+    [ Masc_tui_terminal_palette.Ansi16; Masc_tui_terminal_palette.Unknown ];
+  check str "a terminal that never answered keeps SGR 2" "DIM"
+    (recede ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color
+       None);
+  (* No palette but the page was reported on its own -- a multiplexer, which
+     passes DECSET 996 and 2031 through and answers no OSC colour query. SGR 2
+     blends toward black, so on a light page it walks away from it. *)
+  check str "a light page with no palette recedes with bright black" "GRAY"
+    (recede ~theme_mode:(Some Masc_tui_terminal_palette.Light)
+       ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color None);
+  check str "a dark page with no palette keeps SGR 2" "DIM"
+    (recede ~theme_mode:(Some Masc_tui_terminal_palette.Dark)
+       ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color None);
+  (* A page the terminal did answer for is measured, not guessed at. *)
+  check bool "a known palette outranks the reported page" true
+    (String.equal
+       (recede ~theme_mode:(Some Masc_tui_terminal_palette.Light)
+          ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color
+          light)
+       (recede ~colors_enabled:true
+          ~level:Masc_tui_terminal_palette.True_color light));
+  check str "disabled colours draw nothing at all" ""
+    (recede ~colors_enabled:false ~level:Masc_tui_terminal_palette.True_color
+       light)
+;;
+
 let test_user_message_background_blend () =
   let blend = Masc_tui_theme.For_testing.user_message_background_rgb in
   check_rgb "dark blends twelve percent toward white" (30, 30, 30)
     (blend (rgb 0 0 0));
   check_rgb "light blends four percent toward black" (244, 244, 244)
     (blend (rgb 255 255 255));
-  check_rgb "the weighted luminance picks the dark branch" (206, 118, 74)
+  (* A mid orange. Rec.601 luma put it at 0.487 and called the page dark;
+     perceived lightness puts it at 0.614 and calls it light, which is the
+     answer the page itself gives -- black text on it reads at 5.32 and white
+     at 3.94. One measure of lightness now, so this and the direction a colour
+     moves to be read cannot disagree about the same terminal. *)
+  check_rgb "a saturated mid tone reads as the light page it is" (192, 96, 48)
     (blend (rgb 200 100 50))
 ;;
 
@@ -145,18 +267,18 @@ let test_colour_environment_policy () =
 
 let test_status_names_the_exact_hues () =
   let open Masc_tui_theme in
-  check str "ok is green" Sgr.green (status Ok);
-  check str "warn is yellow" Sgr.yellow (status Warn);
-  check str "bad is red" Sgr.red (status Bad);
-  check str "info is cyan" Sgr.cyan (status Info);
-  check str "muted is dim" Sgr.dim (status Muted)
+  check str "ok is vivid green" Sgr.bright_green (status Ok);
+  check str "warn is vivid yellow" Sgr.bright_yellow (status Warn);
+  check str "bad is vivid red" Sgr.bright_red (status Bad);
+  check str "info is vivid cyan" Sgr.bright_cyan (status Info);
+  check str "muted remains readable gray" Sgr.gray (status Muted)
 
 let test_tone_is_three_values () =
   let open Masc_tui_theme in
   check str "normal needs no escape" "" (tone Normal);
   check str "dim is the dim weight" Sgr.dim (tone Dim);
-  check str "accent is the one accent hue" Sgr.cyan (tone Accent);
-  check str "border focus shares the accent" Sgr.cyan border_focus
+  check str "accent is the vivid accent hue" Sgr.bright_cyan (tone Accent);
+  check str "border focus shares the accent" Sgr.bright_cyan border_focus
 
 let test_glyphs_hold_their_bytes () =
   let open Masc_tui_theme.Glyph in
@@ -246,5 +368,11 @@ let () =
             `Quick test_user_message_background_blend
         ; Alcotest.test_case "strip_sgr removes only styles" `Quick
             test_strip_sgr_removes_only_styles
+        ; Alcotest.test_case "recede moves toward the background" `Quick
+            test_recede_moves_toward_the_background
+        ; Alcotest.test_case "receded text stays legible" `Quick
+            test_receded_text_stays_legible
+        ; Alcotest.test_case "recede falls back where it cannot compute" `Quick
+            test_recede_falls_back_where_it_cannot_compute
         ] )
     ]

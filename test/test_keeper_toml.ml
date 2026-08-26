@@ -995,9 +995,10 @@ let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
   if violations <> []
   then
     failf
-      "concrete Keeper identities remain in OCaml source (%d):\n  %s"
+      "concrete Keeper identities remain in OCaml source (%d):\n  %s\n\nA fixture needs a name, and an ordinary word eventually picks a live Keeper's. Rename it to one absent from %s. Three fixtures in one file hit this on 2026-08-25, each from an unrelated PR, because nothing tells an author which words are taken until CI does."
       (List.length violations)
       (String.concat "\n  " violations)
+      (concrete_keeper_inventory_path repo)
 ;;
 
 let with_temp_dir prefix f =

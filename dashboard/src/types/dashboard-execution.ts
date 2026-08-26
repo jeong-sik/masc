@@ -512,7 +512,7 @@ export interface DashboardPlanningResponse {
   }
 }
 
-// --- Goal Tree (hierarchical goal decomposition) ---
+// --- Flat Goal projection (`children` is an always-empty wire compatibility field) ---
 
 export interface GoalTreeTask {
   id: string

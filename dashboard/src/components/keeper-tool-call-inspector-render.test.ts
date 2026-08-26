@@ -84,6 +84,50 @@ describe('KeeperToolCallInspector render', () => {
     expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
 
+  // A tool that behaved unexpectedly is one an operator wants to open, and
+  // the row alone did not say which file to open. The server derives the path
+  // from the tool name; a built-in ships no file and sends no field, so the
+  // line is absent rather than showing an empty path.
+  it('names the file a tool was defined in, and omits the line for a built-in', async () => {
+    const entry = (tool: string, definition_source?: string) => ({
+      ts: 1_777_100_000,
+      keeper: 'analyst',
+      tool,
+      input: {},
+      output: '{}',
+      success: true,
+      duration_ms: 12,
+      ...(definition_source === undefined ? {} : { definition_source }),
+    })
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 2,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [entry('keeper_broadcast', 'tools/keeper_broadcast.toml'), entry('Execute')],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const toggles = Array.from(
+      container.querySelectorAll('button[aria-expanded="false"]'),
+    ) as HTMLButtonElement[]
+    expect(toggles.length).toBeGreaterThanOrEqual(2)
+    await act(async () => {
+      toggles.forEach(toggle => toggle.click())
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).toContain('tools/keeper_broadcast.toml')
+    expect(container.textContent?.match(/defined in:/g)?.length ?? 0).toBe(1)
+  })
+
   it('links recorded path targets back to the Code IDE route', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',

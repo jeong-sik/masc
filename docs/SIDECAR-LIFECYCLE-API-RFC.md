@@ -22,10 +22,11 @@ GET   /api/v1/sidecar/:id/status   →  200 OK, returns status.json
 GET   /api/v1/sidecar/:id/logs     →  200 OK, last N lines (?lines=N, default 200)
 ```
 
-`:id` ∈ `{imessage, telegram}` — the connectors that run as external
-sidecar processes. Discord (`Server_discord_in_process_gateway`) and Slack
-(`Server_slack_in_process_gateway`) run in-process and are not sidecar ids.
-Anything else returns
+`:id` ∈ `{telegram}` — the one connector left that runs as an external
+sidecar process. Discord (`Server_discord_in_process_gateway`), Slack
+(`Server_slack_in_process_gateway`) and iMessage
+(`Server_imessage_in_process_gateway`) run in-process and are not sidecar ids;
+`?name=imessage` has returned 404 since #30531. Anything else returns
 `400 Bad Request {"ok":false,"error":"unknown sidecar id"}`.
 
 Auth model (mirroring `Server_routes_http_routes_channel_gate`):
@@ -72,8 +73,8 @@ open Server_auth
 open Server_utils
 module Http = Http_server_eio
 
-(* Discord and Slack run in-process; not sidecar ids. *)
-let known_ids = ["imessage"; "telegram"]
+(* Discord, Slack and iMessage run in-process; not sidecar ids. *)
+let known_ids = ["telegram"]
 
 let parse_id_from_path req =
   (* expect path /api/v1/sidecar/<id>/<action> *)

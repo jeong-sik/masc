@@ -328,6 +328,20 @@ let load_from_masc_dir (state : state) (base_path : string) =
 
   state.last_refresh <- Unix.gettimeofday ()
 
+let clear_local_workspace (state : state) =
+  state.agents <- [];
+  state.tasks <- [];
+  state.tasks_domain <- [];
+  state.tasks_error <- None;
+  state.keepers <- [];
+  state.keepers_error <- None;
+  state.keeper_cursor <- 0;
+  state.log_entries <- [];
+  state.log_error <- None;
+  state.live_context <- None;
+  state.live_context_error <- None
+;;
+
 (** Add event to the event log *)
 let add_event (state : state) event_type content =
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -802,10 +816,11 @@ let load_system_logs ~(host : string) ~(port : int) ~(limit : int) :
   | Error err -> Error ("system logs load failed: " ^ err)
   | Ok json -> Tui_decode.decode_system_log_snapshot json
 
-(** Load the tool inventory from /api/v1/dashboard/tools *)
-let load_tools ~(host : string) ~(port : int) :
+(** Load the registered tool inventory and, when selected, one Keeper's exact
+    effective turn surface from /api/v1/dashboard/tools. *)
+let load_tools ~(host : string) ~(port : int) ?keeper () :
     (Tui_decode.tool_snapshot, string) result =
-  match fetch_dashboard_tools ~host ~port with
+  match fetch_dashboard_tools ~host ~port ?keeper () with
   | Error err -> Error ("tool inventory load failed: " ^ err)
   | Ok json -> Tui_decode.decode_tool_snapshot json
 
@@ -980,11 +995,20 @@ let load_keeper_config_view ~(host : string) ~(port : int)
     in
     Ok
       (sanitize_view_lines
-         (("# instructions" :: instructions_lines)
+         (Masc_tui_keeper_config.view_lines json
+          @ ("" :: "# instructions" :: instructions_lines)
           @ ("" :: "# effective system prompt" :: effective_lines)
           @ (match sources_lines with
              | [] -> []
              | lines -> "" :: "# sources" :: lines)))
+
+let load_keeper_config_editor ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
+  match
+    Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper config load failed: " ^ err)
+  | Ok json -> Ok (json, Masc_tui_keeper_config.editor_stem json)
 
 let load_keeper_github_identity_view ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =

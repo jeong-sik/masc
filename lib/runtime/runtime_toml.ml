@@ -116,6 +116,7 @@ type editor_semantics =
 type editor_credential_policy =
   | Credentials_optional
   | Credentials_forbidden
+  | Credentials_file_required
 
 type editor_protocol =
   { protocol : string
@@ -123,6 +124,8 @@ type editor_protocol =
   ; semantics : editor_semantics
   ; credential_policy : editor_credential_policy
   ; requires_non_interactive : bool
+  ; provider_fields : string list
+  ; required_provider_fields : string list
   }
 
 type protocol_declaration =
@@ -138,6 +141,8 @@ let http_editor protocol =
     ; semantics = Http_provider
     ; credential_policy = Credentials_optional
     ; requires_non_interactive = false
+    ; provider_fields = []
+    ; required_provider_fields = []
     }
 ;;
 
@@ -148,6 +153,20 @@ let official_client_editor protocol =
     ; semantics = Official_client
     ; credential_policy = Credentials_forbidden
     ; requires_non_interactive = true
+    ; provider_fields = []
+    ; required_provider_fields = []
+    }
+;;
+
+let antigravity_editor =
+  Some
+    { protocol = "antigravity-cli"
+    ; transport = Command
+    ; semantics = Official_client
+    ; credential_policy = Credentials_file_required
+    ; requires_non_interactive = true
+    ; provider_fields = [ "agent"; "effort"; "timeout-s" ]
+    ; required_provider_fields = [ "timeout-s" ]
     }
 ;;
 
@@ -175,7 +194,10 @@ let protocol_declarations =
       "codex-app-server"
       Runtime_schema.Codex_app_server_runtime
   ; official_client_protocol "claude-code" Runtime_schema.Claude_code_runtime
-  ; hidden_protocol "antigravity-cli" Runtime_schema.Antigravity_cli_runtime
+  ; { protocol = "antigravity-cli"
+    ; api_format = Runtime_schema.Antigravity_cli_runtime
+    ; editor = antigravity_editor
+    }
   ]
 ;;
 
@@ -222,7 +244,14 @@ let transport_of_provider (tbl : Otoml.t) (id : string)
     Error (Printf.sprintf "provider %s: must specify either 'endpoint' or 'command'" id)
 ;;
 
-let active_top_level_namespaces = [ "providers"; "models"; "runtime"; "web_search" ]
+let active_top_level_namespaces =
+  [ "providers"
+  ; "models"
+  ; "runtime"
+  ; "web_search"
+  ; Skill_source_config.top_level_namespace
+  ]
+;;
 let obsolete_top_level_namespaces = [ "system"; "routes"; "profiles" ]
 let reserved_namespaces = active_top_level_namespaces @ obsolete_top_level_namespaces
 let is_reserved name = List.mem name reserved_namespaces

@@ -146,6 +146,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
       ; output_tokens = None
       ; cache_creation_input_tokens = None
       ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Usage_scope_unavailable
       }
     ~execution_ids:[]
     ~blocks:[]

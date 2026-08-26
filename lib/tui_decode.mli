@@ -184,11 +184,38 @@ type inventory_freshness =
       (** The server answered from a built inventory. An empty list here does
           mean no tools. *)
 
+type effective_tool = {
+  et_name : string;
+  et_origin : string;
+  et_group : string option;
+  et_skill_source : string option;
+}
+
+type effective_tool_surface =
+  | Effective_surface_available of {
+      ets_keeper_name : string;
+      ets_runtime_id : string;
+      ets_official_client_kind : string;
+      ets_native_posture : string option;
+      ets_tool_groups : string list;
+      ets_instruction_skills : string list;
+      ets_composition_skills : string list;
+      ets_tools : effective_tool list;
+      ets_tool_surface_sha256 : string option;
+    }
+  | Effective_surface_unavailable of {
+      ets_keeper_name : string;
+      ets_reason : string;
+      ets_detail : string;
+    }
+  | Effective_surface_warming of { ets_keeper_name : string }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
+  ts_effective : effective_tool_surface option;
 }
 
 (** A connector the gate can deliver through. *)
@@ -346,6 +373,7 @@ type repository = {
   rp_codebase : string option;
       (** the server-minted slug the IDE annotation routes scope by;
           [None] when the remote cannot canonicalize *)
+  rp_url : string;  (** the remote as registered, for building links *)
   rp_local_path : string;
   rp_default_branch : string;
   rp_status : string;
@@ -614,13 +642,17 @@ val decode_fusion_detail : Yojson.Safe.t -> (fusion_detail, string) result
 
 (** One tool call a keeper is holding for an operator's answer, from
     [GET /api/v1/keepers/tool-approvals]. [kta_asked_at] is the server
-    clock's epoch reading when the wait opened. *)
+    clock's epoch reading when the wait opened. [kta_because], when
+    present, is the policy's one-line reason for asking — for a composition
+    it is the only place the node that caused the ask is named. Older servers
+    may omit it, in which case the value is [None]. *)
 type keeper_tool_approval = {
   kta_keeper : string;
   kta_tool_call_id : string;
   kta_tool : string;
   kta_args : string;
   kta_question : string;
+  kta_because : string option;
   kta_asked_at : float;
   kta_timeout_sec : float;
 }
@@ -713,12 +745,33 @@ type prompt_row = {
           the file's words rather than emptying the prompt. *)
   pr_file_exists : bool;
   pr_file_path : string;
+  pr_source : string;
+  pr_template_variables : string list;
 }
 
 type prompts_snapshot = { ps_rows : prompt_row list }
 (** GET /api/v1/prompts. *)
 
 val decode_prompts : Yojson.Safe.t -> (prompts_snapshot, string) result
+
+val decode_latest_librarian_run_id : Yojson.Safe.t -> (string, string) result
+(** Read the first Librarian row from the newest-first exact-lane summary. The
+    summary has no payload; callers use this id for one lazy detail read. *)
+
+type librarian_run_page =
+  { lrp_run_id : string option
+  ; lrp_next : (float * string) option
+  }
+
+val decode_librarian_run_page : Yojson.Safe.t -> (librarian_run_page, string) result
+(** One cursor page of exact-lane summaries. [lrp_next] is present only when
+    the server says older rows exist, so a client can search through the full
+    retained registry without assuming the newest page contains a Librarian. *)
+
+val decode_librarian_actual_input :
+  run_id:string -> Yojson.Safe.t -> (string list, string) result
+(** Read [run.input.payload.actual_input] from one exact-lane detail response,
+    prefixed with the run/actor/status identity the TUI displays above it. *)
 
 type log_kind =
   | Log_turn
@@ -748,6 +801,18 @@ type context_unavailable_reason =
   | Context_turn_record_read_failed
   | Context_turn_record_without_usage
   | Context_turn_record_trace_mismatch
+  | Context_conversation_cumulative_usage of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_usage_scope_unavailable of
+      { raw_input_tokens : int option
+      ; context_window : int option
+      }
+  | Context_tokens_exceed_window of
+      { raw_input_tokens : int
+      ; context_window : int
+      }
 
 type context_observation =
   | Context_observed of {
@@ -1008,10 +1073,12 @@ val decode_git_diff : Yojson.Safe.t -> (git_diff, string) result
     vocabulary is closed, so a fourth word means the server changed, and
     drawing it as unchanged would say the opposite of what happened. *)
 
-(** One [/api/v1/git/log] commit: hash, short date, author, subject. *)
+(** One [/api/v1/git/log] commit: hash, author-time epoch milliseconds,
+    author, subject. The epoch shares its unit with {!ide_region}'s
+    [ir_at_ms] so the two sort into one timeline. *)
 type git_log_row = {
   gl_hash : string;
-  gl_date : string;
+  gl_at_ms : float;
   gl_author : string;
   gl_subject : string;
 }

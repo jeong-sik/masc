@@ -48,6 +48,25 @@ let full_fields
       ("max_context_override", Keeper_toml_loader.Toml_int value) :: fields
     | None -> fields
   in
+  let fields =
+    match meta.tool_groups with
+    | Some groups ->
+      ("tools.groups", Keeper_toml_loader.Toml_string_array groups) :: fields
+    | None -> fields
+  in
+  let fields =
+    match
+      if parsed.native_tool_posture_present
+      then parsed.native_tool_posture_opt
+      else parsed.profile_defaults.native_tool_posture
+    with
+    | Some posture ->
+      ( "tools.native"
+      , Keeper_toml_loader.Toml_string
+          (Runtime_native_tools.to_string posture) )
+      :: fields
+    | None -> fields
+  in
   (* Not a meta field: the per-keeper wake prompt lives only in the keeper
      TOML (profile-defaults layer, #28456), so the creation snapshot takes it
      from the parsed args rather than from [meta]. *)
@@ -74,6 +93,25 @@ let explicit_edits
      ( "max_context_override"
      , match parsed.max_context_override_opt with
        | Some value -> set_int value
+       | None -> Keeper_toml_loader.Remove )
+     :: fields)
+  |> fun fields ->
+  (if not parsed.tool_groups_present
+   then fields
+   else
+     ( "tools.groups"
+     , match parsed.tool_groups_opt with
+       | Some groups -> set_strings groups
+       | None -> Keeper_toml_loader.Remove )
+     :: fields)
+  |> fun fields ->
+  (if not parsed.native_tool_posture_present
+   then fields
+   else
+     ( "tools.native"
+     , match parsed.native_tool_posture_opt with
+       | Some posture ->
+         set_string (Runtime_native_tools.to_string posture)
        | None -> Keeper_toml_loader.Remove )
      :: fields)
   |> fun fields ->

@@ -180,20 +180,39 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
     ?decision ?checkpoint_path ?receipt_path ()
   |> Keeper_runtime_manifest.append_best_effort ~site config
 
-let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
-  try setup.Keeper_run_tools.cleanup () with
-  | Eio.Cancel.Cancelled _ -> ()
-  | e ->
+(* Teardown runs in its own cancellation context.
+
+   [Keeper_run_tools.cleanup] reaches [Keeper_turn_sandbox_runtime.cleanup],
+   which removes the turn's sandbox container with `docker rm -f` through
+   [Process_eio]. An Eio call made under an already-cancelled context raises
+   [Cancelled] before spawning anything, so without this protection the
+   container survives for as long as the server process does (#30590).
+
+   The protected region stays bounded: every command inside runs under the
+   Cleanup_rm shell timeout, so [protect] cannot park the caller forever.
+
+   [Cancelled] is reported like any other teardown failure. It used to be
+   swallowed by a silent arm, which is why seven containers leaking over a
+   37-minute window produced zero log lines and zero counter increments. *)
+let run_teardown_protected ~keeper_name ~site f =
+  match Eio.Cancel.protect f with
+  | () -> ()
+  | exception e ->
       let backtrace = Printexc.get_backtrace () in
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string DispatchEventFailures)
-        ~labels:[ "keeper", keeper_name; "site", "tool_cleanup" ]
+        ~labels:[ "keeper", keeper_name; "site", site ]
         ();
       Log.Keeper.warn
-        "%s: keeper tool bundle cleanup raised: %s%s"
+        "%s: keeper %s teardown raised: %s%s"
         keeper_name
+        site
         (Printexc.to_string e)
         (if String.equal backtrace "" then "" else "\n" ^ backtrace)
+
+let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
+  run_teardown_protected ~keeper_name ~site:"tool_cleanup" (fun () ->
+    setup.Keeper_run_tools.cleanup ())
 
 let run_with_setup_cleanup ~cleanup f =
   match f () with

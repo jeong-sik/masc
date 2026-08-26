@@ -1405,9 +1405,9 @@ let tool_entry_json ?(surfaces = [ "public_mcp" ]) ?(direct = `Bool true) () =
     ; ("surfaces", `List (List.map (fun s -> `String s) surfaces))
     ]
 
-let tool_snapshot_json tools =
+let tool_snapshot_json ?effective tools =
   `Assoc
-    [ ("generated_at", `String "2026-08-23T09:00:00Z")
+    ([ ("generated_at", `String "2026-08-23T09:00:00Z")
     ; ("config_resolution", `Assoc [])
     ; ("runtime_resolution", `Assoc [])
     ; ( "tool_inventory"
@@ -1418,6 +1418,10 @@ let tool_snapshot_json tools =
           ] )
     ; ("tool_usage", `Assoc [])
     ]
+    @
+    match effective with
+    | None -> []
+    | Some value -> [ "effective_keeper_surface", value ])
 
 let test_decode_tool_snapshot_reads_the_live_shape () =
   match Tui_decode.decode_tool_snapshot (tool_snapshot_json [ tool_entry_json () ])
@@ -1490,6 +1494,78 @@ let test_decode_tool_snapshot_without_inventory_is_an_error () =
   with
   | Ok _ -> Alcotest.fail "an envelope with no inventory should not decode"
   | Error err -> Alcotest.(check bool) "says so" true (String.length err > 0)
+
+let test_decode_effective_keeper_surface_keeps_provenance () =
+  let effective =
+    `Assoc
+      [ "status", `String "available"
+      ; "keeper_name", `String "codex-mcp-client"
+      ; "runtime_id", `String "openai.codex"
+      ; "official_client_kind", `String "codex"
+      ; "native_posture", `String "read"
+      ; "tool_groups", `List [ `String "filesystem" ]
+      ; "instruction_skills", `List [ `String "ocaml-coding" ]
+      ; "composition_skills", `List [ `String "mission-snapshot" ]
+      ; "count", `Int 1
+      ; ( "tools"
+        , `List
+            [ `Assoc
+                [ "name", `String "keeper_compose_mission-snapshot"
+                ; ( "origin"
+                  , `Assoc
+                      [ "kind", `String "composition_skill"
+                      ; "skill_source"
+                        , `String "skills/mission-snapshot/SKILL.md"
+                      ] )
+                ] ] )
+      ; "tool_surface_sha256", `String (String.make 64 'a')
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Error err -> Alcotest.failf "decode failed: %s" err
+  | Ok
+      { Tui_decode.ts_effective =
+          Some
+            (Tui_decode.Effective_surface_available
+               { ets_keeper_name;
+                 ets_native_posture = Some native;
+                 ets_instruction_skills;
+                 ets_tools = [ tool ];
+                 ets_tool_surface_sha256 = Some digest;
+                 _
+               });
+        _ } ->
+      Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
+      Alcotest.(check string) "native posture" "read" native;
+      Alcotest.(check (list string)) "declared instruction skill"
+        [ "ocaml-coding" ] ets_instruction_skills;
+      Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      Alcotest.(check (option string)) "SKILL.md source"
+        (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
+      Alcotest.(check int) "digest length" 64 (String.length digest)
+  | Ok _ -> Alcotest.fail "expected an available effective Keeper surface"
+
+let test_decode_effective_keeper_surface_does_not_hide_unavailable () =
+  let effective =
+    `Assoc
+      [ "status", `String "unavailable"
+      ; "keeper_name", `String "analyst"
+      ; "reason", `String "declared_skill_missing"
+      ; "detail", `String "current task declares missing skill"
+      ]
+  in
+  match Tui_decode.decode_tool_snapshot (tool_snapshot_json ~effective []) with
+  | Ok
+      { Tui_decode.ts_effective =
+          Some
+            (Tui_decode.Effective_surface_unavailable
+               { ets_reason; ets_detail; _ });
+        _ } ->
+      Alcotest.(check string) "typed reason" "declared_skill_missing" ets_reason;
+      Alcotest.(check bool) "diagnostic preserved" true
+        (String.length ets_detail > 0)
+  | Ok _ -> Alcotest.fail "expected an unavailable effective Keeper surface"
+  | Error err -> Alcotest.failf "decode failed: %s" err
 
 (* Connectors. Shape is each connector's own connector_json; the fields below
    are the ones every connector emits. *)
@@ -2085,8 +2161,9 @@ let test_decode_system_log_requires_the_message () =
   | Error _ -> ()
 
 (* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
-   rows. A row missing a field is rejected, not dropped: a listing that
-   silently thins is how a held call goes unanswered again (masc#30034). *)
+   rows. A row missing a core field is rejected, not dropped: a listing that
+   silently thins is how a held call goes unanswered again (masc#30034).
+   [because] is optional for compatibility with servers predating task-345. *)
 let keeper_tool_approvals_json =
   `Assoc
     [ ( "pending"
@@ -2097,6 +2174,7 @@ let keeper_tool_approvals_json =
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
               ; ("question", `String "Run Execute on git status?")
+              ; ("because", `String "fs tools change something outside this turn")
               ; ("asked_at", `Float 1787555000.)
               ; ("timeout_sec", `Float 180.)
               ]
@@ -2112,8 +2190,33 @@ let test_decode_keeper_tool_approvals () =
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
         held.kta_question;
+      Alcotest.(check (option string)) "because rides with the question"
+        (Some "fs tools change something outside this turn") held.kta_because;
       Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
       Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
+  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
+
+let test_decode_keeper_tool_approvals_accepts_legacy_row () =
+  let legacy =
+    `Assoc
+      [ ( "pending"
+        , `List
+            [ `Assoc
+                [ ("keeper", `String "orbiter")
+                ; ("tool_call_id", `String "call-legacy")
+                ; ("tool", `String "Execute")
+                ; ("args", `String "{}")
+                ; ("question", `String "Run Execute?")
+                ; ("asked_at", `Float 1787555000.)
+                ; ("timeout_sec", `Float 180.)
+                ] ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_tool_approvals legacy with
+  | Error err -> Alcotest.fail err
+  | Ok [ held ] ->
+      Alcotest.(check (option string)) "legacy server has no because" None
+        held.Tui_decode.kta_because
   | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
 
 let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
@@ -2481,6 +2584,8 @@ let prompts_payload =
                ("has_override", `Bool false);
                ("file_exists", `Bool true);
                ("file_path", `String "config/prompts/keeper.md");
+               ("source", `String "file");
+               ("template_variables", `List [ `String "keeper_instructions" ]);
              ];
            `Assoc
              [ ("key", `String "judge.board");
@@ -2500,7 +2605,10 @@ let test_decode_prompts_reads_the_live_shape () =
     Alcotest.(check string) "key" "keeper" first.Tui_decode.pr_key;
     Alcotest.(check string) "the effective text keeps its line break"
       "You are a keeper.\nWork the task." first.Tui_decode.pr_effective;
-    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override
+    Alcotest.(check bool) "no override" false first.Tui_decode.pr_has_override;
+    Alcotest.(check string) "source" "file" first.Tui_decode.pr_source;
+    Alcotest.(check (list string)) "template input names"
+      [ "keeper_instructions" ] first.Tui_decode.pr_template_variables
 
 let test_decode_prompts_survives_a_sparse_row () =
   match Tui_decode.decode_prompts prompts_payload with
@@ -2521,6 +2629,111 @@ let test_decode_prompts_rejects_a_row_with_no_key () =
   match Tui_decode.decode_prompts json with
   | Ok _ -> Alcotest.fail "a keyless prompt row must not decode"
   | Error _ -> ()
+
+let test_decode_prompts_rejects_a_partial_template_variable_list () =
+  let json =
+    `Assoc
+      [ ( "prompts"
+        , `List
+            [ `Assoc
+                [ "key", `String "librarian"
+                ; "template_variables", `List [ `String "current_memory"; `Int 1 ]
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_prompts json with
+  | Ok _ -> Alcotest.fail "a partial input-contract list must not decode"
+  | Error _ -> ()
+
+let test_decode_latest_librarian_input_follows_summary_to_detail () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool false
+      ; ( "runs"
+        , `List
+            [ `Assoc
+                [ "run_id", `String "judge-newer"
+                ; "lane", `String "hitl_auto_judge"
+                ]
+            ; `Assoc
+                [ "run_id", `String "lib-latest"
+                ; "lane", `String "librarian_exact"
+                ]
+            ] )
+      ]
+  in
+  let detail =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "actor", `String "omicron"
+            ; "status", `String "succeeded"
+            ; ( "input"
+              , `Assoc
+                  [ ( "payload"
+                    , `Assoc
+                        [ ( "actual_input"
+                          , `Assoc
+                              [ "keeper_instructions", `String "curate carefully"
+                              ; "message_count", `Int 4
+                              ] )
+                        ] )
+                  ] )
+            ] )
+      ]
+  in
+  match Tui_decode.decode_latest_librarian_run_id listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok run_id ->
+      Alcotest.(check string) "latest Librarian id" "lib-latest" run_id;
+      (match Tui_decode.decode_librarian_actual_input ~run_id detail with
+       | Error detail -> Alcotest.fail detail
+       | Ok lines ->
+           let text = String.concat "\n" lines in
+           Alcotest.(check bool) "identity prefix" true
+             (Astring.String.is_infix
+                ~affix:"lib-latest \xc2\xb7 omicron \xc2\xb7 succeeded"
+                text);
+           Alcotest.(check bool) "actual instructions" true
+             (Astring.String.is_infix ~affix:"curate carefully" text))
+
+let test_decode_latest_librarian_input_requires_actual_input () =
+  let detail =
+    `Assoc
+      [ ( "run"
+        , `Assoc
+            [ "actor", `String "omicron"
+            ; "status", `String "succeeded"
+            ; "input", `Assoc [ "payload", `Assoc [] ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_librarian_actual_input ~run_id:"lib-old" detail with
+  | Ok _ -> Alcotest.fail "a run without actual_input must not render as empty"
+  | Error _ -> ()
+
+let test_decode_librarian_page_keeps_the_server_cursor () =
+  let listing =
+    `Assoc
+      [ "has_more", `Bool true
+      ; ( "runs"
+        , `List
+            [ `Assoc
+                [ "run_id", `String "judge-older"
+                ; "lane", `String "hitl_auto_judge"
+                ; "started_at", `Float 42.5
+                ]
+            ] )
+      ]
+  in
+  match Tui_decode.decode_librarian_run_page listing with
+  | Error detail -> Alcotest.fail detail
+  | Ok page ->
+      Alcotest.(check (option string)) "no Librarian on this page" None
+        page.Tui_decode.lrp_run_id;
+      Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
+        (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
 let () =
   Alcotest.run "tui_decode" [
@@ -2543,6 +2756,8 @@ let () =
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
           test_decode_keeper_tool_approvals
+      ; Alcotest.test_case "accepts a legacy row without because" `Quick
+          test_decode_keeper_tool_approvals_accepts_legacy_row
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
       ] );
@@ -2558,6 +2773,10 @@ let () =
           test_decode_tool_absent_direct_call_is_off;
         Alcotest.test_case "no inventory is an error" `Quick
           test_decode_tool_snapshot_without_inventory_is_an_error;
+        Alcotest.test_case "effective surface keeps provenance" `Quick
+          test_decode_effective_keeper_surface_keeps_provenance;
+        Alcotest.test_case "effective unavailable stays explicit" `Quick
+          test_decode_effective_keeper_surface_does_not_hide_unavailable;
       ] );
     ( "decode_connectors",
       [
@@ -2771,6 +2990,14 @@ let () =
           test_decode_prompts_survives_a_sparse_row;
         Alcotest.test_case "rejects a row with no key" `Quick
           test_decode_prompts_rejects_a_row_with_no_key;
+        Alcotest.test_case "rejects a partial template-variable list" `Quick
+          test_decode_prompts_rejects_a_partial_template_variable_list;
+        Alcotest.test_case "latest Librarian input follows summary to detail" `Quick
+          test_decode_latest_librarian_input_follows_summary_to_detail;
+        Alcotest.test_case "latest Librarian input requires actual input" `Quick
+          test_decode_latest_librarian_input_requires_actual_input;
+        Alcotest.test_case "Librarian page keeps the server cursor" `Quick
+          test_decode_librarian_page_keeps_the_server_cursor;
       ] );
     ( "server_identity",
       [

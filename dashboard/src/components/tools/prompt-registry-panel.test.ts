@@ -82,6 +82,24 @@ function defaultPromptItems(): DashboardPromptItem[] {
       char_count: 14,
       template_variables: [],
     }),
+    makePrompt({
+      key: 'librarian',
+      category: 'librarian',
+      description: 'Memory OS librarian current-memory selection prompt',
+      current: 'Keep {{current_memory}} from {{conversation_history}}',
+      effective: 'Keep {{current_memory}} from {{conversation_history}}',
+      file_value: 'Keep {{current_memory}} from {{conversation_history}}',
+      file_path: 'fixture/config/prompts/librarian.md',
+      source: 'file',
+      char_count: 55,
+      template_variables: [
+        'current_memory',
+        'conversation_history',
+        'counterpart_observations',
+        'keeper_instructions',
+        'max_recall_fact_bytes',
+      ],
+    }),
   ]
 }
 
@@ -157,6 +175,34 @@ describe('PromptRegistryPanel', () => {
     await flush()
 
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
+  })
+
+  it('names the Librarian exact lane, effective prompt source, and every input section', async () => {
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const contract = container.querySelector('[data-librarian-runtime-contract]')
+    expect(contract).not.toBeNull()
+    expect(contract?.textContent).toContain('librarian_exact')
+    expect(contract?.textContent).toContain('user message 한 개')
+    expect(contract?.textContent).toContain('fixture/config/prompts/librarian.md')
+    for (const input of [
+      'keeper_instructions',
+      'current_memory',
+      'conversation_history',
+      'counterpart_observations',
+      'max_recall_fact_bytes',
+    ]) expect(contract?.textContent).toContain(input)
+
+    const open = Array.from(contract?.querySelectorAll('button') ?? []).find(button =>
+      button.textContent?.includes('effective 원문 열기'),
+    ) as HTMLButtonElement
+    await fireEvent.click(open)
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement).value)
+        .toContain('Keep {{current_memory}}')
+    })
   })
 
   it('rebinds the clean editor draft to the first visible prompt when filters hide the selection', async () => {

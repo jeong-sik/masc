@@ -201,6 +201,35 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("enabled", `Bool m.proactive.enabled);
         ]
       in
+      let approval_mode =
+        Keeper_tool_approval_mode.resolve
+          (Keeper_tool_approval_mode.shared ())
+          ~keeper_name:m.name
+      in
+      let tools =
+        `Assoc
+          [ ( "groups"
+            , match m.tool_groups with
+              | None -> `Null
+              | Some groups -> Json_util.json_string_list groups )
+          ; ( "native"
+            , match defaults.native_tool_posture with
+              | None -> `Null
+              | Some posture ->
+                `String (Runtime_native_tools.to_string posture) )
+          ; ( "approval_mode"
+            , `String (Keeper_tool_approval_mode.mode_to_string approval_mode) )
+          ; ( "full_native_admission"
+            , match approval_mode with
+              | Keeper_tool_approval_mode.Yolo ->
+                `Assoc [ "status", `String "allowed" ]
+              | Keeper_tool_approval_mode.Auto ->
+                `Assoc
+                  [ "status", `String "rejected"
+                  ; "reason", `String "approval_mode_requires_yolo"
+                  ] )
+          ]
+      in
       let metrics =
         `Assoc [
           ("total_turns", `Int m.runtime.usage.total_turns);
@@ -284,6 +313,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("prompt", prompt);
          ("execution", execution);
          ("proactive", proactive);
+         ("tools", tools);
          ("auto_execution_session", auto_execution_session_surface_json ());
          ("hooks", Keeper_hooks_agent_core.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);

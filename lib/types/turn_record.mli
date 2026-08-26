@@ -57,6 +57,7 @@ type usage =
        read as pressure on the compaction ceiling, and cache-heavy turns and
        genuinely large prompts are different situations with the same numerator.
        [None] when the provider reported no cache usage. *)
+  ; scope : Runtime_usage_scope.t
   }
 
 type request_wire_observation =

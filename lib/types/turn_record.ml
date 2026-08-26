@@ -36,6 +36,7 @@ type usage =
   ; output_tokens : int option
   ; cache_creation_input_tokens : int option
   ; cache_read_input_tokens : int option
+  ; scope : Runtime_usage_scope.t
   }
 
 type request_wire_observation =
@@ -215,7 +216,8 @@ let to_json (r : t) : Yojson.Safe.t =
         r.usage.cache_creation_input_tokens
     @ opt_field "cache_read_input_tokens" (fun v -> `Int v)
         r.usage.cache_read_input_tokens
-    @ opt_field "output_tokens" (fun v -> `Int v) r.usage.output_tokens
+     @ opt_field "output_tokens" (fun v -> `Int v) r.usage.output_tokens
+    @ [ ("usage_scope", `String (Runtime_usage_scope.to_string r.usage.scope)) ]
     @ [ ("ts", `Float r.ts) ])
 
 let ( let* ) = Result.bind
@@ -477,6 +479,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "cache_creation_input_tokens"
             ; "cache_read_input_tokens"
             ; "output_tokens"
+            ; "usage_scope"
             ; "ts"
             ]
             fields
@@ -606,6 +609,16 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         opt_member "cache_read_input_tokens" fields as_int
       in
       let* output_tokens = opt_member "output_tokens" fields as_int in
+      let* usage_scope =
+        match List.assoc_opt "usage_scope" fields with
+        | None -> Ok Runtime_usage_scope.Usage_scope_unavailable
+        | Some (`String value) ->
+          (match Runtime_usage_scope.of_string value with
+           | Some scope -> Ok scope
+           | None ->
+             Error (Printf.sprintf "turn_record: unknown usage_scope %S" value))
+        | Some _ -> Error "turn_record: usage_scope is not a string"
+      in
       let* ts_json = require "ts" fields in
       let* ts = as_float "ts" ts_json in
       Ok
@@ -635,6 +648,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; output_tokens
             ; cache_creation_input_tokens
             ; cache_read_input_tokens
+            ; scope = usage_scope
             }
         ; ts
         }

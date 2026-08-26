@@ -8,6 +8,15 @@ type reading =
 type tab =
   | Composition
   | Prompt_blocks
+  | Input_map
+
+type input_map_row =
+  { component : Turn_record.input_component_id
+  ; bytes : int
+  ; included_by : string
+  ; retention : string
+  ; exact_text : string option
+  }
 
 let ( let* ) = Result.bind
 
@@ -74,6 +83,95 @@ let input_component_label = function
   | Turn_record.Message_image -> "Images"
   | Turn_record.Message_document -> "Documents"
   | Turn_record.Message_audio -> "Audio"
+
+let unique_find predicate values =
+  match List.filter predicate values with
+  | [ value ] -> Some value
+  | [] | _ :: _ :: _ -> None
+
+let prompt_exact_text
+    (record : Turn_record.t)
+    (capture : Prompt_capture.capture option)
+    block_id
+    component_bytes =
+  match capture with
+  | Some capture
+    when String.equal capture.trace_id record.trace_id
+         && capture.absolute_turn = record.absolute_turn ->
+      (match
+         ( unique_find
+             (fun (block : Turn_record.prompt_block) ->
+                block.block = block_id)
+             record.blocks
+         , unique_find
+             (fun (block : Prompt_capture.block) -> block.id = block_id)
+             capture.blocks )
+       with
+       | Some observed, Some captured ->
+           let digest =
+             Digestif.SHA256.(digest_string captured.text |> to_hex)
+           in
+           if observed.bytes = component_bytes
+              && String.length captured.text = observed.bytes
+              && String.equal digest observed.digest
+           then Some captured.text
+           else None
+       | None, _ | _, None -> None)
+  | Some _ | None -> None
+
+let input_map_metadata = function
+  | Turn_record.Prompt_block _ -> "turn prompt assembly", "bytes only"
+  | Turn_record.Tool_schemas -> "effective tool surface", "schema bytes only"
+  | Turn_record.Message_thinking ->
+      "provider message list", "hidden reasoning; bytes only"
+  | Turn_record.Message_redacted_thinking ->
+      "provider message list", "redacted reasoning; bytes only"
+  | Turn_record.Message_user
+  | Turn_record.Message_system
+  | Turn_record.Message_assistant_text
+  | Turn_record.Message_tool_use
+  | Turn_record.Message_tool_result ->
+      "provider message list", "content not retained"
+  | Turn_record.Message_image
+  | Turn_record.Message_document
+  | Turn_record.Message_audio ->
+      "provider message list", "media bytes only"
+
+let input_map_rows (record : Turn_record.t) capture =
+  match record.input_components with
+  | None -> []
+  | Some components ->
+      List.map
+        (fun (item : Turn_record.input_component) ->
+           let included_by, default_retention =
+             input_map_metadata item.component
+           in
+           let exact_text =
+             match item.component with
+             | Turn_record.Prompt_block block_id ->
+                 prompt_exact_text record capture block_id item.bytes
+             | Turn_record.Tool_schemas
+             | Turn_record.Message_user
+             | Turn_record.Message_system
+             | Turn_record.Message_assistant_text
+             | Turn_record.Message_thinking
+             | Turn_record.Message_redacted_thinking
+             | Turn_record.Message_tool_use
+             | Turn_record.Message_tool_result
+             | Turn_record.Message_image
+             | Turn_record.Message_document
+             | Turn_record.Message_audio -> None
+           in
+           { component = item.component
+           ; bytes = item.bytes
+           ; included_by
+           ; retention =
+               (match exact_text with
+                | Some _ -> "verified exact text"
+                | None -> default_retention)
+           ; exact_text
+           })
+        components
 
 let attributed_bytes (record : Turn_record.t) =
   Option.map

@@ -24,6 +24,7 @@ type entry = {
   style : style;
   timestamp : string;
   role_label : string;
+  role_label_mark_cells : int;
   request_label : string;
   body : string;
   markdown_source : markdown_source;
@@ -50,6 +51,7 @@ type row = {
   style : style;
   kind : row_kind;
   text : string;
+  gutter_label_at : int;
   gutter : string;
 }
 
@@ -465,18 +467,94 @@ let chat_role_label_width ~pane_cells =
   max chat_role_label_column
     (min chat_role_label_budget (pane_cells / chat_role_label_share))
 
-let align_role_label ?(column = chat_role_label_column) label =
-  let column = max 1 column in
+(* Right-align [label] in [column] cells. An overrun loses its head: these
+   read [agent · surface] and share long prefixes -- every canary starts
+   "keeper-canary-10t-cdx-sol-" -- so the tail is what tells two of them
+   apart. *)
+let fit_name column label =
   let pieces = display_pieces label in
   let cells = pieces_width pieces in
   if cells > column then
-    (* Right-aligned, so the cut is at the head. These labels are
-       [agent · surface] and share long prefixes -- every canary starts
-       "keeper-canary-10t-cdx-sol-" -- so the tail is what tells them apart. *)
     let kept = cell_suffix_of_pieces label pieces (column - 1) in
     let pad = max 0 (column - 1 - pieces_width (display_pieces kept)) in
     "…" ^ String.make pad ' ' ^ kept
   else String.make (column - cells) ' ' ^ label
+
+(* Keep both ends of [label] in [column] cells, dropping the middle.
+
+   [fit_width] keeps the head and [fit_name] keeps the tail; an identifier
+   needs both. Keeper names share long prefixes and differ in their tail --
+   [fit_name] says so above -- but a name cut to its tail alone no longer says
+   which family it came from. Cutting "rw-e0-r9-20260820-revision-audit" to
+   "rw-e0-r9-20260820-revi~" loses exactly the part that distinguishes it,
+   and to "…0820-revision-audit" loses exactly the part that groups it.
+
+   The tail gets two thirds of the budget because it is the deciding end. As
+   [column] shrinks the head's third reaches zero and this degrades into
+   [fit_name]'s shape, which is the right thing to lose last.
+
+   Left-aligned and padded to [column], so this is a drop-in where
+   [fit_width] was cutting identifiers. *)
+let fit_middle column label =
+  if column <= 0 then ""
+  else
+    let pieces = display_pieces label in
+    let cells = pieces_width pieces in
+    if cells <= column then label ^ String.make (column - cells) ' '
+    else if column = 1 then "…"
+    else
+      let usable = column - 1 in
+      let head_cells = usable / 3 in
+      let tail_cells = usable - head_cells in
+      let head, head_width, saw_ansi =
+        cell_prefix_of_pieces label pieces head_cells
+      in
+      let tail = cell_suffix_of_pieces label pieces tail_cells in
+      let tail_width = pieces_width (display_pieces tail) in
+      let reset = if saw_ansi then "\x1B[0m" else "" in
+      let used = head_width + 1 + tail_width in
+      head ^ reset ^ "…" ^ tail ^ String.make (max 0 (column - used)) ' '
+
+(* One glyph per speaker, from the vocabulary the Keepers roster and Acting
+   already use. Colour carries this distinction better, and NO_COLOR takes
+   colour away, so the mark is what still answers "who said this" on a pane
+   with no colour at all. *)
+let speaker_mark : style -> string = function
+  | User -> "\xe2\x96\xb6"      (* the operator sends *)
+  | Keeper -> "\xe2\x97\x8f"    (* a keeper speaks *)
+  | Status -> "?"
+  | Error -> "\xe2\x9c\x97"
+  | Tool -> "\xe2\x96\xa0"
+  | Thinking -> "\xc2\xb7"
+
+(* Cells the speaker mark and its separator occupy at the head of a label, or
+   zero when the column was too narrow to keep the mark at all. One reader, so
+   the renderer that styles the mark and the layout that lays it out cannot
+   disagree about where it ends. *)
+let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
+  let column = max 1 column in
+  let cells = display_width (speaker_mark style) + 1 in
+  if column - cells < 1 then 0 else cells
+
+let align_role_label ?(column = chat_role_label_column) ~style label =
+  let column = max 1 column in
+  let mark = speaker_mark style in
+  (* The mark is paid for out of the badge, not added beside it: the body's
+     width is taken from what the badge leaves, so charging it to the label
+     keeps every body exactly as wide as it was.
+
+     It is also kept outside the truncation. A label that overruns loses its
+     head, and the mark sits at the head -- inside, the longest names would be
+     the ones that lost the glyph, and those are the names a reader most needs
+     help telling apart. *)
+  let mark_cells = display_width mark + 1 in
+  let inner = column - mark_cells in
+  (* Kept in step with [role_label_mark_cells]: both decide on [inner < 1]. *)
+  if inner < 1 then
+    (* A pane too narrow to hold both keeps the name. Losing track of who is
+       talking costs more than losing the shorthand for it. *)
+    fit_name column label
+  else mark ^ " " ^ fit_name inner label
 
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
@@ -604,6 +682,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
       { style = entry.style
       ; kind = Metadata metadata
       ; text = fitted
+      ; gutter_label_at = 0
       ; gutter = ""
       }
 
@@ -639,6 +718,17 @@ let min_body_cells = 4
    width on a row of their own; in a margin they are paid for once per message.
    Text that is not a clock of that shape is left as it is rather than cut
    blind. *)
+(* Every row's clock takes the same cells. A settled row says "23:38" and the
+   streaming turn says "live", and the gutter's width is what the body's width
+   is taken from, so one cell of difference wrapped the live body differently
+   from the rows it was about to join. *)
+let chat_clock_column = 5
+
+let pad_clock text =
+  let cells = display_width text in
+  if cells >= chat_clock_column then text
+  else String.make (chat_clock_column - cells) ' ' ^ text
+
 let short_clock timestamp =
   if
     String.length timestamp = 8
@@ -663,7 +753,7 @@ let origin_gutter ~origin ~previous ~inner_width entry =
   | Origin_inline | Origin_bare ->
       let clock =
         match origin with
-        | Origin_inline -> short_clock entry.timestamp ^ " "
+        | Origin_inline -> pad_clock (short_clock entry.timestamp) ^ " "
         | Origin_row | Origin_bare -> ""
       in
       (* The margin is taken from the body, so it cannot be wider than what
@@ -676,18 +766,29 @@ let origin_gutter ~origin ~previous ~inner_width entry =
       let ceiling = max 0 (inner_width - 2 - min_body_cells) in
       let filled = fit_width (clock ^ entry.role_label) (min ceiling
         (display_width (clock ^ entry.role_label))) in
+      (* Where the kind label starts: past the clock and past the speaker mark.
+         Computed here because this is where the clock is prepended; a renderer
+         deriving it would be measuring the same two things a second time. A
+         gutter cut short by [ceiling] can end before the label, so the offset
+         is clamped to what actually survived. *)
+      let label_at =
+        min (display_width filled)
+          (display_width clock + entry.role_label_mark_cells)
+      in
+
       if continues_previous ~previous entry then
         (* Padded rather than repeated: a second row from the same speaker in
            the same second has nothing new to say, and [fit_width] measures the
            cells a label actually occupies where [String.make] would count its
            bytes. *)
-        Some (fit_width "" (display_width filled))
-      else Some filled
+        (* A blank continuation has no label to hold back. *)
+        Some (fit_width "" (display_width filled), 0)
+      else Some (filled, label_at)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
-    match gutter with None -> 0 | Some text -> display_width text
+    match gutter with None -> 0 | Some (text, _) -> display_width text
   in
   let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
@@ -710,13 +811,14 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let body_rows =
-    let margin = Option.value gutter ~default:"" in
+    let margin, label_at = Option.value gutter ~default:("", 0) in
     let blank = fit_width "" (display_width margin) in
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
       ; kind = Body
       ; text = "  " ^ chunk
+      ; gutter_label_at = (if index = 0 then label_at else 0)
       ; gutter = (if index = 0 then margin else blank)
       })
   in

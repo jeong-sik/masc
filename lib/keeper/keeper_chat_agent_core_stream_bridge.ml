@@ -357,8 +357,7 @@ let start_runtime_attempt ~previous_scope state =
         poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded
           ~reason
   in
-  { terminalized with
-    bridge_state = reset_runtime_attempt_state terminalized.bridge_state
+  { bridge_state = reset_runtime_attempt_state terminalized.bridge_state
   ; chat_events =
       terminalized.chat_events
       @ [ Keeper_chat_events.Agent_core_runtime_attempt_started ]
@@ -1223,8 +1222,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         poison_scope bridge_state ~kind:Sse_stream_incomplete
           ~reason:redacted_reason
       in
-      { quarantined with
-        bridge_state =
+      { bridge_state =
           { quarantined.bridge_state with
             scope_failure = bridge_state.scope_failure
           ; message_open = bridge_state.message_open

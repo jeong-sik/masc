@@ -1573,7 +1573,7 @@
 (test
  (name test_keeper_stream_tool_accum)
  (modules test_keeper_stream_tool_accum)
- (libraries alcotest masc masc_server masc.agent_core unix))
+ (libraries alcotest masc masc.masc_types masc_server masc.agent_core unix))
 
 (test
  (name test_keeper_stream_media_accum)

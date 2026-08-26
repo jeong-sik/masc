@@ -135,6 +135,15 @@ let activation_count json =
   |> List.length
 ;;
 
+let summary_count field json =
+  let open Yojson.Safe.Util in
+  json
+  |> member "skill_activations"
+  |> member "summary"
+  |> member field
+  |> to_int
+;;
+
 let test_dashboard_projection_is_live_outside_inventory_cache () =
   with_workspace @@ fun config ->
   let keeper_name = "projection-keeper" in
@@ -145,6 +154,8 @@ let test_dashboard_projection_is_live_outside_inventory_cache () =
       config
   in
   check int "empty live ledger" 0 (activation_count before);
+  check int "empty invocation summary" 0
+    (summary_count "instruction_invocations" before);
   record_one config meta;
   let after =
     Server_dashboard_http_runtime_info.dashboard_tools_http_json
@@ -152,7 +163,15 @@ let test_dashboard_projection_is_live_outside_inventory_cache () =
       config
   in
   check int "same cached inventory gets fresh activation ledger" 1
-    (activation_count after)
+    (activation_count after);
+  check int "one exact invocation" 1
+    (summary_count "instruction_invocations" after);
+  check int "one body served" 1
+    (summary_count "skill_bodies_served" after);
+  check int "no inferred delivery" 0
+    (summary_count "instruction_deliveries" after);
+  check int "strict ledger has no invalid transitions" 0
+    (summary_count "invalid_transitions" after)
 ;;
 
 let test_corrupt_ledger_is_unavailable_not_empty () =

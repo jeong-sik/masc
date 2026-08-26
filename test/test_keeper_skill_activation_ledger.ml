@@ -280,6 +280,12 @@ let test_delivery_and_later_action_form_one_exact_chain () =
      check string "later action id" "call-action" action.tool_use_id;
      check string "later action tool" "keeper_time_now" action.tool_name
    | _ -> fail "later action was not attached to the exact Skill invocation");
+  let summary = Ledger.summarize with_action in
+  check int "one instruction invocation" 1 summary.instruction_invocations;
+  check int "one body served" 1 summary.skill_bodies_served;
+  check int "one delivery" 1 summary.instruction_deliveries;
+  check int "one later action" 1 summary.instruction_actions_observed;
+  check int "zero invalid transitions" 0 summary.invalid_transitions;
   let _, repeated =
     match
       Ledger.observe_action

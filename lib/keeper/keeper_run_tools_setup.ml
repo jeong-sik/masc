@@ -310,9 +310,17 @@ let prepare_agent_setup
       (fun (selected : Keeper_task_skill_turn.selected) ->
          let resource_location =
            match selected.skill.provenance with
-           | Some { source_root = Some source_root; directory; _ } ->
-             Some Keeper_tool_composition_surface.{ source_root; directory }
+           | Some
+               { source_root = Some source_root
+               ; resource_read_max_bytes = Some resource_read_max_bytes
+               ; directory
+               ; _
+               } ->
+             Some
+               Keeper_tool_composition_surface.
+                 { source_root; directory; resource_read_max_bytes }
            | Some { source_root = None; _ }
+           | Some { resource_read_max_bytes = None; _ }
            | None ->
              None
          in

@@ -6,6 +6,10 @@
     composition catalog exists. *)
 val plan_execute_tool_name : string
 
+val composition_run_summary_tool_name : string
+(** Internal durable row name for one terminal composition run. It is not a
+    model-visible tool. *)
+
 val plan_execute_input_schema : Yojson.Safe.t
 (** The plan's input schema, beside its name because it is the same kind of
     fact: what the tool publishes, not how it is built.
@@ -36,6 +40,12 @@ type instruction_skill =
 and resource_location =
   { source_root : string
   ; directory : string
+  ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes
+  }
+
+type composition_skill =
+  { reference : Skill_reference.t
+  ; entry : Keeper_tool_composition_catalog.entry
   }
 
 val instruction_skill :
@@ -83,7 +93,7 @@ val make_tools
            {!Keeper_tool_composition_catalog.skill_tool_name}, which serves a
            frozen body or one deferred bundled resource for a canonical
            exact-reference input. *)
-  -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
+  -> ?skill_compositions:composition_skill list
        (** Composition entries declared by skills
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
            as catalog entries; materialized by the same closure. The caller
@@ -101,6 +111,7 @@ val make_tools
   -> ?record_composition_activation:
        (invocation:Agent_core.Tool_contract.Invocation.t ->
         tool_name:string ->
+        reference:Skill_reference.t ->
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)

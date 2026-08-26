@@ -5652,7 +5652,8 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                 List.find_opt
                   (fun row ->
                      Safe_ops.json_string_opt "tool" row
-                     = Some Masc.Keeper_skill_usage.composition_run_summary_tool_name)
+                     = Some
+                         Masc.Keeper_tool_composition_surface.composition_run_summary_tool_name)
                   rows
               with
               | Some row -> row

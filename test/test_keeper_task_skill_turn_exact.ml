@@ -11,9 +11,11 @@ let source_row ~id ~path =
     path
 ;;
 
-let config sources =
+let config_with_resource_read_max_bytes resource_read_max_bytes sources =
   let text =
-    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n"
+    Printf.sprintf
+      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = %d\n"
+      resource_read_max_bytes
     ^ sources
   in
   match Skill_source_config.parse_text text with
@@ -24,6 +26,8 @@ let config sources =
          "; "
          (List.map Skill_source_config.diagnostic_to_string diagnostics))
 ;;
+
+let config = config_with_resource_read_max_bytes 65536
 
 let document ~name ~description body =
   Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
@@ -225,11 +229,22 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
   let references = Filename.concat skill_root "references" in
   Fs_compat.mkdir_p references;
   let resource = Filename.concat references "PROOF.md" in
-  Fs_compat.save_file resource "DEFERRED_RESOURCE";
+  let oversized_resource = Filename.concat references "TOO-LARGE.md" in
+  Fs_compat.save_file resource "12345678";
+  Fs_compat.save_file oversized_resource "123456789";
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree source_root)
     (fun () ->
-       let config = config (source_row ~id:"only" ~path:"skills") in
+       let config =
+         config_with_resource_read_max_bytes
+           8
+           (source_row ~id:"only" ~path:"skills")
+       in
+       let resource_read_max_bytes =
+         match config.resource_read_max_bytes with
+         | Some value -> value
+         | None -> fail "resource read bound fixture is missing"
+       in
        let skill_snapshot =
          snapshot
            config
@@ -251,7 +266,8 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        let instruction =
          Masc.Keeper_tool_composition_surface.instruction_skill
            ~resource_location:
-             Masc.Keeper_tool_composition_surface.{ source_root; directory = "guide" }
+             Masc.Keeper_tool_composition_surface.
+               { source_root; directory = "guide"; resource_read_max_bytes }
            ~reference
            ~description:selected.skill.description
            ~body:selected.skill.body
@@ -273,7 +289,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        check bool
          "requested resource is returned"
          true
-         (String_util.contains_substring output "DEFERRED_RESOURCE");
+         (String_util.contains_substring output "12345678");
        check bool
          "resource receipt has digest"
          true
@@ -287,7 +303,44 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        check bool
          "parent traversal never reaches the resource reader"
          false
-         (String_util.contains_substring escaped_output "DEFERRED_RESOURCE"))
+         (String_util.contains_substring escaped_output "12345678");
+       let activation_attempts = ref 0 in
+       let bounded_tool =
+         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+           ~record_activation:(fun ~invocation:_ ~content:_ _ ->
+             incr activation_attempts;
+             Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
+           ~instruction_skills:[ instruction ]
+           ()
+       in
+       let oversized =
+         match Reference.to_yojson reference with
+         | `Assoc fields ->
+           `Assoc (("file", `String "references/TOO-LARGE.md") :: fields)
+         | _ -> assert false
+       in
+       let oversized_output = run_skill_tool bounded_tool oversized in
+       check int "oversized resource records no activation" 0 !activation_attempts;
+       check bool "oversized resource reports typed bound" true
+         (String_util.contains_substring oversized_output "too_large"
+          && String_util.contains_substring oversized_output "max_bytes");
+       check bool "oversized resource returns no contents" false
+         (String_util.contains_substring oversized_output "123456789");
+       let duplicate =
+         match Reference.to_yojson reference with
+         | `Assoc fields ->
+           `Assoc
+             (("file", `String "references/PROOF.md")
+              :: ("file", `String "references/OTHER.md")
+              :: fields)
+         | _ -> assert false
+       in
+       let duplicate_output = run_skill_tool tool duplicate in
+       check bool "duplicate resource fields are typed rejection" true
+         (String_util.contains_substring duplicate_output "at most one");
+       check bool "duplicate resource fields read nothing" false
+         (String_util.contains_substring duplicate_output "12345678"))
 ;;
 
 let test_revision_mismatch_is_typed_before_tool_projection () =

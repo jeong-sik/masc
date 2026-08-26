@@ -23,6 +23,7 @@ type provenance = private
   ; source_root : string option
         (** Exact resolved source root captured by the snapshot scan. Omitted
             from public JSON because it is a host path. *)
+  ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes option
   ; directory : string
   }
 

@@ -13,7 +13,6 @@ type error =
   | Turn_scope_mismatch
   | Runtime_attempt_missing
   | Invalid_task_id of string
-  | Composition_reference_missing of { tool_name : string }
   | Activation_rejected of Keeper_skill_activation_ledger.decode_error
   | Store_failed of Keeper_skill_activation_ledger.store_error
 

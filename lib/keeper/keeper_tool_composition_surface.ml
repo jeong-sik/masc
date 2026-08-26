@@ -3,6 +3,7 @@ module Executor = Keeper_tool_plan_executor
 module Activation_ledger = Keeper_skill_activation_ledger
 
 let plan_execute_tool_name = Catalog.plan_execute_tool_name
+let composition_run_summary_tool_name = "keeper_composition_run_summary"
 
 let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
 
@@ -180,12 +181,18 @@ type instruction_skill =
 and resource_location =
   { source_root : string
   ; directory : string
+  ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes
   }
 
-let instruction_skill_description instruction_skills =
+type composition_skill =
+  { reference : Skill_reference.t
+  ; entry : Catalog.entry
+  }
+
+let instruction_skill_description (instruction_skills : instruction_skill list) =
   let listed =
     instruction_skills
-    |> List.map (fun skill ->
+    |> List.map (fun (skill : instruction_skill) ->
          Printf.sprintf
            "%s: %s"
            (Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
@@ -455,7 +462,7 @@ let observe_composition_run_summary
     let schedule = Agent_core.Tool_contract.Invocation.schedule parent_invocation in
     Keeper_tool_call_log.log_call
       ~keeper_name:meta.Keeper_meta_contract.name
-      ~tool_name:Keeper_skill_usage.composition_run_summary_tool_name
+      ~tool_name:composition_run_summary_tool_name
       ~input
       ~output_text
       ~success
@@ -1166,12 +1173,16 @@ let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
 ;;
 
-let merge_instruction_skills ~task ~global =
+let merge_instruction_skills
+      ~(task : instruction_skill list)
+      ~(global : instruction_skill list)
+  =
   List.fold_left
-    (fun selected skill ->
+    (fun (selected : instruction_skill list) (skill : instruction_skill) ->
        if
          List.exists
-           (fun known -> Skill_reference.equal skill.reference known.reference)
+           (fun (known : instruction_skill) ->
+              Skill_reference.equal skill.reference known.reference)
            selected
        then selected
        else selected @ [ skill ])
@@ -1179,7 +1190,9 @@ let merge_instruction_skills ~task ~global =
     global
 ;;
 
-let instruction_skill_schema_tool ~instruction_skills =
+let instruction_skill_schema_tool
+      ~(instruction_skills : instruction_skill list)
+  =
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~name:skill_tool_schema.name
     ~description:(instruction_skill_description instruction_skills)
@@ -1208,6 +1221,7 @@ let activation_failure ?reference ~tool_name ~start_time error =
 
 type skill_input_error =
   | Invalid_skill_reference
+  | Duplicate_resource_path
   | Invalid_resource_path of Skill_resource_path.error
 
 let skill_reference_and_resource_path input =
@@ -1216,24 +1230,50 @@ let skill_reference_and_resource_path input =
     let reference_json =
       `Assoc (List.filter (fun (field, _) -> not (String.equal field "file")) fields)
     in
+    let resource_fields =
+      List.filter_map
+        (fun (field, value) -> if String.equal field "file" then Some value else None)
+        fields
+    in
     (match Skill_reference.of_yojson reference_json with
      | Error _ -> Error Invalid_skill_reference
      | Ok reference ->
-       (match List.assoc_opt "file" fields with
-        | None -> Ok (reference, None)
-        | Some (`String value) ->
+       (match resource_fields with
+        | [] -> Ok (reference, None)
+        | [ `String value ] ->
           Skill_resource_path.of_string value
           |> Result.map (fun resource_path -> reference, Some resource_path)
           |> Result.map_error (fun error -> Invalid_resource_path error)
-        | Some _ -> Error (Invalid_resource_path Skill_resource_path.Empty)))
+        | [ _ ] -> Error (Invalid_resource_path Skill_resource_path.Empty)
+        | _ :: _ :: _ -> Error Duplicate_resource_path))
   | _ ->
     Error Invalid_skill_reference
 ;;
 
+type instruction_resource =
+  | Resource_missing
+  | Resource_too_large of
+      { observed_bytes : int
+      ; max_bytes : int
+      }
+  | Resource_loaded of string
+
 let load_instruction_resource location relative_path =
   let skill_root = Filename.concat location.source_root location.directory in
   let path = Skill_resource_path.append_to ~root:skill_root relative_path in
-  Fs_compat.load_owned_regular_file ~ownership_root:location.source_root path
+  let max_bytes =
+    Skill_source_config.resource_read_max_bytes_to_int
+      location.resource_read_max_bytes
+  in
+  Fs_compat.load_owned_regular_file_prefix
+    ~ownership_root:location.source_root
+    ~max_bytes
+    path
+  |> Result.map (function
+    | None -> Resource_missing
+    | Some { Fs_compat.truncated = true; file_size; _ } ->
+      Resource_too_large { observed_bytes = file_size; max_bytes }
+    | Some { content; truncated = false; _ } -> Resource_loaded content)
 ;;
 
 let make_instruction_skill_tool
@@ -1272,6 +1312,12 @@ let make_instruction_skill_tool
              ~class_:Tool_result.Workflow_rejection
              ~start_time
              "keeper_skill requires one canonical exact Skill reference"
+         | Error Duplicate_resource_path ->
+           Tool_result.make_err
+             ~tool_name:name
+             ~class_:Tool_result.Workflow_rejection
+             ~start_time
+             "keeper_skill accepts at most one resource file"
          | Error (Invalid_resource_path error) ->
            Tool_result.make_err
              ~tool_name:name
@@ -1281,7 +1327,8 @@ let make_instruction_skill_tool
          | Ok (asked, resource_path) ->
            (match
               List.find_opt
-                (fun skill -> Skill_reference.equal skill.reference asked)
+                (fun (skill : instruction_skill) ->
+                   Skill_reference.equal skill.reference asked)
                 instruction_skills
             with
             | Some skill ->
@@ -1331,7 +1378,7 @@ let make_instruction_skill_tool
                          ~tool_name:name
                          ~start_time
                          (Fs_compat.owned_regular_file_read_error_to_string error)
-                     | Ok None ->
+                     | Ok Resource_missing ->
                        Tool_result.make_err
                          ~tool_name:name
                          ~class_:Tool_result.Workflow_rejection
@@ -1339,7 +1386,29 @@ let make_instruction_skill_tool
                          (Printf.sprintf
                             "the Skill carries no resource %S"
                             (Skill_resource_path.to_string relative_path))
-                     | Ok (Some contents) ->
+                     | Ok (Resource_too_large { observed_bytes; max_bytes }) ->
+                       Tool_result.make_err
+                         ~tool_name:name
+                         ~class_:Tool_result.Workflow_rejection
+                         ~start_time
+                         ~data:
+                           (`Assoc
+                              [ ( "skill_resource_error"
+                                , `Assoc
+                                    [ "kind", `String "too_large"
+                                    ; ( "file"
+                                      , `String
+                                          (Skill_resource_path.to_string
+                                             relative_path) )
+                                    ; "observed_bytes", `Int observed_bytes
+                                    ; "max_bytes", `Int max_bytes
+                                    ] )
+                              ])
+                         (Printf.sprintf
+                            "Skill resource too_large: observed_bytes=%d max_bytes=%d"
+                            observed_bytes
+                            max_bytes)
+                     | Ok (Resource_loaded contents) ->
                        let relative_path_text =
                          Skill_resource_path.to_string relative_path
                        in
@@ -1370,7 +1439,7 @@ let make_instruction_skill_tool
                     | skills ->
                       String.concat ", "
                         (List.map
-                           (fun skill ->
+                           (fun (skill : instruction_skill) ->
                               Skill_reference.to_yojson skill.reference
                               |> Yojson.Safe.to_string)
                            skills)))))))
@@ -1384,8 +1453,8 @@ module For_testing = struct
 end
 
 let make_tools
-      ?(instruction_skills = [])
-      ?(skill_composition_entries = [])
+      ?(instruction_skills : instruction_skill list = [])
+      ?(skill_compositions : composition_skill list = [])
       ?composition_plan_index
       ?record_instruction_activation
       ?record_composition_activation
@@ -1411,10 +1480,13 @@ let make_tools
      TOML catalog, so materialization cannot tell them apart — one closure
      serves both. Name collisions across the two sources are refused where
      both catalogs are loaded, before this point. *)
-  let declared_entries = skill_composition_entries in
+  let declared_entries =
+    List.map (fun (skill : composition_skill) -> skill.entry) skill_compositions
+  in
   let composition_tools =
-    declared_entries
-    |> List.map (fun (entry : Catalog.entry) ->
+    skill_compositions
+    |> List.map (fun (skill : composition_skill) ->
+    let entry = skill.entry in
     let tool_name = Catalog.tool_name entry in
     (* The approval policy cannot look this tool up: it is an Agent-Core tool,
        not a keeper descriptor, so a descriptor lookup finds nothing and the
@@ -1511,7 +1583,12 @@ let make_tools
                  | Ok plan ->
                    (match record_composition_activation with
                     | Some record ->
-                      (match record ~invocation:parent_invocation ~tool_name with
+                      (match
+                         record
+                           ~invocation:parent_invocation
+                           ~tool_name
+                           ~reference:skill.reference
+                       with
                        | Error error ->
                          activation_failure ~tool_name ~start_time error
                        | Ok
@@ -1577,7 +1654,12 @@ let make_tools
                match record_composition_activation with
                | None -> Ok ()
                | Some record ->
-                 (match record ~invocation:parent_invocation ~tool_name with
+                 (match
+                    record
+                      ~invocation:parent_invocation
+                      ~tool_name
+                      ~reference:skill.reference
+                  with
                   | Error error -> Error error
                   | Ok
                       ( Activation_ledger.Recorded _

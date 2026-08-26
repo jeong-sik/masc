@@ -28,7 +28,6 @@ type error =
   | Turn_scope_mismatch
   | Runtime_attempt_missing
   | Invalid_task_id of string
-  | Composition_reference_missing of { tool_name : string }
   | Activation_rejected of Ledger.decode_error
   | Store_failed of Ledger.store_error
 
@@ -161,7 +160,6 @@ let error_code = function
   | Turn_scope_mismatch -> "turn_scope_mismatch"
   | Runtime_attempt_missing -> "runtime_attempt_missing"
   | Invalid_task_id _ -> "invalid_task_id"
-  | Composition_reference_missing _ -> "composition_reference_missing"
   | Activation_rejected _ -> "activation_rejected"
   | Store_failed _ -> "store_failed"
 ;;
@@ -173,8 +171,6 @@ let error_to_string = function
     "Skill activation arrived before a concrete runtime attempt was selected"
   | Invalid_task_id task_id ->
     Printf.sprintf "Skill activation Task id is invalid: %s" task_id
-  | Composition_reference_missing { tool_name } ->
-    Printf.sprintf "Skill composition %s has no exact catalog reference" tool_name
   | Activation_rejected _ -> "Skill activation was rejected by the typed ledger"
   | Store_failed error ->
     "Skill activation ledger write failed: " ^ Ledger.store_error_to_string error
@@ -189,8 +185,7 @@ let error_to_yojson error =
     | Turn_scope_mismatch
     | Runtime_attempt_missing
     | Invalid_task_id _
-    | Composition_reference_missing _ ->
-      None
+      -> None
   in
   `Assoc
     ([ "code", `String (error_code error)

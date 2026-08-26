@@ -8,6 +8,7 @@ type provenance =
   { identity : Skill_catalog_snapshot.identity
   ; source : Skill_source_config.source
   ; source_root : string option
+  ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes option
   ; directory : string
   }
 
@@ -254,6 +255,11 @@ let partition_documents documents =
 let skills catalog = catalog
 
 let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
+  let resource_read_max_bytes =
+    match Skill_catalog_snapshot.config_state snapshot with
+    | Configured { config; _ } -> config.resource_read_max_bytes
+    | Config_rejected _ | Config_unreadable _ -> None
+  in
   Skill_catalog_snapshot.sources snapshot
   |> fun sources -> List.nth_opt sources entry.source_index
   |> Option.map (fun scan ->
@@ -269,6 +275,7 @@ let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     { identity = entry.identity
     ; source = scan.Skill_catalog_snapshot.source.source
     ; source_root
+    ; resource_read_max_bytes
     ; directory = entry.directory
     })
 ;;

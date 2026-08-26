@@ -253,6 +253,7 @@ let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
     ; Live.Text "failed reply"
     ; tool_started "call-kept" "Read"
     ; tool_ended "call-kept"
+    ; tool_result "call-kept" "exec-kept"
     ; Live.Runtime_attempt_started
     ; Live.Thinking "fallback reasoning"
     ; Live.Text "fallback reply"
@@ -260,8 +261,13 @@ let test_runtime_attempt_reset_discards_only_unfinished_narrative () =
   check string "only fallback text remains" "fallback reply" (Transcript.text t);
   check string "only fallback thinking remains" "fallback reasoning"
     (Transcript.thinking t);
-  check int "tool evidence survives attempt reset" 1
-    (List.length (Transcript.tool_calls t))
+  (match Transcript.tool_calls t with
+   | [ call ] ->
+     check (option string) "execution identity survives attempt reset"
+       (Some "exec-kept") call.execution_id;
+     check string "settled outcome survives attempt reset" "returned"
+       (outcome_to_string call.outcome)
+   | calls -> failf "expected one preserved tool call, got %d" (List.length calls))
 ;;
 
 let test_snapshot_replaces_accumulated_args () =

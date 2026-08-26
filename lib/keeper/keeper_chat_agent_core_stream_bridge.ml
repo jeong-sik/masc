@@ -262,10 +262,10 @@ let poison_scope_with state ~kind ~reason ~diagnostic extra_events =
   }
 ;;
 
-let start_runtime_attempt state =
+let start_runtime_attempt ~abandon_current_scope state =
   let reason = "tool occurrence superseded by a new runtime attempt" in
   let terminalized =
-    if tools_in_current_scope state = []
+    if (not abandon_current_scope) || tools_in_current_scope state = []
     then { bridge_state = state; chat_events = [] }
     else
       poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded

@@ -76,6 +76,20 @@ let test_normalize_request_url_rejects_non_http () =
   | Ok value ->
       failf "expected non-http URL to be rejected, got %s" value
 
+let test_extract_html_preview_fields_utf8_truncation () =
+  let prefix =
+    "<html><head><title>UTF8 Truncation Title</title></head><body>"
+  in
+  let padding_len = 262_143 - String.length prefix in
+  let padding = String.make padding_len 'x' in
+  let hangul_suffix = "한글</body></html>" in
+  let html = prefix ^ padding ^ hangul_suffix in
+  let extracted =
+    Server_dashboard_http_link_preview.extract_html_preview_fields
+      ~url:"https://example.com/utf8" html
+  in
+  check (option string) "title" (Some "UTF8 Truncation Title") extracted.title
+
 let () =
   Alcotest.run "dashboard_link_preview"
     [
@@ -83,6 +97,8 @@ let () =
         [
           test_case "extract html preview fields" `Quick
             test_extract_html_preview_fields;
+          test_case "extract html preview fields utf8 truncation" `Quick
+            test_extract_html_preview_fields_utf8_truncation;
           test_case "image url detection" `Quick test_image_url_detection;
           test_case "multibyte title survives the byte cap" `Quick
             test_extract_html_preview_fields_multibyte_boundary;

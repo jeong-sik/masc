@@ -192,6 +192,25 @@ ENV OPAM_SWITCH_PREFIX=/home/opam/.opam/5.5 \
 RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
  || { echo "opam switch prefix drift: ${OPAM_SWITCH_PREFIX} has no lib/yojson" >&2; exit 1; }
 
+# The container runs as the host uid (`--user <uid>:<gid>`), which matches no
+# account in the image, so every path it reads has to be world-readable.
+# /home/opam ships 0750 and the switch below it 0755 -- the parent is what
+# denies, and PATH pointing at ${OPAM_SWITCH_PREFIX}/bin does not help when the
+# directory above it cannot be traversed.
+#
+# Measured 2026-08-26: `docker exec` as the host uid answers
+# "Permission denied" for ${OPAM_SWITCH_PREFIX}/bin/dune, so `dune` is absent
+# from PATH in practice. The live fleet already shows this as
+# "OCI runtime exec failed, exit 127, dune build" -- five occurrences in a
+# 24-hour window on the keepers that do run containers.
+#
+# Traverse and read only: no write bit is added, and the switch stays owned by
+# opam. The build itself still runs as opam and is unaffected.
+RUN chmod o+rx /home/opam \
+ && find /home/opam/.opam -type d -exec chmod o+rx {} + \
+ && test -x "${OPAM_SWITCH_PREFIX}/bin/dune" \
+ || { echo "opam switch bin not traversable after chmod" >&2; exit 1; }
+
 VOLUME ["/tmp/keeper-creds"]
 
 # Keeper sandbox: bash + tools (Read/Edit/Bash). SIGTERM lets bash and

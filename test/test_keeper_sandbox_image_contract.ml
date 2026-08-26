@@ -242,6 +242,30 @@ let test_versions_are_pinned_to_the_project () =
     version_pins
 ;;
 
+(* The container runs as the host uid, which matches no account in the image, so
+   the opam switch has to be traversable by "other". /home/opam ships 0750 and
+   the switch below it 0755 -- the parent denies, and PATH pointing into the
+   switch does not help.
+
+   Measured 2026-08-26: without this, `${OPAM_SWITCH_PREFIX}/bin/dune` answers
+   "Permission denied" as the host uid, and the live fleet shows it as
+   "OCI runtime exec failed, exit 127, dune build". Five occurrences in one day
+   on the keepers already running containers -- the failure was in the data
+   before anyone read it as this.
+
+   Checked as a token because that is what a Dockerfile test can see; the
+   build itself asserts the outcome with `test -x`. *)
+let test_the_opam_switch_is_traversable () =
+  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  check bool "the switch parent is opened for other" true (has "o+rx" set);
+  check
+    bool
+    "and the build fails if dune is still unreachable"
+    true
+    (has "opam switch bin not traversable after chmod" set
+     || has "traversable" set)
+;;
+
 (* apt's nodejs is 18.19 on this base, so resolving node from apt alone cannot
    satisfy engines.node >= 22. The nodesource repository has to be present. *)
 let test_node_does_not_come_from_apt_alone () =
@@ -272,6 +296,10 @@ let () =
             "node does not come from apt alone"
             `Quick
             test_node_does_not_come_from_apt_alone
+        ; test_case
+            "the opam switch is traversable"
+            `Quick
+            test_the_opam_switch_is_traversable
         ] )
     ]
 ;;

@@ -6518,7 +6518,7 @@ def fusion_list_detail_interaction(
             b"RESULT",
             b"QUESTION",
             b"PANEL RESPONSES",
-            b"PgUp/PgDn:page",
+            b"PgUp / PgDn:page",
         ):
             if needle not in detail_plain:
                 raise AssertionError(

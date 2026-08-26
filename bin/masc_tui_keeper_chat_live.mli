@@ -32,6 +32,14 @@ type args_fragment =
       (** Argument text that replaces it — some providers send a snapshot
           instead of, not in addition to, their deltas. *)
 
+(** Where a request stood when the server accepted it. *)
+type admission =
+  | Queued  (** Accepted and waiting its turn in the keeper's queue. *)
+  | Running  (** Accepted and started. *)
+  | Settled
+      (** Already finished when it was accepted: an idempotent replay of an
+          operation the server had already run. *)
+
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
@@ -63,6 +71,18 @@ type delta =
       (** How the wait ended -- the answer, or that none came. Drawn so a
           prompt stops being shown, including on the paths where nobody
           answered. *)
+  | Accepted of
+      { admission : admission
+      ; queue_length : int
+            (** How many operations the keeper's chat queue held when the
+                server accepted this one. The server counts the whole queue,
+                so this is not "how many are ahead of this one" and must not
+                be drawn as though it were. *)
+      }
+      (** The server took the request. Until this arrives, a pane can say the
+          request went out and nothing more -- which is what left a wait of
+          minutes reading as "waiting for the run to start" with no way to
+          tell a busy keeper from a stuck one. *)
   | Checkpoint  (** The turn is continuing past a context checkpoint. *)
   | External_effect_completed
   | Run_failed of { message : string }

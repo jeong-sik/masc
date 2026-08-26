@@ -128,6 +128,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -472,6 +473,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census

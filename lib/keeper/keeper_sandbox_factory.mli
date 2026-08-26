@@ -40,6 +40,13 @@ val create :
 (** Create an empty factory.  [default_network_override], when supplied,
     is applied to every runtime created via {!resolve}. *)
 
+val turn_id : t -> int
+(** The token this factory stamps on the containers it creates, as the
+    [masc.mcp.turn_id] label. A factory is built once per turn, so two factories
+    in one process never share it — which is what lets
+    {!Keeper_sandbox_runtime.reap_prior_turn_containers} tell an earlier turn's
+    containers from this turn's. *)
+
 val resolve :
   t ->
   cwd:string ->

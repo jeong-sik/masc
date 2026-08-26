@@ -13,12 +13,24 @@ type t = {
   mutex : Eio.Mutex.t;
 }
 
+(* Distinguishes one turn's containers from an earlier turn's within this
+   process. A factory is built once per turn, so a counter here is one token
+   per turn; combined with the owner-pid label that is enough for
+   [Keeper_sandbox_runtime.reap_prior_turn_containers] to tell the two apart.
+
+   It was previously left at its default of 0 at both call sites, so every
+   container carried the same value and the label could not tell any two turns
+   apart (#30590). *)
+let next_turn_id = Atomic.make 0
+
+let mint_turn_id () = Atomic.fetch_and_add next_turn_id 1 + 1
+
 let create ?default_network_override
-    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ?(turn_id = 0) () =
+    ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) ?turn_id () =
   {
     config;
     meta;
-    turn_id;
+    turn_id = (match turn_id with Some id -> id | None -> mint_turn_id ());
     default_network_override;
     cache = Hashtbl.create 4;
     mutex = Eio.Mutex.create ();
@@ -84,6 +96,8 @@ let resolve (t : t) ~cwd =
         in
         Hashtbl.add t.cache key r;
         Runtime r)
+
+let turn_id t = t.turn_id
 
 let resolve_opt t_opt ~cwd =
   match t_opt with

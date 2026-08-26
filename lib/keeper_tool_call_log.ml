@@ -350,10 +350,19 @@ let take_queued_append () =
    counts, and the flush daemon's [Cancelled -> ()] arm then swallowed it: one
    row lost per cancellation, with no counter and no log line (masc#30619).
 
-   Putting the entry back at the front preserves order and hands the loss back
-   to the queue's own bounded-drop accounting, which does report. This is the
-   shape [Board_votes.flush_dirty] settled on in #26168 — re-mark on failure,
+   Putting the entry back at the front preserves order. This is the shape
+   [Board_votes.flush_dirty] settled on in #26168 — re-mark on failure,
    because the counter and the log line are not the whole response.
+
+   The requeue does not take the capacity check [enqueue_append] takes, and
+   that is deliberate: refusing here would drop the entry this function
+   exists to keep. It costs an overshoot. The entry was just taken, so the
+   length returns to where it was unless a producer landed in between, and
+   then the queue sits one over [append_queue_capacity] per interleaving —
+   uncounted, because only [enqueue_append] reports a drop. Repeated write
+   failures widen it. The bound is a memory guard rather than a contract, so
+   overshooting it beats losing the row; what would be wrong is reading this
+   requeue as accounted for.
 
    [with_append_queue_lock] holds a [Stdlib.Mutex], so the requeue completes
    even when the surrounding Eio context is already cancelled. *)
@@ -430,6 +439,12 @@ let start_flush_fiber ~sw ~clock =
         loop ()
     in
     loop ());
+  (* Cancellation during ordinary running no longer loses a row: the drain
+     requeues before it re-raises, and the daemon comes back for it. This
+     hook is the one place that still can. A cancel here re-raises, and the
+     requeued entry is left in a queue that lives only in this process, which
+     is on its way out. Closing that needs a durable queue, not another
+     handler arm. *)
   Shutdown.register ~name:"keeper_tool_call_log_flush" ~priority:24 (fun () ->
     try
       let n = drain_queued_appends () in

@@ -126,6 +126,11 @@ let recorded_get ~expect_first ~expect_second =
   in
   (get, asked)
 
+(* Discovery asks the MCP endpoint where its metadata is before computing a
+   URL, and the default does that over the network. Every test here says
+   what the server answered instead, so none of them reaches for it. *)
+let no_header ~url:_ = None
+
 let protected_resource_url =
   "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2"
 
@@ -143,7 +148,8 @@ let discovered_atlassian () =
     recorded_get ~expect_first:protected_resource_url
       ~expect_second:authorization_server_url
   in
-  match Keeper_oauth_discovery.discover ~get ~mcp_url:atlassian_mcp_url () with
+  match Keeper_oauth_discovery.discover ~get ~ask:no_header
+    ~mcp_url:atlassian_mcp_url () with
   | Ok found -> found
   | Error err ->
       Alcotest.failf "discovery failed: %s"
@@ -458,7 +464,8 @@ let test_discovery_reads_both_hops () =
     recorded_get ~expect_first:protected_resource_url
       ~expect_second:authorization_server_url
   in
-  match Keeper_oauth_discovery.discover ~get ~mcp_url:atlassian_mcp_url () with
+  match Keeper_oauth_discovery.discover ~get ~ask:no_header
+    ~mcp_url:atlassian_mcp_url () with
   | Error err ->
       Alcotest.failf "discovery failed: %s"
         (Keeper_oauth_discovery.error_to_string err)
@@ -487,10 +494,98 @@ let test_discovery_reads_both_hops () =
         "Jira scopes are published" true
         (List.mem "write:jira-work" found.Keeper_oauth_discovery.scopes_supported)
 
+(* ── where the metadata is ───────────────────────────────────────────── *)
+
+(* A server of Asana's shape: MCP served below the origin, metadata published
+   at the origin, and a 401 that says so. The computed URL misses it, so this
+   is the case the header exists for. *)
+let origin_only_metadata = "https://mcp.example.com/.well-known/oauth-protected-resource"
+
+let origin_only_get ~url =
+  if String.equal url origin_only_metadata then
+    Ok (200, {|{"resource":"https://mcp.example.com","authorization_servers":["https://as.example.com"]}|})
+  else if
+    String.equal url "https://as.example.com/.well-known/oauth-authorization-server"
+  then
+    Ok
+      ( 200,
+        {|{"issuer":"https://as.example.com","authorization_endpoint":"https://as.example.com/authorize","token_endpoint":"https://as.example.com/token","code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none"]}|}
+      )
+  else Ok (404, "not found")
+
+let says ~header = fun ~url:_ -> Some [ ("WWW-Authenticate", header) ]
+
+let test_the_server_says_where_its_metadata_is () =
+  match
+    Keeper_oauth_discovery.discover ~get:origin_only_get
+      ~ask:
+        (says
+           ~header:
+             (Printf.sprintf {|Bearer realm="OAuth", resource_metadata="%s", error="invalid_token"|}
+                origin_only_metadata))
+      ~mcp_url:"https://mcp.example.com/mcp" ()
+  with
+  | Ok found ->
+      check str "the resource it named" "https://mcp.example.com"
+        found.Keeper_oauth_discovery.resource
+  | Error err ->
+      Alcotest.failf
+        "the computed URL was used even though the server named one: %s"
+        (Keeper_oauth_discovery.error_to_string err)
+
+let test_no_header_falls_back_to_the_computed_url () =
+  (* Nine of the servers measured send no such header, so the computed URL
+     is not a fallback for broken servers; it is the other half. *)
+  match
+    Keeper_oauth_discovery.discover ~get:origin_only_get ~ask:no_header
+      ~mcp_url:"https://mcp.example.com/mcp" ()
+  with
+  | Error (Keeper_oauth_discovery.Not_published { url; _ }) ->
+      check str "asked where RFC 9728 puts it"
+        "https://mcp.example.com/.well-known/oauth-protected-resource/mcp" url
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "the origin document answered a path-qualified ask"
+
+let test_a_plaintext_location_is_not_followed () =
+  (* The answer decides where a token comes from. One fetched over http
+     could be replaced on the way, so it is dropped and the computed URL
+     stands. *)
+  match
+    Keeper_oauth_discovery.discover ~get:origin_only_get
+      ~ask:
+        (says
+           ~header:
+             {|Bearer resource_metadata="http://mcp.example.com/.well-known/oauth-protected-resource"|})
+      ~mcp_url:"https://mcp.example.com/mcp" ()
+  with
+  | Error (Keeper_oauth_discovery.Not_published { url; _ }) ->
+      check str "the computed URL was used instead"
+        "https://mcp.example.com/.well-known/oauth-protected-resource/mcp" url
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "a plaintext metadata location was followed"
+
+let test_a_header_without_the_parameter_is_not_a_location () =
+  match
+    Keeper_oauth_discovery.discover ~get:origin_only_get
+      ~ask:(says ~header:{|Bearer realm="OAuth", error="invalid_token"|})
+      ~mcp_url:"https://mcp.example.com/mcp" ()
+  with
+  | Error (Keeper_oauth_discovery.Not_published { url; _ }) ->
+      check str "the computed URL was used instead"
+        "https://mcp.example.com/.well-known/oauth-protected-resource/mcp" url
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "a header with no location was read as one"
+
 let test_discovery_refuses_a_plaintext_server () =
   match
     Keeper_oauth_discovery.discover ~get:(fun ~url:_ -> Ok (200, "{}"))
-      ~mcp_url:"http://mcp.example.com/v1" ()
+      ~ask:no_header ~mcp_url:"http://mcp.example.com/v1" ()
   with
   | Error (Keeper_oauth_discovery.Bad_mcp_url _) -> ()
   | Error other ->
@@ -502,7 +597,7 @@ let test_discovery_names_a_server_that_publishes_nothing () =
   match
     Keeper_oauth_discovery.discover
       ~get:(fun ~url:_ -> Ok (404, "not found"))
-      ~mcp_url:atlassian_mcp_url ()
+      ~ask:no_header ~mcp_url:atlassian_mcp_url ()
   with
   | Error (Keeper_oauth_discovery.Not_published { status; _ }) ->
       Alcotest.(check int) "the status is kept" 404 status
@@ -516,7 +611,7 @@ let test_discovery_names_a_resource_with_no_authorization_server () =
     Keeper_oauth_discovery.discover
       ~get:(fun ~url:_ ->
         Ok (200, {|{"resource":"https://mcp.example.com/v1"}|}))
-      ~mcp_url:"https://mcp.example.com/v1" ()
+      ~ask:no_header ~mcp_url:"https://mcp.example.com/v1" ()
   with
   | Error (Keeper_oauth_discovery.No_authorization_server _) -> ()
   | Error other ->
@@ -906,6 +1001,14 @@ let () =
             test_discovery_names_a_server_that_publishes_nothing;
           Alcotest.test_case "names a resource with no authorization server"
             `Quick test_discovery_names_a_resource_with_no_authorization_server;
+          Alcotest.test_case "the server says where its metadata is" `Quick
+            test_the_server_says_where_its_metadata_is;
+          Alcotest.test_case "no header falls back to the computed URL" `Quick
+            test_no_header_falls_back_to_the_computed_url;
+          Alcotest.test_case "a plaintext location is not followed" `Quick
+            test_a_plaintext_location_is_not_followed;
+          Alcotest.test_case "a header without the parameter is not a location"
+            `Quick test_a_header_without_the_parameter_is_not_a_location;
         ] );
       ( "registration",
         [ Alcotest.test_case "asks as a public client" `Quick

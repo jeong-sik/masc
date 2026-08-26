@@ -117,11 +117,10 @@ blocking_lints() {
   # runs on every lint pass, not only when its own file changes.
   run_lint "Merge audit unfinished-verdict fixture" \
     python3 scripts/ci/test_check_merge_audit.py
-  # The guard itself, wired where CI can call it. The merge-audit workflow
-  # patch is applied by an operator with workflow scope; this call is what
-  # keeps audit-unwired-audits.sh honest until then — a guard CI cannot
-  # fail is a guard that does not guard (the ratchet failed the first
-  # push of this very branch at 12 vs baseline 11).
+  run_lint "Merge safety workflow wiring fixture" \
+    bash scripts/ci/test-merge-safety-wiring.sh
+  # The guard itself is invoked live by main-ci-verdict.yml. Keep this cheap
+  # import/CLI contract next to its decision and workflow fixtures.
   run_lint "Merge audit guard executable" \
     python3 scripts/ci/check-merge-audit.py --self-check
 }

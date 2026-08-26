@@ -22,17 +22,128 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
   actions: read
   issues: write
+  pull-requests: read
 
 concurrency:
-  group: main-ci-verdict
+  # Scheduled verdicts serialize under one key. Every main push gets its own
+  # key: GitHub keeps only one pending run per concurrency group even when
+  # cancel-in-progress=false, so a shared push key would silently discard
+  # audits during a burst of merges.
+  group: >-
+    main-ci-verdict-${{ github.event_name }}-${{
+      github.event_name == 'push' && github.sha || 'scheduled'
+    }}
   cancel-in-progress: false
 
 jobs:
+  merge-audit:
+    name: Audit the required verdict this merge carried
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: ${{ github.event_name == 'push' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Audit the verdict-bearing PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_AUDIT_CONTEXTS: ${{ vars.MERGE_AUDIT_CONTEXTS || 'CI Gate' }}
+        run: |
+          set -euo pipefail
+
+          # Required CI runs on the PR head. Resolve only the PR whose recorded
+          # merge_commit_sha equals this push; commits/{sha}/pulls may return
+          # several associated PRs and its first element is not an authority.
+          associated="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls")"
+          pr_head="$(printf '%s' "${associated}" | jq -r --arg sha "${GITHUB_SHA}" \
+            'map(select(.merge_commit_sha == $sha))[0].head.sha // empty')"
+          pr_number="$(printf '%s' "${associated}" | jq -r --arg sha "${GITHUB_SHA}" \
+            'map(select(.merge_commit_sha == $sha))[0].number // empty')"
+
+          # A direct push has no PR-head verdict. Auditing the pushed SHA makes
+          # the required context absent and therefore fails closed instead of
+          # silently skipping an unreviewed main mutation.
+          audit_sha="${pr_head:-${GITHUB_SHA}}"
+          audit_json="${RUNNER_TEMP}/merge-audit.json"
+          echo "merge ${GITHUB_SHA:0:10} carries ${pr_number:+PR #${pr_number} head }${audit_sha:0:10}"
+
+          set +e
+          python3 scripts/ci/check-merge-audit.py \
+            --sha "${audit_sha}" \
+            --contexts "${MERGE_AUDIT_CONTEXTS}" \
+            --json-out "${audit_json}"
+          audit_rc=$?
+          set -e
+
+          if [ "${audit_rc}" -eq 0 ]; then
+            echo "merge audit: clean, nothing to file"
+            exit 0
+          fi
+          if [ "${audit_rc}" -ne 1 ]; then
+            echo "::error title=merge audit could not run::exit ${audit_rc} -- see log above"
+            exit 1
+          fi
+
+          issue_body="$(python3 - "${audit_json}" "${GITHUB_SHA}" "${pr_number}" <<'PY'
+          import json, sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              audit = json.load(handle)
+          merge_sha = sys.argv[2]
+          pr_number = sys.argv[3]
+
+          lines = [
+              "A push to main landed without a successful required-check verdict.",
+              "",
+              f"Merge commit: `{merge_sha}`",
+              f"Verdict-bearing SHA: `{audit['sha']}`"
+              + (f" (PR #{pr_number})" if pr_number else " (direct push)"),
+              "",
+              "Offending checks (newest conclusion per name):",
+          ]
+          for entry in audit["offending"]:
+              lines.append(
+                  f"- `{entry['context']}` — **{entry['conclusion']}**: "
+                  f"{entry['explanation']}"
+              )
+          lines += [
+              "",
+              "Filed automatically by the merge-audit job. The merge already",
+              "landed; this issue keeps the missing verdict visible immediately.",
+              "",
+              "```masc-triage",
+              "kind: defect",
+              "area: ci",
+              "impact: internal",
+              "must-do: true",
+              "```",
+          ]
+          print("\n".join(lines))
+          PY
+          )"
+
+          title="[merge-audit] main push lacks a successful required verdict (${GITHUB_SHA:0:10})"
+          gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${title}" \
+            --body "${issue_body}" \
+            --label merge-audit \
+          || gh issue create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${title}" \
+            --body "${issue_body}" \
+          || echo "::warning::merge audit found an unfinished verdict but could not file the issue"
+
+          exit 1
+
   verdict:
     name: Report the scheduled main verdict
     runs-on: ubuntu-latest
@@ -40,7 +151,7 @@ jobs:
     # Only the timer speaks for main. A pull_request run describes a merge
     # commit that does not exist on main, and a develop push is not main at
     # all, so neither can open or close an issue about main's health.
-    if: ${{ github.event.workflow_run.event == 'schedule' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'schedule' }}
     steps:
       - name: Open, refresh, or close the tracking issue
         uses: actions/github-script@v9

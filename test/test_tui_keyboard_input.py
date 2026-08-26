@@ -4021,7 +4021,7 @@ def autonomous_turn_history_interaction() -> Interaction:
             ("\u2713 masc_task_history \u00b7 32ms".encode(), "the returned call"),
             ("\u2717 tool_execute \u00b7 1200ms".encode(), "the failed call"),
             ("TURN \u00b7 THINKING".encode(), "the turn start"),
-            ("\u21b3 TOOLS".encode(), "the nested tool block"),
+            ("TOOLS\u2502".encode(), "the nested tool block"),
         ):
             if needle not in plain_pane:
                 raise AssertionError(

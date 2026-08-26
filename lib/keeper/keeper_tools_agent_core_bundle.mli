@@ -18,6 +18,12 @@ val make_tool_bundle
        (** Skills loaded for this turn. Composition skills materialize as
            [keeper_compose_<name>] tools beside the catalog's own entries;
            an absent or empty catalog adds nothing. *)
+  -> ?identity_tools:Agent_core.Tool.t list
+       (** What the work services this Keeper is attached to offer, from
+           {!Keeper_identity_tools.for_turn}. Passed in rather than read
+           here: the caller is the part that also has to tell the tool-name
+           projection about them, and computing them in two places is how
+           the two would come to disagree. Absent or empty adds nothing. *)
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Keeper_tools_agent_core.tool_bundle

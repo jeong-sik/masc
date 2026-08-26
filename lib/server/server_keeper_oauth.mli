@@ -41,7 +41,33 @@ type attached = {
   provider_id : string;
   provider_label : string;
   expires_at : float;
+  tool_discovery : (int, string) result;
+      (** How many tools the provider named, or why asking did not work.
+
+          Asked right here, because an operator who just consented wants to
+          know whether it took, and a first tool call is a slow way to find
+          out. A failure does not undo the attachment: the credentials are
+          written either way, and {!refresh_tools} can be asked again. *)
 }
+
+val refresh_tools :
+  base_path:string ->
+  keeper:string ->
+  provider_id:string ->
+  now:float ->
+  (Yojson.Safe.t, string) result
+(** Ask an attached provider what tools it has, and write the answer down.
+
+    Done when a Keeper attaches, and whenever an operator asks. Not on a
+    timer: a stale catalog is visible and fixable, while a timer is a
+    network call nobody asked for. *)
+
+val attached_tools_json : base_path:string -> keeper:string -> Yojson.Safe.t
+(** What every declared provider currently offers this Keeper, as a screen
+    would list it: when it was found out, and the tool names. A provider this
+    Keeper never attached to is listed as such rather than left out, because
+    "not attached" and "attached with no tools" are different things to
+    whoever is looking. *)
 
 val finish :
   base_path:string ->

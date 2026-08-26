@@ -134,6 +134,8 @@
   fs_compat
   dated_jsonl
   masc_http_client
+  masc_keeper_identity
+  masc_mcp_client
   masc_log
   masc_secret_patterns
   masc_types

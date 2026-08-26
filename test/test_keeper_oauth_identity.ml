@@ -134,7 +134,7 @@ let authorization_server_url =
 
 (* ── the exchange ────────────────────────────────────────────────────── *)
 
-let redirect_uri = "http://127.0.0.1:8935/api/v1/keepers/kidsnote/oauth/callback"
+let redirect_uri = "http://127.0.0.1:8935/api/v1/keepers/oauth-fixture/oauth/callback"
 
 (* Built from the recorded answers rather than by hand, so what the exchange
    is handed is what discovery actually produces. *)
@@ -152,7 +152,7 @@ let discovered_atlassian () =
 let begin_for provider =
   Keeper_oauth_flow.begin_authorization ~provider
     ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~redirect_uri
-    ~keeper:"kidsnote"
+    ~keeper:"oauth-fixture"
 
 let query_of url =
   match String.index_opt url '?' with
@@ -593,7 +593,7 @@ let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
 let start_login ?(configured = None) ?discover ?register provider table =
   Keeper_oauth_session.start ?discover ?register ~provider
     ~configured_client_id:configured ~client_name:"masc"
-    ~redirect_uri ~keeper:"kidsnote" ~pending:table ~now:0.0 ~ttl_sec:600.0 ()
+    ~redirect_uri ~keeper:"oauth-fixture" ~pending:table ~now:0.0 ~ttl_sec:600.0 ()
 
 let test_start_uses_a_configured_client_rather_than_registering () =
   let provider = load_or_fail atlassian_toml in
@@ -694,7 +694,7 @@ let test_the_callback_finishes_the_login_it_started () =
           Alcotest.failf "finish failed: %s"
             (Keeper_oauth_session.finish_error_to_string err)
       | Ok finished ->
-          check str "for the Keeper that started it" "kidsnote"
+          check str "for the Keeper that started it" "oauth-fixture"
             finished.Keeper_oauth_session.keeper;
           check str "under the provider it started with" "atlassian"
             finished.Keeper_oauth_session.provider_id;
@@ -789,7 +789,7 @@ let test_the_shipped_file_entry_is_one_the_projection_accepts () =
   let provider = load_or_fail (shipped_atlassian ()) in
   let base_path = temp_dir () in
   match
-    Keeper_secret_projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+    Keeper_secret_projection.set_file_entry ~base_path ~keeper_name:"oauth-fixture"
       ~scope:Keeper_secret_projection.Keeper_secret
       ~container_path:provider.Keeper_oauth_provider.refresh_token_file
       ~value:"a-refresh-token"
@@ -802,7 +802,7 @@ let test_the_shipped_env_entries_are_ones_the_projection_accepts () =
   let provider = load_or_fail (shipped_atlassian ()) in
   let base_path = temp_dir () in
   let set name value =
-    Keeper_secret_projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+    Keeper_secret_projection.set_env_entry ~base_path ~keeper_name:"oauth-fixture"
       ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
   in
   (match set provider.Keeper_oauth_provider.access_token_env "an-access-token" with

@@ -255,6 +255,16 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
+  (** During autoboot warmup, the next cycle runs at the warmup boundary rather
+      than one full heartbeat cadence later. *)
+  val next_keepalive_sleep_duration_sec :
+    proactive_warmup_sec:int ->
+    proactive_warmup_elapsed:bool ->
+    keepalive_started_ts:float ->
+    now_ts:float ->
+    cadence_sec:float ->
+    float
+
   (** Deferred runtime lane hints have nothing to do with continuation
       delivery; they only shared this module with it. The implementation and
       its live caller both remain, so the export stays too. *)

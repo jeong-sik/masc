@@ -128,6 +128,53 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             47,
         )
 
+    def test_composition_preflight_reads_required_tools_from_skill_snapshot(self):
+        report = acceptance.composition_skill_status(
+            skills={
+                "state": "ready",
+                "usage": [
+                    {
+                        "name": "mission-snapshot",
+                        "kind": "composition",
+                        "tool_name": "keeper_compose_mission-snapshot",
+                    }
+                ],
+            },
+            required_tools=["Read", "keeper_compose_mission-snapshot"],
+            skills_url="http://127.0.0.1:8935/api/v1/skills",
+        )
+
+        self.assertEqual(report["status"], "ok")
+        self.assertEqual(
+            report["required_tools"], ["keeper_compose_mission-snapshot"]
+        )
+        self.assertEqual(report["missing_tools"], [])
+
+    def test_composition_preflight_fails_on_keeper_unparsed_skill(self):
+        report = acceptance.composition_skill_status(
+            skills={
+                "state": "ready",
+                "usage": [
+                    {
+                        "name": "broken",
+                        "kind": "unparsed",
+                        "error": "composition rejected",
+                    }
+                ],
+            },
+            required_tools=["keeper_compose_mission-snapshot"],
+            skills_url="http://127.0.0.1:8935/api/v1/skills",
+        )
+
+        self.assertEqual(report["status"], "unparsed_skills")
+        self.assertEqual(
+            report["missing_tools"], ["keeper_compose_mission-snapshot"]
+        )
+        self.assertEqual(
+            report["unparsed_skills"],
+            [{"name": "broken", "error": "composition rejected"}],
+        )
+
     def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 

@@ -3792,7 +3792,38 @@ let selected_surface_reference state =
                 Link.reference Fusion_run run.fur_run_id)
              (List.nth_opt snapshot.fus_runs state.fusion_cursor)
        | Fusion_list, None -> None)
-  | Overview | Acting | Keepers _ | Lanes | Approvals | Verification
+  (* These four hold an id already and were answering None, so Ctrl-] did
+     nothing on them: a lane names its keeper, a verification request names the
+     task it is waiting on, the roster names the keeper under the cursor, and
+     Overview names the task. Following was built and left switched off for
+     most of the screens that could use it. *)
+  | Overview ->
+      (match state.task_detail_id with
+       | Some task_id -> Some (Link.reference Task task_id)
+       | None ->
+           Option.map
+             (fun (row : Tui_decode.task) -> Link.reference Task row.id)
+             (List.nth_opt state.tasks state.task_cursor))
+  | Keepers _ ->
+      Option.map
+        (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
+        (List.nth_opt state.keepers state.keeper_cursor)
+  | Lanes ->
+      Option.bind state.lanes (fun snapshot ->
+          Option.map
+            (fun (lane : Tui_decode.keeper_lane) ->
+               Link.reference Keeper lane.kl_keeper)
+            (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor))
+  | Verification ->
+      (* The task, not the request: a verification request is a question about
+         a task, and the task is the thing another surface can open. *)
+      Option.bind state.verification (fun snapshot ->
+          Option.map
+            (fun (request : Tui_decode.verification_request) ->
+               Link.reference Task request.vr_task_id)
+            (List.nth_opt snapshot.Tui_decode.vs_requests
+               state.verification_cursor))
+  | Acting | Approvals
   | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
 
@@ -8718,8 +8749,31 @@ let main () =
                    operator actually was rather than where they land. *)
                 state.followed_from <- Some (state.view, None);
                 goto_surface state ~mailbox:async_messages destination;
+                (* Landing on the surface is half the move. Every one of
+                   these already has a "this one is open" state, and without
+                   setting it the operator arrives at the top of a list and
+                   goes looking for the row they just followed. *)
                 (match destination, opened with
                  | Overview, Some task_id -> state.task_detail_id <- Some task_id
+                 | Planning, Some goal_id ->
+                     state.planning_mode <- Planning_detail goal_id
+                 | Board, Some post_id -> state.board_mode <- Board_read post_id
+                 | Schedules, Some schedule_id ->
+                     state.schedule_detail_id <- Some schedule_id
+                 | Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
+                 | Keepers _, Some keeper_name ->
+                     (* The roster is a cursor, not an id, so this puts the
+                        cursor on the named keeper and leaves it there. A name
+                        the roster does not carry leaves the cursor alone
+                        rather than moving it somewhere arbitrary. *)
+                     (match
+                        List.find_index
+                          (fun (keeper : Tui_decode.keeper) ->
+                             String.equal keeper.k_name keeper_name)
+                          state.keepers
+                      with
+                      | Some index -> state.keeper_cursor <- index
+                      | None -> ())
                  | _, _ -> ());
                 add_event state "system" ("followed " ^ reference))
        | Some "\x14" ->

@@ -14,6 +14,10 @@ type frame = {
   lines : string list;
 }
 
+type present_result =
+  | Presented
+  | Unchanged
+
 type snapshot = {
   surface_key : string;
   compact_frame : bool;
@@ -146,7 +150,7 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
     changed_rows ~full_redraw ~previous:presenter.previous screen
   in
   match rows, cursor_changed with
-  | [], false -> ()
+  | [], false -> Unchanged
   | _ ->
       let buffer = Buffer.create 4096 in
       if presenter.synchronized_output then
@@ -172,7 +176,8 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
          write output;
          flush ();
          presenter.previous <- Some snapshot;
-         presenter.invalidated <- false
+         presenter.invalidated <- false;
+         Presented
        with exn ->
          presenter.invalidated <- true;
          raise exn)

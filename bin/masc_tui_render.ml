@@ -9116,9 +9116,29 @@ let render (state : state) =
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   if Render_schedule.Viewport.requires_compact_frame ~rows
-  then render_terminal_too_small ~rows ~cols
-  else if state.palette_open then render_palette state
-  else if state.context_inspector_open then render_context_inspector state
-  else if state.help_open then render_help state
-  else if state.agenda_open then render_agenda state
-  else render_surface state
+  then
+    let frame, clamped = render_terminal_too_small ~rows ~cols in
+    (frame, clamped, None)
+  else if state.palette_open then
+    let frame, clamped = render_palette state in
+    (frame, clamped, None)
+  else if state.context_inspector_open then
+    let frame, clamped = render_context_inspector state in
+    (frame, clamped, None)
+  else if state.help_open then
+    let frame, clamped = render_help state in
+    (frame, clamped, None)
+  else if state.agenda_open then
+    let frame, clamped = render_agenda state in
+    (frame, clamped, None)
+  else
+    let frame, clamped = render_surface state in
+    let presented_approval =
+      match state.view with
+      | Approvals ->
+          List.nth_opt (approval_items state) state.approval_cursor
+      | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
+      | Verification | Harness | Fusion | Repositories | Changes | Connectors
+      | Runtime | Config | Resources | Code | Tools | System_logs -> None
+    in
+    (frame, clamped, presented_approval)

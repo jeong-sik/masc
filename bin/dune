@@ -679,6 +679,12 @@
  (libraries masc_tui_composer masc_tui_types))
 
 (library
+ (name masc_tui_approval_authority)
+ (wrapped false)
+ (modules masc_tui_approval_authority)
+ (libraries masc_tui_types))
+
+(library
  (name masc_tui_terminal_title)
  (wrapped false)
  (modules masc_tui_terminal_title)
@@ -765,6 +771,7 @@
   masc_tui_metrics_tail
   masc_tui_observation_layout
   masc_tui_operator_projection
+  masc_tui_approval_authority
   masc_tui_board_detail
   masc_tui_board_selection
   masc_tui_keeper_selection

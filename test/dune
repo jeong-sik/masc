@@ -2996,6 +2996,11 @@
  (libraries alcotest masc_tui_frame_presenter))
 
 (test
+ (name test_tui_approval_authority)
+ (modules test_tui_approval_authority)
+ (libraries alcotest masc_tui_approval_authority masc_tui_types))
+
+(test
  (name test_tui_terminal_profile)
  (modules test_tui_terminal_profile)
  (libraries alcotest masc_tui_terminal_profile))

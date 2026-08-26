@@ -7,6 +7,7 @@ module Approval = Masc_tui_operator_projection
 module Board_detail = Masc_tui_board_detail
 module Board_selection = Masc_tui_board_selection
 module Frame_presenter = Masc_tui_frame_presenter
+module Approval_authority = Masc_tui_approval_authority
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_history = Masc_tui_keeper_chat_history
 module Chat_queue = Masc_tui_keeper_chat_queue
@@ -3777,6 +3778,19 @@ let follow_target (kind : Link.kind) (id : string) =
   | Link.Keeper -> Some (Keepers Keeper_list, Some id)
 ;;
 
+let approval_row_reference = function
+  | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Operator_row item ->
+      Option.bind item.ap_target_id (fun target_id ->
+          match
+            Masc.Operator_action_constants.target_type_of_string
+              item.ap_target_type
+          with
+          | Some Masc.Operator_action_constants.Keeper ->
+              Some (Link.reference Keeper target_id)
+          | Some Goal -> Some (Link.reference Goal target_id)
+          | Some Workspace | None -> None)
+
 let selected_surface_reference state =
   let board () =
     match state.board_mode with
@@ -3865,18 +3879,7 @@ let selected_surface_reference state =
          surface and gets no reference. *)
       Option.bind
         (List.nth_opt (approval_items state) state.approval_cursor)
-        (function
-          | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
-          | Operator_row item ->
-              Option.bind item.ap_target_id (fun target_id ->
-                  match
-                    Masc.Operator_action_constants.target_type_of_string
-                      item.ap_target_type
-                  with
-                  | Some Masc.Operator_action_constants.Keeper ->
-                      Some (Link.reference Keeper target_id)
-                  | Some Goal -> Some (Link.reference Goal target_id)
-                  | Some Workspace | None -> None))
+        approval_row_reference
   | Acting
   | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
@@ -7250,6 +7253,10 @@ let main () =
         (Terminal_profile.synchronized_output terminal_profile)
       ()
   in
+  (* An approval effect belongs to the row the terminal last accepted, not to
+     the mutable list that an async refresh may install before the next key.
+     This is committed only after [Frame_presenter.present] reports output. *)
+  let presented_approval = ref None in
   let terminal_title = Terminal_title.create () in
   let resize_requested = Atomic.make false in
 
@@ -7360,6 +7367,53 @@ let main () =
   let port = state.port in
   let http_refresh_inflight = ref false in
   let async_messages = Eio.Stream.create 32 in
+  let presented_surface_reference () =
+    match state.view with
+    | Approvals -> Option.bind !presented_approval approval_row_reference
+    | Overview | Acting | Keepers _ | Lanes | Board | Planning | Schedules
+    | Verification | Harness | Fusion | Repositories | Changes | Connectors
+    | Runtime | Config | Resources | Code | Tools | System_logs ->
+        selected_surface_reference state
+  in
+  let answer_presented_approval decision =
+    match
+      Approval_authority.resolve ~presented:!presented_approval
+        ~current:(approval_items state) decision
+    with
+    | Some { Approval_authority.row = Operator_row approval; decision } ->
+        handle_approval_decision state approval decision
+          ~mailbox:async_messages
+    | Some { Approval_authority.row = Keeper_tool_row held; decision } ->
+        launch_surface_tool_approval state ~mailbox:async_messages
+          ~keeper_name:held.kta_keeper
+          ~tool_call_id:held.kta_tool_call_id
+          ~allow:(match decision with Confirm -> true | Deny -> false)
+    | None ->
+        add_event state "system"
+          "Approval list changed; review the updated row before deciding"
+  in
+  let commit_presented_approval approval =
+    presented_approval := approval
+  in
+  let present_frame frame approval =
+    let damaged = Terminal_write_repair.consume_damage () in
+    let authority_changed =
+      Approval_authority.authority_changed
+        ~presented:!presented_approval ~candidate:approval
+    in
+    (* A selected row's hidden token/call id can change while its clipped
+       terminal text stays byte-identical. Only that authority transition
+       forces a full presentation; ordinary async row updates stay
+       differential. *)
+    match
+      Frame_presenter.present frame_presenter
+        ~invalidate_before:(damaged || authority_changed)
+        ~write:(output_string stdout)
+        ~flush:(fun () -> flush stdout) frame
+    with
+    | Frame_presenter.Presented -> commit_presented_approval approval
+    | Frame_presenter.Unchanged -> ()
+  in
   (* Bind the bearer to the workspace actually opened, before any request is
      built. Reported before the recovery load as well, so when neither source
      holds one the operator sees the cause ahead of the symptom: a tokenless
@@ -8867,7 +8921,7 @@ let main () =
           anyway, by hand. *)
        | Some "\x1d" ->
            (match
-              Option.bind (selected_surface_reference state) (fun reference ->
+              Option.bind (presented_surface_reference ()) (fun reference ->
                 Option.bind (Link.parse reference) (fun (kind, id) ->
                   Option.map (fun target -> (reference, target))
                     (follow_target kind id)))
@@ -8913,52 +8967,20 @@ let main () =
                 goto_surface state ~mailbox:async_messages origin;
                 add_event state "system" "back")
        | Some "Y" ->
-           (match selected_surface_reference state with
+           (match presented_surface_reference () with
             | Some reference ->
                 copy_reference_to_terminal render_schedule reference;
                 add_event state "system" ("copied " ^ reference)
             | None when state.view = Approvals ->
-                (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some (Operator_row a) ->
-                     handle_approval_decision state a Confirm
-                       ~mailbox:async_messages
-                 | Some (Keeper_tool_row held) ->
-                     launch_surface_tool_approval state
-                       ~mailbox:async_messages
-                       ~keeper_name:held.kta_keeper
-                       ~tool_call_id:held.kta_tool_call_id ~allow:true
-                 | None -> ())
+                answer_presented_approval Confirm
             | None -> add_event state "system" "nothing on this surface has a link")
        | Some "y" ->
            (match state.view with
-            | Approvals ->
-                (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some (Operator_row a) ->
-                     handle_approval_decision state a Confirm
-                       ~mailbox:async_messages
-                 | Some (Keeper_tool_row held) ->
-                     (* One press, matching the chat pane's [y]: the wait runs
-                        out on a short clock, so the two-press arming the
-                        operator actions use would spend it. *)
-                     launch_surface_tool_approval state
-                       ~mailbox:async_messages
-                       ~keeper_name:held.kta_keeper
-                       ~tool_call_id:held.kta_tool_call_id ~allow:true
-                 | None -> ())
+            | Approvals -> answer_presented_approval Confirm
             | _ -> ())
        | Some "n" | Some "N" ->
            (match state.view with
-            | Approvals ->
-                (match List.nth_opt (approval_items state) state.approval_cursor with
-                 | Some (Operator_row a) ->
-                     handle_approval_decision state a Deny
-                       ~mailbox:async_messages
-                 | Some (Keeper_tool_row held) ->
-                     launch_surface_tool_approval state
-                       ~mailbox:async_messages
-                       ~keeper_name:held.kta_keeper
-                       ~tool_call_id:held.kta_tool_call_id ~allow:false
-                 | None -> ())
+            | Approvals -> answer_presented_approval Deny
             | _ -> ())
        | Some ("pageup" | "pagedown") ->
            let page = surface_page_rows state in
@@ -10736,7 +10758,7 @@ let main () =
           drawn now would clear the rows it occupies and leave the rest. *)
        | Render_schedule.Render when Option.is_some state.image_open -> ()
        | Render_schedule.Render ->
-           let frame, clamped = render state in
+           let frame, clamped, approval = render state in
            (* The frame is what the operator will act on next, so the scroll it
               had to clamp is the scroll the next keypress moves from. Applied
               here rather than inside the drawing: a surface whose row count
@@ -10747,10 +10769,7 @@ let main () =
              Terminal_title.present terminal_title ~write:(output_string stdout)
                ~flush:(fun () -> flush stdout)
                (terminal_title_snapshot state);
-           Frame_presenter.present frame_presenter
-             ~invalidate_before:(Terminal_write_repair.consume_damage ())
-             ~write:(output_string stdout)
-             ~flush:(fun () -> flush stdout) frame
+           present_frame frame approval
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

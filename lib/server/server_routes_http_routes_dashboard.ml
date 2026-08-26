@@ -2018,6 +2018,17 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
 
+  (* What one Keeper is waiting on a human for. *)
+  |> Http.Router.get "/api/v1/keepers/asks" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_ask_status" (fun state _req reqd ->
+         handle_keeper_asks_list state request reqd) request reqd)
+
+  (* Answers a Keeper's question. The operator may be at any surface; the
+     log settles concurrent submissions on first write. *)
+  |> Http.Router.post "/api/v1/keepers/ask-answer" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_ask" (fun state _req reqd ->
+         handle_keeper_ask_answer state request reqd) request reqd)
+
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
      watcher is gone can still be answered instead of only timing out
      (masc#30034). Read authority follows the operator snapshot (public

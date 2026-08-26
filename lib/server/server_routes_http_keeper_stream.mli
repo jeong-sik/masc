@@ -357,3 +357,34 @@ module For_testing : sig
   val register_operation_live_sink :
     operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
 end
+
+val handle_keeper_ask_answer :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/ask-answer].
+
+    Reads [{"name", "ask_id", "answers": [{"question_id", "response"}], ...}]
+    where a response is [{"kind": "chose", "choice_ids": [...]}],
+    [{"kind": "wrote", "text": ...}], or [{"kind": "skipped"}]. Optional
+    ["actor_id"] and ["session_id"] record who answered and from which
+    dashboard session.
+
+    Two surfaces can submit for one ask at once and nothing locks the log. The
+    fold settles on first write, so a submission that lost returns [`Conflict]
+    carrying the answer that landed rather than a bare rejection: the surface
+    showing it has to be able to say what was chosen instead.
+
+    [`Not_found] means the ask or the keeper is unknown, [`Bad_request] that
+    the submissions do not satisfy the recorded question, and [`Conflict] that
+    the ask was already answered or withdrawn. *)
+
+val handle_keeper_asks_list :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
+
+    Returns the Keeper's questions with their choices and current resolution.
+    Defaults to open questions only.
+
+    A surface renders these rows and answers through
+    {!handle_keeper_ask_answer}, sending back choice ids taken from the rows it
+    was given. No surface matches on label text, so rewording a choice cannot
+    orphan an answer already recorded. *)

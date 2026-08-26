@@ -10,8 +10,8 @@ type origin =
       }
 
 type activation = private
-  { identity : Skill_catalog_snapshot.identity
-  ; content_revision : Skill_catalog_snapshot.content_revision
+  { identity : Skill_reference.identity
+  ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
   ; activated_at : string
@@ -38,8 +38,8 @@ type decode_error =
   | Unsupported_schema of string
   | Invalid_source_id of string
   | Invalid_skill_name of string
-  | Invalid_package_id of Skill_catalog_snapshot.package_id_error
-  | Invalid_content_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_package_id of Skill_reference.package_id_error
+  | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
   | Invalid_origin_kind of string
   | Invalid_task_id of string
@@ -68,8 +68,8 @@ val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 
 val make_activation :
-  identity:Skill_catalog_snapshot.identity ->
-  content_revision:Skill_catalog_snapshot.content_revision ->
+  identity:Skill_reference.identity ->
+  content_revision:Skill_reference.content_revision ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
   turn_ref:Ids.Turn_ref.t ->
   activated_at:string ->

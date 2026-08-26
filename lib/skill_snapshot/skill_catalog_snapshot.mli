@@ -1,29 +1,25 @@
 (** Immutable catalog snapshot built from ordered Agent Skills sources. *)
 
-type package_id = private string
+type package_id = Skill_reference.package_id
 
-type package_id_error =
+type package_id_error = Skill_reference.package_id_error =
   | Empty_package_id
   | Current_directory_package_id
   | Parent_directory_package_id
   | Package_id_contains_separator
   | Package_id_contains_nul
 
-type content_revision = private string
+type content_revision = Skill_reference.content_revision
 type config_source_revision = private string
 type config_revision = private string
 type catalog_revision = private string
 type snapshot_revision = private string
 
-type revision_error =
+type revision_error = Skill_reference.revision_error =
   | Invalid_revision_length of { actual : int }
   | Invalid_revision_character of { index : int; found : char }
 
-type identity = private
-  { source_id : Skill_source_config.source_id
-  ; package_id : package_id
-  ; name : string
-  }
+type identity = Skill_reference.identity
 
 type source_operation =
   | Inspect_source
@@ -117,6 +113,14 @@ type build_error =
   | Unexpected_source_scan of Skill_source_config.source_id
   | Source_scan_config_mismatch of Skill_source_config.source_id
 
+type reference_resolution_error =
+  | Identity_not_found of identity
+  | Content_revision_mismatch of
+      { identity : identity
+      ; requested : content_revision
+      ; observed : content_revision
+      }
+
 val package_id_of_directory : string -> (package_id, package_id_error) result
 val package_id_to_string : package_id -> string
 val content_revision_of_string : string -> (content_revision, revision_error) result
@@ -148,6 +152,9 @@ val catalog_revision : t -> catalog_revision
 val snapshot_revision : t -> snapshot_revision
 
 val find_exact : t -> identity -> entry option
+val entry_reference : entry -> Skill_reference.t
+val resolve_reference :
+  t -> Skill_reference.t -> (entry, reference_resolution_error) result
 val find_effective_by_name : t -> string -> entry option
 
 val content_revision_to_string : content_revision -> string

@@ -1,0 +1,8 @@
+(include_subdirs no)
+
+(library
+ (name masc_skill_reference)
+ (public_name masc.skill_reference)
+ (wrapped false)
+ (modules skill_reference)
+ (libraries digestif masc.skill_config yojson))

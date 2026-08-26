@@ -5,4 +5,10 @@
  (public_name masc.skill_snapshot)
  (wrapped false)
  (modules skill_catalog_snapshot)
- (libraries masc.agent_core masc.skill_config digestif yojson unix))
+ (libraries
+  masc.agent_core
+  masc.skill_config
+  masc.skill_reference
+  digestif
+  yojson
+  unix))

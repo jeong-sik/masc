@@ -1,6 +1,7 @@
 open Alcotest
 
 module Snapshot = Skill_catalog_snapshot
+module Reference = Skill_reference
 
 let config_text ?(runtime = "one") sources =
   Printf.sprintf
@@ -105,8 +106,71 @@ let test_precedence_and_exact_identity () =
         ~package_id:(package "review")
         ~name:"review"
     in
-    check bool "first exact entry" true (Option.is_some (Snapshot.find_exact snapshot first_identity));
-    check bool "second exact entry" true (Option.is_some (Snapshot.find_exact snapshot second_identity))
+    let first_entry =
+      match Snapshot.find_exact snapshot first_identity with
+      | Some entry -> entry
+      | None -> fail "first exact entry missing"
+    in
+    let second_entry =
+      match Snapshot.find_exact snapshot second_identity with
+      | Some entry -> entry
+      | None -> fail "second exact entry missing"
+    in
+    let first_reference = Snapshot.entry_reference first_entry in
+    let second_reference = Snapshot.entry_reference second_entry in
+    (match Snapshot.resolve_reference snapshot first_reference with
+     | Ok resolved ->
+       check string "first exact entry" "First" resolved.document.description
+     | Error _ -> fail "first exact reference did not resolve");
+    (match Snapshot.resolve_reference snapshot second_reference with
+     | Ok resolved ->
+       check string "shadow exact entry" "Second" resolved.document.description
+     | Error _ -> fail "shadow exact reference did not resolve");
+    let changed_revision =
+      match Reference.content_revision_of_string (String.make 64 'f') with
+      | Ok revision -> revision
+      | Error _ -> fail "changed revision fixture was invalid"
+    in
+    let stale_reference =
+      Reference.make ~identity:first_identity ~content_revision:changed_revision
+    in
+    (match Snapshot.resolve_reference snapshot stale_reference with
+     | Error
+         (Snapshot.Content_revision_mismatch
+            { identity; requested; observed }) ->
+       check bool
+         "mismatch identity"
+         true
+         (Reference.equal_identity first_identity identity);
+       check string
+         "requested revision"
+         (Reference.content_revision_to_string changed_revision)
+         (Reference.content_revision_to_string requested);
+       check string
+         "observed revision"
+         (Reference.content_revision_to_string first_reference.content_revision)
+         (Reference.content_revision_to_string observed)
+     | Error _ -> fail "revision mismatch returned the wrong typed error"
+     | Ok _ -> fail "stale exact reference resolved");
+    let missing_identity =
+      Snapshot.make_identity
+        ~source_id:first_id
+        ~package_id:(package "absent")
+        ~name:"absent"
+    in
+    let missing_reference =
+      Reference.make
+        ~identity:missing_identity
+        ~content_revision:first_reference.content_revision
+    in
+    (match Snapshot.resolve_reference snapshot missing_reference with
+     | Error (Snapshot.Identity_not_found identity) ->
+       check bool
+         "missing identity"
+         true
+         (Reference.equal_identity missing_identity identity)
+     | Error _ -> fail "missing identity returned the wrong typed error"
+     | Ok _ -> fail "missing exact identity resolved")
   | _ -> fail "expected two configured sources"
 ;;
 

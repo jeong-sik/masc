@@ -7,7 +7,7 @@ Rebuilds the three merge shapes this audit exists to distinguish:
                   SHA (what a healthy merge looks like).
 2. UNFINISHED  -- the PR #30463 shape: ``CI Gate`` CANCELLED, ``Build and
                   Test`` SKIPPED. The audit must refuse to bless it.
-3. ABSENT      -- a required context with no run on the merged SHA at all.
+3. ABSENT      -- a required context with no run on the audited SHA at all.
 
 Run directly: ``python3 scripts/ci/test_check_merge_audit.py``
 (wired into run-lint-suite.sh alongside the other self-tests).
@@ -131,7 +131,7 @@ def main() -> int:
         str(parsed),
     )
 
-    # 3. Required context absent from the merged SHA entirely.
+    # 3. Required context absent from the audited SHA entirely.
     code, out, parsed = run_guard(CHECK_RUNS_ABSENT, COMBINED_STATUS_EMPTY)
     expect(
         "absent required context exits 1",

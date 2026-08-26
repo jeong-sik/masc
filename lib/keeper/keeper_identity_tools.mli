@@ -73,10 +73,17 @@ val agent_tools :
     parse it back off.
 
     A call reads the token and opens a session of its own rather than
-    holding one for the turn. That is one extra round trip per call, and it
-    buys a token refreshed mid-turn being picked up, an expired session
-    healing by itself, and no shared connection two concurrent tool calls
-    have to agree about. *)
+    holding one for the turn. That is three requests where one would do --
+    [initialize], the [initialized] notification, then the call -- measured
+    against the live server on 2026-08-26, which does mint a session id, so
+    the handshake is not free.
+
+    What it buys: a token refreshed mid-turn is picked up, an expired
+    session heals by itself, and two concurrent tool calls have no shared
+    connection to agree about. Worth paying until someone measures the
+    latency and decides otherwise; holding one session per turn needs a
+    mutable cell two fibers share, and that is the part to get right
+    deliberately rather than on the way past. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

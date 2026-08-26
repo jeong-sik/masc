@@ -130,6 +130,71 @@ let test_an_unreadable_catalog_is_not_no_tools () =
   | Ok None -> Alcotest.fail "a broken catalog read as never attached"
   | Ok (Some _) -> Alcotest.fail "read a broken catalog as a catalog"
 
+(* Measured against the live Atlassian server on 2026-08-26: the access
+   token came back 3,446 characters long and the refresh token 2,792. Both
+   go through the secret projection, and every earlier check here used a
+   short placeholder -- which would have passed while a real one was
+   refused. *)
+let live_access_token_chars = 3_446
+let live_refresh_token_chars = 2_792
+
+let test_a_real_sized_token_is_storable () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  (match
+     Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+       ~scope:Projection.Keeper_secret
+       ~name:provider.Provider.access_token_env
+       ~value:(String.make live_access_token_chars 'x')
+   with
+  | Ok () -> ()
+  | Error message ->
+      Alcotest.failf "a real-sized access token is not storable: %s" message);
+  match
+    Projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+      ~scope:Projection.Keeper_secret
+      ~container_path:provider.Provider.refresh_token_file
+      ~value:(String.make live_refresh_token_chars 'y')
+  with
+  | Ok () -> ()
+  | Error message ->
+      Alcotest.failf "a real-sized refresh token is not storable: %s" message
+
+let test_a_real_sized_token_survives_the_projection () =
+  (* Stored is not the same as handed to a runtime. The token reaches a tool
+     call through the projected environment, and that is the array a child
+     process is given. *)
+  let base_path = temp_base () in
+  let provider = provider () in
+  let token = String.make live_access_token_chars 'x' in
+  (match
+     Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+       ~scope:Projection.Keeper_secret
+       ~name:provider.Provider.access_token_env ~value:token
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store: %s" message);
+  match
+    Projection.local_env_for_keeper ~host_env:[||] ~base_path
+      ~keeper_name:"kidsnote" ()
+  with
+  | Error message -> Alcotest.failf "projection failed: %s" message
+  | Ok None -> Alcotest.fail "no projection for this keeper"
+  | Ok (Some entries) ->
+      let prefix = provider.Provider.access_token_env ^ "=" in
+      let found =
+        Array.to_list entries
+        |> List.find_map (fun entry ->
+               if String.starts_with ~prefix entry then
+                 Some
+                   (String.sub entry (String.length prefix)
+                      (String.length entry - String.length prefix))
+               else None)
+      in
+      check (Alcotest.option Alcotest.int) "the whole token comes through"
+        (Some live_access_token_chars)
+        (Option.map String.length found)
+
 let test_a_written_catalog_comes_back () =
   let base_path = temp_base () in
   write_catalog ~base_path ~keeper_name:"acme-daycare"
@@ -327,6 +392,10 @@ let () =
             test_an_unreadable_catalog_is_not_no_tools;
           Alcotest.test_case "a written catalog comes back" `Quick
             test_a_written_catalog_comes_back;
+          Alcotest.test_case "a real-sized token is storable" `Quick
+            test_a_real_sized_token_is_storable;
+          Alcotest.test_case "a real-sized token survives the projection"
+            `Quick test_a_real_sized_token_survives_the_projection;
         ] );
       ( "the tool surface",
         [ Alcotest.test_case "names are namespaced by provider" `Quick

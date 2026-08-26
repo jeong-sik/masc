@@ -1,36 +1,30 @@
-# Atlassian (Jira, Confluence) — OAuth 2.0 authorization code with PKCE.
+# Atlassian's remote MCP server (Jira, Confluence, Compass, Bitbucket).
 #
-# Atlassian issues no credential that acts as the app itself: 3LO is user
-# delegation, and the JWT bearer grant is Connect-only and still impersonates
-# a user. So a Keeper's Atlassian identity is a person's, and which person is
-# whoever approves the consent screen for that Keeper.
+# Only the server is named. Its endpoints, the scopes it publishes and
+# whether a client has to be registered by hand all come from the two
+# well-known documents it serves, so none of that can go stale in this file.
 #
-# https://developer.atlassian.com/cloud/jira/platform/oauth-2-3lo-apps/
+# https://www.atlassian.com/platform/remote-mcp-server
 
 id = "atlassian"
 label = "Atlassian"
-authorize_url = "https://auth.atlassian.com/authorize"
-token_url = "https://auth.atlassian.com/oauth/token"
+mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
 
-# `audience` is Atlassian's own parameter, not part of the OAuth spec: the
-# authorize call has to name the API the token is for.
-audience = "api.atlassian.com"
-
-# `offline_access` is what makes a refresh token come back. Without it the
-# access token expires and the Keeper needs a human again within the hour.
-scopes = [
-  "offline_access",
-  "read:jira-work",
-  "write:jira-work",
-]
-
-# Where the two halves land in the Keeper's own secret projection. The access
-# token is an env entry because that is what a tool call reads; the refresh
-# token is a file entry because nothing should carry it in an environment.
+# Where the two halves of the answer land in the Keeper's own secret
+# projection. The access token is an env entry because that is what a tool
+# call reads; the refresh token is a file entry because it outlives the
+# access tokens it mints and an environment is read by everything a Keeper
+# runs.
 access_token_env = "ATLASSIAN_ACCESS_TOKEN"
 refresh_token_file = "atlassian/refresh_token"
 
-# Renew this many seconds before the access token's stated expiry. Atlassian
-# access tokens live one hour; ten minutes of margin covers a turn that starts
-# just under the wire.
+# Exchange again this long before the stated expiry. Atlassian's access
+# tokens live one hour; ten minutes of margin covers a turn that starts just
+# under the wire.
 renew_before_sec = 600
+
+# Parameters this server wants on the authorize call beyond what the OAuth
+# and MCP specs define. `resource` is not here: it is RFC 8707 and comes from
+# discovery, so every provider gets it without saying so.
+[authorize_params]
+audience = "api.atlassian.com"

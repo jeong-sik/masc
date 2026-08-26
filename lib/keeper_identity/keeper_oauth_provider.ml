@@ -24,13 +24,11 @@ let error_to_string = function
 type t = {
   id : string;
   label : string;
-  authorize_url : string;
-  token_url : string;
-  audience : string option;
-  scopes : string list;
+  mcp_url : string;
   access_token_env : string;
   refresh_token_file : string;
   renew_before_sec : int;
+  authorize_params : (string * string) list;
 }
 
 let ( let* ) = Result.bind
@@ -71,13 +69,6 @@ let string_field pairs key =
   | Some (S_int _ | S_array _ | S_other _) ->
     Error (Wrong_type { field = key; expected = "a string" })
 
-let optional_string_field pairs key =
-  match find pairs key with
-  | None -> Ok None
-  | Some (S_string value) -> Result.map Option.some (non_empty ~key value)
-  | Some (S_int _ | S_array _ | S_other _) ->
-    Error (Wrong_type { field = key; expected = "a string" })
-
 let int_field pairs key =
   match find pairs key with
   | None -> Error (Missing_field key)
@@ -85,29 +76,34 @@ let int_field pairs key =
   | Some (S_string _ | S_array _ | S_other _) ->
     Error (Wrong_type { field = key; expected = "an integer" })
 
-let string_list_field pairs key =
-  match find pairs key with
-  | None -> Error (Missing_field key)
-  | Some (S_array items) ->
+(* An optional table of plain strings, kept in declaration order so the
+   authorize URL a reader sees matches the file they are looking at. *)
+let string_table_field pairs key =
+  match List.assoc_opt key pairs with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries) | Some (Otoml.TomlInlineTable entries) ->
     let rec collect acc = function
       | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        (match classify item with
-         | S_string value ->
-           let* value = non_empty ~key:(key ^ " entry") value in
-           collect (value :: acc) rest
+      | (name, value) :: rest ->
+        (match classify value with
+         | S_string text ->
+           let* text = non_empty ~key:(key ^ "." ^ name) text in
+           collect ((name, text) :: acc) rest
          | S_int _ | S_array _ | S_other _ ->
-           Error (Wrong_type { field = key; expected = "an array of strings" }))
+           Error
+             (Wrong_type { field = key ^ "." ^ name; expected = "a string" }))
     in
-    let* values = collect [] items in
-    if values = [] then Error (Empty_field key) else Ok values
-  | Some (S_string _ | S_int _ | S_other _) ->
-    Error (Wrong_type { field = key; expected = "an array of strings" })
+    collect [] entries
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+      | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+      | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (Wrong_type { field = key; expected = "a table of strings" })
 
-(* An authorize or token endpoint that is not https would carry the exchange,
-   and with it the code and the client secret, in the clear. A declaration
-   that names one is a configuration error rather than a provider this flow
-   supports. *)
+(* A plaintext MCP server would carry the bearer token in the clear, and its
+   discovery answer could be replaced on the way. A declaration that names
+   one is a configuration error rather than a provider this supports. *)
 let https_field pairs key =
   let* value = string_field pairs key in
   if String.starts_with ~prefix:"https://" value
@@ -125,10 +121,8 @@ let load ~file_name ~contents =
       else Error (Name_mismatch { declared = id; file = file_name })
     in
     let* label = string_field pairs "label" in
-    let* authorize_url = https_field pairs "authorize_url" in
-    let* token_url = https_field pairs "token_url" in
-    let* audience = optional_string_field pairs "audience" in
-    let* scopes = string_list_field pairs "scopes" in
+    let* mcp_url = https_field pairs "mcp_url" in
+    let* authorize_params = string_table_field pairs "authorize_params" in
     let* access_token_env = string_field pairs "access_token_env" in
     let* refresh_token_file = string_field pairs "refresh_token_file" in
     let* renew_before_sec = int_field pairs "renew_before_sec" in
@@ -138,13 +132,11 @@ let load ~file_name ~contents =
       Ok
         { id
         ; label
-        ; authorize_url
-        ; token_url
-        ; audience
-        ; scopes
+        ; mcp_url
         ; access_token_env
         ; refresh_token_file
         ; renew_before_sec
+        ; authorize_params
         }
   | Ok
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
@@ -153,6 +145,3 @@ let load ~file_name ~contents =
       | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _
       | Otoml.TomlTableArray _ ) ->
     Error (Wrong_type { field = "top level"; expected = "a table" })
-
-let requires_offline_access provider =
-  List.exists (String.equal "offline_access") provider.scopes

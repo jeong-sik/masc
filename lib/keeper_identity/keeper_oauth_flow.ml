@@ -55,31 +55,41 @@ let query pairs =
        Printf.sprintf "%s=%s" (Uri.pct_encode key) (Uri.pct_encode value))
   |> String.concat "&"
 
-let begin_authorization ~(provider : Provider.t) ~client_id ~redirect_uri ~keeper =
+let begin_authorization
+      ~(provider : Provider.t)
+      ~(discovered : Keeper_oauth_discovery.t)
+      ~client_id
+      ~redirect_uri
+      ~keeper
+  =
   let verifier = fresh_verifier () in
   let state = fresh_state () in
-  let base =
+  let parameters =
     [ "response_type", "code"
     ; "client_id", client_id
     ; "redirect_uri", redirect_uri
-    ; "scope", String.concat " " provider.scopes
+      (* Everything the server said it offers. Narrowing here would be this
+         code deciding what a Keeper may reach, which is the declaration's
+         business at most and the operator's at the consent screen. *)
+    ; "scope", String.concat " " discovered.Keeper_oauth_discovery.scopes_supported
     ; "state", state
     ; "code_challenge", Auth_oauth.pkce_s256 verifier
     ; "code_challenge_method", "S256"
+      (* RFC 8707: name the resource the token is for, so a token minted for
+         one MCP server cannot be presented to another. *)
+    ; "resource", discovered.Keeper_oauth_discovery.resource
     ; "prompt", "consent"
     ]
-  in
-  let parameters =
-    match provider.audience with
-    | None -> base
-    | Some audience -> ("audience", audience) :: base
+    @ provider.Provider.authorize_params
   in
   { provider_id = provider.Provider.id
   ; keeper
   ; verifier
   ; state
   ; authorize_url =
-      Printf.sprintf "%s?%s" provider.Provider.authorize_url (query parameters)
+      Printf.sprintf "%s?%s"
+        discovered.Keeper_oauth_discovery.authorize_url
+        (query parameters)
   }
 
 let form_headers =
@@ -90,7 +100,7 @@ let form_headers =
 (* [expires_in] is seconds from now, so the answer is only meaningful next to
    the moment it was read. Storing the instant rather than the duration means
    a later reader does not have to know when the exchange happened. *)
-let tokens_of_response ~provider ~now body =
+let tokens_of_response ~now body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error detail -> Error (Malformed_response detail)
   | json ->
@@ -116,27 +126,29 @@ let tokens_of_response ~provider ~now body =
         | None ->
           Error (Malformed_response "the answer carries no readable expires_in")
         | Some seconds ->
-          if Provider.requires_offline_access provider && refresh_token = None
+          (* offline_access is in every authorize call this builds, so a
+             missing refresh token is the server answering differently than
+             it was asked, not a shape we chose not to request. *)
+          if refresh_token = None
           then Error No_refresh_token
           else Ok { access_token; refresh_token; expires_at = now +. seconds })
      | Some _ | None ->
        Error (Malformed_response "the answer carries no non-empty access_token"))
 
-let exchange ~post ~provider ~now parameters =
+let exchange ~post ~discovered ~now parameters =
   match
-    post ~url:provider.Provider.token_url ~headers:form_headers
+    post ~url:discovered.Keeper_oauth_discovery.token_url ~headers:form_headers
       ~body:(query parameters)
   with
   | Error detail -> Error (Transport detail)
   | Ok (status, body) when status >= 200 && status < 300 ->
-    tokens_of_response ~provider ~now body
+    tokens_of_response ~now body
   | Ok (status, body) -> Error (Provider_rejected { status; body })
 
 let complete
       ?(post = default_post)
-      ~(provider : Provider.t)
+      ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
-      ~client_secret
       ~redirect_uri
       ~pending
       ~code
@@ -149,29 +161,28 @@ let complete
   if not (String.equal state pending.state)
   then Error State_mismatch
   else
-    exchange ~post ~provider ~now
+    exchange ~post ~discovered ~now
       [ "grant_type", "authorization_code"
       ; "client_id", client_id
-      ; "client_secret", client_secret
       ; "code", code
       ; "redirect_uri", redirect_uri
       ; "code_verifier", pending.verifier
+      ; "resource", discovered.Keeper_oauth_discovery.resource
       ]
 
 let refresh
       ?(post = default_post)
-      ~(provider : Provider.t)
+      ~(discovered : Keeper_oauth_discovery.t)
       ~client_id
-      ~client_secret
       ~refresh_token
       ~now
       ()
   =
-  exchange ~post ~provider ~now
+  exchange ~post ~discovered ~now
     [ "grant_type", "refresh_token"
     ; "client_id", client_id
-    ; "client_secret", client_secret
     ; "refresh_token", refresh_token
+    ; "resource", discovered.Keeper_oauth_discovery.resource
     ]
 
 let needs_renewal ~(provider : Provider.t) ~expires_at ~now =

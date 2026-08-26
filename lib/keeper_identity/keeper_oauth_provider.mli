@@ -26,24 +26,33 @@ val error_to_string : error -> string
 type t = private {
   id : string;
   label : string;  (** what a screen calls this provider *)
-  authorize_url : string;
-  token_url : string;
-  audience : string option;
-      (** Some providers require the API the token is for to be named in the
-          authorize call. It is not an OAuth parameter, so it is optional. *)
-  scopes : string list;
+  mcp_url : string;
+      (** The only endpoint declared. Everything else about the exchange --
+          where to authorize, where to redeem, what scopes exist, whether a
+          client has to be registered by hand -- is what this server's
+          well-known documents answer, and asking beats shipping a copy that
+          can go stale. *)
   access_token_env : string;
       (** Env entry in [secrets/<keeper>/env/] the access token is written
           to. A tool call reads it from there. *)
   refresh_token_file : string;
       (** File entry in [secrets/<keeper>/files/] the refresh token is
           written to. Not an env entry: a refresh token outlives the access
-          token it mints, and an environment is read by everything a Keeper
+          tokens it mints, and an environment is read by everything a Keeper
           runs. *)
   renew_before_sec : int;
       (** How long before the stated expiry to exchange again. A turn that
           starts inside this window gets a fresh token rather than one that
           expires mid-call. *)
+  authorize_params : (string * string) list;
+      (** Parameters this server wants on the authorize call beyond what the
+          specs define, in declaration order.
+
+          Atlassian wants [audience]. Rather than a branch that knows that,
+          the declaration says it -- so the next server that wants something
+          of its own is a line in a file. [resource] is not one of these: it
+          is RFC 8707 and comes from discovery, so every provider gets it
+          without asking. *)
 }
 
 val load : file_name:string -> contents:string -> (t, error) result
@@ -51,8 +60,3 @@ val load : file_name:string -> contents:string -> (t, error) result
 
     [file_name] is the basename minus [.toml]; the file's own [id] must equal
     it, so a renamed file cannot quietly become a different provider. *)
-
-val requires_offline_access : t -> bool
-(** Whether the declared scopes ask for a refresh token. A provider that does
-    not is one whose Keeper needs a human again when the access token
-    expires, which is a fact worth showing rather than discovering. *)

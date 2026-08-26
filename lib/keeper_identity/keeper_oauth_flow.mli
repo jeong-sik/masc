@@ -1,10 +1,16 @@
 (** The authorization-code exchange, for one Keeper and one declared
     provider.
 
-    This module knows the shape of the exchange, not the provider: every URL,
-    scope and field name it uses comes from
-    {!Keeper_oauth_provider.t}. There is no branch here that names a service,
-    and adding one would mean the declaration was missing something.
+    This module knows the shape of the exchange, not the provider. Every URL
+    and scope comes from {!Keeper_oauth_discovery.t}, which is the server's
+    own answer; anything a particular server wants beyond the specs comes
+    from the declaration's [authorize_params]. There is no branch here that
+    names a service, and adding one would mean one of those two was missing
+    something.
+
+    A public client: no secret is sent, because there is nowhere on an
+    operator's machine to keep one that a browser redirect could not also
+    reach. PKCE is the proof instead.
 
     What it does not do: decide where tokens are stored, open a browser, or
     hold state between the two halves of the exchange. Those belong to the
@@ -13,10 +19,10 @@
 type tokens = {
   access_token : string;
   refresh_token : string option;
-      (** Absent when the provider issued none. A provider whose declaration
-          asks for [offline_access] and returns nothing here has answered
-          differently than its declaration said, which is
-          {!No_refresh_token}, not an absent field. *)
+      (** Absent only in shapes this rejects. Every authorize call asks for
+          [offline_access], so a server that returns none has answered
+          differently than it was asked -- {!No_refresh_token}, not a field
+          that happened to be missing. *)
   expires_at : float;  (** unix seconds, computed from the response's [expires_in] *)
 }
 
@@ -34,6 +40,7 @@ type pending = private {
 
 val begin_authorization :
   provider:Keeper_oauth_provider.t ->
+  discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
   redirect_uri:string ->
   keeper:string ->
@@ -56,10 +63,9 @@ type exchange_error =
   | State_mismatch
       (** the callback echoed a state that is not this exchange's *)
   | No_refresh_token
-      (** the declaration asked for [offline_access] and the provider
-          returned no refresh token. Storing only the access token would
-          leave the Keeper working for one hour and then stopping with no
-          record of why. *)
+      (** [offline_access] was asked for and no refresh token came back.
+          Storing only the access token would leave the Keeper working until
+          it expires and then stopping with no record of why. *)
 
 val exchange_error_to_string : exchange_error -> string
 
@@ -72,9 +78,8 @@ type post =
 
 val complete :
   ?post:post ->
-  provider:Keeper_oauth_provider.t ->
+  discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
-  client_secret:string ->
   redirect_uri:string ->
   pending:pending ->
   code:string ->
@@ -88,9 +93,8 @@ val complete :
 
 val refresh :
   ?post:post ->
-  provider:Keeper_oauth_provider.t ->
+  discovered:Keeper_oauth_discovery.t ->
   client_id:string ->
-  client_secret:string ->
   refresh_token:string ->
   now:float ->
   unit ->

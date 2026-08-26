@@ -22,13 +22,13 @@ let atlassian_toml =
   {|
 id = "atlassian"
 label = "Atlassian"
-authorize_url = "https://auth.atlassian.com/authorize"
-token_url = "https://auth.atlassian.com/oauth/token"
-audience = "api.atlassian.com"
-scopes = ["offline_access", "read:jira-work", "write:jira-work"]
+mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
 access_token_env = "ATLASSIAN_ACCESS_TOKEN"
 refresh_token_file = "atlassian/refresh_token"
 renew_before_sec = 600
+
+[authorize_params]
+audience = "api.atlassian.com"
 |}
 
 let load_or_fail ?(file_name = "atlassian") contents =
@@ -48,10 +48,14 @@ let test_reads_the_shipped_declaration () =
   check str "label" "Atlassian" provider.Keeper_oauth_provider.label;
   check str "access token env" "ATLASSIAN_ACCESS_TOKEN"
     provider.Keeper_oauth_provider.access_token_env;
-  check (Alcotest.option str) "audience" (Some "api.atlassian.com")
-    provider.Keeper_oauth_provider.audience;
-  check Alcotest.bool "asks for a refresh token" true
-    (Keeper_oauth_provider.requires_offline_access provider)
+  check str "only the server is named"
+    "https://mcp.atlassian.com/v1/mcp/authv2"
+    provider.Keeper_oauth_provider.mcp_url;
+  (* Atlassian wants this on the authorize call and the specs do not define
+     it. A branch that knew that would be the thing this design avoids. *)
+  check (Alcotest.option str) "the server's own parameter is carried"
+    (Some "api.atlassian.com")
+    (List.assoc_opt "audience" provider.Keeper_oauth_provider.authorize_params)
 
 let test_rejects_a_renamed_file () =
   (* A file renamed to jira.toml keeping id = "atlassian" would answer for a
@@ -62,26 +66,92 @@ let test_rejects_a_renamed_file () =
 let test_rejects_a_plaintext_endpoint () =
   let downgraded =
     Str.global_replace
-      (Str.regexp_string "https://auth.atlassian.com/oauth/token")
-      "http://auth.atlassian.com/oauth/token" atlassian_toml
+      (Str.regexp_string "https://mcp.atlassian.com")
+      "http://mcp.atlassian.com" atlassian_toml
   in
-  expect_rejected ~why:"names a plaintext token endpoint" downgraded
+  expect_rejected ~why:"names a plaintext MCP server" downgraded
 
 let test_rejects_a_missing_field () =
-  let without_token_url =
-    Str.global_replace
-      (Str.regexp {|token_url = .*|})
-      "" atlassian_toml
+  let without_mcp_url =
+    Str.global_replace (Str.regexp {|mcp_url = .*|}) "" atlassian_toml
   in
-  expect_rejected ~why:"declares no token endpoint" without_token_url
+  expect_rejected ~why:"declares no MCP server" without_mcp_url
+
+(* ── discovery ──────────────────────────────────────────────────────── *)
+
+(* The two answers as the live servers gave them on 2026-08-26. Recorded, not
+   fetched: what these pin is our reading of the shapes, and a test that
+   needs the network cannot say when a shape changed. *)
+(* Same shape [test_keeper_toml.ml] uses: DUNE_SOURCEROOT when dune sets it,
+   otherwise walk up until the tree looks like this repo. Reading the file
+   rather than pasting it here keeps one copy of what the servers actually
+   said. *)
+let rec ascend_to_repo path =
+  if Sys.file_exists (Filename.concat path "dune-project") then Some path
+  else
+    let parent = Filename.dirname path in
+    if String.equal parent path then None else ascend_to_repo parent
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root "dune-project") ->
+      Some root
+  | _ -> ascend_to_repo (Sys.getcwd ())
+
+let fixture name =
+  match repo_root () with
+  | None -> Alcotest.failf "cannot find the repo root from %s" (Sys.getcwd ())
+  | Some root ->
+      let path =
+        Filename.concat
+          (Filename.concat root "test/fixtures/oauth_discovery")
+          name
+      in
+      if Sys.file_exists path then
+        In_channel.with_open_bin path In_channel.input_all
+      else Alcotest.failf "recorded answer %s is missing" path
+
+let atlassian_mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
+
+let recorded_get ~expect_first ~expect_second =
+  let asked = ref [] in
+  let get ~url =
+    asked := url :: !asked;
+    if String.equal url expect_first then
+      Ok (200, fixture "atlassian-protected-resource.json")
+    else if String.equal url expect_second then
+      Ok (200, fixture "atlassian-authorization-server.json")
+    else Ok (404, "not found")
+  in
+  (get, asked)
+
+let protected_resource_url =
+  "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2"
+
+let authorization_server_url =
+  "https://auth.atlassian.com/.well-known/oauth-authorization-server/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3"
 
 (* ── the exchange ────────────────────────────────────────────────────── *)
 
 let redirect_uri = "http://127.0.0.1:8935/api/v1/keepers/kidsnote/oauth/callback"
 
+(* Built from the recorded answers rather than by hand, so what the exchange
+   is handed is what discovery actually produces. *)
+let discovered_atlassian () =
+  let get, _ =
+    recorded_get ~expect_first:protected_resource_url
+      ~expect_second:authorization_server_url
+  in
+  match Keeper_oauth_discovery.discover ~get ~mcp_url:atlassian_mcp_url () with
+  | Ok found -> found
+  | Error err ->
+      Alcotest.failf "discovery failed: %s"
+        (Keeper_oauth_discovery.error_to_string err)
+
 let begin_for provider =
-  Keeper_oauth_flow.begin_authorization ~provider ~client_id:"client-abc"
-    ~redirect_uri ~keeper:"kidsnote"
+  Keeper_oauth_flow.begin_authorization ~provider
+    ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~redirect_uri
+    ~keeper:"kidsnote"
 
 let query_of url =
   match String.index_opt url '?' with
@@ -117,9 +187,16 @@ let test_authorize_url_proves_the_verifier () =
     (param query "code_challenge");
   check str "state is echoed back to us" pending.Keeper_oauth_flow.state
     (param query "state");
-  check str "audience is named" "api.atlassian.com" (param query "audience");
-  check str "scopes are space separated"
-    "offline_access read:jira-work write:jira-work" (param query "scope")
+  (* RFC 8707: a token minted for this MCP server cannot be presented to
+     another one. *)
+  check str "the resource is named" "https://mcp.atlassian.com/v1/mcp/authv2"
+    (param query "resource");
+  check str "the server's own parameter rides along" "api.atlassian.com"
+    (param query "audience");
+  Alcotest.(check bool)
+    "offline_access is asked for" true
+    (List.mem "offline_access"
+       (String.split_on_char ' ' (param query "scope")))
 
 let test_two_exchanges_do_not_share_a_verifier () =
   let provider = load_or_fail atlassian_toml in
@@ -139,11 +216,11 @@ let recording_post answer =
   in
   (post, seen)
 
-let complete_with provider pending ~state ~answer =
+let complete_with _provider pending ~state ~answer =
   let post, seen = recording_post answer in
   let result =
-    Keeper_oauth_flow.complete ~post ~provider ~client_id:"client-abc"
-      ~client_secret:"shhh" ~redirect_uri ~pending ~code:"the-code" ~state
+    Keeper_oauth_flow.complete ~post ~discovered:(discovered_atlassian ())
+      ~client_id:"client-abc" ~redirect_uri ~pending ~code:"the-code" ~state
       ~now:1000.0 ()
   in
   (result, seen)
@@ -247,11 +324,10 @@ let test_an_answer_without_expiry_is_not_guessed () =
   | Ok _ -> Alcotest.fail "an expiry was invented for an answer that carried none"
 
 let test_refresh_asks_for_a_refresh_grant () =
-  let provider = load_or_fail atlassian_toml in
   let post, seen = recording_post ok_answer in
   let result =
-    Keeper_oauth_flow.refresh ~post ~provider ~client_id:"client-abc"
-      ~client_secret:"shhh" ~refresh_token:"rt-0" ~now:1000.0 ()
+    Keeper_oauth_flow.refresh ~post ~discovered:(discovered_atlassian ())
+      ~client_id:"client-abc" ~refresh_token:"rt-0" ~now:1000.0 ()
   in
   (match !seen with
   | None -> Alcotest.fail "the refresh sent nothing"
@@ -338,60 +414,6 @@ let test_logins_do_not_collide () =
         b.Keeper_oauth_flow.verifier
   | _ -> Alcotest.fail "one of two concurrent logins was lost"
 
-(* ── discovery ──────────────────────────────────────────────────────── *)
-
-(* The two answers as the live servers gave them on 2026-08-26. Recorded, not
-   fetched: what these pin is our reading of the shapes, and a test that
-   needs the network cannot say when a shape changed. *)
-(* Same shape [test_keeper_toml.ml] uses: DUNE_SOURCEROOT when dune sets it,
-   otherwise walk up until the tree looks like this repo. Reading the file
-   rather than pasting it here keeps one copy of what the servers actually
-   said. *)
-let rec ascend_to_repo path =
-  if Sys.file_exists (Filename.concat path "dune-project") then Some path
-  else
-    let parent = Filename.dirname path in
-    if String.equal parent path then None else ascend_to_repo parent
-
-let repo_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root when Sys.file_exists (Filename.concat root "dune-project") ->
-      Some root
-  | _ -> ascend_to_repo (Sys.getcwd ())
-
-let fixture name =
-  match repo_root () with
-  | None -> Alcotest.failf "cannot find the repo root from %s" (Sys.getcwd ())
-  | Some root ->
-      let path =
-        Filename.concat
-          (Filename.concat root "test/fixtures/oauth_discovery")
-          name
-      in
-      if Sys.file_exists path then
-        In_channel.with_open_bin path In_channel.input_all
-      else Alcotest.failf "recorded answer %s is missing" path
-
-let atlassian_mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
-
-let recorded_get ~expect_first ~expect_second =
-  let asked = ref [] in
-  let get ~url =
-    asked := url :: !asked;
-    if String.equal url expect_first then
-      Ok (200, fixture "atlassian-protected-resource.json")
-    else if String.equal url expect_second then
-      Ok (200, fixture "atlassian-authorization-server.json")
-    else Ok (404, "not found")
-  in
-  (get, asked)
-
-let protected_resource_url =
-  "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2"
-
-let authorization_server_url =
-  "https://auth.atlassian.com/.well-known/oauth-authorization-server/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3"
-
 let test_discovery_reads_both_hops () =
   let get, asked =
     recorded_get ~expect_first:protected_resource_url
@@ -463,6 +485,81 @@ let test_discovery_names_a_resource_with_no_authorization_server () =
         (Keeper_oauth_discovery.error_to_string other)
   | Ok _ -> Alcotest.fail "a resource naming no authorization server was accepted"
 
+(* ── registering this installation as a client ───────────────────────── *)
+
+(* Shaped like the real 201 from Atlassian's /dcr/register on 2026-08-26. The
+   secret is a placeholder: the real one is not kept anywhere, which is the
+   behaviour the last case here pins. *)
+let registration_answer =
+  {|{"client_id":"registered-client-id","client_id_issued_at":1787720214,
+     "client_name":"masc","client_secret":"PLACEHOLDER-NOT-KEPT",
+     "client_secret_expires_at":0,"disabled":false,
+     "redirect_uris":["http://127.0.0.1:8935/cb"],
+     "token_endpoint_auth_method":"none"}|}
+
+let test_registration_asks_as_a_public_client () =
+  let post, seen = recording_post (Ok (201, registration_answer)) in
+  let result =
+    Keeper_oauth_registration.register ~post
+      ~registration_url:"https://auth.example.com/dcr/register"
+      ~client_name:"masc" ~redirect_uri:"http://127.0.0.1:8935/cb" ()
+  in
+  (match !seen with
+  | None -> Alcotest.fail "registration sent nothing"
+  | Some (url, _, body) ->
+      check str "registration endpoint"
+        "https://auth.example.com/dcr/register" url;
+      (* "none" is what makes this a public client, and what lets PKCE be the
+         proof instead of a secret with nowhere to live. *)
+      Alcotest.(check bool)
+        "asks for a public client" true
+        (Str.string_match
+           (Str.regexp ".*\"token_endpoint_auth_method\":\"none\"") body 0);
+      Alcotest.(check bool)
+        "asks for a refresh grant" true
+        (Str.string_match (Str.regexp ".*refresh_token") body 0));
+  match result with
+  | Ok registered ->
+      check str "client id" "registered-client-id"
+        registered.Keeper_oauth_registration.client_id
+  | Error err ->
+      Alcotest.failf "registration failed: %s"
+        (Keeper_oauth_registration.error_to_string err)
+
+let test_registration_does_not_keep_a_secret_it_will_not_send () =
+  (* The answer carries one. Nothing in [registered] can hold it, so it stops
+     at the boundary rather than becoming a stored credential nobody sends. *)
+  match
+    Keeper_oauth_registration.register
+      ~post:(fun ~url:_ ~headers:_ ~body:_ -> Ok (201, registration_answer))
+      ~registration_url:"https://auth.example.com/dcr/register"
+      ~client_name:"masc" ~redirect_uri:"http://127.0.0.1:8935/cb" ()
+  with
+  | Error err ->
+      Alcotest.failf "registration failed: %s"
+        (Keeper_oauth_registration.error_to_string err)
+  | Ok registered ->
+      check (Alcotest.float 0.001) "issued_at is the server's" 1787720214.0
+        registered.Keeper_oauth_registration.issued_at
+
+let test_registration_keeps_the_servers_reason () =
+  match
+    Keeper_oauth_registration.register
+      ~post:(fun ~url:_ ~headers:_ ~body:_ ->
+        Ok (400, {|{"error":"invalid_redirect_uri"}|}))
+      ~registration_url:"https://auth.example.com/dcr/register"
+      ~client_name:"masc" ~redirect_uri:"nonsense" ()
+  with
+  | Error (Keeper_oauth_registration.Refused { status; body }) ->
+      Alcotest.(check int) "status" 400 status;
+      Alcotest.(check bool)
+        "the reason an operator can act on survives" true
+        (Str.string_match (Str.regexp ".*invalid_redirect_uri") body 0)
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_registration.error_to_string other)
+  | Ok _ -> Alcotest.fail "a 400 was read as a registration"
+
 let () =
   Alcotest.run "keeper_oauth_identity"
     [ ( "declaration",
@@ -506,6 +603,14 @@ let () =
             test_discovery_names_a_server_that_publishes_nothing;
           Alcotest.test_case "names a resource with no authorization server"
             `Quick test_discovery_names_a_resource_with_no_authorization_server;
+        ] );
+      ( "registration",
+        [ Alcotest.test_case "asks as a public client" `Quick
+            test_registration_asks_as_a_public_client;
+          Alcotest.test_case "does not keep a secret it will not send" `Quick
+            test_registration_does_not_keep_a_secret_it_will_not_send;
+          Alcotest.test_case "keeps the server's reason" `Quick
+            test_registration_keeps_the_servers_reason;
         ] );
       ( "pending",
         [ Alcotest.test_case "a state is redeemed once" `Quick

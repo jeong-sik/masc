@@ -229,13 +229,37 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
          and tool block look like continuation metadata. An empty gutter adds
          no bytes at all, so a pane showing origins on their own rows draws
          exactly what it drew before this margin existed. *)
+      (* Colour says status, and a row gets one of it. The whole gutter used to
+         take the status colour and bold, so an errored turn painted its kind
+         label red alongside its glyph and the row carried the same fact twice.
+         The glyph keeps the colour -- it is the part that survives NO_COLOR as
+         a shape -- and the label recedes into the dimmest step, saying only
+         which kind of row this is.
+
+         [gutter_label_at] is the layout's own count of the clock and mark it
+         placed; measuring the glyph again here is how the two drift. *)
       let margin =
         if String.equal row.gutter "" then ""
         else
-          Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold
-            row.gutter
-            (if context.ambient_background then context.inline_restore
-             else Ansi.reset)
+          let restore =
+            if context.ambient_background then context.inline_restore
+            else Ansi.reset
+          in
+          let at = max 0 (min row.gutter_label_at (Message_layout.display_width row.gutter)) in
+          (* A plain prefix, not [fit_width]: that one marks an overrun with a
+             trailing "~", which here would land in the middle of the gutter. *)
+          let marked =
+            match Message_layout.split_cells ~max_cells:at row.gutter with
+            | first :: _ -> first
+            | [] -> ""
+          in
+          let label = Message_layout.drop_cells row.gutter at in
+          if String.equal label "" then
+            Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold
+              row.gutter restore
+          else
+            Printf.sprintf "%s%s%s%s%s%s%s" (Chat_theme.origin row.style)
+              Ansi.bold marked Ansi.reset Ansi.gray label restore
       in
       if
         String.length text >= 2 && Char.equal text.[0] ' '
@@ -3603,6 +3627,9 @@ let render_keeper_message (state : state) =
           ({ style;
                timestamp = message.me_timestamp;
                role_label;
+               role_label_mark_cells =
+                 Message_layout.role_label_mark_cells
+                   ~column:role_label_column ~style ();
                request_label =
                  Keeper_chat.compact_request_id message.me_request_id;
                body;
@@ -3640,6 +3667,9 @@ let render_keeper_message (state : state) =
                role_label =
                  Message_layout.align_role_label ~column:role_label_column
                    ~style ("↳ " ^ role_label);
+               role_label_mark_cells =
+                 Message_layout.role_label_mark_cells
+                   ~column:role_label_column ~style ();
                request_label;
                body;
                markdown_source;

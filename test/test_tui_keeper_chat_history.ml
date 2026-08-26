@@ -3,7 +3,7 @@ open Alcotest
 module History = Masc_tui_keeper_chat_history
 module Transcript = Masc_tui_keeper_chat_transcript
 
-let addressed ?(ts = 1.0) ?speaker_name ?surface content =
+let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String "user"
@@ -13,6 +13,9 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
      @ (match speaker_name with
         | None -> []
         | Some name -> [ "speaker_name", `String name ])
+     @ (match speaker_id with
+        | None -> []
+        | Some id -> [ "speaker_id", `String id ])
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
@@ -241,13 +244,50 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     "codex \xc2\xb7 broadcast"
     (label
        (addressed ~speaker_name:"codex" ~surface:(surface "broadcast" []) "main red"));
-  check string "a connector says which one"
-    "vincent \xc2\xb7 slack"
+  (* The channel comes with it. A Keeper can be bound to several -- [sangsu]
+     has five Discord channels -- and without this every one of them reads as
+     the same place. *)
+  check string "a connector says which one, and which channel"
+    "vincent \xc2\xb7 slack C1"
     (label
        (addressed
           ~speaker_name:"vincent"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
+  (* Discord ids are snowflakes: two channels created minutes apart share a
+     long prefix, so the head is the half that does not tell them apart. These
+     two are real ids from one Keeper's five bindings. *)
+  let discord_label id =
+    label
+      (addressed ~speaker_name:"nabi"
+         ~surface:(surface "discord" [ "channel_id", `String id ])
+         "hello")
+  in
+  check bool "two channels of one Keeper read as two places" false
+    (String.equal
+       (discord_label "1356818755795157113")
+       (discord_label "1356818756755525815"));
+  (* An author the producer could not name is not the person reading the pane.
+     272 rows from Slack and Discord arrived this way and every one of them
+     was drawn as "you". *)
+  check string "an unnamed connector author is not the operator"
+    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    (label
+       (addressed ~speaker_id:"U09L0RHPW7P"
+          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
+          "from slack"));
+  (* The producer repeating the id in the name field is the store saying it had
+     no name, not a person called [U09L0RHPW7P]. *)
+  check string "a name that repeats the id is not a name"
+    "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
+    (label
+       (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
+          ~surface:(surface "slack" [ "channel_id", `String "C1" ])
+          "from slack"));
+  (* And a row with no surface at all is still the operator's own: this pane
+     and the dashboard send without one. *)
+  check string "an unnamed row with no surface is still you" "you"
+    (label (addressed "typed here"));
   check string "a gate goes by its channel label" "hookbot \xc2\xb7 ops-room"
     (label
        (addressed
@@ -707,7 +747,11 @@ let test_memory_commit_names_added_removed_and_drop_reason () =
              directions, and what keeps a leading [+] out of markdown's list
              grammar -- the renderer used to escape it and nothing consumed
              the escape, so a backslash reached the pane. *)
-        ; "```diff"
+        (* The journal is fenced as [memory], not [diff]: the sign says whether
+           a fact arrived or left and the category takes a colour of its own,
+           which two diff colours could not carry. Changed in #30921; this
+           expectation was left behind because a pull request runs no checks. *)
+        ; "```memory"
         ; "+ [fact] the probe uses HTTP/2"
         ; "- [constraint] use the old endpoint"
         ; "drop memory-old \xe2\x80\x94 superseded by live evidence"

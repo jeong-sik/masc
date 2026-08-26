@@ -43,8 +43,8 @@
 module Surface : sig
   type t =
     | Dashboard
-    | Discord
-    | Slack
+    | Discord of { channel : string option }
+    | Slack of { channel : string option }
     | Webhook of string  (** the [source] the hook goes by *)
     | Agent
     | Broadcast
@@ -62,6 +62,11 @@ type speaker =
       (** The row named no author, which is a person typing at an operator
           surface: this pane or the dashboard. *)
   | Named of string  (** The author the server named. *)
+  | Unresolved of { id : string option }
+      (** An author the producer could not name: [speaker_name] was absent or
+          repeated [speaker_id]. Kept apart from {!Operator}, which means the
+          person reading this pane wrote it -- folding the two turned messages
+          that arrived from Slack and Discord into the reader's own words. *)
 
 (** What one row of the transcript is. *)
 type kind =

@@ -9,10 +9,18 @@ module Delivery_identity = Keeper_chat_delivery_identity
    a label needs are kept: which surface, and the name a webhook or gate goes
    by. *)
 module Surface = struct
+  (* Slack and Discord carry which channel the row came in on. A Keeper can be
+     bound to several -- [sangsu] has five Discord channels -- and without it
+     every one of them reads as the same place.
+
+     A reference, not a name: the store has only the platform's id today, and
+     naming it would mean the label lied about what it knows. When the id is
+     resolved to a name the field carries that instead and nothing here
+     changes. *)
   type t =
     | Dashboard
-    | Discord
-    | Slack
+    | Discord of { channel : string option }
+    | Slack of { channel : string option }
     | Webhook of string
     | Agent
     | Broadcast
@@ -22,6 +30,14 @@ end
 type speaker =
   | Operator
   | Named of string
+  (* The row named an author the producer could not resolve: [speaker_name] was
+     absent, or it repeated [speaker_id]. Both are the store saying "someone,
+     and I do not know who".
+
+     Kept apart from [Operator] because that one means "the person reading this
+     pane wrote it". Folding an unknown author into it turned 272 messages from
+     Slack and Discord into the operator's own words. *)
+  | Unresolved of { id : string option }
 
 type kind =
   | Addressed_to_keeper of
@@ -66,12 +82,31 @@ let float_field fields name =
   | Some (`Int value) -> Some (float_of_int value)
   | Some _ | None -> None
 
+(* A channel reference, cut to its tail rather than its head. Discord ids are
+   snowflakes: consecutive channels share a long prefix, so [1356818755795157113]
+   and [1356818756755525815] are the same string for the first eleven digits.
+   Cutting the head is what tells them apart. *)
+let channel_reference_cells = 8
+
+let short_channel reference =
+  let length = String.length reference in
+  if length <= channel_reference_cells then reference
+  else
+    "\xe2\x80\xa6"
+    ^ String.sub reference (length - channel_reference_cells) channel_reference_cells
+
+let connector_label name channel =
+  match channel with
+  | None -> Some name
+  | Some reference when String.trim reference = "" -> Some name
+  | Some reference -> Some (name ^ " " ^ short_channel (String.trim reference))
+
 let surface_label : Surface.t -> string option = function
   | Surface.Dashboard -> None
   | Surface.Agent -> Some "agent"
   | Surface.Broadcast -> Some "broadcast"
-  | Surface.Slack -> Some "slack"
-  | Surface.Discord -> Some "discord"
+  | Surface.Slack { channel } -> connector_label "slack" channel
+  | Surface.Discord { channel } -> connector_label "discord" channel
   | Surface.Webhook source -> Some source
   | Surface.Gate label -> Some label
 ;;
@@ -82,8 +117,10 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
   | `Assoc fields ->
       (match string_field fields "kind" with
        | Some "dashboard" -> Some Surface.Dashboard
-       | Some "discord" -> Some Surface.Discord
-       | Some "slack" -> Some Surface.Slack
+       | Some "discord" ->
+           Some (Surface.Discord { channel = string_field fields "channel_id" })
+       | Some "slack" ->
+           Some (Surface.Slack { channel = string_field fields "channel_id" })
        | Some "webhook" ->
            Some
              (Surface.Webhook
@@ -99,7 +136,15 @@ let surface_of_json : Yojson.Safe.t -> Surface.t option = function
 ;;
 
 let addressed_label speaker surface =
-  let name = match speaker with Operator -> "you" | Named name -> name in
+  let name =
+    match speaker with
+    | Operator -> "you"
+    | Named name -> name
+    (* Named by its id where there is one: an unresolved author is still a
+       particular author, and two of them in a channel are two people. *)
+    | Unresolved { id = Some id } -> short_channel id
+    | Unresolved { id = None } -> "someone"
+  in
   match Option.bind surface surface_label with
   | None -> name
   | Some surface -> name ^ " \xc2\xb7 " ^ surface
@@ -489,10 +534,22 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
              reading them is the whole difference between "you" and the 23
              other authors that share this role. A surface this build cannot
              decode is dropped to [None] rather than guessed at. *)
+          let speaker_id = string_field fields "speaker_id" in
           let speaker =
             match string_field fields "speaker_name" with
-            | Some name when String.trim name <> "" -> Named name
-            | Some _ | None -> Operator
+            (* The producer repeating the id in the name field is the store
+               saying it had no name, not a person called [U09L0RHPW7P]. *)
+            | Some name
+              when String.trim name <> ""
+                   && not (Option.equal String.equal (Some name) speaker_id) ->
+                Named name
+            | Some _ | None ->
+                (* Only a row with no surface is the operator's own. A row that
+                   came in from Slack or Discord has an author this build could
+                   not name, which is not the same as the reader. *)
+                (match List.assoc_opt "surface" fields with
+                 | None | Some `Null -> Operator
+                 | Some _ -> Unresolved { id = speaker_id })
           in
           let surface =
             match List.assoc_opt "surface" fields with

@@ -29,7 +29,44 @@
 
 open Alcotest
 
-let dockerfile_path = "Dockerfile.keeper-sandbox"
+(* Dune runs a test from its own build directory, not from the workspace root,
+   so a bare relative path finds nothing. The repository already answers this
+   with DUNE_SOURCEROOT plus a walk upwards, and the shape here is the one
+   test_install_script.ml uses -- including the anchor check, which is what
+   makes the answer trustworthy: an environment variable pointing somewhere
+   without the Dockerfile in it is not the root we want.
+
+   The loud failure at the end is deliberate. The first version of this test
+   read the bare name and CI reported Sys_error("No such file or directory"),
+   which reads as a missing Dockerfile rather than a test that cannot find it. *)
+let dockerfile_name = "Dockerfile.keeper-sandbox"
+
+let rec find_source_root_from dir hops =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir dockerfile_name) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None else find_source_root_from parent (hops + 1)
+;;
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root
+    when String.trim root <> ""
+         && Sys.file_exists (Filename.concat root dockerfile_name) -> root
+  | _ ->
+    (match find_source_root_from (Sys.getcwd ()) 0 with
+     | Some root -> root
+     | None ->
+       Alcotest.fail
+         (Printf.sprintf
+            "could not locate %s from %s -- the test cannot read the image \
+             contract it is meant to check"
+            dockerfile_name
+            (Sys.getcwd ())))
+;;
+
+let dockerfile_path () = Filename.concat (source_root ()) dockerfile_name
 
 let read_file path =
   let ic = open_in_bin path in
@@ -135,7 +172,7 @@ let provided =
 let deliberately_absent = [ "docker"; "playwright"; "ttyd"; "md5"; "actionlint" ]
 
 let test_provided_tools_are_installed () =
-  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  let set = tokens (instruction_lines (read_file (dockerfile_path ()))) in
   List.iter
     (fun (command, provider) ->
        check
@@ -147,7 +184,7 @@ let test_provided_tools_are_installed () =
 ;;
 
 let test_absent_tools_carry_a_reason () =
-  let text = read_file dockerfile_path in
+  let text = read_file (dockerfile_path ()) in
   let everywhere = tokens text in
   let instructions = tokens (instruction_lines text) in
   List.iter
@@ -245,7 +282,7 @@ let version_pins =
 ;;
 
 let test_versions_are_pinned_to_the_project () =
-  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  let set = tokens (instruction_lines (read_file (dockerfile_path ()))) in
   List.iter
     (fun (pin, why) ->
        check bool (Printf.sprintf "%s — %s" pin why) true (has pin set))
@@ -266,7 +303,7 @@ let test_versions_are_pinned_to_the_project () =
    Checked as a token because that is what a Dockerfile test can see; the
    build itself asserts the outcome with `test -x`. *)
 let test_the_opam_switch_is_traversable () =
-  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  let set = tokens (instruction_lines (read_file (dockerfile_path ()))) in
   check bool "the switch parent is opened for other" true (has "o+rx" set);
   check
     bool
@@ -279,7 +316,7 @@ let test_the_opam_switch_is_traversable () =
 (* apt's nodejs is 18.19 on this base, so resolving node from apt alone cannot
    satisfy engines.node >= 22. The nodesource repository has to be present. *)
 let test_node_does_not_come_from_apt_alone () =
-  let set = tokens (instruction_lines (read_file dockerfile_path)) in
+  let set = tokens (instruction_lines (read_file (dockerfile_path ()))) in
   check
     bool
     "a signed nodesource repository supplies node"

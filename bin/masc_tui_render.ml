@@ -4795,7 +4795,8 @@ let render_keeper_message (state : state) =
           compact_enter_hint compact_scroll_hint escape_hint
       else
         Printf.sprintf
-          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  %s%s  %s  Ctrl-U:clear"
+          "%s  Ctrl-J:newline  Ctrl-R:reasoning  Ctrl-D:tools  Ctrl-F:clock  \
+           Ctrl-O:image  %s%s  %s  Ctrl-U:clear"
           enter_hint scroll_hint switch_hint escape_hint
     in
     Buffer.add_string chat_buf

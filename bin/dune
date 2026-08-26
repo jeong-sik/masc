@@ -752,6 +752,7 @@
   masc_tui_keeper_config
   masc_tui_markdown
   masc_tui_graphics
+  masc_tui_image_ref
   masc_tui_link
   masc_tui_markdown_render_cache
   masc_tui_message_layout
@@ -886,3 +887,8 @@
   fs_compat))
 
 ; Executable for MASC MCP
+
+(library
+ (name masc_tui_image_ref)
+ (wrapped false)
+ (modules masc_tui_image_ref))

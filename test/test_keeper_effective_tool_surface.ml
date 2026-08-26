@@ -241,27 +241,19 @@ let test_projection_names_equal_turn_surface_authority () =
          | Some input_schema -> input_schema
          | None -> fail "keeper_skill omitted its required input schema"
        in
-       let actual_names =
-         match
-           input_schema
-           |> Yojson.Safe.Util.member "properties"
-           |> Yojson.Safe.Util.member "name"
-           |> Yojson.Safe.Util.member "enum"
-         with
-         | `List values ->
-           List.map
-             (function
-               | `String value -> value
-               | value ->
-                 failf "keeper_skill name enum contains %s"
-                   (Yojson.Safe.to_string value))
-             values
-         | value ->
-           failf "keeper_skill name enum is %s" (Yojson.Safe.to_string value)
+       let required =
+         input_schema
+         |> Yojson.Safe.Util.member "required"
+         |> Yojson.Safe.Util.to_list
+         |> List.map Yojson.Safe.Util.to_string
        in
-       check (list string) "schema enumerates the readable skill names"
-         (List.map (fun (name, _, _) -> name) instruction_entries)
-         actual_names)
+       check (list string) "schema requires the canonical exact reference"
+         [ "identity"; "content_revision" ] required;
+       check bool "name-only input is absent" true
+         (input_schema
+          |> Yojson.Safe.Util.member "properties"
+          |> Yojson.Safe.Util.member "name"
+          = `Null))
 ;;
 
 let test_external_composition_preserves_snapshot_provenance () =

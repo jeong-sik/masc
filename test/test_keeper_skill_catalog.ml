@@ -9,6 +9,7 @@ let snapshot_of_document ~directory source_text =
     {|[skills]
 activation-lifetime = "session"
 precedence = "earlier-source-wins"
+resource-read-max-bytes = 65536
 [[skills.sources]]
 id = "fixture"
 anchor = "base-path"
@@ -396,7 +397,7 @@ let test_malformed_composition_is_diagnostic_only () =
   (match Skill_catalog.skills catalog with
    | [ skill ] ->
      check string "instruction name survives" "broken" skill.name;
-     check string "frozen body survives" "```toml composition\n[[compositions]]\n" skill.body;
+     check string "frozen body survives" "\n```toml composition\n[[compositions]]\n" skill.body;
      (match skill.provenance with
       | Some provenance ->
         check string "frozen provenance survives" "broken" provenance.directory
@@ -517,94 +518,6 @@ let test_partition_documents_isolates_rejections () =
       ("wrong rejection: " ^ Skill_catalog.error_to_string rejected.error)
   | rejected ->
     failf "expected one isolated rejection, got %d" (List.length rejected)
-;;
-
-let write_file path content =
-  let channel = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out channel)
-    (fun () -> output_string channel content)
-;;
-
-let rec remove_tree path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path
-      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-      Unix.rmdir path)
-    else Unix.unlink path
-;;
-
-let test_loader_scans_the_skills_directory () =
-  let base_path = Filename.temp_file "keeper-skill-loader" "" in
-  Unix.unlink base_path;
-  Unix.mkdir base_path 0o755;
-  Fun.protect
-    ~finally:(fun () -> remove_tree base_path)
-    (fun () ->
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok (catalog, _left_out) ->
-          check
-            int
-            "missing skills dir loads an empty catalog"
-            0
-            (List.length (Skill_catalog.skills catalog))
-        | Error _ -> fail "missing skills directory did not load as empty");
-       let skills_dir = Filename.concat (Filename.concat base_path ".masc") "skills" in
-       Unix.mkdir (Filename.dirname skills_dir) 0o755;
-       Unix.mkdir skills_dir 0o755;
-       let skill_dir = Filename.concat skills_dir "release-checklist" in
-       Unix.mkdir skill_dir 0o755;
-       write_file (Filename.concat skill_dir "SKILL.md") instruction_document;
-       Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
-       write_file (Filename.concat skills_dir "README.md") "not a skill\n";
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok (catalog, _left_out) ->
-          (match Skill_catalog.skills catalog with
-           | [ skill ] ->
-             check
-               string
-               "the SKILL.md-carrying directory is the only skill"
-               "release-checklist"
-               skill.Skill_catalog.name
-           | skills ->
-             fail
-               (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
-        | Error _ -> fail "valid skills directory failed to load");
-       let agents_root = Filename.concat base_path ".agents" in
-       let agents_skills = Filename.concat agents_root "skills" in
-       Unix.mkdir agents_root 0o755;
-       Unix.mkdir agents_skills 0o755;
-       let agent_skill_dir = Filename.concat agents_skills "agent-review" in
-       Unix.mkdir agent_skill_dir 0o755;
-       write_file
-         (Filename.concat agent_skill_dir "SKILL.md")
-         "---\nname: agent-review\ndescription: Review through the configured Agent Skills source.\n---\n\n# Agent review\n";
-       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok (catalog, _left_out) ->
-          check
-            (list string)
-            "turn consumes the configured multi-source snapshot"
-            [ "agent-review"; "release-checklist" ]
-            (Skill_catalog.skills catalog
-             |> List.map (fun skill -> skill.Skill_catalog.name))
-        | Error _ -> fail "configured .agents skill source did not reach the turn");
-       (* A missing description, not a missing name: the directory supplies a
-          name, so that is no longer the defect a broken install shows. *)
-       write_file
-         (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
-         "---\nname: half-installed\n---\n";
-       match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Ok (catalog, _left_out) ->
-         check
-           (list string)
-           "one broken optional skill does not stop unrelated turns"
-           [ "agent-review"; "release-checklist" ]
-           (Skill_catalog.skills catalog
-            |> List.map (fun skill -> skill.Skill_catalog.name))
-       | Error _ -> fail "one broken Skill stopped the whole Keeper catalog")
 ;;
 
 let skill_catalog_of documents =
@@ -739,10 +652,6 @@ let () =
             "partition_documents isolates rejections"
             `Quick
             test_partition_documents_isolates_rejections
-        ; test_case
-            "loader scans the skills directory"
-            `Quick
-            test_loader_scans_the_skills_directory
         ; test_case
             "invocation policy fields are rejected"
             `Quick

@@ -151,7 +151,7 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("external_message_id", message_id);
   ]
 
-let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
+let discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id :
     (Gate_keeper_backend.connector_delivery, string) result =
   let parent_channel_id = State.parent_channel_of_thread ~channel_id in
   let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
@@ -160,7 +160,7 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
        { Gate_keeper_backend.continuation_channel
        ; surface =
            Surface_ref.Discord
-             { guild_id; channel_id; channel_name = None; parent_channel_id; thread_id }
+             { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
        ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
        ; external_message_id = Some message_id
        ; workspace_id = guild_id
@@ -349,10 +349,10 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
         | None -> Keeper_external_attention.Direct_message
         | Some _ -> Keeper_external_attention.Ambient
     in
-    let attention_event_id =
     (* Resolved once for this message, so the attention record and the
        durable chat row name the same room. *)
     let channel_name = resolve_channel_name ~base_dir ~channel_id in
+    let attention_event_id =
       record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
         ~message_id ~author_id ~author_name ~content ~mentions_bot
         ~route:"triggered" ~urgency
@@ -377,7 +377,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       }
     in
     let outcome =
-      match discord_delivery ~guild_id ~channel_id ~message_id ~author_id with
+      match
+        discord_delivery ~guild_id ~channel_id ~channel_name ~message_id ~author_id
+      with
       | Error detail -> Error (Channel_gate.Internal detail)
       | Ok delivery ->
         Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg

@@ -24,7 +24,7 @@ let all_variants =
       {
         guild_id = Some "g1";
         channel_id = "c1";
-        channel_name = None;
+        channel_name = Some "general";
         parent_channel_id = Some "p1";
         thread_id = Some "t1";
       }

@@ -85,7 +85,7 @@ let validate_source_route ~thread_id ~continuation_channel ~surface ~channel
       , Surface_ref.Discord
           { guild_id = surface_guild
           ; channel_id = surface_channel
-          ; channel_name = None
+          ; channel_name = _
           ; parent_channel_id = surface_parent
           ; thread_id = surface_thread
           } ) ->

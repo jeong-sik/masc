@@ -119,6 +119,8 @@ blocking_lints() {
     python3 scripts/ci/test_check_merge_audit.py
   run_lint "Merge safety workflow wiring fixture" \
     bash scripts/ci/test-merge-safety-wiring.sh
+  run_lint "PR critical-gate wiring fixture" \
+    bash scripts/ci/test-pr-critical-gate-wiring.sh
   # The guard itself is invoked live by main-ci-verdict.yml. Keep this cheap
   # import/CLI contract next to its decision and workflow fixtures.
   run_lint "Merge audit guard executable" \

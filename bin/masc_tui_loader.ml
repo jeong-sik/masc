@@ -1002,22 +1002,19 @@ let load_keeper_config_view ~(host : string) ~(port : int)
       | `Assoc fields -> List.assoc_opt key fields
       | _ -> None
     in
-    (* The projection nests the prompt facts under [prompt]; the flat
-       spelling was an older shape and stays as a fallback so a downlevel
-       server still answers. *)
-    let prompt_member key =
+    let prompt_fields =
       match member "prompt" with
-      | Some (`Assoc fields) -> List.assoc_opt key fields
-      | _ -> member key
+      | Some (`Assoc fields) -> fields
+      | Some _ | None -> []
     in
     let instructions_lines =
-      match prompt_member "instructions" with
+      match List.assoc_opt "instructions" prompt_fields with
       | Some (`String text) when String.trim text <> "" ->
         String.split_on_char '\n' text
       | Some _ | None -> [ "(no instructions declared)" ]
     in
     let effective_lines =
-      match prompt_member "effective_system_prompt" with
+      match List.assoc_opt "effective_system_prompt" prompt_fields with
       | Some (`String text) when String.trim text <> "" ->
         String.split_on_char '\n' text
       | Some _ | None -> [ "(no effective system prompt)" ]

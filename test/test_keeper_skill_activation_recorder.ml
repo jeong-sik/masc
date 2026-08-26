@@ -110,7 +110,7 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
        ~config
        context
        ~invocation:(invocation "call-task")
-       ~body:"task body"
+       ~content:(Recorder.Body "task body")
        task_reference
    with
    | Ok _ -> ()
@@ -160,6 +160,42 @@ let test_invalid_task_scope_fails_closed () =
   | Ok _ -> fail "invalid Task scope was accepted"
 ;;
 
+let test_resource_receipt_keeps_path_size_and_digest () =
+  with_session @@ fun config trace_id ->
+  let reference = reference 'a' in
+  let context =
+    make_context ~trace_id ~task_scope:Keeper_task_skill_turn.No_task
+  in
+  let relative_path =
+    match Skill_resource_path.of_string "references/PROOF.md" with
+    | Ok path -> path
+    | Error error -> fail (Skill_resource_path.error_to_string error)
+  in
+  (match
+     Recorder.record_instruction
+       ~config
+       context
+       ~invocation:(invocation "call-resource")
+       ~content:(Recorder.Resource { relative_path; contents = "RESOURCE_BYTES" })
+       reference
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Recorder.error_to_string error));
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match Ledger.activations ledger with
+     | [ { served_content = Ledger.Skill_resource observed; _ } ] ->
+       check string "relative path" "references/PROOF.md" observed.relative_path;
+       check int "exact bytes" 14 observed.bytes;
+       check
+         string
+         "exact digest"
+         "4891552b0a1e3de55b9f5cfdf1f06508210fcbcdae3e5133a40a82aba9920b8b"
+         observed.sha256
+     | _ -> fail "resource invocation was not recorded as a resource")
+;;
+
 let test_turn_scope_mismatch_is_rejected_before_recording () =
   let trace = trace_id "trace-recorder" in
   match
@@ -183,6 +219,8 @@ let () =
             test_task_and_session_origins_are_derived_from_exact_refs
         ; test_case "invalid Task scope fails closed" `Quick
             test_invalid_task_scope_fails_closed
+        ; test_case "resource receipt is exact" `Quick
+            test_resource_receipt_keeps_path_size_and_digest
         ; test_case "turn scope mismatch is rejected" `Quick
             test_turn_scope_mismatch_is_rejected_before_recording
         ] )

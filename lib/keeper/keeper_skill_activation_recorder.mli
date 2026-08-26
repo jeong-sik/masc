@@ -2,6 +2,13 @@
 
 type t
 
+type instruction_content =
+  | Body of string
+  | Resource of
+      { relative_path : Skill_resource_path.t
+      ; contents : string
+      }
+
 type error =
   | Turn_scope_mismatch
   | Invalid_task_id of string
@@ -22,7 +29,7 @@ val record_instruction :
   config:Workspace.config ->
   t ->
   invocation:Agent_core.Tool_contract.Invocation.t ->
-  body:string ->
+  content:instruction_content ->
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 

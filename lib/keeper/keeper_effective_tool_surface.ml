@@ -116,7 +116,20 @@ let project
     let task_instruction_skills =
       List.map
         (fun (selected : Keeper_task_skill_turn.selected) ->
-           selected.reference, selected.skill.description, selected.skill.body)
+           let resource_location =
+             match selected.skill.provenance with
+             | Some { source_root = Some source_root; directory; _ } ->
+               Some Keeper_tool_composition_surface.{ source_root; directory }
+             | Some { source_root = None; _ }
+             | None ->
+               None
+           in
+           Keeper_tool_composition_surface.instruction_skill
+             ?resource_location
+             ~reference:selected.reference
+             ~description:selected.skill.description
+             ~body:selected.skill.body
+             ())
         task_selection.selected
     in
     let global_instruction_skills =
@@ -124,7 +137,21 @@ let project
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
            match skill.reference, skill.model_invocable, skill.surface with
            | Some reference, true, Keeper_skill_catalog.Instruction ->
-             Some (reference, skill.description, skill.body)
+             let resource_location =
+               match skill.provenance with
+               | Some { source_root = Some source_root; directory; _ } ->
+                 Some Keeper_tool_composition_surface.{ source_root; directory }
+               | Some { source_root = None; _ }
+               | None ->
+                 None
+             in
+             Some
+               (Keeper_tool_composition_surface.instruction_skill
+                  ?resource_location
+                  ~reference
+                  ~description:skill.description
+                  ~body:skill.body
+                  ())
            | None, _, _
            | Some _, false, _
            | Some _, true, Keeper_skill_catalog.Composition _ ->
@@ -136,7 +163,9 @@ let project
         ~global:global_instruction_skills
     in
     let instruction_skills =
-      List.map (fun (reference, _, _) -> reference) readable_instruction_skills
+      List.map
+        (fun skill -> skill.Keeper_tool_composition_surface.reference)
+        readable_instruction_skills
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog

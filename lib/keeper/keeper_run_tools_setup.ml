@@ -192,9 +192,20 @@ let prepare_agent_setup
   let task_instruction_skills =
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
-         ( selected.reference
-         , selected.skill.description
-         , selected.skill.body ))
+         let resource_location =
+           match selected.skill.provenance with
+           | Some { source_root = Some source_root; directory; _ } ->
+             Some Keeper_tool_composition_surface.{ source_root; directory }
+           | Some { source_root = None; _ }
+           | None ->
+             None
+         in
+         Keeper_tool_composition_surface.instruction_skill
+           ?resource_location
+           ~reference:selected.reference
+           ~description:selected.skill.description
+           ~body:selected.skill.body
+           ())
       task_skill_selection.selected
   in
   let* skill_activation_context =

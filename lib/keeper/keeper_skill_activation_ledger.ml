@@ -24,6 +24,17 @@ type action =
   ; observed_at : string
   }
 
+type served_content =
+  | Skill_body of
+      { bytes : int
+      ; sha256 : string
+      }
+  | Skill_resource of
+      { relative_path : string
+      ; bytes : int
+      ; sha256 : string
+      }
+
 type activation =
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
@@ -32,8 +43,7 @@ type activation =
   ; runtime_id : string
   ; skill_tool_use_id : string
   ; agent_core_turn : int
-  ; body_bytes : int
-  ; body_sha256 : string
+  ; served_content : served_content
   ; delivery : delivery option
   ; actions : action list
   ; activated_at : string
@@ -78,8 +88,10 @@ type decode_error =
   | Invalid_runtime_id
   | Invalid_skill_tool_use_id
   | Invalid_agent_core_turn of int
-  | Invalid_body_bytes of int
-  | Invalid_body_sha256 of Skill_reference.revision_error
+  | Invalid_served_content_kind of string
+  | Invalid_served_content_path of string
+  | Invalid_served_content_bytes of int
+  | Invalid_served_content_sha256 of Skill_reference.revision_error
   | Invalid_delivery_agent_core_turn of int
   | Invalid_delivery_time of string
   | Invalid_action_tool_use_id_field
@@ -134,8 +146,10 @@ let decode_error_code = function
   | Invalid_runtime_id -> "invalid_runtime_id"
   | Invalid_skill_tool_use_id -> "invalid_skill_tool_use_id"
   | Invalid_agent_core_turn _ -> "invalid_agent_core_turn"
-  | Invalid_body_bytes _ -> "invalid_body_bytes"
-  | Invalid_body_sha256 _ -> "invalid_body_sha256"
+  | Invalid_served_content_kind _ -> "invalid_served_content_kind"
+  | Invalid_served_content_path _ -> "invalid_served_content_path"
+  | Invalid_served_content_bytes _ -> "invalid_served_content_bytes"
+  | Invalid_served_content_sha256 _ -> "invalid_served_content_sha256"
   | Invalid_delivery_agent_core_turn _ -> "invalid_delivery_agent_core_turn"
   | Invalid_delivery_time _ -> "invalid_delivery_time"
   | Invalid_action_tool_use_id_field -> "invalid_action_tool_use_id"
@@ -204,6 +218,26 @@ let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 
+let validate_served_content = function
+  | Skill_body { bytes; sha256 } ->
+    if bytes < 0
+    then Error (Invalid_served_content_bytes bytes)
+    else
+      Skill_reference.validate_revision_string sha256
+      |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
+  | Skill_resource { relative_path; bytes; sha256 } ->
+    let* () =
+      Skill_resource_path.of_string relative_path
+      |> Result.map ignore
+      |> Result.map_error (fun _ -> Invalid_served_content_path relative_path)
+    in
+    if bytes < 0
+    then Error (Invalid_served_content_bytes bytes)
+    else
+      Skill_reference.validate_revision_string sha256
+      |> Result.map_error (fun error -> Invalid_served_content_sha256 error)
+;;
+
 let make_activation_evidence
       ~(identity : Skill_reference.identity)
       ~content_revision
@@ -212,8 +246,7 @@ let make_activation_evidence
       ~runtime_id
       ~skill_tool_use_id
       ~agent_core_turn
-      ~body_bytes
-      ~body_sha256
+      ~served_content
       ~activated_at
       ~origin
   =
@@ -252,13 +285,7 @@ let make_activation_evidence
     then Error (Invalid_agent_core_turn agent_core_turn)
     else Ok ()
   in
-  let* () =
-    if body_bytes < 0 then Error (Invalid_body_bytes body_bytes) else Ok ()
-  in
-  let* () =
-    Skill_reference.validate_revision_string body_sha256
-    |> Result.map_error (fun error -> Invalid_body_sha256 error)
-  in
+  let* () = validate_served_content served_content in
   let* () =
     if String.equal trace_id "" || Ids.Turn_ref.absolute_turn turn_ref <= 0
     then Error (Invalid_turn_ref (Ids.Turn_ref.to_string turn_ref))
@@ -277,8 +304,7 @@ let make_activation_evidence
     ; runtime_id
     ; skill_tool_use_id
     ; agent_core_turn
-    ; body_bytes
-    ; body_sha256
+    ; served_content
     ; delivery = None
     ; actions = []
     ; activated_at
@@ -294,7 +320,7 @@ let make_activation
       ~runtime_id
       ~skill_tool_use_id
       ~agent_core_turn
-      ~body
+      ~served_content
       ~activated_at
       ~origin
   =
@@ -306,8 +332,7 @@ let make_activation
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~body_bytes:(String.length body)
-    ~body_sha256:Digestif.SHA256.(digest_string body |> to_hex)
+    ~served_content
     ~activated_at
     ~origin
 ;;
@@ -349,6 +374,22 @@ let action_to_yojson (action : action) =
     ]
 ;;
 
+let served_content_to_yojson = function
+  | Skill_body { bytes; sha256 } ->
+    `Assoc
+      [ "kind", `String "skill_body"
+      ; "bytes", `Int bytes
+      ; "sha256", `String sha256
+      ]
+  | Skill_resource { relative_path; bytes; sha256 } ->
+    `Assoc
+      [ "kind", `String "skill_resource"
+      ; "relative_path", `String relative_path
+      ; "bytes", `Int bytes
+      ; "sha256", `String sha256
+      ]
+;;
+
 let activation_to_yojson activation =
   `Assoc
     [ "identity", Skill_reference.identity_to_yojson activation.identity
@@ -363,8 +404,7 @@ let activation_to_yojson activation =
     ; "runtime_id", `String activation.runtime_id
     ; "skill_tool_use_id", `String activation.skill_tool_use_id
     ; "agent_core_turn", `Int activation.agent_core_turn
-    ; "body_bytes", `Int activation.body_bytes
-    ; "body_sha256", `String activation.body_sha256
+    ; "served_content", served_content_to_yojson activation.served_content
     ; ( "delivery"
       , match activation.delivery with
         | Some delivery -> delivery_to_yojson delivery
@@ -580,6 +620,35 @@ let decode_action json =
   Ok { tool_use_id; tool_name; agent_core_turn; observed_at }
 ;;
 
+let decode_served_content json =
+  let* fields = object_field "served_content" json in
+  let* kind = string_field "kind" fields in
+  let* () =
+    let allowed =
+      match kind with
+      | "skill_body" -> [ "kind"; "bytes"; "sha256" ]
+      | "skill_resource" ->
+        [ "kind"; "relative_path"; "bytes"; "sha256" ]
+      | observed -> []
+    in
+    match allowed with
+    | [] -> Error (Invalid_served_content_kind kind)
+    | allowed -> exact_fields ~object_name:"served_content" ~allowed fields
+  in
+  let* bytes = int_field "bytes" fields in
+  let* sha256 = string_field "sha256" fields in
+  let* served_content =
+    match kind with
+    | "skill_body" -> Ok (Skill_body { bytes; sha256 })
+    | "skill_resource" ->
+      let* relative_path = string_field "relative_path" fields in
+      Ok (Skill_resource { relative_path; bytes; sha256 })
+    | observed -> Error (Invalid_served_content_kind observed)
+  in
+  let* () = validate_served_content served_content in
+  Ok served_content
+;;
+
 let decode_activation ~expected_trace_id json =
   let* fields = object_field "activation" json in
   let* () =
@@ -593,8 +662,7 @@ let decode_activation ~expected_trace_id json =
         ; "runtime_id"
         ; "skill_tool_use_id"
         ; "agent_core_turn"
-        ; "body_bytes"
-        ; "body_sha256"
+        ; "served_content"
         ; "delivery"
         ; "actions"
         ; "activated_at"
@@ -635,12 +703,12 @@ let decode_activation ~expected_trace_id json =
   let* runtime_id = string_field "runtime_id" fields in
   let* skill_tool_use_id = string_field "skill_tool_use_id" fields in
   let* agent_core_turn = int_field "agent_core_turn" fields in
-  let* body_bytes = int_field "body_bytes" fields in
-  let* body_sha256 = string_field "body_sha256" fields in
-  let* () =
-    Skill_reference.validate_revision_string body_sha256
-    |> Result.map_error (fun error -> Invalid_body_sha256 error)
+  let* served_content_json =
+    match List.assoc_opt "served_content" fields with
+    | Some value -> Ok value
+    | None -> Error (Expected_object { field = "served_content" })
   in
+  let* served_content = decode_served_content served_content_json in
   let* delivery_json =
     match List.assoc_opt "delivery" fields with
     | Some value -> Ok value
@@ -689,8 +757,7 @@ let decode_activation ~expected_trace_id json =
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~body_bytes
-    ~body_sha256
+    ~served_content
     ~activated_at
     ~origin
   in

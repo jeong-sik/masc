@@ -20,6 +20,9 @@ type surface =
 type provenance = private
   { identity : Skill_catalog_snapshot.identity
   ; source : Skill_source_config.source
+  ; source_root : string option
+        (** Exact resolved source root captured by the snapshot scan. Omitted
+            from public JSON because it is a host path. *)
   ; directory : string
   }
 

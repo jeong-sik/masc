@@ -18,7 +18,7 @@ val make_tool_bundle
        (** Skills loaded for this turn. Composition skills materialize as
            [keeper_compose_<name>] tools beside the catalog's own entries;
            an absent or empty catalog adds nothing. *)
-  -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+  -> ?task_instruction_skills:Keeper_tool_composition_surface.instruction_skill list
        (** Exact Task-selected Skill bodies resolved from this turn's frozen
            snapshot. These may include shadowed or disable-model-invocation
            entries without changing global Skill discovery. *)
@@ -38,7 +38,7 @@ val make_tools
   -> ctx_snapshot:Keeper_types.working_context
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?skill_catalog:Keeper_skill_catalog.t
-  -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+  -> ?task_instruction_skills:Keeper_tool_composition_surface.instruction_skill list
   -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
@@ -56,7 +56,7 @@ module For_testing : sig
     -> ?gate_context:Keeper_gate_causal_context.t
     -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
     -> ?skill_catalog:Keeper_skill_catalog.t
-    -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+    -> ?task_instruction_skills:Keeper_tool_composition_surface.instruction_skill list
     -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
     -> unit
     -> Keeper_tools_agent_core.tool_bundle
@@ -69,7 +69,7 @@ module For_testing : sig
     -> ctx_snapshot:Keeper_types.working_context
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?skill_catalog:Keeper_skill_catalog.t
-    -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+    -> ?task_instruction_skills:Keeper_tool_composition_surface.instruction_skill list
     -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
     -> unit
     -> Agent_core.Tool.t list

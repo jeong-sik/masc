@@ -7,6 +7,7 @@ type surface =
 type provenance =
   { identity : Skill_catalog_snapshot.identity
   ; source : Skill_source_config.source
+  ; source_root : string option
   ; directory : string
   }
 
@@ -167,8 +168,18 @@ let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
   Skill_catalog_snapshot.sources snapshot
   |> fun sources -> List.nth_opt sources entry.source_index
   |> Option.map (fun scan ->
+    let source_root =
+      match scan.Skill_catalog_snapshot.observation with
+      | Source_ready { resolved_path; _ } -> Some resolved_path
+      | Source_missing _
+      | Source_not_directory _
+      | Source_unavailable _
+      | Source_unresolved _ ->
+        None
+    in
     { identity = entry.identity
     ; source = scan.Skill_catalog_snapshot.source.source
+    ; source_root
     ; directory = entry.directory
     })
 ;;

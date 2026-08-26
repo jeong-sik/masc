@@ -3,12 +3,13 @@
 (test
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
- (libraries masc masc_test_deps alcotest masc.skill_config masc.skill_snapshot))
-
-(test
- (name test_task_skill_reference)
- (modules test_task_skill_reference)
- (libraries masc.task_handlers masc alcotest unix fs_compat masc_string_util))
+ (libraries
+  alcotest
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc_test_deps))
 
 (env
  (_
@@ -1438,9 +1439,11 @@
   test_set_util
   test_board_core_payload)
  (libraries
-  masc_test_deps
+ masc_test_deps
   masc_test_runtime
   masc.embedded_config
+  masc.skill_config
+  masc.skill_reference
   bigstringaf
   ; test_terminal_size reads the tty size through the ioctl stub
   terminal_size
@@ -3312,7 +3315,14 @@
 (test
  (name test_keeper_task_skill_block)
  (modules test_keeper_task_skill_block)
- (libraries alcotest masc masc_types))
+ (libraries
+  alcotest
+  masc
+  masc.prompt_registry
+  masc.skill_config
+  masc.skill_reference
+  masc_types
+  yojson))
 
 (test
  (name test_keeper_skill_usage)
@@ -3340,8 +3350,52 @@
  (libraries
   alcotest
   masc.skill_snapshot
+  masc.skill_reference
   masc.skill_config
   masc.string_util
+  yojson))
+
+(test
+ (name test_skill_reference)
+ (modules test_skill_reference)
+ (libraries alcotest masc.skill_config masc.skill_reference yojson))
+
+(test
+ (name test_task_exact_skill_refs)
+ (modules test_task_exact_skill_refs)
+ (libraries
+  alcotest
+  masc.masc_types
+  masc.skill_config
+  masc.skill_reference
+  yojson))
+
+(test
+ (name test_keeper_task_skill_turn_exact)
+ (modules test_keeper_task_skill_turn_exact)
+ (libraries
+  alcotest
+  masc
+  masc.agent_core
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.string_util
+  yojson))
+
+(test
+ (name test_workspace_task_exact_skill_refs)
+ (modules test_workspace_task_exact_skill_refs)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc.masc_types
+  masc.masc_workspace
+  masc.skill_config
+  masc.skill_reference
+  unix
   yojson))
 
 (test
@@ -3353,6 +3407,24 @@
   masc.skill_snapshot
   masc.skill_config
   unix))
+
+(test
+ (name test_task_skill_published_resolution)
+ (modules test_task_skill_published_resolution)
+ (libraries
+  alcotest
+  eio
+  eio_main
+  fs_compat
+  masc
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.skill_snapshot_service
+  masc.tool_types
+  masc_core
+  unix
+  yojson))
 
 (test
  (name test_keeper_skill_activation_ledger)

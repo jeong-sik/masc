@@ -16,15 +16,20 @@ type tool =
   ; origin : tool_origin
   }
 
+type tool_delivery =
+  | Tools_delivered
+  | Tools_suppressed_runtime_unsupported
+
 type t =
   { keeper_name : string
   ; runtime_id : string
   ; official_client_kind : string
+  ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
-  ; instruction_skills : string list
-  ; composition_skills : string list
+  ; instruction_skills : Skill_reference.t list
+  ; composition_skills : Skill_reference.t list
   ; skills_left_out : string list
         (** Documents the catalog could not read, by the directory they were
             found in and why. This surface answers "what can this Keeper
@@ -53,11 +58,12 @@ module For_testing : sig
     runtime_id:string ->
     skills_left_out:string list ->
     official_client_kind:string ->
+    tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
     tool_groups:string list option ->
     current_task_id:string option ->
-    task_skill_names:string list ->
-    skill_catalog:Keeper_skill_catalog.t ->
-    (t, string * string) result
-  (** Pure projection seam.  The error pair is [(reason, detail)]. *)
+    task_skill_references:Skill_reference.t list ->
+    skill_snapshot:Skill_catalog_snapshot.t ->
+    (t, Keeper_task_skill_turn.error) result
+  (** Pure projection seam over one frozen Task/snapshot pair. *)
 end

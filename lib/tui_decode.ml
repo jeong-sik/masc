@@ -1464,13 +1464,13 @@ type effective_tool_surface =
       ets_official_client_kind : string;
       ets_native_posture : string option;
       ets_tool_groups : string list;
-      ets_instruction_skills : string list;
+      ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
          missing from them: a skill left out is absent from what the Keeper
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
-      ets_composition_skills : string list;
+      ets_composition_skills : Skill_reference.t list;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }
@@ -1699,6 +1699,12 @@ let decode_effective_tool json =
   let* et_skill_source = optional_string_field origin "skill_source" in
   Ok { et_name; et_origin; et_group; et_skill_source }
 
+let decode_skill_reference_list json field =
+  let* values = required_list_field json field in
+  match Skill_reference.list_of_yojson (`List values) with
+  | Ok references -> Ok references
+  | Error _ -> Error (Printf.sprintf "%s is not a canonical Skill reference list" field)
+
 let decode_effective_tool_surface json =
   let* status = required_string_field json "status" in
   let* ets_keeper_name = required_string_field json "keeper_name" in
@@ -1721,10 +1727,10 @@ let decode_effective_tool_surface json =
         decode_string_name_list json "skills_left_out"
       in
       let* ets_instruction_skills =
-        decode_string_name_list json "instruction_skills"
+        decode_skill_reference_list json "instruction_skills"
       in
       let* ets_composition_skills =
-        decode_string_name_list json "composition_skills"
+        decode_skill_reference_list json "composition_skills"
       in
       let* tools_json = required_list_field json "tools" in
       let* ets_tools =

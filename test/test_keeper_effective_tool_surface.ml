@@ -37,34 +37,13 @@ Use the repository's focused validation wrapper.
     name description
 ;;
 
-let skill_catalog_with_description description =
-  match
-    Keeper_skill_catalog.partition_documents
-      [ "guide", instruction_skill ~description "guide"
-      ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
-      ]
-  with
-  | catalog, [] -> catalog
-  | _, { error; _ } :: _ ->
-    failf "fixture catalog rejected: %s"
-      (Keeper_skill_catalog.error_to_string error)
-;;
-
-let skill_catalog () =
-  skill_catalog_with_description "Read these instructions before working."
-;;
-
-let configured_external_skill_catalog () =
+let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
-    {|[skills]
-activation-lifetime = "session"
-precedence = "earlier-source-wins"
-[[skills.sources]]
-id = "shared-catalog"
-anchor = "absolute"
-path = "/srv/shared-agent-skills"
-access = "read-only"
-|}
+    Printf.sprintf
+      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      source_id
+      anchor
+      path
   in
   let config =
     match Skill_source_config.parse_text config_text with
@@ -79,16 +58,16 @@ access = "read-only"
   let resolved =
     Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
   in
-  let document = composition_skill ~name:"snapshot" ~execution:"async" in
   let scan : Skill_catalog_snapshot.source_scan =
     { source = resolved
     ; observation =
         Skill_catalog_snapshot.Source_ready
-          { resolved_path = "/srv/shared-agent-skills"; candidates = 1 }
+          { resolved_path = path; candidates = List.length documents }
     ; candidates =
-        [ Skill_catalog_snapshot.Candidate_document
-            { directory = "snapshot"; source_text = document }
-        ]
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
     }
   in
   let snapshot =
@@ -96,10 +75,59 @@ access = "read-only"
     | Ok snapshot -> snapshot
     | Error _ -> fail "external Skill snapshot fixture was rejected"
   in
-  match Keeper_skill_catalog.of_snapshot snapshot with
-  | catalog, [] -> catalog
-  | _, diagnostics ->
-    failf "external Skill projection returned %d diagnostics" (List.length diagnostics)
+  snapshot
+;;
+
+let skill_snapshot_with_description description =
+  configured_snapshot
+    ~source_id:"fixture-catalog"
+    ~anchor:"base-path"
+    ~path:"skills"
+    [ "guide", instruction_skill ~description "guide"
+    ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
+    ]
+;;
+
+let skill_snapshot () =
+  skill_snapshot_with_description "Read these instructions before working."
+;;
+
+let skill_catalog_with_description description =
+  let catalog, diagnostics =
+    Keeper_skill_catalog.of_snapshot (skill_snapshot_with_description description)
+  in
+  match diagnostics with
+  | [] -> catalog
+  | diagnostics ->
+    failf "fixture catalog projected with %d diagnostics" (List.length diagnostics)
+;;
+
+let skill_catalog () =
+  skill_catalog_with_description "Read these instructions before working."
+;;
+
+let configured_external_skill_snapshot () =
+  configured_snapshot
+    ~source_id:"shared-catalog"
+    ~anchor:"absolute"
+    ~path:"/srv/shared-agent-skills"
+    [ "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ]
+;;
+
+let reference_by_name snapshot name =
+  match Skill_catalog_snapshot.find_effective_by_name snapshot name with
+  | Some entry -> Skill_catalog_snapshot.entry_reference entry
+  | None -> failf "fixture Skill %S is absent" name
+;;
+
+let instruction_entries snapshot references =
+  match Keeper_task_skill_turn.resolve ~snapshot references with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok selection ->
+    List.map
+      (fun (selected : Keeper_task_skill_turn.selected) ->
+         selected.reference, selected.skill.description, selected.skill.body)
+      selection.selected
 ;;
 
 let names (surface : Keeper_effective_tool_surface.t) =
@@ -108,15 +136,15 @@ let names (surface : Keeper_effective_tool_surface.t) =
   |> List.sort String.compare
 ;;
 
-(* The trailing unit is what lets [?catalog] be left out. Without it every
+(* The trailing unit is what lets [?snapshot] be left out. Without it every
    argument is labelled, nothing marks the application as finished, and each
    call reads as a function still waiting for the optional rather than as
    the result it is used as. *)
 let project
-      ?(catalog = skill_catalog ())
+      ?(snapshot = skill_snapshot ())
       ?(skills_left_out = [])
       ~tool_groups
-      ~task_skill_names
+      ~task_skill_references
       ~native_posture
       ()
   =
@@ -124,36 +152,48 @@ let project
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
     ~official_client_kind:"codex"
+    ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
     ~tool_groups
     ~current_task_id:(Some "task-001")
-    ~task_skill_names
-    ~skill_catalog:catalog
     ~skills_left_out
+    ~task_skill_references
+    ~skill_snapshot:snapshot
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  let task_reference = reference_by_name snapshot "guide" in
   match
     project
+      ~snapshot
       ~tool_groups:None
-      ~task_skill_names:[ "guide" ]
+      ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
+    let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
+    check int "snapshot projection diagnostics" 0 (List.length diagnostics);
+    let task_instruction_skills = instruction_entries snapshot [ task_reference ] in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         ~identity_tool_names:[]
-        ~skill_catalog:(skill_catalog ())
+        ~task_instruction_skills
+        ~skill_catalog:catalog
         ~model_visible_descriptors:descriptors
+        ()
     in
     check (list string) "projection and turn setup names are identical"
       expected (names surface);
-    check (list string) "instruction skill is explicit" [ "guide" ]
-      surface.instruction_skills;
+    check string
+      "instruction skill is exact"
+      (Skill_reference.list_to_yojson [ task_reference ] |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+       |> Yojson.Safe.to_string);
     check bool "instruction reader provenance exists" true
       (List.exists
          (fun (tool : Keeper_effective_tool_surface.tool) ->
@@ -169,9 +209,7 @@ let test_projection_names_equal_turn_surface_authority () =
          surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256);
-    let instruction_entries =
-      Keeper_skill_catalog.instruction_entries (skill_catalog ())
-    in
+    let instruction_entries = task_instruction_skills in
     let schema_tool =
       Keeper_tool_composition_surface.schema_tools
         ~instruction_skills:instruction_entries
@@ -221,13 +259,14 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~keeper_name:"fixture"
       ~runtime_id:"fixture.runtime"
       ~official_client_kind:"codex"
+      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
       ~tool_groups:None
       ~current_task_id:None
-      ~task_skill_names:[]
-      ~skill_catalog:(configured_external_skill_catalog ())
+      ~task_skill_references:[]
+      ~skill_snapshot:(configured_external_skill_snapshot ())
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     let provenance =
       List.find_map
@@ -279,14 +318,14 @@ let test_two_surfaces_have_different_names_and_digests () =
   let all =
     project
       ~tool_groups:None
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   in
   let narrow =
     project
       ~tool_groups:(Some [ "fs" ])
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_full
       ()
   in
@@ -295,22 +334,29 @@ let test_two_surfaces_have_different_names_and_digests () =
     check bool "effective names differ" true (names left <> names right);
     check bool "session digests differ" true
       (left.tool_surface_sha256 <> right.tool_surface_sha256)
-  | Error (_, detail), _ | _, Error (_, detail) -> fail detail
+  | Error error, _ | _, Error error ->
+    fail (Keeper_task_skill_turn.error_to_string error)
 ;;
 
 let test_instruction_skill_without_read_is_admitted () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  let task_reference = reference_by_name snapshot "guide" in
   match
     project
+      ~snapshot
       ~tool_groups:(Some [ "board" ])
-      ~task_skill_names:[ "guide" ]
+      ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error (_, detail) -> fail detail
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
-    check (list string) "instruction name is admitted" [ "guide" ]
-      surface.instruction_skills;
+    check string
+      "exact instruction reference is admitted"
+      (Skill_reference.list_to_yojson [ task_reference ] |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+       |> Yojson.Safe.to_string);
     check bool "dedicated reader is present" true
       (List.exists (String.equal "keeper_skill") (names surface))
 ;;
@@ -318,10 +364,11 @@ let test_instruction_skill_without_read_is_admitted () =
 let test_instruction_description_changes_digest () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let project_description description =
+    let snapshot = skill_snapshot_with_description description in
     project
-      ~catalog:(skill_catalog_with_description description)
+      ~snapshot
       ~tool_groups:None
-      ~task_skill_names:[ "guide" ]
+      ~task_skill_references:[ reference_by_name snapshot "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   in
@@ -329,7 +376,8 @@ let test_instruction_description_changes_digest () =
   | Ok left, Ok right ->
     check bool "instruction description participates in digest" true
       (left.tool_surface_sha256 <> right.tool_surface_sha256)
-  | Error (_, detail), _ | _, Error (_, detail) -> fail detail
+  | Error error, _ | _, Error error ->
+    fail (Keeper_task_skill_turn.error_to_string error)
 ;;
 
 let rec remove_tree path =
@@ -350,11 +398,13 @@ let test_turn_admission_uses_dedicated_instruction_reader () =
     (fun () ->
        let config = Workspace.default_config base in
        ignore (Workspace.init config ~agent_name:None);
+       let snapshot = skill_snapshot () in
+       let guide_reference = reference_by_name snapshot "guide" in
        let created =
          match
            Workspace.add_task_with_result
              ~created_by:"fixture"
-             ~skills:[ "guide" ]
+             ~skills:[ guide_reference ]
              config
              ~title:"skill admission"
              ~priority:3
@@ -385,7 +435,7 @@ let test_turn_admission_uses_dedicated_instruction_reader () =
          Keeper_run_tools_setup.validate_held_task_skill_admission
            ~config
            ~meta
-           ~skill_catalog:(skill_catalog ())
+           ~skill_snapshot:(skill_snapshot ())
        with
        | Ok () -> ()
        | Error error -> fail (Agent_core.Error.to_string error))
@@ -403,6 +453,8 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
     (fun () ->
        let config = Workspace.default_config base in
        ignore (Workspace.init config ~agent_name:None);
+       let snapshot = skill_snapshot () in
+       let guide_reference = reference_by_name snapshot "guide" in
        let agent_name = "keeper-skill-held-agent" in
        let add ~skills ~title =
          match
@@ -413,7 +465,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
          | Error error -> fail (Workspace.add_task_error_to_string error)
        in
        let task_a = add ~skills:[] ~title:"plain work" in
-       let task_b = add ~skills:[ "guide" ] ~title:"skill work" in
+       let task_b = add ~skills:[ guide_reference ] ~title:"skill work" in
        (* Both held by the same keeper. The claim rule admits one live claim
           per agent, so the backlog is written directly: what matters here is
           the projection over two held tasks, not how they came to be held. *)
@@ -454,7 +506,8 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
           Keeper_run_tools_setup.validate_held_task_skill_admission
             ~config
             ~meta:(meta ~tool_groups:(Some [ "board" ]))
-            ~skill_catalog:Keeper_skill_catalog.empty
+            ~skill_snapshot:
+              (Skill_catalog_snapshot.config_unreadable ~detail:"fixture")
         with
         | Ok () -> fail "held task's missing skill was not inspected"
         | Error error ->
@@ -465,13 +518,13 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
             (String_util.contains_substring rendered "guide"));
        (match
           Keeper_run_tools_setup.validate_held_task_skill_admission
-            ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_catalog:(skill_catalog ())
+            ~config ~meta:(meta ~tool_groups:(Some [ "board" ])) ~skill_snapshot:snapshot
         with
         | Ok () -> ()
         | Error error -> fail (Agent_core.Error.to_string error));
        match
          Keeper_run_tools_setup.validate_held_task_skill_admission
-           ~config ~meta:(meta ~tool_groups:None) ~skill_catalog:(skill_catalog ())
+           ~config ~meta:(meta ~tool_groups:None) ~skill_snapshot:snapshot
        with
        | Ok () -> ()
        | Error error -> fail (Agent_core.Error.to_string error))
@@ -487,11 +540,11 @@ let test_left_out_skills_reach_the_surface () =
     project
       ~skills_left_out:[ "not-a-policy: skill \"not-a-policy\": unsupported" ]
       ~tool_groups:None
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error (_, detail) -> Alcotest.fail detail
+  | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     Alcotest.(check (list string))
       "the surface carries what was left out"
@@ -500,13 +553,69 @@ let test_left_out_skills_reach_the_surface () =
     (* And a workspace with nothing left out gains nothing: a row drawn on
        every turn stops being read. *)
     (match
-       project ~tool_groups:None ~task_skill_names:[]
+       project ~tool_groups:None ~task_skill_references:[]
          ~native_posture:Runtime_native_tools.Native_read ()
      with
-     | Error (_, detail) -> Alcotest.fail detail
+     | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
      | Ok clean ->
        Alcotest.(check (list string)) "and says nothing when there is nothing"
          [] clean.Keeper_effective_tool_surface.skills_left_out)
+;;
+
+let test_global_instruction_is_present_in_receipt () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  match
+    project
+      ~snapshot
+      ~tool_groups:None
+      ~task_skill_references:[]
+      ~native_posture:Runtime_native_tools.Native_read
+      ()
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    check string
+      "global instruction receipt is exact"
+      (Skill_reference.list_to_yojson
+         [ reference_by_name snapshot "guide" ]
+       |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+      |> Yojson.Safe.to_string)
+;;
+
+let test_runtime_capability_suppression_is_explicit_and_empty () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let skill_snapshot = skill_snapshot () in
+  match
+    Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"fixture"
+      ~runtime_id:"fixture.runtime"
+      ~official_client_kind:"agent_core"
+      ~tool_delivery:
+        Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
+      ~native_posture:None
+      ~tool_groups:None
+      ~current_task_id:(Some "task-001")
+      ~task_skill_references:[ reference_by_name skill_snapshot "guide" ]
+      ~skill_snapshot
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    check (list string) "no tool reaches the model" [] (names surface);
+    check int "instruction tool is not readable" 0
+      (List.length surface.instruction_skills);
+    check int "composition tools are not callable" 0
+      (List.length surface.composition_skills);
+    let open Yojson.Safe.Util in
+    let delivery =
+      Keeper_effective_tool_surface.to_yojson (Available surface)
+      |> member "tool_delivery"
+    in
+    check string "typed status" "suppressed"
+      (delivery |> member "status" |> to_string);
+    check string "typed reason" "runtime_tools_unsupported"
+      (delivery |> member "reason" |> to_string)
 ;;
 
 let () =
@@ -531,6 +640,10 @@ let () =
             test_turn_admission_uses_dedicated_instruction_reader
         ; test_case "turn admission covers held tasks beyond the current one" `Quick
             test_turn_admission_covers_held_tasks_beyond_current
+        ; test_case "global instruction is present in receipt" `Quick
+            test_global_instruction_is_present_in_receipt
+        ; test_case "runtime capability suppression is explicit and empty" `Quick
+            test_runtime_capability_suppression_is_explicit_and_empty
         ] )
     ]
 ;;

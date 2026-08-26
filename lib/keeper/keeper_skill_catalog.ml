@@ -15,6 +15,7 @@ type skill =
   ; description : string
   ; body : string
   ; conformance : Agent_core.Skill_document.conformance
+  ; reference : Skill_reference.t option
   ; provenance : provenance option
   ; surface : surface
   }
@@ -196,6 +197,7 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
          ; description
          ; body
          ; conformance
+         ; reference = None
          ; provenance = None
          ; surface = Instruction
          }
@@ -208,6 +210,7 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
             ; description
             ; body
             ; conformance
+            ; reference = None
             ; provenance = None
             ; surface = Composition entry
             })
@@ -265,6 +268,7 @@ let fallback_instruction_of_entry snapshot (entry : Skill_catalog_snapshot.entry
   ; description = document.description
   ; body = document.body
   ; conformance = entry.conformance
+  ; reference = Some (Skill_catalog_snapshot.entry_reference entry)
   ; provenance = provenance_of_entry snapshot entry
   ; surface = Instruction
   }
@@ -283,14 +287,22 @@ let composition_projection_failed = function
     false
 ;;
 
+let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
+  parse_document ~conformance:entry.conformance entry.document
+  |> Result.map (fun skill ->
+    { skill with
+      reference = Some (Skill_catalog_snapshot.entry_reference entry)
+    ; provenance = provenance_of_entry snapshot entry
+    })
+;;
+
 let of_snapshot snapshot =
   Skill_catalog_snapshot.effective_entries snapshot
   |> List.fold_left
        (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
-          match parse_document ~conformance:entry.conformance entry.document with
+          match project_entry snapshot entry with
           | Ok skill ->
-            ( { skill with provenance = provenance_of_entry snapshot entry } :: catalog
-            , diagnostics )
+            skill :: catalog, diagnostics
           | Error error when composition_projection_failed error ->
             ( fallback_instruction_of_entry snapshot entry :: catalog
             , { identity = entry.identity; error } :: diagnostics )

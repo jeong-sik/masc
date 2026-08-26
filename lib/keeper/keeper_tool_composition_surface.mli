@@ -36,7 +36,7 @@ val schema_tool_rows :
 
 val schema_tools :
   ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
-  ?instruction_skills:(string * string * string) list ->
+  ?instruction_skills:(Skill_reference.t * string * string) list ->
   unit ->
   Agent_core.Tool.t list
 (** Handler-free materialization of the exact model-visible composition tool
@@ -44,14 +44,25 @@ val schema_tools :
     {!make_tools}; callers use this to project and hash the effective surface
     without constructing turn sandboxes or executable handlers. *)
 
+val merge_instruction_skills :
+  task:(Skill_reference.t * string * string) list ->
+  global:(Skill_reference.t * string * string) list ->
+  (Skill_reference.t * string * string) list
+(** Preserve Task-selected order, then append globally discoverable exact
+    entries that are not already selected. *)
+
+val instruction_skill_schema_tool :
+  instruction_skills:(Skill_reference.t * string * string) list ->
+  Agent_core.Tool.t
+(** Handler-free [keeper_skill] schema with the same exact Available
+    description used by the executable tool. *)
+
 val make_tools
-  :  ?instruction_skills:(string * string * string) list
-       (** Instruction skills this keeper carries, as (name, description,
-           body). Present ones get {!Keeper_tool_composition_catalog.skill_tool_name},
-           which serves a body by name out of the catalog the caller already
-           parsed. The prompt used to hand over a filesystem path instead;
-           .masc/skills sits beside the sandbox root rather than inside it, so
-           the [Read] it asked for could not resolve. *)
+  :  ?instruction_skills:(Skill_reference.t * string * string) list
+       (** Instruction skills this keeper carries, as (exact reference,
+           description, body). Present ones get
+           {!Keeper_tool_composition_catalog.skill_tool_name}, which serves a
+           frozen body only for a canonical exact-reference input. *)
   -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
        (** Composition entries declared by skills
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
@@ -83,7 +94,12 @@ val make_tools
 
 module For_testing : sig
   val instruction_skill_description :
-    (string * string * string) list -> string
+    (Skill_reference.t * string * string) list -> string
+
+  val make_instruction_skill_tool :
+    config:Workspace.config ->
+    instruction_skills:(Skill_reference.t * string * string) list ->
+    Agent_core.Tool.t
 
   val status_result :
     config:Workspace.config ->

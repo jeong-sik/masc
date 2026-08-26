@@ -7336,12 +7336,14 @@ let render_tools (state : state) =
         let instruction =
           match ets_instruction_skills with
           | [] -> "none"
-          | xs -> String.concat "," xs
+          | xs ->
+            Skill_reference.list_to_yojson xs |> Yojson.Safe.to_string
         in
         let composition =
           match ets_composition_skills with
           | [] -> "none"
-          | xs -> String.concat "," xs
+          | xs ->
+            Skill_reference.list_to_yojson xs |> Yojson.Safe.to_string
         in
         let digest =
           match ets_tool_surface_sha256 with

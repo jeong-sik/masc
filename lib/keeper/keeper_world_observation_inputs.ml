@@ -26,7 +26,7 @@ type claimable_task_identity =
 
 type held_task_skills =
   { held_task_id : string
-  ; held_skills : string list
+  ; held_skills : Skill_reference.t list
   }
 
 type backlog_snapshot =

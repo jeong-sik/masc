@@ -12,6 +12,30 @@ open Alcotest
 module Domain = Masc_domain
 module KUP = Masc.Keeper_unified_prompt
 
+let skill_reference name revision_character =
+  let source_id =
+    match Skill_source_config.source_id_of_string "project-masc" with
+    | Ok source_id -> source_id
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory name with
+    | Ok package_id -> package_id
+    | Error _ -> fail "invalid Skill package fixture"
+  in
+  let content_revision =
+    match
+      Skill_reference.content_revision_of_string
+        (String.make 64 revision_character)
+    with
+    | Ok revision -> revision
+    | Error _ -> fail "invalid Skill revision fixture"
+  in
+  Skill_reference.make
+    ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name)
+    ~content_revision
+;;
+
 let task ~skills : Domain.task =
   { id = "task-001"
   ; title = "probe"
@@ -40,20 +64,37 @@ let contains ~needle haystack =
 
 let lines s = String.split_on_char '\n' s
 
+let rec project_root directory =
+  if Sys.file_exists (Filename.concat directory "dune-project")
+  then directory
+  else
+    let parent = Filename.dirname directory in
+    if String.equal parent directory
+    then fail "could not locate repository root"
+    else project_root parent
+;;
+
+let configure_prompt_registry () =
+  let prompt_dir = Filename.concat (project_root (Sys.getcwd ())) "config/prompts" in
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+;;
+
 let test_no_skills_adds_nothing () =
   let rendered = KUP.format_current_task (task ~skills:[]) in
-  check bool "no skill line" false (contains ~needle:"Skills named" rendered)
+  check bool "no skill line" false (contains ~needle:"Skills selected" rendered)
 ;;
 
 let test_one_skill_is_named_with_its_path () =
-  let rendered = KUP.format_current_task (task ~skills:[ "humanize-korean" ]) in
+  let reference = skill_reference "humanize-korean" 'a' in
+  let rendered =
+    KUP.format_current_task
+      (task ~skills:[ reference ])
+  in
   check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
-  (* The keeper is told where to read it, not handed the body: a skill can run
-     to tens of kilobytes and would otherwise land on every turn. *)
-  (* The block used to hand over a filesystem path. .masc/skills sits beside
-     the keeper sandbox root rather than inside it, so the [Read] it asked for
-     could not resolve, and over seven days three of 14,582 [Read] calls even
-     tried. The body comes through [keeper_skill] now. *)
+  (* The exact reference stays compact; [keeper_skill] serves the frozen body
+     only when the Keeper selects it. *)
   check
     bool
     "no filesystem path is handed to the model"
@@ -63,19 +104,27 @@ let test_one_skill_is_named_with_its_path () =
     (contains ~needle:"keeper_skill" rendered);
   let rendered_skill_line =
     lines rendered
-    |> List.find_opt (contains ~needle:"Skills named by this task")
+    |> List.find_opt (contains ~needle:"Skills selected by this task")
     |> Option.value ~default:""
   in
   check
     string
-    "the complete instruction is unchanged"
-    "- Skills named by this task: humanize-korean. Call `keeper_skill` with a \
-     name to read one whole, before you act on it."
+    "the complete instruction carries the exact reference"
+    (Printf.sprintf
+       "- Skills selected by this task: %s. Call `keeper_skill` with one exact reference object to read its frozen body before you act on it."
+       (Skill_reference.list_to_yojson [ reference ] |> Yojson.Safe.to_string))
     rendered_skill_line
 ;;
 
 let test_several_skills_are_listed () =
-  let rendered = KUP.format_current_task (task ~skills:[ "first-skill"; "second-skill" ]) in
+  let rendered =
+    KUP.format_current_task
+      (task
+         ~skills:
+           [ skill_reference "first-skill" 'a'
+           ; skill_reference "second-skill" 'b'
+           ])
+  in
   check bool "first" true (contains ~needle:"first-skill" rendered);
   check bool "second" true (contains ~needle:"second-skill" rendered)
 ;;
@@ -86,7 +135,11 @@ let test_the_only_difference_is_that_one_line () =
      existed, and "one added line" says that in a way a missing assertion
      cannot fake. *)
   let without = lines (KUP.format_current_task (task ~skills:[])) in
-  let with_one = lines (KUP.format_current_task (task ~skills:[ "humanize-korean" ])) in
+  let with_one =
+    lines
+      (KUP.format_current_task
+         (task ~skills:[ skill_reference "humanize-korean" 'a' ]))
+  in
   check int "exactly one line added" (List.length without + 1) (List.length with_one);
   let added = List.filter (fun l -> not (List.mem l without)) with_one in
   check int "and it is a single distinct line" 1 (List.length added);
@@ -94,10 +147,11 @@ let test_the_only_difference_is_that_one_line () =
     bool
     "which is the skill line"
     true
-    (contains ~needle:"Skills named by this task" (List.hd added))
+    (contains ~needle:"Skills selected by this task" (List.hd added))
 ;;
 
 let () =
+  configure_prompt_registry ();
   run
     "keeper_task_skill_block"
     [ ( "current task block"

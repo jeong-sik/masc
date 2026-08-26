@@ -172,62 +172,14 @@ let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
 let instruction_skill_description instruction_skills =
   let listed =
     instruction_skills
-    |> List.map (fun (skill_name, description, _body) ->
-         Printf.sprintf "%s: %s" skill_name description)
+    |> List.map (fun (reference, description, _body) ->
+         Printf.sprintf
+           "%s: %s"
+           (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+           description)
     |> String.concat "\n"
   in
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
-;;
-
-let set_assoc_field ~name ~value fields =
-  let rec loop reversed = function
-    | [] -> List.rev ((name, value) :: reversed)
-    | (key, _) :: rest when String.equal key name ->
-      List.rev_append reversed ((key, value) :: rest)
-    | field :: rest -> loop (field :: reversed) rest
-  in
-  loop [] fields
-;;
-
-(* The catalog is the authority for readable names. Leaving [name] as an
-   unconstrained string made the model discover that authority by failing:
-   first with no argument, then with a plausible but nonexistent skill. Keep
-   the TOML schema as the shape owner and replace only its dynamic enum. *)
-let instruction_skill_input_schema instruction_skills =
-  let available_names =
-    instruction_skills
-    |> List.map (fun (name, _description, _body) -> `String name)
-    |> fun names -> `List names
-  in
-  match skill_tool_schema.input_schema with
-  | `Assoc root_fields ->
-    (match List.assoc_opt "properties" root_fields with
-     | Some (`Assoc properties) ->
-       (match List.assoc_opt "name" properties with
-        | Some (`Assoc name_fields) ->
-          let name_schema =
-            `Assoc
-              (set_assoc_field
-                 ~name:"enum"
-                 ~value:available_names
-                 name_fields)
-          in
-          let properties =
-            set_assoc_field
-              ~name:"name"
-              ~value:name_schema
-              properties
-          in
-          `Assoc
-            (set_assoc_field
-               ~name:"properties"
-               ~value:(`Assoc properties)
-               root_fields)
-        | Some _ | None ->
-          invalid_arg "keeper_skill schema has no object name property")
-     | Some _ | None ->
-       invalid_arg "keeper_skill schema has no object properties field")
-  | _ -> invalid_arg "keeper_skill schema root is not an object"
 ;;
 
 type 'evidence schema_tool_origin =
@@ -295,7 +247,7 @@ let schema_tools ?(skill_composition_entries = [])
       [ schema_tool
           ~name:Catalog.skill_tool_name
           ~description:(instruction_skill_description instruction_skills)
-          ~input_schema:(instruction_skill_input_schema instruction_skills)
+          ~input_schema:skill_tool_schema.input_schema
       ]
     else []
   in
@@ -1155,13 +1107,6 @@ let cancel_result
       data
 ;;
 
-module For_testing = struct
-  let instruction_skill_description = instruction_skill_description
-
-  let status_result = status_result
-  let cancel_result = cancel_result
-end
-
 let make_request_control_tool
       ~(config : Workspace.config)
       ~name
@@ -1196,73 +1141,100 @@ let make_request_control_tool
              "validated composition request input lost request_id"))
 ;;
 
-(* An instruction skill is text the keeper is meant to have read before it
-   acts. The prompt used to hand over a path and ask for a [Read], which put
-   three things in the model's hands: whether to open it, whether the path
-   resolved, and whether anyone could tell afterwards. It answered badly on
-   all three -- .masc/skills sits beside the sandbox root, not inside it, so
-   every attempt failed, and over seven days only three of 14,582 [Read]
-   calls even tried.
+(* Progressive disclosure keeps names and descriptions in the tool
+   description. The frozen body arrives only after an exact-reference call. *)
+(* Declared in [config/tools/keeper_skill.toml] with every other tool rather
+   than built here. Which skills are readable is workspace state and is
+   appended below; the argument's shape and the sentence saying when to reach
+   for the tool are not, and the model-prose ratchet is what says so. *)
+let skill_reference_input_schema = skill_tool_schema.input_schema
 
-   The body comes through a tool instead. Progressive disclosure is kept --
-   names and descriptions ride the tool description, the body arrives only
-   when asked for -- but the harness serves it from the catalog it already
-   parsed, so no path is resolved and the call is on the record. *)
-let skill_name_of_validated_input input =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "name" fields with
-     | Some (`String name) -> Some name
-     | Some _ | None -> None)
-  | _ -> None
+let merge_instruction_skills ~task ~global =
+  List.fold_left
+    (fun selected ((reference, _, _) as skill) ->
+       if
+         List.exists
+           (fun (known, _, _) -> Skill_reference.equal reference known)
+           selected
+       then selected
+       else selected @ [ skill ])
+    task
+    global
+;;
+
+let instruction_skill_schema_tool ~instruction_skills =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~name:skill_tool_schema.name
+    ~description:(instruction_skill_description instruction_skills)
+    ~input_schema:skill_reference_input_schema
+    (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute")
 ;;
 
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in
-  let input_schema = instruction_skill_input_schema instruction_skills in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path
     ~name
     ~description
-    ~input_schema
+    ~input_schema:skill_reference_input_schema
     (fun _execution_env input ->
       let start_time = Time_compat.now () in
       match
-        Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
+        Tool_input_validation.validate_args ~schema:skill_reference_input_schema ~name
+          ~args:input ()
       with
       | Error rejection -> rejection
       | Ok _ ->
-        (match skill_name_of_validated_input input with
-         | None ->
-           Tool_result.runtime_err ~tool_name:name ~start_time
-             "validated skill input lost name"
-         | Some asked ->
+        (match Skill_reference.of_yojson input with
+         | Error _ ->
+           Tool_result.make_err
+             ~tool_name:name
+             ~class_:Tool_result.Workflow_rejection
+             ~start_time
+             "keeper_skill requires one canonical exact Skill reference"
+         | Ok asked ->
            (match
               List.find_opt
-                (fun (skill_name, _, _) -> String.equal skill_name asked)
+                (fun (reference, _, _) -> Skill_reference.equal reference asked)
                 instruction_skills
             with
-            | Some (_, _, body) ->
+            | Some (reference, _, body) ->
               Tool_result.make_ok ~tool_name:name ~start_time
-                ~data:(`Assoc [ "name", `String asked; "body", `String body ])
+                ~data:
+                  (`Assoc
+                     [ "reference", Skill_reference.to_yojson reference
+                     ; "body", `String body
+                     ])
                 ()
-            | (* A name the catalog does not carry is the caller's error and
-                 says so with the names it does carry, rather than an empty
+            | (* A reference the frozen catalog does not carry is the caller's
+                 error and says so with the exact references it does carry,
+                 rather than an empty
                  body the model would read as "this skill says nothing". *)
               None ->
               Tool_result.make_err ~tool_name:name
                 ~class_:Tool_result.Workflow_rejection ~start_time
                 (Printf.sprintf
-                   "no instruction skill named %S; this keeper carries: %s"
-                   asked
+                   "no instruction Skill matches exact reference %s; this keeper carries: %s"
+                   (Skill_reference.to_yojson asked |> Yojson.Safe.to_string)
                    (match instruction_skills with
                     | [] -> "(none)"
                     | skills ->
                       String.concat ", "
-                        (List.map (fun (n, _, _) -> n) skills))))))
+                        (List.map
+                           (fun (reference, _, _) ->
+                              Skill_reference.to_yojson reference
+                              |> Yojson.Safe.to_string)
+                           skills))))))
 ;;
+
+module For_testing = struct
+  let instruction_skill_description = instruction_skill_description
+  let make_instruction_skill_tool = make_instruction_skill_tool
+  let status_result = status_result
+  let cancel_result = cancel_result
+end
 
 let make_tools
       ?(instruction_skills = [])

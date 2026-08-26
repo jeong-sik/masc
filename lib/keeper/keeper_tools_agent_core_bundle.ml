@@ -52,6 +52,7 @@ let make_tool_bundle_for_descriptors
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_tools : Agent_core.Tool.t list = [])
       ?composition_plan_index
+      ?(task_instruction_skills = [])
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -375,9 +376,22 @@ let make_tool_bundle_for_descriptors
       descriptors
   in
   let composition_tools =
+    let global_instruction_skills =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Instruction ->
+             Some (reference, skill.description, skill.body)
+           | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
+             None)
+    in
+    let instruction_skills =
+      Keeper_tool_composition_surface.merge_instruction_skills
+        ~task:task_instruction_skills
+        ~global:global_instruction_skills
+    in
     Keeper_tool_composition_surface.make_tools
-        ~instruction_skills:
-          (Keeper_skill_catalog.instruction_entries skill_catalog)
+        ~instruction_skills
         ~skill_composition_entries:
           (Keeper_skill_catalog.composition_entries skill_catalog)
         ?composition_plan_index
@@ -429,6 +443,7 @@ let make_tool_bundle
       ?skill_catalog
       ?identity_tools
       ?composition_plan_index
+      ?task_instruction_skills
       ?turn_ctx_cell
       ()
   =
@@ -451,6 +466,7 @@ let make_tool_bundle
     ?skill_catalog
     ?identity_tools
     ?composition_plan_index
+    ?task_instruction_skills
     ?turn_ctx_cell
     ~descriptors
     ()
@@ -464,6 +480,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?skill_catalog
+      ?task_instruction_skills
       ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
@@ -474,7 +491,8 @@ let make_tools
      ~publication_recovery
      ~ctx_snapshot
      ?clock
-     ?skill_catalog
+      ?skill_catalog
+      ?task_instruction_skills
      ?turn_ctx_cell
      ())
     .tools

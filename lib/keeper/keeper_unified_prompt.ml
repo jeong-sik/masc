@@ -155,19 +155,21 @@ let format_goal_summaries (summaries : goal_summary list) : string =
        summaries)
 
 let format_task_skills skills =
-  let skill_names = String.concat ", " skills in
+  let skill_references =
+    Skill_reference.list_to_yojson skills |> Yojson.Safe.to_string
+  in
   match
     Prompt_registry.render_prompt_template
       Prompt_names.keeper_current_task_skills
-      [ "skill_names", skill_names ]
+      [ "skill_references", skill_references ]
   with
   | Ok text -> String.trim text
   | Error detail ->
     Log.Misc.error
-      "keeper current-task skills prompt %s did not render, falling back to skill names: %s"
+      "keeper current-task skills prompt %s did not render, falling back to exact references: %s"
       Prompt_names.keeper_current_task_skills
       detail;
-    "- skills=" ^ skill_names
+    "- skill_references=" ^ skill_references
 ;;
 
 (* The other held tasks' skills, one line each, under their own heading. The
@@ -199,11 +201,14 @@ let format_held_task_skills
     let lines =
       List.map
         (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
-           let skill_names = String.concat ", " entry.held_skills in
+           let skill_references =
+             Skill_reference.list_to_yojson entry.held_skills
+             |> Yojson.Safe.to_string
+           in
            render
              Prompt_names.keeper_held_task_skills
-             [ "task_id", entry.held_task_id; "skill_names", skill_names ]
-             ~fallback:(entry.held_task_id ^ ": " ^ skill_names))
+             [ "task_id", entry.held_task_id; "skill_names", skill_references ]
+             ~fallback:(entry.held_task_id ^ ": " ^ skill_references))
         held
     in
     Some (String.concat "\n" ((if String.equal heading "" then [] else [ heading ]) @ lines) ^ "\n\n")
@@ -270,7 +275,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
      block does not list what is available and let the model match — there is
      nothing to choose between by the time the turn starts.
 
-     Names and a path, not the instruction itself. A skill body is written to
+     Exact references, not the instruction itself. A skill body is written to
      be read whole and some run to tens of kilobytes (the published
      im-ai-copyeditor carries an 80 KB reference pack), which would land on
      every turn of the task rather than the one turn that uses it. The keeper

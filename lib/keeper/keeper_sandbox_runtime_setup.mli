@@ -110,6 +110,23 @@ val docker_config_container_root : container_root:'a -> string
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
 type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
+
+(** Why a path is allowed inside a keeper container: the store it belongs to.
+
+    Provenance rather than inspection. A secret-shaped content scan cannot do
+    this job -- a Slack bot token and a task id have the same shape -- so what
+    is asserted instead is that MASC writes the file itself, in a schema MASC
+    owns. A path that fits no variant is a path nobody has justified; adding one
+    is a visible decision, where one more entry in a list of paths is not. *)
+type mount_warrant =
+  | Board_store
+  | Task_store
+  | Goal_store
+
+val mount_warrant_to_string : mount_warrant -> string
+
+val docker_workspace_state_mounts
+  : (mount_warrant * workspace_state_mount_kind * string) list
 val unique_preserving_order : 'a list -> 'a list
 val docker_workspace_state_mount_specs :
   base_path:string -> container_root:'a -> string list

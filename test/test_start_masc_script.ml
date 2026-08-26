@@ -16,6 +16,9 @@ let loopback_script_path () =
 let supervised_script_path () =
   source_file "scripts/start-masc-supervised.sh"
 
+let supervisor_control_script_path () =
+  source_file "scripts/masc-supervisor-control.sh"
+
 let runtime_artifact_contract_path () =
   source_file "scripts/lib/runtime-artifact-contract.sh"
 
@@ -1412,6 +1415,114 @@ let test_supervisor_stops_on_startup_without_candidate () =
         (String_util.contains_substring stderr
            "terminal startup state: no runtime candidate was published"))
 
+let test_supervisor_control_starts_reports_and_stops_the_supervisor () =
+  with_temp_dir "masc-supervisor-control" (fun repo_root ->
+      with_temp_dir "masc-supervisor-control-bin" (fun fake_bin ->
+          let scripts_dir = Filename.concat repo_root "scripts" in
+          let control_script =
+            Filename.concat scripts_dir "masc-supervisor-control.sh"
+          in
+          let supervisor_script =
+            Filename.concat scripts_dir "start-masc-supervised.sh"
+          in
+          let base_path = Filename.concat repo_root "workspace" in
+          let listener_pid_file = Filename.concat repo_root "listener-pid" in
+          let capture_file = Filename.concat repo_root "supervisor-capture" in
+          let pid_file = Filename.concat repo_root "supervisor.pid" in
+          let event_log = Filename.concat repo_root "supervisor.log" in
+          let output_log = Filename.concat repo_root "supervisor.out.log" in
+          mkdir_p scripts_dir;
+          mkdir_p fake_bin;
+          mkdir_p base_path;
+          copy_script (supervisor_control_script_path ()) control_script;
+          write_executable supervisor_script
+            (Printf.sprintf
+               {|#!/bin/bash
+set -eu
+child=""
+stop() {
+  if [ -n "$child" ]; then
+    kill -TERM "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+  exit 0
+}
+trap stop TERM INT HUP
+{
+  printf 'bootstrap=%%s\n' "${MASC_KEEPER_BOOTSTRAP_ENABLED:-}"
+  printf 'args=%%s\n' "$*"
+} > %s
+sleep 300 &
+child=$!
+printf '%%s\n' "$child" > %s
+wait "$child"
+|}
+               (quote capture_file) (quote listener_pid_file));
+          write_executable (Filename.concat fake_bin "lsof")
+            {|
+#!/bin/sh
+set -eu
+if [ -f "${FAKE_LISTENER_PID_FILE:?}" ]; then
+  pid="$(cat "$FAKE_LISTENER_PID_FILE")"
+  if kill -0 "$pid" 2>/dev/null; then
+    printf '%s\n' "$pid"
+  fi
+fi
+|};
+          write_executable (Filename.concat fake_bin "curl")
+            "#!/bin/sh\nexit 0\n";
+          let env =
+            [ ("FAKE_LISTENER_PID_FILE", listener_pid_file)
+            ; ("MASC_BASE_PATH", base_path)
+            ; ("MASC_SUPERVISOR_PID_FILE", pid_file)
+            ; ("MASC_SUPERVISOR_LOG", event_log)
+            ; ("MASC_SUPERVISOR_OUTPUT_LOG", output_log)
+            ; ("MASC_SUPERVISOR_STOP_TIMEOUT_SEC", "5")
+            ; ("PATH", fake_bin ^ ":" ^ Sys.getenv "PATH")
+            ]
+          in
+          let stop_if_running () =
+            if Sys.file_exists pid_file then
+              ignore (run_script ~cwd:repo_root control_script ~env [ "stop" ])
+          in
+          Fun.protect ~finally:stop_if_running (fun () ->
+              let start_code, start_stdout, start_stderr =
+                run_script ~cwd:repo_root control_script ~env [ "start" ]
+              in
+              if start_code <> 0 then
+                failf "supervisor control start failed (%d)\nstdout:\n%s\nstderr:\n%s"
+                  start_code start_stdout start_stderr;
+              check bool "start records the supervisor PID" true
+                (Sys.file_exists pid_file);
+              let capture = read_file capture_file in
+              check bool "operator path enables Keeper autoboot" true
+                (String_util.contains_substring capture "bootstrap=true");
+              check bool "operator path pins HTTP identity" true
+                (String_util.contains_substring capture
+                   (Printf.sprintf
+                      "args=--http --host 127.0.0.1 --port 8935 --base-path %s"
+                      base_path));
+
+              let status_code, status_stdout, status_stderr =
+                run_script ~cwd:repo_root control_script ~env [ "status" ]
+              in
+              if status_code <> 0 then
+                failf "supervisor control status failed (%d)\nstdout:\n%s\nstderr:\n%s"
+                  status_code status_stdout status_stderr;
+              check bool "status binds the listener child to its supervisor" true
+                (String_util.contains_substring status_stdout "state=healthy");
+
+              let stop_code, stop_stdout, stop_stderr =
+                run_script ~cwd:repo_root control_script ~env [ "stop" ]
+              in
+              if stop_code <> 0 then
+                failf "supervisor control stop failed (%d)\nstdout:\n%s\nstderr:\n%s"
+                  stop_code stop_stdout stop_stderr;
+              check bool "stop removes the supervisor PID file" false
+                (Sys.file_exists pid_file);
+              check bool "stop reports completion" true
+                (String_util.contains_substring stop_stdout "stopped"))))
+
 let test_supervisor_zero_exit_without_health_proof_fails_closed () =
   let run_case ~name ~publish_candidate ~terminal_message =
     with_temp_dir name (fun repo_root ->
@@ -1778,6 +1889,8 @@ let () =
             test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
           test_case "supervisor stops on startup without candidate" `Quick
             test_supervisor_stops_on_startup_without_candidate;
+          test_case "supervisor control starts, reports, and stops" `Quick
+            test_supervisor_control_starts_reports_and_stops_the_supervisor;
           test_case "supervisor zero exit without health proof fails closed"
             `Quick test_supervisor_zero_exit_without_health_proof_fails_closed;
           test_case "supervisor promotes PID-bound healthy candidate" `Quick

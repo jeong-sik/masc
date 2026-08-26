@@ -74,8 +74,19 @@ done
 HTTP로 프로세스를 내리는 경로는 없다. 유효한 경로는 SIGTERM/SIGINT뿐이다 (`bin/main_eio.ml`: NOTIFY → HOOKS → BOARD flush → CANCEL, 기본 예산 최대 10초).
 
 ```bash
-kill -TERM $(lsof -ti tcp:8935 -sTCP:LISTEN)
+MASC_BASE_PATH=<base> ./scripts/masc-supervisor-control.sh stop
 lsof -iTCP:8935 -sTCP:LISTEN   # 출력이 비면 내려간 것 — exit code로 판정하지 말 것
+```
+
+이 제어 스크립트는 supervisor에 TERM을 보낸다. supervisor는 현재 child에
+같은 신호를 전달하고 child가 끝날 때까지 기다린다. 리스너 PID만 직접
+내리면 supervisor가 장애로 판단해 다시 띄우므로 금지한다.
+
+기존 프로세스를 supervisor 관리로 처음 전환할 때는 PID 파일이 없다.
+이때만 리스너에 TERM을 직접 보낸다.
+
+```bash
+kill -TERM "$(lsof -ti tcp:8935 -sTCP:LISTEN)"
 ```
 
 ## 6. store preflight
@@ -265,15 +276,19 @@ provider key가 로드된 interactive shell에서 실행한다. launchd 경로(`
 
 ```bash
 cd <repo>
-nohup ./scripts/start-loopback.sh --with-keeper-bootstrap \
-  > <base>/.masc/logs/masc-8935-$(date +%Y%m%d%H%M).out.log 2>&1 &
+MASC_BASE_PATH=<base> ./scripts/masc-supervisor-control.sh start
 ```
 
-`--with-keeper-bootstrap`은 필수다 — `start-loopback.sh`는 상속된 `MASC_KEEPER_BOOTSTRAP_ENABLED`를 무시하고 기본 `false`로 덮으므로, 없이 올리면 autoboot keeper가 돌아오지 않는다.
+제어 스크립트는 `start-masc-supervised.sh`를 백그라운드에서 띄운다.
+autoboot은 이 8935 운영 경로에서 기본 `true`다. supervisor는 health와
+실행 파일 hash를 확인한 child가 종료되면 5초 뒤 다시 띄운다. 빌드가
+실패하면 같은 검증을 거친 LKG만 사용한다. 기동 로그, supervisor 로그,
+PID 파일은 `<base>/.masc/logs/`에 남는다.
 
 ## 8. 검증
 
 ```bash
+MASC_BASE_PATH=<base> ./scripts/masc-supervisor-control.sh status
 curl -s http://127.0.0.1:8935/health \
   | jq '{v:.version, c:.build.binary_commit, src:.build.binary_commit_source,
          dash:.dashboard_surface.status}'
@@ -295,7 +310,8 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 
 | 함정 | 결과 |
 |---|---|
-| `start-loopback.sh`에 `--with-keeper-bootstrap` 누락 | fleet이 빈 채로 기동 |
+| supervisor child 리스너 PID만 직접 종료 | supervisor가 장애로 판단해 즉시 재기동 |
+| `MASC_BASE_PATH`를 빼고 제어 스크립트 실행 | 다른 workspace를 실수로 띄우지 않고 즉시 거절 |
 | launchd로 재기동 | provider key 소실 (keeper.env는 2줄뿐) |
 | raw `pnpm run build` | `.build-stamp` 소실 → dashboard `missing` 고착 |
 | 맨손 `dune build` (worktree 안) | 상위 repo를 빌드하는 거짓 검증 |

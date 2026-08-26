@@ -91,9 +91,11 @@ describe('KeeperToolCallInspector render', () => {
     expect(container.textContent).not.toContain('BeforeTheMove')
   })
 
-  // One profile means nothing to choose between, and a select with a single
-  // option reads as a control that does not work.
-  it('leaves the sandbox filter out when every call ran in the same one', async () => {
+  // One profile means nothing to choose between, so the select stays away --
+  // but which sandbox it was still answers a question. A keeper configured for
+  // docker whose calls all say local is the case worth seeing, and dropping the
+  // row drops exactly that.
+  it('names the sandbox when every call ran in the same one', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',
       count: 1,
@@ -121,6 +123,7 @@ describe('KeeperToolCallInspector render', () => {
     await flushUi()
 
     expect(container.querySelector('select[aria-label="샌드박스 필터"]')).toBeNull()
+    expect(container.textContent).toContain('샌드박스: docker')
   })
 
   it('surfaces copy actions for expanded tool call input and output', async () => {

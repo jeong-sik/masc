@@ -21,6 +21,10 @@ let entry style body : Layout.entry =
   { style
   ; timestamp = "01:41:00"
   ; role_label = "LABEL"
+  (* No speaker mark on this fixture: the shade layers are what it is about,
+     and a mark would only widen the label. #30744 added the field while this
+     file was in flight, so it arrived without one. *)
+  ; role_label_mark_cells = 0
   ; request_label = ""
   ; body
   ; markdown_source = Layout.Markdown_streaming

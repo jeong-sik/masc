@@ -52,6 +52,10 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   | Some Tool_schemas_misc.Messages ->
       Mcp_tool_runtime_comm.handle_messages ~tool_name:name ~start_time:start ctx
 
+  (* ── Asking the operator (delegated) ────────────────────────── *)
+  | Some Tool_schemas_misc.Ask ->
+      Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start ctx
+
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->
       Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name ~start_time:start
@@ -70,7 +74,9 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      and deciding visibility semantics for MCP exposure. *)
 
 let runtime_tool_policy = function
-  | Tool_schemas_misc.Start | Tool_schemas_misc.Broadcast -> false, true
+  | Tool_schemas_misc.Start | Tool_schemas_misc.Broadcast | Tool_schemas_misc.Ask ->
+    (* Recording a question writes; the operator surface reads it back. *)
+    false, true
   | Tool_schemas_misc.Messages -> true, true
 ;;
 

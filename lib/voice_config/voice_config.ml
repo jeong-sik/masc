@@ -432,12 +432,9 @@ let load_detailed () =
           | Ok config -> Ok config
           | Error msg -> Error (Invalid msg))))
 
-let load () =
-  match load_detailed () with
-  | Ok config -> Ok config
-  | Error Not_configured ->
-    Error (Printf.sprintf "voice config missing at %s" (config_path ()))
-  | Error (Invalid msg) -> Error msg
+let load_error_to_string = function
+  | Not_configured -> Printf.sprintf "voice config missing at %s" (config_path ())
+  | Invalid message -> message
 
 let enabled_endpoints (endpoints : endpoint list) =
   List.filter (fun (endpoint : endpoint) -> endpoint.enabled) endpoints

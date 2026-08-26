@@ -1070,6 +1070,31 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     (Ansi.bold ^ "  "
     ^ fit_width (Terminal_text.single_line task.title) (cols - 6)
     ^ Ansi.reset);
+  (* What this task serves. The task record carries no goal -- the goal-task
+     registry is the source of truth -- so this reads the links the loader
+     resolved rather than a field that would always be empty.
+
+     Written as a reference so Ctrl-] can follow it: naming a goal the
+     operator then has to go find by hand is the gap this closes. *)
+  (match
+     List.find_opt (fun (row : Tui_decode.task) -> String.equal row.id task.id)
+       state.tasks
+   with
+   | None -> ()
+   | Some row ->
+     (match row.goal_ids with
+      | [] ->
+        box_line buf cols
+          (Ansi.dim ^ "  Goal        (not linked to a goal)" ^ Ansi.reset)
+      | goal_ids ->
+        List.iteri
+          (fun index goal_id ->
+            let label = if index = 0 then "Goal" else "" in
+            box_line buf cols
+              (Printf.sprintf "  %-11s %s  %s" label
+                 (fit_width goal_id 28)
+                 (Ansi.dim ^ Link.reference Goal goal_id ^ Ansi.reset)))
+          goal_ids));
   (* Each status carries its own timestamps and actors; one exhaustive match
      keeps the row and the status from disagreeing about who did what. The
      note lines stay counted so the body budget below shrinks with them --
@@ -1845,6 +1870,57 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       ~sanitize:Terminal_text.single_line
       post.bp_body
   in
+  (* What this post points at, and who else points at the same thing.
+     Read from the references the writer actually wrote -- [Link.scan] takes
+     only what [Link.reference] could have produced. An id spelled in prose is
+     not a link: a connection the writer did not make is one nobody checked,
+     and following it would go somewhere they never meant.
+
+     Appended to the body so the surface's own scroll carries them; this pane
+     measures its lines rather than reserving rows. *)
+  let referenced = Link.scan post.bp_body in
+  let related =
+    match referenced with
+    | [] -> []
+    | referenced ->
+      state.board_posts
+      |> List.filter (fun (other : board_post) ->
+        (not (String.equal other.bp_id post.bp_id))
+        && List.exists
+             (fun hit -> List.mem hit referenced)
+             (Link.scan other.bp_body))
+  in
+  let reference_lines =
+    match referenced with
+    | [] -> []
+    | referenced ->
+      (Ansi.dim ^ "" ^ Ansi.reset)
+      :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
+      :: List.map
+           (fun (kind, id) ->
+             Printf.sprintf "  %s%-10s %s%s" Ansi.reset
+               (Link.kind_label kind) id Ansi.reset)
+           referenced
+  in
+  let related_lines =
+    match related with
+    | [] -> []
+    | related ->
+      (Ansi.dim ^ "" ^ Ansi.reset)
+      :: (Ansi.bold
+          ^ Printf.sprintf "  ALSO ABOUT THIS (%d)" (List.length related)
+          ^ Ansi.reset)
+      :: (related
+          |> List.filteri (fun index _ -> index < 5)
+          |> List.map (fun (other : board_post) ->
+               Printf.sprintf "  %s  %s%s%s"
+                 (fit_width (Terminal_text.single_line other.bp_id) 12)
+                 Ansi.dim
+                 (fit_width (Terminal_text.single_line other.bp_title)
+                    (max 8 (cols - 26)))
+                 Ansi.reset))
+  in
+  let body_lines = body_lines @ reference_lines @ related_lines in
   let total_lines = List.length body_lines in
   let detail_lines =
     match detail with
@@ -2316,11 +2392,51 @@ let render_planning_detail (state : state)
   let body =
     Planning_detail.body ~width:(cols - 6) goal.pg_proof goal.pg_last_review_note
   in
+  (* What is being done about this goal. The goal record does not carry its
+     tasks -- the goal-task registry is the source of truth and the loader
+     resolved it onto each task -- so this reads them back the other way.
+     Linear over the open tasks, which is a short list and costs nothing
+     against keeping a second copy of the same links in the state.
+
+     Capped: a goal with thirty tasks would take the whole frame and the
+     proof underneath would never be seen. What is left out is said, because
+     a list that stops without saying so reads as the whole list. *)
+  let linked_tasks =
+    List.filter
+      (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids)
+      state.tasks
+  in
+  let linked_drawn = List.filteri (fun index _ -> index < 6) linked_tasks in
+  let linked_omitted = List.length linked_tasks - List.length linked_drawn in
+  let linked_rows =
+    match linked_tasks with
+    | [] -> 1
+    | _ -> 1 + List.length linked_drawn + (if linked_omitted > 0 then 1 else 0)
+  in
   let chrome_rows =
     planning_detail_fixed_rows
+    + linked_rows
     + (match armed with Some _ -> 1 | None -> 0)
     + (match state.goal_action_error with Some _ -> 1 | None -> 0)
   in
+  (* Drawn here, counted above: the two move together or the frame runs past
+     the terminal and the presenter drops whatever fell off. *)
+  (match linked_tasks with
+   | [] ->
+     box_line buf cols (Ansi.dim ^ "  Tasks       (none linked)" ^ Ansi.reset)
+   | _ ->
+     box_line buf cols (Ansi.bold ^ "  TASKS" ^ Ansi.reset);
+     List.iter
+       (fun (row : Tui_decode.task) ->
+         box_line buf cols
+           (Printf.sprintf "  %s  %s  %s"
+              (fit_width (Terminal_text.single_line row.id) 22)
+              (fit_width (Terminal_text.single_line row.title) (max 8 (cols - 60)))
+              (Ansi.dim ^ Link.reference Task row.id ^ Ansi.reset)))
+       linked_drawn;
+     if linked_omitted > 0 then
+       box_line buf cols
+         (Printf.sprintf "%s  and %d more%s" Ansi.dim linked_omitted Ansi.reset));
   let content_height = max 1 (rows - chrome_rows) in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length body) ~height:content_height
@@ -5387,6 +5503,71 @@ let render_harness_list (state : state) =
        ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
+(* Which goals the judged task serves, and what those goals are aiming at.
+   The verdict names a task, the task names its goals, and a goal carries the
+   metric it is measured by -- three hops that were all present and never
+   walked, so a verdict said "pass" without saying what it was passing
+   towards. *)
+let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdict) =
+  let goal_ids =
+    match
+      List.find_opt
+        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
+        state.tasks
+    with
+    | Some row -> row.goal_ids
+    | None -> []
+  in
+  let goal_of id =
+    Option.bind state.planning (fun snapshot ->
+      List.find_opt
+        (fun (goal : Tui_decode.planning_goal) -> String.equal goal.pg_id id)
+        snapshot.Tui_decode.pl_goals)
+  in
+  match goal_ids with
+  | [] ->
+    (* Two different silences, told apart. A task this screen has never seen
+       (the backlog has not loaded, or the verdict judged something already
+       archived) is not the same as a task that serves no goal, and drawing
+       nothing for both leaves the reader unable to tell which. *)
+    let known_task =
+      List.exists
+        (fun (row : Tui_decode.task) -> String.equal row.id verdict.hv_task_id)
+        state.tasks
+    in
+    if known_task then
+      [ Ansi.dim, "  Towards      this task is not linked to a goal" ]
+    else
+      [ Ansi.dim, "  Towards      the judged task is not in this backlog" ]
+  | goal_ids ->
+    (Ansi.bold, "  TOWARDS")
+    :: List.concat_map
+         (fun id ->
+           match goal_of id with
+           | None ->
+             (* Linked to a goal this snapshot does not carry -- terminal, or
+                simply not in the page that was fetched. Named rather than
+                dropped: the link is a fact even when the goal is not here. *)
+             [ Ansi.reset, Printf.sprintf "  %-12s %s" "Goal" id
+             ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
+             ]
+           | Some goal ->
+             let aim =
+               match goal.pg_metric, goal.pg_target_value with
+               | Some metric, Some target -> Printf.sprintf "%s -> %s" metric target
+               | Some metric, None -> metric
+               | None, Some target -> Printf.sprintf "target %s" target
+               | None, None -> "no metric declared"
+             in
+             [ Ansi.reset,
+               Printf.sprintf "  %-12s %s" "Goal"
+                 (Terminal_text.single_line goal.pg_title)
+             ; Ansi.reset, Printf.sprintf "  %-12s %s" "Aim" aim
+             ; Ansi.dim, Printf.sprintf "  %-12s %s" "" (Link.reference Goal id)
+             ])
+         goal_ids
+;;
+
 let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
   let field ?(style = Ansi.reset) label value =
     style,
@@ -5437,6 +5618,12 @@ let render_harness_detail (state : state) verdict =
   box_divider buf cols;
   let lines =
     harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
+    (* Appended rather than woven in: the verdict block is what the server
+       said, and what the task is aiming at is read from two other surfaces.
+       Keeping them in that order keeps the judged fact above the context. *)
+    @ (match harness_goal_lines state verdict with
+       | [] -> []
+       | goal_lines -> (Ansi.dim, "") :: goal_lines)
   in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (List.length lines - content_height) in

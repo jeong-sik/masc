@@ -6770,6 +6770,31 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     target = fusion_run("fusion-target-501", keeper="beta")
     new = fusion_run("fusion-new-501", keeper="gamma")
     fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/dashboard/planning"] = (
+        200,
+        {
+            "goals": [
+                {
+                    "id": "goal-ssim-501",
+                    "title": "raise SSIM to 0.95",
+                    "phase": "executing",
+                    "priority": 1,
+                    "metric": "SSIM",
+                    "target_value": "0.95",
+                    "proof": {"state": "unreviewed"},
+                }
+            ],
+            "rollup": {"active": 1, "verifying": 0, "done": 0, "dropped": 0},
+            "backlog": {
+                "todo": 1,
+                "claimed": 0,
+                "running": 0,
+                "done": 0,
+                "cancelled": 0,
+            },
+            "generated_at": "2026-08-27T00:00:00Z",
+        },
+    )
     fixtures["/api/v1/dashboard/harness-health"] = (
         200,
         {
@@ -6803,6 +6828,39 @@ def fusion_http_fixtures() -> tuple[HttpFixtures, GatedHttpResponse]:
     return fixtures, initial_runs
 
 
+def seed_goal_linked_task(base_path: str) -> None:
+    """Write the task the harness verdict judges, and the goal it serves.
+
+    Tasks come off the local backlog and the goal link lives in its own
+    registry -- the task record carries no goal on purpose. Both have to be on
+    disk before the TUI starts or the chain has a hole at its middle hop.
+    """
+    tasks_dir = os.path.join(base_path, ".masc", "tasks")
+    os.makedirs(tasks_dir, exist_ok=True)
+    with open(os.path.join(tasks_dir, "backlog.json"), "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "tasks": [
+                    {
+                        "id": "task-linked-501",
+                        "title": "linked Harness task",
+                        "status": "todo",
+                        "priority": 1,
+                        "created_at": "2026-08-27T00:00:00Z",
+                        "updated_at": "2026-08-27T00:00:00Z",
+                    }
+                ],
+                "last_updated": "2026-08-27T00:00:00Z",
+                "version": 1,
+            },
+            handle,
+        )
+    with open(
+        os.path.join(tasks_dir, "goal_task_links.json"), "w", encoding="utf-8"
+    ) as handle:
+        json.dump({"goal-ssim-501": ["task-linked-501"]}, handle)
+
+
 def fusion_list_detail_interaction(
     fixtures: HttpFixtures,
     initial_runs: GatedHttpResponse,
@@ -6816,8 +6874,16 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        harness = tab_until(process, master_fd, output, b"task-linked-501")
-        harness_plain = CSI_RE.sub(b"", harness)
+        tab_until(process, master_fd, output, b"task-linked-501")
+        # The row can land in a frame drawn before the column headers are
+        # repainted, so the headers are what this waits on rather than the row:
+        # the assertions below are about the whole list, not one line of it.
+        wait_for_output(
+            process, master_fd, output, b"Evaluator", start=0, timeout=5.0
+        )
+        harness_plain = CSI_RE.sub(
+            b"", frame_containing(bytes(output), b"Evaluator")
+        )
         for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
             if needle not in harness_plain:
                 raise AssertionError(
@@ -6833,6 +6899,10 @@ def fusion_list_detail_interaction(
             process, master_fd, output, b"\r", b"HARNESS VERDICT"
         )
         verdict_plain = CSI_RE.sub(b"", verdict)
+        # The verdict names a task; the task names its goals; a goal declares
+        # the metric it is measured by. All three were present and none of them
+        # met on a screen, so a verdict said "approve" without saying what it
+        # was approving towards.
         for needle in (
             b"linked Harness task",
             b"Agent",
@@ -6846,6 +6916,18 @@ def fusion_list_detail_interaction(
                 raise AssertionError(
                     f"Harness detail omitted {needle!r}: {verdict_plain!r}"
                 )
+        # The verdict names a task, the task names its goals, and a goal
+        # declares its metric. All three were present before and none of them
+        # met on a screen. Whichever way the chain resolves, the detail has to
+        # say so rather than drawing nothing -- "not linked" and "not in this
+        # backlog" are different facts and both are answers.
+        if not any(
+            marker in verdict_plain
+            for marker in (b"TOWARDS", b"Towards")
+        ):
+            raise AssertionError(
+                f"the verdict says nothing about what it aims at: {verdict_plain!r}"
+            )
         send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
         read_available(master_fd, output)
         start = len(output)
@@ -7538,6 +7620,10 @@ def run_keyboard_regression(executable: str) -> None:
         ),
         refresh=0.05,
         http_fixtures=fusion_fixtures,
+        # The harness verdict in these fixtures judges task-linked-501. Seeding
+        # that task and the goal it serves is what lets the detail say what the
+        # verdict was aiming at, rather than naming a task and stopping.
+        prepare_workspace=seed_goal_linked_task,
     )
     run_terminal_scenario(
         executable,

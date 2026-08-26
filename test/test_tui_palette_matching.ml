@@ -55,6 +55,7 @@ let test_the_palette_lists_tasks_and_posts () =
       ; title = "다섯 도구 축 사용 증명"
       ; status = Masc_domain.Todo
       ; priority = 2
+      ; goal_ids = []
       } ];
   state.board_posts <-
     [ { bp_id = "p-1"

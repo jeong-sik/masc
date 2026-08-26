@@ -968,14 +968,6 @@ let effective_autonomous_instructions
   | _ -> base
 ;;
 
-let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
-    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
-    ?(channel : Keeper_world_observation.keeper_cycle_channel option)
-    ()
-  =
-  effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
-;;
-
 (* Titles and phases for the Goals that are still open, read from the store
    under the same phase predicate the world observation uses. The phase rides
    along so the Active Goals block can annotate a [Verifying] goal (RFC-0387
@@ -1002,7 +994,9 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ?(active_goal_summaries : goal_summary list option)
     ()
   =
-  let instructions = effective_instructions ~meta ?profile_defaults ?channel () in
+  let instructions =
+    effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
+  in
   (* [Keeper_prompt.build_keeper_system_prompt] renders id+title only; the
      phase stays on the [goal_summary] for the Active Goals layer. *)
   let active_goals =

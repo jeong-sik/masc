@@ -60,11 +60,6 @@ val file_path_of_token : base_dir:string -> token:string -> string option
 val persist_result :
   base_dir:string -> media_type:string -> data:string -> (string * string, string) result
 
-(** Raising compatibility wrapper around {!persist_result}. New stream-facing code
-    should use the result-returning functions so storage failures stay observable
-    without tearing down the stream. *)
-val persist : base_dir:string -> media_type:string -> data:string -> string * string
-
 (** Human-readable error for logs. Does not include the media payload; callers
     exposing failures to clients should still mask [Write_failed] details because
     filesystem errors may carry internal paths. *)

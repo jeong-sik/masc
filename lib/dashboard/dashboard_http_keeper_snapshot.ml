@@ -146,7 +146,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
         `Assoc [
           ( "instructions",
             `String
-              (Keeper_unified_prompt.effective_instructions
+              (Keeper_unified_prompt.effective_autonomous_instructions
                  ~meta:m
                  ~profile_defaults:defaults
                  ()) );

@@ -876,9 +876,11 @@ let recall_newer (state : state) =
    forward must not replace what they just wrote with a draft from before it. *)
 let forget_recall (state : state) = state.msg_recall_at <- None
 
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
-    ~(load_older : before:float -> unit) (key : string) : bool =
+    ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
+    (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -1024,6 +1026,14 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          state.msg_queued <- rest;
          Buffer.clear state.msg_input;
          Buffer.add_string state.msg_input text);
+      true
+    end else if c = Some 22 then begin
+      (* Ctrl-V: the clipboard's image, staged for the next message. The key
+         reaches here only because [Masc_tui_termios.disable_literal_next]
+         turned off VLNEXT -- with the terminal's default the tty layer eats
+         this byte and passes the next one through raw, so the composer would
+         see the letter after Ctrl-V and never Ctrl-V itself. *)
+      paste_image ();
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       forget_recall state;
@@ -3378,6 +3388,56 @@ let chat_notice state ~keeper_name ~role text =
         (match role with Message_error -> "error" | _ -> "system")
         text
 
+(* Ctrl-V. A terminal never delivers a pasted image: bracketed paste carries
+   text, and a clipboard holding a screenshot has no text form to send. So the
+   bytes are fetched from the clipboard itself and staged the way a dropped
+   file is -- same size limit, same media-type sniff, same staging list.
+
+   The answer goes to the chat pane rather than the event log because that is
+   the surface the operator is looking at when they press this key; with no
+   keeper selected [chat_notice] falls back to the log on its own.
+
+   The draft gets a marker where the image went. Without one, a staged image
+   and a keystroke the terminal ate look identical from the composer, and the
+   operator would learn which it was only after the turn came back. *)
+let paste_clipboard_image state =
+  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  match Masc_tui_clipboard.read_image () with
+  | Error error ->
+    notice ~role:Message_error
+      ("Ctrl-V: " ^ Masc_tui_clipboard.error_to_string error)
+  | Ok bytes ->
+    (* Numbered by staging order and restarting at 1 with each message, so the
+       marker in the draft and the attachment beside it carry the same number:
+       the keeper reads "[Image #2]" and has an image-2.png to look at. *)
+    let index = List.length state.msg_attachments + 1 in
+    let name = Printf.sprintf "image-%d.png" index in
+    (match Masc_tui_attachment.of_bytes ~name bytes with
+     | Error error ->
+       notice ~role:Message_error
+         ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
+     | Ok attachment ->
+       forget_recall state;
+       state.msg_attachments <- state.msg_attachments @ [ attachment ];
+       (* A marker run into the word before it changes that word. Only a draft
+          that does not already end in whitespace needs the separator. *)
+       let needs_separator =
+         Buffer.length state.msg_input > 0
+         && (match Buffer.nth state.msg_input (Buffer.length state.msg_input - 1) with
+             | ' ' | '\n' | '\t' -> false
+             | _ -> true)
+       in
+       if needs_separator then Buffer.add_char state.msg_input ' ';
+       Buffer.add_string state.msg_input (Printf.sprintf "[Image #%d] " index);
+       notice ~role:Message_status
+         (Printf.sprintf
+            "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
+            index
+            attachment.Masc_tui_keeper_chat_projection.mime_type
+            attachment.Masc_tui_keeper_chat_projection.size
+            (List.length state.msg_attachments)))
+;;
+
 (* Whether this terminal draws pictures. Asked once, before the first frame,
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
@@ -5186,6 +5246,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~submit_message:(fun _ -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
+          ~paste_image:(fun () -> paste_clipboard_image state)
           key
       in
       true
@@ -6456,6 +6517,26 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
+(* Raw mode, and the one key the record cannot ask for.
+
+   [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
+   filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
+   among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
+   that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
+   key. Pairing the two here is what keeps the three places that take raw mode
+   back (session start, the return from Ctrl-Z, the return from $EDITOR) from
+   taking it back without the key.
+
+   The result is not checked because there is nothing left for it to report:
+   the [tcsetattr] on the line above just succeeded on this descriptor, so it
+   is a terminal this process can set. What remains is a hangup between the two
+   calls, and that ends the session either way. *)
+let apply_raw_mode new_term =
+  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+  (* See above: a refusal is a hangup, which ends the session either way. *)
+  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
+;;
+
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
   at_exit cleanup;
@@ -6469,7 +6550,7 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   Sys.set_signal Sys.sigwinch (Sys.Signal_handle request_full_repaint);
   Sys.set_signal Sys.sigcont (Sys.Signal_handle request_full_repaint);
   Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term
+  apply_raw_mode new_term
 
 (** Main loop *)
 let main () =
@@ -6525,6 +6606,13 @@ let main () =
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
+  (* Read beside [old_term] because the record cannot carry it. The literal-next
+     character is turned off for as long as this program owns the terminal
+     ([apply_raw_mode]) and handed back whenever the terminal is -- at exit and
+     around Ctrl-Z. Restoring [old_term] alone leaves the shell without the
+     key, which the PTY harness catches as a terminal this program did not put
+     back the way it found it. *)
+  let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -6553,7 +6641,15 @@ let main () =
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* After the record, not before: [tcsetattr] is what puts the rest of the
+       terminal back, and this character is the part it cannot reach.
+       [-1] means the descriptor was never a terminal, so there is nothing to
+       return. *)
+    if old_literal_next >= 0
+    then
+      (* See the guard above: a refusal here is the terminal already gone. *)
+      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
   in
 
   (* Cleanup on exit *)
@@ -6597,7 +6693,7 @@ let main () =
     Fun.protect
       ~finally:(fun () ->
         Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-        Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        apply_raw_mode new_term;
         (* restore_terminal above gave the alternate screen back so the shell
            was usable while stopped. Take it again before the repaint, or the
            frame lands on top of whatever the user did meanwhile. *)
@@ -6704,7 +6800,7 @@ let main () =
      arming gate. The terminal handshake around the child is the pair
      [suspend] already runs around Ctrl-Z. *)
   let reenter_terminal () =
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+    apply_raw_mode new_term;
     request_full_repaint 0
   in
   (* An empty object is the honest starting point for a partial patch: the
@@ -7817,6 +7913,7 @@ let main () =
                          launch_keeper_older_page state
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
+                   ~paste_image:(fun () -> paste_clipboard_image state)
                    k
                in
                ()

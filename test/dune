@@ -2849,6 +2849,11 @@
  (libraries alcotest masc_tui_observer yojson))
 
 (test
+ (name test_tui_clipboard)
+ (modules test_tui_clipboard)
+ (libraries alcotest masc_tui_clipboard))
+
+(test
  (name test_tui_keeper_chat_projection)
  (modules test_tui_keeper_chat_projection)
  (libraries

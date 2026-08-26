@@ -7875,10 +7875,19 @@ let main () =
           showing, and reclaiming its columns should not depend on which
           surface is up. *)
        | Some k when String.equal k toggle_roster_pane_key ->
-           state.roster_pane_hidden <- not state.roster_pane_hidden;
-           if state.roster_pane_hidden then
-             state.keeper_message_focus <- Right_pane;
-           Render_schedule.request render_schedule Render_schedule.Force
+           (match
+              Masc_tui_roster_pane.toggle_hidden
+                ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+            with
+            | None ->
+                add_event state "system"
+                  (Printf.sprintf
+                     "Keeper roster needs %d columns; preference unchanged"
+                     Masc_tui_roster_pane.threshold_cols)
+            | Some hidden ->
+                state.roster_pane_hidden <- hidden;
+                if hidden then state.keeper_message_focus <- Right_pane;
+                Render_schedule.request render_schedule Render_schedule.Force)
        (* Answering is modal. A question needs a key per choice, and this
           surface already spent its arrows and its y/n on the approval queue,
           so the keys have to come from somewhere. Quit and the chrome

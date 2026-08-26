@@ -123,7 +123,10 @@ channel.
 
 At 110 columns and wider, the keeper detail view keeps a roster pane on its
 left with the cursor marked; keys keep their detail meaning. Narrower
-terminals use the single-pane layout.
+terminals use the single-pane layout. `Ctrl-B` changes the roster preference
+only while the pane has room to show. Below 110 columns it reports the width
+requirement and leaves the preference unchanged, so resizing wider cannot
+reveal a hidden toggle that had no visible effect when it was pressed.
 
 ## Surfaces
 

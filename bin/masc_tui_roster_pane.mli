@@ -25,5 +25,10 @@ val name_window : selected:bool -> frame:int -> width:int -> string -> string
 val shown : hidden:bool -> cols:int -> bool
 (** [hidden] is the reader's answer, [cols] the terminal's. Both must agree. *)
 
+val toggle_hidden : hidden:bool -> cols:int -> bool option
+(** Toggle the reader's preference only where the pane can actually show.
+    [None] below {!threshold_cols} leaves the preference untouched, so a key
+    with no visible effect cannot surprise the reader after a later resize. *)
+
 val content_cols : hidden:bool -> cols:int -> int
 (** What the surface beside the roster lays out against. *)

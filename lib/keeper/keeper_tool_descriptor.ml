@@ -1178,6 +1178,42 @@ let board_list_output_schema =
    [files] are declared because the full shape always carries them; the
    status-variant and presence-conditional fields pass through
    [additionalProperties]. *)
+let exact_skill_identity_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "source_id", `Assoc [ "type", `String "string" ]
+          ; "package_id", `Assoc [ "type", `String "string" ]
+          ; "name", `Assoc [ "type", `String "string" ]
+          ] )
+    ; ( "required"
+      , `List
+          [ `String "source_id"; `String "package_id"; `String "name" ] )
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let exact_skill_reference_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "identity", exact_skill_identity_schema
+          ; ( "content_revision"
+            , `Assoc
+                [ "type", `String "string"
+                ; "minLength", `Int 64
+                ; "maxLength", `Int 64
+                ; "pattern", `String "^[0-9a-f]{64}$"
+                ] )
+          ] )
+    ; ( "required"
+      , `List [ `String "identity"; `String "content_revision" ] )
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
 let tasks_list_task_item_schema =
   `Assoc
     [ "type", `String "object"
@@ -1191,6 +1227,11 @@ let tasks_list_task_item_schema =
             , `Assoc
                 [ "type", `String "array"
                 ; "items", `Assoc [ "type", `String "string" ]
+                ] )
+          ; ( "skills"
+            , `Assoc
+                [ "type", `String "array"
+                ; "items", exact_skill_reference_schema
                 ] )
           ; "created_at", `Assoc [ "type", `String "string" ]
           ; "status", `Assoc [ "type", `String "string" ]

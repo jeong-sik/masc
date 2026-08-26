@@ -150,24 +150,6 @@ let make_test_ctx_with_agent agent_name =
 
 let make_test_ctx () = make_test_ctx_with_agent "test-agent"
 
-let install_test_skill ctx name =
-  let path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat
-            (Common.masc_dir_from_base_path
-               ~base_path:ctx.Task.Tool.config.Workspace.base_path)
-            "skills")
-         name)
-      "SKILL.md"
-  in
-  Fs_compat.mkdir_p (Filename.dirname path);
-  Fs_compat.save_file path
-    (Printf.sprintf
-       "---\nname: %s\ndescription: Test skill fixture\n---\n\n# %s\n"
-       name
-       name)
-
 let seed_trace_evidence ctx trace_id =
   let base_path = ctx.Task.Tool.config.Workspace.base_path in
   let path =
@@ -376,53 +358,6 @@ let () = test "dispatch_unknown_tool" (fun () ->
   let args = `Assoc [] in
   assert (Task.Tool.dispatch ctx ~name:"unknown_tool" ~args = None)
 )
-
-(* The tool argument is the only way a task gets skills. The handler checks the
-   actual SKILL.md declarations even when invoked below the schema boundary. *)
-let () = test "add_task accepts skills and stores them" (fun () ->
-  let ctx = make_test_ctx () in
-  install_test_skill ctx "humanize-korean";
-  install_test_skill ctx "spaced";
-  let result =
-    Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-      (`Assoc
-        [
-          ("title", `String "task that names a skill");
-          ("skills", `List [ `String "humanize-korean"; `String "spaced" ]);
-        ])
-  in
-  if not (Tool_result.is_success result) then failwith (Tool_result.message result);
-  match
-    Workspace.get_tasks_raw ctx.Task.Tool.config
-    |> List.find_opt (fun (task : Masc_domain.task) ->
-         String.equal task.title "task that names a skill")
-  with
-  | None -> failwith "the task was not stored"
-  | Some task ->
-    (match task.skills with
-     | [ "humanize-korean"; "spaced" ] -> ()
-     | other ->
-       failwith
-         (Printf.sprintf
-            "expected the two non-blank names, got [%s]"
-            (String.concat "; " other)))
-)
-
-let () = test "add_task rejects malformed skill entries" (fun () ->
-  let ctx = make_test_ctx () in
-  let rejects skills expected =
-    let result =
-      Task.Tool.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
-        (`Assoc
-          [ "title", `String "task with malformed skill"
-          ; "skills", skills
-          ])
-    in
-    assert (not (Tool_result.is_success result));
-    assert (str_contains (Tool_result.message result) expected)
-  in
-  rejects (`List [ `String "" ]) "portable path segment";
-  rejects (`List [ `Int 7 ]) "skills[0] must be a string")
 
 (* Test dispatch add_task *)
 let () = test "dispatch_add_task" (fun () ->

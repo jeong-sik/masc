@@ -120,26 +120,172 @@ include Tool_task_contract_gate
 
 (* Handlers *)
 
+type task_skill_authoring_error =
+  | Invalid_reference_payload of Skill_reference.decode_error
+  | Invalid_workspace of Config_dir_resolver.canonical_base_path_error
+  | Snapshot_not_registered
+  | Snapshot_uninitialized
+  | Reference_identity_not_found of Skill_reference.t
+  | Reference_revision_mismatch of
+      { reference : Skill_reference.t
+      ; observed : Skill_reference.content_revision
+      }
+
 let parse_task_skills args =
   match Json_util.assoc_member_opt "skills" args with
   | None -> Ok []
-  | Some (`List values) ->
-    let rec collect acc index = function
-      | [] -> Ok (List.rev acc)
-      | `String value :: rest -> collect (value :: acc) (index + 1) rest
-      | value :: _ ->
-        Error
-          (Printf.sprintf
-             "skills[%d] must be a string (received %s)"
-             index
-             (Json_util.kind_name value))
-    in
-    collect [] 0 values
   | Some value ->
-    Error
-      (Printf.sprintf
-         "skills must be an array of strings (received %s)"
-         (Json_util.kind_name value))
+    Skill_reference.list_of_yojson value
+    |> Result.map_error (fun error -> Invalid_reference_payload error)
+;;
+
+let package_id_error_to_yojson = function
+  | Skill_reference.Empty_package_id ->
+    `Assoc [ "kind", `String "empty_package_id" ]
+  | Current_directory_package_id ->
+    `Assoc [ "kind", `String "current_directory_package_id" ]
+  | Parent_directory_package_id ->
+    `Assoc [ "kind", `String "parent_directory_package_id" ]
+  | Package_id_contains_separator ->
+    `Assoc [ "kind", `String "package_id_contains_separator" ]
+  | Package_id_contains_nul ->
+    `Assoc [ "kind", `String "package_id_contains_nul" ]
+;;
+
+let revision_error_to_yojson = function
+  | Skill_reference.Invalid_revision_length { actual } ->
+    `Assoc
+      [ "kind", `String "invalid_revision_length"; "actual", `Int actual ]
+  | Invalid_revision_character { index; found } ->
+    `Assoc
+      [ "kind", `String "invalid_revision_character"
+      ; "index", `Int index
+      ; "found", `String (String.make 1 found)
+      ]
+;;
+
+let reference_decode_error_to_yojson = function
+  | Skill_reference.Expected_object { field } ->
+    `Assoc [ "kind", `String "expected_object"; "field", `String field ]
+  | Expected_list { field } ->
+    `Assoc [ "kind", `String "expected_list"; "field", `String field ]
+  | Missing_field { object_name; field } ->
+    `Assoc
+      [ "kind", `String "missing_field"
+      ; "object", `String object_name
+      ; "field", `String field
+      ]
+  | Expected_string { object_name; field } ->
+    `Assoc
+      [ "kind", `String "expected_string"
+      ; "object", `String object_name
+      ; "field", `String field
+      ]
+  | Duplicate_field { object_name; field } ->
+    `Assoc
+      [ "kind", `String "duplicate_field"
+      ; "object", `String object_name
+      ; "field", `String field
+      ]
+  | Unexpected_field { object_name; field } ->
+    `Assoc
+      [ "kind", `String "unexpected_field"
+      ; "object", `String object_name
+      ; "field", `String field
+      ]
+  | Invalid_source_id source_id ->
+    `Assoc
+      [ "kind", `String "invalid_source_id"; "source_id", `String source_id ]
+  | Invalid_package_id error ->
+    `Assoc
+      [ "kind", `String "invalid_package_id"
+      ; "reason", package_id_error_to_yojson error
+      ]
+  | Invalid_content_revision error ->
+    `Assoc
+      [ "kind", `String "invalid_content_revision"
+      ; "reason", revision_error_to_yojson error
+      ]
+  | Duplicate_reference reference ->
+    `Assoc
+      [ "kind", `String "duplicate_reference"
+      ; "reference", Skill_reference.to_yojson reference
+      ]
+;;
+
+let workspace_error_to_yojson = function
+  | Config_dir_resolver.Empty_after_normalization ->
+    `Assoc [ "kind", `String "empty_after_normalization" ]
+  | Could_not_derive_absolute { input } ->
+    `Assoc
+      [ "kind", `String "could_not_derive_absolute"; "input", `String input ]
+;;
+
+let task_skill_authoring_error_projection = function
+  | Invalid_reference_payload error ->
+    ( "invalid_skill_reference_payload"
+    , [ "reason", reference_decode_error_to_yojson error ] )
+  | Invalid_workspace error ->
+    ( "skill_snapshot_invalid_workspace"
+    , [ "reason", workspace_error_to_yojson error ] )
+  | Snapshot_not_registered -> "skill_snapshot_not_registered", []
+  | Snapshot_uninitialized -> "skill_snapshot_uninitialized", []
+  | Reference_identity_not_found reference ->
+    ( "skill_reference_identity_not_found"
+    , [ "reference", Skill_reference.to_yojson reference ] )
+  | Reference_revision_mismatch { reference; observed } ->
+    ( "skill_reference_revision_mismatch"
+    , [ "reference", Skill_reference.to_yojson reference
+      ; ( "observed_content_revision"
+        , `String (Skill_reference.content_revision_to_string observed) )
+      ] )
+;;
+
+let task_skill_authoring_error_to_yojson error =
+  let code, fields = task_skill_authoring_error_projection error in
+  `Assoc (("code", `String code) :: fields)
+;;
+
+let task_skill_rejection ~tool_name ~start_time error =
+  let code, _fields = task_skill_authoring_error_projection error in
+  let message = "Task Skill reference rejected: " ^ code in
+  let data =
+    Workflow_rejection_payload.payload
+      ~rule_id:code
+      ~extra_fields:
+        [ "skill_rejection", task_skill_authoring_error_to_yojson error ]
+      message
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    ~data
+    message
+;;
+
+let resolve_task_skills ~base_path references =
+  match references with
+  | [] -> Ok []
+  | _ :: _ ->
+    (match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
+     | Error error -> Error (Invalid_workspace error)
+     | Ok None -> Error Snapshot_not_registered
+     | Ok (Some workspace) ->
+       (match Skill_catalog_snapshot_service.current ~workspace with
+        | None -> Error Snapshot_uninitialized
+        | Some snapshot ->
+          let rec resolve = function
+            | [] -> Ok references
+            | reference :: rest ->
+              (match Skill_catalog_snapshot.resolve_reference snapshot reference with
+               | Ok _entry -> resolve rest
+               | Error (Skill_catalog_snapshot.Identity_not_found _) ->
+                 Error (Reference_identity_not_found reference)
+               | Error (Content_revision_mismatch { observed; _ }) ->
+                 Error (Reference_revision_mismatch { reference; observed }))
+          in
+          resolve references))
 ;;
 
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
@@ -181,9 +327,6 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
-  (* Skill directory names under <base-path>/.masc/skills/. The authoring
-     contract below rejects blank or non-segment values; silently dropping one
-     would make a malformed declaration look as if it had been accepted. *)
   let skills_result = parse_task_skills args in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
@@ -217,23 +360,15 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result, skills_result with
-    | Error error, _ | _, Error error ->
+    | Error error, _ ->
         Tool_result.error
           ~failure_class:Tool_result.Workflow_rejection
           ~tool_name ~start_time error
-    | Ok contract, Ok skills ->
-        (match
-           Task_skill_reference.validate_all
-             ~base_path:ctx.config.base_path
-             skills
-         with
-         | Error error ->
-           Tool_result.error
-             ~failure_class:Tool_result.Workflow_rejection
-             ~tool_name
-             ~start_time
-             error
-         | Ok () ->
+    | _, Error error -> task_skill_rejection ~tool_name ~start_time error
+    | Ok contract, Ok parsed_skills ->
+      (match resolve_task_skills ~base_path:ctx.config.base_path parsed_skills with
+       | Error error -> task_skill_rejection ~tool_name ~start_time error
+       | Ok skills ->
         let add_result =
           let created_by =
             match created_by with
@@ -263,6 +398,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
                   ; "goal_id", Json_util.string_opt_to_json goal_id
                   ; ( "predecessor_task_id"
                     , Json_util.string_opt_to_json predecessor_task_id )
+                  ; "skills", Skill_reference.list_to_yojson skills
                   ])
              ()
          | Error err ->

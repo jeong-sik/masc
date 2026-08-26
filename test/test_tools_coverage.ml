@@ -401,6 +401,7 @@ let test_masc_add_task_schema () =
            Alcotest.(check bool) "has description" true (List.mem_assoc "description" props);
            Alcotest.(check bool) "has goal_id" true (List.mem_assoc "goal_id" props);
            Alcotest.(check bool) "has contract" true (List.mem_assoc "contract" props);
+           Alcotest.(check bool) "has skills" true (List.mem_assoc "skills" props);
            (match List.assoc_opt "goal_id" props with
             | Some goal_id_schema ->
                 let description =
@@ -420,6 +421,39 @@ let test_masc_add_task_schema () =
                  (Some false)
                  (get_json_bool "additionalProperties" contract_schema)
              | None -> Alcotest.fail "masc_add_task missing contract property")
+          ; (match List.assoc_opt "skills" props with
+             | Some skills_schema ->
+               (match get_json_assoc "items" skills_schema with
+                | None -> Alcotest.fail "masc_add_task skills missing item schema"
+                | Some item_fields ->
+                  let item_schema = `Assoc item_fields in
+                  Alcotest.(check (option bool))
+                    "Skill references reject additional properties"
+                    (Some false)
+                    (get_json_bool "additionalProperties" item_schema);
+                  (match get_json_assoc "properties" item_schema with
+                   | None -> Alcotest.fail "Skill reference missing properties"
+                   | Some reference_properties ->
+                     Alcotest.(check bool)
+                       "Skill reference has identity"
+                       true
+                       (List.mem_assoc "identity" reference_properties);
+                     Alcotest.(check bool)
+                       "Skill reference has content revision"
+                       true
+                       (List.mem_assoc
+                          "content_revision"
+                          reference_properties);
+                     (match List.assoc_opt "identity" reference_properties with
+                      | None -> Alcotest.fail "Skill reference identity missing"
+                      | Some identity_schema ->
+                        Alcotest.(check (option bool))
+                          "Skill identity rejects additional properties"
+                          (Some false)
+                          (get_json_bool
+                             "additionalProperties"
+                             identity_schema)))))
+             | None -> Alcotest.fail "masc_add_task missing skills property")
        | None -> Alcotest.fail "masc_add_task missing properties");
       (match get_json_list "required" schema.input_schema with
        | Some reqs ->

@@ -83,7 +83,43 @@ items = { type = "string" }
 [[params]]
 name = "skills"
 type = "array"
-items = { type = "string" }
 description = """
-Skill directory names under <base-path>/.masc/skills/ that a keeper working \
-this task may read. Omit when the task needs none."""
+Canonical exact Skill references from the published Skill catalog. Each item \
+pins source, package, canonical Skill name, and exact SKILL.md content revision. Omit \
+or pass an empty list when the task needs none."""
+
+[params.items]
+type = "object"
+additional_properties = false
+
+[[params.items.params]]
+name = "identity"
+type = "object"
+required = true
+additional_properties = false
+
+[[params.items.params.params]]
+name = "source_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params.params]]
+name = "package_id"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params.params]]
+name = "name"
+type = "string"
+required = true
+min_length = 1
+
+[[params.items.params]]
+name = "content_revision"
+type = "string"
+required = true
+min_length = 64
+max_length = 64
+pattern = "^[0-9a-f]{64}$"

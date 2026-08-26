@@ -131,6 +131,12 @@ let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 (* The columns the Identity pane wraps its notice at. Asked of the terminal
    the same way {!surface_rows} asks for its rows, so the key handler counts
    the lines the renderer is about to draw. *)
+(* The query the list is showing, which is the empty one whenever the filter
+   is not open. Asked here so the renderer, the cursor and the keys all read
+   the same list. *)
+let identity_query (state : state) =
+  Option.value state.identity_filter ~default:""
+
 let identity_pane_columns (state : state) =
   let _rows, columns = get_terminal_size () in
   Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
@@ -161,11 +167,14 @@ let move_identity_cursor (state : state) ~delta =
   | None -> ()
   | Some (_, providers) ->
       let count =
-        List.length (Masc_tui_types.identity_connectable providers)
+        List.length
+          (Masc_tui_types.identity_connectable ~query:(identity_query state)
+             providers)
       in
       if count > 0 then begin
+        let query = identity_query state in
         let cursor =
-          Masc_tui_types.identity_cursor_clamped ~providers
+          Masc_tui_types.identity_cursor_clamped ~query ~providers
             state.identity_cursor
         in
         let cursor =
@@ -186,7 +195,9 @@ let move_identity_cursor (state : state) ~delta =
                      ~notice:
                        (Masc_tui_types.identity_notice
                           ~cols:(identity_pane_columns state)
-                          state.identity_attempt_error)
+                          state.identity_attempt_error
+                       @ Masc_tui_types.identity_filter_rows ~providers
+                           state.identity_filter)
                      ~index:cursor)
                 ~height state.detail_scroll
       end
@@ -4607,6 +4618,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
               than at whichever row the last one was left on. *)
            state.identity_cursor <- 0;
            state.identity_attempt_error <- None;
+           state.identity_filter <- None;
            launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
@@ -8341,6 +8353,60 @@ let main () =
                 state.search <- Some longer;
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
+       (* The Identity list narrows as you type, which the row search above
+          deliberately does not: sixty-seven rows is a list to look things up
+          in rather than scroll. While it is open every printable key is
+          text, so R, q, [ and the rest come back only when it closes -- esc,
+          or backspace on an empty query. The arrows are named keys rather
+          than characters and keep moving the cursor through what is left. *)
+       | Some k
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && Option.is_some state.identity_filter
+              && not compact_viewport -> (
+           let query = Option.value state.identity_filter ~default:"" in
+           let narrow text =
+             state.identity_filter <- Some text;
+             (* Back to the top: the row the cursor was on may not be in the
+                shorter list, and keeping the index would move the marker to
+                whatever happens to sit there now. *)
+             state.identity_cursor <- 0
+           in
+           match k with
+           | "esc" -> state.identity_filter <- None
+           | "up" -> move_identity_cursor state ~delta:(-1)
+           | "down" -> move_identity_cursor state ~delta:1
+           | "\127" | "\b" ->
+             if String.equal query ""
+             then state.identity_filter <- None
+             else narrow (Masc_tui_message_layout.drop_last_utf8_scalar query)
+           | "\r" | "\n" -> (
+               match (selected_keeper state, state.identity_view) with
+               | Some keeper, Some (stamp, providers)
+                 when String.equal stamp keeper.k_name -> (
+                   match
+                     Masc_tui_types.identity_cursor_provider
+                       ~query:(identity_query state) ~providers
+                       state.identity_cursor
+                   with
+                   | Some (provider_id, label) ->
+                     state.identity_login <- None;
+                     state.identity_attempt_error <- None;
+                     launch_identity_login state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name ~provider_id ~label
+                   | None -> ())
+               | Some _, (Some _ | None) | None, _ -> ())
+           | s
+             when (String.length s = 1 && Char.code s.[0] >= 32)
+                  || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+             narrow (query ^ s)
+           | _ -> ())
+       | Some "/"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport ->
+           state.identity_filter <- Some "";
+           state.identity_cursor <- 0
        | Some "/"
          when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
@@ -8409,7 +8475,8 @@ let main () =
              when String.equal stamp keeper.k_name -> (
                match
                  List.nth_opt
-                   (Masc_tui_types.identity_connectable providers)
+                   (Masc_tui_types.identity_connectable
+                      ~query:(identity_query state) providers)
                    wanted
                with
                | Some (provider_id, label) ->
@@ -9805,7 +9872,8 @@ let main () =
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
                match
-                 Masc_tui_types.identity_cursor_provider ~providers
+                 Masc_tui_types.identity_cursor_provider
+                   ~query:(identity_query state) ~providers
                    state.identity_cursor
                with
                | Some (provider_id, label) ->

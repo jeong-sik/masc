@@ -780,6 +780,38 @@ let test_save_raw_token_credential_in_eio_runtime () =
                  "save_raw_token_credential should work inside Eio runtime: %s"
                  (Masc_domain.masc_error_to_string e))))
 
+let test_save_file_backed_raw_token_credential_persists_private_bearer () =
+  let dir = setup_test_workspace () in
+  let raw_token = "file-backed-admin-token" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      match
+        Auth.save_file_backed_raw_token_credential dir
+          ~agent_name:"bootstrap-admin" ~role:Masc_domain.Admin ~raw_token
+      with
+      | Error error ->
+          failf "file-backed credential save failed: %s"
+            (Masc_domain.masc_error_to_string error)
+      | Ok credential ->
+          check string "stored token hash" credential.token
+            (Auth.sha256_hash raw_token);
+          check (option string) "raw token file is readable" (Some raw_token)
+            (Auth.load_raw_token dir ~agent_name:"bootstrap-admin");
+          let token_file =
+            Filename.concat (Auth.auth_dir dir) "bootstrap-admin.token"
+          in
+          check int "raw token file mode" 0o600 (permission_bits token_file);
+          match
+            Auth.verify_token dir ~agent_name:"bootstrap-admin" ~token:raw_token
+          with
+          | Ok verified ->
+              check bool "file-backed role is admin" true
+                (verified.role = Masc_domain.Admin)
+          | Error error ->
+              failf "file-backed bearer should verify: %s"
+                (Masc_domain.masc_error_to_string error))
+
 let test_ensure_keeper_credential_uses_per_keeper_token () =
   let dir = setup_test_workspace () in
   Fun.protect
@@ -1304,6 +1336,8 @@ let () =
         test_save_raw_token_credential_rejects_blank_token;
       test_case "save_raw_token_credential works in eio runtime" `Quick
         test_save_raw_token_credential_in_eio_runtime;
+      test_case "file-backed raw credential persists private bearer" `Quick
+        test_save_file_backed_raw_token_credential_persists_private_bearer;
       test_case "ensure_keeper_credential uses per-keeper token" `Quick
         test_ensure_keeper_credential_uses_per_keeper_token;
       test_case "ensure_keeper_credential reuses uuid" `Quick

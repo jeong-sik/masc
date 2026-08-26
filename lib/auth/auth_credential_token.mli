@@ -69,6 +69,10 @@ val save_raw_token_credential_without_expiry :
   string -> agent_name:string -> role:agent_role -> raw_token:string ->
   (agent_credential, masc_error) result
 
+val save_file_backed_raw_token_credential :
+  string -> agent_name:string -> role:agent_role -> raw_token:string ->
+  (agent_credential, masc_error) result
+
 (** {1 Token lifecycle} *)
 
 val create_token :

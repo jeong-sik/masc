@@ -249,7 +249,7 @@ mcp_jsonrpc_call() {
     body_file="$(mcp_mktemp_file "masc-jsonrpc-body" ".json")"
     stderr_file="$(mcp_mktemp_file "masc-jsonrpc-stderr" ".log")"
     resp_file="$(mcp_mktemp_file "masc-jsonrpc-resp" ".json")"
-    trap 'rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"' RETURN
+    trap 'rm -f "${body_file:-}" "${stderr_file:-}" "${resp_file:-}" "${auth_header_file:-}"; trap - RETURN' RETURN
     printf '%s' "$request_body" >"$body_file"
 
     local -a cmd=(
@@ -284,6 +284,7 @@ mcp_jsonrpc_call() {
     MCP_LAST_TIME_TOTAL="$cumulative_time"
     stderr_text="$(cat "$stderr_file" 2>/dev/null || true)"
     raw="$(cat "$resp_file" 2>/dev/null || true)"
+    trap - RETURN
     rm -f "$body_file" "$stderr_file" "$resp_file" "$auth_header_file"
 
     if [[ "$status" -eq 0 ]]; then

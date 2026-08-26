@@ -3851,6 +3851,35 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
           Alcotest.failf "bootable keeper token should verify exactly: %s"
             (Masc_domain.masc_error_to_string err))
 
+let test_sync_admin_token_env_repairs_raw_token_file () =
+  with_temp_dir "startup-admin-token-sync" (fun dir ->
+      let stale_token = "stale-admin-token" in
+      let current_token = "current-admin-token" in
+      (match
+         Auth.save_raw_token_credential dir ~agent_name:"admin"
+           ~role:Masc_domain.Admin ~raw_token:stale_token
+       with
+       | Ok _ -> ()
+       | Error error ->
+           Alcotest.failf "failed to seed stale admin credential: %s"
+             (Masc_domain.masc_error_to_string error));
+      let token_file = Filename.concat (Auth.auth_dir dir) "admin.token" in
+      Auth.save_private_text_file token_file stale_token;
+      with_env "MASC_ADMIN_TOKEN" (Some current_token) @@ fun () ->
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
+      Server_runtime_startup_credentials.sync_admin_token_env state;
+      Alcotest.(check (option string)) "raw token file follows startup env"
+        (Some current_token) (Auth.load_raw_token dir ~agent_name:"admin");
+      Alcotest.(check int) "startup raw token file is private" 0o600
+        ((Unix.stat token_file).Unix.st_perm land 0o777);
+      match Auth.verify_token dir ~agent_name:"admin" ~token:current_token with
+      | Ok credential ->
+          Alcotest.(check bool) "startup token keeps admin role" true
+            (credential.role = Masc_domain.Admin)
+      | Error error ->
+          Alcotest.failf "startup admin bearer should verify: %s"
+            (Masc_domain.masc_error_to_string error))
+
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
       with_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
@@ -4483,6 +4512,9 @@ let () =
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;
+          Alcotest.test_case
+            "startup admin env sync repairs raw token file"
+            `Quick test_sync_admin_token_env_repairs_raw_token_file;
           Alcotest.test_case
             "startup sync rotates shared bootable keeper tokens"
             `Quick

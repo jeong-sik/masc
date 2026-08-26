@@ -29,7 +29,7 @@ let delta_to_string : Live.delta -> string = function
   | Live.Stream_protocol_error { quarantined_occurrence; detail } ->
       let occurrence =
         Option.fold ~none:"-"
-          ~some:(fun occurrence ->
+          ~some:(fun (occurrence : Live.tool_occurrence) ->
             Printf.sprintf "%d/%d" occurrence.stream_scope occurrence.block_index)
           quarantined_occurrence
       in

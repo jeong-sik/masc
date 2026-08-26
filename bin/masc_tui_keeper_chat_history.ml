@@ -379,7 +379,7 @@ let add_trace_step summary (step : Yojson.Safe.t) =
                     ?execution_id:(string_field fields "execution_id")
                     ~call_id:(string_field fields "tool_call_id") ~tool_name
                     ~args ~outcome:(persisted_outcome fields)
-                    ~duration:(string_field fields "dur")
+                    ~duration:(string_field fields "dur") ()
                   :: summary.tools
               })
       | Some _ | None -> { summary with omitted = summary.omitted + 1 })
@@ -600,7 +600,7 @@ let fold_tool_blocks parsed_rows =
                 | None -> Transcript.Outcome_unrecorded
               in
               Transcript.make_tool_activity ?execution_id ~call_id ~tool_name ~args
-                ~outcome ~duration:None)
+                ~outcome ~duration:None ())
             calls
         in
         { at

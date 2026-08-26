@@ -191,7 +191,7 @@ let nonblank = function
   | Some _ | None -> None
 
 let make_tool_activity ?execution_id ~call_id ~tool_name ~args ~outcome
-    ~duration =
+    ~duration () =
   let call_id = nonblank call_id in
   let execution_id = nonblank execution_id in
   { call_id
@@ -212,7 +212,7 @@ let activity_of_live_call (call : live_tool_call) =
        else if call.result_ready then Returned
        else if call.ended then Awaiting_result
        else Started)
-    ~duration:None
+    ~duration:None ()
 
 let tool_calls t =
   List.rev t.reversed_tool_calls |> List.map activity_of_live_call

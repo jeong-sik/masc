@@ -109,7 +109,7 @@ let test_tool_call_is_named_the_way_the_other_surfaces_name_it () =
            ~call_id:(Some "c1")
            ~tool_name:"read_file"
            ~args:"{\"file_path\":\"lib/keeper/a.ml\"}"
-           ~outcome:Transcript.Returned ~duration:None)
+           ~outcome:Transcript.Returned ~duration:None ())
         call
   | other -> failf "expected one call, got %d" (List.length other)
 
@@ -650,7 +650,7 @@ let test_tool_rows_mark_how_far_each_call_got () =
    disagree about one block. *)
 let activity ~name ~outcome =
   Transcript.make_tool_activity ~call_id:(Some name) ~tool_name:name ~args:""
-    ~outcome ~duration:None
+    ~outcome ~duration:None ()
 
 let summary_outcome mode activities =
   (Transcript.project_tool_block mode (Transcript.tool_block ~omitted_steps:0 activities))
@@ -692,12 +692,12 @@ let test_compact_and_full_keep_the_same_typed_facts () =
   let activities =
     [ Transcript.make_tool_activity ~call_id:(Some "c1")
         ~tool_name:"read_file" ~args:"{\"file_path\":\"a.ml\"}"
-        ~outcome:Transcript.Returned ~duration:(Some "12ms")
+        ~outcome:Transcript.Returned ~duration:(Some "12ms") ()
     ; Transcript.make_tool_activity ~call_id:(Some "c2")
         ~tool_name:"edit_file" ~args:"{\"file_path\":\"b.ml\"}"
-        ~outcome:Transcript.Failed ~duration:(Some "18ms")
+        ~outcome:Transcript.Failed ~duration:(Some "18ms") ()
     ; Transcript.make_tool_activity ~call_id:None ~tool_name:"glob" ~args:""
-        ~outcome:Transcript.Outcome_unrecorded ~duration:None
+        ~outcome:Transcript.Outcome_unrecorded ~duration:None ()
     ]
   in
   let block = Transcript.tool_block ~omitted_steps:2 activities in
@@ -737,7 +737,7 @@ let test_compact_and_full_keep_the_same_typed_facts () =
 let test_compact_summary_counts_registered_public_names () =
   let activity name =
     Transcript.make_tool_activity ~call_id:None ~tool_name:name ~args:"{}"
-      ~outcome:Transcript.Returned ~duration:None
+      ~outcome:Transcript.Returned ~duration:None ()
   in
   let projection =
     Transcript.tool_block

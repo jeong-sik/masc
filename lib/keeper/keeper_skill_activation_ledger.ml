@@ -68,6 +68,38 @@ type store_error =
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
+let decode_error_code = function
+  | Expected_object _ -> "expected_object"
+  | Missing_string _ -> "missing_string"
+  | Duplicate_field _ -> "duplicate_field"
+  | Unexpected_field _ -> "unexpected_field"
+  | Unsupported_schema _ -> "unsupported_schema"
+  | Invalid_source_id _ -> "invalid_source_id"
+  | Invalid_skill_name _ -> "invalid_skill_name"
+  | Invalid_package_id _ -> "invalid_package_id"
+  | Invalid_content_revision _ -> "invalid_content_revision"
+  | Invalid_snapshot_revision _ -> "invalid_snapshot_revision"
+  | Invalid_origin_kind _ -> "invalid_origin_kind"
+  | Invalid_task_id _ -> "invalid_task_id"
+  | Invalid_tool_name _ -> "invalid_tool_name"
+  | Invalid_turn_ref _ -> "invalid_turn_ref"
+  | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
+  | Invalid_activated_at _ -> "invalid_activated_at"
+  | Duplicate_exact_activation -> "duplicate_exact_activation"
+  | Session_id_mismatch -> "session_id_mismatch"
+  | Workspace_key_mismatch -> "workspace_key_mismatch"
+  | Invalid_ledger_revision _ -> "invalid_ledger_revision"
+  | Ledger_revision_mismatch -> "ledger_revision_mismatch"
+;;
+
+let store_error_code = function
+  | Lock_failed _ -> "lock_failed"
+  | Read_failed _ -> "read_failed"
+  | Decode_failed error -> "decode_failed." ^ decode_error_code error
+  | Write_failed _ -> "write_failed"
+  | Readback_mismatch -> "readback_mismatch"
+;;
+
 let store_error_to_string = function
   | Lock_failed detail -> "lock failed: " ^ detail
   | Read_failed error ->

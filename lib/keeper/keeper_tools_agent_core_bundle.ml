@@ -57,6 +57,17 @@ let make_tool_bundle_for_descriptors
       ()
   : tool_bundle
   =
+  let skill_surface_present =
+    task_instruction_skills <> []
+    || List.exists
+         (fun (skill : Keeper_skill_catalog.skill) -> skill.model_invocable)
+         (Keeper_skill_catalog.skills skill_catalog)
+  in
+  (match skill_surface_present, skill_activation_context with
+   | true, None ->
+     invalid_arg
+       "Skill-bearing Keeper bundle requires a frozen activation context"
+   | true, Some _ | false, Some _ | false, None -> ());
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory. in_playground and the runtime cache key need
      the call site's [cwd], which is unknown at turn start, so the factory

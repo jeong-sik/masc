@@ -197,7 +197,9 @@ let test_corrupt_ledger_is_typed () =
   output_string channel "not-json";
   close_out channel;
   match Ledger.load ~config ~trace_id with
-  | Error (Ledger.Decode_failed _) -> ()
+  | Error (Ledger.Decode_failed _ as error) ->
+    check string "typed cause code" "decode_failed.expected_object"
+      (Ledger.store_error_code error)
   | Error error ->
     fail ("corrupt ledger returned the wrong typed error: " ^ Ledger.store_error_to_string error)
   | Ok _ -> fail "corrupt ledger loaded"

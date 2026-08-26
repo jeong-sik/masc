@@ -184,8 +184,8 @@ let test_disabled_explicit_reference_is_readable_without_global_discovery () =
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~record_activation:(fun observed ->
         incr activation_attempts;
-        Error
-          (Masc.Keeper_skill_activation_recorder.Task_scope_missing observed))
+        ignore observed;
+        Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
       ~instruction_skills:
         [ reference, selected.skill.description, selected.skill.body ]
       ()

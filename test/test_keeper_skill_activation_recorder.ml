@@ -20,12 +20,6 @@ let trace_id value =
   | Error detail -> fail detail
 ;;
 
-let task_id value =
-  match Keeper_id.Task_id.of_string value with
-  | Ok value -> value
-  | Error detail -> fail detail
-;;
-
 let source_id value =
   match Skill_source_config.source_id_of_string value with
   | Ok value -> value
@@ -71,7 +65,7 @@ let with_session operation =
     (fun () -> operation config trace_id)
 ;;
 
-let make_context ~trace_id ~task_id ~task_references =
+let make_context ~trace_id ~task_scope =
   match
     Recorder.make
       ~trace_id
@@ -80,8 +74,7 @@ let make_context ~trace_id ~task_id ~task_references =
            ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
            ~absolute_turn:3)
       ~snapshot_revision
-      ~task_id
-      ~task_references
+      ~task_scope
   with
   | Ok context -> context
   | Error error -> fail (Recorder.error_to_string error)
@@ -94,8 +87,9 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
   let context =
     make_context
       ~trace_id
-      ~task_id:(Some (task_id "task-007"))
-      ~task_references:[ task_reference ]
+      ~task_scope:
+        (Keeper_task_skill_turn.Task
+           { task_id = "task-007"; references = [ task_reference ] })
   in
   (match Recorder.record_instruction ~config context task_reference with
    | Ok _ -> ()
@@ -124,18 +118,23 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
      | _ -> fail "exact references did not derive the expected origins")
 ;;
 
-let test_task_reference_without_task_scope_fails_closed () =
-  with_session @@ fun config trace_id ->
+let test_invalid_task_scope_fails_closed () =
+  let trace_id = trace_id "trace-recorder" in
   let task_reference = reference 'a' in
-  let context =
-    make_context ~trace_id ~task_id:None ~task_references:[ task_reference ]
-  in
-  match Recorder.record_instruction ~config context task_reference with
-  | Error (Recorder.Task_scope_missing observed) ->
-    check bool "same exact reference" true
-      (Skill_reference.equal task_reference observed)
+  match
+    Recorder.make
+      ~trace_id
+      ~turn_ref:
+        (Ids.Turn_ref.make ~trace_id:"trace-recorder" ~absolute_turn:1)
+      ~snapshot_revision
+      ~task_scope:
+        (Keeper_task_skill_turn.Task
+           { task_id = ""; references = [ task_reference ] })
+  with
+  | Error (Recorder.Invalid_task_id task_id) ->
+    check string "rejected exact id" "" task_id
   | Error error -> fail (Recorder.error_to_string error)
-  | Ok _ -> fail "Task-declared activation invented a session origin"
+  | Ok _ -> fail "invalid Task scope was accepted"
 ;;
 
 let test_turn_scope_mismatch_is_rejected_before_recording () =
@@ -145,8 +144,7 @@ let test_turn_scope_mismatch_is_rejected_before_recording () =
       ~trace_id:trace
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:1)
       ~snapshot_revision
-      ~task_id:None
-      ~task_references:[]
+      ~task_scope:Keeper_task_skill_turn.No_task
   with
   | Error Recorder.Turn_scope_mismatch -> ()
   | Error error -> fail (Recorder.error_to_string error)
@@ -159,8 +157,8 @@ let () =
     [ ( "recording"
       , [ test_case "exact refs derive Task and session origins" `Quick
             test_task_and_session_origins_are_derived_from_exact_refs
-        ; test_case "missing Task scope fails closed" `Quick
-            test_task_reference_without_task_scope_fails_closed
+        ; test_case "invalid Task scope fails closed" `Quick
+            test_invalid_task_scope_fails_closed
         ; test_case "turn scope mismatch is rejected" `Quick
             test_turn_scope_mismatch_is_rejected_before_recording
         ] )

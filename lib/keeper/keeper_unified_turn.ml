@@ -677,8 +677,8 @@ let run_keeper_cycle
                let current_task =
                  Keeper_world_observation_inputs.read_current_task ~config ~meta
                in
-               let task_skill_references =
-                 Keeper_task_skill_turn.references_of_observation current_task
+               let task_skill_scope =
+                 Keeper_task_skill_turn.scope_of_observation current_task
                in
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_of_store ~config
@@ -904,7 +904,7 @@ let run_keeper_cycle
                            ; profile_defaults
                            ; publication_recovery
                            ; skill_snapshot
-                           ; task_skill_references
+                           ; task_skill_scope
                            ; shared_context
                            ; trajectory_acc
                            ; turn_id = keeper_turn_id

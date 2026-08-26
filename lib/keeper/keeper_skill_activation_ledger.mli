@@ -63,6 +63,8 @@ type store_error =
   | Readback_mismatch
 
 val store_error_to_string : store_error -> string
+val store_error_code : store_error -> string
+val decode_error_code : decode_error -> string
 
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activations : t -> activation list

@@ -254,6 +254,19 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
           ~speaker_name:"vincent"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
+  (* Discord answers the same question through its own gateway, and the label
+     is drawn by the same code. Pinned on both connectors so a fix to one does
+     not quietly leave the other reading ids. *)
+  check string "a named discord channel reads as the room"
+    "nabi \xc2\xb7 discord #\xec\x9d\xbc\xeb\xb0\x98"
+    (label
+       (addressed ~speaker_name:"nabi"
+          ~surface:
+            (surface "discord"
+               [ "channel_id", `String "1493253256019972230"
+               ; "channel_name", `String "\xec\x9d\xbc\xeb\xb0\x98"
+               ])
+          "from discord"));
   (* The name where the workspace let us ask, the id where it did not. Both
      answer "which room"; only one of them reads as a place. *)
   check string "a named channel reads as the room"

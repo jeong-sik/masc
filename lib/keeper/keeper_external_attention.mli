@@ -17,6 +17,7 @@ type surface_ref = Surface_ref.t =
   | Discord of {
       guild_id : string option;
       channel_id : string;
+      channel_name : string option;
       parent_channel_id : string option;
       thread_id : string option;
     }

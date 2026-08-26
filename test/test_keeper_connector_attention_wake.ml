@@ -89,6 +89,7 @@ let discord_surface =
     {
       guild_id = Some "guild-1";
       channel_id = "chan-1";
+      channel_name = None;
       parent_channel_id = None;
       thread_id = None;
     }

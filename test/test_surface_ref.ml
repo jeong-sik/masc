@@ -24,11 +24,12 @@ let all_variants =
       {
         guild_id = Some "g1";
         channel_id = "c1";
+        channel_name = None;
         parent_channel_id = Some "p1";
         thread_id = Some "t1";
       }
   ; S.Discord
-      { guild_id = None; channel_id = "c2"; parent_channel_id = None; thread_id = None }
+      { guild_id = None; channel_id = "c2"; channel_name = None; parent_channel_id = None; thread_id = None }
   ; S.Slack { team_id = Some "T1"; channel_id = "C9"; channel_name = None; thread_ts = None }
   ; S.Webhook { source = "ci"; event_id = "evt-7" }
   ; S.Agent
@@ -56,7 +57,7 @@ let test_lane_label_goldens () =
   check string "discord" "discord"
     (S.lane_label
        (S.Discord
-          { guild_id = None; channel_id = "c"; parent_channel_id = None; thread_id = None }));
+          { guild_id = None; channel_id = "c"; channel_name = None; parent_channel_id = None; thread_id = None }));
   check string "agent" "agent" (S.lane_label S.Agent);
   check string "broadcast" "broadcast" (S.lane_label S.Broadcast);
   check string "gate label verbatim" "my-connector"
@@ -90,7 +91,7 @@ let test_typed_write_round_trips () =
   with_base "surface-ref-write" (fun base ->
       let ref_ =
         S.Discord
-          { guild_id = Some "g1"; channel_id = "c1"; parent_channel_id = None; thread_id = None }
+          { guild_id = Some "g1"; channel_id = "c1"; channel_name = None; parent_channel_id = None; thread_id = None }
       in
       Store.append_user_message ~base_dir:base ~keeper_name:"alice"
         ~content:"hello" ~surface:ref_ ();

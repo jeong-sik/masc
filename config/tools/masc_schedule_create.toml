@@ -27,34 +27,31 @@ seconds are accepted and truncated. Provide this, due_at_unix, or a calendar \
 recurrence (daily/cron) that can derive the first due time."""
 
 [[params]]
-name = "payload"
-type = "object"
-additional_properties = true
-description = """
-Typed schedule payload envelope: {kind:string, schema_version:int, \
-body:object}."""
-
-[[params]]
-name = "payload_kind"
+name = "keeper_name"
 type = "string"
-description = """
-Payload kind used when payload is omitted. The server consumer accepts \
-masc.keeper_wake."""
+required = true
+description = "The Keeper to wake."
 
 [[params]]
-name = "payload_schema_version"
-type = "integer"
-description = "Payload schema version used when payload is omitted."
+name = "message"
+type = "string"
+required = true
+description = """
+What the Keeper is being woken to do. It reads this and nothing else about \
+why the wake exists, so write the work, not a reminder that work exists."""
 
 [[params]]
-name = "payload_body"
-type = "object"
-additional_properties = true
+name = "title"
+type = "string"
+description = "Short label for this wake in listings. Falls back to message."
+
+[[params]]
+name = "urgency"
+type = "string"
+enum = ["immediate", "normal", "low"]
 description = """
-Payload body used when payload is omitted. For masc.keeper_wake use \
-{keeper_name, message, optional title, optional urgency}. Result delivery \
-policy is stamped by the runtime from the current continuation and cannot be \
-supplied by the model."""
+Where the wake sits in the Keeper's queue when it lands. Defaults to \
+normal."""
 
 [[params]]
 name = "schedule_id"

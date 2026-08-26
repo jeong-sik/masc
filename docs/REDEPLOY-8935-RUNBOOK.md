@@ -95,6 +95,39 @@ meta 검사 범위는 keeper meta(`<base>/.masc/keepers/*.json`)뿐이다. `goal
 
 스토어 버전이 올라간 바이너리(이벤트 큐 v16 → v17, exact-lane run registry v4 → v5 등)를 올릴 때는 이전 버전 파일을 이 단계에서 지운다. 새 바이너리는 옛 파일을 열지 않으므로 남겨 두면 아무 도구도 다시 보지 않는 고아 파일이 된다. 지우기 전에 크기와 행 수를 기록한다 (`wc -lc <base>/.masc/exact-lane-runs-v4.jsonl`).
 
+### schedule signal ledger 은퇴 (payload envelope 평탄화 배포에서 1회)
+
+schedule payload 에서 `schema_version` 을 뺀 바이너리를 처음 올릴 때만 해당한다. 저장된 signal 행은 `payload_digest` 와 `occurrence_id` 를 payload 로부터 다시 계산해 대조하는데, payload 모양이 바뀌었으니 전 행이 어긋난다. preflight 는 첫 어긋난 행에서 멈춘다. board attention candidate ledger 와 같은 방식으로 은퇴시킨다 — 옛 행을 읽는 코드는 만들지 않는다.
+
+```bash
+# 서버 정지 상태에서. 지우기 전에 규모를 기록한다.
+find <base>/.masc/schedules/signals -name '*.jsonl' | wc -l
+find <base>/.masc/schedules/signals -name '*.jsonl' -exec cat {} + | wc -l
+rm -rf <base>/.masc/schedules/signals <base>/.masc/schedules/signal_keys.json
+```
+
+`signal_keys.json` 은 이미 보낸 occurrence 를 다시 안 보내려고 두는 id 목록이라 같이 지운다. 남겨 두면 새 모양으로 계산한 id 와 안 맞아 아무 것도 막지 못한다. 다시 보낼 위험은 상태가 `Due` 인 schedule 에만 있으니, 지우기 전에 `Due` 가 0건인지 확인한다.
+
+```bash
+python3 -c "import json;d=json.load(open('<base>/.masc/schedules.json'));print(sum(1 for s in d['schedules'] if s.get('status')=='due'))"
+```
+
+`schedules.json` 은 지우지 않는다. 여기에는 아직 안 온 wake 가 들어 있다. 대신 payload 에 남은 `schema_version` 을 턴다. 디코더가 안 읽는 필드라 남겨 둬도 동작에는 영향이 없지만, 남겨 두면 다음 사람이 그게 뭔지 다시 찾아본다.
+
+```bash
+python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("<base>/.masc/schedules.json")
+d = json.loads(p.read_text())
+n = 0
+for s in d["schedules"]:
+    if (s.get("payload") or {}).pop("schema_version", None) is not None:
+        n += 1
+p.write_text(json.dumps(d))
+print("stripped", n)
+PY
+```
+
 ## 7. 기동
 
 provider key가 로드된 interactive shell에서 실행한다. launchd 경로(`com.jeong-sik.masc-main`)는 `~/.zshenv`를 읽지 않아 provider 크리덴셜이 조용히 사라진다.

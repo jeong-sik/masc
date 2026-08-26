@@ -137,7 +137,6 @@ let automated id : Schedule_domain.actor =
 let schedule_payload =
   `Assoc
     [ "kind", `String "keeper.waiting_test"
-    ; "schema_version", `Int 1
     ; "body", `Assoc [ "message", `String "wait for schedule" ]
     ]
 ;;

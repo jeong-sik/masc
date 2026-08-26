@@ -63,7 +63,7 @@ type recurrence =
     The schedule domain does not interpret payload kind or body fields, but it
     does require a typed envelope so producers cannot persist an ambiguous raw
     string/null/list as future intent. Serialized shape:
-    [{ kind: string; schema_version: int; body: object }]. *)
+    [{ kind: string; body: object }]. *)
 type payload
 
 type schedule_request =

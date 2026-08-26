@@ -140,44 +140,45 @@ let actor_from_args args ~prefix ~default_id ~default_kind =
   else Ok Schedule_domain.{ id; kind; display_name }
 ;;
 
-let generic_payload_from_args args =
-  let* kind = required_string args "payload_kind" in
-  let schema_version =
-    (* DET-OK: absent schema_version means the stable schedule payload v1
-       contract, not provider-derived guessing. *)
-    optional_int args "payload_schema_version" |> Option.value ~default:1
+(* The kind the runtime stamps on every schedule it creates. Written as a
+   match on the projection's closed variant rather than as a constant: a
+   second kind added there stops the build here, which is where the decision
+   about what this tool asks a caller for belongs. *)
+let stamped_kind : Schedule_payload_projection.known_kind -> string = function
+  | Schedule_payload_projection.Keeper_wake -> Schedule_supported_kinds.keeper_wake
+;;
+
+(* One kind exists, so the tool takes its fields directly instead of an
+   envelope the caller assembles. The envelope was three params -- kind,
+   schema version, body -- whose only correct values were a fixed string, the
+   integer 1, and an object with two required keys. Callers guessed, and two
+   thirds of the calls were rejected on shape before the schedule was ever
+   considered. [result_delivery] is absent on purpose: it is stamped from the
+   creating turn's continuation and a supplied one is not honoured. *)
+let payload_from_args args =
+  let* keeper_name = required_string args "keeper_name" in
+  let* message = required_string args "message" in
+  let optional name = function
+    | None -> []
+    | Some value -> [ name, `String value ]
   in
-  let* body =
-    match Json_util.assoc_member_opt "payload_body" args with
-    | None -> Ok (`Assoc [])
-    | Some (`Assoc _ as body) -> Ok body
-    | Some _ -> Error "payload_body must be an object"
+  let body =
+    [ "keeper_name", `String keeper_name; "message", `String message ]
+    @ optional "title" (string_opt args "title")
+    @ optional "urgency" (string_opt args "urgency")
   in
   Ok
     (`Assoc
-      [ "kind", `String kind; "schema_version", `Int schema_version; "body", body ])
+      [ "kind", `String (stamped_kind Schedule_payload_projection.Keeper_wake)
+      ; "body", `Assoc body
+      ])
 ;;
 
-let payload_from_args args =
-  match Json_util.assoc_member_opt "payload" args with
-  | Some (`Assoc _ as payload) -> Ok payload
-  | Some _ -> Error "payload must be an object envelope"
-  | None -> generic_payload_from_args args
-;;
-
-let schedule_payload_unsupported_labels ~phase = [ "phase", phase ]
-
-let record_unsupported_payload_creation rejection =
-  match rejection with
-  | Schedule_payload_projection.Creation_unsupported_kind _ ->
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_schedule_payload_unsupported_total
-      ~labels:(schedule_payload_unsupported_labels ~phase:"creation")
-      ()
-  | Schedule_payload_projection.Creation_invalid_payload _
-  | Schedule_payload_projection.Creation_invalid_supported_payload _ -> ()
-;;
-
+(* [schedule_payload_unsupported_total] is no longer counted here. The label
+   was phase=creation, and this tool stamps the kind, so an unsupported kind
+   cannot arrive through it any more. The dispatch-phase producer in
+   [Server_schedule_consumers] is what still meets one, on a row stored before
+   a kind was retired. *)
 let validate_known_payload_request ~payload =
   match
     Schedule_payload_projection.validate_request_payload_for_creation_detailed
@@ -185,7 +186,6 @@ let validate_known_payload_request ~payload =
   with
   | Ok () -> Ok ()
   | Error rejection ->
-    record_unsupported_payload_creation rejection;
     Error (Schedule_payload_projection.creation_rejection_message rejection)
 ;;
 

@@ -520,6 +520,12 @@ let payload_to_yojson payload =
 
 let payload_of_yojson = function
   | `Assoc fields ->
+    let* () =
+      Json_util.reject_unknown_fields
+        ~surface:"schedule payload"
+        ~allowed:[ "kind"; "body" ]
+        fields
+    in
     let* kind = string_field "kind" fields in
     let* kind = nonempty "payload.kind" kind in
     let* body = assoc_field "body" fields in

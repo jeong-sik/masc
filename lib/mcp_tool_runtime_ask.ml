@@ -118,7 +118,8 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
      attention for an answer that reaches nobody. Refuse at the write. *)
   if not (Keeper_registry.is_registered ~base_path keeper_name) then
     reject
-      (Printf.sprintf "%s is not a registered keeper, so a question from it could not be read back"
+      (Printf.sprintf
+         "unknown keeper %s: a question from a caller the registry does not hold could not be read back"
          keeper_name)
   else
   match list_field "questions" ctx.arguments with

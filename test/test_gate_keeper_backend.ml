@@ -1577,7 +1577,9 @@ let test_keeper_stream_bridge_quarantines_transport_failed_scope () =
                    error.kind);
               check bool (label ^ " exact occurrence") true
                 (Option.exists
-                   (fun occurrence -> occurrence.block_index = 0)
+                   (fun
+                     (occurrence : Keeper_chat_events.tool_stream_occurrence)
+                     -> occurrence.block_index = 0)
                    error.quarantined_occurrence)
             | _ -> fail (label ^ " did not quarantine one exact occurrence"))
          [ ( "active"

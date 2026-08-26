@@ -190,6 +190,9 @@ let with_bundle_tools f =
            ~registry:publication_recovery_registry
            ~keeper_name:meta.name
        in
+       let composition_plan_index =
+         Masc.Keeper_tool_composition_plan_index.create ()
+       in
        let bundle =
          Keeper_tools_agent_core_bundle.make_tool_bundle
            ~config
@@ -198,13 +201,16 @@ let with_bundle_tools f =
            ~ctx_snapshot
            ~skill_catalog:(skill_catalog ())
            ~identity_tools:(identity_tools ~base_path:dir)
+           ~composition_plan_index
            ()
        in
-       Fun.protect ~finally:bundle.cleanup (fun () -> f bundle.tools))
+       Fun.protect ~finally:bundle.cleanup (fun () ->
+         f composition_plan_index bundle.tools))
 ;;
 
-let with_bundle f = with_bundle_tools (fun tools ->
-  f (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
+let with_bundle f = with_bundle_tools (fun composition_plan_index tools ->
+  f composition_plan_index
+    (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that
@@ -218,7 +224,7 @@ let run_tool (tool : Agent_core.Tool.t) input =
 (* Guards against an empty-list false pass: a bundle that produced nothing
    would satisfy every assertion below by vacuity. *)
 let test_the_bundle_is_not_empty () =
-  with_bundle (fun names ->
+  with_bundle (fun _ names ->
     check bool "the keeper is handed tools at all" true (names <> []);
     (* Without these the gate would pass by not looking at anything. Each is a
        kind of undescribed tool the policy has an arm for. *)
@@ -240,7 +246,7 @@ let test_the_bundle_is_not_empty () =
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun tools ->
+  with_bundle_tools (fun _ tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -263,11 +269,11 @@ let test_the_skill_tool_serves_the_body () =
 ;;
 
 let test_every_bundle_tool_is_classifiable () =
-  with_bundle (fun names ->
+  with_bundle (fun composition_plan_index names ->
     let unclassifiable =
       List.filter
         (fun tool_name ->
-           not (Policy.classifies ~tool_name))
+           not (Policy.classifies ~composition_plan_index ~tool_name))
         names
     in
     match unclassifiable with
@@ -287,7 +293,7 @@ let test_every_bundle_tool_is_classifiable () =
 (* Names are unique, so a duplicate cannot hide an unclassifiable twin behind
    a classifiable one of the same name. *)
 let test_bundle_names_are_unique () =
-  with_bundle (fun names ->
+  with_bundle (fun _ names ->
     check
       int
       "bundle model names are unique"
@@ -296,7 +302,7 @@ let test_bundle_names_are_unique () =
 ;;
 
 let test_bundle_matches_expected_projection () =
-  with_bundle (fun names ->
+  with_bundle (fun _ names ->
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         (* Named from the same fixture the bundle was handed. Passing [] here

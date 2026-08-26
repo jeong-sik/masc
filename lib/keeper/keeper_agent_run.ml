@@ -672,6 +672,11 @@ let run_turn
   in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
+  let composition_plan_index =
+    Option.map
+      (fun (gate : Keeper_tool_approval_gate.t) -> gate.composition_plan_index)
+      approval_gate
+  in
   let setup =
     Keeper_run_tools.prepare_agent_setup
       ~config
@@ -681,6 +686,7 @@ let run_turn
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
+      ?composition_plan_index
       ~turn_ctx_cell
       ~ctx_work
       ~session

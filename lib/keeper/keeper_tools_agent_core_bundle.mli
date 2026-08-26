@@ -24,6 +24,9 @@ val make_tool_bundle
            here: the caller is the part that also has to tell the tool-name
            projection about them, and computing them in two places is how
            the two would come to disagree. Absent or empty adds nothing. *)
+  -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
+       (** Turn-local approval state. Composition plans are recorded here
+           while their tools are materialized. *)
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Keeper_tools_agent_core.tool_bundle

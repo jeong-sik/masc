@@ -8,11 +8,6 @@ type t =
 
 let create () = { rows = []; mutex = Stdlib.Mutex.create () }
 
-(* Created at load, so a bundle built on one fiber and a policy consulted on
-   another see the same instance. *)
-let shared_index = create ()
-let shared () = shared_index
-
 let record t ~composition ~node_tools =
   Stdlib.Mutex.protect t.mutex (fun () ->
     let without =
@@ -24,5 +19,3 @@ let record t ~composition ~node_tools =
 let node_tools t ~composition =
   Stdlib.Mutex.protect t.mutex (fun () -> List.assoc_opt composition t.rows)
 ;;
-
-let forget_all t = Stdlib.Mutex.protect t.mutex (fun () -> t.rows <- [])

@@ -79,9 +79,9 @@ let ad_hoc_plan_nodes input =
   | _ -> None
 ;;
 
-let rec verdict_for ~tool_name ~input =
+let rec verdict_for ?composition_plan_index ~tool_name ~input =
   match descriptor_for tool_name with
-  | None -> verdict_for_undescribed ~tool_name ~input
+  | None -> verdict_for_undescribed ?composition_plan_index ~tool_name ~input
   | Some descriptor -> (
       match Descriptor.readonly_for_input descriptor ~input with
       | Some true ->
@@ -161,7 +161,7 @@ and node_asks_for_approval node =
    empty input would read that as "cannot classify", which is the empty-input
    trap this policy already avoids one level down when it judges plan nodes on
    static facts rather than on a fabricated [{}]. *)
-and undescribed_kind tool_name =
+and undescribed_kind ?composition_plan_index tool_name =
   if String.equal tool_name Keeper_tool_composition_catalog.status_tool_name
   then Control (Run { because = "reads a composition request this keeper made" })
   else if String.equal tool_name Keeper_tool_composition_catalog.cancel_tool_name
@@ -176,9 +176,8 @@ and undescribed_kind tool_name =
   then Ad_hoc_plan
   else
     match
-      Keeper_tool_composition_plan_index.node_tools
-        (Keeper_tool_composition_plan_index.shared ())
-        ~composition:tool_name
+      Option.bind composition_plan_index (fun index ->
+        Keeper_tool_composition_plan_index.node_tools index ~composition:tool_name)
     with
     | Some node_tools -> Composition node_tools
     | None ->
@@ -201,8 +200,8 @@ and verdict_of_nodes node_tools =
             (List.length node_tools)
       }
 
-and verdict_for_undescribed ~tool_name ~input =
-  match undescribed_kind tool_name with
+and verdict_for_undescribed ?composition_plan_index ~tool_name ~input =
+  match undescribed_kind ?composition_plan_index tool_name with
   | Control verdict -> verdict
   | Attached_service (Some true) ->
     Run { because = "the service says this tool only reads" }
@@ -231,11 +230,11 @@ and verdict_for_undescribed ~tool_name ~input =
     Ask { because = unclassifiable_because }
 ;;
 
-let classifies ~tool_name =
+let classifies ?composition_plan_index ~tool_name =
   match descriptor_for tool_name with
   | Some _ -> true
   | None ->
-    (match undescribed_kind tool_name with
+    (match undescribed_kind ?composition_plan_index tool_name with
      | Control _ | Composition _ | Ad_hoc_plan | Attached_service _ -> true
      | Unknown -> false)
 ;;

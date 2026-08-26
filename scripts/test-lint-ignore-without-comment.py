@@ -63,6 +63,20 @@ CASES: list[tuple[str, bool]] = [
     ("", False),
     # A quote inside a string must not swallow the rest of the file.
     ("let quote_char () = char_is '\"' && ignore (f x) = ()", True),
+    ("", False),
+    # The OCaml lexer reads string literals inside comments, so a `"*)"`
+    # written in prose does not close the comment. Ending it there left the
+    # trailing quote opening a string nothing had opened, which pushed the
+    # scan out of phase in both directions: a real call went unseen, and a
+    # word inside an ordinary string was reported as one.
+    ('(* the close marker "*)" written in prose *)', False),
+    ("let after_quoted_close () = ignore (f x)", True),
+    ("", False),
+    ('(* a {|*)|} quoted literal in prose *)', False),
+    ("let after_quoted_literal () = ignore (f x)", True),
+    ("", False),
+    ('(* prose mentioning "*)" again *)', False),
+    ('let string_after_comment () = log "ignore this text"', False),
 ]
 
 

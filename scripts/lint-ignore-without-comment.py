@@ -76,6 +76,33 @@ def blank_noncode(src: str) -> str:
             if out[k] != "\n":
                 out[k] = " "
 
+    def consume_double_quoted(i: int) -> int:
+        """Blank a `"`-delimited literal and return the index past it."""
+        blank(i, i + 1)
+        i += 1
+        while i < n:
+            if src[i] == "\\" and i + 1 < n:
+                blank(i, i + 2)
+                i += 2
+                continue
+            if src[i] == '"':
+                blank(i, i + 1)
+                return i + 1
+            blank(i, i + 1)
+            i += 1
+        return i
+
+    def consume_quoted_literal(i: int) -> int | None:
+        """Blank a `{id|...|id}` literal, or return None if this is not one."""
+        m = QUOTED_OPEN.match(src, i)
+        if not m:
+            return None
+        close = "|" + m.group(1) + "}"
+        end = src.find(close, m.end())
+        end = n if end < 0 else end + len(close)
+        blank(i, end)
+        return end
+
     while i < n:
         if depth:
             if src.startswith("(*", i):
@@ -87,6 +114,18 @@ def blank_noncode(src: str) -> str:
                 depth -= 1
                 blank(i, i + 2)
                 i += 2
+                continue
+            # The OCaml lexer reads string literals inside comments, so a
+            # `"*)"` written in prose does not close the comment. Skipping
+            # them here would end the comment early and leave the trailing
+            # quote to open a string that was never opened -- which both
+            # invents call sites inside real strings and hides real ones.
+            if src[i] == '"':
+                i = consume_double_quoted(i)
+                continue
+            end = consume_quoted_literal(i)
+            if end is not None:
+                i = end
                 continue
             blank(i, i + 1)
             i += 1
@@ -101,28 +140,12 @@ def blank_noncode(src: str) -> str:
         c = src[i]
 
         if c == '"':
-            blank(i, i + 1)
-            i += 1
-            while i < n:
-                if src[i] == "\\" and i + 1 < n:
-                    blank(i, i + 2)
-                    i += 2
-                    continue
-                if src[i] == '"':
-                    blank(i, i + 1)
-                    i += 1
-                    break
-                blank(i, i + 1)
-                i += 1
+            i = consume_double_quoted(i)
             continue
 
         if c == "{":
-            m = QUOTED_OPEN.match(src, i)
-            if m:
-                close = "|" + m.group(1) + "}"
-                end = src.find(close, m.end())
-                end = n if end < 0 else end + len(close)
-                blank(i, end)
+            end = consume_quoted_literal(i)
+            if end is not None:
                 i = end
                 continue
 

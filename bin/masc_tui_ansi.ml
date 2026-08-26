@@ -74,6 +74,8 @@ module Theme = struct
     ; keeper : string
     ; tool : string
     ; quiet : string
+    ; probe : string
+    ; message : string
     }
 
   let resolved_cache : resolved option Atomic.t = Atomic.make None
@@ -99,6 +101,8 @@ module Theme = struct
         ; keeper = of_colour Masc_tui_theme.Bright_blue
         ; tool = of_colour Masc_tui_theme.Bright_magenta
         ; quiet = of_colour Masc_tui_theme.Bright_black
+        ; probe = of_colour Masc_tui_theme.Bright_cyan
+        ; message = of_colour Masc_tui_theme.Bright_magenta
         }
       in
       if Atomic.compare_and_set resolved_cache previous (Some next) then next
@@ -120,6 +124,13 @@ module Theme = struct
   let keeper_origin () = (resolved ()).keeper
   let tool_origin () = (resolved ()).tool
   let quiet_origin () = (resolved ()).quiet
+
+  (* The two next-action colours that are not a health reading. A keeper about
+     to be probed is not unwell, and one a person just spoke to is not well --
+     they say which kind of thing is about to happen, so they draw through
+     their own names rather than borrowing [ok] and [bad]. *)
+  let action_probe () = (resolved ()).probe
+  let action_message () = (resolved ()).message
   let selection = Masc_tui_theme.selection
   let border_focus = Masc_tui_theme.border_focus
 

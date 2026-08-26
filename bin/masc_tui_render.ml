@@ -2311,8 +2311,21 @@ let keeper_action_color
   | None -> Ansi.dim
   | Some Status.Auto_restart -> (Theme.bad ())
   | Some Status.Recover -> (Theme.warn ())
-  | Some Status.Probe -> Ansi.cyan
-  | Some Status.Direct_message -> (Theme.ok ())
+  | Some Status.Probe -> Theme.action_probe ()
+  (* Green until this measurement. The cell draws four readings in four
+     channels and this is the only one carried by colour alone, so the four
+     colours have to stay apart for a reader who cannot separate red from
+     green -- roughly one man in twelve.
+
+     Simulated (Machado 2009, severity 1.0) over the twelve base16 schemes the
+     contrast harness measures, the closest pair was not red against green but
+     [Recover] against [Direct_message] -- yellow and green both arrive
+     yellowish -- at 0.015 in Oklab. Magenta is the only candidate that
+     improves every reading rather than trading one for another: 0.070 to
+     0.121 for ordinary vision, 0.015 to 0.044 for deuteranopia, 0.019 to
+     0.027 for protanopia. Blue and white came out worse than green even for
+     ordinary vision, because they close on [Probe]'s cyan. *)
+  | Some Status.Direct_message -> Theme.action_message ()
 
 let keeper_state_glyph ~paused ~(health : Tui_decode.keeper_health option) =
   Masc_tui_keeper_mark.glyph ~paused

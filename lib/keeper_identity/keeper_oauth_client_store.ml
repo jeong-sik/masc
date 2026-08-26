@@ -88,6 +88,11 @@ let write_whole path value =
   Unix.rename temp path
 ;;
 
+let remove_if_present path =
+  try Sys.remove path with
+  | Sys_error _ when not (Sys.file_exists path) -> ()
+;;
+
 let save ~dir ~provider { client_id; client_secret; scopes } =
   try
     (* Secret first, id second. The id is what {!load} keys on, so writing it
@@ -95,10 +100,10 @@ let save ~dir ~provider { client_id; client_secret; scopes } =
        of a public one -- which would fail at the token endpoint with the
        server's word for "who are you" and nothing here saying why. *)
     (match scopes with
-     | [] -> ()
+     | [] -> remove_if_present (scopes_path ~dir ~provider)
      | scopes -> write_whole (scopes_path ~dir ~provider) (String.concat " " scopes));
     (match client_secret with
-     | None -> ()
+     | None -> remove_if_present (secret_path ~dir ~provider)
      | Some secret -> write_whole (secret_path ~dir ~provider) secret);
     write_whole (file_path ~dir ~provider) client_id;
     Ok ()

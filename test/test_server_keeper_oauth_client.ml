@@ -187,6 +187,25 @@ let test_no_scopes_means_ask_for_what_the_service_publishes () =
   check Alcotest.bool "nothing recorded" true
     (member payload "scopes" = Some (`List []))
 
+let test_clearing_an_app_removes_old_secret_and_scopes () =
+  let base_path = base_path () in
+  let _ =
+    set ~scopes:"channels:read chat:write" base_path
+      ~client_secret:(Some "old-secret")
+  in
+  let _ = set base_path ~client_secret:None in
+  let dir = Filename.concat (Filename.concat base_path ".masc") "identity" in
+  match Store.load ~dir ~provider:(provider_or_fail "slack") with
+  | Ok (Some credentials) ->
+    check
+      (Alcotest.option Alcotest.string)
+      "the old secret is gone" None credentials.Store.client_secret;
+    check
+      (Alcotest.list Alcotest.string)
+      "the old scope override is gone" [] credentials.Store.scopes
+  | Ok None -> Alcotest.fail "clearing optional fields removed the client id"
+  | Error message -> Alcotest.failf "reading cleared app failed: %s" message
+
 let () =
   Alcotest.run "server_keeper_oauth_client"
     [ ( "recording an operator's own app",
@@ -210,5 +229,7 @@ let () =
             test_recorded_scopes_are_what_gets_asked_for;
           Alcotest.test_case "no scopes means what the service publishes"
             `Quick test_no_scopes_means_ask_for_what_the_service_publishes;
+          Alcotest.test_case "clearing removes old secret and scopes" `Quick
+            test_clearing_an_app_removes_old_secret_and_scopes;
         ] );
     ]

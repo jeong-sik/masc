@@ -3717,6 +3717,26 @@ let write_to_terminal payload =
   output_string stdout payload;
   flush stdout
 
+(* Where a reference lands, and what it opens when it gets there.
+
+   The surfaces already print [masc://] references beside what they name and
+   [Y] already copies the one under the cursor. Reading that same reference
+   back is the other half: without it the screen knows where the answer is and
+   the operator still walks over by hand.
+
+   Tasks have no surface of their own -- they are listed on Overview -- so a
+   task reference lands there with its detail open, which is what "go to this
+   task" means on this screen. *)
+let follow_target (kind : Link.kind) (id : string) =
+  match kind with
+  | Link.Task -> Some (Overview, Some id)
+  | Link.Goal -> Some (Planning, Some id)
+  | Link.Board_post -> Some (Board, Some id)
+  | Link.Schedule -> Some (Schedules, Some id)
+  | Link.Fusion_run -> Some (Fusion, Some id)
+  | Link.Keeper -> Some (Keepers Keeper_list, Some id)
+;;
+
 let selected_surface_reference state =
   let board () =
     match state.board_mode with
@@ -8597,6 +8617,35 @@ let main () =
             | System_logs -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
+       (* Ctrl-] follows the reference under the cursor; Ctrl-T comes back.
+          vim's tag keys, because that is the move: the screen names a thing
+          somewhere else and this goes there and back. [Y] already copies the
+          same reference -- following it is what an operator did with the copy
+          anyway, by hand. *)
+       | Some "\x1d" ->
+           (match
+              Option.bind (selected_surface_reference state) (fun reference ->
+                Option.bind (Link.parse reference) (fun (kind, id) ->
+                  Option.map (fun target -> (reference, target))
+                    (follow_target kind id)))
+            with
+            | None -> ()
+            | Some (reference, (destination, opened)) ->
+                (* Recorded before the move, so the way back is where the
+                   operator actually was rather than where they land. *)
+                state.followed_from <- Some (state.view, None);
+                goto_surface state ~mailbox:async_messages destination;
+                (match destination, opened with
+                 | Overview, Some task_id -> state.task_detail_id <- Some task_id
+                 | _, _ -> ());
+                add_event state "system" ("followed " ^ reference))
+       | Some "\x14" ->
+           (match state.followed_from with
+            | None -> ()
+            | Some (origin, _) ->
+                state.followed_from <- None;
+                goto_surface state ~mailbox:async_messages origin;
+                add_event state "system" "back")
        | Some "Y" ->
            (match selected_surface_reference state with
             | Some reference ->

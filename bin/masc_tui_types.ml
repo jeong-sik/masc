@@ -1028,6 +1028,16 @@ type state = {
   mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: surface;
+  (* Where Esc goes back to after following a reference, and what was open
+     there. The surfaces print [masc://] references beside the thing they
+     name -- a verdict says which task it judged -- and following one is only
+     half a move: an operator who cannot get back reads the id, walks over by
+     hand, and loses the row they were on.
+
+     One step, not a stack. A second jump replaces the first: the way back
+     from two hops is the surface strip, and a stack that grew without a
+     screen showing it would be state nobody can see. *)
+  mutable followed_from: (surface * string option) option;
   mutable keeper_cursor: int;
   (* The runtime picker: the keeper it is choosing for, its cursor into the
      dispatchable catalogue, and the catalogue itself with where every keeper
@@ -1588,6 +1598,7 @@ let create_state
   connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;
+  followed_from = None;
   keeper_cursor = 0;
   runtime_pick_keeper = None;
   runtime_pick_cursor = 0;

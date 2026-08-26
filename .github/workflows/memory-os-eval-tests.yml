@@ -5,11 +5,6 @@ name: Memory OS Eval Tests
 # deterministic and make no network call, so this job needs no judge endpoint
 # or secret. The live judge path (calibrate/measure) stays off CI by design.
 on:
-  pull_request:
-    paths:
-      - 'scripts/memory_os_judge_eval.py'
-      - 'test/test_memory_os_judge_eval.py'
-      - '.github/workflows/memory-os-eval-tests.yml'
   push:
     branches: [main]
     paths:

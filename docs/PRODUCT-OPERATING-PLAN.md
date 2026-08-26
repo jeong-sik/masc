@@ -127,19 +127,10 @@ reconciles them, so they are the one place in this model where a label asserts a
 source behind it. Either the hand-labelling stops or PRs get a declaration of their own; today it is
 neither.
 
-What a PR does carry by machine is `pr/*`, projected from GitHub's own view of it by the `PR Status Labels`
-workflow out of `.github/pull-request-labels.json`.
-
-| Label | Set when |
-|-------|----------|
-| `pr/conflict` | `mergeable` is `CONFLICTING`. GitHub cannot build a merge commit in that state, so no new `pull_request` workflow starts and the checks stop updating - a PR that conflicted from the start shows none at all (#29332) |
-| `pr/review-changes` | the review decision is `CHANGES_REQUESTED` |
-| `pr/review-approved` | the review decision is `APPROVED` |
-| `pr/unresolved` | at least one review thread is still open |
-
-Nothing gates on these and nobody sets them by hand. Conflict flips when main moves and resolving a thread
-emits no webhook at all, so the workflow sweeps every open PR on push-to-main and once an hour as well as
-on PR and review events.
+The former `pr/*` status-label projection was retired with automatic PR
+workflows. GitHub's native mergeability, review decision, and unresolved-thread
+views are the source of truth instead of a second state machine maintained by
+scheduled reconciliation.
 
 ### PR rules
 

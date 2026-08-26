@@ -39,6 +39,9 @@ description: Walk the release checklist before shipping.
 - `disable-model-invocation`은 MASC에서 거부한다. 다른 클라이언트의 동명 키는 모델 호출
   전체를 제어하지만 MASC의 동작은 composition 도구 하나만 숨기므로 같은 이름으로 다른
   의미를 제공하지 않는다.
+- 실험적 `allowed-tools`도 MASC에서 거부한다. 표준의 이 필드는 도구 제한이 아니라
+  사전 승인 힌트인데 MASC의 승인 정책과 결합돼 있지 않다. 읽고 무시하거나 API에 노출해
+  허용된 권한처럼 보이게 하지 않는다. 모든 도구 호출은 기존 MASC 승인 게이트를 따른다.
 - 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다

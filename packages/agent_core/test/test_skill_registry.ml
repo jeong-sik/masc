@@ -83,10 +83,10 @@ let test_json_projection () =
     "body"
     "Inspect exactly."
     (projected |> member "body" |> to_string);
-  Alcotest.(check string)
-    "allowed tools scalar"
-    "Read Shell"
-    (projected |> member "allowed_tools" |> to_string);
+  Alcotest.(check bool)
+    "experimental approval hint is not projected"
+    true
+    (Yojson.Safe.equal (projected |> member "allowed_tools") `Null);
   Alcotest.(check string)
     "metadata"
     "masc"

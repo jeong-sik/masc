@@ -38,6 +38,7 @@ type error =
       { skill : string
       ; declared : string
       }
+  | Removed_allowed_tools of { skill : string }
   | Removed_disable_model_invocation of { skill : string }
   | Invalid_masc_composition_tool of
       { skill : string
@@ -167,8 +168,19 @@ let parse_skill ~directory content =
   match Agent_core.Skill_document.decode ~directory_name:directory content with
   | Unloadable diagnostics -> Error (Definition_rejected { directory; diagnostics })
   | Loaded { document; conformance } ->
-    let { Agent_core.Skill_document.name; description; body; extensions; _ } = document in
-    (match materialize_composition_tool ~skill:name extensions with
+    let { Agent_core.Skill_document.name
+        ; description
+        ; body
+        ; allowed_tools
+        ; extensions
+        ; _
+        }
+      = document
+    in
+    (match allowed_tools with
+     | Some _ -> Error (Removed_allowed_tools { skill = name })
+     | None ->
+       (match materialize_composition_tool ~skill:name extensions with
      | Error _ as error -> error
      | Ok materialize_tool ->
        (match composition_blocks body with
@@ -187,7 +199,7 @@ let parse_skill ~directory content =
           in
           Ok { name; description; body; conformance; surface })
      | Ok blocks ->
-       Error (Multiple_composition_blocks { skill = name; count = List.length blocks })))
+       Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))))
 ;;
 
 let empty = []
@@ -287,6 +299,10 @@ let error_to_string = function
       "skill %S: composition name %S must equal the skill name"
       skill
       declared
+  | Removed_allowed_tools { skill } ->
+    Printf.sprintf
+      "skill %S: allowed-tools is unsupported; MASC approval policy is authoritative"
+      skill
   | Removed_disable_model_invocation { skill } ->
     Printf.sprintf
       "skill %S: disable-model-invocation is not a MASC composition policy; use masc-composition-tool: false"

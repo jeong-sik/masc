@@ -50,7 +50,6 @@ let skill_to_json (skill : Skill_document.t) : Yojson.Safe.t =
      @ [ "body", `String skill.body ]
      @ opt_str "license" skill.license
      @ opt_str "compatibility" skill.compatibility
-     @ opt_str "allowed_tools" skill.allowed_tools
      @ [ ( "metadata"
          , `Assoc
              (List.map

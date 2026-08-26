@@ -301,7 +301,10 @@ current task 뿐 아니라 함께 든 task 의 스킬도 프롬프트·admission
   `compatibility`, `metadata`, 실험적 `allowed-tools`). 3단계 progressive disclosure
   (메타 ~100토큰 상시 / 본문 <5k 토큰 / 참조 파일 필요 시). 채택 클라이언트 40+
   (Claude Code, Codex, Gemini CLI, Cursor, OpenClaw, pi 등). masc는 휴대성을 위해
-  복구 가능한 스펙 편차를 거부하지 않고 `runtime_compatible` 진단으로 노출한다.
+  복구 가능한 스펙 편차를 거부하지 않고 `runtime_compatible` 진단으로 노출한다. 단,
+  `allowed-tools`는 도구 제한이 아니라 구현체별 사전 승인 힌트이므로 MASC 승인 정책과
+  병합하지 않는다. Keeper 카탈로그는 이 필드를 명시적으로 거부하고 공개 projection에서도
+  제거한다.
 - **Anthropic Tool Search Tool (GA)**: `defer_loading: true` 도구는 컨텍스트에서
   빠지고 검색 시 `tool_reference` 로 인라인 확장(캐시 보존). 공식 수치 ~55k 토큰의
   85%+ 절감, 도구 30–50개 초과 시 선택 정확도 저하. 커스텀 검색 도구가

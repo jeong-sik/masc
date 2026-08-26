@@ -600,6 +600,25 @@ let test_legacy_disable_model_invocation_is_rejected () =
   | Ok _ -> fail "legacy key was silently assigned MASC-specific semantics"
 ;;
 
+let test_allowed_tools_is_rejected () =
+  let document =
+    {|---
+name: release-checklist
+description: Walk the release checklist before shipping.
+allowed-tools: Read Bash(git:*)
+---
+
+# Release checklist
+|}
+  in
+  match Skill_catalog.parse_skill ~directory:"release-checklist" document with
+  | Error (Skill_catalog.Removed_allowed_tools { skill }) ->
+    check string "error names the skill" "release-checklist" skill
+  | Error error ->
+    fail ("allowed-tools returned the wrong error: " ^ Skill_catalog.error_to_string error)
+  | Ok _ -> fail "allowed-tools was silently accepted without approval semantics"
+;;
+
 let test_composition_skill_joins_projection () =
   let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
   let expected_instruction =
@@ -705,6 +724,10 @@ let () =
             "legacy disable-model-invocation is rejected"
             `Quick
             test_legacy_disable_model_invocation_is_rejected
+        ; test_case
+            "allowed-tools is rejected"
+            `Quick
+            test_allowed_tools_is_rejected
         ; test_case
             "composition skill joins the model projection"
             `Quick

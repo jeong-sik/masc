@@ -428,6 +428,7 @@ let test_durable_speaker_attribution_reaches_counterpart_observations () =
            (Surface_ref.Discord
               { guild_id = Some "guild-7"
               ; channel_id = "channel-9"
+              ; channel_name = None
               ; parent_channel_id = None
               ; thread_id = None
               })
@@ -496,6 +497,7 @@ let test_counterpart_observations_keep_direct_and_attention_fallback () =
          Discord
            { guild_id = Some "guild-fallback"
            ; channel_id = "channel-fallback"
+           ; channel_name = None
            ; parent_channel_id = None
            ; thread_id = None
            }

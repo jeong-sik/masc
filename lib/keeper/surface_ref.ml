@@ -8,6 +8,7 @@ type t =
   | Discord of {
       guild_id : string option;
       channel_id : string;
+      channel_name : string option;
       parent_channel_id : string option;
       thread_id : string option;
     }
@@ -46,9 +47,11 @@ let to_json = function
       `Assoc
         ([ ("kind", `String "dashboard") ]
         @ Json_util.string_field_if_present "session_id" session_id)
-  | Discord { guild_id; channel_id; parent_channel_id; thread_id } ->
+  | Discord { guild_id; channel_id; channel_name; parent_channel_id; thread_id }
+    ->
       `Assoc
         ([ ("kind", `String "discord"); ("channel_id", `String channel_id) ]
+        @ Json_util.string_field_if_present "channel_name" channel_name
         @ Json_util.string_field_if_present "guild_id" guild_id
         @ Json_util.string_field_if_present "parent_channel_id" parent_channel_id
         @ Json_util.string_field_if_present "thread_id" thread_id)
@@ -87,6 +90,7 @@ let of_json json =
            {
              guild_id = Json_util.assoc_string_opt "guild_id" json;
              channel_id;
+             channel_name = Json_util.assoc_string_opt "channel_name" json;
              parent_channel_id = Json_util.assoc_string_opt "parent_channel_id" json;
              thread_id = Json_util.assoc_string_opt "thread_id" json;
            })

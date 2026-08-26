@@ -429,6 +429,7 @@ let test_assistant_message_persists_with_typed_surface () =
              {
                guild_id = None;
                channel_id = "chan-1";
+               channel_name = None;
                parent_channel_id = None;
                thread_id = None;
              })
@@ -521,6 +522,7 @@ let test_mentions_require_exact_resolved_target_roster () =
           (Masc.Surface_ref.Discord
              { guild_id = None
              ; channel_id = "D-current"
+             ; channel_name = None
              ; parent_channel_id = None
              ; thread_id = None
              })
@@ -530,6 +532,7 @@ let test_mentions_require_exact_resolved_target_roster () =
           (Masc.Surface_ref.Discord
              { guild_id = None
              ; channel_id = "D-other"
+             ; channel_name = None
              ; parent_channel_id = None
              ; thread_id = None
              })

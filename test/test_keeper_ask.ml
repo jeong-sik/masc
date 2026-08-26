@@ -26,7 +26,7 @@ let dashboard_channel thread_id =
 
 let ok_ask ~questions =
   match
-    ask ~ask_id:"ask-1" ~keeper_name:"rondo" ~questions ~context:"picking a migration order"
+    ask ~ask_id:"ask-1" ~keeper_name:"asker" ~questions ~context:"picking a migration order"
       ~continuation:(dashboard_channel "thread-1") ~asked_at:1000.0 ()
   with
   | Ok a -> a

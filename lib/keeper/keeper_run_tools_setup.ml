@@ -499,6 +499,7 @@ let prepare_agent_setup
     ; receipt_runtime_observation_ref
     ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
+    ; skill_activation_context
     ; on_tool_result_ready
     ; tools
     }

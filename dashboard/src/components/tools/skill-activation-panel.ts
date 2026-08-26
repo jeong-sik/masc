@@ -41,6 +41,13 @@ function originLabel(origin: DashboardSkillActivation['origin']): string {
   }
 }
 
+function servedLabel(activation: DashboardSkillActivation): string {
+  const served = activation.served_content
+  return served.kind === 'skill_body'
+    ? `body · ${served.bytes} bytes · ${served.sha256}`
+    : `resource ${served.relative_path} · ${served.bytes} bytes · ${served.sha256}`
+}
+
 function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface }) {
   if (surface.status === 'warming') {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">Keeper surface warming</div>`
@@ -81,7 +88,13 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
   `
 }
 
-function ActivationReceipt({ projection }: { projection: DashboardSkillActivationProjection }) {
+function ActivationReceipt({
+  projection,
+  offered,
+}: {
+  projection: DashboardSkillActivationProjection
+  offered: number | null
+}) {
   if (projection.status === 'no_session') {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">No Keeper session</div>`
   }
@@ -92,8 +105,21 @@ function ActivationReceipt({ projection }: { projection: DashboardSkillActivatio
       </div>
     `
   }
+  const summary = projection.summary
   return html`
     <div class="grid gap-2" data-testid="skill-activation-ledger">
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="skill-use-summary">
+        <span class="text-xs">offered ${offered ?? 'unknown'}</span>
+        <span class="text-xs">invoked ${summary.instruction_invocations}</span>
+        <span class="text-xs">bodies ${summary.skill_bodies_served}</span>
+        <span class="text-xs">resources ${summary.skill_resources_served}</span>
+        <span class="text-xs">delivered ${summary.instruction_deliveries}</span>
+        <span class="text-xs">actions ${summary.instruction_actions_observed}</span>
+        <span class="text-xs">invalid ${summary.invalid_transitions}</span>
+        <span class="text-xs">
+          compositions ${summary.composition_invocations}/${summary.composition_deliveries}/${summary.composition_actions_observed}
+        </span>
+      </div>
       <div class="text-xs text-[var(--color-fg-muted)]">
         session ${projection.ledger.session_id} · ${projection.ledger.activations.length} activations
       </div>
@@ -104,7 +130,23 @@ function ActivationReceipt({ projection }: { projection: DashboardSkillActivatio
               <code class="text-3xs break-all">${activationReferenceLabel(activation)}</code>
               <span class="text-3xs">${originLabel(activation.origin)}</span>
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-                snapshot ${activation.snapshot_revision} · turn ${activation.turn_ref}
+                invoked turn ${activation.agent_core_turn} · id ${activation.skill_tool_use_id} · runtime ${activation.runtime_id} · ${activation.activated_at}
+              </code>
+              <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+                served ${servedLabel(activation)}
+              </code>
+              <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+                ${activation.delivery
+                  ? `delivered turn ${activation.delivery.agent_core_turn} · ${activation.delivery.delivered_at}`
+                  : 'delivery pending'}
+              </code>
+              ${activation.actions.map(action => html`
+                <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+                  action turn ${action.agent_core_turn} · ${action.tool_name} · id ${action.tool_use_id} · ${action.observed_at}
+                </code>
+              `)}
+              <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+                snapshot ${activation.snapshot_revision} · keeper turn ${activation.turn_ref}
               </code>
             </div>
           `)}
@@ -154,7 +196,12 @@ export function SkillActivationPanel(props: SkillActivationPanelProps) {
                 </div>`
             : html`
                 <${SurfaceReceipt} surface=${effectiveSurface} />
-                <${ActivationReceipt} projection=${activations} />
+                <${ActivationReceipt}
+                  projection=${activations}
+                  offered=${effectiveSurface.status === 'available'
+                    ? effectiveSurface.instruction_skills.length
+                    : null}
+                />
               `}
     </div>
   `

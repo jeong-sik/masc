@@ -564,16 +564,48 @@ export interface DashboardSkillActivation {
   content_revision: string
   snapshot_revision: string
   turn_ref: string
+  runtime_id: string
+  skill_tool_use_id: string
+  agent_core_turn: number
+  served_content:
+    | { kind: 'skill_body'; bytes: number; sha256: string }
+    | {
+        kind: 'skill_resource'
+        relative_path: string
+        bytes: number
+        sha256: string
+      }
+  delivery: { agent_core_turn: number; delivered_at: string } | null
+  actions: Array<{
+    tool_use_id: string
+    tool_name: string
+    agent_core_turn: number
+    observed_at: string
+  }>
   activated_at: string
   origin: DashboardSkillActivationOrigin
+}
+
+export interface DashboardSkillActivationSummary {
+  instruction_invocations: number
+  skill_bodies_served: number
+  skill_resources_served: number
+  instruction_deliveries: number
+  instruction_actions_observed: number
+  composition_invocations: number
+  composition_deliveries: number
+  composition_actions_observed: number
+  invalid_transitions: number
 }
 
 export type DashboardSkillActivationProjection =
   | {
       status: 'available'
       keeper_name: string
+      summary: DashboardSkillActivationSummary
       ledger: {
         schema: string
+        workspace_key: string
         session_id: string
         revision: string
         activations: DashboardSkillActivation[]

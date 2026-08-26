@@ -12,6 +12,10 @@ type status_item =
       ; commit : string
       }
   | Server_base_path of string
+  (* The workspace the TUI itself resolved, said only when it is not the one
+     the server resolved. [Server_base_path] already names the server's, so
+     the pair reads as the disagreement it is. *)
+  | Workspace_mismatch of string
   | Port of int
 
 (* Enough of the commit to tell two checkouts apart, which is the question
@@ -29,6 +33,9 @@ type retention =
   | Workspace_identity
   | Build_identity
   | Refresh_context
+  (* Last to go. A footer with no room for the port still has room to say the
+     screen is reading two different workspaces. *)
+  | Workspace_conflict
 
 type projected_status =
   { text : string
@@ -57,6 +64,12 @@ let status_item_projection = function
   | Server_base_path "" -> None
   | Server_base_path path ->
     Some { text = "Base: " ^ path; retention = Workspace_identity }
+  | Workspace_mismatch "" -> None
+  | Workspace_mismatch local ->
+    Some
+      { text = "MISMATCH local " ^ local ^ " (r:retry)"
+      ; retention = Workspace_conflict
+      }
   | Port port when port > 0 ->
     Some { text = Printf.sprintf "Port: %d" port; retention = Endpoint_identity }
   | Port _ -> None
@@ -69,7 +82,12 @@ let body hints statuses =
       (String.concat " | " (List.map (fun status -> status.text) statuses))
 
 let omission_order =
-  [ Refresh_context; Build_identity; Workspace_identity; Endpoint_identity ]
+  [ Refresh_context
+  ; Build_identity
+  ; Workspace_identity
+  ; Endpoint_identity
+  ; Workspace_conflict
+  ]
 
 let rec fit_body ~max_cells ~hints ~omissions statuses =
   let rendered = body hints statuses in
@@ -88,7 +106,8 @@ let rec fit_body ~max_cells ~hints ~omissions statuses =
 
     Key hints retain the row before status facts do. When the facts do not fit,
     whole typed items are omitted in this order: refresh interval, build, base
-    path, port. Only an overlong surface-owned hint uses cell-safe truncation
+    path, port, workspace mismatch. Only an overlong surface-owned hint uses
+    cell-safe truncation
     as the final fallback. *)
 let line ?(status = []) ~dim ~reset ~max_cells ~port ~hints () =
   let statuses =

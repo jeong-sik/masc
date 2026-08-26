@@ -241,6 +241,40 @@ let test_ansi_korean_hint_truncates_by_cells () =
   check_at_most_cells "ANSI and Korean stay within ten cells" 10 line;
   check_bool "cell-safe truncation is explicit" true (contains ~needle:"~" line)
 
+(* A workspace disagreement used to replace the whole screen and swallow every
+   key but r. The reads it protects are refused where they happen, so the
+   notice rides the footer instead -- and it is the last fact a narrow footer
+   gives up, after the port. *)
+let test_a_workspace_mismatch_outlives_the_port () =
+  check_string "the local path reads beside the server's own"
+    "<dim>  q:quit  | Base: /me | MISMATCH local /work/masc (r:retry) | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:
+         [ Masc_tui_footer.Server_base_path "/me"
+         ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+         ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ());
+  let narrow =
+    Masc_tui_footer.line
+      ~status:
+        [ Masc_tui_footer.Refresh_interval 5.0
+        ; Masc_tui_footer.Server_build { version = "0.24.0"; commit = "030fa90" }
+        ; Masc_tui_footer.Server_base_path "/Users/dancer/me"
+        ; Masc_tui_footer.Workspace_mismatch "/work/masc"
+        ]
+      ~dim:"<dim>" ~reset:"<reset>" ~max_cells:48 ~port:8935 ~hints:"q:quit" ()
+  in
+  check_bool "the notice outlives the port" true
+    (contains ~needle:"MISMATCH local /work/masc" narrow);
+  check_bool "the port went first" false (contains ~needle:"Port:" narrow);
+  check_string "a workspace that agrees says nothing"
+    "<dim>  q:quit  | Port: 8935<reset>\n"
+    (Masc_tui_footer.line
+       ~status:[ Masc_tui_footer.Workspace_mismatch "" ]
+       ~dim:"<dim>" ~reset:"<reset>" ~max_cells:120 ~port:8935
+       ~hints:"q:quit" ())
+
 let tests =
   [ ( "tui-footer-status-items"
     , [ Alcotest.test_case "port closes every footer" `Quick
@@ -267,6 +301,8 @@ let tests =
           test_unavailable_status_is_omitted
       ; Alcotest.test_case "ANSI Korean hint truncates by cells" `Quick
           test_ansi_korean_hint_truncates_by_cells
+      ; Alcotest.test_case "a workspace mismatch outlives the port" `Quick
+          test_a_workspace_mismatch_outlives_the_port
       ] )
   ]
 

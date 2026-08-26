@@ -3002,6 +3002,108 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
     return interact
 
 
+# A body says what it is about by writing the reference the TUI itself writes.
+# Two posts naming the same task are about the same thing; a post that merely
+# spells the id in prose is not, because nobody wrote that connection down.
+#
+# The last post carries an id whose percent escapes decode to real terminal
+# control bytes. Link.parse decodes, so that row is the one place a board post
+# could have driven the reader's terminal.
+BOARD_REFERENCE_TASK = "masc://overview/tasks/task-77"
+BOARD_REFERENCE_GOAL = "masc://planning/goal-9"
+
+
+def board_reference_http_fixtures() -> HttpFixtures:
+    # One body per post, in the list and in the detail. The related block reads
+    # the bodies the list carries, and board_post_dashboard_json sends p.body
+    # whole -- a list body that summarised would leave the block permanently
+    # empty while every unit test still passed.
+    bodies = {
+        "r1": ("Retry", f"we changed {BOARD_REFERENCE_TASK} for {BOARD_REFERENCE_GOAL}"),
+        "r2": ("Rollout", f"also about {BOARD_REFERENCE_TASK}"),
+        "r3": ("Prose", "task-77 and goal-9 in prose only"),
+        "r4": ("Hostile", "see masc://board/post%1b%5b2Jdanger"),
+    }
+    posts = [
+        board_selection_post(suffix, title, body)
+        for suffix, (title, body) in bodies.items()
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
+    for suffix, (title, body) in bodies.items():
+        fixtures[f"/api/v1/board/post-{suffix}?format=flat"] = (
+            200,
+            {"post": board_selection_post(suffix, title, body), "comments": []},
+        )
+    return fixtures
+
+
+def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
+        )
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (4)"))
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=180,
+            needle=screen_header(b"MASC Board", b" (4)"),
+            final_cursor=b"\x1b[?25l",
+        )
+
+        opened = send_and_wait(process, master_fd, output, b"\r", b"POINTS AT")
+        plain = CSI_RE.sub(b"", frame_containing(opened, b"POINTS AT"))
+        for needle in (b"task", b"task-77", b"goal", b"goal-9"):
+            if needle not in plain:
+                raise AssertionError(
+                    f"POINTS AT dropped {needle!r}: {plain!r}"
+                )
+        if b"ALSO ABOUT THIS (1)" not in plain:
+            raise AssertionError(f"related posts miscounted: {plain!r}")
+        if b"post-r2" not in plain:
+            raise AssertionError(f"the post naming the same task is missing: {plain!r}")
+        if b"post-r3" in plain:
+            raise AssertionError(
+                f"an id spelled in prose became a link: {plain!r}"
+            )
+
+        # Down three rows to the hostile post, whose id decodes to control bytes.
+        back = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+        del back
+        for row in (b"post-r2", b"post-r3", b"post-r4"):
+            send_and_wait(process, master_fd, output, b"j", selected_row(row))
+        hostile = send_and_wait(process, master_fd, output, b"\r", b"POINTS AT")
+        hostile_frame = frame_containing(hostile, b"POINTS AT")
+        if rb"\x1B[2Jdanger" not in CSI_RE.sub(b"", hostile_frame):
+            raise AssertionError(
+                f"the decoded id was not rendered as text: {hostile_frame!r}"
+            )
+        if b"\x1b[2Jdanger" in hostile_frame:
+            raise AssertionError(
+                "a board post drove the reader's terminal: "
+                f"{hostile_frame!r}"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+        # Arm the exit; the harness supplies the confirming press.
+        os.write(master_fd, b"q")
+
+    return interact
+
+
 def board_selection_identity_interaction(fixtures: HttpFixtures) -> Interaction:
     def interact(
         process: subprocess.Popen[bytes],
@@ -7834,6 +7936,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="Planning missing detail recovery",
         interact=planning_missing_detail_interaction(planning_missing_fixtures),
         http_fixtures=planning_missing_fixtures,
+    )
+    board_reference_fixtures = board_reference_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Board references and related posts",
+        interact=board_reference_interaction(board_reference_fixtures),
+        http_fixtures=board_reference_fixtures,
     )
     run_terminal_scenario(
         executable,

@@ -1090,8 +1090,8 @@ type file_change = {
       (** Canonical physical-execution identity. A chat activity may join a
           change only through this field, never through provider call ids. *)
   fc_line_evidence : Keeper_file_change_evidence.t option;
-      (** Producer-recorded 1-based old/new ranges. [None] is an older row,
-          not a request for the reader to rediscover a location from text. *)
+      (** Producer-owned actual line ranges from this execution. [None] is an
+          older row, not permission to rediscover coordinates from text. *)
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -1126,9 +1126,9 @@ val decode_file_change_snapshot :
     to write; this says what is actually in the working tree now, and the two
     disagree often enough that merging them would make both untrue.
 
-    The rows arrive already parsed, with the line numbers git computed. That
-    is the part the tool-call reading cannot have: an [Edit] records two
-    pieces of text and no idea where in the file they sit. *)
+    The rows arrive already parsed, with per-row line numbers git computed for
+    the current tree. A successful tool-call reading may carry the producer's
+    recorded old/new ranges, but it is not a later git-tree observation. *)
 
 (** One node of the workspace tree family
     ([/api/v1/workspace/tree], [/workspace/children]). *)

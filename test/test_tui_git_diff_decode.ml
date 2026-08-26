@@ -1,8 +1,8 @@
 (** Decoding what the working tree holds.
 
-    The rows arrive already parsed, with the line numbers git computed. That
-    is the half the tool-call reading cannot have: an [Edit] records two
-    pieces of text and no idea where in the file they sit. *)
+    The rows arrive already parsed, with per-row line numbers git computed for
+    the current tree. Tool-call evidence can record the completed Edit's
+    ranges, but it is not this later tree observation. *)
 
 open Alcotest
 

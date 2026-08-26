@@ -3667,6 +3667,35 @@ let decode_file_change_kind json =
       Ok (Fc_written { content })
   | other -> Error (Printf.sprintf "unknown file change kind %S" other)
 
+let validate_line_evidence_contract
+      ~execution_id
+      ~succeeded
+      kind
+      evidence
+  =
+  match kind, evidence with
+  | _, None -> Ok ()
+  | _, Some _
+    when Option.fold
+           ~none:true
+           ~some:(fun value -> String.trim value = "")
+           execution_id ->
+    Error "line_evidence has no canonical execution_id"
+  | _, Some _ when not succeeded ->
+    Error "failed change carries completed line_evidence"
+  | Fc_edited { replace_all = false; _ },
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error "single Edit carries an occurrence_count other than one"
+  | Fc_edited _, Some (Keeper_file_change_evidence.Edited _) -> Ok ()
+  | Fc_written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
+  | Fc_edited _, Some (Keeper_file_change_evidence.Written _) ->
+    Error "Edit change carries Write line_evidence"
+  | Fc_written _, Some (Keeper_file_change_evidence.Edited _) ->
+    Error "Write change carries Edit line_evidence"
+
 let decode_file_change json =
   let* fc_at = require_float_field json "at" in
   let* fc_keeper = required_string_field json "keeper" in
@@ -3687,6 +3716,13 @@ let decode_file_change json =
   let* kind_json = required_object_field json "change" in
   let* fc_kind = decode_file_change_kind kind_json in
   let* fc_succeeded = required_bool_field json "succeeded" in
+  let* () =
+    validate_line_evidence_contract
+      ~execution_id:fc_execution_id
+      ~succeeded:fc_succeeded
+      fc_kind
+      fc_line_evidence
+  in
   Ok
     { fc_at
     ; fc_keeper

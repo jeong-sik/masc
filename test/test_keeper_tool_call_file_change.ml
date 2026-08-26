@@ -9,13 +9,15 @@ open Alcotest
 open Masc
 
 module Change = Keeper_tool_call_file_change
+module Evidence = Keeper_file_change_evidence
 
 (* One logged call. Only the fields the projection reads are spelled; a real
    row carries about thirty more, and listing them here would make the test
    about the writer's schema instead of about what the reader needs. *)
 let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
     ?(target_path = "repos/masc/test/test_ci_run_tests_script.ml") ?(success = true)
-    ?(turn = Some 2459) ?(task_id = Some "task-475") ?line_evidence
+    ?(turn = Some 2459) ?(task_id = Some "task-475")
+    ?(execution_id = Some "exec-1787533327603-0173") ?line_evidence
     ?(ts = 1787533327.603755) input =
   let optional name = function None -> [] | Some value -> [ (name, value) ] in
   `Assoc
@@ -23,12 +25,12 @@ let row ?(keeper = "fixture-keeper") ?(descriptor_id = "agent.edit_file")
      ; ("keeper", `String keeper)
      ; ("input", input)
      ; ("success", `Bool success)
-     ; ("execution_id", `String "exec-1787533327603-0173")
      ; ("route_evidence", `Assoc [ ("descriptor_id", `String descriptor_id) ])
      ; ("action_radius", `Assoc [ ("target_path", `String target_path) ])
-     ]
+    ]
     @ optional "turn" (Option.map (fun t -> `Int t) turn)
     @ optional "task_id" (Option.map (fun t -> `String t) task_id)
+    @ optional "execution_id" (Option.map (fun id -> `String id) execution_id)
     @ optional "file_change_evidence" line_evidence)
 ;;
 
@@ -78,6 +80,140 @@ let test_write_carries_content () =
   match change.Change.kind with
   | Change.Written { content } -> check string "content" "whole body" content
   | Change.Edited _ -> fail "expected Written"
+;;
+
+let test_edit_carries_producer_line_evidence_through_redaction () =
+  let original_secret =
+    List.init 9 (fun index -> Printf.sprintf "secret-%d" index)
+    |> String.concat "\n"
+  in
+  let evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:12
+          ~new_start_line:12
+          ~old_string:original_secret
+          ~new_string:"safe"
+      ]
+  in
+  let change =
+    change_of
+      (row
+         ~line_evidence:(Evidence.to_yojson evidence)
+         (edit_input ~before:"[REDACTED]" ~after:"safe" ()))
+  in
+  let projected = Change.to_json change in
+  check string "same typed evidence reaches the endpoint"
+    (Evidence.to_yojson evidence |> Yojson.Safe.to_string)
+    (Yojson.Safe.Util.member "line_evidence" projected
+     |> Yojson.Safe.to_string)
+;;
+
+let test_legacy_row_has_no_invented_line_evidence () =
+  let change =
+    change_of (row (edit_input ~before:"old" ~after:"new" ()))
+  in
+  check bool "historical row remains range-less" true
+    (Option.is_none change.Change.line_evidence)
+;;
+
+let test_oversized_edit_keeps_count_and_explicitly_omits_ranges () =
+  let occurrence_count = Evidence.max_recorded_edit_occurrences + 1 in
+  let evidence = Evidence.edited_ranges_omitted ~occurrence_count in
+  let change =
+    change_of
+      (row
+         ~line_evidence:(Evidence.to_yojson evidence)
+         (edit_input
+            ~replace_all:(Some true)
+            ~before:"old"
+            ~after:"new"
+            ()))
+  in
+  match change.Change.line_evidence with
+  | Some (Evidence.Edited { occurrence_count = actual; occurrences = None }) ->
+    check int "exact count" occurrence_count actual
+  | _ -> fail "expected bounded Edit evidence"
+;;
+
+let expect_malformed label row =
+  match classify row with
+  | Change.Unreadable (Change.Malformed _) -> ()
+  | Change.Unreadable Change.Input_exceeded_log_budget ->
+    failf "%s: expected malformed evidence, got log budget" label
+  | Change.File_change _ -> failf "%s: malformed evidence was accepted" label
+  | Change.Not_a_file_change -> failf "%s: file change was classified as a read" label
+;;
+
+let test_invalid_file_change_evidence_is_rejected () =
+  let edit_evidence =
+    Evidence.edited
+      [ Evidence.edit_occurrence
+          ~old_start_line:2
+          ~new_start_line:2
+          ~old_string:"old"
+          ~new_string:"new"
+      ]
+    |> Evidence.to_yojson
+  in
+  expect_malformed
+    "kind mismatch"
+    (row
+       ~descriptor_id:"agent.write_file"
+       ~line_evidence:edit_evidence
+       (`Assoc [ "file_path", `String "x.ml"; "content", `String "body" ]));
+  expect_malformed
+    "failed mutation"
+    (row
+       ~success:false
+       ~line_evidence:edit_evidence
+       (edit_input ~before:"old" ~after:"new" ()));
+  expect_malformed
+    "missing execution identity"
+    (row
+       ~execution_id:None
+       ~line_evidence:edit_evidence
+       (edit_input ~before:"old" ~after:"new" ()));
+  expect_malformed
+    "count mismatch"
+    (row
+       ~line_evidence:
+         (`Assoc
+           [ "kind", `String "edit"
+           ; "occurrence_count", `Int 1
+           ; "occurrences", `List []
+           ])
+       (edit_input ~before:"old" ~after:"new" ()));
+  expect_malformed
+    "invalid line range"
+    (row
+       ~line_evidence:
+         (`Assoc
+           [ "kind", `String "edit"
+           ; "occurrence_count", `Int 1
+           ; ( "occurrences"
+             , `List
+                 [ `Assoc
+                     [ ( "old_range"
+                       , `Assoc
+                           [ "start_line", `Int 4; "end_line", `Int 3 ] )
+                     ; ( "new_range"
+                       , `Assoc
+                           [ "start_line", `Int 4; "end_line", `Int 4 ] )
+                     ] ] )
+           ])
+       (edit_input ~before:"old" ~after:"new" ()));
+  expect_malformed
+    "Write range does not start at one"
+    (row
+       ~descriptor_id:"agent.write_file"
+       ~line_evidence:
+         (`Assoc
+           [ "kind", `String "write"
+           ; ( "new_range"
+             , `Assoc [ "start_line", `Int 42; "end_line", `Int 43 ] )
+           ])
+       (`Assoc [ "file_path", `String "x.ml"; "content", `String "body" ]))
 ;;
 
 (* The address comes from the resolver's target, so a file inside a clone is
@@ -350,6 +486,12 @@ let () =
       , [ test_case "edit carries both sides" `Quick test_edit_carries_both_sides
         ; test_case "edit reads replace_all" `Quick test_edit_reads_replace_all
         ; test_case "write carries content" `Quick test_write_carries_content
+        ; test_case "edit evidence survives redacted text" `Quick
+            test_edit_carries_producer_line_evidence_through_redaction
+        ; test_case "legacy rows do not invent evidence" `Quick
+            test_legacy_row_has_no_invented_line_evidence
+        ; test_case "oversized edit evidence keeps its count" `Quick
+            test_oversized_edit_keeps_count_and_explicitly_omits_ranges
         ] )
     ; ( "address"
       , [ test_case "repo-relative" `Quick test_repo_relative_address
@@ -378,6 +520,8 @@ let () =
         ; test_case "edit with no strings" `Quick test_edit_missing_arguments_is_unreadable
         ; test_case "unknown descriptor" `Quick test_unknown_descriptor_is_unreadable
         ; test_case "no resolved target" `Quick test_missing_action_radius_is_unreadable
+        ; test_case "invalid line evidence" `Quick
+            test_invalid_file_change_evidence_is_rejected
         ] )
     ; ( "classify_all"
       , [ test_case "counts each outcome" `Quick test_classify_all_counts_each_outcome

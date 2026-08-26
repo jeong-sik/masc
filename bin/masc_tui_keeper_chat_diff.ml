@@ -159,6 +159,90 @@ let omission_row ~max_line_cells omitted =
 let attempted_suffix (change : Masc.Tui_decode.file_change) =
   if change.fc_succeeded then "" else " · failed attempt"
 
+let line_range_label (range : Masc.Keeper_file_change_evidence.line_range) =
+  if range.start_line = range.end_line then Printf.sprintf "L%d" range.start_line
+  else Printf.sprintf "L%d-%d" range.start_line range.end_line
+
+let occurrence_range_label
+      (occurrence : Masc.Keeper_file_change_evidence.edit_occurrence)
+  =
+  let old_range = "old " ^ line_range_label occurrence.old_range in
+  match occurrence.new_range with
+  | Some new_range -> old_range ^ " -> new " ^ line_range_label new_range
+  | None -> old_range ^ " -> deleted"
+
+let rec take count = function
+  | _ when count <= 0 -> []
+  | [] -> []
+  | value :: rest -> value :: take (count - 1) rest
+
+let max_occurrence_range_rows = 3
+
+let edited_evidence_rows ~max_line_cells ~replace_all
+      (change : Masc.Tui_decode.file_change) =
+  let attempted = attempted_suffix change in
+  match change.fc_line_evidence with
+  | None ->
+    ( (if replace_all then
+         "  replace-all template · match count unavailable"
+       else "  recorded replacement")
+      ^ attempted
+    , [] )
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = None }) ->
+    ( Printf.sprintf
+        "  %d matches · line ranges omitted · replace-all template%s"
+        occurrence_count
+        attempted
+    , [] )
+  | Some
+      (Masc.Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = Some occurrences }) ->
+    let detail =
+      if replace_all then
+        Printf.sprintf
+          "  %d match%s · replace-all template%s"
+          occurrence_count
+          (if occurrence_count = 1 then "" else "es")
+          attempted
+      else "  recorded replacement" ^ attempted
+    in
+    let shown = take max_occurrence_range_rows occurrences in
+    let range_rows =
+      List.mapi
+        (fun index occurrence ->
+           let prefix =
+             if occurrence_count = 1 then "  "
+             else Printf.sprintf "  #%d " (index + 1)
+           in
+           clipped
+             ~max_cells:max_line_cells
+             (prefix ^ occurrence_range_label occurrence))
+        shown
+    in
+    let hidden = occurrence_count - List.length shown in
+    let hidden_row =
+      if hidden <= 0 then []
+      else
+        [ clipped
+            ~max_cells:max_line_cells
+            (Printf.sprintf
+               "(%d more recorded line range%s withheld)"
+               hidden
+               (if hidden = 1 then "" else "s"))
+        ]
+    in
+    detail, range_rows @ hidden_row
+  | Some (Masc.Keeper_file_change_evidence.Written _) ->
+    (* The strict endpoint decoder rejects this mismatch. Keep the renderer
+       fail-closed for directly-constructed test values too. *)
+    ( (if replace_all then
+         "  replace-all template · match count unavailable"
+       else "  recorded replacement")
+      ^ attempted
+    , [] )
+
 let address_row ~max_line_cells ~summary change =
   let prefix = "↳ " in
   let suffix = " " ^ summary in
@@ -176,12 +260,8 @@ let address_row ~max_line_cells ~summary change =
 
 let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     ~replace_all =
-  let detail =
-    if replace_all then
-      "  replace-all template · match count unavailable"
-      ^ attempted_suffix change
-    else
-      "  recorded replacement" ^ attempted_suffix change
+  let detail, evidence_rows =
+    edited_evidence_rows ~max_line_cells ~replace_all change
   in
   let summary =
     if replace_all then Printf.sprintf "(+%d -%d per match)" added removed
@@ -192,10 +272,12 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     [ address
     ; clipped ~max_cells:max_line_cells (detail ^ " · no textual delta")
     ]
+    @ evidence_rows
   else
     let detail = clipped ~max_cells:max_line_cells detail in
     let lines = List.map (diff_line ~max_line_cells) preview in
-    address :: detail :: (preview_block ~max_line_cells ~language:"diff" lines
+    address :: detail :: (evidence_rows
+                          @ preview_block ~max_line_cells ~language:"diff" lines
                           @ omission_row ~max_line_cells omitted)
 
 let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
@@ -207,13 +289,21 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
     else Printf.sprintf "(%d-row write attempt)" row_count
   in
   let address = address_row ~max_line_cells ~summary change in
+  let evidence_rows =
+    match change.fc_line_evidence with
+    | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
+      [ clipped ~max_cells:max_line_cells ("  new " ^ line_range_label range) ]
+    | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
+      [ "  empty body" ]
+    | None | Some (Masc.Keeper_file_change_evidence.Edited _) -> []
+  in
   let detail =
     Printf.sprintf
       "  recorded write body · previous content unavailable%s"
       (attempted_suffix change)
     |> clipped ~max_cells:max_line_cells
   in
-  if row_count = 0 then [ address; detail ]
+  if row_count = 0 then [ address; detail ] @ evidence_rows
   else
     let lines =
       List.filter_map
@@ -222,7 +312,8 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
           | Diff.Context _ | Diff.Removed _ -> None)
         preview
     in
-    address :: detail :: (preview_block ~max_line_cells ~language:"" lines
+    address :: detail :: (evidence_rows
+                          @ preview_block ~max_line_cells ~language:"" lines
                           @ omission_row ~max_line_cells omitted)
 
 let section ~max_line_cells prepared =

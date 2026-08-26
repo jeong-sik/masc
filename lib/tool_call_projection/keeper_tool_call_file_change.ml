@@ -143,11 +143,27 @@ let line_evidence_of_row row =
      | Ok evidence -> Ok (Some evidence)
      | Error detail -> Error (Malformed ("file_change_evidence: " ^ detail)))
 
-let validate_line_evidence_kind kind line_evidence =
+let validate_line_evidence ~execution_id ~succeeded kind line_evidence =
   match kind, line_evidence with
+  | _, None -> Ok ()
+  | _, Some _
+    when Option.fold
+           ~none:true
+           ~some:(fun value -> String.trim value = "")
+           execution_id ->
+    Error (Malformed "file_change_evidence has no canonical execution_id")
+  | _, Some _ when not succeeded ->
+    Error (Malformed "failed file change carries completed line evidence")
+  | Edited { replace_all = false; _ },
+    Some
+      (Keeper_file_change_evidence.Edited
+        { occurrence_count; occurrences = _ })
+    when occurrence_count <> 1 ->
+    Error
+      (Malformed
+         "single Edit carries a file_change_evidence occurrence_count other than one")
   | Edited _, Some (Keeper_file_change_evidence.Edited _)
-  | Written _, Some (Keeper_file_change_evidence.Written _)
-  | (Edited _ | Written _), None -> Ok ()
+  | Written _, Some (Keeper_file_change_evidence.Written _) -> Ok ()
   | Edited _, Some (Keeper_file_change_evidence.Written _) ->
     Error (Malformed "edit input carries write file_change_evidence")
   | Written _, Some (Keeper_file_change_evidence.Edited _) ->
@@ -254,9 +270,18 @@ let classify row =
         let parsed =
           Result.bind input (fun input ->
               Result.bind (kind_of_input ~handler input) (fun kind ->
+                  let succeeded =
+                    Option.value ~default:false
+                      (Json_field.to_option (Json_field.bool row "success"))
+                  in
+                  let execution_id = optional_string row "execution_id" in
                   Result.bind (line_evidence_of_row row) (fun line_evidence ->
                     Result.bind
-                      (validate_line_evidence_kind kind line_evidence)
+                      (validate_line_evidence
+                         ~execution_id
+                         ~succeeded
+                         kind
+                         line_evidence)
                       (fun () ->
                         Result.bind (target_path_of_row row) (fun target_path ->
                           Result.bind (required_string row "keeper") (fun keeper ->
@@ -269,13 +294,11 @@ let classify row =
                             ; keeper
                             ; turn = optional_int row "turn"
                             ; task_id = optional_string row "task_id"
-                            ; execution_id = optional_string row "execution_id"
+                            ; execution_id
                             ; line_evidence
                             ; location = location_of_target ~target_path
                             ; kind
-                            ; succeeded =
-                                Option.value ~default:false
-                                  (Json_field.to_option (Json_field.bool row "success"))
+                            ; succeeded
                             }))))))
         in
         (match parsed with

@@ -112,13 +112,6 @@ val is_http_error_response : Yojson.Safe.t -> bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.is_http_error_response}. *)
 
-val request_runtime_result :
-  deps -> (Server_mcp_transport_http_types.runtime, string) result
-(** Re-export of
-    {!Server_mcp_transport_http_headers.request_runtime_result}.
-    Calls [deps.get_runtime_result ()] without inspecting the
-    request — the request is not needed for runtime resolution. *)
-
 val request_force_json_response : Httpun.Request.t -> bool
 (** Re-export of
     {!Server_mcp_transport_http_headers.request_force_json_response}. *)

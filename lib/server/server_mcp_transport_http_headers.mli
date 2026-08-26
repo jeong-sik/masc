@@ -21,11 +21,6 @@ val is_http_error_response : Yojson.Safe.t -> bool
     business-logic errors when deciding whether to attach a
     legacy-accept warning header. *)
 
-val request_runtime_result : deps -> (Server_mcp_transport_http_types.runtime, string) result
-(** [request_runtime_result deps] is a thin wrapper for
-    [deps.get_runtime_result ()] — kept as a binding so the call
-    site is greppable across the transport. *)
-
 val body_jsonrpc_method : string -> (string * bool) option
 (** [body_jsonrpc_method body_str] parses [body_str] as JSON and
     returns [Some (method_, has_id)] when it is an [`Assoc] with a

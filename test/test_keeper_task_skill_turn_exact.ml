@@ -230,8 +230,13 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
   Fs_compat.mkdir_p references;
   let resource = Filename.concat references "PROOF.md" in
   let oversized_resource = Filename.concat references "TOO-LARGE.md" in
+  let boundary_resource = Filename.concat references "BOUNDARY.md" in
+  let boundary_contents =
+    String.make Masc.Tool_bridge.default_externalize_threshold_bytes '"'
+  in
   Fs_compat.save_file resource "12345678";
   Fs_compat.save_file oversized_resource "123456789";
+  Fs_compat.save_file boundary_resource boundary_contents;
   Fun.protect
     ~finally:(fun () -> Fs_compat.remove_tree source_root)
     (fun () ->
@@ -286,14 +291,7 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          | _ -> assert false
        in
        let output = run_skill_tool tool input in
-       check bool
-         "requested resource is returned"
-         true
-         (String_util.contains_substring output "12345678");
-       check bool
-         "resource receipt has digest"
-         true
-         (String_util.contains_substring output "sha256");
+       check string "requested resource is the exact provider wire body" "12345678" output;
        let escaped =
          match Reference.to_yojson reference with
          | `Assoc fields -> `Assoc (("file", `String "../OUTSIDE.md") :: fields)
@@ -340,7 +338,64 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
        check bool "duplicate resource fields are typed rejection" true
          (String_util.contains_substring duplicate_output "at most one");
        check bool "duplicate resource fields read nothing" false
-         (String_util.contains_substring duplicate_output "12345678"))
+         (String_util.contains_substring duplicate_output "12345678");
+       let boundary_config =
+         config_with_resource_read_max_bytes
+           Masc.Tool_bridge.default_externalize_threshold_bytes
+           (source_row ~id:"only" ~path:"skills")
+       in
+       let boundary_snapshot =
+         snapshot
+           boundary_config
+           [ [ "guide", document ~name:"guide" ~description:"guide" "BODY" ] ]
+       in
+       let boundary_reference =
+         exact_reference
+           boundary_snapshot
+           ~source_id
+           ~package_id:"guide"
+           ~name:"guide"
+       in
+       let boundary_selected = resolve_one boundary_snapshot boundary_reference in
+       let boundary_read_max_bytes =
+         match boundary_config.resource_read_max_bytes with
+         | Some value -> value
+         | None -> fail "boundary resource read bound fixture is missing"
+       in
+       let boundary_instruction =
+         Masc.Keeper_tool_composition_surface.instruction_skill
+           ~resource_location:
+             Masc.Keeper_tool_composition_surface.
+               { source_root
+               ; directory = "guide"
+               ; resource_read_max_bytes = boundary_read_max_bytes
+               }
+           ~reference:boundary_reference
+           ~description:boundary_selected.skill.description
+           ~body:boundary_selected.skill.body
+           ()
+       in
+       let boundary_tool =
+         Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+           ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+           ~instruction_skills:[ boundary_instruction ]
+           ()
+       in
+       let boundary_input =
+         match Reference.to_yojson boundary_reference with
+         | `Assoc fields ->
+           `Assoc (("file", `String "references/BOUNDARY.md") :: fields)
+         | _ -> assert false
+       in
+       let boundary_output = run_skill_tool boundary_tool boundary_input in
+       check int
+         "escape-heavy boundary content keeps exact wire length"
+         Masc.Tool_bridge.default_externalize_threshold_bytes
+         (String.length boundary_output);
+       check string
+         "escape-heavy boundary content is not replaced by an artifact marker"
+         boundary_contents
+         boundary_output)
 ;;
 
 let test_revision_mismatch_is_typed_before_tool_projection () =

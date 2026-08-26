@@ -12,8 +12,9 @@
 [skills]
 activation-lifetime = "session"
 precedence = "earlier-source-wins"
-# One resource page fits the existing 64 KiB tool-response envelope without
-# relying on a separate hidden runtime default or ceiling.
+# keeper_skill returns raw resource bytes on the provider wire and carries
+# reference/digest evidence as metadata, so this explicit bound aligns with the
+# shared 64 KiB inline tool-result boundary without JSON-envelope expansion.
 resource-read-max-bytes = 65536
 
 # Skill sources are searched in this declared order. The runtime has no hidden

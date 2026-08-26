@@ -91,6 +91,12 @@ let strict_guard_cases =
        invalid target name ("bad keeper!") must be rejected by argument
        validation. *)
     ("masc_keeper_delegate", [ "keeper_name must match" ]);
+    (* #30720 made masc_ask refuse at the write when the asking caller is not
+       a registered Keeper (a question no surface could ever read back). The
+       matrix harness always calls under the synthetic "tool-matrix" identity,
+       which is never registered, so this tool must always guard here -- never
+       succeed. Referenced from lib/mcp_tool_runtime_ask.ml's refusal message. *)
+    ("masc_ask", [ "is not a registered keeper" ]);
   ]
 
 let endpoint_unavailable_guard_names =

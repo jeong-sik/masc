@@ -417,7 +417,10 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          }
                        :: rest ->
                        (match List.rev rest with
-                        | Agent_core.Types.MessageStop :: _ ->
+                        | Agent_core.Types.MessageStop
+                          :: MessageDelta
+                               { stop_reason = Some EndTurn; usage = None }
+                          :: _ ->
                           let starts =
                             List.filter_map
                               (function
@@ -460,7 +463,9 @@ let test_keeper_projects_mcp_tool_and_settles () =
                                arguments
                            | None ->
                              fail "no tool_use input snapshot in Antigravity stream")
-                        | _ -> fail "Antigravity stream did not end with MessageStop")
+                        | _ ->
+                          fail
+                            "Antigravity stream did not end with EndTurn then MessageStop")
                      | _ ->
                        fail "Antigravity stream did not open with the expected MessageStart");
                     observed_initial_prompt :=

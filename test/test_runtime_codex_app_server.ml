@@ -1992,6 +1992,7 @@ let test_keeper_projects_codex_live_stream () =
             ; ContentBlockStop { index = 1 }
             ; ContentBlockDelta
                 { index = 0; delta = TextDelta "SUBSCRIPTION_OK" }
+            ; MessageDelta { stop_reason = Some EndTurn; usage = None }
             ; MessageStop
             ] ->
             check string

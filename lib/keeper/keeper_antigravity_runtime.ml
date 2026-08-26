@@ -330,6 +330,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event =
                    (Hashtbl.find_opt native_tool_indexes call_id))
               observation.call_id
           | Runtime_antigravity.Turn_finished { text = _ } ->
+            emit
+              (Agent_core.Types.MessageDelta
+                 { stop_reason = Some Agent_core.Types.EndTurn; usage = None });
             emit Agent_core.Types.MessageStop)
     ; on_tool_started =
         (fun ~call_id ~tool_name ~arguments ->

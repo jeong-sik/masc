@@ -812,6 +812,7 @@ let test_keeper_streams_text_and_tool_events () =
                ; ContentBlockStop { index = 1 }
                ; ContentBlockDelta
                    { index = 0; delta = TextDelta "CLAUDE_STREAM" }
+               ; MessageDelta { stop_reason = Some EndTurn; usage = None }
                ; MessageStop
                ] ->
                check string

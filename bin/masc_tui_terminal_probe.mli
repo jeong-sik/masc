@@ -6,6 +6,11 @@
 
 type result =
   { palette : Masc_tui_terminal_palette.t option
+  ; theme_mode : Masc_tui_terminal_palette.theme_mode option
+        (** What the terminal said about its own page, and [None] where it
+            said nothing. Separate from [palette] because it survives where
+            the palette does not: a multiplexer passes DECSET 996 and 2031
+            through and answers no OSC colour query. *)
   ; graphics : Masc_tui_graphics.query_reply option
   ; replay : string
   }
@@ -24,6 +29,11 @@ val complete : decoder -> bool
 (** [complete] becomes true only after the graphics query and every requested
     palette slot have answered. It permits an early end without rescanning the
     captured prefix after every byte. *)
+
+val theme_mode : decoder -> Masc_tui_terminal_palette.theme_mode option
+(** What the terminal has said about its own page so far. Read while the
+    decoder is still live, because DECSET 2031 reports again whenever the
+    reader switches theme and there is no one moment the answer is final. *)
 
 val palette : decoder -> Masc_tui_terminal_palette.t option
 (** The complete palette available now, if any. O(1) and does not materialize

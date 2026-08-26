@@ -103,8 +103,9 @@ let two_tone_palette ~foreground ~background =
     ~background:(Some background) ~ansi:(no_ansi ())
 ;;
 
-let recede ~colors_enabled ~level palette =
-  Masc_tui_theme.For_testing.recede ~colors_enabled ~dim:"DIM"
+let recede ?(theme_mode = None) ~colors_enabled ~level palette =
+  Masc_tui_theme.For_testing.recede ~colors_enabled ~dim:"DIM" ~gray:"GRAY"
+    ~theme_mode
     ~project:
       (Masc_tui_terminal_palette.For_testing.best_color_for_level ~level)
     palette
@@ -178,6 +179,23 @@ let test_recede_falls_back_where_it_cannot_compute () =
   check str "a terminal that never answered keeps SGR 2" "DIM"
     (recede ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color
        None);
+  (* No palette but the page was reported on its own -- a multiplexer, which
+     passes DECSET 996 and 2031 through and answers no OSC colour query. SGR 2
+     blends toward black, so on a light page it walks away from it. *)
+  check str "a light page with no palette recedes with bright black" "GRAY"
+    (recede ~theme_mode:(Some Masc_tui_terminal_palette.Light)
+       ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color None);
+  check str "a dark page with no palette keeps SGR 2" "DIM"
+    (recede ~theme_mode:(Some Masc_tui_terminal_palette.Dark)
+       ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color None);
+  (* A page the terminal did answer for is measured, not guessed at. *)
+  check bool "a known palette outranks the reported page" true
+    (String.equal
+       (recede ~theme_mode:(Some Masc_tui_terminal_palette.Light)
+          ~colors_enabled:true ~level:Masc_tui_terminal_palette.True_color
+          light)
+       (recede ~colors_enabled:true
+          ~level:Masc_tui_terminal_palette.True_color light));
   check str "disabled colours draw nothing at all" ""
     (recede ~colors_enabled:false ~level:Masc_tui_terminal_palette.True_color
        light)

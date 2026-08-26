@@ -88,6 +88,29 @@ val ansi : t -> int -> rgb option
     theme is unreadable on another, so a reader that cannot tell has to say
     so instead of assuming. *)
 
+(** Whether the terminal calls its own page light or dark.
+
+    OSC 10, 11 and 4 do not survive a multiplexer: tmux and screen can be
+    attached to several terminals at once, so they have no one page to report.
+    DECSET 996 and 2031 are a later answer to the same question that they do
+    pass through, and that Ghostty, Kitty, VTE, Zellij and Contour answer too.
+
+    It carries no colours, so it cannot stand in for a palette. It says which
+    way a colour has to move to be read, which is the half that matters when
+    nothing else is known. *)
+type theme_mode =
+  | Dark
+  | Light
+
+val theme_mode_unsubscribe : string
+(** [CSI ? 2031 l]. *)
+
+val parse_theme_mode_parameters : string -> theme_mode option
+(** Read the parameters of a [CSI ? 997 ; n n] reply. The same reply answers
+    {!theme_mode_query} and arrives unasked after {!theme_mode_subscribe}, so
+    nothing here cares which prompted it. A parameter this does not know reads
+    as [None]: an unknown page is not a dark one. *)
+
 type slot =
   | Foreground
   | Background
@@ -133,6 +156,15 @@ type snapshot
 
 val snapshot : unit -> snapshot
 val snapshot_palette : snapshot -> t option
+
+val snapshot_theme_mode : snapshot -> theme_mode option
+(** What the terminal last said about its own page. Independent of the
+    palette: a multiplexer answers this and no OSC colour query. *)
+
+val set_theme_mode : theme_mode option -> unit
+(** Publish a theme mode and bump the generation. Not a set-once -- DECSET
+    2031 reports again whenever the reader switches theme, and a reader
+    caching by generation has to be woken by that as much as by a palette. *)
 val snapshot_generation : snapshot -> int
 (** One atomic read of the process palette and its monotonic generation. A
     captured snapshot remains internally consistent if [set_current] runs

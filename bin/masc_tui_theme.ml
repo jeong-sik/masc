@@ -79,16 +79,25 @@ let recede_rgb ~foreground ~background =
     ~max_ratio:recede_max_ratio foreground
 ;;
 
-let recede_for ~colors_enabled ~dim ~project palette =
+let recede_for ~colors_enabled ~dim ~gray ~theme_mode ~project palette =
   if not colors_enabled then ""
   else
     match palette with
-    | None ->
-      (* The terminal never answered the palette query -- a multiplexer, or an
-         emulator without the reply. SGR 2 is what this drew before, and
-         guessing a colour against an unknown background is worse than the
-         attribute that at least half the time is right. *)
-      dim
+    | None -> (
+      (* No palette: a multiplexer, or an emulator without the OSC reply. The
+         page may still have been reported on its own, and which way it goes
+         is the whole question -- SGR 2 blends toward black, so on a light
+         terminal the quiet row comes out darker than its neighbours.
+
+         Where the page is known to be light, bright black is the safer
+         recede: base16 and its relatives put it a step above the background
+         in the ramp, so on a light theme it sits between the text and the
+         page rather than past the text. Where the page is dark or unsaid,
+         SGR 2 is what every row drew before this and is right on a dark
+         one. *)
+      match theme_mode with
+      | Some Terminal_palette.Light -> gray
+      | Some Terminal_palette.Dark | None -> dim)
     | Some palette ->
       (match
          recede_rgb
@@ -169,9 +178,9 @@ let user_message_background palette =
     ~project:Terminal_palette.best_color palette
 ;;
 
-let recede palette =
-  recede_for ~colors_enabled ~dim:Sgr.dim ~project:Terminal_palette.best_color
-    palette
+let recede ~theme_mode palette =
+  recede_for ~colors_enabled ~dim:Sgr.dim ~gray:Sgr.gray ~theme_mode
+    ~project:Terminal_palette.best_color palette
 ;;
 
 module Term = struct

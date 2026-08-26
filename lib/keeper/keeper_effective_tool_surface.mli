@@ -24,6 +24,11 @@ type t =
   ; current_task_id : string option
   ; instruction_skills : string list
   ; composition_skills : string list
+  ; skills_left_out : string list
+        (** Documents the catalog could not read, by the directory they were
+            found in and why. This surface answers "what can this Keeper
+            call"; a skill left out is absent from that answer, and absence
+            with no reason beside it reads as a skill nobody wrote. *)
   ; tools : tool list
   ; tool_surface_sha256 : string option
   }
@@ -45,6 +50,7 @@ module For_testing : sig
   val project :
     keeper_name:string ->
     runtime_id:string ->
+    skills_left_out:string list ->
     official_client_kind:string ->
     native_posture:Runtime_native_tools.posture option ->
     tool_groups:string list option ->

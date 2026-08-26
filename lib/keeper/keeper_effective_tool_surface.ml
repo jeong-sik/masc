@@ -19,6 +19,12 @@ type t =
   ; current_task_id : string option
   ; instruction_skills : string list
   ; composition_skills : string list
+        (* Documents the catalog could not read, by the directory they were
+           found in. They are here because this is the surface that answers
+           "what can this Keeper call": a skill that was left out is absent
+           from that answer, and absence with no reason beside it reads as a
+           skill that was never written. *)
+  ; skills_left_out : string list
   ; tools : tool list
   ; tool_surface_sha256 : string option
   }
@@ -98,6 +104,7 @@ let validate_task_skills ~task_skill_names ~skill_catalog =
 let project
       ~keeper_name
       ~runtime_id
+      ~skills_left_out
       ~official_client_kind
       ~native_posture
       ~tool_groups
@@ -136,6 +143,7 @@ let project
       ; current_task_id
       ; instruction_skills
       ; composition_skills
+      ; skills_left_out
       ; tools
       ; tool_surface_sha256
       }
@@ -223,10 +231,16 @@ let resolve ~config ~keeper_name =
           unavailable
             keeper_name
             ("skill_catalog_unreadable", Agent_core.Error.to_string error)
-        (* This surface projects what the Keeper can call. A document left
-           out of the catalog is named where the turn is prepared, which is
-           the place that can say which Keeper it happened to. *)
-        | Ok (skill_catalog, _rejections) ->
+        | Ok (skill_catalog, rejections) ->
+        let skills_left_out =
+          List.map
+            (fun (rejection : Keeper_skill_catalog.rejection) ->
+              Printf.sprintf
+                "%s: %s"
+                rejection.directory
+                (Keeper_skill_catalog.error_to_string rejection.error))
+            rejections
+        in
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->
@@ -251,6 +265,7 @@ let resolve ~config ~keeper_name =
                      ~current_task_id
                      ~task_skill_names
                      ~skill_catalog
+                     ~skills_left_out
                  with
                  | Ok surface -> Available surface
                  | Error error -> unavailable keeper_name error)))))
@@ -294,6 +309,7 @@ let to_yojson = function
           | Some task_id -> `String task_id )
       ; "instruction_skills", string_list surface.instruction_skills
       ; "composition_skills", string_list surface.composition_skills
+      ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)
       ; ( "tools"
         , `List

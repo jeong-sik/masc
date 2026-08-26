@@ -1153,6 +1153,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -1296,6 +1297,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache

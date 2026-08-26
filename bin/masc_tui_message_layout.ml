@@ -342,6 +342,19 @@ let drop_cells text cells =
     loop 0 pieces;
     Buffer.contents buffer
 
+(* Keep the first [cells] display cells: the counterpart to [drop_cells], so a
+   caller cutting a row in two gets back exactly the cells it started with. A
+   wide grapheme straddling the boundary is dropped whole here and padded with
+   spaces there, so the two halves still add up to the whole.
+
+   [split_cells] is not this function. It wraps, and a wrapper has to move
+   forward or it never ends: it takes one piece even when [max_cells] is zero.
+   Read as a prefix that invents a cell, which is how a row with no mark to
+   colour drew its first character twice. *)
+let take_cells text cells =
+  let prefix, _, _ = cell_prefix text (max 0 cells) in
+  prefix
+
 let fit_width text width =
   if width <= 0 then ""
   else

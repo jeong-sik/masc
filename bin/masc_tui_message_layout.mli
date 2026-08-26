@@ -32,6 +32,12 @@ type entry = {
   style : style;
   timestamp : string;
   role_label : string;
+  role_label_mark_cells : int;
+      (** Cells the speaker mark occupies at the head of {!role_label}, from
+          {!role_label_mark_cells}. Zero when the column was too narrow to keep
+          the mark. Carried on the entry because the caller is what chose the
+          column, and read back by the renderer to style the mark and the
+          label differently: colour says status, the label only says kind. *)
   request_label : string;
   body : string;
   markdown_source : markdown_source;
@@ -68,6 +74,12 @@ type row = {
   style : style;
   kind : row_kind;
   text : string;
+  gutter_label_at : int;
+      (** Cells of {!gutter} that belong to the clock and the speaker mark. The
+          rest is the kind label. The renderer colours what comes before this
+          by status and lets the label recede; without the offset it would have
+          to find the mark by measuring the glyph a second time. Zero on rows
+          whose gutter is blank. *)
   gutter : string;
       (** What to draw left of the body's rule. Empty under {!Origin_row};
           under the other two it holds the origin on a message's first row and
@@ -115,6 +127,15 @@ val dress_bare_links :
 val fit_width : string -> int -> string
 
 val fit_middle : int -> string -> string
+
+val role_label_mark_cells : ?column:int -> style:style -> unit -> int
+(** Cells {!align_role_label} spends on the speaker mark and its separator at
+    the given column, or zero when the column is too narrow to keep the mark.
+
+    The single reader of that arithmetic. A renderer that styles the mark apart
+    from the label asks here rather than measuring the glyph again, so the two
+    cannot drift. *)
+
 (** [fit_middle column label] keeps both ends of [label] in [column] cells,
     dropping the middle and marking the cut with ["…"].
 

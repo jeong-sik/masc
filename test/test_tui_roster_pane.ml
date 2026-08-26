@@ -113,9 +113,45 @@ let test_name_window_is_static_until_selected_and_overflowing () =
     (Masc_tui_message_layout.display_width
        (Pane.name_window ~selected:true ~frame:5 ~width:8 "가나다라마바사"))
 
+(* ── which pane a cursor key belongs to ─────────────────────────────── *)
+
+let test_a_hidden_pane_does_not_hold_the_arrows () =
+  (* The reader put the roster away with Ctrl-B. The stored preference still
+     says left, and acting on it moves a keeper cursor nobody can see --
+     which, with the selection already at the end of the roster, moves
+     nothing at all and reads as a dead key. *)
+  Alcotest.(check bool)
+    "not while it is put away" false
+    (Masc_tui_roster_pane.arrows_go_left ~hidden:true ~cols:200
+       ~preferring_left:true)
+
+let test_a_pane_too_narrow_to_draw_does_not_hold_them_either () =
+  Alcotest.(check bool)
+    "nor below the width it needs" false
+    (Masc_tui_roster_pane.arrows_go_left ~hidden:false
+       ~cols:(Masc_tui_roster_pane.threshold_cols - 1) ~preferring_left:true)
+
+let test_a_drawn_pane_keeps_what_the_reader_asked_for () =
+  Alcotest.(check bool)
+    "left when asked and drawn" true
+    (Masc_tui_roster_pane.arrows_go_left ~hidden:false ~cols:200
+       ~preferring_left:true);
+  Alcotest.(check bool)
+    "right when that is what was asked" false
+    (Masc_tui_roster_pane.arrows_go_left ~hidden:false ~cols:200
+       ~preferring_left:false)
+
 let () =
   Alcotest.run "tui_roster_pane"
-    [ ( "shown"
+    [ ( "which pane holds the arrows"
+      , [ Alcotest.test_case "a hidden pane does not" `Quick
+            test_a_hidden_pane_does_not_hold_the_arrows
+        ; Alcotest.test_case "nor one too narrow to draw" `Quick
+            test_a_pane_too_narrow_to_draw_does_not_hold_them_either
+        ; Alcotest.test_case "a drawn pane keeps the preference" `Quick
+            test_a_drawn_pane_keeps_what_the_reader_asked_for
+        ] )
+    ; ( "shown"
       , [ Alcotest.test_case "a wide terminal shows the roster" `Quick
             test_a_wide_terminal_shows_the_roster
         ; Alcotest.test_case "a narrow terminal keeps it away" `Quick

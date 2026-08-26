@@ -9307,7 +9307,11 @@ let main () =
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                if state.keeper_detail_focus = Left_pane then begin
+                if
+                  Masc_tui_roster_pane.arrows_go_left
+                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~preferring_left:(state.keeper_detail_focus = Left_pane)
+                then begin
                   state.keeper_cursor <-
                     Masc_tui_scroll.cursor_down
                       ~count:(List.length state.keepers)
@@ -9555,7 +9559,11 @@ let main () =
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                if state.keeper_detail_focus = Left_pane then begin
+                if
+                  Masc_tui_roster_pane.arrows_go_left
+                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~preferring_left:(state.keeper_detail_focus = Left_pane)
+                then begin
                   state.keeper_cursor <-
                     Masc_tui_scroll.cursor_up
                       ~count:(List.length state.keepers)

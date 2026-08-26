@@ -751,19 +751,144 @@ let test_cache_stats_follow_the_cache () =
       check int "clearing the cache clears the count" 0 cleared.Activity_graph.past_day_files)
 ;;
 
-let test_current_day_cache_reparses_only_appended_delta () =
+let test_current_day_cache_rebuilds_once_per_fingerprint () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 10;
       let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "first read sees 10 events" 10 (List.length first);
-      check int "cold-miss full parse does not touch the delta counter" 0
-        (Activity_graph.For_testing.current_day_parsed_line_count ());
+      check int "cold miss builds once" 1
+        (Activity_graph.For_testing.current_day_rebuild_count ());
       emit_n config 5;
       let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "second read sees all 15 events" 15 (List.length second);
-      check int "warm cache re-parses only the 5 appended lines" 5
-        (Activity_graph.For_testing.current_day_parsed_line_count ()))
+      check int "changed fingerprint rebuilds once" 2
+        (Activity_graph.For_testing.current_day_rebuild_count ());
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100
+           ~keep:(fun _ -> true) ());
+      check int "unchanged fingerprint reuses cache" 2
+        (Activity_graph.For_testing.current_day_rebuild_count ()))
+
+let test_default_projections_share_unchanged_event_aggregate () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 10;
+      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
+      ignore (Activity_graph.graph_json config ~limit:500 ~timeline_limit:80 ());
+      ignore (Activity_graph.agent_spans_json config ~limit:500 ());
+      check int "three unchanged projections share one aggregate rebuild" 1
+        (Activity_graph.For_testing.all_events_rebuild_count ());
+      emit_n config 1;
+      ignore (Activity_graph.json_response config ~after_seq:0 ~limit:1000 ());
+      check int "append invalidates aggregate signature" 2
+        (Activity_graph.For_testing.all_events_rebuild_count ()))
+
+let test_same_size_rewrite_invalidates_current_day_cache () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 1;
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100
+           ~keep:(fun _ -> true) ());
+      let path = Activity_graph.For_testing.current_day_path config in
+      let content = Fs_compat.load_file path in
+      let needle = "\"seq_hint\":1" in
+      let rec find i =
+        if i + String.length needle > String.length content
+        then Alcotest.fail "fixture payload marker missing"
+        else if String.sub content i (String.length needle) = needle
+        then i
+        else find (i + 1)
+      in
+      let bytes = Bytes.of_string content in
+      Bytes.set bytes (find 0 + String.length needle - 1) '9';
+      Fs_compat.save_file path (Bytes.to_string bytes);
+      let rewritten =
+        Activity_graph.list_events config ~after_seq:0 ~limit:100
+          ~keep:(fun _ -> true) ()
+      in
+      match rewritten with
+      | [ event ] ->
+        check int "same-size rewrite is reparsed" 9
+          (event.Activity_graph.payload
+           |> Yojson.Safe.Util.member "seq_hint"
+           |> Yojson.Safe.Util.to_int)
+      | events -> failf "expected one rewritten event, got %d" (List.length events))
+
+let test_truncate_regrow_is_not_treated_as_append () =
+  with_config (fun config ->
+      Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+      emit_n config 1;
+      ignore
+        (Activity_graph.list_events config ~after_seq:0 ~limit:100
+           ~keep:(fun _ -> true) ());
+      let path = Activity_graph.For_testing.current_day_path config in
+      let raw_line seq =
+        Printf.sprintf
+          "{\"seq\":%d,\"ts_ms\":%d,\"ts_iso\":\"2026-01-01T00:00:00Z\",\
+           \"kind\":\"message.broadcast\",\"payload\":{},\"tags\":[]}\n"
+          seq seq
+      in
+      Fs_compat.save_file path (raw_line 7 ^ raw_line 8);
+      let rewritten =
+        Activity_graph.list_events config ~after_seq:0 ~limit:100
+          ~keep:(fun _ -> true) ()
+      in
+      check (list int) "replacement rows only" [ 7; 8 ]
+        (List.map (fun event -> event.Activity_graph.seq) rewritten))
+
+let test_aggregate_cache_retains_multiple_workspaces () =
+  with_config (fun first ->
+      with_config (fun second ->
+        Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+        emit_n first 1;
+        emit_n second 1;
+        let read config =
+          ignore
+            (Activity_graph.list_events config ~after_seq:0 ~limit:100
+               ~keep:(fun _ -> true) ())
+        in
+        read first;
+        read second;
+        check int "two roots each build once" 2
+          (Activity_graph.For_testing.all_events_rebuild_count ());
+        read first;
+        check int "second root does not evict first" 2
+          (Activity_graph.For_testing.all_events_rebuild_count ())))
+
+let test_workspace_parse_caches_do_not_evict_each_other () =
+  with_config (fun first ->
+      with_config (fun second ->
+        Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+        emit_n first 3;
+        emit_n second 3;
+        let read config =
+          ignore
+            (Activity_graph.list_events config ~after_seq:0 ~limit:100
+               ~keep:(fun _ -> true) ())
+        in
+        read first;
+        read second;
+        read first;
+        check int "first workspace parse cache survives second root" 2
+          (Activity_graph.For_testing.current_day_rebuild_count ())))
+
+let test_workspace_aggregate_cache_uses_lru_at_capacity () =
+  Activity_graph.For_testing.reset_current_day_cache_for_testing ();
+  for i = 0 to 15 do
+    Activity_graph.For_testing.touch_workspace_cache (Printf.sprintf "root-%02d" i)
+  done;
+  Activity_graph.For_testing.touch_workspace_cache "root-00";
+  Activity_graph.For_testing.touch_workspace_cache "root-16";
+  check int "cache stays bounded" 16
+    (Activity_graph.For_testing.workspace_cache_count ());
+  check bool "recent root retained" true
+    (Activity_graph.For_testing.workspace_cache_mem "root-00");
+  check bool "least recently used root evicted" false
+    (Activity_graph.For_testing.workspace_cache_mem "root-01");
+  check bool "new root admitted" true
+    (Activity_graph.For_testing.workspace_cache_mem "root-16")
 
 let test_current_day_cache_matches_uncached_golden () =
   with_config (fun config ->
@@ -935,8 +1060,20 @@ let () =
         ] );
       ( "current_day_cache",
         [
-          test_case "warm cache re-parses only the appended delta" `Quick
-            test_current_day_cache_reparses_only_appended_delta;
+          test_case "current-day cache rebuilds once per fingerprint" `Quick
+            test_current_day_cache_rebuilds_once_per_fingerprint;
+          Alcotest.test_case "unchanged projections share sorted aggregate"
+            `Quick test_default_projections_share_unchanged_event_aggregate;
+          Alcotest.test_case "same-size rewrite invalidates cache" `Quick
+            test_same_size_rewrite_invalidates_current_day_cache;
+          Alcotest.test_case "truncate-regrow is not append" `Quick
+            test_truncate_regrow_is_not_treated_as_append;
+          Alcotest.test_case "aggregate cache retains multiple workspaces"
+            `Quick test_aggregate_cache_retains_multiple_workspaces;
+          Alcotest.test_case "workspace parse caches are isolated" `Quick
+            test_workspace_parse_caches_do_not_evict_each_other;
+          Alcotest.test_case "workspace aggregate cache uses bounded lru" `Quick
+            test_workspace_aggregate_cache_uses_lru_at_capacity;
           test_case "cache_stats follow the cache" `Quick
             test_cache_stats_follow_the_cache;
           test_case "incremental path output matches full-reparse reference"

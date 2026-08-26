@@ -66,6 +66,60 @@ let test_generated_at_recent () =
     true (s.generated_at <= after)
 ;;
 
+let test_projection_ttl_reuse_boundaries () =
+  let reuse ~now ~ttl ~refreshed_at =
+    Dashboard_snapshot.For_testing.should_reuse_projection
+      ~now ~ttl ~refreshed_at
+  in
+  Alcotest.(check bool) "inside ttl reuses" true
+    (reuse ~now:109.9 ~ttl:10.0 ~refreshed_at:100.0);
+  Alcotest.(check bool) "ttl boundary refreshes" false
+    (reuse ~now:110.0 ~ttl:10.0 ~refreshed_at:100.0);
+  Alcotest.(check bool) "clock rollback refreshes" false
+    (reuse ~now:99.0 ~ttl:10.0 ~refreshed_at:100.0)
+;;
+
+let test_projection_cache_retains_last_good_and_successful_null () =
+  let now_value = ref 100.0 in
+  let now () = !now_value in
+  let calls = ref 0 in
+  let cache = Dashboard_snapshot.For_testing.make_cache () in
+  let refresh compute =
+    Dashboard_snapshot.For_testing.refresh_projection
+      ~now ~ttl:10.0 ~cache compute
+  in
+  let first = refresh (fun () -> incr calls; `String "good") in
+  Alcotest.(check string) "first success" "good" (Yojson.Safe.Util.to_string first);
+  now_value := 105.0;
+  let hit = refresh (fun () -> incr calls; `String "unexpected") in
+  Alcotest.(check string) "fresh hit" "good" (Yojson.Safe.Util.to_string hit);
+  Alcotest.(check int) "fresh hit skips callback" 1 !calls;
+  now_value := 111.0;
+  let fallback = refresh (fun () -> incr calls; failwith "refresh failed") in
+  Alcotest.(check string) "failed refresh keeps last good" "good"
+    (Yojson.Safe.Util.to_string fallback);
+  let null_cache = Dashboard_snapshot.For_testing.make_cache () in
+  now_value := 200.0;
+  let null_calls = ref 0 in
+  ignore
+    (Dashboard_snapshot.For_testing.refresh_projection
+       ~now ~ttl:10.0 ~cache:null_cache
+       (fun () -> incr null_calls; `Null));
+  now_value := 205.0;
+  ignore
+    (Dashboard_snapshot.For_testing.refresh_projection
+       ~now ~ttl:10.0 ~cache:null_cache
+       (fun () -> incr null_calls; `String "unexpected"));
+  Alcotest.(check int) "successful null is cached" 1 !null_calls;
+  let cold_cache = Dashboard_snapshot.For_testing.make_cache () in
+  Alcotest.check_raises "cold failure aborts publish" (Failure "cold")
+    (fun () ->
+       ignore
+         (Dashboard_snapshot.For_testing.refresh_projection
+            ~now ~ttl:10.0 ~cache:cold_cache
+            (fun () -> failwith "cold")))
+;;
+
 let () =
   Alcotest.run "Dashboard_snapshot"
     [
@@ -82,6 +136,10 @@ let () =
         [
           Alcotest.test_case "generated_at within call window"
             `Quick test_generated_at_recent;
+          Alcotest.test_case "projection ttl reuse boundaries"
+            `Quick test_projection_ttl_reuse_boundaries;
+          Alcotest.test_case "projection cache keeps last good and null"
+            `Quick test_projection_cache_retains_last_good_and_successful_null;
         ] );
     ]
 ;;

@@ -240,7 +240,8 @@ let relevant_delivery_count ~base_path ~candidate_id =
           | Event_queue.Completion_authority_rejected _
           | Event_queue.Task_cancelled _
           | Event_queue.Workspace_message _
-          | Event_queue.Delegate_completed _ -> count)
+          | Event_queue.Delegate_completed _
+          | Event_queue.Composition_completed _ -> count)
        0
 ;;
 

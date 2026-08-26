@@ -690,6 +690,16 @@ let async_submission_result
          ~base_path:config.base_path
          ~caller:meta.name
          ~keeper_name:meta.name
+         (* Without this the submitter is never told the work finished. The
+            tool hands back a request id and returns, so the result reached
+            the Keeper only if it remembered to read that id: measured over
+            2026-08-18..26, 22 submissions produced 12 reads and a settled
+            result waited a median of 21.9s against a median 2.7ms of work.
+            The same callback Fusion uses, on the same broker. *)
+         ~on_worker_settled:
+           (Keeper_composition_completion_wake.on_worker_settled
+              ~base_path:config.base_path
+              ~composition_tool:tool_name)
          ~f:(fun ~request_id request_sw ->
            async_worker_result
              ~entry
@@ -729,6 +739,14 @@ let async_submission_result
            ; tool_kind_field tool_kind
            ; "execution", `String "async"
            ; "request_id", `String request_id
+           (* Says the wake exists. Without it the only way to learn the
+              result is to poll keeper_composition_status, which is the habit
+              that left results sitting a median of 21.9s. *)
+           ; ( "delivery"
+             , `String
+                 "async: you will be woken with the result when this \
+                  composition settles. Read it with keeper_composition_status \
+                  and this request_id; there is no need to poll for it." )
            ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
            ]
        in

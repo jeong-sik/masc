@@ -451,7 +451,10 @@ let source_terminal_receipt_of_stimulus source =
   (* Transferable receipts are the ones an operator can hand to another
      Keeper. A delegation answer belongs to the Keeper that asked; moving it
      would deliver an answer to someone who never asked. *)
-  | Keeper_event_queue.Delegate_completed _ ->
+  | Keeper_event_queue.Delegate_completed _
+  (* Same reason: an async composition's result belongs to the Keeper that
+     submitted it. *)
+  | Keeper_event_queue.Composition_completed _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

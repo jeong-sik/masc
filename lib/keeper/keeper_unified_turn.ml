@@ -171,7 +171,8 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
-  | Keeper_event_queue.Delegate_completed _ ->
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _ ->
     false
 ;;
 
@@ -260,7 +261,8 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
          | Keeper_event_queue.Workspace_message _
-         | Keeper_event_queue.Delegate_completed _ -> false)
+         | Keeper_event_queue.Delegate_completed _
+         | Keeper_event_queue.Composition_completed _ -> false)
       stimuli
   with
   | None -> None

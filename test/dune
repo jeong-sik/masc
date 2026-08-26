@@ -1209,6 +1209,7 @@
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
   test_keeper_delegate_completion_wake
+  test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
@@ -1353,6 +1354,7 @@
   test_task_transition_broadcast
   test_keeper_task_cancellation_wake
   test_keeper_delegate_completion_wake
+  test_keeper_composition_completion_wake
   test_dashboard_recent_terminal_tasks
   test_sandbox_inspect_trim_10488
   test_credential_alias_10440
@@ -3353,3 +3355,9 @@
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
  (libraries alcotest masc_tui_types))
+
+(test
+ (name test_keeper_composition_async_broker)
+ (modules test_keeper_composition_async_broker)
+ (libraries masc_test_deps masc_schedule multimodal bigstringaf
+   masc.keeper_checkpoint_ref masc.embedded_config masc.tool_spawn))

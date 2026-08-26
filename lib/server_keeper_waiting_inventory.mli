@@ -38,6 +38,7 @@ type wake_producer =
   | Keeper_compaction_request
   | Keeper_workspace_message
   | Keeper_delegate
+  | Keeper_composition
   | Read_model_reader
 
 type waiting_row =

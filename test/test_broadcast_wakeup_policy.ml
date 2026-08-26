@@ -272,7 +272,8 @@ let queued_workspace_messages ~base_path ~keeper_name =
       | Keeper_event_queue.Manual_compaction_requested
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
-      | Keeper_event_queue.Delegate_completed _ -> None)
+      | Keeper_event_queue.Delegate_completed _
+      | Keeper_event_queue.Composition_completed _ -> None)
 ;;
 
 (* A workspace message that names a Keeper has to reach the same linear drain

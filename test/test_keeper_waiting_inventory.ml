@@ -195,6 +195,60 @@ let create_schedule_exn config ~schedule_id ~scheduled_by =
     fail ("schedule create failed: " ^ Schedule_service.service_error_to_string err)
 ;;
 
+(* The row a settled async composition puts in front of an operator.
+
+   The dashboard reads these fields by name -- [wake_producer] goes straight
+   into the queue row, [source] picks the lane stage, and [detail] is what the
+   inventory panel expands -- so the shape is a wire contract, not internal
+   naming. Pinned here because a composition that finishes and shows up as a
+   blank row is the same loss as not being announced at all. *)
+let test_settled_composition_row_names_what_finished () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "composition-inventory-keeper" in
+  ensure_keeper config keeper_name;
+  let completion =
+    { Keeper_event_queue.cc_request_id = "kmsg-bbb"
+    ; cc_tool = "keeper_compose_background-snapshot"
+    ; cc_terminal = Keeper_event_queue.Composition_failed "node board: store unavailable"
+    }
+  in
+  Keeper_event_queue_persistence.persist
+    ~base_path:config.Workspace_utils_backend_setup.base_path
+    ~keeper_name
+    (queue_of_list
+       [ stimulus
+           ~post_id:(Keeper_event_queue.composition_completion_post_id completion)
+           ~arrived_at:100.0
+           (Keeper_event_queue.Composition_completed completion)
+       ]);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  match find_keeper json keeper_name with
+  | None -> fail "keeper row missing"
+  | Some keeper ->
+    (match U.(keeper |> member "waiting_on" |> to_list) with
+     | row :: _ ->
+       (* The lane stage the dashboard picks. A composition result waits in the
+          Keeper's own event queue like every other stimulus. *)
+       check string "the row sits in the event queue lane" "event_queue_pending"
+         (json_string_member "source" row);
+       check string "the producer names the composition broker" "keeper_composition"
+         (json_string_member "wake_producer" row);
+       check string "the row says which composition and how it ended"
+         "keeper_compose_background-snapshot 실패 · kmsg-bbb"
+         (json_string_member "what" row);
+       let detail = U.member "detail" row in
+       check string "the typed payload label survives" "keeper_composition_completed"
+         (json_string_member "payload_kind" detail);
+       (* The two fields an operator needs to go read the result itself. *)
+       check string "the request id to read the result with" "kmsg-bbb"
+         (json_string_member "composition_request_id" detail);
+       check string "and the tool that produced it"
+         "keeper_compose_background-snapshot"
+         (json_string_member "composition_tool" detail)
+     | [] -> fail "the settled composition put no row in front of the operator")
+;;
+
 let test_event_queue_pending_is_visible () =
   with_workspace
   @@ fun config ->
@@ -886,6 +940,8 @@ let () =
     [ ( "dashboard_json"
       , [ test_case "event queue pending is visible" `Quick
             test_event_queue_pending_is_visible
+        ; test_case "a settled composition row names what finished" `Quick
+            test_settled_composition_row_names_what_finished
         ; test_case "event queue rows carry operator-visible payload fields" `Quick
             test_event_queue_pending_rows_carry_operator_visible_fields
         ; test_case "manual compaction producer is typed" `Quick

@@ -76,7 +76,9 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
   (* The answer arriving is the reply; it names no further destination. *)
-  | Keeper_event_queue.Delegate_completed _ ->
+  | Keeper_event_queue.Delegate_completed _
+  (* The submitter is the destination; there is nothing further to route. *)
+  | Keeper_event_queue.Composition_completed _ ->
     No_channel
 ;;
 

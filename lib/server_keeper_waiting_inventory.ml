@@ -33,6 +33,7 @@ type wake_producer =
   | Keeper_compaction_request
   | Keeper_workspace_message
   | Keeper_delegate
+  | Keeper_composition
   | Read_model_reader
 
 type waiting_row =
@@ -104,6 +105,7 @@ let wake_producer_to_string = function
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
   | Keeper_compaction_request -> "keeper_compaction_request"
+  | Keeper_composition -> "keeper_composition"
   | Keeper_workspace_message -> "keeper_workspace_message"
   | Keeper_delegate -> "keeper_delegate"
   | Read_model_reader -> "read_model_reader"
@@ -123,6 +125,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Task_cancelled _ -> Keeper_task_cancellation
   | Workspace_message _ -> Keeper_workspace_message
   | Delegate_completed _ -> Keeper_delegate
+  | Composition_completed _ -> Keeper_composition
 ;;
 
 let unix_iso_json = function
@@ -194,6 +197,10 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
     [ "delegate_operation_id", `String dc.dc_operation_id
     ; "delegate_keeper", `String dc.dc_keeper
     ]
+  | Composition_completed cc ->
+    [ "composition_request_id", `String cc.cc_request_id
+    ; "composition_tool", `String cc.cc_tool
+    ]
 ;;
 
 let board_signal_what (signal : Keeper_event_queue.board_stimulus) =
@@ -255,6 +262,14 @@ let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = functio
        Printf.sprintf "%s가 답 없이 끝냄 · %s" dc.dc_keeper dc.dc_operation_id
      | Delegate_failed _ ->
        Printf.sprintf "%s가 끝내지 못함 · %s" dc.dc_keeper dc.dc_operation_id)
+  | Composition_completed cc ->
+    (match cc.cc_terminal with
+     | Composition_succeeded ->
+       Printf.sprintf "%s 끝남 · %s" cc.cc_tool cc.cc_request_id
+     | Composition_failed _ ->
+       Printf.sprintf "%s 실패 · %s" cc.cc_tool cc.cc_request_id
+     | Composition_cancelled _ ->
+       Printf.sprintf "%s 취소됨 · %s" cc.cc_tool cc.cc_request_id)
 ;;
 
 let urgency_what_suffix : Keeper_event_queue.urgency -> string = function

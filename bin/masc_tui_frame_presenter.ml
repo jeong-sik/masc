@@ -7,6 +7,7 @@ type cursor =
 
 type frame = {
   surface_key : string;
+  compact_frame : bool;
   terminal_rows : int;
   terminal_cols : int;
   cursor : cursor;
@@ -15,6 +16,7 @@ type frame = {
 
 type snapshot = {
   surface_key : string;
+  compact_frame : bool;
   terminal_rows : int;
   terminal_cols : int;
   cursor : cursor;
@@ -50,6 +52,13 @@ let create ~synchronized_output () =
   { synchronized_output; invalidated = true; previous = None }
 
 let invalidate presenter = presenter.invalidated <- true
+
+let last_frame_is_compact presenter =
+  presenter.invalidated
+  ||
+  match presenter.previous with
+  | None -> true
+  | Some previous -> previous.compact_frame
 
 let setup presenter ~write ~flush =
   presenter.invalidated <- true;
@@ -90,6 +99,7 @@ let same_cursor_mode left right =
 
 let same_geometry (previous : snapshot) (frame : frame) =
   String.equal previous.surface_key frame.surface_key
+  && Bool.equal previous.compact_frame frame.compact_frame
   && previous.terminal_rows = max 1 frame.terminal_rows
   && previous.terminal_cols = max 1 frame.terminal_cols
   && same_cursor_mode previous.cursor frame.cursor
@@ -151,6 +161,7 @@ let present presenter ~invalidate_before ~write ~flush (frame : frame) =
       let output = Buffer.contents buffer in
       let snapshot =
         { surface_key = frame.surface_key;
+          compact_frame = frame.compact_frame;
           terminal_rows;
           terminal_cols;
           cursor = frame.cursor;

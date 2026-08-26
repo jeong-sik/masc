@@ -1291,10 +1291,21 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
-  check int "main gates input once on the compact viewport" 1
+  check int "main reads the compact gate from the presented frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main"
+       ~callee:"Frame_presenter.last_frame_is_compact");
+  check int "main does not recompute compact state from newer mutable state" 0
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main"
        ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "run loop polls pending resize twice per pass" 2
+    (Ast_grep.count_calls_inside_while_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop"
+       ~callee:"consume_resize_request");
+  check int "resize polling consumes one pending signal" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"consume_resize_request" ~callee:"Atomic.exchange");
   check int "render owns one compact viewport gate" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"

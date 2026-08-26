@@ -48,9 +48,11 @@ let frame_lines buf =
 (* A frame, and what it had to clamp to build itself. The clamp travels beside
    the frame rather than being written into the state mid-draw; see
    [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
-let finish_frame ?clamped ~surface_key ~cursor ~rows ~cols buf :
+let finish_frame ?clamped ?(compact_frame = false) ~surface_key ~cursor ~rows
+    ~cols buf :
     Frame_presenter.frame * clamped_scroll option =
   ( { surface_key;
+      compact_frame;
       terminal_rows = rows;
       terminal_cols = cols;
       cursor;
@@ -9069,7 +9071,7 @@ let render_terminal_too_small ~rows ~cols =
           Render_schedule.Viewport.minimum_fixed_chrome_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~surface_key:"terminal-too-small"
+  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
     ~cursor:Frame_presenter.Hidden ~rows ~cols buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the

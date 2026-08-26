@@ -167,8 +167,20 @@ let schema_tool ~name ~description ~input_schema =
     (fun _ _ -> invalid_arg "schema-only Keeper tool cannot execute")
 ;;
 
+let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
+
+let instruction_skill_description instruction_skills =
+  let listed =
+    instruction_skills
+    |> List.map (fun (skill_name, description, _body) ->
+         Printf.sprintf "%s: %s" skill_name description)
+    |> String.concat "\n"
+  in
+  skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
+;;
+
 let schema_tools ?(skill_composition_entries = [])
-      ?(include_instruction_skill = false) () =
+      ?(instruction_skills = []) () =
   let composition_tools =
     List.map
       (fun (entry : Catalog.entry) ->
@@ -185,12 +197,12 @@ let schema_tools ?(skill_composition_entries = [])
       ~input_schema:plan_execute_input_schema
   in
   let instruction_tools =
-    if include_instruction_skill
+    if instruction_skills <> []
     then
       [ schema_tool
           ~name:Catalog.skill_tool_name
-          ~description:Tool_schemas_skill.schema.description
-          ~input_schema:Tool_schemas_skill.schema.input_schema
+          ~description:(instruction_skill_description instruction_skills)
+          ~input_schema:skill_tool_schema.input_schema
       ]
     else []
   in
@@ -900,6 +912,8 @@ let cancel_result
 ;;
 
 module For_testing = struct
+  let instruction_skill_description = instruction_skill_description
+
   let status_result = status_result
   let cancel_result = cancel_result
 end
@@ -954,7 +968,6 @@ let make_request_control_tool
    than built here. Which skills are readable is workspace state and is
    appended below; the argument's shape and the sentence saying when to reach
    for the tool are not, and the model-prose ratchet is what says so. *)
-let skill_tool_schema : Masc_domain.tool_schema = Tool_schemas_skill.schema
 let skill_name_input_schema = skill_tool_schema.input_schema
 
 let skill_name_of_validated_input input =
@@ -968,16 +981,7 @@ let skill_name_of_validated_input input =
 
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
   let name = Catalog.skill_tool_name in
-  let listed =
-    instruction_skills
-    |> List.map (fun (skill_name, description, _body) ->
-         Printf.sprintf "%s: %s" skill_name description)
-    |> String.concat "
-"
-  in
-  let description =
-    skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
-  in
+  let description = instruction_skill_description instruction_skills in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
     ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
     ~base_path:config.base_path

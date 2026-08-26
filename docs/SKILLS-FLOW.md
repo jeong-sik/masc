@@ -95,7 +95,7 @@ sequenceDiagram
   Turn->>Setup: prepare_agent_setup
   Setup->>Cat: load_skill_catalog ~base_path
   Setup->>Setup: validate_held_task_skill_admission
-  Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나 / 지시 스킬이면 Read 있나
+  Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_composition_entries
   Surface-->>Model: 합성 → keeper_compose_&lt;name&gt;<br/>지시 → keeper_skill (표면에 노출)
 ```
@@ -104,8 +104,8 @@ sequenceDiagram
 
 `prepare_agent_setup`(`keeper_run_tools_setup.ml`)이 카탈로그를 로드하고
 `validate_held_task_skill_admission`으로 **보유한 모든 task**(current + 나머지
-Claimed/InProgress, task-364 수리)가 지명한 스킬을 검사한다: 카탈로그에 없는 스킬 →
-config error, 지시 스킬인데 `Read` 도구가 없으면 → config error. 통과하면
+Claimed/InProgress, task-364 수리)가 지명한 스킬을 검사한다: 카탈로그에 없는 스킬만
+config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
 `Keeper_tool_composition_surface.make_tools`가:
 
 - 합성 스킬 → `keeper_compose_<name>` 도구(`keeper_tool_composition_catalog.ml:116`,

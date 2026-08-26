@@ -198,7 +198,8 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     address :: detail :: (preview_block ~max_line_cells ~language:"diff" lines
                           @ omission_row ~max_line_cells omitted)
 
-let written_section ~max_line_cells change ~preview ~omitted ~row_count =
+let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
+      ~preview ~omitted ~row_count =
   let summary =
     if change.fc_succeeded then
       Printf.sprintf "(%d row%s written)" row_count

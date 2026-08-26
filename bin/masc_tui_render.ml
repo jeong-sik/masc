@@ -2706,25 +2706,16 @@ let keeper_health_word (health : Tui_decode.keeper_health option) =
   | None -> "unread"
   | Some value -> Tui_decode.keeper_health_to_string value
 
-(* The runtime id is [provider.model], and the provider half repeats inside the
-   model half often enough that printing both costs the column its width. The
-   phase is the fine-grained state-machine reading from GET /api/v1/gate/keepers,
-   shown ahead of the model so an operator scanning the column sees lifecycle
-   state first. *)
+(* [runtime_id] is the producer-owned runtime identity. Keep it whole instead
+   of deriving a model by splitting its spelling: the phase is a separate
+   typed reading, while the sanitized id is the exact identity the gate named. *)
 let keeper_runtime_label (runtime : keeper_runtime option) =
   match runtime with
   | None -> "\xe2\x80\x94"
-  | Some row -> (
-      let raw = Terminal_text.single_line row.kr_runtime_id in
-      let model =
-        match String.index_opt raw '.' with
-        | Some idx when idx + 1 < String.length raw ->
-            String.sub raw (idx + 1) (String.length raw - idx - 1)
-        | Some _ | None -> raw
-      in
+  | Some row ->
       Printf.sprintf "%s %s"
         (Tui_decode.keeper_phase_to_string row.kr_phase)
-        model)
+        (Terminal_text.single_line row.kr_runtime_id)
 
 let keeper_message_identity state keeper_name =
   match
@@ -2784,7 +2775,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
     ; (if columns.kcol_show_runtime then
-         " " ^ fit_width "LIFECYCLE / MODEL" columns.kcol_runtime
+         " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
     ; " "
     ; "TASK"

@@ -1602,7 +1602,7 @@ def navigate_with_arrows_and_quit(
     )
 
 
-def keeper_runtime_phase_and_model_interaction(
+def keeper_runtime_phase_and_identity_interaction(
     process: subprocess.Popen[bytes],
     master_fd: int,
     _slave_fd: int,
@@ -1622,13 +1622,21 @@ def keeper_runtime_phase_and_model_interaction(
         master_fd,
         output,
         b"2",
-        b"running claude-opus-5",
+        b"running anthropic.claude-opus-5",
     )
     wait_for_output(
         process,
         master_fd,
         output,
-        b"paused claude-sonnet-4",
+        b"LIFECYCLE / RUNTIME",
+        start=0,
+        timeout=3.0,
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"paused anthropic.claude-sonnet-4",
         start=0,
         timeout=3.0,
     )
@@ -4799,7 +4807,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
             master_fd,
             output,
             b"2",
-            b"running claude-opus-5",
+            b"running anthropic.claude-opus-5",
         )
         send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1malpha")
         send_and_wait(process, master_fd, output, b"m", b"Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat")
@@ -4854,7 +4862,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         beta_plain = CSI_RE.sub(b"", beta_frame)
         for expected in (
             b"Keepers \xe2\x96\xb8 beta \xe2\x96\xb8 chat",
-            b"idle \xc2\xb7 paused claude-sonnet-4",
+            b"idle \xc2\xb7 paused anthropic.claude-sonnet-4",
             b"beta-current-history-marker",
         ):
             if expected not in beta_plain:
@@ -4893,7 +4901,7 @@ def keeper_message_switch_interaction(alpha_history: GatedHttpResponse) -> Inter
         )
         alpha_plain = CSI_RE.sub(b"", alpha_frame)
         for expected in (
-            b"healthy \xc2\xb7 running claude-opus-5",
+            b"healthy \xc2\xb7 running anthropic.claude-opus-5",
             b"alpha-current-history-marker",
             b"> alpha-draft",
         ):
@@ -7638,8 +7646,8 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
-        description="Keeper phase and model",
-        interact=keeper_runtime_phase_and_model_interaction,
+        description="Keeper phase and runtime identity",
+        interact=keeper_runtime_phase_and_identity_interaction,
         http_fixtures=keeper_runtime_http_fixtures(),
     )
     run_terminal_scenario(

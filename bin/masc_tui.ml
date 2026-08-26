@@ -5646,12 +5646,22 @@ let handle_board_compose_key state ~mailbox (key : string) : bool =
       true
   | _ -> true
 
+(* Said by every keypress gate that finds nothing under the cursor. One name
+   rather than the sentence written twice: the two gates have to answer the
+   same way, and a test can ask whether each of them reaches this. *)
+let no_keeper_under_cursor = "no keeper under the cursor; r to reload the roster"
+
 (* The keypress path. The reading decides which actions exist at all, so a key
    that names an action the reading does not offer says why instead of sending
    a request the server would refuse. *)
 let handle_keeper_action state ~base_path ~mailbox action =
   match selected_keeper state with
-  | None -> ()
+  | None ->
+    (* A keypress with nothing under the cursor said nothing at all, which
+       reads as a key that does not exist. The comment above already holds
+       this rule for the next gate -- an action the reading does not offer
+       says why -- and this gate is the one the operator reaches first. *)
+    add_event state "system" no_keeper_under_cursor
   | Some keeper ->
       let reading = keeper_reading state keeper in
       if not (List.mem action (Keeper_control.available reading)) then
@@ -7818,7 +7828,12 @@ let main () =
   in
   let handle_keeper_settings_edit () =
     match selected_keeper state with
-    | None -> ()
+    | None ->
+      (* Every other outcome of this handler reports: no $EDITOR, a load
+         failure, unparseable JSON, an empty patch. This one returned silently,
+         so pressing the key with an empty or stale roster looked exactly like
+         a feature that is not there. *)
+      add_event state "system" no_keeper_under_cursor
     | Some keeper -> (
       match Masc_tui_editor.editor_command () with
       | None ->

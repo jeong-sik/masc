@@ -504,6 +504,17 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
     "masc_board_list"
     (Masc.Snapshot_protocol.to_yojson
        (Masc.Snapshot_protocol.Unchanged { revision = "board:r1" }));
+  let task_skill_reference =
+    `Assoc
+      [ ( "identity"
+        , `Assoc
+            [ "source_id", `String "project-masc"
+            ; "package_id", `String "ocaml-coding"
+            ; "name", `String "ocaml-coding"
+            ] )
+      ; "content_revision", `String (String.make 64 'a')
+      ]
+  in
   let task_item =
     `Assoc
       [ "id", `String "task-1"
@@ -511,6 +522,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; "description", `String "d"
       ; "priority", `Int 3
       ; "files", `List [ `String "lib/a.ml" ]
+      ; "skills", `List [ task_skill_reference ]
       ; "created_at", `String "2026-08-18T00:00:00Z"
       ; "status", `String "claimed"
       ; "assignee", `String "albini"
@@ -524,6 +536,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
       ; "priority", `Int 2
       ; "created_at", `String "2026-08-18T00:00:00Z"
       ; "status", `String "todo"
+      ; "skills", `List []
       ]
   in
   accepts

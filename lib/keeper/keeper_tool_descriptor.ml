@@ -1201,12 +1201,7 @@ let exact_skill_reference_schema =
       , `Assoc
           [ "identity", exact_skill_identity_schema
           ; ( "content_revision"
-            , `Assoc
-                [ "type", `String "string"
-                ; "minLength", `Int 64
-                ; "maxLength", `Int 64
-                ; "pattern", `String "^[0-9a-f]{64}$"
-                ] )
+            , `Assoc [ "type", `String "string" ] )
           ] )
     ; ( "required"
       , `List [ `String "identity"; `String "content_revision" ] )

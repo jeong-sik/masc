@@ -1,7 +1,7 @@
 // Tools main component — orchestrates inventory and executor views
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { SectionCard } from '../common/card'
 import { ToolMetrics } from '../tool-metrics'
@@ -10,6 +10,7 @@ import {
   toolsLoading,
   toolsError,
   loadTools,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS,
 } from './tool-state'
 import { FullInventoryView } from './tool-full-inventory'
 import { ConfigResolutionPanel } from './config-resolution-panel'
@@ -20,6 +21,9 @@ import { formatElapsedCompact } from '../../lib/format-time'
 import { sourceHealthClass, coverageGapDisplay } from '../common/source-health'
 import { ScheduledAutomationPanel } from './scheduled-automation-panel'
 import { KeeperWaitingInventoryPanel } from './keeper-waiting-inventory-panel'
+import { SkillActivationPanel } from './skill-activation-panel'
+import { fetchDashboardTools, type DashboardToolsResponse } from '../../api'
+import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 import {
   scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh,
@@ -42,6 +46,13 @@ export function Tools() {
   const inventory = data?.tool_inventory.tools ?? []
   const usage = data?.tool_usage ?? null
   const usageCoverageGap = usage ? coverageGapDisplay(usage) : null
+  const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
+    .map(keeper => keeper.keeper_name)
+    .sort((left, right) => left.localeCompare(right))
+  const [selectedKeeper, setSelectedKeeper] = useState<string | null>(null)
+  const [keeperReceipt, setKeeperReceipt] = useState<DashboardToolsResponse | null>(null)
+  const [keeperReceiptLoading, setKeeperReceiptLoading] = useState(false)
+  const [keeperReceiptError, setKeeperReceiptError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -51,6 +62,44 @@ export function Tools() {
     // part of the tools response.
     return subscribeScheduledAutomationRefresh()
   }, [])
+
+  useEffect(() => {
+    if (selectedKeeper === null) {
+      setKeeperReceipt(null)
+      setKeeperReceiptError(null)
+      setKeeperReceiptLoading(false)
+      return
+    }
+    let controller: AbortController | null = null
+    const refresh = () => {
+      controller?.abort()
+      controller = new AbortController()
+      const current = controller
+      setKeeperReceiptLoading(true)
+      setKeeperReceiptError(null)
+      void fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal })
+        .then(response => {
+          setKeeperReceipt(response)
+        })
+        .catch((cause: unknown) => {
+          if (current.signal.aborted) return
+          setKeeperReceipt(null)
+          setKeeperReceiptError(cause instanceof Error ? cause.message : String(cause))
+        })
+        .finally(() => {
+          if (!current.signal.aborted) setKeeperReceiptLoading(false)
+        })
+    }
+    refresh()
+    const stopRefresh = setupVisibleAutoRefresh(
+      refresh,
+      KEEPER_WAITING_INVENTORY_REFRESH_MS,
+    )
+    return () => {
+      stopRefresh()
+      controller?.abort()
+    }
+  }, [selectedKeeper])
 
   return html`
     <div class="v2-lab-surface flex flex-col gap-4">
@@ -93,6 +142,18 @@ export function Tools() {
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">
         <${KeeperWaitingInventoryPanel} inventory=${data?.keeper_waiting_inventory ?? null} />
+      <//>
+
+      <${SectionCard} label="Keeper Skill Receipts" class="section v2-lab-panel mb-4">
+        <${SkillActivationPanel}
+          keeperNames=${keeperNames}
+          selectedKeeper=${selectedKeeper}
+          effectiveSurface=${keeperReceipt?.effective_keeper_surface}
+          activations=${keeperReceipt?.skill_activations}
+          loading=${keeperReceiptLoading}
+          error=${keeperReceiptError}
+          onSelectKeeper=${setSelectedKeeper}
+        />
       <//>
 
       <${SectionCard} label="시스템 도구 목록" class="section v2-lab-panel mb-4">

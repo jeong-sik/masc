@@ -16,11 +16,17 @@ type MockToolsResponse = {
 
 const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
+  fetchDashboardTools: vi.fn(),
   navigate: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
   scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
+}))
+
+vi.mock('../../api', async importOriginal => ({
+  ...await importOriginal<typeof import('../../api')>(),
+  fetchDashboardTools: mocks.fetchDashboardTools,
 }))
 
 vi.mock('../schedule/schedule-state', () => ({
@@ -33,6 +39,11 @@ vi.mock('./tool-state', () => ({
   toolsData: mocks.toolsData,
   toolsError: mocks.toolsError,
   toolsLoading: mocks.toolsLoading,
+  KEEPER_WAITING_INVENTORY_REFRESH_MS: 15_000,
+}))
+
+vi.mock('../../lib/auto-refresh', () => ({
+  setupVisibleAutoRefresh: () => () => {},
 }))
 
 vi.mock('../common/card', () => ({
@@ -110,6 +121,7 @@ describe('Tools', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
+    mocks.fetchDashboardTools.mockReset()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
@@ -265,5 +277,81 @@ describe('Tools', () => {
     expect(container.textContent).toContain('store .masc/tool_usage')
     expect(container.textContent).toContain('surface /api/v1/dashboard/tools')
     expect(container.textContent).toContain('error synthetic append failure')
+  })
+
+  it('loads and renders exact Keeper Skill receipts', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const reference = {
+      identity: {
+        source_id: 'project-masc',
+        package_id: 'ocaml-coding',
+        name: 'ocaml-coding',
+      },
+      content_revision: 'a'.repeat(64),
+    }
+    mocks.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: { count: 0, tools: [] },
+      tool_usage: {
+        total_calls: 0,
+        distinct_tools_called: 0,
+        top_20: [],
+        never_called_count: 0,
+        registered_count: 0,
+      },
+      effective_keeper_surface: {
+        status: 'available',
+        keeper_name: 'sangsu',
+        runtime_id: 'openai.codex',
+        official_client_kind: 'codex',
+        native_posture: 'read',
+        tool_groups: [],
+        current_task_id: 'task-001',
+        instruction_skills: [reference],
+        composition_skills: [],
+        count: 2,
+        tools: [],
+        tool_surface_sha256: 'b'.repeat(64),
+      },
+      skill_activations: {
+        status: 'available',
+        keeper_name: 'sangsu',
+        ledger: {
+          schema: 'masc.skill-activations/v1',
+          session_id: 'trace-one',
+          revision: 'c'.repeat(64),
+          activations: [
+            {
+              ...reference,
+              snapshot_revision: 'd'.repeat(64),
+              turn_ref: 'trace-one:1',
+              activated_at: '2026-08-26T00:00:00Z',
+              origin: { kind: 'task_instruction', task_id: 'task-001' },
+            },
+          ],
+        },
+      },
+    })
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    const selector = container.querySelector('select') as HTMLSelectElement
+    selector.value = 'sangsu'
+    selector.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    expect(mocks.fetchDashboardTools).toHaveBeenCalledWith(expect.objectContaining({
+      keeperName: 'sangsu',
+    }))
+    expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
+    expect(container.textContent).toContain('Task instruction · task-001')
+    expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
   })
 })

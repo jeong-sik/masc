@@ -363,19 +363,29 @@ let test_renewal_window_opens_before_expiry () =
 
 (* ── the exchanges waiting for a browser ─────────────────────────────── *)
 
-let pending_for provider = begin_for provider
+let in_flight_for provider : Keeper_oauth_pending.in_flight =
+  { pending = begin_for provider
+  ; discovered = discovered_atlassian ()
+  ; client_id = "client-abc"
+  }
 
 let test_a_state_is_redeemed_once () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let pending = pending_for provider in
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 pending;
-  let state = pending.Keeper_oauth_flow.state in
+  let held = in_flight_for provider in
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held;
+  let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
   (match Keeper_oauth_pending.take table ~now:1.0 ~state with
   | None -> Alcotest.fail "the exchange was not held"
   | Some found ->
-      check str "the verifier came back" pending.Keeper_oauth_flow.verifier
-        found.Keeper_oauth_flow.verifier);
+      check str "the verifier came back"
+        held.Keeper_oauth_pending.pending.Keeper_oauth_flow.verifier
+        found.Keeper_oauth_pending.pending.Keeper_oauth_flow.verifier;
+      (* The callback redeems at the endpoint the authorize call was built
+         from, not one discovered again in between. *)
+      check str "and so did the endpoint it must redeem at"
+        held.Keeper_oauth_pending.discovered.Keeper_oauth_discovery.token_url
+        found.Keeper_oauth_pending.discovered.Keeper_oauth_discovery.token_url);
   (* A replayed callback finds nothing, which is what it should find. *)
   Alcotest.(check bool)
     "a second callback finds nothing" true
@@ -384,9 +394,9 @@ let test_a_state_is_redeemed_once () =
 let test_an_abandoned_login_expires () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let pending = pending_for provider in
-  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 pending;
-  let state = pending.Keeper_oauth_flow.state in
+  let held = in_flight_for provider in
+  Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 held;
+  let state = held.Keeper_oauth_pending.pending.Keeper_oauth_flow.state in
   Alcotest.(check int) "held while inside the window" 1
     (Keeper_oauth_pending.waiting table ~now:599.0);
   Alcotest.(check int) "gone once past it" 0
@@ -398,20 +408,24 @@ let test_an_abandoned_login_expires () =
 let test_logins_do_not_collide () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
-  let one = pending_for provider and two = pending_for provider in
+  let one = in_flight_for provider and two = in_flight_for provider in
   Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 one;
   Keeper_oauth_pending.remember table ~now:0.0 ~ttl_sec:600.0 two;
   Alcotest.(check int) "both are held" 2
     (Keeper_oauth_pending.waiting table ~now:1.0);
+  let verifier (f : Keeper_oauth_pending.in_flight) =
+    f.Keeper_oauth_pending.pending.Keeper_oauth_flow.verifier
+  in
+  let state_of (f : Keeper_oauth_pending.in_flight) =
+    f.Keeper_oauth_pending.pending.Keeper_oauth_flow.state
+  in
   match
-    ( Keeper_oauth_pending.take table ~now:1.0 ~state:one.Keeper_oauth_flow.state,
-      Keeper_oauth_pending.take table ~now:1.0 ~state:two.Keeper_oauth_flow.state )
+    ( Keeper_oauth_pending.take table ~now:1.0 ~state:(state_of one),
+      Keeper_oauth_pending.take table ~now:1.0 ~state:(state_of two) )
   with
   | Some a, Some b ->
-      check str "the first kept its own verifier" one.Keeper_oauth_flow.verifier
-        a.Keeper_oauth_flow.verifier;
-      check str "the second kept its own" two.Keeper_oauth_flow.verifier
-        b.Keeper_oauth_flow.verifier
+      check str "the first kept its own verifier" (verifier one) (verifier a);
+      check str "the second kept its own" (verifier two) (verifier b)
   | _ -> Alcotest.fail "one of two concurrent logins was lost"
 
 let test_discovery_reads_both_hops () =
@@ -560,6 +574,151 @@ let test_registration_keeps_the_servers_reason () =
         (Keeper_oauth_registration.error_to_string other)
   | Ok _ -> Alcotest.fail "a 400 was read as a registration"
 
+(* ── the whole login, both halves ───────────────────────────────────── *)
+
+let stub_discover ?(supports_pkce = true) ?(registration = Some "https://auth.example.com/dcr") () =
+  fun ~mcp_url ->
+    ignore mcp_url;
+    let base = discovered_atlassian () in
+    Ok
+      { base with
+        Keeper_oauth_discovery.supports_pkce_s256 = supports_pkce
+      ; registration_url = registration
+      }
+
+let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
+  Alcotest.fail "registered a client when one was already configured"
+
+let start_login ?(configured = None) ?discover ?register provider table =
+  Keeper_oauth_session.start ?discover ?register ~provider
+    ~configured_client_id:configured ~client_name:"masc"
+    ~redirect_uri ~keeper:"kidsnote" ~pending:table ~now:0.0 ~ttl_sec:600.0 ()
+
+let test_start_uses_a_configured_client_rather_than_registering () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~configured:(Some "operators-own-app") ~discover:(stub_discover ())
+      ~register:never_register provider table
+  with
+  | Error err ->
+      Alcotest.failf "start failed: %s"
+        (Keeper_oauth_session.start_error_to_string err)
+  | Ok started ->
+      check str "the operator's client id is used" "operators-own-app"
+        started.Keeper_oauth_session.client_id;
+      Alcotest.(check bool)
+        "and nothing was registered" false
+        started.Keeper_oauth_session.registered_now;
+      Alcotest.(check int) "the login is waiting" 1
+        (Keeper_oauth_pending.waiting table ~now:1.0)
+
+let test_start_registers_when_nobody_configured_one () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let register ~registration_url ~client_name ~redirect_uri:_ =
+    check str "registers where discovery said" "https://auth.example.com/dcr"
+      registration_url;
+    check str "under our own name" "masc" client_name;
+    Ok
+      { Keeper_oauth_registration.client_id = "freshly-registered"
+      ; issued_at = 1.0
+      }
+  in
+  match start_login ~discover:(stub_discover ()) ~register provider table with
+  | Error err ->
+      Alcotest.failf "start failed: %s"
+        (Keeper_oauth_session.start_error_to_string err)
+  | Ok started ->
+      check str "the new client id comes back" "freshly-registered"
+        started.Keeper_oauth_session.client_id;
+      (* The caller has to persist it, or the next login registers again and
+         leaves another client record behind. *)
+      Alcotest.(check bool)
+        "and says it is new" true started.Keeper_oauth_session.registered_now
+
+let test_start_refuses_a_server_without_pkce () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~configured:(Some "id") ~discover:(stub_discover ~supports_pkce:false ())
+      ~register:never_register provider table
+  with
+  | Error (Keeper_oauth_session.No_pkce_s256 _) ->
+      Alcotest.(check int) "and holds no login" 0
+        (Keeper_oauth_pending.waiting table ~now:1.0)
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_session.start_error_to_string other)
+  | Ok _ -> Alcotest.fail "a server with no S256 was accepted"
+
+let test_start_says_when_there_is_no_way_to_get_a_client () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~discover:(stub_discover ~registration:None ())
+      ~register:never_register provider table
+  with
+  | Error (Keeper_oauth_session.No_registration _) -> ()
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_session.start_error_to_string other)
+  | Ok _ -> Alcotest.fail "a login started with no client id and no way to get one"
+
+let test_the_callback_finishes_the_login_it_started () =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~configured:(Some "client-abc") ~discover:(stub_discover ())
+      ~register:never_register provider table
+  with
+  | Error err ->
+      Alcotest.failf "start failed: %s"
+        (Keeper_oauth_session.start_error_to_string err)
+  | Ok started -> (
+      let post, seen = recording_post ok_answer in
+      let result =
+        Keeper_oauth_session.finish ~post ~pending:table ~redirect_uri
+          ~state:started.Keeper_oauth_session.state ~code:"the-code" ~now:1.0 ()
+      in
+      (match !seen with
+      | None -> Alcotest.fail "the callback sent nothing"
+      | Some (url, _, _) ->
+          (* Redeemed where the first half was built from, not somewhere
+             discovered again in between. *)
+          check str "redeems at the endpoint the login was built from"
+            "https://auth.atlassian.com/oauth/token" url);
+      match result with
+      | Error err ->
+          Alcotest.failf "finish failed: %s"
+            (Keeper_oauth_session.finish_error_to_string err)
+      | Ok finished ->
+          check str "for the Keeper that started it" "kidsnote"
+            finished.Keeper_oauth_session.keeper;
+          check str "under the provider it started with" "atlassian"
+            finished.Keeper_oauth_session.provider_id;
+          check str "access token" "at-1"
+            finished.Keeper_oauth_session.access_token;
+          check str "refresh token" "rt-1"
+            finished.Keeper_oauth_session.refresh_token;
+          Alcotest.(check int) "and the login is no longer waiting" 0
+            (Keeper_oauth_pending.waiting table ~now:2.0))
+
+let test_a_callback_nobody_is_waiting_on_says_so () =
+  let table = Keeper_oauth_pending.create () in
+  match
+    Keeper_oauth_session.finish
+      ~post:(fun ~url:_ ~headers:_ ~body:_ ->
+        Alcotest.fail "sent an exchange for a state nobody was waiting on")
+      ~pending:table ~redirect_uri ~state:"never-issued" ~code:"the-code"
+      ~now:1.0 ()
+  with
+  | Error Keeper_oauth_session.Unknown_state -> ()
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_session.finish_error_to_string other)
+  | Ok _ -> Alcotest.fail "a code was redeemed against no login"
+
 let () =
   Alcotest.run "keeper_oauth_identity"
     [ ( "declaration",
@@ -611,6 +770,20 @@ let () =
             test_registration_does_not_keep_a_secret_it_will_not_send;
           Alcotest.test_case "keeps the server's reason" `Quick
             test_registration_keeps_the_servers_reason;
+        ] );
+      ( "login",
+        [ Alcotest.test_case "uses a configured client rather than registering"
+            `Quick test_start_uses_a_configured_client_rather_than_registering;
+          Alcotest.test_case "registers when nobody configured one" `Quick
+            test_start_registers_when_nobody_configured_one;
+          Alcotest.test_case "refuses a server without PKCE" `Quick
+            test_start_refuses_a_server_without_pkce;
+          Alcotest.test_case "says when there is no way to get a client" `Quick
+            test_start_says_when_there_is_no_way_to_get_a_client;
+          Alcotest.test_case "the callback finishes the login it started" `Quick
+            test_the_callback_finishes_the_login_it_started;
+          Alcotest.test_case "a callback nobody is waiting on says so" `Quick
+            test_a_callback_nobody_is_waiting_on_says_so;
         ] );
       ( "pending",
         [ Alcotest.test_case "a state is redeemed once" `Quick

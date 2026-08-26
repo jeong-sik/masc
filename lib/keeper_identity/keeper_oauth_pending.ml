@@ -1,8 +1,14 @@
 (** See keeper_oauth_pending.mli for why this is in memory and why nothing
     sweeps it. *)
 
-type entry = {
+type in_flight = {
   pending : Keeper_oauth_flow.pending;
+  discovered : Keeper_oauth_discovery.t;
+  client_id : string;
+}
+
+type entry = {
+  in_flight : in_flight;
   expires_at : float;
 }
 
@@ -24,13 +30,13 @@ let with_lock t f =
 let live ~now entries =
   List.filter (fun (_, entry) -> entry.expires_at > now) entries
 
-let remember t ~now ~ttl_sec pending =
+let remember t ~now ~ttl_sec in_flight =
   with_lock t (fun () ->
-    let state = pending.Keeper_oauth_flow.state in
+    let state = in_flight.pending.Keeper_oauth_flow.state in
     (* Dropping what has expired here as well keeps a table that is only ever
        written to from growing without bound. *)
     t.entries <-
-      (state, { pending; expires_at = now +. ttl_sec })
+      (state, { in_flight; expires_at = now +. ttl_sec })
       :: live ~now (List.remove_assoc state t.entries))
 
 let take t ~now ~state =
@@ -38,7 +44,7 @@ let take t ~now ~state =
     let remaining = live ~now t.entries in
     let found = List.assoc_opt state remaining in
     t.entries <- List.remove_assoc state remaining;
-    Option.map (fun entry -> entry.pending) found)
+    Option.map (fun entry -> entry.in_flight) found)
 
 let waiting t ~now =
   with_lock t (fun () -> List.length (live ~now t.entries))

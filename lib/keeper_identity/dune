@@ -12,7 +12,7 @@
  (name masc_keeper_identity)
  (public_name masc.keeper_identity)
  (modules keeper_oauth_provider keeper_oauth_flow keeper_oauth_pending
-  keeper_oauth_discovery keeper_oauth_registration)
+  keeper_oauth_discovery keeper_oauth_registration keeper_oauth_session)
  (wrapped false)
  (flags
   (:standard -w +4 -w +33 -w +37))

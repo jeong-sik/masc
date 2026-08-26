@@ -16,16 +16,28 @@
     login nobody finishes costs one entry until the next lookup walks past
     it, and no fiber exists to wake up and find nothing. *)
 
+type in_flight = {
+  pending : Keeper_oauth_flow.pending;
+  discovered : Keeper_oauth_discovery.t;
+      (** What the server answered when this exchange started. Kept rather
+          than asked again: the callback has to redeem at the same token
+          endpoint the authorize call was built from, and a server that
+          moved between the two would otherwise be redeemed at the new one
+          with a code minted by the old. *)
+  client_id : string;
+      (** Which client asked. Kept for the same reason -- the redemption has
+          to name the client the code was issued to. *)
+}
+
 type t
 
 val create : unit -> t
 
-val remember :
-  t -> now:float -> ttl_sec:float -> Keeper_oauth_flow.pending -> unit
+val remember : t -> now:float -> ttl_sec:float -> in_flight -> unit
 (** Hold an exchange until [now + ttl_sec]. Keyed by the pending's own state,
     which is what the callback will carry back. *)
 
-val take : t -> now:float -> state:string -> Keeper_oauth_flow.pending option
+val take : t -> now:float -> state:string -> in_flight option
 (** Look up an exchange by the state a callback echoed, and remove it.
 
     Removed, not read: a state is redeemed once. A second callback carrying

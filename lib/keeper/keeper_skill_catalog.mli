@@ -55,6 +55,11 @@ type error =
       { skill : string
       ; declared : string
       }
+  | Removed_disable_model_invocation of { skill : string }
+  | Invalid_masc_composition_tool of
+      { skill : string
+      ; actual : string
+      }
   | Duplicate_skill of { name : string }
 
 val parse_skill : directory:string -> string -> (skill, error) result

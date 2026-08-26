@@ -6881,10 +6881,14 @@ let render_code (state : state) =
               if selected then glyph ^ " "
               else
                 let colour =
+                  (* bright_ variants for the data/prose marks: the plain
+                     red/yellow/green are reserved for semantic status tokens
+                     (test_tui_http_ast guards render.ml against using them
+                     raw), and a file's type is not a status. *)
                   match kind with
                   | File_icon.Code -> Ansi.cyan
-                  | File_icon.Data -> Ansi.yellow
-                  | File_icon.Prose -> Ansi.green
+                  | File_icon.Data -> Ansi.bright_yellow
+                  | File_icon.Prose -> Ansi.bright_green
                   | File_icon.Script -> Ansi.magenta
                   | File_icon.Web -> Ansi.blue
                   | File_icon.Media -> Ansi.bright_magenta

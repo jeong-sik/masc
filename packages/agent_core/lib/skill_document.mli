@@ -83,7 +83,6 @@ type t = private
   ; metadata_values : (string * extension_value) list
         (** All metadata values in source order, including client-specific
             structures and duplicate keys, for diagnostics and projection. *)
-  ; allowed_tools : string option
   ; extensions : (string * extension_value) list
         (** Non-standard top-level fields. Their presence makes the document
             runtime-compatible rather than strictly conformant. *)
@@ -104,7 +103,11 @@ val decode : directory_name:string -> string -> load_outcome
     The runtime-compatible path may use [directory_name] when [name] is
     absent, or retain a usable non-conforming document with diagnostics. A
     missing description or structurally unreadable frontmatter is
-    [Unloadable], because the document cannot participate in discovery. *)
+    [Unloadable], because the document cannot participate in discovery.
+
+    The experimental Agent Skills [allowed-tools] key is shape-checked for
+    portable input compatibility and then discarded. It is not part of [t]
+    and carries no runtime or approval semantics. *)
 
 val diagnostics : load_outcome -> diagnostic list
 val conformance_diagnostics : conformance -> diagnostic list

@@ -572,19 +572,10 @@ let test_invocation_policy_fields_are_rejected () =
     ]
 ;;
 
-(* [allowed-tools] is read and not acted on. Agent Skills calls it an
-   experimental pre-approval hint and MASC's approval policy is what decides,
-   so projecting it as though it were a permission contract was false -- and
-   that projection is gone.
-
-   Refusing the document is a wider claim: it says a skill carrying the field
-   cannot load at all. The field is standard in the ecosystem, so that reaches
-   skills nobody wrote for MASC, and one of them takes the whole catalog with
-   it -- the catalog is a single [result], so a keeper that drops such a file
-   into a read-write source stops every turn, including the turn that would
-   remove it. A field this does not act on is not a lie; showing it as policy
-   was. *)
-let test_allowed_tools_loads_and_says_nothing () =
+(* Portable input may carry the experimental ecosystem key, but the decoded
+   document and Keeper catalog deliberately retain no value or semantics for
+   it. *)
+let test_allowed_tools_is_discarded () =
   let document =
     {|---
 name: release-checklist
@@ -721,9 +712,9 @@ let () =
             `Quick
             test_invocation_policy_fields_are_rejected
         ; test_case
-            "allowed-tools loads and says nothing"
+            "allowed-tools is discarded"
             `Quick
-            test_allowed_tools_loads_and_says_nothing
+            test_allowed_tools_is_discarded
         ; test_case
             "composition skill joins the model projection"
             `Quick

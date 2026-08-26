@@ -36,7 +36,8 @@ description: Walk the release checklist before shipping.
   존재와 표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지
   않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark
   외부 fence로 감싼다.
-- 실험적 `allowed-tools`는 읽되 아무 동작도 하지 않고 공개 projection에도 싣지 않는다.
+- 실험적 `allowed-tools`는 입력 호환을 위해 형식만 확인한 뒤 버린다. 런타임 객체와 공개
+  projection 어디에도 보존하지 않는다.
   표준의 이 필드는 도구 제한이 아니라 구현체별 사전 승인 힌트다. 이를 이유로 표준 스킬
   전체를 거부하지도, MASC 권한처럼 표시하지도 않는다. 모든 도구 호출은 기존 MASC 승인
   게이트만 따른다.

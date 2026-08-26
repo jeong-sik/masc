@@ -22,6 +22,32 @@ let catalog_path ~base_path ~keeper_name ~provider_id =
     (provider_id ^ ".json")
 ;;
 
+(* Which Keepers have a catalog for this provider.
+
+   Read off the catalogs directory rather than the roster, because a catalog
+   is what "attached" means here: a Keeper with a name and no catalog has
+   nothing to report, and one whose name left the roster still has whatever
+   it was given. The names are the directories masc wrote, which is the
+   keeper name put through [Workspace_utils.safe_filename]. *)
+let keepers_with ~base_path ~provider_id ~excluding =
+  let root =
+    Filename.concat
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity")
+      "catalogs"
+  in
+  match Sys.readdir root with
+  | exception Sys_error _ -> []
+  | entries ->
+    Array.to_list entries
+    |> List.filter (fun keeper ->
+         (not (String.equal keeper (Workspace_utils.safe_filename excluding)))
+         && Sys.file_exists
+              (Filename.concat
+                 (Filename.concat root keeper)
+                 (provider_id ^ ".json")))
+    |> List.sort String.compare
+;;
+
 let tool_to_json (tool : Mcp_client.tool) =
   `Assoc
     ([ "name", `String tool.Mcp_client.name

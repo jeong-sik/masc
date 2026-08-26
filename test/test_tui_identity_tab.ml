@@ -8,9 +8,9 @@
 
 let check = Alcotest.check
 
-let declared ?tools id label =
+let declared ?tools ?(also_on = []) id label =
   Masc_tui_types.Identity_declared
-    { idp_id = id; idp_label = label; idp_tools = tools }
+    { idp_id = id; idp_label = label; idp_tools = tools; idp_also_on = also_on }
 
 let unreadable id problem =
   Masc_tui_types.Identity_unreadable { idp_id = id; idp_problem = problem }
@@ -213,6 +213,34 @@ let test_no_filter_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
     (List.length (Masc_tui_types.identity_filter_rows ~providers:sample None))
 
+(* ── which other Keepers hold a service ─────────────────────────────── *)
+
+let test_coverage_is_carried_per_provider () =
+  (* A Keeper attaches on its own account, so "who else has this" is the one
+     question this tab cannot answer from its own row -- and it is the answer
+     that stops an operator consenting twice as the wrong account. *)
+  let providers =
+    [ declared ~also_on:[ "sangsu"; "taskmaster" ] "atlassian" "Atlassian";
+      declared "linear" "Linear" ]
+  in
+  let coverage id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared { idp_id; idp_also_on; _ }
+          when String.equal idp_id id -> Some idp_also_on
+        | Masc_tui_types.Identity_declared _
+        | Masc_tui_types.Identity_unreadable _ -> None)
+      providers
+  in
+  check
+    (Alcotest.option (Alcotest.list Alcotest.string))
+    "the two that have it"
+    (Some [ "sangsu"; "taskmaster" ])
+    (coverage "atlassian");
+  check
+    (Alcotest.option (Alcotest.list Alcotest.string))
+    "and none for the one nobody has" (Some []) (coverage "linear")
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "numbering",
@@ -236,6 +264,10 @@ let () =
             test_a_notice_pushes_the_list_down;
           Alcotest.test_case "no notice reserves no room" `Quick
             test_no_notice_reserves_no_room;
+        ] );
+      ( "which other Keepers hold a service",
+        [ Alcotest.test_case "coverage is carried per provider" `Quick
+            test_coverage_is_carried_per_provider;
         ] );
       ( "typing to narrow the list",
         [ Alcotest.test_case "a query narrows to what it names" `Quick

@@ -3653,6 +3653,20 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       providers
     |> Option.join
   in
+  (* Which other Keepers hold this one. Shown on both states: on an attached
+     row it says the coverage, and on an unattached one it says the service
+     is already in use somewhere, which is the row an operator is most likely
+     to have lost track of. *)
+  let also_on id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared { idp_id; idp_also_on; _ }
+          when String.equal idp_id id -> Some idp_also_on
+        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
+          -> None)
+      providers
+    |> Option.value ~default:[]
+  in
   let numbered =
     List.mapi
       (fun index (id, label) ->
@@ -3680,7 +3694,14 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
            shortens the column by however long the codes are. *)
         let padded = Printf.sprintf "%-24s" (Terminal_text.single_line label) in
         let shown = if here then Ansi.bold ^ padded ^ Ansi.reset else padded in
-        Printf.sprintf "%s %2d  %s %s" marker (index + 1) shown row_state)
+        let elsewhere =
+          match also_on id with
+          | [] -> ""
+          | names ->
+            Ansi.dim ^ "  · also " ^ String.concat ", " names ^ Ansi.reset
+        in
+        Printf.sprintf "%s %2d  %s %s%s" marker (index + 1) shown row_state
+          elsewhere)
       connectable
   in
   let attached_tool_lines =

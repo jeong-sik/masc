@@ -1104,8 +1104,17 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                      offering nothing. *)
                   | Some _ | None -> None
                 in
+                let idp_also_on =
+                  match field "also_on" with
+                  | Some (`List names) ->
+                    List.filter_map
+                      (function `String name -> Some name | _ -> None)
+                      names
+                  | Some _ | None -> []
+                in
                 Some
-                  (Masc_tui_types.Identity_declared { idp_id; idp_label; idp_tools })
+                  (Masc_tui_types.Identity_declared
+                     { idp_id; idp_label; idp_tools; idp_also_on })
               | None, _ -> None)
             rows))
 

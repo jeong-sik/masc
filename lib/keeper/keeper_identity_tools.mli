@@ -20,6 +20,18 @@ type catalog = {
   tools : Mcp_client.tool list;
 }
 
+val keepers_with :
+  base_path:string -> provider_id:string -> excluding:string -> string list
+(** Which Keepers hold a catalog for this provider, sorted.
+
+    A Keeper attaches on its own account -- the client is shared, the token
+    is not -- so "who has this already" is a question no single Keeper's tab
+    can answer, and answering it by opening each of them in turn is how an
+    operator loses track of which account went where.
+
+    [excluding] is the Keeper being looked at, left out because the screen
+    already says whether that one has it. *)
+
 val load :
   base_path:string ->
   keeper_name:string ->

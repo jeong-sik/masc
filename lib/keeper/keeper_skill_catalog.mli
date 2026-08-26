@@ -55,7 +55,6 @@ type error =
       { skill : string
       ; declared : string
       }
-  | Removed_allowed_tools of { skill : string }
   | Removed_invocation_policy of
       { skill : string
       ; field : string

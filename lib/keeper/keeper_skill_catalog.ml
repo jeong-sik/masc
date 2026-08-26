@@ -38,7 +38,6 @@ type error =
       { skill : string
       ; declared : string
       }
-  | Removed_allowed_tools of { skill : string }
   | Removed_invocation_policy of
       { skill : string
       ; field : string
@@ -167,10 +166,19 @@ let parse_skill ~directory content =
         }
       = document
     in
-    (match allowed_tools with
-     | Some _ -> Error (Removed_allowed_tools { skill = name })
-     | None ->
-       (match reject_invocation_policy ~skill:name extensions with
+    (* [allowed-tools] is read and not acted on. Agent Skills calls it an
+       experimental pre-approval hint; MASC's approval policy is what decides,
+       and projecting this field as though it were a permission contract is
+       the thing that was false. That projection is gone.
+
+       Refusing the document is a different claim, and a wider one: it says a
+       skill carrying the field cannot be loaded at all. The field is standard
+       in the ecosystem -- 122 of the skills on this machine declare it -- so
+       the refusal reaches skills nobody wrote for MASC, and one of them
+       failing takes the whole catalog with it. A field this does not act on
+       is not a lie; showing it as policy was. *)
+    ignore (allowed_tools : string option);
+    (match reject_invocation_policy ~skill:name extensions with
      | Error _ as error -> error
      | Ok () ->
        (match composition_blocks body with
@@ -182,7 +190,7 @@ let parse_skill ~directory content =
         | Ok entry ->
           Ok { name; description; body; conformance; surface = Composition entry })
      | Ok blocks ->
-       Error (Multiple_composition_blocks { skill = name; count = List.length blocks }))))
+       Error (Multiple_composition_blocks { skill = name; count = List.length blocks })))
 ;;
 
 let empty = []
@@ -282,10 +290,6 @@ let error_to_string = function
       "skill %S: composition name %S must equal the skill name"
       skill
       declared
-  | Removed_allowed_tools { skill } ->
-    Printf.sprintf
-      "skill %S: allowed-tools is unsupported; MASC approval policy is authoritative"
-      skill
   | Removed_invocation_policy { skill; field } ->
     Printf.sprintf
       "skill %S: %s is unsupported; the composition fence alone determines the surface"

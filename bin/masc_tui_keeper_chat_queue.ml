@@ -44,6 +44,17 @@ let drop_for_keeper queue ~keeper_name =
     queue
 ;;
 
+let take queue ~request_id =
+  let rec walk skipped = function
+    | [] -> None
+    | (request : Chat.request) :: rest
+      when String.equal request.request_id request_id ->
+      Some (request, List.rev_append skipped rest)
+    | request :: rest -> walk (request :: skipped) rest
+  in
+  walk [] queue
+;;
+
 let holds queue ~request_id =
   List.exists
     (fun (request : Chat.request) ->

@@ -101,6 +101,7 @@ let expected_model_tool_names
       ?(task_instruction_skills = [])
       ~skill_catalog
       ~model_visible_descriptors
+      ()
   =
   let descriptor_names =
     model_visible_descriptors
@@ -382,6 +383,7 @@ let prepare_agent_setup
       ~task_instruction_skills
       ~skill_catalog
       ~model_visible_descriptors
+      ()
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

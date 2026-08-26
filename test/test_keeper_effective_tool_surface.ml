@@ -136,6 +136,7 @@ let test_projection_names_equal_turn_surface_authority () =
       Keeper_run_tools_setup.expected_model_tool_names
         ~skill_catalog:(Keeper_skill_catalog.of_snapshot (skill_snapshot ()) |> fst)
         ~model_visible_descriptors:descriptors
+        ()
     in
     check (list string) "projection and turn setup names are identical"
       expected (names surface);
@@ -179,6 +180,7 @@ let test_external_composition_preserves_snapshot_provenance () =
                { provenance = Some provenance } -> Some provenance
            | Composition_skill { provenance = None }
            | Descriptor _
+           | Instruction_skill
            | Composition_plan
            | Composition_control -> None)
         surface.tools

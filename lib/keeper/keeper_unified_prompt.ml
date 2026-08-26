@@ -169,7 +169,9 @@ let format_task_skills skills =
       "keeper current-task skills prompt %s did not render, falling back to exact references: %s"
       Prompt_names.keeper_current_task_skills
       detail;
-    "- skills=" ^ skill_references
+    Printf.sprintf
+      "- Skills selected by this task: %s. Call `keeper_skill` with one exact reference object to read its frozen body before you act on it."
+      skill_references
 ;;
 
 (** Render the keeper's own claimed task as standing context (RFC-0315).

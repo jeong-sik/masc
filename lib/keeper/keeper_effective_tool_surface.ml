@@ -1,5 +1,6 @@
 type tool_origin =
   | Descriptor of { group : string }
+  | Instruction_skill
   | Composition_skill of
       { provenance : Keeper_skill_catalog.provenance option }
   | Composition_plan
@@ -86,6 +87,16 @@ let composition_rows skill_catalog =
     { name; origin }, schema_tool)
 ;;
 
+let instruction_skill_row =
+  let schema = Tool_schemas_skill.schema in
+  ( { name = schema.name; origin = Instruction_skill }
+  , Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~name:schema.name
+      ~description:schema.description
+      ~input_schema:schema.input_schema
+      (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute") )
+;;
+
 let project
       ~keeper_name
       ~runtime_id
@@ -103,9 +114,6 @@ let project
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
   in
-  let rows = descriptor_rows descriptors @ composition_rows skill_catalog in
-  let tools = List.map fst rows in
-  let schema_tools = List.map snd rows in
   match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
   | Error _ as error -> error
   | Ok task_selection ->
@@ -125,6 +133,29 @@ let project
            | Some _, true, Keeper_skill_catalog.Instruction ->
              None)
     in
+    let global_instruction_present =
+      List.exists
+        (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.model_invocable, skill.surface with
+           | Some _, true, Keeper_skill_catalog.Instruction -> true
+           | None, _, _
+           | Some _, false, _
+           | Some _, true, Keeper_skill_catalog.Composition _ ->
+             false)
+        (Keeper_skill_catalog.skills skill_catalog)
+    in
+    let instruction_rows =
+      if instruction_skills <> [] || global_instruction_present
+      then [ instruction_skill_row ]
+      else []
+    in
+    let rows =
+      descriptor_rows descriptors
+      @ instruction_rows
+      @ composition_rows skill_catalog
+    in
+    let tools = List.map fst rows in
+    let schema_tools = List.map snd rows in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->
@@ -281,6 +312,7 @@ let reference_list values = Skill_reference.list_to_yojson values
 let origin_to_yojson = function
   | Descriptor { group } ->
     `Assoc [ "kind", `String "descriptor"; "group", `String group ]
+  | Instruction_skill -> `Assoc [ "kind", `String "instruction_skill" ]
   | Composition_skill { provenance } ->
     `Assoc
       [ "kind", `String "composition_skill"

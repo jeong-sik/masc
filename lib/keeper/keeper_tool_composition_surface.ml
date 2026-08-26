@@ -943,18 +943,8 @@ let make_request_control_tool
              "validated composition request input lost request_id"))
 ;;
 
-(* An instruction skill is text the keeper is meant to have read before it
-   acts. The prompt used to hand over a path and ask for a [Read], which put
-   three things in the model's hands: whether to open it, whether the path
-   resolved, and whether anyone could tell afterwards. It answered badly on
-   all three -- .masc/skills sits beside the sandbox root, not inside it, so
-   every attempt failed, and over seven days only three of 14,582 [Read]
-   calls even tried.
-
-   The body comes through a tool instead. Progressive disclosure is kept --
-   names and descriptions ride the tool description, the body arrives only
-   when asked for -- but the harness serves it from the catalog it already
-   parsed, so no path is resolved and the call is on the record. *)
+(* Progressive disclosure keeps names and descriptions in the tool
+   description. The frozen body arrives only after an exact-reference call. *)
 (* Declared in [config/tools/keeper_skill.toml] with every other tool rather
    than built here. Which skills are readable is workspace state and is
    appended below; the argument's shape and the sentence saying when to reach

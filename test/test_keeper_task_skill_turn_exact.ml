@@ -157,7 +157,7 @@ let test_disabled_explicit_reference_is_readable_without_global_discovery () =
        (Masc.Keeper_skill_catalog.skills global_catalog));
   let tool =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
-      ~config:(Workspace.default_config "/tmp/keeper-task-skill-turn-exact")
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
   in
   let exact_output = run_skill_tool tool (Reference.to_yojson reference) in

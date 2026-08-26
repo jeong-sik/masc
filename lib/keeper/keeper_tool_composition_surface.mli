@@ -48,10 +48,7 @@ val make_tools
        (** Instruction skills this keeper carries, as (exact reference,
            description, body). Present ones get
            {!Keeper_tool_composition_catalog.skill_tool_name}, which serves a
-           frozen body only for a canonical exact-reference input. The prompt
-           used to hand over a filesystem path instead;
-           .masc/skills sits beside the sandbox root rather than inside it, so
-           the [Read] it asked for could not resolve. *)
+           frozen body only for a canonical exact-reference input. *)
   -> ?skill_composition_entries:Keeper_tool_composition_catalog.entry list
        (** Composition entries declared by skills
            ({!Keeper_skill_catalog.composition_entries}). Same validated type

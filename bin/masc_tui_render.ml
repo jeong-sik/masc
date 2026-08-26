@@ -574,8 +574,7 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
    that fires in an hour is ambient, and painting it warn would make the
    screen shout every hour. The badge does not: a keeper stopped on the
    operator is the half that has to be read now. *)
-let agenda_line (state : state) agenda ~cols =
-  ignore state;
+let agenda_line agenda ~cols =
   match
     Agenda.strip
       ~now:(Unix.gettimeofday ())
@@ -632,7 +631,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_char framed '\n')
     body;
   (if agenda_rows > 0 then
-     match agenda_line state (Masc_tui_types.agenda state) ~cols with
+     match agenda_line (Masc_tui_types.agenda state) ~cols with
      | Some line -> Buffer.add_string framed (line ^ "\n")
      | None -> ());
   Buffer.add_string framed (composer_line state ~cols ^ "\n");

@@ -29,6 +29,10 @@ description: Walk the release checklist before shipping.
 - 그 밖의 frontmatter 키는 Agent Skills 표준대로 무시한다. `metadata.openclaw` 같은
   다른 런타임의 네임스페이스가 있어도 그대로 동작한다 — 공개된 스킬 파일을 수정 없이
   설치할 수 있다.
+- 무시하지 **않는** 확장 키가 하나 있다: `disable-model-invocation: true`. 합성 fence 가
+  있어도 그 스킬은 `keeper_compose_<name>` 도구로 승격되지 않는다 — 파일은 정상 로드되고
+  `keeper_skill` 로 본문을 읽는 것도 그대로다. 절차를 파일로 남기되 모델이 스스로
+  집어들지는 않게 할 때 쓴다.
 - 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다
@@ -37,9 +41,13 @@ description: Walk the release checklist before shipping.
 
 | fence 개수 | 종류 | 표면 |
 |---|---|---|
-| 0 | 지시 스킬 | task 라우팅 + `Read` (도구 표면 0 B) |
+| 0 | 지시 스킬 | task 라우팅 + `keeper_skill` 목록에 이름·설명 한 줄 |
 | 1 | 합성 스킬 | `keeper_compose_<name>` 도구로 승격 |
 | 2+ | 오류 | 턴이 typed config error 로 거부된다 |
+
+fence 개수가 유일한 갈림길은 아니다. fence 가 하나여도 frontmatter 에
+`disable-model-invocation: true` 가 있으면 승격이 일어나지 않고 지시 스킬처럼 남는다
+(`keeper_skill_catalog.ml`).
 
 ### 지시 스킬 (instruction)
 

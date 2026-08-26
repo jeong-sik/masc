@@ -75,7 +75,7 @@ value = {}
 |}
 ;;
 
-let composition_document_with_tool_surface ?(key = "masc-composition-tool") value =
+let composition_document_with_invocation_policy ~key value =
   Printf.sprintf
     {|---
 name: manual-clock
@@ -507,97 +507,28 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let test_masc_composition_tool_controls_dedicated_tool () =
-  let disabled =
-    skill_catalog_of
-      [ "manual-clock", composition_document_with_tool_surface "false" ]
-  in
-  (match Skill_catalog.find disabled "manual-clock" with
-   | Some skill ->
-     check
-       string
-       "disabled composition remains task-readable"
-       "instruction"
-       (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
-   | None -> fail "disabled composition disappeared from the task skill catalog");
-  check
-    int
-    "disabled composition has no dedicated entry"
-    0
-    (List.length (Skill_catalog.composition_entries disabled));
-  let disabled_surface =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-      ~identity_tool_names:[]
-      ~skill_catalog:disabled
-      ~model_visible_descriptors:[]
-  in
-  check
-    bool
-    "generic task-routed reader remains"
-    true
-    (List.mem Catalog.skill_tool_name disabled_surface);
-  check
-    bool
-    "dedicated composition tool is absent"
-    false
-    (List.mem "keeper_compose_manual-clock" disabled_surface);
-  let enabled =
-    skill_catalog_of
-      [ "manual-clock", composition_document_with_tool_surface "true" ]
-  in
-  let enabled_surface =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-      ~identity_tool_names:[]
-      ~skill_catalog:enabled
-      ~model_visible_descriptors:[]
-  in
-  check
-    bool
-    "boolean true preserves dedicated composition tool"
-    true
-    (List.mem "keeper_compose_manual-clock" enabled_surface)
-;;
-
-let test_masc_composition_tool_rejects_non_boolean_values () =
+let test_invocation_policy_fields_are_rejected () =
   List.iter
-    (fun (source, expected_kind) ->
+    (fun (key, value) ->
        match
          Skill_catalog.parse_skill
            ~directory:"manual-clock"
-           (composition_document_with_tool_surface source)
+           (composition_document_with_invocation_policy ~key value)
        with
-       | Error
-           (Skill_catalog.Invalid_masc_composition_tool
-             { skill = "manual-clock"; actual }) ->
-         check string ("value " ^ source) expected_kind actual
+       | Error (Skill_catalog.Removed_invocation_policy { skill; field }) ->
+         check string "error names the skill" "manual-clock" skill;
+         check string "error names the removed field" key field
        | Error error ->
          fail
            (Printf.sprintf
-              "value %s returned the wrong error: %s"
-              source
+              "%s returned the wrong error: %s"
+              key
               (Skill_catalog.error_to_string error))
-       | Ok _ -> fail ("non-boolean value was silently accepted: " ^ source))
-    [ {|"true"|}, "string"
-    ; "1", "number"
-    ; "null", "null"
-    ; "[true]", "sequence"
-    ; "{ enabled: true }", "mapping"
+       | Ok _ -> fail (key ^ " was silently assigned invocation semantics"))
+    [ "masc-composition-tool", "false"
+    ; "masc-composition-tool", "true"
+    ; "disable-model-invocation", "true"
     ]
-;;
-
-let test_legacy_disable_model_invocation_is_rejected () =
-  match
-    Skill_catalog.parse_skill
-      ~directory:"manual-clock"
-      (composition_document_with_tool_surface
-         ~key:"disable-model-invocation"
-         "true")
-  with
-  | Error (Skill_catalog.Removed_disable_model_invocation { skill }) ->
-    check string "error names the skill" "manual-clock" skill
-  | Error error ->
-    fail ("legacy key returned the wrong error: " ^ Skill_catalog.error_to_string error)
-  | Ok _ -> fail "legacy key was silently assigned MASC-specific semantics"
 ;;
 
 let test_allowed_tools_is_rejected () =
@@ -713,17 +644,9 @@ let () =
             `Quick
             test_loader_scans_the_skills_directory
         ; test_case
-            "masc-composition-tool controls the dedicated tool"
+            "invocation policy fields are rejected"
             `Quick
-            test_masc_composition_tool_controls_dedicated_tool
-        ; test_case
-            "masc-composition-tool rejects non-booleans"
-            `Quick
-            test_masc_composition_tool_rejects_non_boolean_values
-        ; test_case
-            "legacy disable-model-invocation is rejected"
-            `Quick
-            test_legacy_disable_model_invocation_is_rejected
+            test_invocation_policy_fields_are_rejected
         ; test_case
             "allowed-tools is rejected"
             `Quick

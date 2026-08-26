@@ -56,10 +56,9 @@ type error =
       ; declared : string
       }
   | Removed_allowed_tools of { skill : string }
-  | Removed_disable_model_invocation of { skill : string }
-  | Invalid_masc_composition_tool of
+  | Removed_invocation_policy of
       { skill : string
-      ; actual : string
+      ; field : string
       }
   | Duplicate_skill of { name : string }
 

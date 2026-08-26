@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { h, render } from 'preact'
 import { signal } from '@preact/signals'
 import { fireEvent, waitFor } from '@testing-library/preact'
-import { explorerScopeLabel, IdeExplorer } from './ide-explorer'
+import { explorerScopeLabel, fileTreeVisual, IdeExplorer } from './ide-explorer'
 import { createFileTreeStore, type FileTreeNode } from './file-tree-store'
 import type { Repository } from '../../api/repositories'
 import { activeIdeFile, focusIdeFile, ideContextFocus } from './ide-state'
@@ -48,6 +48,28 @@ describe('explorerScopeLabel', () => {
         [],
       ),
     ).toEqual({ label: 'missing-repo fallback', tone: 'muted' })
+  })
+})
+
+describe('file tree visuals', () => {
+  it('classifies common file types without relying on emoji width', () => {
+    expect(fileTreeVisual('src', true, false)).toMatchObject({ kind: 'directory' })
+    expect(fileTreeVisual('router.TSX', false, false)).toMatchObject({ kind: 'typescript' })
+    expect(fileTreeVisual('worker.py', false, false)).toMatchObject({ kind: 'python' })
+    expect(fileTreeVisual('README.md', false, false)).toMatchObject({ kind: 'document' })
+    expect(fileTreeVisual('settings.yaml', false, false)).toMatchObject({ kind: 'config' })
+    expect(fileTreeVisual('LICENSE', false, false)).toMatchObject({ kind: 'file' })
+  })
+
+  it('renders a semantic icon class for unowned file rows', () => {
+    const store = createFileTreeStore()
+    const container = document.createElement('div')
+    store.seed(SAMPLE)
+    render(h(IdeExplorer, { fileTreeStore: store }), container)
+
+    expect(container.querySelector('.ide-explorer-file-icon--directory')).not.toBeNull()
+    expect(container.querySelector('.ide-explorer-file-icon--data')).not.toBeNull()
+    render(null, container)
   })
 })
 

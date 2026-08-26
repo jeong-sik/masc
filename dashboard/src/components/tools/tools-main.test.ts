@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   loadTools: vi.fn(),
   fetchDashboardTools: vi.fn(),
   navigate: vi.fn(),
+  configResolutionPanel: vi.fn(),
   toolsData: { value: null as null | MockToolsResponse },
   toolsLoading: { value: false },
   toolsError: { value: null as string | null },
@@ -72,7 +73,10 @@ vi.mock('../../router', () => ({
 }))
 
 vi.mock('./config-resolution-panel', () => ({
-  ConfigResolutionPanel: () => html`<div>ConfigResolutionPanel</div>`,
+  ConfigResolutionPanel: (props: unknown) => {
+    mocks.configResolutionPanel(props)
+    return html`<div>ConfigResolutionPanel</div>`
+  },
 }))
 
 vi.mock('../tool-executor/tool-executor', () => ({
@@ -190,6 +194,7 @@ describe('Tools', () => {
     document.body.appendChild(container)
     mocks.loadTools.mockClear()
     mocks.fetchDashboardTools.mockReset()
+    mocks.configResolutionPanel.mockClear()
     mocks.toolsData.value = null
     mocks.toolsLoading.value = false
     mocks.toolsError.value = null
@@ -308,6 +313,31 @@ describe('Tools', () => {
     expect(container.textContent).not.toContain('event queue pending')
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
     expect(container.querySelector('.v2-lab-card')).not.toBeNull()
+  })
+
+  it('keeps the Tools surface alive while config projections warm', async () => {
+    mocks.toolsData.value = {
+      config_resolution: { status: 'warming' },
+      runtime_resolution: { status: 'warming' },
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    } as MockToolsResponse
+
+    render(html`<${Tools} />`, container)
+    await flush()
+
+    expect(container.querySelector('[data-testid="tools-config-resolution-warming"]'))
+      .not.toBeNull()
+    expect(container.textContent).toContain('Keeper Skill Receipts')
+    expect(mocks.configResolutionPanel).toHaveBeenLastCalledWith({
+      resolution: undefined,
+      runtimeResolution: undefined,
+    })
   })
 
   it('renders tool usage coverage gap provenance', async () => {

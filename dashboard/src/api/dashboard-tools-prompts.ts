@@ -494,13 +494,17 @@ export interface DashboardKeeperBackground {
   keepers: DashboardKeeperBackgroundKeeper[]
 }
 
+export interface DashboardToolsWarmingProjection {
+  status: 'warming'
+}
+
 export interface DashboardToolsResponse {
   generated_at?: string
   status?: string
   is_warming?: boolean
   stale_reason?: string | null
-  config_resolution?: DashboardConfigResolution
-  runtime_resolution?: DashboardRuntimeResolution
+  config_resolution?: DashboardConfigResolution | DashboardToolsWarmingProjection
+  runtime_resolution?: DashboardRuntimeResolution | DashboardToolsWarmingProjection
   tool_inventory: DashboardToolInventoryResponse
   tool_usage: ToolMetricsResponse
   keeper_waiting_inventory?: DashboardKeeperWaitingInventory

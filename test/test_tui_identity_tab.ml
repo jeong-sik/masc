@@ -8,8 +8,9 @@
 
 let check = Alcotest.check
 
-let declared id label =
-  Masc_tui_types.Identity_declared { idp_id = id; idp_label = label }
+let declared ?tools id label =
+  Masc_tui_types.Identity_declared
+    { idp_id = id; idp_label = label; idp_tools = tools }
 
 let unreadable id problem =
   Masc_tui_types.Identity_unreadable { idp_id = id; idp_problem = problem }

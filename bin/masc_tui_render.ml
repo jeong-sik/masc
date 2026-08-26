@@ -3309,12 +3309,44 @@ let secret_lines (state : state) (k : keeper) =
    the same list. *)
 let identity_lines (state : state) (k : keeper) providers =
   let connectable = Masc_tui_types.identity_connectable providers in
+  let tools_of id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared { idp_id; idp_tools; _ }
+          when String.equal idp_id id -> Some idp_tools
+        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _ ->
+            None)
+      providers
+    |> Option.join
+  in
   let numbered =
     List.mapi
-      (fun index (_, label) ->
-        Printf.sprintf "  %d  %s" (index + 1)
-          (Terminal_text.single_line label))
+      (fun index (id, label) ->
+        (* Attached-and-offering-nothing is a third state. Reading it as "not
+           attached" would tell an operator to consent again for no reason. *)
+        let state =
+          match tools_of id with
+          | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
+          | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
+          | Some names ->
+              Printf.sprintf "%s%d tools%s" (Theme.ok ()) (List.length names)
+                Ansi.reset
+        in
+        Printf.sprintf "  %d  %-24s %s" (index + 1)
+          (Terminal_text.single_line label) state)
       connectable
+  in
+  let attached_tool_lines =
+    connectable
+    |> List.concat_map (fun (id, _) ->
+           match tools_of id with
+           | None | Some [] -> []
+           | Some names ->
+               ""
+               :: (Ansi.dim ^ "  " ^ Terminal_text.single_line id ^ Ansi.reset)
+               :: List.map
+                    (fun name -> "    " ^ Terminal_text.single_line name)
+                    names)
   in
   let rejected =
     List.filter_map
@@ -3344,9 +3376,10 @@ let identity_lines (state : state) (k : keeper) providers =
   if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
-    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name) ^ ".")
+    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name)
+      ^ ", R to ask again what tools exist.")
      :: "" :: numbered)
-    @ rejected @ started
+    @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -3538,7 +3571,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
-      | Detail_identity -> "[ ]:tab  1-9:connect"
+      | Detail_identity -> "[ ]:tab  1-9:connect  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

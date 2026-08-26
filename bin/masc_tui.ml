@@ -1209,6 +1209,7 @@ type async_msg =
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
   | Identity_login_started of string * (string * string, string) result
+  | Identity_refreshed of string * (unit, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
@@ -2207,7 +2208,7 @@ let launch_identity_view state ~mailbox keeper_name =
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_loader.load_identity_providers ~host ~port with
+      try Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -2257,6 +2258,42 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   | None ->
       enqueue_async mailbox
         (Identity_login_started (keeper_name, Error "Eio switch is unavailable"))
+
+(* Ask every attached service again what tools it has. An operator action
+   rather than a timer: a stale catalog is visible and fixable, while a timer
+   is a network call nobody asked for. *)
+let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        List.fold_left
+          (fun acc provider_id ->
+            match acc with
+            | Error _ as err -> err
+            | Ok () -> (
+                match
+                  Masc_tui_http.post_keeper_identity_refresh ~host ~port
+                    ~keeper_name ~provider_id
+                with
+                | Ok _ -> Ok ()
+                | Error err -> Error (provider_id ^ ": " ^ err)))
+          (Ok ()) provider_ids
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_refreshed (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = server_peer_host in
@@ -5711,6 +5748,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       (* Shown on the tab rather than swallowed: the operator pressed a key
          and has to learn that nothing is going to open. *)
       | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_refreshed (keeper_name, result) -> (
+      match result with
+      (* Re-read rather than patch what is on screen: the catalog the server
+         just wrote is the answer, and building a second copy of it here is
+         how the two come to disagree. *)
+      | Ok () ->
+          state.identity_view <- None;
+          state.identity_view_error <- None;
+          launch_identity_view state ~mailbox keeper_name
+      | Error detail -> state.identity_view_error <- Some detail)
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -7638,6 +7685,26 @@ let main () =
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
+       | Some "R"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name ->
+               let attached =
+                 List.filter_map
+                   (function
+                     | Masc_tui_types.Identity_declared
+                         { idp_id; idp_tools = Some _; _ } -> Some idp_id
+                     | Masc_tui_types.Identity_declared _
+                     | Masc_tui_types.Identity_unreadable _ -> None)
+                   providers
+               in
+               if attached <> [] then
+                 launch_identity_refresh state ~mailbox:async_messages
+                   ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" when state.view = Resources && not compact_viewport ->
            (match

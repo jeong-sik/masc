@@ -578,7 +578,15 @@ let keeper_detail_tab_label = function
     rather than dropped: an operator who came looking for a provider needs to
     see why it is not on offer, not a shorter list. *)
 type identity_provider =
-  | Identity_declared of { idp_id: string; idp_label: string }
+  | Identity_declared of
+      { idp_id: string
+      ; idp_label: string
+      ; idp_tools: string list option
+        (** What this service currently offers this Keeper, or [None] when it
+            was never attached. An empty list is a third fact -- attached and
+            offering nothing -- and reading it as "not attached" would tell an
+            operator to consent again for no reason. *)
+      }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
 (** The providers a key can act on, in the order the screen numbers them.
@@ -587,7 +595,7 @@ type identity_provider =
 let identity_connectable providers =
   List.filter_map
     (function
-      | Identity_declared { idp_id; idp_label } -> Some (idp_id, idp_label)
+      | Identity_declared { idp_id; idp_label; _ } -> Some (idp_id, idp_label)
       | Identity_unreadable _ -> None)
     providers
 

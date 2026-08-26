@@ -15,6 +15,9 @@ type undescribed =
   | Control of verdict
   | Composition of string list
   | Ad_hoc_plan
+  | Attached_service of bool option
+      (** A tool from a work service this Keeper is attached to, carrying
+          what that service said about whether it only reads. *)
   | Unknown
 
 let verdict_because = function
@@ -178,7 +181,14 @@ and undescribed_kind tool_name =
         ~composition:tool_name
     with
     | Some node_tools -> Composition node_tools
-    | None -> Unknown
+    | None ->
+      (match
+         Keeper_identity_tool_index.read_only
+           (Keeper_identity_tool_index.shared ())
+           ~tool_name
+       with
+       | Some read_only -> Attached_service read_only
+       | None -> Unknown)
 
 and verdict_of_nodes node_tools =
   match List.find_map node_asks_for_approval node_tools with
@@ -194,6 +204,20 @@ and verdict_of_nodes node_tools =
 and verdict_for_undescribed ~tool_name ~input =
   match undescribed_kind tool_name with
   | Control verdict -> verdict
+  | Attached_service (Some true) ->
+    Run { because = "the service says this tool only reads" }
+  | Attached_service (Some false) ->
+    Ask { because = "the service says this tool can change something there" }
+  (* Silence is not permission. On a lane that can ask, this reaches an
+     operator; on one that cannot -- the official-client lanes pass no
+     approval callback -- it is a refusal, so the reason has to say what
+     would change it rather than only what is wrong. *)
+  | Attached_service None ->
+    Ask
+      { because =
+          "the service did not say whether this tool only reads; it runs \
+           once the service annotates it, or while this keeper is set to yolo"
+      }
   | Composition node_tools -> verdict_of_nodes node_tools
   | Ad_hoc_plan ->
     (match ad_hoc_plan_nodes input with
@@ -212,7 +236,7 @@ let classifies ~tool_name =
   | Some _ -> true
   | None ->
     (match undescribed_kind tool_name with
-     | Control _ | Composition _ | Ad_hoc_plan -> true
+     | Control _ | Composition _ | Ad_hoc_plan | Attached_service _ -> true
      | Unknown -> false)
 ;;
 

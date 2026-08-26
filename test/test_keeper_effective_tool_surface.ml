@@ -538,11 +538,11 @@ let test_left_out_skills_reach_the_surface () =
     project
       ~skills_left_out:[ "not-a-policy: skill \"not-a-policy\": unsupported" ]
       ~tool_groups:None
-      ~task_skill_names:[]
+      ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
   with
-  | Error (_, detail) -> Alcotest.fail detail
+  | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
   | Ok surface ->
     Alcotest.(check (list string))
       "the surface carries what was left out"
@@ -551,13 +551,35 @@ let test_left_out_skills_reach_the_surface () =
     (* And a workspace with nothing left out gains nothing: a row drawn on
        every turn stops being read. *)
     (match
-       project ~tool_groups:None ~task_skill_names:[]
+       project ~tool_groups:None ~task_skill_references:[]
          ~native_posture:Runtime_native_tools.Native_read ()
      with
-     | Error (_, detail) -> Alcotest.fail detail
+     | Error error -> Alcotest.fail (Keeper_task_skill_turn.error_to_string error)
      | Ok clean ->
        Alcotest.(check (list string)) "and says nothing when there is nothing"
          [] clean.Keeper_effective_tool_surface.skills_left_out)
+;;
+
+let test_global_instruction_is_present_in_receipt () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  match
+    project
+      ~snapshot
+      ~tool_groups:None
+      ~task_skill_references:[]
+      ~native_posture:Runtime_native_tools.Native_read
+      ()
+  with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok surface ->
+    check string
+      "global instruction receipt is exact"
+      (Skill_reference.list_to_yojson
+         [ reference_by_name snapshot "guide" ]
+       |> Yojson.Safe.to_string)
+      (Skill_reference.list_to_yojson surface.instruction_skills
+       |> Yojson.Safe.to_string)
 ;;
 
 let () =
@@ -582,6 +604,8 @@ let () =
             test_turn_admission_uses_dedicated_instruction_reader
         ; test_case "turn admission covers held tasks beyond the current one" `Quick
             test_turn_admission_covers_held_tasks_beyond_current
+        ; test_case "global instruction is present in receipt" `Quick
+            test_global_instruction_is_present_in_receipt
         ] )
     ]
 ;;

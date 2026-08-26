@@ -2930,6 +2930,7 @@
  (modules test_tui_message_layout)
  (libraries
   alcotest
+  masc_tui_frame
   masc_tui_markdown_render_cache
   masc_tui_message_layout))
 

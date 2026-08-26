@@ -50,6 +50,27 @@ let every_dispatched_operation_has_a_schema () =
       Alcotest.(check string) ("schema for " ^ name) name schema.Masc_domain.name)
     Tool_schemas_misc.mcp_runtime_operations
 
+(* A live Keeper reaches its own tools under the agent alias its runtime was
+   spawned with, not under the bare name the registry holds. Measured against
+   a running server on 2026-08-26: every unit test passed while a real
+   taskmaster keeper was refused with "keeper-taskmaster-agent is not a
+   registered keeper", because the tool read the alias straight through. The
+   guard is right; the name it was handed was not. *)
+let the_agent_alias_resolves_to_the_registered_name () =
+  Alcotest.(check (option string))
+    "the alias a Keeper runtime spawns under" (Some "taskmaster")
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper-taskmaster-agent");
+  Alcotest.(check (option string))
+    "underscore spelling" (Some "taskmaster")
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "keeper_taskmaster_agent")
+
+let a_bare_name_is_left_alone () =
+  (* An operator and these tests call under the registry name itself. It is
+     not an alias, so it must pass through rather than resolve to nothing. *)
+  Alcotest.(check (option string))
+    "not an alias" None
+    (Masc.Keeper_identity.keeper_name_of_agent_alias "taskmaster")
+
 let () =
   Alcotest.run "masc_ask tool surface"
     [
@@ -65,5 +86,11 @@ let () =
             the_tool_name_round_trips_through_the_dispatch_vocabulary;
           Alcotest.test_case "every dispatched operation has a schema" `Quick
             every_dispatched_operation_has_a_schema;
+        ] );
+      ( "who is asking",
+        [
+          Alcotest.test_case "the agent alias resolves to the registered name" `Quick
+            the_agent_alias_resolves_to_the_registered_name;
+          Alcotest.test_case "a bare name is left alone" `Quick a_bare_name_is_left_alone;
         ] );
     ]

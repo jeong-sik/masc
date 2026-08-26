@@ -91,17 +91,26 @@ let ask_json (a : Keeper_ask.ask) =
     ]
 
 let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+  (* A Keeper reaches its own tools under the agent alias its runtime was
+     spawned with ([keeper-<name>-agent]); an operator and the tests use the
+     bare registry name. One codec owns both spellings, so the registry
+     lookup below sees the same name either way -- without it a live Keeper
+     is refused by a guard meant for unregistered callers. *)
+  let keeper_name =
+    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
+    | Some name -> name
+    | None -> ctx.agent_name
+  in
   let reject detail =
     (* A refused question is worth a line. The Keeper sees the rejection in
        its own result; an operator wondering why nothing is waiting on them
        has only the log. *)
-    Log.Keeper.info "keeper_ask: keeper=%s refused=%s" ctx.agent_name detail;
+    Log.Keeper.info "keeper_ask: keeper=%s refused=%s" keeper_name detail;
     Some
       (Tool_result.error ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time
          detail)
   in
   let base_path = ctx.config.base_path in
-  let keeper_name = ctx.agent_name in
   match list_field "questions" ctx.arguments with
   | Error detail -> reject detail
   | Ok [] -> reject "at least one question is required"

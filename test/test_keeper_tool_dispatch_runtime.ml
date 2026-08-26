@@ -892,7 +892,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
          ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
          ();
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -2760,7 +2760,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
         ]
         (fun () ->
           let bundle =
-            Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+            Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
               ~config
               ~meta
               ~publication_recovery
@@ -3086,7 +3086,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
          }
        in
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4083,7 +4083,7 @@ let test_model_visible_tools_keep_canonical_agent_core_descriptors () =
     "model_visible_agent_core_descriptors"
     (fun ~config ~meta ~publication_recovery ~ctx_work:_ ->
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -4107,7 +4107,7 @@ let test_surface_post_bundle_names_reader_and_repeat_cost () =
     "surface_post_model_description"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4149,7 +4149,7 @@ let test_invalid_surface_post_input_stays_correction_capable () =
     "surface_post_invalid_input"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4325,7 +4325,7 @@ let test_deferred_web_search_yields_before_provider_retry () =
         | Ok _ -> ()
         | Error detail -> fail ("failed to select Manual Gate mode: " ^ detail));
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4423,7 +4423,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
        mkdir_p (Filename.dirname chat_path);
        Unix.mkdir chat_path 0o755;
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -4541,7 +4541,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             Unix.unlink chat_path;
             Unix.mkdir chat_path 0o755;
             let runtime_bundle =
-              Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+              Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
                 ~config
                 ~meta
                 ~publication_recovery
@@ -4942,7 +4942,7 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
          skill_catalog_of_composition ~name:"clock" one_node_clock_composition
        in
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5013,7 +5013,7 @@ let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
          skill_catalog_of_composition ~name:"shell-output" shell_output_composition
        in
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5075,7 +5075,7 @@ let test_composition_externalizes_oversized_shell_ir_output () =
            (shell_artifact_composition ())
        in
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5199,7 +5199,7 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
     "direct-shell-ir-artifact"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let execute =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5290,7 +5290,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
     "direct-shell-ir-post-effect-artifact-failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -5390,7 +5390,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
     "direct-pre-effect-correction"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -5587,7 +5587,7 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
             in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
-              Masc.Keeper_tools_agent_core_bundle.make_tools
+              Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
                 ~config
                 ~meta
                 ~publication_recovery
@@ -5758,7 +5758,7 @@ let test_composition_telemetry_failure_does_not_change_execution () =
             in
             let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
             let tool =
-              Masc.Keeper_tools_agent_core_bundle.make_tools
+              Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
                 ~config
                 ~meta
                 ~publication_recovery
@@ -5816,7 +5816,7 @@ let test_terminal_composition_materializes_terminal_completion () =
          skill_catalog_of_composition ~name:"surface" one_node_terminal_composition
        in
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5845,7 +5845,7 @@ let test_composition_plan_failure_exposes_typed_cause () =
            invalid_clock_input_composition
        in
        let tool =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery
@@ -5899,7 +5899,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
          skill_catalog_of_composition ~name:"write-then-invalid-post" post_effect_terminal_failure_composition
        in
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -6016,7 +6016,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
          skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
        in
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -6100,7 +6100,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
         | Ok _ -> ()
         | Error detail -> fail ("failed to allow composition effect: " ^ detail));
        let direct_bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -6128,7 +6128,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
            (write_then_unchanged_board_composition ~revision)
        in
        let bundle =
-         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
            ~config
            ~meta
            ~publication_recovery
@@ -6234,7 +6234,7 @@ let test_async_composition_binds_params_into_durable_status () =
            async_param_memory_composition
        in
        let tools =
-         Masc.Keeper_tools_agent_core_bundle.make_tools
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
            ~config
            ~meta
            ~publication_recovery

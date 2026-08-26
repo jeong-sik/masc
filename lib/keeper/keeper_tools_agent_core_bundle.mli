@@ -54,6 +54,35 @@ val make_tools
   -> Agent_core.Tool.t list
 
 module For_testing : sig
+  val make_tool_bundle
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?continuation_channel:Keeper_continuation_channel.t
+    -> ?gate_context:Keeper_gate_causal_context.t
+    -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+    -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> unit
+    -> Keeper_tools_agent_core.tool_bundle
+
+  val make_tools
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> publication_recovery:
+         Keeper_publication_recovery_availability.turn_context
+    -> ctx_snapshot:Keeper_types.working_context
+    -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+    -> ?skill_catalog:Keeper_skill_catalog.t
+    -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+    -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
+    -> unit
+    -> Agent_core.Tool.t list
+
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->
     Keeper_tools_agent_core.terminal_effect_state

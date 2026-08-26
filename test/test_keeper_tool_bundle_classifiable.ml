@@ -101,22 +101,55 @@ value = {}
     name name name execution
 ;;
 
+let instruction_document =
+  "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
+;;
+
 let skill_catalog () =
-  match
-    Keeper_skill_catalog.partition_documents
-      [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
-      ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
-      ; ( "gate-instruction"
-          (* An instruction skill puts [keeper_skill] on the surface. It is a
-             third shape the policy has to place, and it reaches the bundle
-             the same way the composition ones do. *)
-        , "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n" )
-      ]
-  with
+  let source_config =
+    match
+      Skill_source_config.parse_text
+        "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+    with
+    | Ok config -> config
+    | Error _ -> fail "bundle Skill source config was rejected"
+  in
+  let source =
+    match source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "bundle Skill source count changed"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let documents =
+    [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
+    ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
+    ; "gate-instruction", instruction_document
+    ]
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/workspace/skills"
+          ; candidates = List.length documents
+          }
+    ; candidates =
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config:source_config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "bundle Skill snapshot was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
   | catalog, [] -> catalog
-  | _, { error = e; _ } :: _ ->
-    failf "the gate's own skill fixtures must parse: %s"
-      (Keeper_skill_catalog.error_to_string e)
+  | _, _ :: _ -> fail "bundle Skill snapshot projection was rejected"
 ;;
 
 let instruction_reference () =
@@ -130,9 +163,6 @@ let instruction_reference () =
     | Ok package_id -> package_id
     | Error _ -> fail "invalid instruction fixture package"
   in
-  let source_text =
-    "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
-  in
   Skill_reference.make
     ~identity:
       (Skill_reference.make_identity
@@ -140,7 +170,7 @@ let instruction_reference () =
          ~package_id
          ~name:"gate-instruction")
     ~content_revision:
-      (Skill_reference.content_revision_of_source_text source_text)
+      (Skill_reference.content_revision_of_source_text instruction_document)
 ;;
 
 let contains ~needle haystack =
@@ -201,7 +231,7 @@ audience = "api.atlassian.com"
     .Keeper_identity_tools.offered
 ;;
 
-let with_bundle_tools f =
+let with_bundle_tools ?(record_activations = true) f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
     Filename.concat
@@ -271,7 +301,8 @@ let with_bundle_tools f =
            ~composition_plan_index
            ~task_instruction_skills:
              [ reference, "what the gate reads", "body" ]
-           ~skill_activation_context
+           ?skill_activation_context:
+             (if record_activations then Some skill_activation_context else None)
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () ->
@@ -289,6 +320,75 @@ let run_tool (tool : Agent_core.Tool.t) input =
   match tool.handler (Agent_core.Tool.Execution_env.create ()) input with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error err -> err.Agent_core.Llm_provider.Types.message
+;;
+
+let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"bundle-composition-activation"
+      ~turn:1
+      ~schedule:
+        { planned_index = 0
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:(Agent_core.Tool.completion tool)
+  in
+  match Agent_core.Tool.execute ~invocation tool (`Assoc []), expected_failure with
+  | Ok _, None -> ()
+  | Error error, Some expected ->
+    check bool "expected submission failure" true
+      (contains ~needle:expected error.Agent_core.Types.message)
+  | Ok _, Some expected -> failf "expected %s failure" expected
+  | Error error, None -> fail error.Agent_core.Types.message
+;;
+
+let test_composition_activation_is_durable ?expected_failure tool_name =
+  with_bundle_tools (fun config meta tools ->
+    let tool =
+      match
+        List.find_opt
+          (fun (tool : Agent_core.Tool.t) ->
+             String.equal tool.schema.name tool_name)
+          tools
+      with
+      | Some tool -> tool
+      | None -> failf "%s missing from exact snapshot bundle" tool_name
+    in
+    run_composition_tool ?expected_failure tool;
+    let ledger =
+      match
+        Keeper_skill_activation_ledger.load
+          ~config
+          ~trace_id:meta.runtime.trace_id
+      with
+      | Ok ledger -> ledger
+      | Error error ->
+        fail (Keeper_skill_activation_ledger.store_error_to_string error)
+    in
+    match Keeper_skill_activation_ledger.activations ledger with
+    | [ activation ] ->
+      (match activation.origin with
+       | Keeper_skill_activation_ledger.Session_composition
+           { tool_name = observed } ->
+         check string "exact composition origin" tool_name observed
+       | Keeper_skill_activation_ledger.Task_composition _
+       | Keeper_skill_activation_ledger.Task_instruction _
+       | Keeper_skill_activation_ledger.Session_instruction ->
+         fail "composition activation kept the wrong typed origin")
+    | activations ->
+      failf "expected one composition activation, got %d" (List.length activations))
+;;
+
+let test_inline_composition_activation_is_durable () =
+  test_composition_activation_is_durable "keeper_compose_gate-inline"
+;;
+
+let test_async_composition_activation_is_durable () =
+  test_composition_activation_is_durable
+    ~expected_failure:"background_switch_unavailable"
+    "keeper_compose_gate-async"
 ;;
 
 (* Guards against an empty-list false pass: a bundle that produced nothing
@@ -310,6 +410,16 @@ let test_the_bundle_is_not_empty () =
       ; Keeper_tool_composition_catalog.cancel_tool_name
       ; Keeper_tool_composition_catalog.skill_tool_name
       ])
+;;
+
+let test_skill_bundle_without_activation_context_is_rejected () =
+  check_raises
+    "Skill surface cannot bypass durable activation recording"
+    (Invalid_argument
+       "Skill-bearing Keeper bundle requires a frozen activation context")
+    (fun () ->
+       with_bundle_tools ~record_activations:false
+         (fun _config _meta _tools -> ()))
 ;;
 
 (* The point of the tool is that a body reaches the keeper. A tool that is on
@@ -419,11 +529,17 @@ let () =
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
       , [ test_case "is not empty" `Quick test_the_bundle_is_not_empty
+        ; test_case "requires activation context" `Quick
+            test_skill_bundle_without_activation_context_is_rejected
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
+        ; test_case "inline composition activation is durable" `Quick
+            test_inline_composition_activation_is_durable
+        ; test_case "async composition activation is durable" `Quick
+            test_async_composition_activation_is_durable
         ] )
     ; ( "the approval policy"
       , [ test_case "can classify every tool in it" `Quick

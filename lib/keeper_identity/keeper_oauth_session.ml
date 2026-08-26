@@ -12,6 +12,7 @@ type start_error =
   | Registration_failed of Registration.error
   | No_pkce_s256 of string
   | No_registration of string
+  | No_public_client of string
 
 let start_error_to_string = function
   | Discovery_failed err ->
@@ -29,6 +30,12 @@ let start_error_to_string = function
     Printf.sprintf
       "no client id is configured and %s offers no registration endpoint; \
        create an app and configure its client id"
+      issuer
+  | No_public_client issuer ->
+    Printf.sprintf
+      "%s wants a client secret at its token endpoint, and there is nowhere \
+       here to keep one; this attaches public clients that prove the \
+       redemption with PKCE instead"
       issuer
 
 type started = {
@@ -67,6 +74,12 @@ let start
      redemption has nothing else to prove it with. *)
   if not discovered.Discovery.supports_pkce_s256
   then Error (No_pkce_s256 discovered.Discovery.issuer)
+    (* Asked before registering rather than found out at the exchange: a
+       server that will not take a public client would otherwise be learned
+       about after the operator consented and after a client of ours was
+       left on their account. *)
+  else if not discovered.Discovery.client_secret_optional
+  then Error (No_public_client discovered.Discovery.issuer)
   else
     let* client_id, registered_now =
       match configured_client_id with

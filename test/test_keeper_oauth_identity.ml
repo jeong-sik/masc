@@ -199,6 +199,30 @@ let test_authorize_url_proves_the_verifier () =
     (List.mem "offline_access"
        (String.split_on_char ' ' (param query "scope")))
 
+let test_a_server_that_names_no_scopes_is_asked_for_none () =
+  (* Two of the servers this ships a declaration for publish no scopes at
+     all. "scope=" is not an empty list, it is a malformed one, and a server
+     is entitled to answer it with invalid_scope -- so the parameter is left
+     out rather than sent empty. *)
+  let provider = load_or_fail atlassian_toml in
+  let discovered =
+    { (discovered_atlassian ()) with
+      Keeper_oauth_discovery.scopes_supported = []
+    }
+  in
+  let pending =
+    Keeper_oauth_flow.begin_authorization ~provider ~discovered
+      ~client_id:"client-abc" ~redirect_uri ~keeper:"oauth-fixture"
+  in
+  let query = query_of pending.Keeper_oauth_flow.authorize_url in
+  Alcotest.(check bool)
+    "no scope parameter at all" false
+    (List.mem_assoc "scope" query);
+  (* Everything else still rides along, so this is an omission rather than a
+     shorter URL. *)
+  check str "the resource is still named" "https://mcp.atlassian.com/v1/mcp/authv2"
+    (param query "resource")
+
 let test_two_exchanges_do_not_share_a_verifier () =
   let provider = load_or_fail atlassian_toml in
   let one = begin_for provider and two = begin_for provider in
@@ -577,13 +601,19 @@ let test_registration_keeps_the_servers_reason () =
 
 (* ── the whole login, both halves ───────────────────────────────────── *)
 
-let stub_discover ?(supports_pkce = true) ?(registration = Some "https://auth.example.com/dcr") () =
+let stub_discover
+      ?(supports_pkce = true)
+      ?(secret_optional = true)
+      ?(registration = Some "https://auth.example.com/dcr")
+      ()
+  =
   fun ~mcp_url ->
     ignore mcp_url;
     let base = discovered_atlassian () in
     Ok
       { base with
         Keeper_oauth_discovery.supports_pkce_s256 = supports_pkce
+      ; client_secret_optional = secret_optional
       ; registration_url = registration
       }
 
@@ -665,6 +695,25 @@ let test_start_says_when_there_is_no_way_to_get_a_client () =
       Alcotest.failf "wrong refusal: %s"
         (Keeper_oauth_session.start_error_to_string other)
   | Ok _ -> Alcotest.fail "a login started with no client id and no way to get one"
+
+let test_start_refuses_a_server_that_wants_a_client_secret () =
+  (* Before registering, not after consent. A server that will not take a
+     client authenticating with nothing is one this cannot finish with, and
+     finding that out at the exchange means an operator has already consented
+     and a client of ours is sitting on their account for nothing. *)
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~discover:(stub_discover ~secret_optional:false ())
+      ~register:never_register provider table
+  with
+  | Error (Keeper_oauth_session.No_public_client _) ->
+      Alcotest.(check int) "and holds no login" 0
+        (Keeper_oauth_pending.waiting table ~now:1.0)
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_session.start_error_to_string other)
+  | Ok _ -> Alcotest.fail "a login started against a server that wants a secret"
 
 let test_the_callback_finishes_the_login_it_started () =
   let provider = load_or_fail atlassian_toml in
@@ -827,6 +876,8 @@ let () =
       ( "authorize",
         [ Alcotest.test_case "the challenge proves the verifier" `Quick
             test_authorize_url_proves_the_verifier;
+          Alcotest.test_case "a server naming no scopes is asked for none"
+            `Quick test_a_server_that_names_no_scopes_is_asked_for_none;
           Alcotest.test_case "two exchanges share nothing" `Quick
             test_two_exchanges_do_not_share_a_verifier;
         ] );
@@ -873,6 +924,8 @@ let () =
             test_start_refuses_a_server_without_pkce;
           Alcotest.test_case "says when there is no way to get a client" `Quick
             test_start_says_when_there_is_no_way_to_get_a_client;
+          Alcotest.test_case "refuses a server that wants a client secret"
+            `Quick test_start_refuses_a_server_that_wants_a_client_secret;
           Alcotest.test_case "the callback finishes the login it started" `Quick
             test_the_callback_finishes_the_login_it_started;
           Alcotest.test_case "a callback nobody is waiting on says so" `Quick

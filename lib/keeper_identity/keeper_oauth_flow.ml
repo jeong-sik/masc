@@ -65,15 +65,24 @@ let begin_authorization
   =
   let verifier = fresh_verifier () in
   let state = fresh_state () in
+  (* A server that names no scopes gets no scope parameter. "scope=" is not
+     an empty list, it is a malformed one, and some servers answer it with
+     invalid_scope. *)
+  let scope =
+    match discovered.Keeper_oauth_discovery.scopes_supported with
+    | [] -> []
+    (* Everything the server said it offers. Narrowing here would be this
+       code deciding what a Keeper may reach, which is the declaration's
+       business at most and the operator's at the consent screen. *)
+    | scopes -> [ "scope", String.concat " " scopes ]
+  in
   let parameters =
     [ "response_type", "code"
     ; "client_id", client_id
     ; "redirect_uri", redirect_uri
-      (* Everything the server said it offers. Narrowing here would be this
-         code deciding what a Keeper may reach, which is the declaration's
-         business at most and the operator's at the consent screen. *)
-    ; "scope", String.concat " " discovered.Keeper_oauth_discovery.scopes_supported
-    ; "state", state
+    ]
+    @ scope
+    @ [ "state", state
     ; "code_challenge", Auth_oauth.pkce_s256 verifier
     ; "code_challenge_method", "S256"
       (* RFC 8707: name the resource the token is for, so a token minted for

@@ -604,9 +604,27 @@ let identity_connectable providers =
     written to the Keeper. *)
 type identity_login_started = {
   ils_keeper: string;
+  ils_provider: string;
+      (** Which service, by id. The label is for a screen; matching on it
+          would tie "this login landed" to a display string that a
+          declaration is free to change. *)
   ils_label: string;
   ils_url: string;
 }
+
+(** Whether the login [login] started has landed: the service it was for now
+    reports tools for this Keeper.
+
+    This is what ends the tick's re-asking. A poll with no end condition is a
+    poll that runs for the life of the process, so the condition is named
+    here and tested rather than being a line inside the message handler. *)
+let identity_login_landed ~providers ~login =
+  List.exists
+    (function
+      | Identity_declared { idp_id; idp_tools = Some _; _ } ->
+        String.equal idp_id login.ils_provider
+      | Identity_declared _ | Identity_unreadable _ -> false)
+    providers
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
     legal destinations makes a new Keeper sub-view an explicit compiler error

@@ -1,0 +1,20 @@
+# Supabase's remote MCP server.
+#
+# Only the server is named. Its endpoints, the scopes it publishes and whether
+# a client has to be made by hand come from what it serves, so none of that
+# can go stale here.
+#
+# Measured 2026-08-27: an MCP initialize is refused with 401, its protected-resource document answers where RFC 9728 computes it, and the
+# authorization server it names offers S256. It registers a client itself, so nothing has to be set up first. It names 13 scopes, all of which are asked for.
+
+id = "supabase"
+label = "Supabase"
+mcp_url = "https://mcp.supabase.com/mcp"
+
+access_token_env = "SUPABASE_ACCESS_TOKEN"
+expires_at_env = "SUPABASE_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.supabase/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

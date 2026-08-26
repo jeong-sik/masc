@@ -199,6 +199,7 @@ let a_failed_worker_wakes_the_submitter () =
         ~result:
           (Profile.tool_result_error
              ~tool_name:composition_tool
+             ~class_:Tool_result.Dependency_unavailable
              "node board: store unavailable")
         ()
     in

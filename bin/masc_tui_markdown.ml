@@ -441,21 +441,49 @@ let styled_piece palette (text, kind) =
     let opening, closing = span_of_palette palette kind in
     opening ^ text ^ closing
 
+let diff_row_span palette pieces =
+  let non_empty = List.filter (fun (text, _) -> String.length text > 0) pieces in
+  match non_empty with
+  | (_, kind) :: rest
+    when (String.equal kind kind_code_diff_added
+          || String.equal kind kind_code_diff_removed)
+         && List.for_all (fun (_, other) -> String.equal kind other) rest ->
+      Some (span_of_palette palette kind)
+  | _ -> None
+
+let fill_styled_row ~width (opening, closing) text =
+  let remaining = max 0 (width - Layout.display_width text) in
+  opening ^ text ^ String.make remaining ' ' ^ closing
+
 (* One lexed row. In the width budget it draws as its pieces; past it the
    row falls back to the single-span cell split -- a code row keeps its
    alignment before it keeps its colours, because the alignment is why it
-   was fenced. *)
+   was fenced.
+
+   The diff lexer gives an added or removed row one typed kind from edge to
+   edge. That row span includes the gutter and fills the available width;
+   every hard-split chunk repeats it, so a narrow pane cannot turn the tail of
+   a changed line back into ordinary code. No source-prefix check belongs
+   here: the lexer remains the authority for what is a changed row. *)
 let styled_code_rows palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
   let plain = String.concat "" (List.map fst pieces) in
   let cells = Layout.display_width plain in
-  if cells <= body_width then
-    [ gutter ^ String.concat "" (List.map (styled_piece palette) pieces) ]
-  else
-    let opening, closing = palette.code in
-    Layout.split_cells ~max_cells:body_width plain
-    |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
+  match diff_row_span palette pieces with
+  | Some span ->
+      let chunks =
+        if cells <= body_width then [ plain ]
+        else Layout.split_cells ~max_cells:body_width plain
+      in
+      List.map (fun chunk -> fill_styled_row ~width span (gutter ^ chunk)) chunks
+  | None ->
+      if cells <= body_width then
+        [ gutter ^ String.concat "" (List.map (styled_piece palette) pieces) ]
+      else
+        let opening, closing = palette.code in
+        Layout.split_cells ~max_cells:body_width plain
+        |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))

@@ -58,6 +58,9 @@ module Sgr : sig
   val bold : string
   val dim : string
   val underline : string
+  val no_underline : string
+  (** SGR 24: close underline without resetting foreground, background, or
+      weight. Conditional under NO_COLOR like the underline it closes. *)
 
   val red : string
   val green : string
@@ -264,20 +267,22 @@ module Syntax : sig
 
   val diff_added : string
   val diff_removed : string
-  (** Diff colours in the foreground, for a diff drawn inside running prose.
-
-      A background paints the row to its full width; inside a chat fence that
-      draws a band across the pane for every changed line, so prose asks for
-      these and a dedicated diff surface asks for the backgrounds below. *)
+  (** Diff colours in the foreground, for compact readings that do not paint
+      a whole row. *)
 
   val diff_added_bg : string
   val diff_removed_bg : string
   (** Diff-row backgrounds.
 
       Content rather than state, the same way a keyword is: a green line says
-      the file gained it, not that something is healthy. A renderer asks for
-      these instead of reaching into {!Sgr}, so one remap moves every diff at
-      once. *)
+      the file gained it, not that something is healthy. Both dedicated diff
+      surfaces and changed rows inside a chat fence ask for these instead of
+      reaching into {!Sgr}, so one remap moves every full-row diff at once. *)
+
+  val diff_row_foreground : string
+  (** Fixed light text paired with both fixed dark diff backgrounds. Unlike
+      the terminal default foreground, this pair keeps its contrast when a
+      light terminal theme uses dark default text. *)
 end
 
 val strip_sgr : string -> string

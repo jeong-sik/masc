@@ -5948,6 +5948,17 @@ def keeper_lanes_interaction(
             raise AssertionError(
                 f"Lanes did not band the cursor row: {populated!r}"
             )
+        # Lifecycle colour is a pointer, not a band over the whole status
+        # word. This is the real refreshed Lanes frame: the green SGR must end
+        # immediately after the running glyph, before the producer-owned word.
+        running_mark_only = re.compile(
+            rb"alpha[^\r\n]*\x1b\[[0-9;]*m"
+            rb"\xe2\x97\x8f\x1b\[0m running"
+        )
+        if running_mark_only.search(populated) is None:
+            raise AssertionError(
+                f"Lanes did not limit lifecycle colour to the glyph: {populated!r}"
+            )
         banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
         send_and_wait(
             process,

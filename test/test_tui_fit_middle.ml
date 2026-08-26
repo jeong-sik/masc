@@ -62,7 +62,11 @@ let test_width_is_exact () =
               column
               (width (Layout.fit_middle column name)))
          [ 4; 8; 12; 23; 40 ])
-    [ "long", audit; "short", "rondo"; "empty", "" ]
+    (* The short case only needs a name shorter than [audit]; it must not be a
+       word that could become a live Keeper's name, which is what
+       test/fixtures/concrete-keeper-identities.txt guards. Protocol roles are
+       named there as fixtures that stay valid. *)
+    [ "long", audit; "short", "operator"; "empty", "" ]
 ;;
 
 (* As the column shrinks the head's third reaches zero, and the result becomes

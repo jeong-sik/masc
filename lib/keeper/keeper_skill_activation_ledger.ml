@@ -49,6 +49,8 @@ type decode_error =
   | Invalid_package_id of Skill_reference.package_id_error
   | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_workspace_key of Skill_catalog_snapshot.revision_error
+  | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
   | Invalid_tool_name of string
@@ -79,6 +81,8 @@ let decode_error_code = function
   | Invalid_package_id _ -> "invalid_package_id"
   | Invalid_content_revision _ -> "invalid_content_revision"
   | Invalid_snapshot_revision _ -> "invalid_snapshot_revision"
+  | Invalid_workspace_key _ -> "invalid_workspace_key"
+  | Invalid_session_id _ -> "invalid_session_id"
   | Invalid_origin_kind _ -> "invalid_origin_kind"
   | Invalid_task_id _ -> "invalid_task_id"
   | Invalid_tool_name _ -> "invalid_tool_name"
@@ -115,6 +119,8 @@ let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
+let workspace_key ledger = ledger.workspace_key
+let session_id ledger = ledger.session_id
 
 let make_activation
       ~(identity : Skill_reference.identity)
@@ -413,7 +419,7 @@ let exact_key_equal left right =
        right.content_revision
 ;;
 
-let of_yojson ~expected_workspace_root ~expected_trace_id json =
+let of_projection_yojson json =
   let* fields = object_field "ledger" json in
   let* () =
     exact_fields
@@ -428,17 +434,15 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
     else Error (Unsupported_schema observed_schema)
   in
   let* session_id = string_field "session_id" fields in
-  let* () =
-    if String.equal session_id (Keeper_id.Trace_id.to_string expected_trace_id)
-    then Ok ()
-    else Error Session_id_mismatch
+  let* session_id =
+    Keeper_id.Trace_id.of_string session_id
+    |> Result.map_error (fun _ -> Invalid_session_id session_id)
   in
-  let expected_workspace_key = workspace_key_of_root expected_workspace_root in
   let* workspace_key = string_field "workspace_key" fields in
   let* () =
-    if String.equal workspace_key expected_workspace_key
-    then Ok ()
-    else Error Workspace_key_mismatch
+    Skill_catalog_snapshot.snapshot_revision_of_string workspace_key
+    |> Result.map ignore
+    |> Result.map_error (fun error -> Invalid_workspace_key error)
   in
   let* declared_revision = string_field "revision" fields in
   let* () =
@@ -452,7 +456,7 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
       List.fold_left
         (fun result value ->
            let* reversed = result in
-           let* activation = decode_activation ~expected_trace_id value in
+           let* activation = decode_activation ~expected_trace_id:session_id value in
            Ok (activation :: reversed))
         (Ok [])
         values
@@ -469,13 +473,26 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
   let* () = ensure_unique activations in
   let ledger =
     make
-      ~workspace_key:expected_workspace_key
-      ~session_id:expected_trace_id
+      ~workspace_key
+      ~session_id
       activations
   in
   if String.equal ledger.revision declared_revision
   then Ok ledger
   else Error Ledger_revision_mismatch
+;;
+
+let of_yojson ~expected_workspace_root ~expected_trace_id json =
+  let* ledger = of_projection_yojson json in
+  let* () =
+    if Keeper_id.Trace_id.equal ledger.session_id expected_trace_id
+    then Ok ()
+    else Error Session_id_mismatch
+  in
+  let expected_workspace_key = workspace_key_of_root expected_workspace_root in
+  if String.equal ledger.workspace_key expected_workspace_key
+  then Ok ledger
+  else Error Workspace_key_mismatch
 ;;
 
 let ledger_path session_dir = Filename.concat session_dir filename

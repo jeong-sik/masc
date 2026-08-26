@@ -383,6 +383,32 @@ let test_revision_binds_workspace_and_trace () =
                (Ledger.ledger_revision_to_string another_workspace))))
 ;;
 
+let test_projection_decoder_reuses_all_ledger_invariants () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let ledger = Ledger.empty ~workspace_root ~trace_id:trace in
+  let json = Ledger.to_yojson ledger in
+  (match Ledger.of_projection_yojson json with
+   | Error error -> failf "canonical projection rejected: %s" (Ledger.decode_error_code error)
+   | Ok decoded ->
+     check string "workspace" (Ledger.workspace_key ledger)
+       (Ledger.workspace_key decoded);
+     check string "session"
+       (Keeper_id.Trace_id.to_string trace)
+       (Ledger.session_id decoded |> Keeper_id.Trace_id.to_string));
+  let invalid_workspace =
+    match json with
+    | `Assoc fields ->
+      `Assoc (("workspace_key", `String "not-a-digest")
+              :: List.remove_assoc "workspace_key" fields)
+    | other -> other
+  in
+  match Ledger.of_projection_yojson invalid_workspace with
+  | Error (Ledger.Invalid_workspace_key _) -> ()
+  | Error _ -> fail "invalid projection workspace returned wrong error"
+  | Ok _ -> fail "invalid projection workspace was accepted"
+;;
+
 let () =
   run
     "keeper skill activation ledger"
@@ -410,6 +436,8 @@ let () =
             test_record_rejects_another_trace
         ; test_case "revision binds workspace and trace" `Quick
             test_revision_binds_workspace_and_trace
+        ; test_case "projection decoder reuses all ledger invariants" `Quick
+            test_projection_decoder_reuses_all_ledger_invariants
         ] )
     ]
 ;;

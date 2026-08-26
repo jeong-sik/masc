@@ -246,6 +246,7 @@ let test_bundle_matches_expected_projection () =
   with_bundle (fun names ->
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
+        ~identity_tool_names:[]
         ~skill_catalog:(skill_catalog ())
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     in

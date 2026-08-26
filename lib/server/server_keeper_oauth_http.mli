@@ -10,8 +10,11 @@
     ([POST /api/v1/keepers/<keeper>/oauth-login]); only the half the browser
     reaches is here.
 
-    Beside it, [GET /api/v1/keepers/oauth/providers] lists what a Keeper can
-    be attached to -- file names and labels that ship with the binary,
-    reading like the rest of the operator snapshot. *)
+    Beside it, two reads that look like the rest of the operator snapshot:
+    [GET /api/v1/keepers/oauth/providers] lists what a Keeper can be attached
+    to -- file names and labels that ship with the binary -- and
+    [GET /api/v1/keepers/oauth/attached-tools?keeper=<name>] lists what each
+    of them currently offers that Keeper. Tool names only: a screen has no
+    use for a credential and every use for knowing whether one is there. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

@@ -754,6 +754,12 @@ type code_history_listing = {
   chl_edits_note: string option;
 }
 
+(* Which list the Config surface is showing. A bool held two and could not
+   hold a third. *)
+type config_pane =
+  | Config_runtime
+  | Config_prompts
+
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
@@ -837,7 +843,7 @@ type state = {
   (* The Config surface owns the files the server reads. runtime.toml is one;
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
-  mutable config_prompts: bool;
+  mutable config_pane: config_pane;
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
@@ -1377,7 +1383,7 @@ let create_state
   resource_content_error = None;
   resource_scroll = 0;
   resource_focus = Left_pane;
-  config_prompts = false;
+  config_pane = Config_runtime;
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;

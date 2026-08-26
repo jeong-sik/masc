@@ -2685,7 +2685,7 @@ let goto_surface state ~mailbox (destination : surface) =
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
    | Config ->
-       if state.config_prompts then launch_prompts_load state ~mailbox
+       if state.config_pane = Config_prompts then launch_prompts_load state ~mailbox
        else launch_runtime_config_load state ~mailbox
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
@@ -7874,7 +7874,7 @@ let main () =
                   in
                   state.verification_cursor <- cursor;
                   state.verification_scroll <- scroll
-            | Config when state.config_prompts ->
+            | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
@@ -8248,7 +8248,7 @@ let main () =
                     state.log_scroll
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
-            | Config when state.config_prompts ->
+            | Config when state.config_pane = Config_prompts ->
                 let count =
                   match state.prompts_snapshot with
                   | Some snapshot -> List.length snapshot.Tui_decode.ps_rows
@@ -8489,7 +8489,7 @@ let main () =
             | Keepers Keeper_calls ->
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
-            | Config when state.config_prompts ->
+            | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
                 if next <> state.prompts_cursor then begin
                   state.prompts_cursor <- next;
@@ -9216,20 +9216,23 @@ let main () =
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "i" | Some "I"
-         when state.view = Config && state.config_prompts ->
+         when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
        | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
-           state.config_prompts <- not state.config_prompts;
+           state.config_pane <-
+             (match state.config_pane with
+              | Config_runtime -> Config_prompts
+              | Config_prompts -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
            state.prompts_librarian_input <- None;
            state.prompts_librarian_input_error <- None;
            state.prompts_librarian_input_loading <- false;
-           if state.config_prompts && state.prompts_snapshot = None then
-             launch_prompts_load state ~mailbox:async_messages
+           if state.config_pane = Config_prompts && state.prompts_snapshot = None
+           then launch_prompts_load state ~mailbox:async_messages
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one
@@ -9298,14 +9301,14 @@ let main () =
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Config ->
-                if state.config_prompts then handle_prompt_edit ()
+                if state.config_pane = Config_prompts then handle_prompt_edit ()
                 else handle_runtime_config_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
-         when state.view = Config && state.config_prompts
+         when state.view = Config && state.config_pane = Config_prompts
               && not compact_viewport ->
            handle_prompt_clear ()
        | Some "b" when state.view = Connectors && not compact_viewport ->

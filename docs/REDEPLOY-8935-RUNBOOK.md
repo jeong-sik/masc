@@ -187,7 +187,7 @@ for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
             continue
         slot = row.get('transcript_slot')
         kind = (slot.get('kind') if isinstance(slot, dict) else slot) or ''
-        if 'tool_call' not in str(kind):
+        if kind != 'tool_call':
             continue
         if (row.get('ts') or 0) < CUT:
             if not row.get('execution_id'):
@@ -213,9 +213,10 @@ fi
 mkdir -p "$chat_retirement_archive"
 cp -R '<base>/.masc/keeper_chat' "$chat_retirement_archive/keeper_chat"
 python3 - <<'PY'
-import json, glob, os
+import json, glob, os, stat
 kept = retired = 0
 for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
+    original = os.stat(path)
     out = []
     changed = False
     for line in open(path):
@@ -228,7 +229,7 @@ for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
             out.append(text); kept += 1; continue
         slot = row.get('transcript_slot')
         kind = (slot.get('kind') if isinstance(slot, dict) else slot) or ''
-        if 'tool_call' in str(kind) and not row.get('execution_id'):
+        if kind == 'tool_call' and not row.get('execution_id'):
             retired += 1; changed = True
         else:
             out.append(text); kept += 1
@@ -237,7 +238,15 @@ for path in glob.glob('<base>/.masc/keeper_chat/*.jsonl'):
         with open(tmp, 'w') as fh:
             for text in out:
                 fh.write(text + '\n')
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, stat.S_IMODE(original.st_mode))
         os.replace(tmp, path)
+        directory = os.open(os.path.dirname(path), os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 print('kept', kept, 'retired', retired)
 PY
 ```

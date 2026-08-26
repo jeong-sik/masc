@@ -60,7 +60,17 @@ let names (surface : Keeper_effective_tool_surface.t) =
   |> List.sort String.compare
 ;;
 
-let project ?(catalog = skill_catalog ()) ~tool_groups ~task_skill_names ~native_posture =
+(* The trailing unit is what lets [?catalog] be left out. Without it every
+   argument is labelled, nothing marks the application as finished, and each
+   call reads as a function still waiting for the optional rather than as
+   the result it is used as. *)
+let project
+      ?(catalog = skill_catalog ())
+      ~tool_groups
+      ~task_skill_names
+      ~native_posture
+      ()
+  =
   Keeper_effective_tool_surface.For_testing.project
     ~keeper_name:"fixture"
     ~runtime_id:"fixture.runtime"
@@ -79,6 +89,7 @@ let test_projection_names_equal_turn_surface_authority () =
       ~tool_groups:None
       ~task_skill_names:[ "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
+      ()
   with
   | Error (_, detail) -> fail detail
   | Ok surface ->
@@ -135,12 +146,14 @@ let test_two_surfaces_have_different_names_and_digests () =
       ~tool_groups:None
       ~task_skill_names:[]
       ~native_posture:Runtime_native_tools.Native_read
+      ()
   in
   let narrow =
     project
       ~tool_groups:(Some [ "fs" ])
       ~task_skill_names:[]
       ~native_posture:Runtime_native_tools.Native_full
+      ()
   in
   match all, narrow with
   | Ok left, Ok right ->
@@ -157,6 +170,7 @@ let test_instruction_skill_without_read_is_admitted () =
       ~tool_groups:(Some [ "board" ])
       ~task_skill_names:[ "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
+      ()
   with
   | Error (_, detail) -> fail detail
   | Ok surface ->
@@ -174,6 +188,7 @@ let test_instruction_description_changes_digest () =
       ~tool_groups:None
       ~task_skill_names:[ "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
+      ()
   in
   match project_description "first contract", project_description "second contract" with
   | Ok left, Ok right ->

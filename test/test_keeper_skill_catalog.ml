@@ -347,6 +347,16 @@ let skill_catalog_of documents =
 
 let test_composition_skill_joins_projection () =
   let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
+  let expected_instruction =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~skill_catalog:(skill_catalog_of [ "release-checklist", instruction_document ])
+      ~model_visible_descriptors:descriptors
+  in
+  check
+    bool
+    "instruction skill joins the descriptor projection"
+    true
+    (List.mem Catalog.skill_tool_name expected_instruction);
   let expected =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
       ~skill_catalog:

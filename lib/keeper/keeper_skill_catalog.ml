@@ -129,6 +129,15 @@ let of_documents documents =
 
 let skills catalog = catalog
 
+let has_instruction_skill catalog =
+  List.exists
+    (fun skill ->
+       match skill.surface with
+       | Instruction -> true
+       | Composition _ -> false)
+    catalog
+;;
+
 let find catalog name =
   List.find_opt (fun skill -> String.equal skill.name name) catalog
 ;;

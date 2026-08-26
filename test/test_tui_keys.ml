@@ -53,13 +53,15 @@ let test_one_spelling_per_key () =
         (Masc_tui_keys.for_surface surface))
     every_surface
 
-let test_listing_footers_share_one_shape () =
+let test_plain_listing_footer_shape () =
   let canonical = "j/k:scroll  Esc:overview  r:refresh  Tab:next  q:quit" in
-  List.iter
-    (fun surface ->
-      check str "the plain listings share one footer" canonical
-        (Masc_tui_keys.footer_hints surface))
-    [ Lanes; System_logs ]
+  check str "the plain listing keeps its footer" canonical
+    (Masc_tui_keys.footer_hints System_logs)
+
+let test_lanes_footer_opens_the_selected_keeper () =
+  check str "Lanes names its Keeper detail jump"
+    "j/k:move  Right / Enter:detail  Esc:overview  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Lanes)
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
@@ -210,10 +212,12 @@ let () =
             test_one_spelling_per_key
         ] )
     ; ( "projections"
-      , [ Alcotest.test_case "plain listings share one footer" `Quick
-            test_listing_footers_share_one_shape
+      , [ Alcotest.test_case "plain listing footer shape" `Quick
+            test_plain_listing_footer_shape
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Lanes opens the selected Keeper" `Quick
+            test_lanes_footer_opens_the_selected_keeper
         ; Alcotest.test_case "Harness links to Overview task" `Quick
             test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Repositories offers the Code tree" `Quick

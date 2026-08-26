@@ -282,13 +282,16 @@ phase. A phase or turn value this TUI does not know is shown verbatim with a
 Before the first response the page says `(not loaded yet)`. A successful empty
 response says `(no keeper lane snapshots)`. A failed refresh leaves the prior
 rows on screen, adds the error in red, and says that an empty body is not a
-reading.
+reading. Move the lane cursor with `j` / `k`. Right or `Enter` opens that
+Keeper in the existing Keeper detail view. If the lane's Keeper is not in the
+current local roster, the key does nothing.
 
 ### Keeper detail
 
-Right or `Enter` from the list. Live context comes from the newest trace-matched
-TurnRecord; missing, malformed, unreadable, usage-less, and prior-trace
-observations stay distinct unavailable states rather than collapsing to zero.
+Right or `Enter` from the Keeper list or Lanes. Live context comes from the
+newest trace-matched TurnRecord; missing, malformed, unreadable, usage-less,
+and prior-trace observations stay distinct unavailable states rather than
+collapsing to zero.
 
 ```
  Keeper: code-reviewer
@@ -856,10 +859,11 @@ Per surface:
 | Key | Surface | Action |
 |-----|---------|--------|
 | `j` / `k` | Overview | Scroll Recent Events |
-| `j` / `k` | Keepers, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
-| `j` / `k` | Lanes, Runtime, System Logs | Scroll the page |
+| `j` / `k` | Keepers, Lanes, Approvals, Board, Planning, Schedules, Fusion list | Move cursor |
+| `j` / `k` | Runtime, System Logs | Scroll the page |
 | `j` / `k` | Keeper detail, logs, Board read, Planning detail, Fusion detail | Scroll content |
 | Right / `Enter` | Keepers | Open keeper detail |
+| Right / `Enter` | Lanes | Open the selected lane's Keeper detail |
 | Right / `Enter` | Board | Open post body |
 | `Ctrl-W` | Board read, Resources | Switch the focused pane |
 | `h` / `l` | Wide Board read | Focus post list / post detail |
@@ -908,10 +912,9 @@ Tab cycles the surfaces:
 Within a surface:
 
   Keepers   --Right/Enter-->  Keeper detail  --l-->  Keeper logs
-      |                       |
-      c                       c
-      v                       v
-  Message input          Message input
+  Lanes     --Right/Enter--^
+
+  Keeper list/detail  --c-->  Message input
 
   Board     --Right/Enter-->  Board read
   Planning  --Right/Enter-->  Goal detail

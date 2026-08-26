@@ -1481,11 +1481,44 @@ type effective_tool_surface =
     }
   | Effective_surface_warming of { ets_keeper_name : string }
 
+type skill_activation_origin =
+  | Skill_task_instruction of { sao_task_id : string }
+  | Skill_session_instruction
+  | Skill_task_composition of
+      { sao_task_id : string
+      ; sao_tool_name : string
+      }
+  | Skill_session_composition of { sao_tool_name : string }
+
+type skill_activation =
+  { sa_reference : Skill_reference.t
+  ; sa_snapshot_revision : string
+  ; sa_turn_ref : string
+  ; sa_activated_at : string
+  ; sa_origin : skill_activation_origin
+  }
+
+type skill_activation_projection =
+  | Skill_activations_available of
+      { sap_keeper_name : string
+      ; sap_workspace_key : string
+      ; sap_session_id : string
+      ; sap_revision : string
+      ; sap_activations : skill_activation list
+      }
+  | Skill_activations_no_session of { sap_keeper_name : string }
+  | Skill_activations_unavailable of
+      { sap_keeper_name : string
+      ; sap_reason : string
+      ; sap_detail : string
+      }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
   ts_effective : effective_tool_surface option;
+  ts_skill_activations : skill_activation_projection option;
 }
 
 type connector = {
@@ -1758,6 +1791,133 @@ let decode_effective_tool_surface json =
         (Printf.sprintf
            "effective_keeper_surface.status has unknown value %S" unknown)
 
+let decode_keeper_task_id json field =
+  let* value = required_string_field json field in
+  Keeper_id.Task_id.of_string value
+  |> Result.map Keeper_id.Task_id.to_string
+  |> Result.map_error (fun detail -> Printf.sprintf "%s is invalid: %s" field detail)
+
+let decode_skill_activation_origin json =
+  let* kind = required_string_field json "kind" in
+  match kind with
+  | "task_instruction" ->
+      let* sao_task_id = decode_keeper_task_id json "task_id" in
+      Ok (Skill_task_instruction { sao_task_id })
+  | "session_instruction" -> Ok Skill_session_instruction
+  | "task_composition" ->
+      let* sao_task_id = decode_keeper_task_id json "task_id" in
+      let* sao_tool_name = required_string_field json "tool_name" in
+      Ok (Skill_task_composition { sao_task_id; sao_tool_name })
+  | "session_composition" ->
+      let* sao_tool_name = required_string_field json "tool_name" in
+      Ok (Skill_session_composition { sao_tool_name })
+  | unknown ->
+      Error (Printf.sprintf "skill activation origin has unknown kind %S" unknown)
+
+let decode_skill_activation json =
+  let* identity = required_object_field json "identity" in
+  let* content_revision = required_string_field json "content_revision" in
+  let* sa_reference =
+    Skill_reference.of_yojson
+      (`Assoc
+         [ "identity", identity
+         ; "content_revision", `String content_revision
+         ])
+    |> Result.map_error (fun _ -> "skill activation reference is not canonical")
+  in
+  let* snapshot_revision = required_string_field json "snapshot_revision" in
+  let* sa_snapshot_revision =
+    Skill_catalog_snapshot.snapshot_revision_of_string snapshot_revision
+    |> Result.map Skill_catalog_snapshot.snapshot_revision_to_string
+    |> Result.map_error (fun _ -> "skill activation snapshot_revision is invalid")
+  in
+  let* turn_ref = required_member json "turn_ref" in
+  let* sa_turn_ref =
+    Ids.Turn_ref.of_yojson turn_ref
+    |> Result.map Ids.Turn_ref.to_string
+    |> Result.map_error (fun detail -> "skill activation turn_ref is invalid: " ^ detail)
+  in
+  let* sa_activated_at = required_string_field json "activated_at" in
+  let* origin = required_object_field json "origin" in
+  let* sa_origin = decode_skill_activation_origin origin in
+  Ok
+    { sa_reference
+    ; sa_snapshot_revision
+    ; sa_turn_ref
+    ; sa_activated_at
+    ; sa_origin
+    }
+
+let decode_sha256_field json field =
+  let* value = required_string_field json field in
+  let* () =
+    Skill_reference.validate_revision_string value
+    |> Result.map_error (fun _ -> Printf.sprintf "%s is not a SHA-256 digest" field)
+  in
+  Ok value
+
+let decode_skill_activation_ledger ~keeper_name json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.skill-activations/v1"
+    then Ok ()
+    else Error (Printf.sprintf "skill activation ledger has unknown schema %S" schema)
+  in
+  let* sap_workspace_key = decode_sha256_field json "workspace_key" in
+  let* session_id = required_string_field json "session_id" in
+  let* sap_session_id =
+    Keeper_id.Trace_id.of_string session_id
+    |> Result.map Keeper_id.Trace_id.to_string
+    |> Result.map_error (fun detail -> "skill activation session_id is invalid: " ^ detail)
+  in
+  let* sap_revision = decode_sha256_field json "revision" in
+  let* activations = required_list_field json "activations" in
+  let* sap_activations =
+    decode_list "skill_activations.ledger.activations" decode_skill_activation
+      activations
+  in
+  let* () =
+    match
+      List.find_opt
+        (fun activation ->
+           match Ids.Turn_ref.of_string activation.sa_turn_ref with
+           | Some turn_ref ->
+               not
+                 (String.equal
+                    (Ids.Turn_ref.trace_id turn_ref)
+                    sap_session_id)
+           | None -> true)
+        sap_activations
+    with
+    | None -> Ok ()
+    | Some _ -> Error "skill activation turn_ref does not belong to ledger session_id"
+  in
+  Ok
+    (Skill_activations_available
+       { sap_keeper_name = keeper_name
+       ; sap_workspace_key
+       ; sap_session_id
+       ; sap_revision
+       ; sap_activations
+       })
+
+let decode_skill_activation_projection json =
+  let* status = required_string_field json "status" in
+  let* sap_keeper_name = required_string_field json "keeper_name" in
+  match status with
+  | "available" ->
+      let* ledger = required_object_field json "ledger" in
+      decode_skill_activation_ledger ~keeper_name:sap_keeper_name ledger
+  | "no_session" -> Ok (Skill_activations_no_session { sap_keeper_name })
+  | "unavailable" ->
+      let* sap_reason = required_string_field json "reason" in
+      let* sap_detail = required_string_field json "detail" in
+      Ok
+        (Skill_activations_unavailable
+           { sap_keeper_name; sap_reason; sap_detail })
+  | unknown ->
+      Error (Printf.sprintf "skill_activations.status has unknown value %S" unknown)
+
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
      inventory; this reads the inventory and leaves the rest to the dashboard,
@@ -1781,7 +1941,20 @@ let decode_tool_snapshot json =
     | None -> Ok None
     | Some value -> Result.map Option.some (decode_effective_tool_surface value)
   in
-  Ok { ts_tools; ts_count; ts_freshness; ts_effective }
+  let* skill_activations_json = optional_object_field json "skill_activations" in
+  let* ts_skill_activations =
+    match skill_activations_json with
+    | None -> Ok None
+    | Some value ->
+        Result.map Option.some (decode_skill_activation_projection value)
+  in
+  Ok
+    { ts_tools
+    ; ts_count
+    ; ts_freshness
+    ; ts_effective
+    ; ts_skill_activations
+    }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in

@@ -7256,6 +7256,16 @@ let tool_domain_rule_cells = 21
 let tool_domain_rule =
   String.concat "" (List.init tool_domain_rule_cells (fun _ -> Ansi.box_h))
 
+let skill_activation_origin_text = function
+  | Masc.Tui_decode.Skill_task_instruction { sao_task_id } ->
+      "task_instruction task=" ^ sao_task_id
+  | Masc.Tui_decode.Skill_session_instruction -> "session_instruction"
+  | Masc.Tui_decode.Skill_task_composition { sao_task_id; sao_tool_name } ->
+      Printf.sprintf "task_composition task=%s tool=%s"
+        sao_task_id sao_tool_name
+  | Masc.Tui_decode.Skill_session_composition { sao_tool_name } ->
+      "session_composition tool=" ^ sao_tool_name
+
 let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -7394,6 +7404,74 @@ let render_tools (state : state) =
         @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
   in
+  let activation_lines =
+    match state.tools_inventory with
+    | None -> [ Theme.warn, " Skill Activations — not loaded" ]
+    | Some { Masc.Tui_decode.ts_skill_activations = None; _ } ->
+        [ Theme.warn, " Skill Activations — no Keeper selected" ]
+    | Some
+        { Masc.Tui_decode.ts_skill_activations =
+            Some
+              (Masc.Tui_decode.Skill_activations_no_session
+                 { sap_keeper_name });
+          _ } ->
+        [ Theme.warn,
+          Printf.sprintf " Skill Activations — %s — no session"
+            (Terminal_text.single_line sap_keeper_name) ]
+    | Some
+        { Masc.Tui_decode.ts_skill_activations =
+            Some
+              (Masc.Tui_decode.Skill_activations_unavailable
+                 { sap_keeper_name; sap_reason; sap_detail });
+          _ } ->
+        [ Theme.bad,
+          Printf.sprintf " Skill Activations — %s — unavailable (%s)"
+            (Terminal_text.single_line sap_keeper_name)
+            (Terminal_text.single_line sap_reason);
+          Theme.bad, "   " ^ Terminal_text.single_line sap_detail ]
+    | Some
+        { Masc.Tui_decode.ts_skill_activations =
+            Some
+              (Masc.Tui_decode.Skill_activations_available
+                 { sap_keeper_name
+                 ; sap_workspace_key
+                 ; sap_session_id
+                 ; sap_revision
+                 ; sap_activations
+                 });
+          _ } ->
+        let receipt_lines =
+          List.concat_map
+            (fun (activation : Masc.Tui_decode.skill_activation) ->
+               let exact_reference =
+                 Skill_reference.to_yojson activation.sa_reference
+                 |> Yojson.Safe.to_string
+               in
+               [ Ansi.dim,
+                 "   exact=" ^ Terminal_text.single_line exact_reference
+               ; Ansi.dim,
+                 Printf.sprintf "     snapshot=%s  turn=%s  origin=%s  at=%s"
+                   (Terminal_text.single_line activation.sa_snapshot_revision)
+                   (Terminal_text.single_line activation.sa_turn_ref)
+                   (skill_activation_origin_text activation.sa_origin
+                    |> Terminal_text.single_line)
+                   (Terminal_text.single_line activation.sa_activated_at)
+               ])
+            sap_activations
+        in
+        [ Ansi.bold,
+          Printf.sprintf " Skill Activations — %s (%d receipts)"
+            (Terminal_text.single_line sap_keeper_name)
+            (List.length sap_activations)
+        ; Ansi.dim,
+          Printf.sprintf "   session=%s  ledger=%s"
+            (Terminal_text.single_line sap_session_id)
+            (Terminal_text.single_line sap_revision)
+        ; Ansi.dim,
+          "   workspace=" ^ Terminal_text.single_line sap_workspace_key
+        ]
+        @ receipt_lines
+  in
   let catalog_lines =
     let heading =
       [ Ansi.bold,
@@ -7437,7 +7515,13 @@ let render_tools (state : state) =
                   (Terminal_text.single_line surfaces) ))
         registered_rows
   in
-  let display_lines = effective_lines @ [ Ansi.dim, "" ] @ catalog_lines in
+  let display_lines =
+    effective_lines
+    @ [ Ansi.dim, "" ]
+    @ activation_lines
+    @ [ Ansi.dim, "" ]
+    @ catalog_lines
+  in
   let chrome_rows = if Option.is_some state.tools_error then 7 else 5 in
   let content_height = max 1 (rows - chrome_rows) in
   let drawable = List.length display_lines in

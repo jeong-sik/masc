@@ -4,8 +4,8 @@ Date: 2026-06-29
 
 ## Purpose
 
-OAS owns provider and transport behavior. MASC and other agent runtimes should
-consume typed OAS facts instead of matching model names or provider-specific
+agent_core owns provider and transport behavior. MASC and other agent runtimes should
+consume typed agent_core facts instead of matching model names or provider-specific
 strings when they decide how to display, replay, pause, or interrupt reasoning.
 
 `Llm_provider.Reasoning_dialect` is the typed surface for those facts. It is

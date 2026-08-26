@@ -30,6 +30,8 @@
     "keeper_voice_sessions.toml",
     "keeper_voice_speak.toml",
     "masc_add_task.toml",
+    "masc_ask.toml",
+    "masc_ask_status.toml",
     "masc_batch_add_tasks.toml",
     "masc_board_cleanup.toml",
     "masc_board_comment.toml",

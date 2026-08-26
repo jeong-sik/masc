@@ -1201,7 +1201,7 @@ let run_named
             ; first_event_timeout_s =
                 (* Keeper policy knob, injected from the resolved layer like
                    [provider_call_deadline_sec] below instead of threading
-                   one more optional through run_named (RFC-OAS-037). *)
+                   one more optional through run_named (RFC-AC-037). *)
                 Keeper_runtime_resolved.first_event_timeout_sec ()
             ; body_timeout_s
             ; provider_call_deadline_sec =

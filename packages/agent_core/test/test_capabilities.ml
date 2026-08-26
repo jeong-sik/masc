@@ -449,7 +449,7 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
        (* 2026-08-15 (closes #28749): this row is served through ollama_cloud's
           OpenAI-compat /v1/chat/completions, which cannot encode Ollama's
           native think toggle — same defect class as qwen3.5:397b (#28748).
-          Live overlay probe (oas-models-overlay.toml, 2026-08-04): reasoning
+          Live overlay probe (agent-core-models-overlay.toml, 2026-08-04): reasoning
           is inherent, no request-side control wire. *)
        check_thinking_control
          "provider-qualified Ollama Cloud Kimi has no request control"
@@ -946,7 +946,7 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
      endpoint returned reasoning unconditionally (message keys
      ['content','reasoning','role'], 882 chars) with no request-side toggle
      accepted — matching the confirmed sibling family (kimi-k2.6,
-     kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; oas#2716 2026-07-20
+     kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; 2026-07-20
      audit) of "inherent reasoning, no control wire on /v1". This row
      previously declared Ollama's native think toggle (thinking_control_format
      = "ollama_think"), which only exists on Ollama's native /api/chat, not
@@ -984,7 +984,7 @@ let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
      (#28748) — declaring Ollama's native /api/chat think toggle on a model
      served through the OpenAI-compat /v1/chat/completions path, which cannot
      encode it. Each is independently confirmed by a live probe recorded in
-     the OAS overlay (~/me/.masc/config/oas-models-overlay.toml, oas#2716
+     the overlay (~/me/.masc/config/agent-core-models-overlay.toml,
      2026-07-20 audit + 2026-08-04 per-model probes): reasoning is inherent
      and unconditional, and the response streams it back on a plain "reasoning"
      field (not Ollama's native "thinking" field). kimi-k2.6 is covered

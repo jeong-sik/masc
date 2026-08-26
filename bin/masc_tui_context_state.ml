@@ -1,12 +1,24 @@
 module Decode = Masc.Tui_decode
 module Projection = Masc.Keeper_context_observation_projection
 
-type t = {
+type reading = {
   observation : Decode.context_observation option;
   error : string option;
 }
 
-let empty = { observation = None; error = None }
+type t =
+  | Empty
+  | Reading of {
+      keeper_name : string;
+      reading : reading;
+    }
+
+let empty = Empty
+
+let reading_for_keeper ~keeper_name = function
+  | Reading snapshot when String.equal snapshot.keeper_name keeper_name ->
+      Some snapshot.reading
+  | Empty | Reading _ -> None
 
 let resolve_with ~project (keeper : Decode.keeper) =
   let json =
@@ -16,8 +28,16 @@ let resolve_with ~project (keeper : Decode.keeper) =
   match
     Decode.decode_context_observation ~expected_trace_id:keeper.k_trace_id json
   with
-  | Ok observation -> { observation = Some observation; error = None }
-  | Error error -> { observation = None; error = Some error }
+  | Ok observation ->
+      Reading
+        { keeper_name = keeper.k_name;
+          reading = { observation = Some observation; error = None };
+        }
+  | Error error ->
+      Reading
+        { keeper_name = keeper.k_name;
+          reading = { observation = None; error = Some error };
+        }
 
 let load ~config =
   resolve_with ~project:(fun ~keeper_name ~current_trace_id ->

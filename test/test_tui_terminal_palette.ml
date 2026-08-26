@@ -129,6 +129,79 @@ let test_unsupported_levels_do_not_invent_a_background () =
     [ Palette.Ansi16; Palette.Unknown ]
 ;;
 
+
+(* Stdlib has no substring search. Small enough to write than to reach for. *)
+let contains haystack needle =
+  let hay = String.length haystack and pin = String.length needle in
+  let rec scan offset =
+    if offset + pin > hay then false
+    else if String.equal (String.sub haystack offset pin) needle then true
+    else scan (offset + 1)
+  in
+  scan 0
+;;
+
+(* The query has to actually ask, and the answers have to be understood.
+   OSC 10 and 11 name the text and the page; OSC 4 names each of the sixteen
+   entries an SGR colour code selects, which is the only way to know what a
+   code will draw on this terminal rather than on the one it was picked
+   against. *)
+let test_the_query_asks_for_the_page_and_every_slot () =
+  check bool "asks for the foreground" true
+    (contains Palette.query "\x1b]10;?");
+  check bool "asks for the background" true
+    (contains Palette.query "\x1b]11;?");
+  for index = 0 to Palette.ansi_slot_count - 1 do
+    check bool
+      (Printf.sprintf "asks for palette entry %d" index)
+      true
+      (contains Palette.query
+         (Printf.sprintf "\x1b]4;%d;?" index))
+  done
+;;
+
+let slot_of body =
+  match Palette.parse_response body with
+  | Palette.Palette_response { slot; color } -> Some (slot, color)
+  | Palette.Not_palette_response -> None
+;;
+
+let test_a_slot_answer_is_read_back_to_its_own_index () =
+  (match slot_of "4;3;rgb:f7f7/caca/8888" with
+   | Some (Palette.Ansi 3, Some color) ->
+     check int "red component" 0xf7 (Palette.red color);
+     check int "green component" 0xca (Palette.green color);
+     check int "blue component" 0x88 (Palette.blue color)
+   | Some _ | None -> fail "expected palette entry 3");
+  (* An answer for a slot outside the sixteen is not an answer to anything
+     this asked, so it is passed through rather than stored somewhere. *)
+  check bool "an index past the sixteen is not a palette answer" true
+    (slot_of "4;200;rgb:0000/0000/0000" = None);
+  check bool "a malformed index is not a palette answer" true
+    (slot_of "4;x;rgb:0000/0000/0000" = None)
+;;
+
+(* Sixteen unknown entries are a terminal that answered the page and not the
+   palette -- a multiplexer, or an emulator without OSC 4. It is still a
+   palette: the background is what every reading is measured against. *)
+let test_a_page_without_a_palette_is_still_a_palette () =
+  let rgb red green blue = Palette.make_rgb ~red ~green ~blue in
+  match
+    Palette.of_responses ~foreground:(Some (rgb 200 200 200))
+      ~background:(Some (rgb 20 20 20))
+      ~ansi:(Array.make Palette.ansi_slot_count None)
+  with
+  | None -> fail "a foreground and a background are enough"
+  | Some palette ->
+    check int "background survives" 20 (Palette.red (Palette.background palette));
+    check bool "every slot reads as unknown" true
+      (List.for_all
+         (fun index -> Palette.ansi palette index = None)
+         (List.init Palette.ansi_slot_count Fun.id));
+    check bool "an index past the sixteen is unknown, not an error" true
+      (Palette.ansi palette Palette.ansi_slot_count = None)
+;;
+
 let () =
   run "tui_terminal_palette"
     [ ( "classifier"
@@ -136,6 +209,14 @@ let () =
             test_classifier_precedence
         ; test_case "stdout level is cached once" `Quick
             test_stdout_level_is_one_process_lazy
+        ] )
+    ; ( "osc palette"
+      , [ test_case "the query asks for the page and every slot" `Quick
+            test_the_query_asks_for_the_page_and_every_slot
+        ; test_case "a slot answer keeps its index" `Quick
+            test_a_slot_answer_is_read_back_to_its_own_index
+        ; test_case "a page without a palette is still a palette" `Quick
+            test_a_page_without_a_palette_is_still_a_palette
         ] )
     ; ( "projection"
       , [ test_case "truecolor preserves RGB" `Quick

@@ -72,7 +72,7 @@ let test_hook_decision_to_string () =
 ;;
 
 let test_hook_decision_tool_approval () =
-  let prompt : Hooks.tool_approval_prompt = { question = "Approve exact tool call?" } in
+  let prompt : Hooks.tool_approval_prompt = { question = "Approve exact tool call?"; because = "policy: unknown tool surface" } in
   let decision = Hooks.ElicitToolApproval prompt in
   match decision with
   | Hooks.ElicitToolApproval returned ->
@@ -81,7 +81,7 @@ let test_hook_decision_tool_approval () =
 ;;
 
 let test_hook_decision_tool_approval_to_string () =
-  let decision = Hooks.ElicitToolApproval { question = "Approve exact tool call?" } in
+  let decision = Hooks.ElicitToolApproval { question = "Approve exact tool call?"; because = "policy: unknown tool surface" } in
   Alcotest.(check string)
     "string"
     "elicit_tool_approval"

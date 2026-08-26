@@ -22,6 +22,7 @@ val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
 
 val schema_tools :
   ?skill_composition_entries:Keeper_tool_composition_catalog.entry list ->
+  ?include_instruction_skill:bool ->
   unit ->
   Agent_core.Tool.t list
 (** Handler-free materialization of the exact model-visible composition tool

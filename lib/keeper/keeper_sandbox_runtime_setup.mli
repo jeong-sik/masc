@@ -45,6 +45,15 @@ val sandbox_started_at_label_key : string
 val sandbox_network_label_key : string
 val sandbox_ttl_sec_label_key : string
 val sandbox_turn_id_label_key : string
+
+val turn_container_kind : string
+
+val current_owner_pid : unit -> int
+(** The pid written as [masc.mcp.owner_pid] and the one a filter must supply to
+    select those containers again. Kept as one reader so a filter cannot be
+    built from a different pid than the label carries. *)
+(** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
+
 val strip_trailing_slashes : string -> string
 val normalize_base_path_for_hash : string -> string
 val base_path_hash : string -> string

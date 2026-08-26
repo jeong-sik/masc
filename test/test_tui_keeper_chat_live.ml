@@ -242,6 +242,7 @@ let test_an_approval_request_is_read_whole () =
         ; tool_name = "Edit"
         ; args = "{\"file_path\":\"a.ml\"}"
         ; question = "Run Edit on a.ml?"
+        ; because = ""
         }
     ]
     (feed_whole body)
@@ -263,6 +264,33 @@ let test_a_request_missing_its_question_is_reported () =
       failf "expected one report, got [%s]"
         (String.concat "; " (List.map delta_to_string other))
 
+let test_the_because_reaches_the_pane () =
+  (* The approval list screen shows why a call was held (#30518). A reader
+     answering from the chat pane decides on the same call, so the reason has
+     to arrive here too -- without it the pane asks a question the rest of the
+     TUI already answers. *)
+  let body =
+    sse
+      (custom "KEEPER_TOOL_APPROVAL_REQUESTED"
+         (`Assoc
+            [ "tool_call_id", `String "c1"
+            ; "tool_call_name", `String "Edit"
+            ; "args", `String "{}"
+            ; "question", `String "Run Edit on a.ml?"
+            ; "because", `String "file_path touches /etc"
+            ]))
+  in
+  check (list delta) "why the call was held travels with the ask"
+    [ Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{}"
+        ; question = "Run Edit on a.ml?"
+        ; because = "file_path touches /etc"
+        }
+    ]
+    (feed_whole body)
+
 let test_a_request_with_no_arguments_is_still_a_prompt () =
   let body =
     sse
@@ -279,6 +307,7 @@ let test_a_request_with_no_arguments_is_still_a_prompt () =
         ; tool_name = "Execute"
         ; args = ""
         ; question = "Run Execute?"
+        ; because = ""
         }
     ]
     (feed_whole body)
@@ -309,8 +338,10 @@ let () =
         ] )
     ; ( "held calls"
       , [ test_case "an approval request is read whole" `Quick
-            test_an_approval_request_is_read_whole
-        ; test_case "a request with no arguments is still a prompt" `Quick
+            test_an_approval_request_is_read_whole;
+          test_case "the because reaches the pane" `Quick
+            test_the_because_reaches_the_pane;
+        test_case "a request with no arguments is still a prompt" `Quick
             test_a_request_with_no_arguments_is_still_a_prompt
         ; test_case "the settled event carries its outcome" `Quick
             test_the_settled_event_carries_its_outcome

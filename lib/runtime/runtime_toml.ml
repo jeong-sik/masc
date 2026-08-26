@@ -1186,6 +1186,25 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
               n))
     | Error _ as e -> e
   in
+  (* Request-side output budget. AGENT_CORE omits the wire field when this is
+     absent, so the provider's own default decides -- 65536 on ollama.com/v1,
+     which is where a collapsed generation runs to. Positive-or-omitted mirrors
+     max-request-body-bytes: 0 would mean "ask for no output at all", which no
+     caller wants and every envelope rejects differently. *)
+  let max_tokens_result =
+    match typed_find "an integer" path tbl "max-tokens" Otoml.get_integer with
+    | Ok None -> Ok None
+    | Ok (Some n) when n > 0 -> Ok (Some n)
+    | Ok (Some n) ->
+      Error
+        (error
+           (path ^ ".max-tokens")
+           (Printf.sprintf
+              "max-tokens must be a positive integer, or omitted to let the provider \
+               apply its own default; got %d"
+              n))
+    | Error _ as e -> e
+  in
   let price_input_result = typed_find "a float" path tbl "price-input" Otoml.get_float in
   let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
@@ -1228,6 +1247,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   in
   let* max_concurrent = max_concurrent_result in
   let* max_request_body_bytes = max_request_body_bytes_result in
+  let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
   let* keep_alive = keep_alive_result in
@@ -1243,6 +1263,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; wizard_default
     ; max_concurrent
     ; max_request_body_bytes
+    ; max_tokens
     ; price_input
     ; price_output
     ; keep_alive
@@ -1590,6 +1611,69 @@ let parse_exact_output_lanes (toml : Otoml.t)
          "[runtime.exact_output_lanes] must be a table of lane tables")
 ;;
 
+(* [repeat-penalty] and [repeat-last-n] are fields of Ollama's own
+   [/api/chat] [options] object. No other request builder has a field to put
+   them in, so on any other wire the declaration was accepted, dropped without
+   a word, and the operator was left believing the knob was live -- while the
+   repetition loop it exists to stop kept running.
+
+   Probed 2026-08-25 against ollama.com/v1/chat/completions with
+   deepseek-v4-flash:0731 at seed 7: repeat_penalty=1.15 returned 65 completion
+   tokens against a 63-token baseline, so the OpenAI-compatible endpoint ignores
+   the name rather than honouring it under a different one. That endpoint's own
+   repetition controls are [frequency_penalty] / [presence_penalty], which are
+   different functions of the token history and not this value under another
+   spelling -- so there is nothing to translate to, and the declaration is
+   refused rather than silently reinterpreted.
+
+   A binding whose provider is not declared is not judged here: those are
+   dropped downstream by design, and naming them at this Gate would report the
+   wrong defect. *)
+let validate_ollama_only_binding_fields
+      (providers : Runtime_schema.provider list)
+      (bindings : Runtime_schema.binding list)
+  : parse_error list
+  =
+  let api_format_of_provider provider_id =
+    List.find_map
+      (fun (provider : Runtime_schema.provider) ->
+         if String.equal provider.id provider_id
+         then Some provider.api_format
+         else None)
+      providers
+  in
+  List.concat_map
+    (fun (binding : Runtime_schema.binding) ->
+       match api_format_of_provider binding.provider_id with
+       | None | Some Runtime_schema.Ollama_api -> []
+       | Some
+           (( Runtime_schema.Messages_api
+            | Runtime_schema.Chat_completions_api
+            | Runtime_schema.Codex_app_server_runtime
+            | Runtime_schema.Antigravity_cli_runtime
+            | Runtime_schema.Claude_code_runtime ) as api_format) ->
+         let path = binding.provider_id ^ "." ^ binding.model_id in
+         let refuse key =
+           error
+             (path ^ "." ^ key)
+             (Printf.sprintf
+                "%s is an Ollama /api/chat option and provider %S speaks %s, whose \
+                 request has no field for it -- the value would be dropped without a \
+                 trace. Remove it, or bind this model to a provider declared with \
+                 protocol = \"ollama-http\"."
+                key
+                binding.provider_id
+                (Runtime_schema.show_api_format api_format))
+         in
+         (match binding.repeat_penalty with
+          | Some _ -> refuse "repeat-penalty"
+          | None -> [])
+         @ (match binding.repeat_last_n with
+            | Some _ -> refuse "repeat-last-n"
+            | None -> []))
+    bindings
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
@@ -1634,16 +1718,22 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ~label:"exact_output_lanes"
         exact_output_lanes_result
     in
-    Ok
-      { Runtime_schema.providers
-      ; models
-      ; bindings
-      ; default_runtime_id = runtime_section.default_runtime_id
-      ; keeper_assignments
-      ; media_failover = runtime_section.media_failover
-      ; lane_decls
-      ; exact_output_lane_decls
-      })
+    (* Cross-table Gate: a binding field only reaches the wire through its
+       provider's request builder, so whether it is carriable is a fact about
+       the provider, not about the binding table it was written in. *)
+    match validate_ollama_only_binding_fields providers bindings with
+    | _ :: _ as errors -> Error errors
+    | [] ->
+      Ok
+        { Runtime_schema.providers
+        ; models
+        ; bindings
+        ; default_runtime_id = runtime_section.default_runtime_id
+        ; keeper_assignments
+        ; media_failover = runtime_section.media_failover
+        ; lane_decls
+        ; exact_output_lane_decls
+        })
 ;;
 
 let parse_string (content : string) : (Runtime_schema.config, parse_error list) result =

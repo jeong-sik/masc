@@ -236,6 +236,50 @@ let test_a_keeper_is_offered_all_four () =
     [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
 ;;
 
+(* The descriptor list above is what the registry says it will offer. This one
+   pins [expected_model_tool_names], which folds descriptors, skills, and
+   compositions into a list of names.
+
+   That list is not the set a turn opens with. It is one side of a comparison
+   in [keeper_run_tools_setup.ml]: the other side is [all_tool_names], built
+   from the bundle the turn actually carries, and a disagreement writes one
+   error line and lets the turn run on. So a tool can go missing from a live
+   Keeper with this suite green -- what is pinned here is only that the four
+   survive the descriptor-to-name fold.
+
+   Pinning that half is still worth doing, because #30294 lost the four on
+   this side while the declaration suite above stayed green. Asserting the
+   other half needs a different test over [all_tool_names], and the fact that
+   a mismatch is only logged is worth its own look.
+
+   The empty catalog is the tight case rather than a shortcut: the four come
+   from [descriptor_names], and a catalog only appends composition and async
+   control names on top. Surviving the fold with nothing to append means
+   surviving it with anything to append. *)
+let test_the_boot_projection_keeps_all_four () =
+  let module TD = Masc.Keeper_tool_descriptor in
+  let empty_catalog =
+    match Masc.Keeper_skill_catalog.of_documents [] with
+    | Ok catalog -> catalog
+    | Error error ->
+      Alcotest.fail
+        ("empty skill catalog was rejected: "
+        ^ Masc.Keeper_skill_catalog.error_to_string error)
+  in
+  let projected =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~skill_catalog:empty_catalog
+      ~model_visible_descriptors:(TD.model_visible_descriptors ())
+  in
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         ("the boot projection keeps " ^ name)
+         true
+         (List.exists (String.equal name) projected))
+    [ "keeper_spawn"; "keeper_spawn_read"; "keeper_spawn_wait"; "keeper_spawn_stop" ]
+;;
+
 let () =
   Alcotest.run
     "tool_spawn"
@@ -277,6 +321,10 @@ let () =
             "a keeper is offered all four"
             `Quick
             test_a_keeper_is_offered_all_four
+        ; Alcotest.test_case
+            "the boot projection keeps all four"
+            `Quick
+            test_the_boot_projection_keeps_all_four
         ] )
     ]
 ;;

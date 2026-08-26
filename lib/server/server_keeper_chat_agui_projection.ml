@@ -208,15 +208,16 @@ let project ~timestamp ~redact_text ~redact_json state event =
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
              ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
              Ag_ui.Tool_call_end) )
-  | Tool_approval_requested { tool_call_id; tool_call_name; args; question } ->
+  | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
       ( state
       , Some
           (custom ~timestamp ~redact_json state Tool_approval_requested
              (`Assoc
-                [ "tool_call_id", `String tool_call_id
-                ; "tool_call_name", `String tool_call_name
-                ; "args", `String args
-                ; "question", `String question
+                [ ("tool_call_id", `String tool_call_id)
+                ; ("tool_call_name", `String tool_call_name)
+                ; ("args", `String args)
+                ; ("question", `String question)
+                ; ("because", `String because)
                 ])) )
   | Tool_approval_settled { tool_call_id; outcome } ->
       ( state

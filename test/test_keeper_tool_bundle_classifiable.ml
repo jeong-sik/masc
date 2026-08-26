@@ -242,12 +242,28 @@ let test_bundle_names_are_unique () =
       (List.length (List.sort_uniq String.compare names)))
 ;;
 
+let test_bundle_matches_expected_projection () =
+  with_bundle (fun names ->
+    let expected =
+      Keeper_run_tools_setup.expected_model_tool_names
+        ~skill_catalog:(skill_catalog ())
+        ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+    in
+    check
+      (list string)
+      "instruction and composition tools match the expected projection"
+      expected
+      (List.sort_uniq String.compare names))
+;;
+
 let () =
   run
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
       , [ test_case "is not empty" `Quick test_the_bundle_is_not_empty
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
+        ; test_case "matches the expected projection" `Quick
+            test_bundle_matches_expected_projection
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
         ] )

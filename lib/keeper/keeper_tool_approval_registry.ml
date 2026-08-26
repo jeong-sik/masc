@@ -29,6 +29,7 @@ type pending =
   ; tool_name : string
   ; args : string
   ; question : string
+  ; because : string
   ; asked_at : float
   ; timeout_sec : float
   }
@@ -75,7 +76,7 @@ let take_locked t key =
       t.waiters;
   !taken
 
-let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question
+let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question ~because
     ~timeout_sec =
   let key = { key_keeper_name = keeper_name; key_tool_call_id = tool_call_id } in
   let entry =
@@ -84,6 +85,7 @@ let await t ~clock ~keeper_name ~tool_call_id ~tool_name ~args ~question
     ; tool_name
     ; args
     ; question
+    ; because
     ; asked_at = Eio.Time.now clock
     ; timeout_sec
     }

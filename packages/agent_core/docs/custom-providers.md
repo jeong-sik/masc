@@ -1,6 +1,6 @@
 # Custom Providers
 
-OAS accepts third-party HTTP endpoints through the same exact
+agent_core accepts third-party HTTP endpoints through the same exact
 `Llm_provider.Provider_config.t` used by built-in provider kinds. Agent
 execution does not consult a callback-based implementation registry and does
 not choose a provider when `Agent.options.provider_config` is absent.
@@ -58,7 +58,7 @@ let anthropic_config () =
            ())
 ```
 
-OAS never derives provider identity from the URL or model name.
+agent_core never derives provider identity from the URL or model name.
 
 ## Catalog Binding
 
@@ -141,6 +141,6 @@ never becomes a secret store.
   skipped.
 
 There is no custom response-parser callback on the Agent provider carrier.
-Endpoints must implement one of the typed OAS wire kinds. A genuinely new wire
+Endpoints must implement one of the typed agent_core wire kinds. A genuinely new wire
 protocol belongs in a provider backend with an explicit typed contract, not in
 a process-global callback registry.

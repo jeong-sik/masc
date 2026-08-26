@@ -1,4 +1,4 @@
-# OAS Architecture
+# agent_core Architecture
 
 ## Layer overview
 

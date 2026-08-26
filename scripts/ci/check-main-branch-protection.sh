@@ -3,15 +3,12 @@
 #
 # What it guards: main still requires the status contexts named in
 # BRANCH_PROTECTION_REQUIRED_CONTEXTS. Dropping one of those is what lets an
-# unchecked merge reach main, so it is the assertion worth holding.
+# unchecked merge reach main, so it remains the failing assertion.
 #
-# It does not assert enforce_admins. That was checked until admin enforcement
-# was turned off on main (2026-07-17), after which the check reported the same
-# drift every hour without anyone restoring the setting — a permanently red
-# check that stops being read and takes the checks near it down with it. The
-# only document arguing otherwise is RFC-0270, which is still status: Draft
-# with implementation_prs: [], so it records a proposal rather than a decision.
-# Restore this clause alongside the setting if admin enforcement comes back.
+# enforce_admins remains intentionally non-failing while it is disabled on
+# main, but the resulting admin bypass must stay visible in both GitHub output
+# and the final status line. The policy debt is tracked by #25861. Restore a
+# failing assertion alongside the setting if admin enforcement comes back.
 #
 # This check fails closed when it cannot read branch-protection settings;
 # otherwise CI silently masks required-context drift.
@@ -79,16 +76,41 @@ handle_unauthorized() {
   exit 1
 }
 
-if ! contexts="$(gh api "$endpoint" --jq '.required_status_checks.contexts[]?' 2>&1)"; then
-  if is_unauthorized "$contexts"; then
-    handle_unauthorized "$contexts"
+if ! protection="$(gh api "$endpoint" --jq '
+  (.required_status_checks.contexts[]? | "context=" + .),
+  ("enforce_admins=" +
+    (if (.enforce_admins.enabled | type) == "boolean"
+     then (.enforce_admins.enabled | tostring)
+     else "unreadable"
+     end))
+' 2>&1)"; then
+  if is_unauthorized "$protection"; then
+    handle_unauthorized "$protection"
   fi
-  if is_integration_forbidden "$contexts"; then
-    handle_integration_forbidden "$contexts"
+  if is_integration_forbidden "$protection"; then
+    handle_integration_forbidden "$protection"
   fi
-  echo "::error title=Branch protection check failed::Could not read required status contexts for ${repo}/${branch}: ${contexts}"
+  echo "::error title=Branch protection check failed::Could not read branch protection settings for ${repo}/${branch}: ${protection}"
   exit 1
 fi
+
+contexts="$(printf '%s\n' "$protection" | sed -n 's/^context=//p')"
+enforce_admins="$(printf '%s\n' "$protection" | sed -n 's/^enforce_admins=//p')"
+
+admin_issue_url="https://github.com/jeong-sik/masc/issues/25861"
+case "$enforce_admins" in
+  true)
+    admin_status="enabled"
+    ;;
+  false)
+    echo "::warning title=Admin merge bypass enabled::enforce_admins=false for ${repo}/${branch}; admins can bypass required status checks. Tracked by #25861 (${admin_issue_url})."
+    admin_status="disabled; admin merge bypass active; tracked by #25861 (${admin_issue_url})"
+    ;;
+  *)
+    echo "::error title=Branch protection check failed::Could not read enforce_admins.enabled for ${repo}/${branch}; refusing to report a complete audit."
+    exit 1
+    ;;
+esac
 
 failures=()
 
@@ -107,5 +129,5 @@ if ((${#failures[@]} > 0)); then
   exit 1
 fi
 
-printf 'branch protection drift: OK for %s/%s (required contexts present: %s)\n' \
-  "$repo" "$branch" "$required_contexts_csv"
+printf 'branch protection drift: OK for %s/%s (required contexts present: %s; admin enforcement: %s)\n' \
+  "$repo" "$branch" "$required_contexts_csv" "$admin_status"

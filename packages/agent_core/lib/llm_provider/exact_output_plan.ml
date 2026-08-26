@@ -655,8 +655,8 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
   in
   (* Frozen over the [agent_core-exact-output-plan-v2] material domain. The
      previous pin ([d59eee4e...], labeled v0.220) hashed the same material
-     under the [oas-exact-output-plan-v2] domain string; #27945 hard-cut the
-     oas name out of the fingerprint domain, which intentionally changed
+     under the previous domain string; #27945 hard-cut the old name out of
+     the fingerprint domain, which intentionally changed
      every plan fingerprint. Any further mismatch here means the fingerprint
      material drifted again — update this pin only for a deliberate,
      commit-documented material change. *)

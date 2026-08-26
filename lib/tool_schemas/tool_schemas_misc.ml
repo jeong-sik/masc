@@ -37,19 +37,25 @@ type mcp_runtime_operation =
   | Start
   | Broadcast
   | Messages
+  | Ask
+  | Ask_status
 
-let mcp_runtime_operations = [ Start; Broadcast; Messages ]
+let mcp_runtime_operations = [ Start; Broadcast; Messages; Ask; Ask_status ]
 
 let mcp_runtime_tool_name = function
   | Start -> "masc_start"
   | Broadcast -> "masc_broadcast"
   | Messages -> "masc_messages"
+  | Ask -> "masc_ask"
+  | Ask_status -> "masc_ask_status"
 ;;
 
 let mcp_runtime_operation_of_tool_name = function
   | "masc_start" -> Some Start
   | "masc_broadcast" -> Some Broadcast
   | "masc_messages" -> Some Messages
+  | "masc_ask" -> Some Ask
+  | "masc_ask_status" -> Some Ask_status
   | _ -> None
 ;;
 

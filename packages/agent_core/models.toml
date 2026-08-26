@@ -519,7 +519,7 @@ supports_extended_thinking = true
 # (ollama_think) even though it is served through ollama_cloud's OpenAI-compat
 # /v1/chat/completions, which cannot encode it — same defect as qwen3.5:397b
 # (PR #28748), already confirmed and corrected for this exact model in the live
-# overlay (~/me/.masc/config/oas-models-overlay.toml, oas#2716 2026-07-20 audit,
+# overlay (~/me/.masc/config/agent-core-models-overlay.toml, 2026-07-20 audit,
 # 2026-08-04 live probe: message keys ['role','content','reasoning']). This row
 # just carried the buggy default forward in the embedded catalog. Closes #28749.
 supports_reasoning_budget = false
@@ -1122,7 +1122,7 @@ supports_extended_thinking = true
 # A live probe of the ":cloud" alias on this same backend returned reasoning
 # unconditionally (message keys ['content','reasoning','role'], 882 chars) even
 # without any request-side toggle, matching the confirmed sibling family (kimi-k2.6,
-# kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; oas#2716 2026-07-20 audit) of
+# kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; 2026-07-20 audit) of
 # "inherent reasoning, no control wire on /v1". Sending enable_thinking=true against
 # ollama_think here fails fail-closed with Enable_not_encodable (masc keeper canary
 # canary-runtime-failover-20260814-0730, 2026-08-14 07:08); reasoning_effort was
@@ -1137,7 +1137,7 @@ thinking_control_format = "none"
 # test_streaming.ml ("reasoning_content" delta on a qwen3.5:397b chunk).
 # Flagging one open discrepancy rather than silently resolving it: the
 # ":cloud" alias row above was live-probed and returned field name
-# "reasoning", not "reasoning_content" (oas-models-overlay.toml comment,
+# "reasoning", not "reasoning_content" (agent-core-models-overlay.toml comment,
 # 2026-08-05). RFC-0370 says ":cloud" and ":397b" hit the same served backend,
 # so the two field names should match; they currently don't. Either value here
 # is strictly better than the prior No_streaming_reasoning default, but the

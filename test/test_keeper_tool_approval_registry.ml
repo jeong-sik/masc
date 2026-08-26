@@ -39,7 +39,7 @@ let test_an_answer_releases_the_wait () =
         Eio.Fiber.pair
           (fun () ->
             Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-1" ~timeout_sec:5.0)
           (fun () ->
             settled :=
@@ -59,7 +59,7 @@ let test_a_denial_is_carried_as_itself () =
         Eio.Fiber.pair
           (fun () ->
             Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-2" ~timeout_sec:5.0)
           (fun () ->
             ignore
@@ -75,7 +75,7 @@ let test_a_wait_nobody_answers_times_out () =
       let registry = Registry.create () in
       let result =
         Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-3" ~timeout_sec:0.05
       in
       check outcome "the turn is released rather than parked forever"
@@ -90,7 +90,7 @@ let test_answering_a_wait_that_already_timed_out_reports_it () =
       let registry = Registry.create () in
       let timed_out =
         Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
           ~tool_call_id:"call-4" ~timeout_sec:0.02
       in
       check outcome "the wait ended on its own" Registry.Timed_out timed_out;
@@ -115,7 +115,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
         Eio.Fiber.pair
           (fun () ->
             Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
               ~tool_call_id:"call-5" ~timeout_sec:5.0)
           (fun () ->
             let rec wait_for_first attempts =
@@ -128,7 +128,7 @@ let test_a_second_wait_on_the_same_id_displaces_the_first () =
             Eio.Fiber.pair
               (fun () ->
                 Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                   ~tool_call_id:"call-5" ~timeout_sec:5.0)
               (fun () ->
                 Eio.Time.sleep clock 0.02;
@@ -149,7 +149,7 @@ let test_waits_are_scoped_to_their_keeper () =
         Eio.Fiber.pair
           (fun () ->
             Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:"keeper.one"
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:"keeper.one"
               ~tool_call_id:"shared-id" ~timeout_sec:0.15)
           (fun () ->
             let rec wait_for_registration attempts =
@@ -175,13 +175,13 @@ let test_pending_lists_open_waits_oldest_first () =
         [ (fun () ->
             ignore
               (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-a" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.01;
             ignore
               (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                  ~tool_call_id:"call-b" ~timeout_sec:0.2))
         ; (fun () ->
             Eio.Time.sleep clock 0.05;
@@ -214,7 +214,7 @@ let test_a_cancelled_wait_leaves_nothing_behind () =
         (fun () ->
           ignore
             (Registry.await registry ~clock ~tool_name:"Execute" ~args:"{}"
-                ~question:"run?" ~keeper_name:keeper
+                ~question:"run?" ~because:"policy: ask" ~keeper_name:keeper
                ~tool_call_id:"call-cancel" ~timeout_sec:5.0))
         (fun () -> Eio.Time.sleep clock 0.02);
       check int "the cancelled wait is not still registered" 0

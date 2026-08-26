@@ -51,6 +51,9 @@
     "lib/keeper/keeper_tool_surface_ops.ml": [
       42
     ],
+    "lib/keeper/keeper_tool_task_runtime.ml": [
+      330
+    ],
     "lib/keeper/keeper_trace_emit.ml": [
       21
     ],
@@ -102,7 +105,7 @@
       1177
     ],
     "lib/server/server_bootstrap_maintenance.ml": [
-      521
+      550
     ],
     "lib/server/server_dashboard_http_perf.ml": [
       105
@@ -172,7 +175,7 @@
       15
     ],
     "lib/workspace/workspace_utils_backend_setup.ml": [
-      207
+      251
     ],
     "packages/agent_core/lib/llm_provider/cli_common_env.ml": [
       11

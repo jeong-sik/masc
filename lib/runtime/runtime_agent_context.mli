@@ -46,7 +46,7 @@ type config = {
           [Builder.with_first_event_timeout]. [stream_idle_timeout_s] arms
           only after that event; when [None], AGENT_CORE's resolver falls
           back to [body_timeout_s], then to [stream_idle_timeout_s]
-          (RFC-OAS-037). *)
+          (RFC-AC-037). *)
   body_timeout_s : float option;
       (** Total HTTP body-consumption ceiling forwarded to AGENT_CORE
           [Builder.with_body_timeout] for non-streaming completion paths.

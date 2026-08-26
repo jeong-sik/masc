@@ -300,6 +300,44 @@ let test_every_registered_schema_has_catalog_permission () =
     missing
 ;;
 
+(* HTTP routes that authorize through [with_tool_auth] need a catalog entry
+   under the name they pass as ~tool_name. The approval routes used to borrow
+   "masc_keeper_delegate_cancel", which made the permission a dispatchable
+   tool's business and left the route invisible in the catalog; the entries
+   below pin the dedicated keys so neither regression can return silently. *)
+let test_approval_route_auth_keys_are_dedicated_hidden_entries () =
+  let route_keys =
+    [ "keeper_tool_approval_route"; "keeper_tool_approval_mode_route" ]
+  in
+  List.iter
+    (fun name ->
+      match Tool_catalog.registered_metadata name with
+      | None ->
+        Alcotest.failf "%s is missing from the catalog: with_tool_auth would \
+                        reject every caller with 'use unregistered tool'"
+          name
+      | Some meta ->
+        Alcotest.(check bool)
+          (name ^ " is hidden from the public surface")
+          true
+          (meta.visibility = Tool_catalog.Hidden);
+        Alcotest.(check bool)
+          (name ^ " allows the direct call the HTTP route makes")
+          true
+          meta.allow_direct_call_when_hidden;
+        Alcotest.(check bool)
+          (name ^ " keeps route authority at admin tier")
+          true
+          (meta.required_permission = Masc_domain.CanAdmin);
+        (* Route keys must stay route-only: no schema, no dispatch path. A
+           schema here would put an uncallable name on the tool surface. *)
+        Alcotest.(check bool)
+          (name ^ " has no dispatchable schema")
+          false
+          (List.mem name (Tool_dispatch.all_schema_names ())))
+    route_keys
+;;
+
 let () =
   let open Alcotest in
   run
@@ -343,6 +381,10 @@ let () =
             "every registered schema has catalog permission"
             `Quick
             test_every_registered_schema_has_catalog_permission
+        ; test_case
+            "approval routes own dedicated hidden auth keys"
+            `Quick
+            test_approval_route_auth_keys_are_dedicated_hidden_entries
         ] )
     ]
 ;;

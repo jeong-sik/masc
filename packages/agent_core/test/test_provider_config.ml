@@ -2143,7 +2143,7 @@ let test_capability_provider_label_ollama_cloud_requires_explicit_id () =
          through the OpenAI-compat /v1/chat/completions path, which cannot
          encode Ollama's native think toggle — same defect class as
          qwen3.5:397b (#28748), corrected in #28750 with a live-probe-backed
-         "none" declaration (oas#2716). This assertion is what checks that
+         "none" declaration (2026-07-20 audit). This assertion is what checks that
          the explicit ollama_cloud provider id actually picks up the
          provider-scoped row's *own* contract rather than the bare/native one. *)
       check_bool

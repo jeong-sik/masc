@@ -17,7 +17,25 @@ val start_background_maintenance :
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
 
+(** Why a Keeper with durable work has no runnable owner. [Owner_unknown] is a
+    lookup that did not answer; [Owner_absent] is a lookup that answered and
+    holds no such Keeper. Only the second is an orphan queue directory. *)
+type durable_demand_owner_error =
+  | Demand_unknown of string
+  | Owner_unknown of string
+  | Owner_absent
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
+  | Demand_execution_failed of exn * Printexc.raw_backtrace
+
 module Recovery_for_testing : sig
+  val load_durable_demand_meta :
+    base_path:string ->
+    config:Workspace.config ->
+    keeper_name:string ->
+    (Keeper_meta_contract.keeper_meta option, durable_demand_owner_error) result
+  (** The exact classification the maintenance sweep runs per discovered
+      Keeper. [Ok None] means the durable state carries no demand. *)
+
   val consume_owner_projection_batch :
     commit_cursor:(unit -> unit) ->
     keeper_name:('a -> string) ->

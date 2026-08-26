@@ -41,10 +41,14 @@ let file_a_message dir seq =
   close_out out
 
 let test_a_name_yields_its_sequence () =
-  check int "padded" 75
+  check int "as the writer pads it" 75
     (Paths.message_seq_of_filename
        "000000075_keeper-alpha-agent_wmsg-abc_broadcast.json");
-  check int "unpadded, as older files were written" 1664
+  (* Any width, so a change to the padding cannot make a filed message
+     invisible to the counter -- which is the failure this path exists to
+     prevent. No file of this shape is in the store; the assertion is about
+     the parser, not about history. *)
+  check int "and at any width" 1664
     (Paths.message_seq_of_filename "1664_keeper-alpha-agent_broadcast.json")
 
 let test_a_name_that_is_not_ours_yields_none () =

@@ -39,6 +39,7 @@ let call_to_string (call : Transcript.tool_activity) =
     (Option.value ~default:"-" call.duration)
 
 let tool_call = testable (Fmt.of_to_string call_to_string) ( = )
+let tool_outcome = testable (Fmt.of_to_string outcome_to_string) ( = )
 
 let read_file_call =
   [ Live.Tool_started { call_id = "c1"; tool_name = "read_file" }
@@ -230,7 +231,8 @@ let approval_rows t =
          if kind = Transcript.Attention then Some text else None)
 
 let requested ~call_id ~tool_name ~question =
-  Live.Approval_requested { call_id; tool_name; args = ""; question }
+  Live.Approval_requested
+    { call_id; tool_name; args = ""; question; because = "" }
 
 let test_a_held_call_shows_its_question () =
   let t = fresh () in
@@ -251,6 +253,37 @@ let test_a_held_call_shows_its_question () =
       (* Without the keys the prompt is a statement, not a question. *)
       check bool "and so is how to answer it" true
         (contains ~needle:"[y]" row && contains ~needle:"[n]" row)
+  | rows -> failf "expected one prompt row, got %d" (List.length rows)
+
+let test_the_reason_a_reader_is_asked_is_drawn_under_the_question () =
+  (* The approval list screen shows the because next to each held call
+     (#30518). The chat pane asks the same reader the same question, so it
+     draws the reason under the prompt -- and drops the extra line when the
+     emitter is older and sent none. *)
+  let t = fresh () in
+  feed t
+    [ Live.Run_started
+    ; Live.Tool_started { call_id = "c1"; tool_name = "Edit" }
+    ; Live.Approval_requested
+        { call_id = "c1"
+        ; tool_name = "Edit"
+        ; args = "{}"
+        ; question = "Run Edit on a.ml?"
+        ; because = "file_path touches /etc"
+        }
+    ];
+  (match approval_rows t with
+   | [ row ] ->
+       check bool "the reason is under the question" true
+         (contains ~needle:"because file_path touches /etc" row)
+   | rows -> failf "expected one prompt row, got %d" (List.length rows));
+  let plain = fresh () in
+  feed plain
+    [ requested ~call_id:"c1" ~tool_name:"Edit" ~question:"Run Edit?" ];
+  match approval_rows plain with
+  | [ row ] ->
+      check bool "an older emitter draws no because line" true
+        (not (contains ~needle:"because" row))
   | rows -> failf "expected one prompt row, got %d" (List.length rows)
 
 let test_a_held_turn_does_not_say_it_is_working () =
@@ -309,6 +342,7 @@ let test_the_arguments_reach_the_call_row () =
         ; tool_name = "Edit"
         ; args = "{\"file_path\":\"lib/a.ml\"}"
         ; question = "Run Edit on lib/a.ml?"
+        ; because = ""
         }
     ];
   (* A reader deciding whether to allow it needs to see what it would touch,
@@ -436,6 +470,51 @@ let test_tool_rows_mark_how_far_each_call_got () =
       check bool "the open call is named by its file" true
         (contains ~needle:"a.ml" open_call)
   | rows -> failf "expected three rows, got %d" (List.length rows)
+
+(* A folded block hides its calls behind one row, and the chat body is
+   sanitized before it is drawn, so the marker inside that row cannot carry a
+   colour. The row's own style is the only channel left, and it needs the
+   outcome as a value. Same precedence as the summary glyph, so the two cannot
+   disagree about one block. *)
+let activity ~name ~outcome =
+  Transcript.make_tool_activity ~call_id:(Some name) ~tool_name:name ~args:""
+    ~outcome ~duration:None
+
+let summary_outcome mode activities =
+  (Transcript.project_tool_block mode (Transcript.tool_block ~omitted_steps:0 activities))
+    .Transcript.summary_outcome
+
+let test_a_fold_reports_the_outcome_its_marker_stands_for () =
+  let outcome = tool_outcome in
+  check (option outcome) "a fold holding a failure reports it"
+    (Some Transcript.Failed)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"edit_file" ~outcome:Transcript.Failed
+       ]);
+  check (option outcome) "one call still out outranks the ones that returned"
+    (Some Transcript.Awaiting_result)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"glob" ~outcome:Transcript.Awaiting_result
+       ]);
+  check (option outcome) "a fold where every call returned reports that"
+    (Some Transcript.Returned)
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"glob" ~outcome:Transcript.Returned
+       ]);
+  (* Expanded, every call keeps a row and a marker of its own, so there is no
+     one outcome the entry stands for and nothing to colour it by. *)
+  check (option outcome) "an expanded block reports no summary outcome" None
+    (summary_outcome Transcript.Full
+       [ activity ~name:"read_file" ~outcome:Transcript.Returned
+       ; activity ~name:"edit_file" ~outcome:Transcript.Failed
+       ]);
+  (* A single call is not folded in either mode: it already has its own row. *)
+  check (option outcome) "a lone call is never a fold" None
+    (summary_outcome Transcript.Compact
+       [ activity ~name:"edit_file" ~outcome:Transcript.Failed ])
 
 let test_compact_and_full_keep_the_same_typed_facts () =
   let activities =
@@ -628,6 +707,8 @@ let () =
             test_compact_and_full_keep_the_same_typed_facts
         ; test_case "compact summary counts registered public names" `Quick
             test_compact_summary_counts_registered_public_names
+        ; test_case "a fold reports the outcome its marker stands for" `Quick
+            test_a_fold_reports_the_outcome_its_marker_stands_for
         ] )
     ; ( "terminal safety"
       , [ test_case "control bytes never reach the pane" `Quick
@@ -635,7 +716,10 @@ let () =
         ] )
     ; ( "held calls"
       , [ test_case "a held call shows its question" `Quick
-            test_a_held_call_shows_its_question
+            test_a_held_call_shows_its_question;
+            test_case "the reason a reader is asked is drawn under the question"
+              `Quick
+              test_the_reason_a_reader_is_asked_is_drawn_under_the_question
         ; test_case "a held turn does not say it is working" `Quick
             test_a_held_turn_does_not_say_it_is_working
         ; test_case "an answer clears the prompt" `Quick

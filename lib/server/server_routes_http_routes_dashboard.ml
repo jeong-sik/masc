@@ -530,6 +530,8 @@ let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome 
 let respond_runtime_config_reload state agent_name ~operation request reqd =
   match Runtime.load_config_text () with
   | Ok (path, saved_text) ->
+    let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+    ignore (Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path);
     audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
     Http.Response.json_value ~compress:true ~request
@@ -2010,10 +2012,24 @@ let add_routes ~sw ~clock router =
          handle_keeper_turn_interrupt state request reqd) request reqd)
 
   (* Answers a tool call the keeper is holding. Same authority as interrupting
-     a turn: both decide what a running turn is allowed to do next. *)
+     a turn: both decide what a running turn is allowed to do next. The route
+     carries its own catalog auth key (keeper_tool_approval_route) rather than
+     borrowing a dispatchable tool's name, so the permission it enforces stays
+     reviewable on its own terms. *)
   |> Http.Router.post "/api/v1/keepers/tool-approval" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
+       with_tool_auth ~tool_name:"keeper_tool_approval_route" (fun state _req reqd ->
          handle_keeper_tool_approval state request reqd) request reqd)
+
+  (* What one Keeper is waiting on a human for. *)
+  |> Http.Router.get "/api/v1/keepers/asks" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_ask_status" (fun state _req reqd ->
+         handle_keeper_asks_list state request reqd) request reqd)
+
+  (* Answers a Keeper's question. The operator may be at any surface; the
+     log settles concurrent submissions on first write. *)
+  |> Http.Router.post "/api/v1/keepers/ask-answer" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_ask" (fun state _req reqd ->
+         handle_keeper_ask_answer state request reqd) request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream
      watcher is gone can still be answered instead of only timing out
@@ -2027,13 +2043,17 @@ let add_routes ~sw ~clock router =
   (* The per-keeper approval stance the gate consults per call. Reading the
      overrides is a public-read projection like the listing above; setting
      one decides what a running turn may do next, so it carries the same
-     authority as answering a held call. *)
+     authority as answering a held call (and its own catalog auth key,
+     keeper_tool_approval_mode_route). *)
   |> Http.Router.get "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          handle_keeper_tool_approval_mode_get state request reqd) request reqd)
   |> Http.Router.post "/api/v1/keepers/tool-approval-mode" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_delegate_cancel" (fun state _req reqd ->
-         handle_keeper_tool_approval_mode_set state request reqd) request reqd)
+       with_tool_actor_auth ~tool_name:"keeper_tool_approval_mode_route"
+         (fun state agent_name _req reqd ->
+           handle_keeper_tool_approval_mode_set ~actor:agent_name state request
+             reqd)
+         request reqd)
 
   (* Keeper POST sub-routes. *)
   |> Http.Router.prefix_post "/api/v1/keepers/" (fun request reqd ->

@@ -16,7 +16,7 @@ Status: Active (PR-3 merge promotes to Active; PR-5 removal flips to Implemented
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: HTTP transport surface (`POST /mcp`) — chunked-first default, auto-upgrade to SSE on demand, `Mcp-Session-Id` header, legacy `GET /sse` deprecation window
-Out of scope: provider-side streaming wire-up ([[RFC-0095]], merged), error envelope shape ([[RFC-0098]]), session lifecycle events ([[RFC-0099]] — *consumed* by this RFC for resume/eviction), FD accounting (IMPROVE-03), TTFT measurement ([[RFC-OAS-020]] in agent_core)
+Out of scope: provider-side streaming wire-up ([[RFC-0095]], merged), error envelope shape ([[RFC-0098]]), session lifecycle events ([[RFC-0099]] — *consumed* by this RFC for resume/eviction), FD accounting (IMPROVE-03), TTFT measurement ([[RFC-AC-020]] in agent_core)
 Series: **IMPROVE-02** of the masc + agent_core improvement series.
 
 ## 1. Problem
@@ -168,4 +168,4 @@ PR-2 is **wire-shape-changing** (chunked framing replaces full-body); but the *b
 - [[RFC-0098]] — Typed JSON-RPC error envelope (response edge, IMPROVE-01)
 - [[RFC-0099]] — Session lifecycle typed events (transport edge, IMPROVE-05)
 - [[RFC-0095]] — Provider-D-compat provider streaming wire-up (provider edge, in main)
-- [[RFC-OAS-020]] — TTFT instrumentation in agent_core (IMPROVE-04)
+- [[RFC-AC-020]] — TTFT instrumentation in agent_core (IMPROVE-04)

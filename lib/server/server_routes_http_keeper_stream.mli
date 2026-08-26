@@ -130,11 +130,13 @@ val handle_keeper_tool_approvals_list :
 (** Drives [GET /api/v1/keepers/tool-approvals].
 
     Projects every held tool call from the shared approval registry:
-    [{pending: [{keeper, tool_call_id, tool, args, question, asked_at,
-    timeout_sec}]}], oldest first. Live registry state only — a wait exists
-    exactly while its turn is parked on it. This is what lets an operator
-    answer a call whose owning stream watcher is gone; without it such a
-    call can only time out (masc#30034). *)
+    [{pending: [{keeper, tool_call_id, tool, args, question, because,
+    asked_at, timeout_sec}]}], oldest first. Live registry state only — a wait
+    exists exactly while its turn is parked on it. This is what lets an
+    operator answer a call whose owning stream watcher is gone; without it
+    such a call can only time out (masc#30034). [because] is the policy's
+    one-line reason for asking — the listing is the only place an operator
+    sees it, so it rides with the question. *)
 
 val handle_keeper_tool_approval_mode_get :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
@@ -143,12 +145,14 @@ val handle_keeper_tool_approval_mode_get :
     A keeper absent from the list is [auto]. *)
 
 val handle_keeper_tool_approval_mode_set :
+  actor:string ->
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Drives [POST /api/v1/keepers/tool-approval-mode]. Reads
     [{"name", "mode"}] where mode is ["auto"] or ["yolo"], validates the
     keeper is registered, and sets the in-memory stance the approval gate
     consults per call. The stance does not survive a restart — deliberately:
-    [yolo] runs every tool call unasked. *)
+    [yolo] runs every tool call unasked. [actor] is the authenticated
+    operator who changed the stance and is recorded in the change log. *)
 
 val handle_keeper_turn_interrupt :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
@@ -355,3 +359,35 @@ module For_testing : sig
   val register_operation_live_sink :
     operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
 end
+
+val handle_keeper_ask_answer :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [POST /api/v1/keepers/ask-answer].
+
+    Reads [{"name", "ask_id", "answers": [{"question_id", "response"}], ...}]
+    where a response is [{"kind": "chose", "choice_ids": [...]}],
+    [{"kind": "wrote", "text": ...}], or [{"kind": "skipped"}]. Optional
+    ["actor_id"] and ["session_id"] record who answered and from which
+    dashboard session.
+
+    Two surfaces can submit for one ask at once and nothing locks the log. The
+    fold settles on first write, so a submission that lost returns [`Conflict]
+    carrying the answer that landed rather than a bare rejection: the surface
+    showing it has to be able to say what was chosen instead.
+
+    [`Not_found] means the ask or the keeper is unknown, [`Bad_request] that
+    the submissions do not satisfy the recorded question, and [`Conflict] that
+    the ask was already answered or withdrawn. *)
+
+val handle_keeper_asks_list :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Drives [GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>].
+
+    Without [name] this covers the whole fleet and every row names the Keeper
+    it belongs to; with [name] it narrows to one and returns [`Not_found] when
+    that Keeper is not registered. Defaults to open questions only.
+
+    A surface renders these rows and answers through
+    {!handle_keeper_ask_answer}, sending back choice ids taken from the rows it
+    was given. No surface matches on label text, so rewording a choice cannot
+    orphan an answer already recorded. *)

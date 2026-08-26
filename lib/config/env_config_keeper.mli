@@ -194,7 +194,7 @@ module KeeperKeepalive : sig
   val first_event_timeout_sec : unit -> float option
   (** Explicit streaming-provider first-event (TTFT/prefill) timeout. Bounds
       only the wait for the FIRST provider event; {!stream_idle_timeout_sec}
-      bounds inter-line gaps after it (RFC-OAS-037). [None] means no explicit
+      bounds inter-line gaps after it (RFC-AC-037). [None] means no explicit
       value (the resolved layer substitutes the fail-safe floor). A configured
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)

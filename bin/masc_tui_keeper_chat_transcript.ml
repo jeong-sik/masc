@@ -52,6 +52,7 @@ type tool_projection =
   ; rows : string list
   ; hidden_activity_rows : int
   ; omitted_steps : int
+  ; summary_outcome : tool_outcome option
   }
 
 (* Mutable stream state stays private. The typed activity handed to history
@@ -74,6 +75,10 @@ type awaiting_approval =
   { call_id : string
   ; tool_name : string
   ; question : string
+  ; (* Why the call was held. attached under the question so the reader who
+       answers [y]/[n] from this pane sees the reason the approval list
+       screen shows. *)
+    because : string
   }
 
 type unreadable =
@@ -289,24 +294,31 @@ let compact_outcome_parts (activities : tool_activity list) =
          | 0 -> None
          | count -> Some (Printf.sprintf "%d %s" count label))
 
-let compact_marker (activities : tool_activity list) =
+(* The one outcome a folded block reads as. The order is the order of what a
+   reader needs to know first: a call that failed outranks one still out,
+   which outranks one whose end was never recorded. Both the summary glyph and
+   the summary colour come from here, so the two cannot say different things
+   about the same block. *)
+let compact_outcome (activities : tool_activity list) =
   if List.exists (fun activity -> activity.outcome = Failed) activities then
-    marker_of_outcome Failed
+    Failed
   else if
     List.exists (fun activity -> activity.outcome = Awaiting_result) activities
-  then marker_of_outcome Awaiting_result
+  then Awaiting_result
   else if
     List.exists
       (fun activity ->
         activity.outcome = Started || activity.outcome = Never_returned)
       activities
-  then marker_of_outcome Started
+  then Started
   else if
     List.exists
       (fun activity -> activity.outcome = Outcome_unrecorded)
       activities
-  then marker_of_outcome Outcome_unrecorded
-  else marker_of_outcome Returned
+  then Outcome_unrecorded
+  else Returned
+
+let compact_marker activities = marker_of_outcome (compact_outcome activities)
 
 (* The descriptor registry already owns the model-facing name. Reusing it
    here keeps the summary on the same vocabulary the Keeper saw (Read, Edit,
@@ -347,11 +359,11 @@ let compact_tool_mix activities =
 let project_tool_block mode (block : tool_block) =
   let activity_count = List.length block.activities in
   let full_activity_rows = render_activity_rows block.activities in
-  let activity_rows, hidden_activity_rows =
+  let activity_rows, hidden_activity_rows, summary_outcome =
     match mode, block.activities with
     | (Full | Compact), ([] | [ _ ]) ->
-        full_activity_rows, 0
-    | Full, _ -> full_activity_rows, 0
+        full_activity_rows, 0, None
+    | Full, _ -> full_activity_rows, 0, None
     | Compact, activities ->
         let outcomes = String.concat ", " (compact_outcome_parts activities) in
         let mix = compact_tool_mix activities in
@@ -362,7 +374,8 @@ let project_tool_block mode (block : tool_block) =
                  activity_count mix outcomes
                  (plural hidden_activity_rows "detail"))
           ]
-        , hidden_activity_rows )
+        , hidden_activity_rows
+        , Some (compact_outcome activities) )
   in
   let rows =
     if block.omitted_steps = 0 then activity_rows
@@ -372,6 +385,7 @@ let project_tool_block mode (block : tool_block) =
   ; rows
   ; hidden_activity_rows
   ; omitted_steps = block.omitted_steps
+  ; summary_outcome
   }
 
 let tool_rows t =
@@ -506,7 +520,10 @@ let progress_text ~now t =
 let awaiting_text t =
   Option.map
     (fun (awaiting : awaiting_approval) ->
-      Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question)
+      let base = Printf.sprintf "%s  [y] allow  [n] deny" awaiting.question in
+      match awaiting.because with
+      | "" -> base
+      | because -> Printf.sprintf "%s\n  because %s" base because)
     t.awaiting
 
 let status_rows ~now t =
@@ -572,14 +589,14 @@ let apply t (delta : Live.delta) =
       update_call t call_id (fun call -> { call with ended = true })
   | Live.Tool_result { call_id } ->
       update_call t call_id (fun call -> { call with result_ready = true })
-  | Live.Approval_requested { call_id; tool_name; args; question } ->
+  | Live.Approval_requested { call_id; tool_name; args; question; because } ->
       (* The arguments go on the call's own row, which the pane already draws;
          the prompt carries the question. *)
       (match args with
        | "" -> ()
        | args ->
            update_call t call_id (fun call -> { call with args }));
-      t.awaiting <- Some { call_id; tool_name; question }
+      t.awaiting <- Some { call_id; tool_name; question; because }
   | Live.Approval_settled { call_id; outcome = _ } ->
       (* Cleared whatever the answer was, including none: the prompt is over
          either way, and leaving it up would ask again for a call that has

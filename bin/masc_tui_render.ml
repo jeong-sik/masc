@@ -3444,7 +3444,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
       (fun index (id, label) ->
         (* Attached-and-offering-nothing is a third state. Reading it as "not
            attached" would tell an operator to consent again for no reason. *)
-        let state =
+        let row_state =
           match tools_of id with
           | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
           | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
@@ -3452,8 +3452,21 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
               Printf.sprintf "%s%d tools%s" (Theme.ok ()) (List.length names)
                 Ansi.reset
         in
-        Printf.sprintf "  %d  %-24s %s" (index + 1)
-          (Terminal_text.single_line label) state)
+        (* The row the arrows are on is marked rather than merely numbered:
+           past nine the number is no longer a key an operator can press,
+           and the marker is what says which one enter would start. *)
+        let here =
+          index
+          = Masc_tui_types.identity_cursor_clamped ~providers
+              state.identity_cursor
+        in
+        let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
+        (* Padded before it is emphasised: the escape codes are characters
+           to a width specifier and nothing on screen, so padding afterwards
+           shortens the column by however long the codes are. *)
+        let padded = Printf.sprintf "%-24s" (Terminal_text.single_line label) in
+        let shown = if here then Ansi.bold ^ padded ^ Ansi.reset else padded in
+        Printf.sprintf "%s %2d  %s %s" marker (index + 1) shown row_state)
       connectable
   in
   let attached_tool_lines =
@@ -3508,10 +3521,9 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
   if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
-    ((("  Press a number to connect " ^ Terminal_text.single_line k.k_name)
-      ^ ", R to ask again what tools exist.")
-     :: "" :: numbered)
-    @ rejected @ started @ attached_tool_lines
+    Masc_tui_types.identity_preamble
+      ~keeper:(Terminal_text.single_line k.k_name)
+    @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
@@ -3704,7 +3716,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
-      | Detail_identity -> "[ ]:tab  1-9:connect  R:refresh"
+      (* Arrows first: the digits only reach the first nine rows and the
+         list is a declaration directory that can hold more. *)
+      | Detail_identity -> "[ ]:tab  arrows+enter:connect  1-9:jump  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =

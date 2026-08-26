@@ -79,6 +79,50 @@ let test_another_service_landing_does_not_end_this_login () =
     (Masc_tui_types.identity_login_landed ~providers
        ~login:(login ~provider:"atlassian"))
 
+(* ── the cursor, once the list outgrew the digits ───────────────────── *)
+
+let test_the_cursor_names_a_provider () =
+  let providers =
+    [ declared "atlassian" "Atlassian";
+      unreadable "jira" "unreadable";
+      declared "slack" "Slack" ]
+  in
+  (* Indexes the connectable list, so the broken declaration in the middle
+     does not shift what the second row means. *)
+  check
+    (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
+    "the second connectable one"
+    (Some ("slack", "Slack"))
+    (Masc_tui_types.identity_cursor_provider ~providers 1)
+
+let test_a_cursor_past_the_end_names_the_last_row () =
+  (* A list that shrank under a cursor -- a declaration stopped reading, say
+     -- answers from a row that is there rather than from none at all. *)
+  let providers = [ declared "atlassian" "Atlassian" ] in
+  check Alcotest.int "clamped" 0
+    (Masc_tui_types.identity_cursor_clamped ~providers 7);
+  check
+    (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
+    "still names something" (Some ("atlassian", "Atlassian"))
+    (Masc_tui_types.identity_cursor_provider ~providers 7)
+
+let test_nothing_connectable_names_nothing () =
+  let providers = [ unreadable "jira" "unreadable" ] in
+  check
+    (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
+    "no row to start" None
+    (Masc_tui_types.identity_cursor_provider ~providers 0)
+
+let test_the_provider_row_sits_below_the_preamble () =
+  (* The key handler scrolls the pane to the line a provider is drawn on.
+     Both sides read the preamble rather than counting it, so a line added
+     to the header moves the cursor's target with it. *)
+  let preamble = List.length (Masc_tui_types.identity_preamble ~keeper:"k") in
+  check Alcotest.int "first provider" preamble
+    (Masc_tui_types.identity_provider_line ~index:0);
+  check Alcotest.int "fourth provider" (preamble + 3)
+    (Masc_tui_types.identity_provider_line ~index:3)
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "numbering",
@@ -88,6 +132,16 @@ let () =
             test_the_order_is_the_declared_order;
           Alcotest.test_case "nothing connectable is not an error" `Quick
             test_nothing_connectable_is_not_an_error;
+        ] );
+      ( "the cursor",
+        [ Alcotest.test_case "names a provider" `Quick
+            test_the_cursor_names_a_provider;
+          Alcotest.test_case "past the end names the last row" `Quick
+            test_a_cursor_past_the_end_names_the_last_row;
+          Alcotest.test_case "nothing connectable names nothing" `Quick
+            test_nothing_connectable_names_nothing;
+          Alcotest.test_case "a provider row sits below the preamble" `Quick
+            test_the_provider_row_sits_below_the_preamble;
         ] );
       ( "when the tick stops asking",
         [ Alcotest.test_case "a login lands when its service reports tools"

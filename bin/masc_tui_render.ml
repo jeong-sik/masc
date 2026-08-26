@@ -328,8 +328,25 @@ let footer_line ?(status = []) (state : state) ~max_cells ~hints =
             (Terminal_text.single_line identity.Tui_decode.sid_base_path)
         ]
   in
-  Masc_tui_footer.line ~status:(status @ identity) ~dim:Ansi.dim ~reset:Ansi.reset
-    ~max_cells ~port:state.port ~hints ()
+  (* A workspace disagreement rides the footer every surface already draws,
+     rather than replacing the screen. The reads that would be wrong under a
+     mismatch are refused where they happen -- [load_local_workspace_if_safe],
+     [load_live_context_if_safe], [load_keeper_logs_if_safe],
+     [handle_composer_key], [handle_paste] -- and [clear_local_workspace]
+     empties what a previous match had loaded. Drawing nothing but the notice
+     took away Overview, Keepers, Board and Changes as well, and those read the
+     server's answer, not this filesystem. *)
+  let conflict =
+    match state.workspace_identity with
+    | Masc_tui_types.Workspace_identity_mismatch { local_base_path; _ } ->
+        [ Masc_tui_footer.Workspace_mismatch
+            (Terminal_text.single_line local_base_path)
+        ]
+    | Masc_tui_types.Workspace_identity_unread
+    | Masc_tui_types.Workspace_identity_match -> []
+  in
+  Masc_tui_footer.line ~status:(status @ identity @ conflict) ~dim:Ansi.dim
+    ~reset:Ansi.reset ~max_cells ~port:state.port ~hints ()
 
 let composer_line state ~cols =
   let composer = Composer_projection.of_state state in
@@ -532,13 +549,28 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
-let connection_badge : Masc_tui_types.connection_status -> string = function
+let connection_status_badge : Masc_tui_types.connection_status -> string =
+  function
   | Connected as status ->
       Theme.ok ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | (Degraded | Connecting | Reconnecting) as status ->
       Theme.warn ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
   | Disconnected as status ->
       Theme.bad ^ "[" ^ connection_status_label status ^ "]" ^ Ansi.reset
+;;
+
+(* Every surface header ends with this, so a workspace the server does not
+   share is said on whichever screen the operator is reading. The footer
+   carries the two paths when the row has space for them; this is the part
+   that has to survive a full row of key hints, because the surfaces it
+   explains are the ones drawing nothing. *)
+let connection_badge (state : state) =
+  let connection = connection_status_badge state.connection_status in
+  match state.workspace_identity with
+  | Masc_tui_types.Workspace_identity_mismatch _ ->
+      connection ^ " " ^ Theme.bad ^ "[workspace mismatch]" ^ Ansi.reset
+  | Masc_tui_types.Workspace_identity_unread
+  | Masc_tui_types.Workspace_identity_match -> connection
 ;;
 
 let workspace_health_label = function
@@ -619,7 +651,7 @@ let render_overview (state : state) =
   let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
     (screen_title " MASC Overview")
     Ansi.cyan (Terminal_text.single_line state.workspace) Ansi.reset timestamp
-    (connection_badge state.connection_status) in
+    (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -860,7 +892,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   let header = Printf.sprintf "%s  %s[%s]%s  %s  %s"
     (screen_title " MASC Task")
     Ansi.cyan (fit_width task.id 20) Ansi.reset timestamp
-    (connection_badge state.connection_status) in
+    (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -1091,7 +1123,7 @@ let render_approvals (state : state) =
       "%s (%s/%s, hidden %s, actor %s)  %s  %s%s"
       (screen_title " MASC Approvals")
       visible_count total_count hidden_count scope timestamp
-      (connection_badge state.connection_status) action_badge
+      (connection_badge state) action_badge
   in
 
   box_top buf cols;
@@ -1276,7 +1308,7 @@ let render_board_compose (state : state) =
     (match state.board_compose_reply_to with
      | Some _ -> "reply" | None -> "new post")
     Ansi.reset
-    (connection_badge state.connection_status)
+    (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -1338,7 +1370,7 @@ let render_board_list (state : state) =
   let header = Printf.sprintf "%s (%d)  %s  %s"
     (screen_title " MASC Board")
     count timestamp
-    (connection_badge state.connection_status) in
+    (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -1696,7 +1728,7 @@ let render_planning_list (state : state) =
   let header = Printf.sprintf "%s  %s  %s"
     (screen_title " MASC Planning")
     timestamp
-    (connection_badge state.connection_status) in
+    (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -1953,7 +1985,7 @@ let render_schedule_list (state : state) =
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let header = Printf.sprintf " MASC Schedules  %s  %s"
     timestamp
-    (connection_badge state.connection_status) in
+    (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
@@ -2833,11 +2865,11 @@ let render_lanes (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Lanes") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d keepers)  %s  %s"
           (screen_title " MASC Lanes") snapshot.kls_count timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   let columns = keeper_lane_columns inner in
   box_top buf cols;
@@ -4025,14 +4057,14 @@ let render_system_logs (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC System Logs") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         (* [total] counts what the ring has seen, not what this page holds.
            Showing both keeps "300 of 774273" from reading as "300 exist". *)
         Printf.sprintf "%s (%d of %d, seq %d)  %s  %s"
           (screen_title " MASC System Logs")
           total_entries snapshot.sys_total snapshot.sys_latest_seq timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4126,14 +4158,14 @@ let render_verification (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Verification") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         (* Both numbers, for the same reason the log surface shows both: "12"
            beside a list of 12 would read as "that is all of them". *)
         Printf.sprintf "%s (%d of %d)  %s  %s"
           (screen_title " MASC Verification") shown
           snapshot.Masc.Tui_decode.vs_total timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4271,17 +4303,17 @@ let render_harness (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Harness") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some _ when fallbacks > 0 ->
         (* The count is the reading an operator opens this for: verdicts that
            came from something other than the evaluator the gate names. *)
         Printf.sprintf "%s (%d verdicts, %d by fallback)  %s  %s"
           (screen_title " MASC Harness")
-          shown fallbacks timestamp (connection_badge state.connection_status)
+          shown fallbacks timestamp (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d verdicts)  %s  %s"
           (screen_title " MASC Harness") shown timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4381,11 +4413,11 @@ let render_fusion_list (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Fusion") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d runs)  %s  %s"
           (screen_title " MASC Fusion") shown timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4595,7 +4627,7 @@ let render_fusion_detail (state : state) run_id =
   let header =
     Printf.sprintf "%s  %s  %s" (screen_title " MASC Fusion")
       (fit_width (Terminal_text.single_line run_id) 38)
-      (connection_badge state.connection_status)
+      (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4659,11 +4691,11 @@ let render_repositories (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Repositories") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some _ ->
         Printf.sprintf "%s (%d)  %s  %s"
           (screen_title " MASC Repositories") shown timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4820,7 +4852,7 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
       (screen_title " MASC Change")
       (Terminal_text.single_line (change_row_address change))
       removed added
-      (connection_badge state.connection_status)
+      (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -4897,7 +4929,7 @@ let render_changes_list (state : state) =
     | None ->
         Printf.sprintf "%s %s  (not loaded)  %s  %s"
           (screen_title " MASC Changes") whose timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
@@ -4906,7 +4938,7 @@ let render_changes_list (state : state) =
           (screen_title " MASC Changes") whose shown
           s.Masc.Tui_decode.fcs_window_hours s.Masc.Tui_decode.fcs_calls_in_window
           timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -5084,7 +5116,7 @@ let render_changes_tree_diff (state : state)
     Printf.sprintf "%s %s  vs HEAD  %s"
       (screen_title " MASC Tree")
       (Terminal_text.single_line (change_row_address change))
-      (connection_badge state.connection_status)
+      (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -5184,12 +5216,12 @@ let render_connectors (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Connectors") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         Printf.sprintf "%s (%d of %d available)  %s  %s"
           (screen_title " MASC Connectors")
           snapshot.Masc.Tui_decode.cs_active snapshot.Masc.Tui_decode.cs_total
-          timestamp (connection_badge state.connection_status)
+          timestamp (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -5365,7 +5397,7 @@ let render_runtime (state : state) =
     | None ->
         Printf.sprintf "%s  (not loaded)  %s  %s"
           (screen_title " MASC Runtime") timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         let lane_count = List.length snapshot.rss_resolved.rrs_lanes in
         let probe_status =
@@ -5382,7 +5414,7 @@ let render_runtime (state : state) =
         in
         Printf.sprintf "%s (%d lanes, %d candidates)  %s%s  %s  %s"
           (screen_title " MASC Runtime") lane_count shown probe_status probe_read
-          timestamp (connection_badge state.connection_status)
+          timestamp (connection_badge state)
   in
   let authority_line =
     match state.runtime_surface with
@@ -5560,7 +5592,7 @@ let render_tools (state : state) =
   let header =
     Printf.sprintf "%s  effective Keeper + registered catalog  %s  %s"
       (screen_title " MASC Tools") timestamp
-      (connection_badge state.connection_status)
+      (connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
@@ -5749,7 +5781,7 @@ let render_keeper_calls (state : state) =
         Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 calls  (not loaded yet)  %s  %s"
           (Terminal_text.single_line keeper_name)
           timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
     | Some snapshot ->
         let freshness =
           match
@@ -5764,7 +5796,7 @@ let render_keeper_calls (state : state) =
           (Terminal_text.single_line keeper_name)
           (List.length snapshot.Masc.Tui_decode.kcs_entries)
           freshness timestamp
-          (connection_badge state.connection_status)
+          (connection_badge state)
   in
   box_top buf cols;
   box_line_styled buf cols ~style:Ansi.bold header;
@@ -5984,7 +6016,7 @@ let render_acting (state : state) =
   let header =
     Printf.sprintf " MASC Acting (%d of %d held, %s)  %s  %s" shown held
       (Acting.filter_label state.acting_filter) timestamp
-      (connection_badge state.connection_status)
+      (connection_badge state)
   in
   box_top buf cols;
   box_line_styled buf cols ~style:Ansi.bold header;
@@ -6840,7 +6872,7 @@ let render_prompts (state : state) =
     (Printf.sprintf "%s  %s%d prompt(s)%s  %s"
        (screen_title " MASC Prompts")
        Ansi.dim total Ansi.reset
-       (connection_badge state.connection_status));
+       (connection_badge state));
   box_divider buf cols;
   let error_rows = if Option.is_some state.prompts_error then 1 else 0 in
   let combined_height = max 2 (rows - 9 - error_rows) in
@@ -6970,7 +7002,7 @@ let render_config (state : state) =
            Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
              now.Unix.tm_sec)
           Ansi.reset)
-       (connection_badge state.connection_status));
+       (connection_badge state));
   (* Where this server reads from, and how old the binary serving it is. A
      stale binary answers every request as confidently as a current one, so
      the age is the only thing on screen that separates them. *)
@@ -7544,40 +7576,6 @@ let render_terminal_too_small ~rows ~cols =
   finish_frame ~surface_key:"terminal-too-small"
     ~cursor:Frame_presenter.Hidden ~rows ~cols buf
 
-let render_workspace_identity_blocker state ~terminal_rows ~rows ~cols =
-  let buf = Buffer.create 512 in
-  box_top buf cols;
-  box_line_styled buf cols ~style:Theme.bad
-    " WORKSPACE IDENTITY BLOCKER";
-  box_divider buf cols;
-  (match state.workspace_identity with
-   | Masc_tui_types.Workspace_identity_mismatch
-       { local_base_path; server_base_path } ->
-     box_line_styled buf cols ~style:Theme.bad
-       "  The TUI and server resolve different workspaces.";
-     box_line buf cols
-       ("  local  " ^ Terminal_text.single_line local_base_path);
-     box_line buf cols
-       ("  server " ^ Terminal_text.single_line server_base_path);
-     box_line_styled buf cols ~style:Ansi.dim
-       "  Local Keeper/context/metrics reads are disabled. Restart with the matching --base-path."
-   | Masc_tui_types.Workspace_identity_unread ->
-     box_line_styled buf cols ~style:Theme.warn
-       "  Waiting for /health?full=1 to prove the server's effective base path.";
-     box_line buf cols
-       ("  local  " ^ Terminal_text.single_line state.local_base_path);
-     box_line_styled buf cols ~style:Ansi.dim
-       "  Local Keeper/context/metrics reads remain disabled until identity is proven."
-   | Masc_tui_types.Workspace_identity_match -> ());
-  for _ = 1 to max 0 (rows - 9) do
-    box_empty buf cols
-  done;
-  box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:"r:retry identity  q:quit");
-  finish_surface state ~surface_key:"workspace-identity-blocker"
-    ~rows:terminal_rows ~cols buf
-
 (** Keep every high-chrome surface out of a viewport that cannot contain the
     largest declared fixed-row budget. Main ignores hidden surface input, and
     growing the terminal restores the unchanged selected surface. *)
@@ -7588,13 +7586,7 @@ let render (state : state) =
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
   if Render_schedule.Viewport.requires_compact_frame ~rows
   then render_terminal_too_small ~rows ~cols
-  else
-    match state.workspace_identity with
-    | Masc_tui_types.Workspace_identity_unread
-    | Masc_tui_types.Workspace_identity_mismatch _ ->
-      render_workspace_identity_blocker state ~terminal_rows ~rows ~cols
-    | Masc_tui_types.Workspace_identity_match ->
-      if state.palette_open then render_palette state
-      else if state.context_inspector_open then render_context_inspector state
-      else if state.help_open then render_help state
-      else render_surface state
+  else if state.palette_open then render_palette state
+  else if state.context_inspector_open then render_context_inspector state
+  else if state.help_open then render_help state
+  else render_surface state

@@ -144,9 +144,15 @@ let test_composition_skill_materializes_entry () =
       (contains ~needle:"```toml composition" skill.Skill_catalog.body)
 ;;
 
+(* #30205 rejected a mismatch outright; #30680 relaxed it to keep the skill
+   loadable. What the relaxation must not do is leave the name ambiguous: a
+   task names a skill by its directory (docs/SKILLS.md), so the directory is
+   what the skill answers to and the frontmatter is the one that gave way.
+   Asserting the declared name here read the relaxation backwards, and the PR
+   that wrote it never ran this file. *)
 let test_directory_name_mismatch_is_runtime_compatible () =
   let skill = parsed ~directory:"another-name" instruction_document in
-  check string "declared name remains authoritative" "release-checklist" skill.name
+  check string "the directory is what a task can name" "another-name" skill.name
 ;;
 
 let test_missing_required_frontmatter_rejected () =

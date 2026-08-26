@@ -165,7 +165,7 @@ function resetUnfinishedRuntimeAttempt(
     text: '',
     rawText: '',
     blocks: (entry.blocks ?? []).filter(block => (
-      block.t !== 'text' && block.t !== 'thinking'
+      block.t !== 'p' && block.t !== 'thinking'
     )),
     traceSteps: (entry.traceSteps ?? []).filter(step => step.kind === 'tool'),
     details: entry.details

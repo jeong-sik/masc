@@ -60,6 +60,11 @@ type translated_event = {
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
 
+let diagnostic_provider_id = function
+  | Some provider_id -> provider_id
+  | None -> "<provider-id-absent>"
+;;
+
 let empty_state () =
   { blocks_by_index = []
   ; current_stream_scope = None
@@ -920,10 +925,9 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
                    ~reason:
                      (Printf.sprintf
                         "tool-use block index already active: existing tool %s/%s, incoming tool %s/%s"
-                        (Option.value ~default:"<provider-id-absent>"
-                           existing.tool_call_id)
+                        (diagnostic_provider_id existing.tool_call_id)
                         existing.tool_call_name
-                        (Option.value ~default:"<provider-id-absent>" tool_call_id)
+                        (diagnostic_provider_id tool_call_id)
                         tname)
                    Tool_start_duplicate_index ]
            }

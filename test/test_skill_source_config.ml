@@ -251,6 +251,21 @@ let test_seed_declares_sources () =
     projected
 ;;
 
+let test_projection_names_policy () =
+  match to_yojson (parse_exn ordered_sources) with
+  | `Assoc fields ->
+    let string_field name =
+      match List.assoc_opt name fields with
+      | Some (`String value) -> Some value
+      | _ -> None
+    in
+    check (option string) "activation lifetime" (Some "session")
+      (string_field "activation_lifetime");
+    check (option string) "precedence" (Some "earlier-source-wins")
+      (string_field "precedence")
+  | _ -> fail "Skill source projection was not an object"
+;;
+
 let () =
   run
     "skill_source_config"
@@ -266,6 +281,7 @@ let () =
         ; test_case "duplicate indices" `Quick test_duplicate_indices_are_original
         ; test_case "invalid anchor inputs" `Quick test_invalid_anchor_inputs_are_visible
         ; test_case "seed declares sources" `Quick test_seed_declares_sources
+        ; test_case "projection names policy" `Quick test_projection_names_policy
         ] )
     ]
 ;;

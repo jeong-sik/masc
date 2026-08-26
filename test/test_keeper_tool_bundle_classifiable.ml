@@ -93,7 +93,7 @@ value = {}
 
 let skill_catalog () =
   match
-    Keeper_skill_catalog.of_documents
+    Keeper_skill_catalog.partition_documents
       [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
       ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
       ; ( "gate-instruction"
@@ -103,8 +103,8 @@ let skill_catalog () =
         , "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n" )
       ]
   with
-  | Ok catalog -> catalog
-  | Error e ->
+  | catalog, [] -> catalog
+  | _, { error = e; _ } :: _ ->
     failf "the gate's own skill fixtures must parse: %s"
       (Keeper_skill_catalog.error_to_string e)
 ;;

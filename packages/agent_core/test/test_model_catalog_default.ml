@@ -149,11 +149,17 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
            (model_id ^ " no reasoning budget control")
            (Some false)
            entry.supports_reasoning_budget;
+         (* The row states no thinking control of its own. It used to, and the
+            value it stated was a wire: ollama_cloud is reachable over both
+            the native /api/chat and the OpenAI-compatible /v1, and a row
+            cannot know which one a deployment points it at. The wire now
+            selects the base at resolution time, so an undeclared field here
+            is the row saying the right thing rather than staying silent. *)
          check
            bool
-           (model_id ^ " inherent thinking has no request control")
+           (model_id ^ " leaves the thinking control to the wire")
            true
-           (entry.thinking_control_format = Some Capability_vocab.No_thinking_control);
+           (entry.thinking_control_format = None);
          check
            (option bool)
            (model_id ^ " json mode")
@@ -297,6 +303,7 @@ let test_catalog_only_runtime_projects_serving_constraint () =
     Model_catalog.set_global catalog;
     match
       Capabilities.for_provider_model_id
+        ~wire:None
         ~allow_bare_fallback:false
         ~provider_label:"evidence-runtime"
         ~model_id:"evidence-model"

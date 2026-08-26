@@ -45,6 +45,28 @@ let frame_lines buf =
   | "" :: reversed -> List.rev reversed
   | reversed -> List.rev reversed
 
+(* Two already-drawn panes, side by side, one terminal row per line.
+
+   The left pane's own width pads the rows it ran out of. Without that a
+   short list lets the right pane's remaining lines slide to column zero,
+   which reads as the detail having changed panes. Five surfaces had copied
+   this loop; a sixth copy is how the padding rule drifts. *)
+let write_two_panes buf ~left_cols ~left ~right =
+  let blank_left = String.make left_cols ' ' in
+  let rec zip left right =
+    match left, right with
+    | [], [] -> []
+    | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+    | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+    | l :: lt, [] -> l :: zip lt []
+  in
+  List.iter
+    (fun line ->
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n')
+    (zip (frame_lines left) (frame_lines right))
+;;
+
 (* A frame, and what it had to clamp to build itself. The clamp travels beside
    the frame rather than being written into the state mid-draw; see
    [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
@@ -2083,19 +2105,8 @@ let render_board_read (state : state) (list_post : board_post) =
     let scroll =
       board_read_pane state list_post ~rows ~cols:right_cols right_buf
     in
-    let blank_left = String.make left_cols ' ' in
-    let rec zip left right =
-      match left, right with
-      | [], [] -> []
-      | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-      | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-      | l :: lt, [] -> l :: zip lt []
-    in
-    List.iter
-      (fun line ->
-        Buffer.add_string buf line;
-        Buffer.add_char buf '\n')
-      (zip (frame_lines left_buf) (frame_lines right_buf));
+    write_two_panes buf ~left_cols:left_cols ~left:left_buf
+      ~right:right_buf;
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
@@ -3626,7 +3637,12 @@ let secret_lines (state : state) (k : keeper) =
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
 let identity_lines (state : state) (k : keeper) ~cols providers =
-  let connectable = Masc_tui_types.identity_connectable providers in
+  (* Everything on this pane reads the filtered list: the rows drawn, the
+     number beside each one, and the row the marker is on. A screen that
+     numbered the whole set while the keys acted on a subset would start the
+     wrong service. *)
+  let query = Option.value state.identity_filter ~default:"" in
+  let connectable = Masc_tui_types.identity_connectable ~query providers in
   let tools_of id =
     List.find_map
       (function
@@ -3655,7 +3671,7 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
            and the marker is what says which one enter would start. *)
         let here =
           index
-          = Masc_tui_types.identity_cursor_clamped ~providers
+          = Masc_tui_types.identity_cursor_clamped ~query ~providers
               state.identity_cursor
         in
         let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
@@ -3735,11 +3751,25 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
         else Theme.bad () ^ line ^ Ansi.reset)
       attempt
   in
-  if numbered = [] && rejected = [] then
+  (* The query, and what it left. Shown even when it matches nothing --
+     otherwise an empty pane is indistinguishable from a service list that
+     failed to load. *)
+  let filter_rows =
+    List.map
+      (fun line -> if line = "" then line else Theme.ok () ^ line ^ Ansi.reset)
+      (Masc_tui_types.identity_filter_rows ~providers state.identity_filter)
+  in
+  if numbered = [] && rejected = [] && state.identity_filter <> None then
+    Masc_tui_types.identity_preamble
+      ~keeper:(Terminal_text.single_line k.k_name)
+      ~notice:(attempt @ filter_rows)
+    @ [ Ansi.dim ^ "  Nothing here matches. esc to see them all." ^ Ansi.reset ]
+  else if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name) ~notice:attempt
+      ~keeper:(Terminal_text.single_line k.k_name)
+      ~notice:(attempt @ filter_rows)
     @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
@@ -3938,7 +3968,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | Detail_github -> "[ ]:tab  L:login"
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
-      | Detail_identity -> "[ ]:tab  arrows+enter:connect  1-9:jump  R:refresh"
+      | Detail_identity ->
+        "[ ]:tab  arrows+enter:connect  /:filter  1-9:jump  R:refresh"
       | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =
@@ -4092,19 +4123,8 @@ let render_keeper_detail (state : state) =
       let scroll =
         keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
       in
-      let blank_left = String.make left_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines right_buf));
+      write_two_panes buf ~left_cols:left_cols ~left:left_buf
+        ~right:right_buf;
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -5026,19 +5046,8 @@ let render_keeper_message (state : state) =
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
         state ~rows ~cols:keeper_roster_pane_cols left_buf;
-      let blank_left = String.make keeper_roster_pane_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines chat_buf))
+      write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
+        ~right:chat_buf
     end;
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
@@ -7003,6 +7012,7 @@ let render_tools (state : state) =
                    ets_native_posture;
                    ets_tool_groups;
                    ets_instruction_skills;
+                   ets_skills_left_out;
                    ets_composition_skills;
                    ets_tools;
                    ets_tool_surface_sha256;
@@ -7055,8 +7065,24 @@ let render_tools (state : state) =
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
             (Terminal_text.single_line composition);
-          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest;
-          Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
+          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+        (* Said on this surface because this is the one that answers "what can
+           this Keeper call". A document the catalog could not read is absent
+           from that answer, and absence with nothing beside it reads as a
+           skill nobody wrote rather than one that did not load. Drawn only
+           when there is one, so a healthy workspace gains no row. *)
+        @ (match ets_skills_left_out with
+           | [] -> []
+           | left_out ->
+             ( (Theme.warn ()),
+               Printf.sprintf "   %d skill(s) left out of the catalog"
+                 (List.length left_out) )
+             :: List.map
+                  (fun entry ->
+                    (Theme.warn ()),
+                    "     " ^ Terminal_text.single_line entry)
+                  left_out)
+        @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
   in
   let catalog_lines =
@@ -8040,19 +8066,8 @@ let render_code (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane buf cols);
@@ -8188,19 +8203,8 @@ let render_resources (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.resource_focus = Right_pane then content_pane buf cols
    else list_pane buf cols);

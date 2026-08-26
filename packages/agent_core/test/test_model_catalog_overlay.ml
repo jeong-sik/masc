@@ -25,7 +25,7 @@ let bare_row ~model ~max_context =
   Printf.sprintf "[[models]]\nid_prefix = %S\nmax_context_tokens = %d\n" model max_context
 ;;
 
-let provider_entry ?(aliases = []) ~id ~base_url () =
+let provider_entry ?(aliases = []) ?wire_base ~id ~base_url () =
   let aliases =
     match aliases with
     | [] -> ""
@@ -34,6 +34,14 @@ let provider_entry ?(aliases = []) ~id ~base_url () =
         "aliases = [%s]\n"
         (String.concat ", " (List.map (Printf.sprintf "%S") aliases))
   in
+  let wire_base =
+    match wire_base with
+    | None -> ""
+    | Some base ->
+      Printf.sprintf
+        "capabilities_base_by_identity_kind = { openai_compat = %S }\n"
+        base
+  in
   Printf.sprintf
     "[[providers]]\n\
      id = %S\n\
@@ -41,10 +49,12 @@ let provider_entry ?(aliases = []) ~id ~base_url () =
      base_url = %S\n\
      request_path = \"/v1/chat/completions\"\n\
      api_key_env = \"\"\n\
-     capabilities_base = \"openai_chat\"\n"
+     capabilities_base = \"openai_chat\"\n\
+     %s"
     id
     aliases
     base_url
+    wire_base
 ;;
 
 let max_context ~suite ~what = function
@@ -146,6 +156,29 @@ let test_merge_provider_entries_replace_by_id () =
   | None -> failf "%s: merged catalog should keep prov-a" suite
   | Some entry ->
     check string "overlay provider entry wins" "https://overlay.example" entry.base_url
+;;
+
+let test_provider_wire_capability_base_is_typed_and_alias_addressable () =
+  let catalog =
+    catalog_of
+      ~suite:"provider wire capability base"
+      (provider_entry
+         ~aliases:[ "cloud" ]
+         ~wire_base:"ollama_cloud_v1"
+         ~id:"provider-a"
+         ~base_url:"https://provider.example"
+         ())
+  in
+  match Model_catalog.provider_entry_for_label catalog "cloud" with
+  | None -> fail "provider alias did not resolve to its typed entry"
+  | Some entry ->
+    check
+      (list (pair string string))
+      "wire-specific base survives parsing"
+      [ "openai_compat", "ollama_cloud_v1" ]
+      (List.map
+         (fun (kind, base) -> Llm_provider.Provider_kind.to_string kind, base)
+         entry.capabilities_base_by_identity_kind)
 ;;
 
 (* --- global composition --- *)
@@ -482,6 +515,10 @@ let () =
             "provider entries replace by id"
             `Quick
             test_merge_provider_entries_replace_by_id
+        ; test_case
+            "provider wire capability base is typed"
+            `Quick
+            test_provider_wire_capability_base_is_typed_and_alias_addressable
         ; test_case
             "overlay provider wins endpoint identity"
             `Quick

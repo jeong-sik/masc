@@ -592,10 +592,34 @@ type identity_provider =
 (** The providers a key can act on, in the order the screen numbers them.
     Both the renderer and the key handler read this, so the number an
     operator sees and the provider a keypress starts cannot drift apart. *)
-let identity_connectable providers =
+let lowercase_contains ~needle haystack =
+  let needle = String.lowercase_ascii needle in
+  let haystack = String.lowercase_ascii haystack in
+  let n = String.length needle and h = String.length haystack in
+  if n = 0
+  then true
+  else
+    let rec at i =
+      i + n <= h && (String.equal (String.sub haystack i n) needle || at (i + 1))
+    in
+    at 0
+
+(** Whether a query names this provider.
+
+    Both the label and the id, because they diverge and an operator knows
+    whichever one they know: the screen says "Google Sheets" and the tool
+    names say "googlesheets_". Matching one would make the other a query
+    that finds nothing while the row is right there. *)
+let identity_names ~query (id, label) =
+  lowercase_contains ~needle:query label || lowercase_contains ~needle:query id
+
+let identity_connectable ?(query = "") providers =
   List.filter_map
     (function
-      | Identity_declared { idp_id; idp_label; _ } -> Some (idp_id, idp_label)
+      | Identity_declared { idp_id; idp_label; _ } ->
+        if identity_names ~query (idp_id, idp_label)
+        then Some (idp_id, idp_label)
+        else None
       | Identity_unreadable _ -> None)
     providers
 
@@ -629,13 +653,30 @@ let identity_notice ~cols detail =
       (Masc_tui_message_layout.wrap_words ~max_cells:(max 20 (cols - 8)) text)
     @ [ "  There is a form for it on the dashboard, in this panel, marked \
          \xeb\x82\xb4 \xec\x95\xb1 \xec\x93\xb0\xea\xb8\xb0."
+      ; ""
       ]
 
+(** The filter's own two rows: what was typed, and how much of the set is
+    left. Built here for the same reason the notice is -- the key handler
+    counts these to know where the list starts, and a count that disagreed
+    with what is drawn would scroll the cursor to the wrong row. *)
+let identity_filter_rows ~providers filter =
+  match filter with
+  | None -> []
+  | Some typed ->
+    [ Printf.sprintf "  /%s   %d of %d" typed
+        (List.length (identity_connectable ~query:typed providers))
+        (List.length (identity_connectable providers))
+    ; ""
+    ]
+
+(* Each block above the list brings its own trailing blank, so two of them
+   do not stack two blanks and none of them leaves the list flush against
+   the hint. *)
 let identity_preamble ~keeper ~notice =
-  ((("  Move with the arrows and press enter to connect " ^ keeper
-     ^ ", R to ask again what tools exist.")
-    :: "" :: notice)
-   @ if notice = [] then [] else [ "" ])
+  ("  Move with the arrows and press enter to connect " ^ keeper
+   ^ ", R to ask again what tools exist.")
+  :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
 
@@ -649,15 +690,15 @@ let identity_provider_line ~notice ~index =
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no
     longer there. *)
-let identity_cursor_clamped ~providers cursor =
-  let count = List.length (identity_connectable providers) in
+let identity_cursor_clamped ~query ~providers cursor =
+  let count = List.length (identity_connectable ~query providers) in
   if count = 0 then 0 else max 0 (min cursor (count - 1))
 
 (** The provider a keypress on the cursor would start, if any. *)
-let identity_cursor_provider ~providers cursor =
+let identity_cursor_provider ~query ~providers cursor =
   List.nth_opt
-    (identity_connectable providers)
-    (identity_cursor_clamped ~providers cursor)
+    (identity_connectable ~query providers)
+    (identity_cursor_clamped ~query ~providers cursor)
 
 (** A login the operator has started but not finished: they have to open
     [ils_url] in a browser, and until they come back nothing has been
@@ -1026,6 +1067,10 @@ type state = {
      the list itself failing to load. A refusal from one provider is not a
      reason to take the other fifty-odd off the screen. *)
   mutable identity_attempt_error: string option;
+  (* [None] is not filtering; [Some ""] is filtering with nothing typed yet,
+     which is a different screen from not filtering -- one says the list is
+     everything, the other says it is everything so far. *)
+  mutable identity_filter: string option;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -1612,6 +1657,7 @@ let create_state
   identity_login = None;
   identity_cursor = 0;
   identity_attempt_error = None;
+  identity_filter = None;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;

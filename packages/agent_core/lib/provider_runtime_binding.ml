@@ -252,7 +252,11 @@ let capabilities_for_provider_config (cfg : PConfig.t) =
     | Some model_caps -> model_caps
     | None ->
       (match
+         (* Same config, so the same wire: this fallback differs from
+            [capabilities_for_config_model] only in the label it qualifies
+            with, not in which of the provider's wires it resolved to. *)
          Llm_provider.Capabilities.for_provider_model_id
+           ~wire:(Some cfg.kind)
            ~allow_bare_fallback:false
            ~provider_label:(provider_id_of_provider_config cfg)
            ~model_id:cfg.model_id
@@ -297,6 +301,7 @@ let to_provider_config ?model binding =
        let provider_capabilities_override =
          match
            Llm_provider.Capabilities.for_provider_model_id
+             ~wire:None
              ~allow_bare_fallback:false
              ~provider_label:binding.id
              ~model_id

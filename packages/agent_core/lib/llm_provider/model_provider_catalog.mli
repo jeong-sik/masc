@@ -11,6 +11,9 @@ type entry =
   ; api_key_env : string
   ; default_model : string option
   ; capabilities_base : string option
+  ; capabilities_base_by_identity_kind : (Provider_kind.t * string) list
+    (** Wire-specific capability bases. Keys must also appear in
+        [identity_kinds]; absent keys inherit [capabilities_base]. *)
   ; identity_hosts : string list
   }
 

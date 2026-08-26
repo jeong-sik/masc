@@ -93,25 +93,25 @@ let test_the_cursor_names_a_provider () =
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "the second connectable one"
     (Some ("slack", "Slack"))
-    (Masc_tui_types.identity_cursor_provider ~providers 1)
+    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 1)
 
 let test_a_cursor_past_the_end_names_the_last_row () =
   (* A list that shrank under a cursor -- a declaration stopped reading, say
      -- answers from a row that is there rather than from none at all. *)
   let providers = [ declared "atlassian" "Atlassian" ] in
   check Alcotest.int "clamped" 0
-    (Masc_tui_types.identity_cursor_clamped ~providers 7);
+    (Masc_tui_types.identity_cursor_clamped ~query:"" ~providers 7);
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "still names something" (Some ("atlassian", "Atlassian"))
-    (Masc_tui_types.identity_cursor_provider ~providers 7)
+    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 7)
 
 let test_nothing_connectable_names_nothing () =
   let providers = [ unreadable "jira" "unreadable" ] in
   check
     (Alcotest.option (Alcotest.pair Alcotest.string Alcotest.string))
     "no row to start" None
-    (Masc_tui_types.identity_cursor_provider ~providers 0)
+    (Masc_tui_types.identity_cursor_provider ~query:"" ~providers 0)
 
 let test_the_provider_row_sits_below_the_preamble () =
   (* The key handler scrolls the pane to the line a provider is drawn on.
@@ -134,8 +134,8 @@ let test_a_notice_pushes_the_list_down () =
   let bare = Masc_tui_types.identity_provider_line ~notice:[] ~index:0 in
   let with_notice = Masc_tui_types.identity_provider_line ~notice ~index:0 in
   check Alcotest.bool "the list starts lower" true (with_notice > bare);
-  check Alcotest.int "by the notice and the blank line after it"
-    (bare + List.length notice + 1) with_notice
+  check Alcotest.int "by exactly the notice it was given"
+    (bare + List.length notice) with_notice
 
 let test_no_notice_reserves_no_room () =
   (* Nothing is held back for a message there is none of. A blank line kept
@@ -143,6 +143,75 @@ let test_no_notice_reserves_no_room () =
      has nothing to report. *)
   check Alcotest.int "the hint and one blank, and that is all" 2
     (List.length (Masc_tui_types.identity_preamble ~keeper:"k" ~notice:[]))
+
+(* ── typing to narrow the list ──────────────────────────────────────── *)
+
+let sample =
+  [ declared "googlesheets" "Google Sheets";
+    declared "gmail" "Gmail";
+    declared "linear" "Linear";
+    unreadable "broken" "unreadable" ]
+
+let matched query =
+  List.map fst (Masc_tui_types.identity_connectable ~query sample)
+
+let test_a_query_narrows_to_what_it_names () =
+  check (Alcotest.list Alcotest.string) "both Google rows"
+    [ "googlesheets"; "gmail" ] (matched "g");
+  check (Alcotest.list Alcotest.string) "one of them" [ "googlesheets" ]
+    (matched "sheet")
+
+let test_the_id_is_searched_as_well_as_the_label () =
+  (* The screen says "Google Sheets" and the tools are named
+     "googlesheets_". An operator knows whichever one they know. *)
+  check (Alcotest.list Alcotest.string) "found by its id" [ "googlesheets" ]
+    (matched "googlesheets")
+
+let test_case_does_not_matter () =
+  check (Alcotest.list Alcotest.string) "typed lower, labelled upper"
+    [ "linear" ] (matched "LINEAR")
+
+let test_an_empty_query_is_the_whole_list () =
+  check (Alcotest.list Alcotest.string) "everything connectable"
+    [ "googlesheets"; "gmail"; "linear" ] (matched "")
+
+let test_a_query_matching_nothing_is_not_an_error () =
+  check (Alcotest.list Alcotest.string) "empty" [] (matched "zzz")
+
+let test_the_cursor_indexes_what_is_left () =
+  (* The number beside a row and the provider a keypress starts both come
+     from the filtered list. If the cursor indexed the whole set, pressing
+     enter on the second visible row would start whatever happens to be
+     second overall. *)
+  let at ~query index =
+    Option.map fst
+      (Masc_tui_types.identity_cursor_provider ~query ~providers:sample index)
+  in
+  (* Row three is Linear with no filter, and does not exist under "g" -- so
+     the same index has to answer differently, and the filtered one clamps
+     to the last row that is actually drawn. *)
+  check (Alcotest.option Alcotest.string) "unfiltered, row three"
+    (Some "linear") (at ~query:"" 2);
+  check (Alcotest.option Alcotest.string) "filtered, clamped to the last one"
+    (Some "gmail") (at ~query:"g" 2)
+
+let test_the_filter_rows_say_how_much_is_left () =
+  match
+    Masc_tui_types.identity_filter_rows ~providers:sample (Some "g")
+  with
+  | [ line; "" ] ->
+    let contains needle =
+      Masc_tui_types.lowercase_contains ~needle line
+    in
+    check Alcotest.bool "the query is shown" true (contains "/g");
+    check Alcotest.bool "and the count" true (contains "2 of 3")
+  | rows ->
+    Alcotest.failf "expected a line and a blank, got %d rows"
+      (List.length rows)
+
+let test_no_filter_takes_no_rows () =
+  check Alcotest.int "nothing reserved" 0
+    (List.length (Masc_tui_types.identity_filter_rows ~providers:sample None))
 
 let () =
   Alcotest.run "tui_identity_tab"
@@ -167,6 +236,24 @@ let () =
             test_a_notice_pushes_the_list_down;
           Alcotest.test_case "no notice reserves no room" `Quick
             test_no_notice_reserves_no_room;
+        ] );
+      ( "typing to narrow the list",
+        [ Alcotest.test_case "a query narrows to what it names" `Quick
+            test_a_query_narrows_to_what_it_names;
+          Alcotest.test_case "the id is searched as well as the label" `Quick
+            test_the_id_is_searched_as_well_as_the_label;
+          Alcotest.test_case "case does not matter" `Quick
+            test_case_does_not_matter;
+          Alcotest.test_case "an empty query is the whole list" `Quick
+            test_an_empty_query_is_the_whole_list;
+          Alcotest.test_case "a query matching nothing is not an error" `Quick
+            test_a_query_matching_nothing_is_not_an_error;
+          Alcotest.test_case "the cursor indexes what is left" `Quick
+            test_the_cursor_indexes_what_is_left;
+          Alcotest.test_case "the filter rows say how much is left" `Quick
+            test_the_filter_rows_say_how_much_is_left;
+          Alcotest.test_case "no filter takes no rows" `Quick
+            test_no_filter_takes_no_rows;
         ] );
       ( "when the tick stops asking",
         [ Alcotest.test_case "a login lands when its service reports tools"

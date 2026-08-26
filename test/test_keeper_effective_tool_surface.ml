@@ -39,13 +39,13 @@ Use the repository's focused validation wrapper.
 
 let skill_catalog_with_description description =
   match
-    Keeper_skill_catalog.of_documents
+    Keeper_skill_catalog.partition_documents
       [ "guide", instruction_skill ~description "guide"
       ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
       ]
   with
-  | Ok catalog -> catalog
-  | Error error ->
+  | catalog, [] -> catalog
+  | _, { error; _ } :: _ ->
     failf "fixture catalog rejected: %s"
       (Keeper_skill_catalog.error_to_string error)
 ;;
@@ -66,6 +66,7 @@ let names (surface : Keeper_effective_tool_surface.t) =
    the result it is used as. *)
 let project
       ?(catalog = skill_catalog ())
+      ?(skills_left_out = [])
       ~tool_groups
       ~task_skill_names
       ~native_posture
@@ -80,6 +81,7 @@ let project
     ~current_task_id:(Some "task-001")
     ~task_skill_names
     ~skill_catalog:catalog
+    ~skills_left_out
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
@@ -342,6 +344,38 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
        | Error error -> fail (Agent_core.Error.to_string error))
 ;;
 
+(* A document the catalog could not read reaches the surface that answers
+   "what can this Keeper call". Left off it, the skill is simply absent, and
+   absence with nothing beside it reads as a skill nobody wrote rather than
+   one that did not load -- which is how yesterday's outage looked from the
+   operator's side once it stopped being fatal. *)
+let test_left_out_skills_reach_the_surface () =
+  match
+    project
+      ~skills_left_out:[ "not-a-policy: skill \"not-a-policy\": unsupported" ]
+      ~tool_groups:None
+      ~task_skill_names:[]
+      ~native_posture:Runtime_native_tools.Native_read
+      ()
+  with
+  | Error (_, detail) -> Alcotest.fail detail
+  | Ok surface ->
+    Alcotest.(check (list string))
+      "the surface carries what was left out"
+      [ "not-a-policy: skill \"not-a-policy\": unsupported" ]
+      surface.Keeper_effective_tool_surface.skills_left_out;
+    (* And a workspace with nothing left out gains nothing: a row drawn on
+       every turn stops being read. *)
+    (match
+       project ~tool_groups:None ~task_skill_names:[]
+         ~native_posture:Runtime_native_tools.Native_read ()
+     with
+     | Error (_, detail) -> Alcotest.fail detail
+     | Ok clean ->
+       Alcotest.(check (list string)) "and says nothing when there is nothing"
+         [] clean.Keeper_effective_tool_surface.skills_left_out)
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
@@ -352,6 +386,8 @@ let () =
             test_two_surfaces_have_different_names_and_digests
         ; test_case "instruction skill does not require Read" `Quick
             test_instruction_skill_without_read_is_admitted
+        ; test_case "left out skills reach the surface" `Quick
+            test_left_out_skills_reach_the_surface
         ; test_case "instruction description changes digest" `Quick
             test_instruction_description_changes_digest
         ; test_case "turn admission uses dedicated instruction reader" `Quick

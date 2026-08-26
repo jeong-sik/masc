@@ -205,7 +205,12 @@ let capabilities_for_config_model (config : t) =
       | Some _, _ | None, OpenAI_compat -> false
       | None, (Anthropic | Kimi | Ollama | Gemini | Glm | DashScope) -> true
     in
+    (* The label says which provider; [kind] says which of that provider's
+       wires this config resolved to. Both are needed: a provider that admits
+       two wires ([[providers]] identity_kinds) can differ between them in what
+       a request can express, and the label alone cannot tell them apart. *)
     Capabilities.for_provider_model_id
+      ~wire:(Some config.kind)
       ~allow_bare_fallback
       ~provider_label
       ~model_id:config.model_id

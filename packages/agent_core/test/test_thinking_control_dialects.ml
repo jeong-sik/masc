@@ -94,7 +94,7 @@ let catalog_capabilities ?provider_id model_id =
     match provider_id with
     | None -> CAP.for_model_id model_id
     | Some provider_label ->
-      CAP.for_provider_model_id ~allow_bare_fallback:false ~provider_label ~model_id
+      CAP.for_provider_model_id ~wire:None ~allow_bare_fallback:false ~provider_label ~model_id
   in
   match capabilities with
   | Some caps -> caps

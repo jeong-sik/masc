@@ -8,7 +8,7 @@ additional_properties = false
 name = "name"
 type = "string"
 min_length = 1
-pattern = "\\S"
+pattern = "^.*\\S.*$"
 description = """
 Non-blank Keeper handle. Optional; defaults to the caller only when omitted."""
 

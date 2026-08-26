@@ -69,6 +69,65 @@ Contacts 가 다 그걸 읽습니다. 클라이언트는 원래 서비스가 아
 없는 응답을 거절합니다. Slack 은 앱의 token rotation 을, GitHub 은 token expiration 을
 켜 두세요. 안 켜면 승인까지는 되고 마지막 교환에서 막힙니다.
 
+### 순서
+
+**0. 콜백 주소부터 정합니다**
+
+앱을 만들 때 넣을 주소는 이겁니다.
+
+```
+<이 masc 의 base URL>/api/v1/keepers/oauth/callback
+```
+
+base URL 은 `MASC_HTTP_BASE_URL` 이 정하고, 안 정하면 바인딩 주소에서 나옵니다.
+지금 값은 `/.well-known/agent.json` 의 `url` 에서 확인할 수 있습니다.
+
+**Slack 은 이 주소가 https 여야 합니다.** Slack 문서가 "Redirect URL must also
+use HTTPS" 라고 못박습니다. `http://127.0.0.1:8935/...` 로는 앱 설정 자체가 안
+됩니다. 그러니 Slack 을 쓸 거면 먼저 `MASC_HTTP_BASE_URL` 을 밖에서 닿는 https
+주소로 두고 masc 를 다시 켭니다. 그 값은 콜백 주소만 바꾸는 게 아니라 서버가
+자기 것으로 인정하는 Host 도 정합니다 — 안 맞으면 터널로 들어온 요청이
+`request_authority_untrusted` 로 거절됩니다.
+
+Google 과 Figma 는 http 로컬 주소를 받는지 문서에 안 나옵니다. 지금 주소로 먼저
+해보고, 거절당하면 Slack 과 같은 https 주소를 씁니다.
+
+**1. Slack**
+
+1. `api.slack.com/apps` 에서 앱을 만듭니다.
+2. OAuth & Permissions → Redirect URLs 에 위 콜백 주소를 넣습니다.
+3. **Token Rotation 을 켭니다.** masc 는 만료 시각도 refresh token 도 없는 응답을
+   거절하므로, 이걸 안 켜면 동의까지는 되고 마지막 교환에서 막힙니다.
+4. 필요한 User Token Scopes 를 지정합니다.
+5. Basic Information 에서 Client ID 와 Client Secret 을 복사합니다.
+6. 대시보드 → 그 Keeper → `업무 서비스 연결` → Slack 줄의 `내 앱 쓰기` 에 넣고
+   저장합니다.
+7. Slack 을 눌러 연결합니다.
+
+**2. Figma**
+
+1. `figma.com/developers/apps` 에서 앱을 만듭니다.
+2. Redirect URL 에 콜백 주소를 넣습니다.
+3. Client ID 와 Client Secret 을 복사합니다. **Secret 은 이때 한 번만 보여줍니다.**
+4. `내 앱 쓰기` 에 넣고 저장합니다.
+5. Figma 를 눌러 연결합니다.
+
+**3. GitHub**
+
+Slack 과 같습니다. OAuth App 을 만들고, 콜백을 넣고, **token expiration 을 켠 다음**
+id 와 secret 을 저장합니다.
+
+**4. Google — 여덟 개가 앱 하나**
+
+1. Google Cloud Console 에서 프로젝트를 고르고 APIs & Services → Credentials 로
+   갑니다.
+2. OAuth client ID 를 만듭니다(Web application).
+3. Authorized redirect URIs 에 콜백 주소를 넣습니다.
+4. Client ID 와 Secret 을 `내 앱 쓰기` 에 **한 번만** 넣습니다. Gmail 에 넣든
+   Sheets 에 넣든 여덟 개가 다 읽습니다.
+5. 쓰고 싶은 제품을 하나씩 눌러 연결합니다. 앱은 하나지만 **동의는 제품마다 한 번**
+   입니다 — 각 제품이 자기 권한을 따로 요구합니다.
+
 ## 붙고 나면
 
 도구 이름은 `<서비스>_<원래이름>` 입니다. Jira 이슈 조회는 `atlassian_getJiraIssue`

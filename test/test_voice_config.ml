@@ -124,22 +124,21 @@ let test_load_detailed_valid_config () =
       | Error (Vc.Invalid msg) ->
         fail (Printf.sprintf "expected Ok, got Invalid: %s" msg))
 
-(* [load ()] keeps its legacy error strings on top of [load_detailed]:
-   unconfigured reads as "missing", a broken explicit config surfaces
-   the parse error instead of falling through to a default. *)
-let test_load_legacy_strings_preserved () =
+let test_load_error_to_string () =
   with_unconfigured_voice (fun () ->
-    match Vc.load () with
-    | Error msg ->
-      check bool "missing reported" true
-        (String_util.string_contains_substring ~needle:"voice config missing at" msg)
-    | Ok _ -> fail "expected missing-config Error, got Ok");
+    check bool "missing reported" true
+      (Vc.load_error_to_string Vc.Not_configured
+       |> String_util.string_contains_substring
+            ~needle:"voice config missing at"));
   with_explicit_voice_config "{ this is not json" (fun () ->
-    match Vc.load () with
-    | Error msg ->
+    match Vc.load_detailed () with
+    | Error (Vc.Invalid _ as error) ->
       check bool "json error surfaced" true
-        (String_util.string_contains_substring ~needle:"invalid voice config json" msg)
-    | Ok _ -> fail "expected invalid-config Error, got Ok")
+        (Vc.load_error_to_string error
+         |> String_util.string_contains_substring
+              ~needle:"invalid voice config json")
+    | Error Vc.Not_configured -> fail "expected Invalid, got Not_configured"
+    | Ok _ -> fail "expected Invalid, got Ok")
 
 let test_session_empty_endpoints_ok () =
   let json = minimal_config_json ~session_endpoints:"[]" in
@@ -319,8 +318,8 @@ let () =
             `Quick test_load_detailed_schema_error_is_invalid;
           test_case "valid config loads"
             `Quick test_load_detailed_valid_config;
-          test_case "legacy load strings preserved"
-            `Quick test_load_legacy_strings_preserved;
+          test_case "load errors render at operator boundary"
+            `Quick test_load_error_to_string;
         ] );
       ( "session_endpoints",
         [

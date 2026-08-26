@@ -4746,9 +4746,9 @@ let skill_catalog_of_composition ~name toml =
       name
       toml
   in
-  match Masc.Keeper_skill_catalog.of_documents [ name, document ] with
-  | Ok catalog -> catalog
-  | Error error ->
+  match Masc.Keeper_skill_catalog.partition_documents [ name, document ] with
+  | catalog, [] -> catalog
+  | _, { error; _ } :: _ ->
     failf
       "composition fixture %S was rejected as a skill: %s"
       name

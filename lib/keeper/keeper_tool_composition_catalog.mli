@@ -1,6 +1,5 @@
 (** Closed grammar for immutable Keeper tool-composition plans. Declared
-    today inside SKILL.md composition fences ({!Keeper_skill_catalog});
-    the standalone tool-compositions.toml path is gone.
+    inside SKILL.md composition fences ({!Keeper_skill_catalog}).
 
     The document grammar is closed and explicit. Input templates use tagged
     [literal], [output], [object], and [array] nodes; strings are never scanned

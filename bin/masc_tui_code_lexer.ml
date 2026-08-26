@@ -391,12 +391,223 @@ let diff_lexer text =
     lines;
   runs_segments runs
 
+(* {1 C-family and Python lexers}
+
+   These share the shape of [ocaml_lexer] but read the punctuation the curly-
+   brace family and Python use. They are tokenizers, not parsers, so the
+   keyword sets are broad on purpose: an identifier that matches a keyword in a
+   sibling dialect is coloured, the same trade the fence lexers already make. *)
+
+(* A string opened by [quote] and closed by the next unescaped [quote].
+   Mirrors [take_ocaml_string] for any quote, so single quotes (char and string
+   literals) and JS backticks read too. *)
+let take_quoted ~quote text index (runs : runs) =
+  let limit = String.length text in
+  let opening = index in
+  let rec advance index =
+    if index >= limit then index
+    else begin
+      let char = text.[index] in
+      runs_add runs kind_string char;
+      if char = '\\' && index + 1 < limit then begin
+        runs_add runs kind_string text.[index + 1];
+        advance (index + 2)
+      end
+      else if Char.equal char quote && index > opening then index + 1
+      else advance (index + 1)
+    end
+  in
+  advance index
+
+(* A [/* ... */] block comment, not nested: C, JS, Rust and CSS all end at the
+   first close. [index] points at the opening slash. *)
+let take_c_block_comment text index (runs : runs) =
+  let limit = String.length text in
+  runs_add runs kind_comment '/';
+  runs_add runs kind_comment '*';
+  let rec advance i =
+    if i >= limit then i
+    else if i + 1 < limit && text.[i] = '*' && text.[i + 1] = '/' then begin
+      runs_add runs kind_comment '*';
+      runs_add runs kind_comment '/';
+      i + 2
+    end
+    else begin
+      runs_add runs kind_comment text.[i];
+      advance (i + 1)
+    end
+  in
+  advance (index + 2)
+
+(* A Python triple-quoted string ["""..."""] or ['''...''']. [index] points at
+   the first quote of the opening triple. *)
+let take_triple ~quote text index (runs : runs) =
+  let limit = String.length text in
+  runs_add runs kind_string quote;
+  runs_add runs kind_string quote;
+  runs_add runs kind_string quote;
+  let rec advance i =
+    if i >= limit then i
+    else if
+      i + 3 <= limit
+      && Char.equal text.[i] quote
+      && Char.equal text.[i + 1] quote
+      && Char.equal text.[i + 2] quote
+    then begin
+      runs_add runs kind_string quote;
+      runs_add runs kind_string quote;
+      runs_add runs kind_string quote;
+      i + 3
+    end
+    else begin
+      runs_add runs kind_string text.[i];
+      advance (i + 1)
+    end
+  in
+  advance (index + 3)
+
+(* A number: 0x hex, or decimal digits with underscores and one decimal point.
+   Mirrors [ocaml_lexer] so a literal reads the same colour in every language.
+   [index] points at the first digit. *)
+let take_number text index (runs : runs) =
+  let limit = String.length text in
+  let char = text.[index] in
+  if
+    index + 1 < limit && char = '0'
+    && (text.[index + 1] = 'x' || text.[index + 1] = 'X')
+  then begin
+    runs_add runs kind_number char;
+    runs_add runs kind_number text.[index + 1];
+    take_while text (index + 2) (fun c -> is_hex c || c = '_') kind_number runs
+  end
+  else
+    let after =
+      take_while text index (fun c -> is_digit c || c = '_') kind_number runs
+    in
+    if after < limit && text.[after] = '.' then begin
+      runs_add runs kind_number '.';
+      take_while text (after + 1)
+        (fun c -> is_digit c || c = '_')
+        kind_number runs
+    end
+    else after
+
+(* One identifier: a reserved word is a keyword, a capitalised start is a type
+   (the class/type convention these languages share), the rest plain code.
+   [index] points at the identifier's first character. *)
+let take_identifier ~is_reserved text index (runs : runs) =
+  let limit = String.length text in
+  let word = Buffer.create 16 in
+  Buffer.add_char word text.[index];
+  let rec scan i =
+    if i < limit && is_identifier_char text.[i] then begin
+      Buffer.add_char word text.[i];
+      scan (i + 1)
+    end
+    else i
+  in
+  let stop = scan (index + 1) in
+  let as_string = Buffer.contents word in
+  let kind =
+    if is_reserved as_string then kind_keyword
+    else if as_string.[0] >= 'A' && as_string.[0] <= 'Z' then kind_type
+    else kind_code
+  in
+  String.iter (fun c -> runs_add runs kind c) as_string;
+  stop
+
+let c_like_reserved =
+  [ "abstract"; "as"; "async"; "await"; "break"; "case"; "catch"; "class"
+  ; "const"; "continue"; "debugger"; "default"; "defer"; "delete"; "do"
+  ; "else"; "enum"; "export"; "extends"; "extern"; "final"; "finally"; "fn"
+  ; "for"; "func"; "function"; "go"; "goto"; "if"; "impl"; "implements"
+  ; "import"; "in"; "instanceof"; "interface"; "let"; "loop"; "match"; "mod"
+  ; "module"; "mut"; "namespace"; "new"; "package"; "private"; "protected"
+  ; "pub"; "public"; "readonly"; "return"; "select"; "static"; "struct"
+  ; "super"; "switch"; "throw"; "trait"; "try"; "type"; "typeof"; "union"
+  ; "unsafe"; "use"; "var"; "void"; "where"; "while"; "with"; "yield" ]
+
+let is_c_like_reserved word = List.mem word c_like_reserved
+
+let python_reserved =
+  [ "and"; "as"; "assert"; "async"; "await"; "break"; "case"; "class"
+  ; "continue"; "def"; "del"; "elif"; "else"; "except"; "False"; "finally"
+  ; "for"; "from"; "global"; "if"; "import"; "in"; "is"; "lambda"; "match"
+  ; "None"; "nonlocal"; "not"; "or"; "pass"; "raise"; "return"; "True"; "try"
+  ; "while"; "with"; "yield" ]
+
+let is_python_reserved word = List.mem word python_reserved
+
+let c_like_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if index + 1 < limit && char = '/' && text.[index + 1] = '/' then
+        advance (take_while text index (fun c -> c <> '\n') kind_comment runs)
+      else if index + 1 < limit && char = '/' && text.[index + 1] = '*' then
+        advance (take_c_block_comment text index runs)
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if char = '`' then advance (take_quoted ~quote:'`' text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_c_like_reserved text index runs)
+      else if is_digit char then advance (take_number text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
+let python_lexer text =
+  let runs = new_runs kind_code in
+  let limit = String.length text in
+  let is_triple index quote =
+    index + 3 <= limit
+    && Char.equal text.[index] quote
+    && Char.equal text.[index + 1] quote
+    && Char.equal text.[index + 2] quote
+  in
+  let rec advance index =
+    if index >= limit then ()
+    else begin
+      let char = text.[index] in
+      if char = '#' then
+        advance (take_while text index (fun c -> c <> '\n') kind_comment runs)
+      else if is_triple index '"' then
+        advance (take_triple ~quote:'"' text index runs)
+      else if is_triple index '\'' then
+        advance (take_triple ~quote:'\'' text index runs)
+      else if char = '"' then advance (take_quoted ~quote:'"' text index runs)
+      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
+      else if is_identifier_start char then
+        advance (take_identifier ~is_reserved:is_python_reserved text index runs)
+      else if is_digit char then advance (take_number text index runs)
+      else begin
+        runs_add runs kind_code char;
+        advance (index + 1)
+      end
+    end
+  in
+  advance 0;
+  runs_segments runs
+
 let lexer_of_language (tag : string) =
   match String.lowercase_ascii (String.trim tag) with
   | "ocaml" | "ml" | "mli" -> Some ocaml_lexer
   | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
   | "json" -> Some json_lexer
   | "diff" | "patch" -> Some diff_lexer
+  | "c_like" | "typescript" | "ts" | "javascript" | "js" | "tsx" | "jsx"
+  | "go" | "rust" | "rs" | "c" | "cpp" | "java" | "kotlin" | "swift" | "scala"
+  | "php" | "dart" ->
+    Some c_like_lexer
+  | "python" | "py" -> Some python_lexer
   | _ -> None
 
 
@@ -428,6 +639,13 @@ let language_of_path path =
   if has ".ml" || has ".mli" then Some "ocaml"
   else if has ".sh" || has ".bash" || has ".zsh" then Some "bash"
   else if has ".json" then Some "json"
+  else if
+    has ".ts" || has ".tsx" || has ".js" || has ".jsx" || has ".mjs"
+    || has ".cjs" || has ".c" || has ".h" || has ".cpp" || has ".cc"
+    || has ".hpp" || has ".go" || has ".rs" || has ".java" || has ".kt"
+    || has ".swift" || has ".scala" || has ".php" || has ".dart"
+  then Some "c_like"
+  else if has ".py" then Some "python"
   else None
 
 (* A whole file as rows of (text, kind) segments. Lexing reads the whole

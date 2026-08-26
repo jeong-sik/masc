@@ -112,6 +112,11 @@ blocking_lints() {
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Branch protection fail-closed fixture" bash scripts/test-main-branch-protection-fail-closed.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  # task-377: the merge audit must keep refusing the PR #30463 shape
+  # (required check CANCELLED/SKIPPED on the merged SHA), so its self-test
+  # runs on every lint pass, not only when its own file changes.
+  run_lint "Merge audit unfinished-verdict fixture" \
+    python3 scripts/ci/test_check_merge_audit.py
 }
 
 blocking_pr_lints() {

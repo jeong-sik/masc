@@ -474,7 +474,7 @@ let test_loader_scans_the_skills_directory () =
     ~finally:(fun () -> remove_tree base_path)
     (fun () ->
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _left_out) ->
           check
             int
             "missing skills dir loads an empty catalog"
@@ -490,7 +490,7 @@ let test_loader_scans_the_skills_directory () =
        Unix.mkdir (Filename.concat skills_dir "half-installed") 0o755;
        write_file (Filename.concat skills_dir "README.md") "not a skill\n";
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _left_out) ->
           (match Skill_catalog.skills catalog with
            | [ skill ] ->
              check
@@ -512,7 +512,7 @@ let test_loader_scans_the_skills_directory () =
          (Filename.concat agent_skill_dir "SKILL.md")
          "---\nname: agent-review\ndescription: Review through the configured Agent Skills source.\n---\n\n# Agent review\n";
        (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-        | Ok catalog ->
+        | Ok (catalog, _left_out) ->
           check
             (list string)
             "turn consumes the configured multi-source snapshot"
@@ -526,7 +526,7 @@ let test_loader_scans_the_skills_directory () =
          (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
          "---\nname: half-installed\n---\n";
        match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Ok catalog ->
+       | Ok (catalog, _left_out) ->
          check
            (list string)
            "one broken optional skill does not stop unrelated turns"

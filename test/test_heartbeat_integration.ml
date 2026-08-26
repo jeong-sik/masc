@@ -51,6 +51,7 @@ module Dashboard_delete = Server_dashboard_http_delete_actions
 
 exception Librarian_executor_cancel
 exception Cancel_direct_keepalive_parent
+exception Cancel_keeper_up_after_metadata
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -1886,6 +1887,153 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
            ~base_path:config.base_path
            name
           : Masc.Keeper_keepalive.joined_stop_result))
+
+let test_update_keeper_cancellation_finishes_lane_swap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  Memory_lane.For_testing.reset ();
+  let base_dir = temp_dir "update-cancelled-lane-swap" in
+  let name = "update-cancelled-lane-swap" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir name;
+      Memory_lane.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      seed_keeper_sandbox_profile ~base_dir name;
+      Eio.Switch.run @@ fun root_sw ->
+      install_owner_inventory_exn ~sw:root_sw config;
+      Memory_lane.init ~sw:root_sw;
+      let clock = Eio.Stdenv.clock env in
+      let meta =
+        { (make_meta name) with
+          proactive = { enabled = false }
+        }
+      in
+      create_owner_meta_exn config meta;
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = root_sw
+        ; clock
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env root_sw config)
+        }
+      in
+      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         failf
+           "cancelled-update fixture failed to start: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      Eio.Time.sleep clock 0.05;
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let release_librarian, resolve_release_librarian = Eio.Promise.create () in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              Eio.Promise.await release_librarian)
+       with
+       | Memory_lane.Submitted -> ()
+       | Memory_lane.Coalesced
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "cancelled-update Librarian fixture was not submitted");
+      Eio.Promise.await librarian_started;
+      let profile_defaults =
+        { Keeper_profile_defaults.empty_keeper_profile_defaults with
+          sandbox_profile = Some meta.sandbox_profile
+        }
+      in
+      let parsed : Turn_up_args.parsed_args =
+        { name
+        ; runtime_id_opt = None
+        ; allowed_paths_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; autonomous_wake_prompt_opt = None
+        ; autonomous_wake_prompt_present = false
+        ; proactive_enabled_opt = Some false
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; tool_groups_opt = None
+        ; tool_groups_present = false
+        ; native_tool_posture_opt = None
+        ; native_tool_posture_present = false
+        ; instructions_arg = Some "durable cancelled update"
+        ; profile_defaults
+        ; instructions_opt = profile_defaults.instructions
+        ; autonomous_instructions_arg = None
+        ; autonomous_instructions_opt = None
+        }
+      in
+      let update_switch, resolve_update_switch = Eio.Promise.create () in
+      let update_done, resolve_update_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw:root_sw (fun () ->
+        let disposition =
+          try
+            Eio.Switch.run @@ fun update_sw ->
+            Eio.Promise.resolve resolve_update_switch update_sw;
+            ignore (Turn_up_update.update_keeper ctx parsed meta);
+            `Returned
+          with
+          | Cancel_keeper_up_after_metadata -> `Cancelled
+        in
+        Eio.Promise.resolve resolve_update_done disposition);
+      let update_sw = Eio.Promise.await update_switch in
+      Eio.Time.with_timeout_exn clock 1.0 (fun () ->
+        let rec await_lane_swap_fence () =
+          match
+            owner_shutdown_operation_id_exn
+              ~base_path:config.base_path
+              ~keeper_name:name
+          with
+          | Some _ -> ()
+          | None ->
+            Eio.Fiber.yield ();
+            await_lane_swap_fence ()
+        in
+        await_lane_swap_fence ());
+      Eio.Switch.fail update_sw Cancel_keeper_up_after_metadata;
+      Eio.Promise.resolve resolve_release_librarian ();
+      (match Eio.Promise.await update_done with
+       | `Cancelled -> ()
+       | `Returned -> fail "keeper update returned after its caller was cancelled");
+      check bool
+        "cancelled update rolls back its temporary shutdown fence"
+        true
+        (Option.is_none
+           (owner_shutdown_operation_id_exn
+              ~base_path:config.base_path
+              ~keeper_name:name));
+      (match R.get ~base_path:config.base_path name with
+       | Some entry ->
+         check string
+           "cancelled update finishes the lane restart"
+           "running"
+           (KSM.phase_to_string entry.phase);
+         check bool "replacement lane remains live" false (R.lane_has_exited entry)
+       | None -> fail "cancelled update left the Keeper unregistered");
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name
+          : Masc.Keeper_keepalive.joined_stop_result))
+;;
 
 let test_keeper_up_shared_boundary_outlives_calling_turn () =
   Eio_main.run @@ fun env ->
@@ -4409,6 +4557,8 @@ let () =
         test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "update rejects lane swap while turn in flight" `Quick
         test_update_keeper_rejects_lane_swap_while_turn_in_flight;
+      test_case "cancelled update finishes lane swap" `Quick
+        test_update_keeper_cancellation_finishes_lane_swap;
       test_case "keeper up shared boundary outlives calling turn" `Quick
         test_keeper_up_shared_boundary_outlives_calling_turn;
       test_case "shutdown store isolates corrupt owner" `Quick

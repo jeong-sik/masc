@@ -5,10 +5,10 @@
 # BRANCH_PROTECTION_REQUIRED_CONTEXTS. Dropping one of those is what lets an
 # unchecked merge reach main, so it remains the failing assertion.
 #
-# enforce_admins remains intentionally non-failing while it is disabled on
-# main, but the resulting admin bypass must stay visible in both GitHub output
-# and the final status line. The policy debt is tracked by #25861. Restore a
-# failing assertion alongside the setting if admin enforcement comes back.
+# Main must also require branches to be current and apply the same checks to
+# administrators. #30755 merged with no successful CI Gate on its exact head
+# while both strict and enforce_admins were false; either regression reopens
+# that broken window, so both are failing assertions.
 #
 # This check fails closed when it cannot read branch-protection settings;
 # otherwise CI silently masks required-context drift.
@@ -78,6 +78,11 @@ handle_unauthorized() {
 
 if ! protection="$(gh api "$endpoint" --jq '
   (.required_status_checks.contexts[]? | "context=" + .),
+  ("strict=" +
+    (if (.required_status_checks.strict | type) == "boolean"
+     then (.required_status_checks.strict | tostring)
+     else "unreadable"
+     end)),
   ("enforce_admins=" +
     (if (.enforce_admins.enabled | type) == "boolean"
      then (.enforce_admins.enabled | tostring)
@@ -95,24 +100,22 @@ if ! protection="$(gh api "$endpoint" --jq '
 fi
 
 contexts="$(printf '%s\n' "$protection" | sed -n 's/^context=//p')"
+strict="$(printf '%s\n' "$protection" | sed -n 's/^strict=//p')"
 enforce_admins="$(printf '%s\n' "$protection" | sed -n 's/^enforce_admins=//p')"
 
-admin_issue_url="https://github.com/jeong-sik/masc/issues/25861"
-case "$enforce_admins" in
-  true)
-    admin_status="enabled"
-    ;;
-  false)
-    echo "::warning title=Admin merge bypass enabled::enforce_admins=false for ${repo}/${branch}; admins can bypass required status checks. Tracked by #25861 (${admin_issue_url})."
-    admin_status="disabled; admin merge bypass active; tracked by #25861 (${admin_issue_url})"
-    ;;
-  *)
-    echo "::error title=Branch protection check failed::Could not read enforce_admins.enabled for ${repo}/${branch}; refusing to report a complete audit."
-    exit 1
-    ;;
+failures=()
+
+case "$strict" in
+  true) ;;
+  false) failures+=("required status checks are not strict: branch can be behind main") ;;
+  *) failures+=("required_status_checks.strict is unreadable") ;;
 esac
 
-failures=()
+case "$enforce_admins" in
+  true) ;;
+  false) failures+=("admin enforcement is disabled: admins can bypass CI Gate") ;;
+  *) failures+=("enforce_admins.enabled is unreadable") ;;
+esac
 
 IFS=',' read -r -a required_contexts <<<"$required_contexts_csv"
 for context in "${required_contexts[@]}"; do
@@ -129,5 +132,5 @@ if ((${#failures[@]} > 0)); then
   exit 1
 fi
 
-printf 'branch protection drift: OK for %s/%s (required contexts present: %s; admin enforcement: %s)\n' \
-  "$repo" "$branch" "$required_contexts_csv" "$admin_status"
+printf 'branch protection drift: OK for %s/%s (required contexts present: %s; strict: enabled; admin enforcement: enabled)\n' \
+  "$repo" "$branch" "$required_contexts_csv"

@@ -142,6 +142,19 @@ let test_bootstrap_mints_admin_token_for_base_path () =
     "unset MASC_ADMIN_TOKEN";
   require_contains "server start scrubs ambient token" source "unset MASC_TOKEN"
 
+let test_transport_harness_mints_token_before_server_start () =
+  let source = read_source_file "scripts/harness/transport/common.sh" in
+  require_contains "transport mints workspace admin token" source
+    "harness_mint_admin_token";
+  require_contains "transport stores canonical token" source
+    "MASC_TRANSPORT_AUTH_TOKEN=\"$(";
+  require_contains "transport exports canonical token" source
+    "export MASC_TRANSPORT_AUTH_TOKEN";
+  require_contains "empty transport token is fatal" source
+    "ERROR: transport harness admin token is empty";
+  require_order "transport token is minted before server start" source
+    "harness_mint_admin_token" "harness_start_server"
+
 let test_mcp_jsonrpc_does_not_fallback_to_masc_token () =
   let source = read_source_file "scripts/harness/lib/mcp_jsonrpc.sh" in
   require_contains "canonical token selected" source "${MCP_TOKEN:-}";
@@ -162,6 +175,8 @@ let () =
             test_run_all_mints_workspace_token_before_mcp_probe;
           test_case "bootstrap mints admin token for base path" `Quick
             test_bootstrap_mints_admin_token_for_base_path;
+          test_case "transport mints token before server start" `Quick
+            test_transport_harness_mints_token_before_server_start;
           test_case "mcp_jsonrpc rejects MASC_TOKEN fallback" `Quick
             test_mcp_jsonrpc_does_not_fallback_to_masc_token;
         ] );

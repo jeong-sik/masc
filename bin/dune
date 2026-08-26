@@ -396,6 +396,12 @@
  (libraries unix))
 
 (library
+ (name masc_tui_browser)
+ (wrapped false)
+ (modules masc_tui_browser)
+ (libraries unix))
+
+(library
  (name masc_tui_utf8_input)
  (wrapped false)
  (modules masc_tui_utf8_input))
@@ -680,6 +686,7 @@
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_attachment
+  masc_tui_browser
   masc_tui_clipboard
   masc_tui_termios
   masc_tui_keys

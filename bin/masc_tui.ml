@@ -2265,7 +2265,15 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
             match json with
             | `Assoc fields -> (
                 match List.assoc_opt "authorize_url" fields with
-                | Some (`String url) -> Ok (label, url)
+                | Some (`String url) ->
+                    (* Opened here, on this fiber, because the URL is about
+                       nine hundred characters and a pane truncates it -- an
+                       operator cannot select what is not on screen. It is
+                       still printed below, wrapped, for the machine that has
+                       no opener. *)
+                    (match Masc_tui_browser.open_url url with
+                    | Ok _ | Error _ -> ());
+                    Ok (label, url)
                 | Some _ | None ->
                     Error "the server answered without an authorize_url")
             | _ -> Error "the server answered with something this cannot read")

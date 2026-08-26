@@ -235,6 +235,14 @@ let keeper_brief_meta_json (meta : keeper_meta) =
       ("name", `String meta.name);
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
+      (* The sandbox the keeper is declared to run in. On the roster because
+         that is where an operator compares keepers: reading it one keeper at a
+         time means opening a detail pane per row, and the question is almost
+         always about the fleet rather than about one of them. *)
+      ( "sandbox_profile",
+        `String
+          (Keeper_types_profile_sandbox.sandbox_profile_to_string
+             meta.sandbox_profile) );
     ]
 
 let keeper_list_effective_meta_error_json name err =

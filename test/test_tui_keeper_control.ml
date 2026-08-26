@@ -18,7 +18,8 @@ let health raw =
 
 let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = false)
     ?(next_action = None) ?(autoboot_enabled = true) ?(proactive_enabled = true)
-    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running") name :
+    ?(runtime_id = "anthropic.claude-opus-5") ?(phase = phase "running")
+    ?(sandbox_profile = "local") name :
     Decode.keeper_runtime =
   { kr_name = name
   ; kr_health = health
@@ -29,6 +30,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_proactive_enabled = proactive_enabled
   ; kr_runtime_id = runtime_id
   ; kr_phase = phase
+  ; kr_sandbox_profile = sandbox_profile
   }
 
 let complete rows = Control.Roster_complete rows
@@ -488,15 +490,65 @@ let test_empty_error_body_names_the_status () =
 
 (* {1 Roster decode} *)
 
+(* [meta] carries the keeper's own declaration, and the roster row reads the
+   sandbox profile out of it. The fixture shipped without [meta] while nothing
+   read it; leaving it out now would only mean the decoder had learned to do
+   without a field the server always sends. *)
 let gate_row ?(health = "healthy") ?(paused = false)
-    ?(next_action = "\"direct_message\"") ?(phase = "running") name =
+    ?(next_action = "\"direct_message\"") ?(phase = "running")
+    ?(sandbox_profile = "local") name =
   Printf.sprintf
     {|{"runtime_class":"keeper","name":%S,"agent_name":"keeper-%s-agent",
+       "meta":{"name":%S,"trace_id":"trace-1","created_at":"2026-08-21T17:32:29Z",
+               "updated_at":"2026-08-23T06:53:43Z","sandbox_profile":%S},
        "health":%S,"paused":%b,"next_action":%s,
        "phase":%S,"keepalive_running":true,"autoboot_enabled":true,
        "proactive_enabled":true,"runtime_id":"anthropic.claude-opus-5",
        "created_at":"2026-08-21T17:32:29Z","updated_at":"2026-08-23T06:53:43Z"}|}
-    name name health paused next_action phase
+    name name name sandbox_profile health paused next_action phase
+
+(* The roster is where an operator compares keepers, so the sandbox each one is
+   declared for has to survive the decode. Reading it per keeper from a detail
+   pane was the thing this replaced. *)
+let test_roster_decode_reads_the_sandbox_profile () =
+  let json =
+    Yojson.Safe.from_string
+      (Printf.sprintf
+         {|{"count":2,"total":2,"truncated":false,"keepers":[%s,%s]}|}
+         (gate_row ~sandbox_profile:"docker" "contained")
+         (gate_row ~sandbox_profile:"local" "on-the-host"))
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Error detail -> Alcotest.failf "roster must decode: %s" detail
+  | Ok (rows, _, _) ->
+      Alcotest.(check (list string))
+        "each row keeps its own declaration"
+        [ "docker"; "local" ]
+        (List.map (fun (r : Decode.keeper_runtime) -> r.kr_sandbox_profile) rows)
+
+(* A row without the field is a server that stopped sending it, which is worth
+   a loud decode failure rather than a row that silently reads as local. The
+   boundary is the thing being reported; guessing it defeats the report. *)
+let test_a_row_without_a_sandbox_profile_is_rejected () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"count":1,"total":1,"truncated":false,"keepers":[
+         {"runtime_class":"keeper","name":"n","agent_name":"keeper-n-agent",
+          "meta":{"name":"n","trace_id":"t","created_at":"c","updated_at":"u"},
+          "health":"healthy","paused":false,"next_action":null,
+          "phase":"running","keepalive_running":true,"autoboot_enabled":true,
+          "proactive_enabled":true,"runtime_id":"r",
+          "created_at":"c","updated_at":"u"}]}|}
+  in
+  match Decode.decode_keeper_runtime_list json with
+  | Ok _ -> Alcotest.fail "a row with no sandbox_profile must not decode"
+  | Error detail ->
+      Alcotest.(check bool)
+        "and the failure names the field" true
+        (let needle = "sandbox_profile" in
+         let n = String.length needle and l = String.length detail in
+         let rec go i = i + n <= l && (String.sub detail i n = needle || go (i + 1)) in
+         go 0)
 
 let test_roster_decode_reads_rows () =
   let json =
@@ -764,7 +816,11 @@ let () =
             test_empty_error_body_names_the_status
         ] )
     ; ( "roster"
-      , [ Alcotest.test_case "rows decode in order" `Quick
+      , [ Alcotest.test_case "the sandbox profile survives the decode" `Quick
+            test_roster_decode_reads_the_sandbox_profile
+        ; Alcotest.test_case "a row without a sandbox profile is rejected" `Quick
+            test_a_row_without_a_sandbox_profile_is_rejected
+        ; Alcotest.test_case "rows decode in order" `Quick
             test_roster_decode_reads_rows
         ; Alcotest.test_case "unknown health is rejected" `Quick
             test_roster_decode_rejects_an_unknown_status

@@ -286,14 +286,19 @@ let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
 
 let keeper_marker_width = 3
 let keeper_status_width = 10
-let keeper_flags_width = 3
+(* "A P S": autoboot, proactive, sandbox. The width and the inner-width
+   threshold below move together -- widening the cell without raising the
+   threshold spends two columns the layout had already promised to the name and
+   task cells, and the row grows past the frame at exactly the widths where
+   flags first appear. *)
+let keeper_flags_width = 5
 let keeper_turns_width = 6
 let keeper_minimum_name_width = 16
 let keeper_maximum_name_width = 32
 let keeper_minimum_runtime_width = 20
 let keeper_maximum_runtime_width = 34
 let keeper_minimum_task_width = 10
-let keeper_flags_minimum_inner_width = 96
+let keeper_flags_minimum_inner_width = 98
 let keeper_runtime_minimum_inner_width = 118
 
 type keeper_columns = {

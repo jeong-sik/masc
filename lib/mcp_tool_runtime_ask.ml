@@ -92,6 +92,10 @@ let ask_json (a : Keeper_ask.ask) =
 
 let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let reject detail =
+    (* A refused question is worth a line. The Keeper sees the rejection in
+       its own result; an operator wondering why nothing is waiting on them
+       has only the log. *)
+    Log.Keeper.info "keeper_ask: keeper=%s refused=%s" ctx.agent_name detail;
     Some
       (Tool_result.error ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time
          detail)
@@ -130,6 +134,11 @@ let handle_ask ~tool_name ~start_time (ctx : context) : Tool_result.result optio
                     (Tool_result.error ~failure_class:Tool_result.Runtime_failure ~tool_name
                        ~start_time detail)
               | Ok () ->
+                  (* Recording a question spends an operator's attention
+                     later, so the act is logged where it happens rather than
+                     inferred from the store's file changing. *)
+                  Log.Keeper.info "keeper_ask: keeper=%s ask_id=%s questions=%d"
+                    keeper_name a.ask_id (List.length a.questions);
                   Some
                     (Tool_result.ok ~tool_name ~start_time
                        (Yojson.Safe.to_string (ask_json a))))))

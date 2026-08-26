@@ -246,8 +246,6 @@ let validate_keeper_wake_body body =
        |> Result.map (fun _ -> ()))
 ;;
 
-let validate_keeper_wake_for_creation view = validate_keeper_wake_body view.body
-let validate_keeper_wake_for_dispatch view = validate_keeper_wake_body view.body
 
 let validate_request_payload_for_creation_detailed ~payload =
   match payload with
@@ -268,7 +266,7 @@ let validate_request_payload_for_creation_detailed ~payload =
                 (Creation_invalid_supported_payload
                    (Keeper_wake, keeper_wake_kind ^ " payload requires object body"))
           in
-          validate_keeper_wake_for_creation { raw_kind; body }
+          validate_keeper_wake_body body
           |> Result.map_error (fun msg ->
             Creation_invalid_supported_payload (Keeper_wake, msg))
         | None -> Error (Creation_unsupported_kind raw_kind))
@@ -303,7 +301,7 @@ let dispatch_view_detailed request =
   match classify_kind view.raw_kind with
   | Some Keeper_wake ->
     let* () =
-      validate_keeper_wake_for_dispatch view
+      validate_keeper_wake_body view.body
       |> Result.map_error (fun msg ->
         Dispatch_invalid_supported_payload (Keeper_wake, msg))
     in

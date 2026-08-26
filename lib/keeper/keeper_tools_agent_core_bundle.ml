@@ -375,7 +375,13 @@ let make_tool_bundle_for_descriptors
   in
   let composition_tools =
     Keeper_tool_composition_surface.make_tools
-        ~instruction_skills:(Keeper_skill_catalog.instruction_entries skill_catalog)
+        ~instruction_skills:
+          (Keeper_skill_catalog.skills skill_catalog
+           |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+                match skill.model_invocable, skill.surface with
+                | true, Keeper_skill_catalog.Instruction ->
+                  Some (skill.name, skill.description, skill.body)
+                | false, _ | true, Keeper_skill_catalog.Composition _ -> None))
         ~skill_composition_entries:
           (Keeper_skill_catalog.composition_entries skill_catalog)
         ~config

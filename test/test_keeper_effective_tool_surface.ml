@@ -54,6 +54,54 @@ let skill_catalog () =
   skill_catalog_with_description "Read these instructions before working."
 ;;
 
+let configured_external_skill_catalog () =
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+[[skills.sources]]
+id = "shared-catalog"
+anchor = "absolute"
+path = "/srv/shared-agent-skills"
+access = "read-only"
+|}
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "external Skill source fixture config was rejected"
+  in
+  let source =
+    match config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "external Skill fixture did not contain exactly one source"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let document = composition_skill ~name:"snapshot" ~execution:"async" in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/srv/shared-agent-skills"; candidates = 1 }
+    ; candidates =
+        [ Skill_catalog_snapshot.Candidate_document
+            { directory = "snapshot"; source_text = document }
+        ]
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "external Skill snapshot fixture was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
+  | catalog, [] -> catalog
+  | _, diagnostics ->
+    failf "external Skill projection returned %d diagnostics" (List.length diagnostics)
+;;
+
 let names (surface : Keeper_effective_tool_surface.t) =
   surface.tools
   |> List.map (fun (tool : Keeper_effective_tool_surface.tool) -> tool.name)
@@ -114,8 +162,7 @@ let test_projection_names_equal_turn_surface_authority () =
       (List.exists
          (fun (tool : Keeper_effective_tool_surface.tool) ->
             match tool.origin with
-            | Keeper_effective_tool_surface.Composition_skill
-                { source = "skills/snapshot/SKILL.md" } -> true
+            | Keeper_effective_tool_surface.Composition_skill _ -> true
             | _ -> false)
          surface.tools);
     check bool "official client digest exists" true
@@ -137,6 +184,65 @@ let test_projection_names_equal_turn_surface_authority () =
          (Keeper_tool_composition_surface.For_testing.instruction_skill_description
             instruction_entries)
          tool.schema.description)
+;;
+
+let test_external_composition_preserves_snapshot_provenance () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  match
+    Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"fixture"
+      ~runtime_id:"fixture.runtime"
+      ~official_client_kind:"codex"
+      ~native_posture:None
+      ~tool_groups:None
+      ~current_task_id:None
+      ~task_skill_names:[]
+      ~skill_catalog:(configured_external_skill_catalog ())
+  with
+  | Error (_, detail) -> fail detail
+  | Ok surface ->
+    let provenance =
+      List.find_map
+        (fun (tool : Keeper_effective_tool_surface.tool) ->
+           match tool.origin with
+           | Keeper_effective_tool_surface.Composition_skill
+               { provenance = Some provenance } -> Some provenance
+           | Composition_skill { provenance = None }
+           | Descriptor _
+           | Composition_plan
+           | Composition_control -> None)
+        surface.tools
+    in
+    (match provenance with
+     | None -> fail "external composition lost snapshot provenance"
+     | Some provenance ->
+       check string "exact configured source id" "shared-catalog"
+         (Skill_source_config.source_id_to_string provenance.source.id);
+       check string "exact configured source path" "/srv/shared-agent-skills"
+         provenance.source.configured_path;
+       check string "exact package directory" "snapshot" provenance.directory;
+       check string "exact identity source" "shared-catalog"
+         (Skill_source_config.source_id_to_string provenance.identity.source_id));
+    let open Yojson.Safe.Util in
+    let composition_origin =
+      Keeper_effective_tool_surface.to_yojson (Available surface)
+      |> member "tools"
+      |> to_list
+      |> List.find_map (fun tool ->
+        let origin = member "origin" tool in
+        match member "kind" origin with
+        | `String "composition_skill" -> Some origin
+        | _ -> None)
+    in
+    (match composition_origin with
+     | None -> fail "effective-surface JSON omitted composition provenance"
+     | Some origin ->
+       check string "wire source path is exact" "/srv/shared-agent-skills"
+         (origin |> member "skill_provenance" |> member "source" |> member "path"
+          |> to_string);
+       check string "wire identity source is exact" "shared-catalog"
+         (origin |> member "skill_provenance" |> member "identity"
+          |> member "source_id" |> to_string))
 ;;
 
 let test_two_surfaces_have_different_names_and_digests () =
@@ -350,6 +456,10 @@ let () =
             test_projection_names_equal_turn_surface_authority
         ; test_case "different Keeper declarations change names and digest" `Quick
             test_two_surfaces_have_different_names_and_digests
+        ; test_case
+            "external composition preserves snapshot provenance"
+            `Quick
+            test_external_composition_preserves_snapshot_provenance
         ; test_case "instruction skill does not require Read" `Quick
             test_instruction_skill_without_read_is_admitted
         ; test_case "instruction description changes digest" `Quick

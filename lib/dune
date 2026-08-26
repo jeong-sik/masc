@@ -118,6 +118,9 @@
   masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
+  masc.skill_config
+  masc.skill_snapshot
+  masc.skill_snapshot_service
   uri
   tls
   tls-eio

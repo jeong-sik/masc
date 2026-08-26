@@ -69,6 +69,7 @@ type agent_setup =
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
   ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
@@ -100,6 +101,7 @@ val prepare_agent_setup
   -> is_retry:bool
   -> config_root:string
   -> runtime_config_path:string option
+  -> skill_snapshot:Skill_catalog_snapshot.t
   -> trajectory_acc:Trajectory.accumulator option
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)

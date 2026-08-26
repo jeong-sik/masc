@@ -151,7 +151,7 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("external_message_id", message_id);
   ]
 
-let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
+let discord_delivery ~base_dir ~guild_id ~channel_id ~message_id ~author_id :
     (Gate_keeper_backend.connector_delivery, string) result =
   let parent_channel_id = State.parent_channel_of_thread ~channel_id in
   let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
@@ -160,7 +160,19 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
        { Gate_keeper_backend.continuation_channel
        ; surface =
            Surface_ref.Discord
-             { guild_id; channel_id; channel_name = None; parent_channel_id; thread_id }
+             { guild_id
+             ; channel_id
+               (* Recalled, not fetched: this runs on the dispatch path where
+                  the inbound handler has already asked and written it down.
+                  Left as [None] the stored [source] would name the room by id
+                  while the row's own surface named it -- one room, two
+                  answers. *)
+             ; channel_name =
+                 Connector_names.recall ~base_dir ~connector:State.channel
+                   ~scope:Connector_names.Channel ~id:channel_id
+             ; parent_channel_id
+             ; thread_id
+             }
        ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
        ; external_message_id = Some message_id
        ; workspace_id = guild_id
@@ -377,7 +389,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       }
     in
     let outcome =
-      match discord_delivery ~guild_id ~channel_id ~message_id ~author_id with
+      match
+        discord_delivery ~base_dir ~guild_id ~channel_id ~message_id ~author_id
+      with
       | Error detail -> Error (Channel_gate.Internal detail)
       | Ok delivery ->
         Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg

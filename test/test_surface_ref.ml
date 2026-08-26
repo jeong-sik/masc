@@ -132,6 +132,36 @@ let test_invalid_surface_payload_keeps_row () =
           check string "row content survives" "bad surface" bad.content
       | other -> failf "expected 2 lines, got %d" (List.length other))
 
+(* Written and read back. The writer put [channel_name] on the wire before
+   the reader looked for it, so a surface that made a full round trip came
+   back naming the room by its id -- the name was there and then it was not. *)
+let test_a_channel_name_survives_the_round_trip () =
+  List.iter
+    (fun surface ->
+      match
+        Masc.Surface_ref.of_json (Masc.Surface_ref.to_json surface)
+      with
+      | Error detail -> Alcotest.fail detail
+      | Ok decoded ->
+        Alcotest.(check bool)
+          "the decoded surface is the one encoded" true
+          (decoded = surface))
+    [ Masc.Surface_ref.Slack
+        { team_id = Some "T1"
+        ; channel_id = "C1"
+        ; channel_name = Some "kinossam-dev"
+        ; thread_ts = None
+        }
+    ; Masc.Surface_ref.Discord
+        { guild_id = Some "G1"
+        ; channel_id = "C2"
+        ; channel_name = Some "\xec\x9d\xbc\xeb\xb0\x98"
+        ; parent_channel_id = None
+        ; thread_id = None
+        }
+    ]
+;;
+
 let () =
   Random.self_init ();
   run "surface_ref"
@@ -144,6 +174,8 @@ let () =
       ("labels", [ test_case "lane_label goldens" `Quick test_lane_label_goldens ]);
       ( "lane",
         [
+          test_case "a channel name survives the round trip" `Quick
+            test_a_channel_name_survives_the_round_trip;
           test_case "typed write round trips" `Quick
             test_typed_write_round_trips;
           test_case "source-only row does not restore surface" `Quick

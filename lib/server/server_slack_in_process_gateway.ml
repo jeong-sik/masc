@@ -132,8 +132,8 @@ let metadata_bool key value = [ (key, string_of_bool value) ]
    recorder to thread the persisted user line. *)
 let slack_conversation_id ~channel_id = Printf.sprintf "slack:channel:%s" channel_id
 
-let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
-    ~user_name:_ ~ts : (Gate_keeper_backend.connector_delivery, string) result =
+let slack_delivery ~base_dir ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts
+    ~user_id ~user_name:_ ~ts : (Gate_keeper_backend.connector_delivery, string) result =
   Result.map
     (fun continuation_channel ->
        { Gate_keeper_backend.continuation_channel
@@ -141,7 +141,12 @@ let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
            Surface_ref.Slack
              { team_id
              ; channel_id
-             ; channel_name = None
+               (* Recalled, not fetched: the inbound handler has already asked
+                  and written it down. Left as [None] the stored [source] would
+                  name the room by id while the row's own surface named it. *)
+             ; channel_name =
+                 Connector_names.recall ~base_dir ~connector:State.channel
+                   ~scope:Connector_names.Channel ~id:channel_id
              ; thread_ts = Some reply_to_thread_ts
              }
        ; conversation_id = Some (slack_conversation_id ~channel_id)
@@ -352,7 +357,8 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
     in
     let outcome =
       match
-        slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts
+        slack_delivery ~base_dir ~team_id ~channel_id ~thread_ts
+          ~reply_to_thread_ts
           ~user_id ~user_name ~ts
       with
       | Error detail -> Error (Channel_gate.Internal detail)

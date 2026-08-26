@@ -90,7 +90,7 @@ let of_json json =
            {
              guild_id = Json_util.assoc_string_opt "guild_id" json;
              channel_id;
-             channel_name = None;
+             channel_name = Json_util.assoc_string_opt "channel_name" json;
              parent_channel_id = Json_util.assoc_string_opt "parent_channel_id" json;
              thread_id = Json_util.assoc_string_opt "thread_id" json;
            })

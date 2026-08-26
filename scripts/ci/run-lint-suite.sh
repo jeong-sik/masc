@@ -112,6 +112,18 @@ blocking_lints() {
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Branch protection fail-closed fixture" bash scripts/test-main-branch-protection-fail-closed.sh
   run_lint "Feedback-loop metrics fixture" bash scripts/test-feedback-loop-metrics.sh
+  # task-377: the merge audit must keep refusing the PR #30463 shape
+  # (required check CANCELLED/SKIPPED on the merged head), so its self-test
+  # runs on every lint pass, not only when its own file changes.
+  run_lint "Merge audit unfinished-verdict fixture" \
+    python3 scripts/ci/test_check_merge_audit.py
+  # The guard itself, wired where CI can call it. The merge-audit workflow
+  # patch is applied by an operator with workflow scope; this call is what
+  # keeps audit-unwired-audits.sh honest until then — a guard CI cannot
+  # fail is a guard that does not guard (the ratchet failed the first
+  # push of this very branch at 12 vs baseline 11).
+  run_lint "Merge audit guard executable" \
+    python3 scripts/ci/check-merge-audit.py --self-check
 }
 
 blocking_pr_lints() {

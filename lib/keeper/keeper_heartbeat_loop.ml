@@ -78,8 +78,17 @@ type keepalive_scheduling_decision = Keeper_heartbeat_loop_scheduling.keepalive_
 
 let decide_keepalive_scheduling = Keeper_heartbeat_loop_scheduling.decide_keepalive_scheduling
 
-let should_run_turn_after_event_intake ~scheduled ~event_queue_intake_error =
-  scheduled && Option.is_none event_queue_intake_error
+let should_run_turn_after_event_intake
+      ~scheduled
+      ~consumed_stimulus_count
+      ~event_queue_intake_error
+  =
+  scheduled
+  &&
+  match event_queue_intake_error with
+  | None -> true
+  | Some (Stimulus_intake.Transient_board_read _) -> consumed_stimulus_count > 0
+  | Some (Stimulus_intake.Pending_selection_failed _) -> false
 ;;
 
 let provider_timeout_observation_reasons =
@@ -232,35 +241,6 @@ let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name eve
          err)
 ;;
 
-(* The queue entry and the external-attention row are two separate writes. A
-   quarantining turn failure terminalizes the entry, so nothing is left to
-   deliver the row to a Keeper: the wake is edge-triggered (RFC-connector-
-   ambient-attention-wake) and only a *new* ambient message in that conversation
-   arms another stimulus. Without this append the row stays [Recorded] forever
-   and the waiting inventory reports work that no producer will ever pick up.
-   [Quarantined], not [Ignored] — no turn judged this row. *)
-let mark_connector_attention_quarantined_after_turn
-      ~base_path ~keeper_name ~detail event_ids =
-  match event_ids with
-  | [] -> ()
-  | _ :: _ ->
-    (match
-       Keeper_external_attention.mark_quarantined
-         ~base_path
-         ~keeper_name
-         ~event_ids
-         ~reason:(Printf.sprintf "connector_attention_turn_quarantined: %s" detail)
-         ()
-     with
-     | Ok () -> ()
-     | Error err ->
-       Log.Keeper.warn
-         "connector attention mark_quarantined after turn failed keeper=%s events=[%s]: %s"
-         keeper_name
-         (String.concat "," event_ids)
-         err)
-;;
-
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
@@ -336,59 +316,14 @@ let record_compaction_outcome_metric ~keeper_name outcome =
     ()
 ;;
 
-(* Pure liveness policy for a [Cycle.Failed] outcome holding one exact source.
-   A frozen runtime successor keeps that selection bound to the failover walk.
-   Retryable failures rotate to the urgency-lane tail. Deterministic failures
-   move only the source into a durable terminal receipt. An effect-fenced
-   provider failure always moves the exact source to that receipt even when a
-   stale deferred successor exists, because replay could duplicate an external
-   effect. Transcript corruption alone pauses the Keeper because continuing
-   with a structurally invalid history can duplicate or misattribute effects. *)
-type failed_source_disposition =
-  | Preserve_for_deferred_runtime
-  | Defer_to_queue_tail
-  | Quarantine_source of { detail : string }
-
-let failed_source_disposition
-      (failure : Keeper_unified_turn.turn_failure)
-  =
-  match failure.Keeper_unified_turn.source_disposition with
-  | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.route with
-     | Keeper_runtime_failure_route.Exhausted_visible_alive
-         { terminal =
-             ( Keeper_runtime_failure_route.Provider_attempt_effect_fenced
-             | Keeper_runtime_failure_route.Tool_correction_lost )
-         ; detail
-         ; _
-         } -> Quarantine_source { detail }
-     | route ->
-       (match failure.Keeper_unified_turn.deferred_runtime_lane with
-        | Some _ -> Preserve_for_deferred_runtime
-        | None ->
-          (match route with
-           | Keeper_runtime_failure_route.Exhausted_visible_alive
-               { detail; _ } -> Quarantine_source { detail }
-           | Keeper_runtime_failure_route.Retry_after_observed _
-           | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
-;;
-
-(* RFC-0377 batch disposition: the queue action a turn outcome implies for
-   every stimulus admitted into that turn (the primary plus any
-   Connector_attention companions), extracted as a pure function of
-   [cycle_outcome] alone. Before this extraction the decision lived inline
-   in [run_keepalive_turn]'s closure, reachable only through the full Eio
-   ctx + durable-registry harness, so a regression from "ack the whole
-   batch" back to "ack only the primary" would still pass every existing
-   test (nothing exercised the decision directly — see
-   test_keeper_connector_attention_batch_disposition.ml). One turn always
-   produces one disposition applied uniformly to every admitted selection:
-   the outcome is a property of the turn, not of any individual stimulus. *)
+(* The queue records attention that a Keeper must observe, not provider health.
+   A source leaves only after a completed turn has observed the admitted batch.
+   Provider/config/context failures therefore leave every source untouched;
+   otherwise one runtime failure can terminally discard an arbitrary batch of
+   unrelated Board, Schedule, Task, or completion-authority facts. *)
 type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
-  | Batch_quarantine of { detail : string }
-  | Batch_defer of { reason : string }
   | Batch_no_action
 
 let batch_disposition_of_cycle_outcome
@@ -403,21 +338,11 @@ let batch_disposition_of_cycle_outcome
       }
   | Some (Cycle.Manual_compaction_applied _) ->
     Batch_ack_completed { connector_attention_outcome = Attention_ignored }
-  | Some (Cycle.Failed { failure; _ }) ->
-    (match failed_source_disposition failure with
-     | Quarantine_source { detail } -> Batch_quarantine { detail }
-     | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
-     | Preserve_for_deferred_runtime -> Batch_no_action)
-  | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
-    Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
-  | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
-    Batch_quarantine
-      { detail =
-          Keeper_post_turn.compaction_recovery_error_to_string
-            (Keeper_post_turn.No_compaction no_compaction)
-      }
   | Some
-      ( Cycle.Checkpointed _
+      ( Cycle.Failed _
+      | Cycle.Manual_compaction_failed _
+      | Cycle.Manual_compaction_not_applied _
+      | Cycle.Checkpointed _
       | Cycle.Input_required _
       | Cycle.Cancelled _
       | Cycle.Skipped _ )
@@ -428,7 +353,6 @@ let batch_disposition_of_cycle_outcome
 type connector_attention_settlement =
   | Settle_resolved
   | Settle_ignored
-  | Settle_quarantined of { detail : string }
   | Settle_pending_in_queue
 
 let connector_attention_settlement_of_disposition = function
@@ -436,11 +360,9 @@ let connector_attention_settlement_of_disposition = function
     Settle_resolved
   | Batch_ack_completed { connector_attention_outcome = Attention_ignored } ->
     Settle_ignored
-  | Batch_quarantine { detail } -> Settle_quarantined { detail }
-  (* These two leave the queue entry in place, so the turn that finally drains
-     it owns the terminal event. Settling here would retire a row that is still
-     live. *)
-  | Batch_defer _ | Batch_no_action -> Settle_pending_in_queue
+  (* The entry stays pending, so the turn that finally drains it owns the
+     terminal event. Settling here would retire a row that is still live. *)
+  | Batch_no_action -> Settle_pending_in_queue
 ;;
 
 
@@ -650,6 +572,7 @@ let run_keepalive_unified_turn
       let should_run_turn =
         should_run_turn_after_event_intake
           ~scheduled:scheduling.should_run_turn
+          ~consumed_stimulus_count:event_intake.consumed_stimulus_count
           ~event_queue_intake_error:event_intake.event_queue_intake_error
       in
       let verdict_strs =
@@ -883,16 +806,6 @@ let run_keepalive_unified_turn
                followup_detail);
           true
       in
-      let terminalize_failed_selection ~selection ~detail =
-        Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-          ~base_path:ctx.config.base_path
-          meta_after_triage.name
-          ~applied_at:(Time_compat.now ())
-          ~selection
-          ~detail
-        |> record_terminal_selection_result ~label:"turn-attempt terminal"
-        |> ignore
-      in
       let terminalize_completed_selection ~selection =
         Keeper_registry_event_queue.terminalize_pending_turn_completed_result
           ~base_path:ctx.config.base_path
@@ -900,26 +813,6 @@ let run_keepalive_unified_turn
           ~applied_at:(Time_compat.now ())
           ~selection
         |> record_terminal_selection_result ~label:"turn completion"
-      in
-      let defer_selection_to_queue_tail ~selection ~reason =
-        match
-          Keeper_registry_event_queue.defer_pending_result
-            ~base_path:ctx.config.base_path
-            meta_after_triage.name
-            ~selection
-        with
-        | Ok _ ->
-          Log.Keeper.info
-            ~keeper_name:meta_after_triage.name
-            "source moved to queue tail post_id=%s reason=%s"
-            selection.source.post_id
-            reason
-        | Error detail ->
-          record_event_queue_failure
-            (Printf.sprintf
-               "failed to defer source to queue tail: reason=%s detail=%s"
-               reason
-               detail)
       in
       (match !cycle_outcome_ref with
        | Some (Cycle.Failed _)
@@ -957,18 +850,15 @@ let run_keepalive_unified_turn
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name
                  event_ids
-             | Settle_quarantined { detail } ->
-               mark_connector_attention_quarantined_after_turn
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
-                 ~detail
-                 event_ids
              | Settle_pending_in_queue -> ()
            in
            let remove_completed_selections ~settlement =
              let all_acked =
-               List.for_all
-                 (fun selection -> terminalize_completed_selection ~selection)
+               List.fold_left
+                 (fun all_acked selection ->
+                    let acked = terminalize_completed_selection ~selection in
+                    all_acked && acked)
+                 true
                  selections
              in
              stimuli_acked := all_acked;
@@ -982,19 +872,6 @@ let run_keepalive_unified_turn
            in
            match disposition with
            | Batch_ack_completed _ -> remove_completed_selections ~settlement
-           | Batch_quarantine { detail } ->
-             List.iter
-               (fun selection -> terminalize_failed_selection ~selection ~detail)
-               selections;
-             (* The entries are gone from the queue whether or not each receipt
-                committed, and no new stimulus is coming for these rows. A late
-                duplicate terminal event is harmless — the projection keeps the
-                first terminal state — while skipping the append is not. *)
-             settle_connector_attention settlement
-           | Batch_defer { reason } ->
-             List.iter
-               (fun selection -> defer_selection_to_queue_tail ~selection ~reason)
-               selections
            | Batch_no_action -> ());
       (let compaction_outcomes =
          match !cycle_outcome_ref with

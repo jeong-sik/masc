@@ -642,7 +642,7 @@ let is_context_overflow (err : Agent_core.Error.t) : bool =
      mechanical retry will fit. The ordinary consecutive-failure threshold
      bounds it, and the heartbeat quarantines the selected source unless the
      failure carries a deferred runtime lane
-     ([Keeper_heartbeat_loop.failed_source_disposition]).
+     (the heartbeat loop keeps the source pending until a completed turn).
    - 0-byte empty completion: bounded by
      [Keeper_unified_turn_failure]'s per-keeper exemption budget — after
      [empty_completion_exemption_budget] consecutive exempted empty

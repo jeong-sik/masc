@@ -639,6 +639,70 @@ let test_scheduled_wake_renders_schedule_pointer () =
     (contains_sub "never pass it to a Board tool" world_state)
 ;;
 
+let test_repeated_schedule_occurrences_render_as_one_derived_row () =
+  Masc_test_deps.init_unified_tool_registry ();
+  init_runtime_default_for_tests ();
+  let base_wake =
+    match sample_scheduled_wake.event_kind with
+    | WO.Schedule_due wake -> wake
+    | _ -> fail "sample scheduled wake lost its typed payload"
+  in
+  let occurrence index due_at =
+    let occurrence_id = Printf.sprintf "schedule-occurrence:%d" index in
+    { sample_scheduled_wake with
+      post_id = occurrence_id
+    ; event_kind =
+        WO.Schedule_due
+          { base_wake with
+            occurrence_id
+          ; due_at
+          }
+    ; updated_at = due_at
+    }
+  in
+  let obs =
+    let changed_series =
+      let event = occurrence 4 400.0 in
+      match event.event_kind with
+      | WO.Schedule_due wake ->
+        { event with
+          event_kind =
+            WO.Schedule_due
+              { wake with
+                payload_digest = "digest-updated-series"
+              ; message = "updated scheduled work"
+              }
+        }
+      | _ -> fail "schedule occurrence fixture lost its typed payload"
+    in
+    { base_observation with
+      pending_board_events =
+        [ occurrence 1 100.0
+        ; occurrence 2 200.0
+        ; occurrence 3 300.0
+        ; changed_series
+        ]
+    }
+  in
+  let { Masc.Keeper_unified_prompt.world_state; _ } =
+    build_prompt ~meta:minimal_meta obs
+  in
+  check bool "header preserves every due occurrence and exact payload series" true
+    (contains_sub "### Scheduled Wake (4 due across 2 series)" world_state);
+  check bool "one derived row carries the occurrence count" true
+    (contains_sub "occurrence_count=\"3\"" world_state);
+  check bool "derived row carries the first occurrence" true
+    (contains_sub "first_occurrence_id=\"schedule-occurrence:1\"" world_state);
+  check bool "derived row carries the last occurrence" true
+    (contains_sub "last_occurrence_id=\"schedule-occurrence:3\"" world_state);
+  check bool "derived row carries the first due time" true
+    (contains_sub "first_due_at_unix=\"100\"" world_state);
+  check bool "derived row carries the last due time" true
+    (contains_sub "last_due_at_unix=\"300\"" world_state);
+  check bool "updated payload series remains a separate row" true
+    (contains_sub "message=\"updated scheduled work\"" world_state)
+;;
+
 let test_untitled_wake_keeps_pointer_out_of_prose () =
   let wake : Keeper_event_queue.scheduled_wake =
     { occurrence_id = "occurrence-sched-untitled"
@@ -963,12 +1027,9 @@ let test_own_recent_board_posts_show_the_response () =
   check bool "an unanswered post says so rather than omitting the field" true
     (contains_sub "replies=\"0\"" world_state)
 
-(* Board Activity is bounded at the render. The two cases below pin the two
-   halves of that: under the budget nothing changes, over it the heading states
-   what was left out and mentions survive the cut.
-
-   [board_activity_render_budget_rows] is 20; these build 25 so the excess is
-   five rows and the arithmetic in the heading is checkable by hand. *)
+(* Every admitted Board row must reach the prompt. A completed turn ACKs its
+   whole Event Queue batch, so a render-only cap would silently discard the
+   rows above that cap while still recording them as observed. *)
 let board_event_n ?(mention = false) i =
   { sample_board_event with
     post_id = Printf.sprintf "board-post-%02d" i
@@ -990,9 +1051,7 @@ let test_board_activity_under_the_budget_renders_every_row () =
   check bool "the first row is present" true
     (contains_sub "board-post-00" world_state)
 
-let test_board_activity_over_the_budget_says_what_it_left_out () =
-  (* One mention, deliberately the oldest, so keeping it can only be the
-     mention rule and not recency. *)
+let test_board_activity_renders_every_admitted_row () =
   let events =
     board_event_n ~mention:true 0 :: List.init 24 (fun i -> board_event_n (i + 1))
   in
@@ -1000,17 +1059,15 @@ let test_board_activity_over_the_budget_says_what_it_left_out () =
   let { Masc.Keeper_unified_prompt.world_state; _ } =
     build_prompt ~meta:minimal_meta obs
   in
-  check bool "both counts stated" true
-    (contains_sub "### Board Activity (25 new, 20 shown" world_state);
-  check bool "the route to the rest is named" true
-    (contains_sub "masc_board_list" world_state);
-  check bool "the oldest row survives because it is a mention" true
+  check bool "the heading states every admitted row" true
+    (contains_sub "### Board Activity (25 new)" world_state);
+  check bool "there is no hidden-row notice" false
+    (contains_sub "shown" world_state);
+  check bool "the oldest mention is visible" true
     (contains_sub "board-post-00" world_state);
-  check bool "the newest non-mention survives" true
+  check bool "the newest row is visible" true
     (contains_sub "board-post-24" world_state);
-  (* 25 rows, 20 shown: the oldest non-mentions are the five dropped. With the
-     mention taking one slot, recency fills 19, so 01..05 fall out. *)
-  check bool "an oldest non-mention is dropped" false
+  check bool "an old non-mention is visible too" true
     (contains_sub "board-post-01" world_state)
 
 (* The post author is the one participant who never commented on their own
@@ -1160,6 +1217,9 @@ let () =
             "prompt: scheduled wake renders the schedule_id pointer"
             `Quick test_scheduled_wake_renders_schedule_pointer;
           test_case
+            "prompt: repeated schedule occurrences collapse to one derived row"
+            `Quick test_repeated_schedule_occurrences_render_as_one_derived_row;
+          test_case
             "prompt: untitled wake keeps the pointer out of prose"
             `Quick test_untitled_wake_keeps_pointer_out_of_prose;
           test_case
@@ -1182,8 +1242,8 @@ let () =
             "prompt: Board Activity under the budget renders every row"
             `Quick test_board_activity_under_the_budget_renders_every_row;
           test_case
-            "prompt: Board Activity over the budget says what it left out"
-            `Quick test_board_activity_over_the_budget_says_what_it_left_out;
+            "prompt: Board Activity renders every admitted row"
+            `Quick test_board_activity_renders_every_admitted_row;
           test_case
             "prompt: a comment on your own post says who and what"
             `Quick test_a_comment_on_your_own_post_says_who_and_what;

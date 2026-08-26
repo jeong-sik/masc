@@ -1010,11 +1010,10 @@ let select_when_result ~base_path ~keeper_name ~ready =
   | Ok state -> Ok (State.select_when ~ready state)
 ;;
 
-let connector_attention_conversation_batch_result ~base_path ~keeper_name ~primary =
+let pending_selections_result ~base_path ~keeper_name =
   match load_state_result ~base_path ~keeper_name with
   | Error _ as error -> error
-  | Ok state ->
-    Ok (State.connector_attention_conversation_batch ~primary state)
+  | Ok state -> Ok (State.pending_selections state)
 ;;
 
 let validate_pending_selection_result ~base_path ~keeper_name ~selection =

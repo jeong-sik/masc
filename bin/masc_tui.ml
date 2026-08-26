@@ -6402,6 +6402,16 @@ let main () =
   in
   state.view <- Overview;
 
+  (* A theme named in runtime.toml's [tui] section is applied at boot, so the
+     reader's pick survives a restart instead of being re-chosen each session.
+     Absent or unknown, the TUI follows the terminal exactly as before:
+     Theme_choice.apply returns false for a name no scheme carries, and the
+     [when] guard then leaves theme_choice unset. *)
+  (match Masc_tui_config.theme ~base_path with
+   | Some name when Masc_tui_theme_choice.apply name ->
+       state.theme_choice <- Some name
+   | Some _ | None -> ());
+
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's

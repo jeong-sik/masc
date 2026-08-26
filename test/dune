@@ -3217,6 +3217,10 @@
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
 (include stanzas/test_tui_theme_contrast.inc)
+
+(include stanzas/test_tui_file_icon.inc)
+
+(include stanzas/test_tui_config.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)

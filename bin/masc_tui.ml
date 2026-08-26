@@ -3008,7 +3008,16 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                  (List.exists
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
-        | Message_user _ | Message_keeper | Message_autonomous | Message_tool
+        | Message_user _ ->
+            (* A line still waiting in the queue is not in the transcript the
+               server just sent, because it has not been sent yet. Dropping it
+               with the rest would take it off the screen at the exact moment
+               the turn ahead of it settled -- which is when the operator is
+               watching for it to go -- and it would come back only if and when
+               it was dispatched. It is kept until the queue stops holding
+               it. *)
+            Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
+        | Message_keeper | Message_autonomous | Message_tool
         | Message_thinking | Message_memory ->
             false)
       state.msg_history

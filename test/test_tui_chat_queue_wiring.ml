@@ -306,6 +306,28 @@ let test_the_pane_marks_what_is_still_waiting () =
       n
 ;;
 
+(* When a turn settles, the pane reloads the keeper's transcript from the
+   server and drops the rows it is replacing -- every user row for that keeper.
+   A queued line is not in what the server sent, because it has not been sent;
+   dropping it there takes it off the screen at the exact moment the turn ahead
+   of it settles, which is when the operator is watching for it to go. It would
+   come back only if and when it was dispatched, and the lines behind it not at
+   all. So the reload asks the queue before dropping. *)
+let test_a_transcript_reload_keeps_what_is_still_queued () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"bin/masc_tui.ml"
+      ~binding_name:"forget_session_rows_the_transcript_holds"
+      ~callee:"Chat_queue.holds"
+  in
+  if n < 1 then
+    failf
+      "the transcript reload must keep the rows the queue still holds; \
+       Chat_queue.holds is called %d time(s) in \
+       forget_session_rows_the_transcript_holds"
+      n
+;;
+
 (* Staged attachments belong to the line they were staged for. They used to be
    taken at dispatch, so an image attached while a line waited went out with
    whichever line happened to go next -- and the operator had no way to see
@@ -523,6 +545,8 @@ let () =
             test_queueing_puts_the_line_in_the_conversation
         ; test_case "a queued line takes its attachments when it is typed" `Quick
             test_a_queued_line_takes_its_attachments_when_it_is_typed
+        ; test_case "a transcript reload keeps what is still queued" `Quick
+            test_a_transcript_reload_keeps_what_is_still_queued
         ; test_case "cancel and edit take the row with them" `Quick
             test_cancel_and_edit_take_the_row_with_them
         ; test_case "the pane draws every row into its own buffer" `Quick

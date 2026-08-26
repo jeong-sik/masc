@@ -18,7 +18,7 @@ let test_official_document () =
   let decoded =
     Skill_document.decode
       ~directory_name:"pdf-processing"
-      "---\nname: pdf-processing\ndescription: Process PDF files when requested.\nlicense: Apache-2.0\ncompatibility: Requires pdftotext.\nmetadata:\n  author: example-org\n  version: \"1.0\"\nallowed-tools: Read Bash(pdftotext:*)\n---\n# PDF\n\nUse references/spec.md.\n"
+      "---\nname: pdf-processing\ndescription: Process PDF files when requested.\nlicense: Apache-2.0\ncompatibility: Requires pdftotext.\nmetadata:\n  author: example-org\n  version: \"1.0\"\n---\n# PDF\n\nUse references/spec.md.\n"
   in
   check_conformance "conformant" decoded;
   let document = document_exn decoded in
@@ -210,7 +210,7 @@ let test_invalid_optional_values_are_diagnostic () =
   let decoded =
     Skill_document.decode
       ~directory_name:"optional-values"
-      "---\nname: optional-values\ndescription: Diagnose explicit invalid optional values.\nlicense: null\ncompatibility: \"\"\nmetadata: null\nallowed-tools: null\n---\nBody"
+      "---\nname: optional-values\ndescription: Diagnose explicit invalid optional values.\nlicense: null\ncompatibility: \"\"\nmetadata: null\n---\nBody"
   in
   check_conformance "runtime_compatible" decoded;
   let diagnostics = Skill_document.diagnostics decoded in
@@ -233,10 +233,6 @@ let test_invalid_optional_values_are_diagnostic () =
     "null metadata"
     true
     (has_invalid_type Skill_document.Metadata Skill_document.String_mapping);
-  Alcotest.(check bool)
-    "null allowed-tools"
-    true
-    (has_invalid_type Skill_document.Allowed_tools Skill_document.String_value);
   Alcotest.(check bool)
     "empty compatibility"
     true

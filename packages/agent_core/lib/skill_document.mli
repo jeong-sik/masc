@@ -10,7 +10,6 @@ type standard_field =
   | License
   | Compatibility
   | Metadata
-  | Allowed_tools
 
 type field =
   | Standard of standard_field
@@ -105,9 +104,8 @@ val decode : directory_name:string -> string -> load_outcome
     missing description or structurally unreadable frontmatter is
     [Unloadable], because the document cannot participate in discovery.
 
-    The experimental Agent Skills [allowed-tools] key is shape-checked for
-    portable input compatibility and then discarded. It is not part of [t]
-    and carries no runtime or approval semantics. *)
+    Unknown top-level fields are retained as extensions and diagnosed as
+    runtime-compatible rather than silently assigned client semantics. *)
 
 val diagnostics : load_outcome -> diagnostic list
 val conformance_diagnostics : conformance -> diagnostic list

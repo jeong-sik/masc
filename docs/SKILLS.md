@@ -32,15 +32,13 @@ description: Walk the release checklist before shipping.
   없거나 frontmatter 구조를 읽을 수 없을 때만 문서를 거부한다.
 - `metadata.openclaw` 같은 다른 런타임의 네임스페이스도 문서를 막지는 않는다. 편차의
   정확한 이유는 `/api/v1/skills`와 Monitor › Skills에 표시된다.
-- `masc-composition-tool`과 `disable-model-invocation`은 모두 거부한다. composition의
-  존재와 표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지
-  않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark
-  외부 fence로 감싼다.
-- 실험적 `allowed-tools`는 입력 호환을 위해 형식만 확인한 뒤 버린다. 런타임 객체와 공개
-  projection 어디에도 보존하지 않는다.
-  표준의 이 필드는 도구 제한이 아니라 구현체별 사전 승인 힌트다. 이를 이유로 표준 스킬
-  전체를 거부하지도, MASC 권한처럼 표시하지도 않는다. 모든 도구 호출은 기존 MASC 승인
-  게이트만 따른다.
+- `masc-composition-tool`, `disable-model-invocation`, `allowed-tools`는 모두 거부한다.
+  composition의 존재와 표면은 본문 fence 하나가 전부 결정한다. 별도
+  invocation-policy 스위치를 두지 않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용
+  fence 예시는 더 긴 CommonMark 외부 fence로 감싼다.
+- `allowed-tools`는 구현체별 사전 승인 힌트이지 이식 가능한 도구 제한 계약이 아니다.
+  MASC는 이 필드를 받아 놓고 무시하지 않는다. 스킬을 명시적으로 거부하며, 모든 도구
+  호출은 기존 MASC 승인 게이트만 따른다.
 - 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
   제외된 이름을 task가 지명한 경우에만 admission이 typed missing 오류로 막는다. 정확한
   파싱 오류는 `/api/v1/skills`의 `rejections` 또는 `usage.kind = "unparsed"`에 남는다.

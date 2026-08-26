@@ -16,12 +16,30 @@ val callback_path : string
     them: which login a callback belongs to is the state it echoes, and a
     state is unguessable and redeemable once. *)
 
-val declarations_json : unit -> Yojson.Safe.t
+val declarations_json : base_path:string -> Yojson.Safe.t
 (** Every provider declared under [config/identity/], as a screen would list
     them: [{id, label}] for one that reads, [{id, problem}] for one that does
     not. A declaration nobody can read is listed with what is wrong with it,
     because the alternative is an operator seeing a shorter list and no
     reason the provider they came for is missing. *)
+
+val set_client :
+  base_path:string ->
+  provider_id:string ->
+  client_id:string ->
+  client_secret:string option ->
+  (Yojson.Safe.t, string) result
+(** Record an app an operator made themselves.
+
+    For a provider whose authorization server offers no registration
+    endpoint there is no other way in: Slack, GitHub and Figma all publish
+    one client per app and expect the operator to have made it. {!start}
+    already prefers what is on file over registering, so this is the road in.
+
+    One per provider for this install rather than one per Keeper, matching
+    where a registered client is kept.
+
+    The answer says whether a secret is on file and never what it is. *)
 
 val start :
   base_path:string ->

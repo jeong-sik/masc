@@ -51,7 +51,19 @@ let identity_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
 ;;
 
-let declarations_json () =
+(* Whether this install already has a client for a provider, and never which
+   one. A screen showing the list needs to know that an app is on file --
+   otherwise an operator retypes one they already entered -- and has no use
+   for the id or the secret. A directory that cannot be read reports as
+   nothing on file, because the alternative is a screen that refuses to draw
+   over a question it is not asking. *)
+let has_client ~base_path ~provider =
+  match Store.load ~dir:(identity_dir ~base_path) ~provider with
+  | Ok (Some _) -> true
+  | Ok None | Error _ -> false
+;;
+
+let declarations_json ~base_path =
   `List
     (List.map
        (function
@@ -59,10 +71,43 @@ let declarations_json () =
            `Assoc
              [ "id", `String provider.Provider.id
              ; "label", `String provider.Provider.label
+             ; "has_client", `Bool (has_client ~base_path ~provider)
              ]
          | Declarations.Unreadable { id; problem } ->
            `Assoc [ "id", `String id; "problem", `String problem ])
        (Declarations.all ()))
+;;
+
+(* An app an operator made themselves, for a provider that registers none.
+   Kept where a registered one is kept, because it is the same thing arriving
+   by a different road: one per provider for this install, not one per
+   Keeper. A secret is optional -- some providers issue an app without one --
+   and clearing it is saying "this app has none" rather than "leave what is
+   there", so an absent field and an empty one mean the same. *)
+let set_client ~base_path ~provider_id ~client_id ~client_secret =
+  let* provider = provider_of_id provider_id in
+  let trimmed = String.trim client_id in
+  if String.equal trimmed ""
+  then Error "a client id is required"
+  else
+    let client_secret =
+      match client_secret with
+      | Some secret when String.trim secret <> "" -> Some (String.trim secret)
+      | Some _ | None -> None
+    in
+    let* () =
+      Store.save ~dir:(identity_dir ~base_path) ~provider
+        { Store.client_id = trimmed; client_secret }
+    in
+    Ok
+      (`Assoc
+        [ "provider", `String provider.Provider.id
+        ; "provider_label", `String provider.Provider.label
+        ; "client_id", `String trimmed
+          (* Never the secret back. What an operator needs to know is
+             whether one is on file. *)
+        ; "has_client_secret", `Bool (client_secret <> None)
+        ])
 ;;
 
 let start ~base_path ~keeper ~provider_id ~now =

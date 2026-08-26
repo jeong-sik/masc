@@ -1,0 +1,27 @@
+# Slack's remote MCP server.
+#
+# Slack publishes no registration endpoint, so this needs an app made by
+# hand: create a Slack app, then POST its client id and secret to
+# /api/v1/keepers/oauth/client.
+#
+# Measured 2026-08-27: the MCP endpoint refuses an initialize with 401, the
+# 401 names its metadata at the origin, and the authorization server offers
+# S256 and thirty scopes. Its token endpoint is not RFC 6749 shaped -- a
+# rejected code comes back as HTTP 200 with {"ok":false,"error":"..."} --
+# which masc now reads as the refusal it is.
+#
+# Not measured: a completed exchange. Slack issues a refresh token and an
+# expiry only for apps with token rotation turned on, and masc refuses an
+# answer carrying neither. Turn rotation on for the app.
+
+id = "slack"
+label = "Slack"
+mcp_url = "https://mcp.slack.com/mcp"
+
+access_token_env = "SLACK_ACCESS_TOKEN"
+expires_at_env = "SLACK_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.slack/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

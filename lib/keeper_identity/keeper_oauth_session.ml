@@ -28,8 +28,9 @@ let start_error_to_string = function
       issuer
   | No_registration issuer ->
     Printf.sprintf
-      "no client id is configured and %s offers no registration endpoint; \
-       create an app and configure its client id"
+      "no client is configured and %s offers no registration endpoint; make \
+       an app with this provider and post its client id to \
+       /api/v1/keepers/oauth/client"
       issuer
 
 type started = {

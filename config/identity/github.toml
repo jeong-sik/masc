@@ -1,0 +1,24 @@
+# GitHub's remote MCP server.
+#
+# GitHub publishes no registration endpoint, so this needs an OAuth app or
+# GitHub App made by hand: create one, then POST its client id and secret to
+# /api/v1/keepers/oauth/client.
+#
+# Measured 2026-08-27: the MCP endpoint refuses an initialize with 401 and
+# names its metadata, and the authorization server offers S256.
+#
+# Not measured: a completed exchange. GitHub issues an expiry and a refresh
+# token only where the app has token expiration turned on, and masc refuses
+# an answer carrying neither.
+
+id = "github"
+label = "GitHub"
+mcp_url = "https://api.githubcopilot.com/mcp/"
+
+access_token_env = "GITHUB_ACCESS_TOKEN"
+expires_at_env = "GITHUB_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.github/refresh_token"
+
+# Margin, not a copy of a lifetime: the server states its own expiry on every
+# exchange and this only decides how early to go back.
+renew_before_sec = 600

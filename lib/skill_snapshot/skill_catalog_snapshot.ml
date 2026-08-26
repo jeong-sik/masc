@@ -660,8 +660,16 @@ let rejection_to_public_yojson (rejection : rejection) =
 ;;
 
 let config_state_to_public_yojson = function
-  | Configured { revision; _ } ->
-    `Assoc [ "kind", `String "configured"; "revision", `String revision ]
+  | Configured { revision; config } ->
+    `Assoc
+      [ "kind", `String "configured"
+      ; "revision", `String revision
+      ; ( "resource_read_max_bytes"
+        , match config.resource_read_max_bytes with
+          | Some value ->
+            `Int (Skill_source_config.resource_read_max_bytes_to_int value)
+          | None -> `Null )
+      ]
   | Config_rejected { source_revision; diagnostics } ->
     `Assoc
       [ "kind", `String "rejected"

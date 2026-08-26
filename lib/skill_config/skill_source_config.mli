@@ -13,6 +13,9 @@ type access =
 
 type activation_lifetime = Session
 
+type resource_read_max_bytes = private int
+(** Strictly positive configured bound for one deferred Skill resource read. *)
+
 type precedence = Earlier_source_wins
 (** The first configured source containing a usable Skill name is the default
     winner. Later same-name entries remain addressable by exact identity and
@@ -28,6 +31,7 @@ type source = private
 type t = private
   { activation_lifetime : activation_lifetime option
   ; precedence : precedence option
+  ; resource_read_max_bytes : resource_read_max_bytes option
   ; sources : source list
   }
 
@@ -69,6 +73,9 @@ type diagnostic =
   | Missing_precedence
   | Invalid_precedence_type of value_kind
   | Unsupported_precedence of string
+  | Missing_resource_read_max_bytes
+  | Invalid_resource_read_max_bytes_type of value_kind
+  | Non_positive_resource_read_max_bytes of int
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -137,6 +144,7 @@ val resolve :
 
 val source_id_to_string : source_id -> string
 val source_id_of_string : string -> (source_id, string) result
+val resource_read_max_bytes_to_int : resource_read_max_bytes -> int
 val top_level_namespace : string
 val anchor_to_string : anchor -> string
 val access_to_string : access -> string

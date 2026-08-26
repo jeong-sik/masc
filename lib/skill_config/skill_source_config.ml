@@ -10,6 +10,7 @@ type access =
   | Read_write
 
 type activation_lifetime = Session
+type resource_read_max_bytes = int
 type precedence = Earlier_source_wins
 
 type source =
@@ -22,6 +23,7 @@ type source =
 type t =
   { activation_lifetime : activation_lifetime option
   ; precedence : precedence option
+  ; resource_read_max_bytes : resource_read_max_bytes option
   ; sources : source list
   }
 
@@ -63,6 +65,9 @@ type diagnostic =
   | Missing_precedence
   | Invalid_precedence_type of value_kind
   | Unsupported_precedence of string
+  | Missing_resource_read_max_bytes
+  | Invalid_resource_read_max_bytes_type of value_kind
+  | Non_positive_resource_read_max_bytes of int
   | Unexpected_skill_field of string
   | Invalid_sources_type of value_kind
   | Invalid_source_entry_type of
@@ -119,6 +124,8 @@ type resolved_source =
   }
 
 let source_id_to_string id = id
+let resource_read_max_bytes_to_int value = value
+
 let source_id_of_string id =
   if Safe_identifier.is_portable_name id
   then Ok id
@@ -203,6 +210,16 @@ let diagnostic_to_string = function
       (value_kind_to_string actual)
   | Unsupported_precedence value ->
     Printf.sprintf "unsupported Skill source precedence %S" value
+  | Missing_resource_read_max_bytes ->
+    "skills.resource-read-max-bytes is required"
+  | Invalid_resource_read_max_bytes_type actual ->
+    Printf.sprintf
+      "skills.resource-read-max-bytes must be an integer, got %s"
+      (value_kind_to_string actual)
+  | Non_positive_resource_read_max_bytes value ->
+    Printf.sprintf
+      "skills.resource-read-max-bytes must be positive, got %d"
+      value
   | Unexpected_skill_field field ->
     Printf.sprintf "skills has unexpected field %S" field
   | Invalid_sources_type actual ->
@@ -370,6 +387,7 @@ let parse_entry ~index = function
 
 let activation_lifetime_key = top_level_namespace ^ ".activation-lifetime"
 let precedence_key = top_level_namespace ^ ".precedence"
+let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
 let sources_key = top_level_namespace ^ ".sources"
 
 let activation_lifetime ~required doc =
@@ -387,6 +405,16 @@ let precedence ~required doc =
     Some Earlier_source_wins, []
   | Some (Toml_string value) -> None, [ Unsupported_precedence value ]
   | Some value -> None, [ Invalid_precedence_type (value_kind value) ]
+;;
+
+let resource_read_max_bytes ~required doc =
+  match List.assoc_opt resource_read_max_bytes_key doc with
+  | None ->
+    if required then None, [ Missing_resource_read_max_bytes ] else None, []
+  | Some (Keeper_toml_loader.Toml_int value) when value > 0 -> Some value, []
+  | Some (Toml_int value) -> None, [ Non_positive_resource_read_max_bytes value ]
+  | Some value ->
+    None, [ Invalid_resource_read_max_bytes_type (value_kind value) ]
 ;;
 
 let source_entries doc =
@@ -412,7 +440,13 @@ let duplicate_diagnostics indexed_sources =
 
 let parse_doc doc =
   let namespace_prefix = top_level_namespace ^ "." in
-  let known_fields = [ activation_lifetime_key; precedence_key; sources_key ] in
+  let known_fields =
+    [ activation_lifetime_key
+    ; precedence_key
+    ; resource_read_max_bytes_key
+    ; sources_key
+    ]
+  in
   let configured =
     List.exists (fun (key, _) -> String.starts_with ~prefix:namespace_prefix key) doc
   in
@@ -436,6 +470,9 @@ let parse_doc doc =
     activation_lifetime ~required:configured doc
   in
   let precedence, precedence_diagnostics = precedence ~required:configured doc in
+  let resource_read_max_bytes, resource_read_max_bytes_diagnostics =
+    resource_read_max_bytes ~required:configured doc
+  in
   let entries, source_container_diagnostics =
     match source_entries doc with
     | Ok entries -> entries, []
@@ -457,6 +494,7 @@ let parse_doc doc =
     unexpected
     @ lifetime_diagnostics
     @ precedence_diagnostics
+    @ resource_read_max_bytes_diagnostics
     @ source_container_diagnostics
     @ entry_diagnostics
     @ duplicate_diagnostics indexed_sources
@@ -466,6 +504,7 @@ let parse_doc doc =
     Ok
       { activation_lifetime
       ; precedence
+      ; resource_read_max_bytes
       ; sources = List.map snd indexed_sources
       }
   else Error diagnostics
@@ -488,6 +527,10 @@ let to_yojson config =
     [ ( "activation_lifetime"
       , option_string activation_lifetime_to_string config.activation_lifetime )
     ; "precedence", option_string precedence_to_string config.precedence
+    ; ( "resource_read_max_bytes"
+      , match config.resource_read_max_bytes with
+        | Some value -> `Int (resource_read_max_bytes_to_int value)
+        | None -> `Null )
     ; ( "sources"
       , `List
           (List.map

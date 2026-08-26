@@ -45,6 +45,28 @@ let frame_lines buf =
   | "" :: reversed -> List.rev reversed
   | reversed -> List.rev reversed
 
+(* Two already-drawn panes, side by side, one terminal row per line.
+
+   The left pane's own width pads the rows it ran out of. Without that a
+   short list lets the right pane's remaining lines slide to column zero,
+   which reads as the detail having changed panes. Five surfaces had copied
+   this loop; a sixth copy is how the padding rule drifts. *)
+let write_two_panes buf ~left_cols ~left ~right =
+  let blank_left = String.make left_cols ' ' in
+  let rec zip left right =
+    match left, right with
+    | [], [] -> []
+    | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+    | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+    | l :: lt, [] -> l :: zip lt []
+  in
+  List.iter
+    (fun line ->
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n')
+    (zip (frame_lines left) (frame_lines right))
+;;
+
 (* A frame, and what it had to clamp to build itself. The clamp travels beside
    the frame rather than being written into the state mid-draw; see
    [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
@@ -2071,19 +2093,8 @@ let render_board_read (state : state) (list_post : board_post) =
     let scroll =
       board_read_pane state list_post ~rows ~cols:right_cols right_buf
     in
-    let blank_left = String.make left_cols ' ' in
-    let rec zip left right =
-      match left, right with
-      | [], [] -> []
-      | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-      | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-      | l :: lt, [] -> l :: zip lt []
-    in
-    List.iter
-      (fun line ->
-        Buffer.add_string buf line;
-        Buffer.add_char buf '\n')
-      (zip (frame_lines left_buf) (frame_lines right_buf));
+    write_two_panes buf ~left_cols:left_cols ~left:left_buf
+      ~right:right_buf;
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
@@ -4061,19 +4072,8 @@ let render_keeper_detail (state : state) =
       let scroll =
         keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
       in
-      let blank_left = String.make left_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines right_buf));
+      write_two_panes buf ~left_cols:left_cols ~left:left_buf
+        ~right:right_buf;
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -4995,19 +4995,8 @@ let render_keeper_message (state : state) =
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
         state ~rows ~cols:keeper_roster_pane_cols left_buf;
-      let blank_left = String.make keeper_roster_pane_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines chat_buf))
+      write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
+        ~right:chat_buf
     end;
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
@@ -8009,19 +7998,8 @@ let render_code (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane buf cols);
@@ -8157,19 +8135,8 @@ let render_resources (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.resource_focus = Right_pane then content_pane buf cols
    else list_pane buf cols);

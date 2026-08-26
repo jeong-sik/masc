@@ -3569,7 +3569,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
               (match Observation_layout.context_summary observation with
                | Observation_layout.Context_measured observation ->
                    let ratio = observation.ratio in
-                   let pct = ratio *. 100.0 in
+                   let pct =
+                     Float.of_int (Observation_layout.percentage_tenths ratio)
+                     /. 10.0
+                   in
                    let bar_width =
                      Masc_tui_render_schedule.keeper_context_bar_width
                        ~inner_width:inner

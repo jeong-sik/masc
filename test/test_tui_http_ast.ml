@@ -115,15 +115,25 @@ let test_tui_status_colors_use_theme_tokens () =
 let test_tui_ansi_status_helpers_use_theme_tokens () =
   let module_path = "bin/masc_tui_ansi.ml" in
   let raw_status_identifiers =
-    [ "Ansi.red"
+    [ "red"
+    ; "yellow"
+    ; "green"
+    ; "gray"
+    ; "bright_red"
+    ; "bright_yellow"
+    ; "bright_green"
+    ; "bright_black"
+    ; "Ansi.red"
     ; "Ansi.yellow"
     ; "Ansi.green"
+    ; "Ansi.gray"
     ; "Ansi.bright_red"
     ; "Ansi.bright_yellow"
     ; "Ansi.bright_green"
     ; "Masc_tui_theme.Sgr.red"
     ; "Masc_tui_theme.Sgr.yellow"
     ; "Masc_tui_theme.Sgr.green"
+    ; "Masc_tui_theme.Sgr.gray"
     ; "Masc_tui_theme.Sgr.bright_red"
     ; "Masc_tui_theme.Sgr.bright_yellow"
     ; "Masc_tui_theme.Sgr.bright_green"
@@ -133,7 +143,7 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
     (Ast_grep.count_value_bindings ~module_path ~name:"status_color");
   List.iter
     (fun binding_name ->
-      check int (binding_name ^ " does not bypass semantic status tokens") 0
+      check int (binding_name ^ " contains no direct raw status identifier") 0
         (Ast_grep.count_identifiers_outside_calls_in_value_binding ~module_path
            ~binding_name ~callees:[] ~identifiers:raw_status_identifiers))
     [ "priority_indicator"; "ctx_color"; "ctx_bar" ];
@@ -156,9 +166,25 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
     ; "pressure", "Theme.warn"
     ; "danger", "Theme.bad"
     ];
+  check int "context tone reads the shared pressure projection" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"ctx_color"
+       ~callee:"Masc_tui_observation_layout.context_pressure");
   check int "the context bar consumes the shared tone once" 1
     (Ast_grep.count_calls_in_value_binding ~module_path
-       ~binding_name:"ctx_bar" ~callee:"ctx_color")
+       ~binding_name:"ctx_bar" ~callee:"ctx_color");
+  check int "the context bar shares visible percentage rounding" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"ctx_bar"
+       ~callee:"Masc_tui_observation_layout.percentage_tenths");
+  check int "the empty context bar recedes through the palette" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"ctx_bar" ~callee:"Theme.recede");
+  check int "the detail label shares visible percentage rounding" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"keeper_detail_pane"
+       ~callee:"Observation_layout.percentage_tenths")
 ;;
 
 (* The chat pane's role colours draw through the readable path, not out of the
@@ -167,12 +193,9 @@ let test_tui_ansi_status_helpers_use_theme_tokens () =
    tool trail's bright black at 1.69:1 on Nord -- the row an operator scans to
    see what a keeper just did.
 
-   The R8 guard above watches [masc_tui_render.ml] and reserves red, yellow
-   and green. It cannot see this: the mapping lives in [masc_tui_ansi.ml], and
-   cyan, blue and bright black are not reserved there because borders and
-   rules legitimately draw in them. So the check is the other way round --
-   every arm of [origin] reaches a resolved token, and a reverting arm takes
-   one of these counts with it. *)
+   The renderer guard cannot see this mapping because it lives in
+   [masc_tui_ansi.ml], so this focused check requires every arm of [origin] to
+   reach its resolved role token. *)
 let test_chat_roles_draw_through_the_readable_path () =
   List.iter
     (fun callee ->

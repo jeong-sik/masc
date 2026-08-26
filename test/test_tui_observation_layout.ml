@@ -105,6 +105,18 @@ let test_context_summaries () =
           fail "unavailable context became observed")
     reasons
 
+let test_visible_context_percentage_rounding () =
+  let check_projection label ratio percentage pressure =
+    check int (label ^ " visible percentage") percentage
+      (Layout.percentage_tenths ratio);
+    check bool (label ^ " pressure") true
+      (Layout.context_pressure ratio = pressure)
+  in
+  check_projection "49.99% rounds to warning" 0.4999 500 Layout.Pressure;
+  check_projection "49.94% stays quiet" 0.4994 499 Layout.Quiet;
+  check_projection "79.99% rounds to danger" 0.7999 800 Layout.Danger;
+  check_projection "79.94% stays warning" 0.7994 799 Layout.Pressure
+
 let test_context_header_item_is_measured_and_atomic () =
   let measured = observed ~ratio:0.5 ~maximum:200 () in
   check (option string) "exact fit" (Some "Context 50% used")
@@ -133,6 +145,8 @@ let () =
             test_log_rows_keep_stable_columns
         ; test_case "context states remain distinct" `Quick
             test_context_summaries
+        ; test_case "visible context percentage owns rounding" `Quick
+            test_visible_context_percentage_rounding
         ; test_case "context header item is measured and atomic" `Quick
             test_context_header_item_is_measured_and_atomic
         ] )

@@ -1104,7 +1104,52 @@ let test_evicted_history_has_no_image_modality () =
     in
     assert (evicted2 = evicted))
 
+let truncated_json_response ~stop_reason : Agent_core.Types.api_response =
+  (* A reply cut off mid-JSON: the closing quote and brace never arrive, so the
+     structured parse fails. This is what a MaxTokens budget cut produces. *)
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason
+  ; content = [ Agent_core.Types.Text {|{"text":"a red circle on a white backg|} ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let test_vision_default_max_tokens_is_reasoning_sized () =
+  (* Reasoning models count thinking as output tokens; a 4096 cap let the
+     reasoning phase truncate the answer (2026-08-27 MiniMax M3 live probe).
+     Pinned above the ~25000 reasoning-reserve floor so a shrink back is a
+     deliberate, reviewed change rather than silent drift. *)
+  assert (Vt.vision_default_max_tokens = 32768)
+
+let test_truncated_structured_response_reads_as_truncation () =
+  (* mid-JSON parse failure + MaxTokens stop = the budget cut the reply short,
+     not a malformed model. Report the real cause so the remedy (a larger
+     budget) is legible instead of a misleading parser fault. *)
+  (match
+     Vt.outcome_of_response
+       (truncated_json_response ~stop_reason:Agent_core.Types.MaxTokens)
+   with
+   | Vt.Vo_truncated -> ()
+   | _ -> failwith "MaxTokens-cut mid-JSON must classify as Vo_truncated");
+  (* The same broken text with a clean stop is a genuine structured failure. *)
+  (match
+     Vt.outcome_of_response
+       (truncated_json_response ~stop_reason:Agent_core.Types.EndTurn)
+   with
+   | Vt.Vo_invalid_structured_response _ -> ()
+   | _ ->
+     failwith
+       "mid-JSON parse failure with a clean stop must stay \
+        Vo_invalid_structured_response");
+  (* A well-formed reply is unaffected by the reclassification. *)
+  match Vt.outcome_of_response (ok_response "a red circle") with
+  | Vt.Vo_ok text -> assert (text = "a red circle")
+  | _ -> failwith "valid structured JSON must classify as Vo_ok"
+
 let () =
+  test_vision_default_max_tokens_is_reasoning_sized ();
+  test_truncated_structured_response_reads_as_truncation ();
   test_truncated_of_stop_reason ();
   test_message_of_request ();
   test_first_vision_runtime_id_total ();

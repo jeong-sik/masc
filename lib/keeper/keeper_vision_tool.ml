@@ -12,8 +12,22 @@ type complete_fn = Keeper_provider_subcall.complete_fn
    clean; on /v1 the model's reasoning lands in a separate response field and
    never enters the JSON content. The budget must now cover the answer PLUS
    any reasoning the model spends first, since that phase can no longer be
-   suppressed; truncated_of_stop_reason still flags a MaxTokens cut. *)
-let vision_default_max_tokens = 4096
+   suppressed; truncated_of_stop_reason still flags a MaxTokens cut.
+
+   4096 was too small: on a 2026-08-27 live probe a MiniMax M3 Korean image
+   description was cut mid-reply because the reasoning phase drained the
+   budget before the visible answer closed its JSON, so the structured parse
+   failed. This is the documented reasoning-model budget trap. The value now
+   follows published guidance for reasoning models, which count reasoning as
+   output tokens: OpenAI advises reserving >= 25000 output tokens for
+   reasoning plus answer, and DeepSeek-R1's standard generation length is
+   32768. A describe call normally finishes far below this — max_tokens is a
+   ceiling billed only for tokens generated, not a target — so the raise
+   removes the truncation without changing typical cost; the ceiling only
+   bounds a runaway. It stays well under M3's declared output ceiling
+   (128k-512k across providers) and sits at the conservative end of what OSS
+   reasoning-model tooling uses (Aider and Cline cap such models at 64000). *)
+let vision_default_max_tokens = 32768
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
@@ -272,7 +286,16 @@ let vision_text_of_response (response : Agent_core.Types.api_response) =
 
 let outcome_of_response (response : Agent_core.Types.api_response) =
   match vision_text_of_response response with
-  | Error detail -> Vo_invalid_structured_response detail
+  | Error detail ->
+    (* A reply the model truncated mid-JSON fails the structured parse before
+       its text can be read, so vision_text_of_response reports a parse error
+       even though the cause is a MaxTokens cut. Consult the stop reason first:
+       a length cut is truncation (remediation: a larger budget), which we
+       report as such instead of a malformed-reply parser fault that would
+       misdirect the operator. A parse error with a non-length stop reason is
+       a genuine structured failure. *)
+    if truncated_of_stop_reason response.stop_reason then Vo_truncated
+    else Vo_invalid_structured_response detail
   | Ok text ->
     let truncated = truncated_of_stop_reason response.stop_reason in
     (match Va.classify ~truncated ~content:text with

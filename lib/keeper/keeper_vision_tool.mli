@@ -100,6 +100,13 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
+val outcome_of_response : Agent_core.Types.api_response -> vision_outcome
+(** Classify a provider response into a {!vision_outcome}. A reply the model
+    truncated mid-JSON fails the structured parse before its text can be read;
+    when the stop reason is a MaxTokens cut this is reported as [Vo_truncated]
+    (remediation: a larger budget) rather than [Vo_invalid_structured_response],
+    so the operator sees the real cause. Exposed for tests. *)
+
 val run_vision
   :  ?complete:complete_fn
   -> sw:Eio.Switch.t
@@ -113,8 +120,10 @@ val run_vision
 (** The one-shot vision sub-call core (runtime resolution + Provider-boundary
     call + §2.2 classification). Used by {!handle} and by eager ingestion.
     Non-cancellation exceptions are converted to
-    [Vo_provider]; provider success with malformed structured output is
-    [Vo_invalid_structured_response], so eager ingestion can keep the turn alive
+    [Vo_provider]; provider success whose text is malformed structured output
+    is [Vo_invalid_structured_response] — unless the stop reason is a MaxTokens
+    cut, which reads as [Vo_truncated] because the parse only failed on a reply
+    the budget cut short. Either way eager ingestion can keep the turn alive
     with a typed unread placeholder. *)
 
 val handle

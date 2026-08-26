@@ -159,6 +159,37 @@ let test_same_name_different_identity_or_revision_is_distinct () =
   | Ok ledger -> check int "three exact activations" 3 (List.length (Ledger.activations ledger))
 ;;
 
+let test_session_origins_roundtrip () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~revision:'b' ~origin:Ledger.Session_instruction ()
+    ; activation
+        ~revision:'c'
+        ~origin:(Ledger.Session_composition { tool_name = "keeper_compose_review" })
+        ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "session origin was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match
+       List.map (fun (activation : Ledger.activation) -> activation.origin)
+         (Ledger.activations ledger)
+     with
+     | [ Ledger.Session_instruction
+       ; Ledger.Session_composition { tool_name }
+       ] ->
+       check string "composition tool" "keeper_compose_review" tool_name
+     | _ -> fail "session origins did not survive durable roundtrip")
+;;
+
 let test_corrupt_ledger_is_typed () =
   with_session @@ fun config trace_id session_dir ->
   let path = Filename.concat session_dir "skill-activations.json" in
@@ -166,7 +197,9 @@ let test_corrupt_ledger_is_typed () =
   output_string channel "not-json";
   close_out channel;
   match Ledger.load ~config ~trace_id with
-  | Error (Ledger.Decode_failed _) -> ()
+  | Error (Ledger.Decode_failed _ as error) ->
+    check string "typed cause code" "decode_failed.expected_object"
+      (Ledger.store_error_code error)
   | Error error ->
     fail ("corrupt ledger returned the wrong typed error: " ^ Ledger.store_error_to_string error)
   | Ok _ -> fail "corrupt ledger loaded"
@@ -350,6 +383,32 @@ let test_revision_binds_workspace_and_trace () =
                (Ledger.ledger_revision_to_string another_workspace))))
 ;;
 
+let test_projection_decoder_reuses_all_ledger_invariants () =
+  with_session @@ fun config trace _session_dir ->
+  let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
+  let ledger = Ledger.empty ~workspace_root ~trace_id:trace in
+  let json = Ledger.to_yojson ledger in
+  (match Ledger.of_projection_yojson json with
+   | Error error -> failf "canonical projection rejected: %s" (Ledger.decode_error_code error)
+   | Ok decoded ->
+     check string "workspace" (Ledger.workspace_key ledger)
+       (Ledger.workspace_key decoded);
+     check string "session"
+       (Keeper_id.Trace_id.to_string trace)
+       (Ledger.session_id decoded |> Keeper_id.Trace_id.to_string));
+  let invalid_workspace =
+    match json with
+    | `Assoc fields ->
+      `Assoc (("workspace_key", `String "not-a-digest")
+              :: List.remove_assoc "workspace_key" fields)
+    | other -> other
+  in
+  match Ledger.of_projection_yojson invalid_workspace with
+  | Error (Ledger.Invalid_workspace_key _) -> ()
+  | Error _ -> fail "invalid projection workspace returned wrong error"
+  | Ok _ -> fail "invalid projection workspace was accepted"
+;;
+
 let () =
   run
     "keeper skill activation ledger"
@@ -358,6 +417,8 @@ let () =
             test_empty_record_and_idempotent_readback
         ; test_case "exact identity and revision form the dedupe key" `Quick
             test_same_name_different_identity_or_revision_is_distinct
+        ; test_case "session origins survive durable roundtrip" `Quick
+            test_session_origins_roundtrip
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
         ; test_case "copied ledger is bound to its trace" `Quick
             test_copied_ledger_is_rejected_by_session_identity
@@ -375,6 +436,8 @@ let () =
             test_record_rejects_another_trace
         ; test_case "revision binds workspace and trace" `Quick
             test_revision_binds_workspace_and_trace
+        ; test_case "projection decoder reuses all ledger invariants" `Quick
+            test_projection_decoder_reuses_all_ledger_invariants
         ] )
     ]
 ;;

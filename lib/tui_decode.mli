@@ -198,11 +198,16 @@ type effective_tool = {
   et_skill_source : string option;
 }
 
+type effective_tool_delivery =
+  | Effective_tools_delivered
+  | Effective_tools_suppressed_runtime_unsupported
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
       ets_runtime_id : string;
       ets_official_client_kind : string;
+      ets_tool_delivery : effective_tool_delivery;
       ets_native_posture : string option;
       ets_tool_groups : string list;
       ets_instruction_skills : Skill_reference.t list;
@@ -222,12 +227,25 @@ type effective_tool_surface =
     }
   | Effective_surface_warming of { ets_keeper_name : string }
 
+type skill_activation_projection =
+  | Skill_activations_available of {
+      sap_keeper_name : string;
+      sap_ledger : Keeper_skill_activation_ledger.t;
+    }
+  | Skill_activations_no_session of { sap_keeper_name : string }
+  | Skill_activations_unavailable of {
+      sap_keeper_name : string;
+      sap_reason : string;
+      sap_detail : string;
+    }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
       (** Whether the count above is an answer. *)
   ts_effective : effective_tool_surface option;
+  ts_skill_activations : skill_activation_projection option;
 }
 
 (** A connector the gate can deliver through. *)

@@ -4,10 +4,12 @@ type ledger_revision = private string
 
 type origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Session_instruction
   | Task_composition of
       { task_id : Keeper_id.Task_id.t
       ; tool_name : string
       }
+  | Session_composition of { tool_name : string }
 
 type activation = private
   { identity : Skill_reference.identity
@@ -41,6 +43,8 @@ type decode_error =
   | Invalid_package_id of Skill_reference.package_id_error
   | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_workspace_key of Skill_catalog_snapshot.revision_error
+  | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
   | Invalid_tool_name of string
@@ -61,11 +65,15 @@ type store_error =
   | Readback_mismatch
 
 val store_error_to_string : store_error -> string
+val store_error_code : store_error -> string
+val decode_error_code : decode_error -> string
 
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activations : t -> activation list
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
+val workspace_key : t -> string
+val session_id : t -> Keeper_id.Trace_id.t
 
 val make_activation :
   identity:Skill_reference.identity ->
@@ -77,6 +85,11 @@ val make_activation :
   (activation, decode_error) result
 
 val to_yojson : t -> Yojson.Safe.t
+val of_projection_yojson : Yojson.Safe.t -> (t, decode_error) result
+(** Strictly decode the self-contained dashboard projection. This verifies the
+    schema, exact fields, typed ids, activation invariants, uniqueness, and
+    derived ledger revision. It does not assert which workspace requested the
+    projection; callers with that authority use {!of_yojson}. *)
 val of_yojson :
   expected_workspace_root:string ->
   expected_trace_id:Keeper_id.Trace_id.t ->

@@ -242,7 +242,7 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
-      ~(task_skill_references : Skill_reference.t list)
+      ~(task_skill_scope : Keeper_task_skill_turn.task_scope)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -294,6 +294,9 @@ let prepare_agent_setup
              "tool result arrived before the resolved runtime attempt owner was observed")
       on_tool_result_ready
   in
+  let task_skill_references =
+    Keeper_task_skill_turn.references task_skill_scope
+  in
   let* task_skill_selection =
     Keeper_task_skill_turn.resolve
       ~snapshot:skill_snapshot
@@ -307,6 +310,19 @@ let prepare_agent_setup
          , selected.skill.description
          , selected.skill.body ))
        task_skill_selection.selected
+  in
+  let* skill_activation_context =
+    Keeper_skill_activation_recorder.make
+      ~trace_id:meta.runtime.trace_id
+      ~turn_ref:
+        (Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~absolute_turn:keeper_turn_id)
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+      ~task_scope:task_skill_scope
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal
+           (Keeper_skill_activation_recorder.error_to_string error))
   in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
@@ -395,6 +411,7 @@ let prepare_agent_setup
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
       ?composition_plan_index
       ~task_instruction_skills
+      ~skill_activation_context
       ~turn_ctx_cell
       ()
   in

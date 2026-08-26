@@ -102,7 +102,7 @@ val prepare_agent_setup
   -> config_root:string
   -> runtime_config_path:string option
   -> skill_snapshot:Skill_catalog_snapshot.t
-  -> task_skill_references:Skill_reference.t list
+  -> task_skill_scope:Keeper_task_skill_turn.task_scope
        (** Exact refs captured with the current-task observation before any
            provider attempt. Retries reuse this list and [skill_snapshot]. *)
   -> trajectory_acc:Trajectory.accumulator option

@@ -5,10 +5,12 @@ type workspace_key = string
 
 type origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Session_instruction
   | Task_composition of
       { task_id : Keeper_id.Task_id.t
       ; tool_name : string
       }
+  | Session_composition of { tool_name : string }
 
 type activation =
   { identity : Skill_reference.identity
@@ -47,6 +49,8 @@ type decode_error =
   | Invalid_package_id of Skill_reference.package_id_error
   | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_workspace_key of Skill_catalog_snapshot.revision_error
+  | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
   | Invalid_tool_name of string
@@ -66,6 +70,40 @@ type store_error =
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
+let decode_error_code = function
+  | Expected_object _ -> "expected_object"
+  | Missing_string _ -> "missing_string"
+  | Duplicate_field _ -> "duplicate_field"
+  | Unexpected_field _ -> "unexpected_field"
+  | Unsupported_schema _ -> "unsupported_schema"
+  | Invalid_source_id _ -> "invalid_source_id"
+  | Invalid_skill_name _ -> "invalid_skill_name"
+  | Invalid_package_id _ -> "invalid_package_id"
+  | Invalid_content_revision _ -> "invalid_content_revision"
+  | Invalid_snapshot_revision _ -> "invalid_snapshot_revision"
+  | Invalid_workspace_key _ -> "invalid_workspace_key"
+  | Invalid_session_id _ -> "invalid_session_id"
+  | Invalid_origin_kind _ -> "invalid_origin_kind"
+  | Invalid_task_id _ -> "invalid_task_id"
+  | Invalid_tool_name _ -> "invalid_tool_name"
+  | Invalid_turn_ref _ -> "invalid_turn_ref"
+  | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
+  | Invalid_activated_at _ -> "invalid_activated_at"
+  | Duplicate_exact_activation -> "duplicate_exact_activation"
+  | Session_id_mismatch -> "session_id_mismatch"
+  | Workspace_key_mismatch -> "workspace_key_mismatch"
+  | Invalid_ledger_revision _ -> "invalid_ledger_revision"
+  | Ledger_revision_mismatch -> "ledger_revision_mismatch"
+;;
+
+let store_error_code = function
+  | Lock_failed _ -> "lock_failed"
+  | Read_failed _ -> "read_failed"
+  | Decode_failed error -> "decode_failed." ^ decode_error_code error
+  | Write_failed _ -> "write_failed"
+  | Readback_mismatch -> "readback_mismatch"
+;;
+
 let store_error_to_string = function
   | Lock_failed detail -> "lock failed: " ^ detail
   | Read_failed error ->
@@ -81,6 +119,8 @@ let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let revision ledger = ledger.revision
 let ledger_revision_to_string revision = revision
+let workspace_key ledger = ledger.workspace_key
+let session_id ledger = ledger.session_id
 
 let make_activation
       ~(identity : Skill_reference.identity)
@@ -102,8 +142,9 @@ let make_activation
   in
   let origin_valid =
     match origin with
-    | Task_instruction _ -> Ok ()
-    | Task_composition { tool_name; _ } ->
+    | Task_instruction _ | Session_instruction -> Ok ()
+    | Task_composition { tool_name; _ }
+    | Session_composition { tool_name } ->
       if Safe_identifier.is_portable_name tool_name
       then Ok ()
       else Error (Invalid_tool_name tool_name)
@@ -135,10 +176,17 @@ let origin_to_yojson = function
       [ "kind", `String "task_instruction"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
       ]
+  | Session_instruction ->
+    `Assoc [ "kind", `String "session_instruction" ]
   | Task_composition { task_id; tool_name } ->
     `Assoc
       [ "kind", `String "task_composition"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
+      ; "tool_name", `String tool_name
+      ]
+  | Session_composition { tool_name } ->
+    `Assoc
+      [ "kind", `String "session_composition"
       ; "tool_name", `String tool_name
       ]
 ;;
@@ -261,23 +309,40 @@ let decode_origin json =
         ~object_name:"origin"
         ~allowed:[ "kind"; "task_id" ]
         fields
+    | "session_instruction" ->
+      exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
     | "task_composition" ->
       exact_fields
         ~object_name:"origin"
         ~allowed:[ "kind"; "task_id"; "tool_name" ]
         fields
+    | "session_composition" ->
+      exact_fields
+        ~object_name:"origin"
+        ~allowed:[ "kind"; "tool_name" ]
+        fields
     | kind -> Error (Invalid_origin_kind kind)
   in
-  let* task_id_text = string_field "task_id" fields in
-  let* task_id =
-    Keeper_id.Task_id.of_string task_id_text
-    |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
-  in
   match kind with
-  | "task_instruction" -> Ok (Task_instruction { task_id })
+  | "task_instruction" ->
+    let* task_id_text = string_field "task_id" fields in
+    let* task_id =
+      Keeper_id.Task_id.of_string task_id_text
+      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
+    in
+    Ok (Task_instruction { task_id })
+  | "session_instruction" -> Ok Session_instruction
   | "task_composition" ->
+    let* task_id_text = string_field "task_id" fields in
+    let* task_id =
+      Keeper_id.Task_id.of_string task_id_text
+      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
+    in
     let* tool_name = string_field "tool_name" fields in
     Ok (Task_composition { task_id; tool_name })
+  | "session_composition" ->
+    let* tool_name = string_field "tool_name" fields in
+    Ok (Session_composition { tool_name })
   | kind -> Error (Invalid_origin_kind kind)
 ;;
 
@@ -354,7 +419,7 @@ let exact_key_equal left right =
        right.content_revision
 ;;
 
-let of_yojson ~expected_workspace_root ~expected_trace_id json =
+let of_projection_yojson json =
   let* fields = object_field "ledger" json in
   let* () =
     exact_fields
@@ -369,17 +434,15 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
     else Error (Unsupported_schema observed_schema)
   in
   let* session_id = string_field "session_id" fields in
-  let* () =
-    if String.equal session_id (Keeper_id.Trace_id.to_string expected_trace_id)
-    then Ok ()
-    else Error Session_id_mismatch
+  let* session_id =
+    Keeper_id.Trace_id.of_string session_id
+    |> Result.map_error (fun _ -> Invalid_session_id session_id)
   in
-  let expected_workspace_key = workspace_key_of_root expected_workspace_root in
   let* workspace_key = string_field "workspace_key" fields in
   let* () =
-    if String.equal workspace_key expected_workspace_key
-    then Ok ()
-    else Error Workspace_key_mismatch
+    Skill_catalog_snapshot.snapshot_revision_of_string workspace_key
+    |> Result.map ignore
+    |> Result.map_error (fun error -> Invalid_workspace_key error)
   in
   let* declared_revision = string_field "revision" fields in
   let* () =
@@ -393,7 +456,7 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
       List.fold_left
         (fun result value ->
            let* reversed = result in
-           let* activation = decode_activation ~expected_trace_id value in
+           let* activation = decode_activation ~expected_trace_id:session_id value in
            Ok (activation :: reversed))
         (Ok [])
         values
@@ -410,13 +473,26 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
   let* () = ensure_unique activations in
   let ledger =
     make
-      ~workspace_key:expected_workspace_key
-      ~session_id:expected_trace_id
+      ~workspace_key
+      ~session_id
       activations
   in
   if String.equal ledger.revision declared_revision
   then Ok ledger
   else Error Ledger_revision_mismatch
+;;
+
+let of_yojson ~expected_workspace_root ~expected_trace_id json =
+  let* ledger = of_projection_yojson json in
+  let* () =
+    if Keeper_id.Trace_id.equal ledger.session_id expected_trace_id
+    then Ok ()
+    else Error Session_id_mismatch
+  in
+  let expected_workspace_key = workspace_key_of_root expected_workspace_root in
+  if String.equal ledger.workspace_key expected_workspace_key
+  then Ok ledger
+  else Error Workspace_key_mismatch
 ;;
 
 let ledger_path session_dir = Filename.concat session_dir filename

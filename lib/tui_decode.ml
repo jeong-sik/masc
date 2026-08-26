@@ -1457,11 +1457,16 @@ type effective_tool = {
   et_skill_source : string option;
 }
 
+type effective_tool_delivery =
+  | Effective_tools_delivered
+  | Effective_tools_suppressed_runtime_unsupported
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
       ets_runtime_id : string;
       ets_official_client_kind : string;
+      ets_tool_delivery : effective_tool_delivery;
       ets_native_posture : string option;
       ets_tool_groups : string list;
       ets_instruction_skills : Skill_reference.t list;
@@ -1481,11 +1486,24 @@ type effective_tool_surface =
     }
   | Effective_surface_warming of { ets_keeper_name : string }
 
+type skill_activation_projection =
+  | Skill_activations_available of
+      { sap_keeper_name : string
+      ; sap_ledger : Keeper_skill_activation_ledger.t
+      }
+  | Skill_activations_no_session of { sap_keeper_name : string }
+  | Skill_activations_unavailable of
+      { sap_keeper_name : string
+      ; sap_reason : string
+      ; sap_detail : string
+      }
+
 type tool_snapshot = {
   ts_tools : tool_entry list;
   ts_count : int;
   ts_freshness : inventory_freshness;
   ts_effective : effective_tool_surface option;
+  ts_skill_activations : skill_activation_projection option;
 }
 
 type connector = {
@@ -1705,6 +1723,20 @@ let decode_skill_reference_list json field =
   | Ok references -> Ok references
   | Error _ -> Error (Printf.sprintf "%s is not a canonical Skill reference list" field)
 
+let decode_effective_tool_delivery json =
+  let* status = required_string_field json "status" in
+  match status with
+  | "delivered" -> Ok Effective_tools_delivered
+  | "suppressed" ->
+      let* reason = required_string_field json "reason" in
+      (match reason with
+       | "runtime_tools_unsupported" ->
+         Ok Effective_tools_suppressed_runtime_unsupported
+       | unknown ->
+         Error (Printf.sprintf "tool_delivery.reason has unknown value %S" unknown))
+  | unknown ->
+      Error (Printf.sprintf "tool_delivery.status has unknown value %S" unknown)
+
 let decode_effective_tool_surface json =
   let* status = required_string_field json "status" in
   let* ets_keeper_name = required_string_field json "keeper_name" in
@@ -1721,6 +1753,8 @@ let decode_effective_tool_surface json =
       let* ets_official_client_kind =
         required_string_field json "official_client_kind"
       in
+      let* tool_delivery = required_object_field json "tool_delivery" in
+      let* ets_tool_delivery = decode_effective_tool_delivery tool_delivery in
       let* ets_native_posture = optional_string_field json "native_posture" in
       let* ets_tool_groups = decode_string_name_list json "tool_groups" in
       let* ets_skills_left_out =
@@ -1745,6 +1779,7 @@ let decode_effective_tool_surface json =
            { ets_keeper_name;
              ets_runtime_id;
              ets_official_client_kind;
+             ets_tool_delivery;
              ets_native_posture;
              ets_tool_groups;
              ets_instruction_skills;
@@ -1757,6 +1792,32 @@ let decode_effective_tool_surface json =
       Error
         (Printf.sprintf
            "effective_keeper_surface.status has unknown value %S" unknown)
+
+let decode_skill_activation_ledger ~keeper_name json =
+  Keeper_skill_activation_ledger.of_projection_yojson json
+  |> Result.map (fun sap_ledger ->
+    Skill_activations_available
+      { sap_keeper_name = keeper_name; sap_ledger })
+  |> Result.map_error (fun error ->
+    "skill activation ledger is invalid: "
+    ^ Keeper_skill_activation_ledger.decode_error_code error)
+
+let decode_skill_activation_projection json =
+  let* status = required_string_field json "status" in
+  let* sap_keeper_name = required_string_field json "keeper_name" in
+  match status with
+  | "available" ->
+      let* ledger = required_object_field json "ledger" in
+      decode_skill_activation_ledger ~keeper_name:sap_keeper_name ledger
+  | "no_session" -> Ok (Skill_activations_no_session { sap_keeper_name })
+  | "unavailable" ->
+      let* sap_reason = required_string_field json "reason" in
+      let* sap_detail = required_string_field json "detail" in
+      Ok
+        (Skill_activations_unavailable
+           { sap_keeper_name; sap_reason; sap_detail })
+  | unknown ->
+      Error (Printf.sprintf "skill_activations.status has unknown value %S" unknown)
 
 let decode_tool_snapshot json =
   (* The tools envelope carries config and runtime resolution beside the
@@ -1775,13 +1836,29 @@ let decode_tool_snapshot json =
   let ts_freshness =
     match warming with Some true -> Warming | Some false | None -> Settled
   in
-  let* effective_json = optional_object_field json "effective_keeper_surface" in
+  let* effective_json = required_member json "effective_keeper_surface" in
   let* ts_effective =
     match effective_json with
-    | None -> Ok None
-    | Some value -> Result.map Option.some (decode_effective_tool_surface value)
+    | `Null -> Ok None
+    | `Assoc _ as value ->
+        Result.map Option.some (decode_effective_tool_surface value)
+    | bad -> field_type_error "effective_keeper_surface" "an object or null" bad
   in
-  Ok { ts_tools; ts_count; ts_freshness; ts_effective }
+  let* skill_activations_json = required_member json "skill_activations" in
+  let* ts_skill_activations =
+    match skill_activations_json with
+    | `Null -> Ok None
+    | `Assoc _ as value ->
+        Result.map Option.some (decode_skill_activation_projection value)
+    | bad -> field_type_error "skill_activations" "an object or null" bad
+  in
+  Ok
+    { ts_tools
+    ; ts_count
+    ; ts_freshness
+    ; ts_effective
+    ; ts_skill_activations
+    }
 
 let decode_connector json =
   let* cn_id = required_string_field json "connector_id" in

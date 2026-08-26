@@ -26,6 +26,16 @@ open Masc
 
 module Policy = Keeper_tool_approval_policy
 
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+  | Unix.S_SOCK -> Unix.unlink path
+;;
+
 let with_publication_recovery_registry ~registry_root f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -91,22 +101,55 @@ value = {}
     name name name execution
 ;;
 
-let skill_catalog () =
-  match
-    Keeper_skill_catalog.partition_documents
-      [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
-      ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
-      ; ( "gate-instruction"
-          (* An instruction skill puts [keeper_skill] on the surface. It is a
-             third shape the policy has to place, and it reaches the bundle
-             the same way the composition ones do. *)
-        , "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n" )
-      ]
-  with
-  | catalog, [] -> catalog
-  | _, { error = e; _ } :: _ ->
-    failf "the gate's own skill fixtures must parse: %s"
-      (Keeper_skill_catalog.error_to_string e)
+let instruction_document =
+  "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
+;;
+
+let skill_snapshot_and_catalog () =
+  let source_config =
+    match
+      Skill_source_config.parse_text
+        "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n[[skills.sources]]\nid = \"bundle-fixture\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
+    with
+    | Ok config -> config
+    | Error _ -> fail "bundle Skill source config was rejected"
+  in
+  let source =
+    match source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "bundle Skill source count changed"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let documents =
+    [ "gate-inline", composition_skill ~name:"gate-inline" ~execution:"inline"
+    ; "gate-async", composition_skill ~name:"gate-async" ~execution:"async"
+    ; "gate-instruction", instruction_document
+    ]
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/workspace/skills"
+          ; candidates = List.length documents
+          }
+    ; candidates =
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config:source_config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "bundle Skill snapshot was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
+  | catalog, [] -> snapshot, catalog
+  | _, _ :: _ -> fail "bundle Skill snapshot projection was rejected"
 ;;
 
 let instruction_reference () =
@@ -120,9 +163,6 @@ let instruction_reference () =
     | Ok package_id -> package_id
     | Error _ -> fail "invalid instruction fixture package"
   in
-  let source_text =
-    "---\nname: gate-instruction\ndescription: what the gate reads\n---\n\nbody\n"
-  in
   Skill_reference.make
     ~identity:
       (Skill_reference.make_identity
@@ -130,7 +170,7 @@ let instruction_reference () =
          ~package_id
          ~name:"gate-instruction")
     ~content_revision:
-      (Skill_reference.content_revision_of_source_text source_text)
+      (Skill_reference.content_revision_of_source_text instruction_document)
 ;;
 
 let contains ~needle haystack =
@@ -191,7 +231,29 @@ audience = "api.atlassian.com"
     .Keeper_identity_tools.offered
 ;;
 
-let with_bundle_tools f =
+let snapshot_reference snapshot name =
+  match Skill_catalog_snapshot.find_effective_by_name snapshot name with
+  | Some entry -> Skill_catalog_snapshot.entry_reference entry
+  | None -> failf "exact snapshot reference %s missing" name
+;;
+
+let assert_exact_activation snapshot expected
+      (activation : Keeper_skill_activation_ledger.activation)
+  =
+  let observed =
+    Skill_reference.make
+      ~identity:activation.identity
+      ~content_revision:activation.content_revision
+  in
+  check bool "exact identity and content revision" true
+    (Skill_reference.equal expected observed);
+  check bool "exact frozen snapshot revision" true
+    (Skill_catalog_snapshot.equal_snapshot_revision
+       (Skill_catalog_snapshot.snapshot_revision snapshot)
+       activation.snapshot_revision)
+;;
+
+let with_bundle_tools ?(record_activations = true) f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
     Filename.concat
@@ -200,10 +262,39 @@ let with_bundle_tools f =
   in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect
-    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    ~finally:(fun () -> if Sys.file_exists dir then remove_tree dir)
     (fun () ->
        let config = Workspace.default_config dir in
        let meta = make_meta ~name:"bundle-classifiable" () in
+       let skill_snapshot, skill_catalog = skill_snapshot_and_catalog () in
+       let trace_id = meta.runtime.trace_id in
+       let session_dir =
+         Keeper_fs.keeper_session_dir
+           config
+           (Keeper_id.Trace_id.to_string trace_id)
+       in
+       Unix.mkdir session_dir 0o700;
+       let reference = instruction_reference () in
+       let snapshot_revision =
+         Skill_catalog_snapshot.snapshot_revision skill_snapshot
+       in
+       let skill_activation_context =
+         match
+           Keeper_skill_activation_recorder.make
+             ~trace_id
+             ~turn_ref:
+               (Ids.Turn_ref.make
+                  ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+                  ~absolute_turn:1)
+             ~snapshot_revision
+             ~task_scope:
+               (Keeper_task_skill_turn.Task
+                  { task_id = "task-001"; references = [ reference ] })
+         with
+         | Ok context -> context
+         | Error error ->
+           fail (Keeper_skill_activation_recorder.error_to_string error)
+       in
        let ctx_snapshot =
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
@@ -223,20 +314,24 @@ let with_bundle_tools f =
            ~meta
            ~publication_recovery
            ~ctx_snapshot
-           ~skill_catalog:(skill_catalog ())
+           ~skill_catalog
            ~identity_tools:(identity_tools ~base_path:dir)
            ~composition_plan_index
            ~task_instruction_skills:
-             [ instruction_reference (), "what the gate reads", "body" ]
+             [ reference, "what the gate reads", "body" ]
+           ?skill_activation_context:
+             (if record_activations then Some skill_activation_context else None)
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () ->
-         f composition_plan_index bundle.tools))
+         f config meta skill_snapshot composition_plan_index bundle.tools))
 ;;
 
-let with_bundle f = with_bundle_tools (fun composition_plan_index tools ->
+let with_bundle f =
+  with_bundle_tools
+  @@ fun _config _meta _skill_snapshot composition_plan_index tools ->
   f composition_plan_index
-    (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
+    (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools)
 ;;
 
 (* The handler is the tool. Reading only its schema would let a tool that
@@ -245,6 +340,82 @@ let run_tool (tool : Agent_core.Tool.t) input =
   match tool.handler (Agent_core.Tool.Execution_env.create ()) input with
   | Ok output -> output.Agent_core.Llm_provider.Types.content
   | Error err -> err.Agent_core.Llm_provider.Types.message
+;;
+
+let run_composition_tool ?expected_failure (tool : Agent_core.Tool.t) =
+  let invocation =
+    Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"bundle-composition-activation"
+      ~turn:1
+      ~schedule:
+        { planned_index = 0
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_core.Tool_contract.Serial
+        }
+      ~completion:(Agent_core.Tool.completion tool)
+  in
+  match Agent_core.Tool.execute ~invocation tool (`Assoc []), expected_failure with
+  | Ok _, None -> ()
+  | Error error, Some expected ->
+    check bool "expected submission failure" true
+      (contains ~needle:expected error.Agent_core.Types.message)
+  | Ok _, Some expected -> failf "expected %s failure" expected
+  | Error error, None -> fail error.Agent_core.Types.message
+;;
+
+let test_composition_activation_is_durable ?expected_failure ~skill_name tool_name =
+  with_bundle_tools (fun config meta snapshot _composition_plan_index tools ->
+    let tool =
+      match
+        List.find_opt
+          (fun (tool : Agent_core.Tool.t) ->
+             String.equal tool.schema.name tool_name)
+          tools
+      with
+      | Some tool -> tool
+      | None -> failf "%s missing from exact snapshot bundle" tool_name
+    in
+    run_composition_tool ?expected_failure tool;
+    let ledger =
+      match
+        Keeper_skill_activation_ledger.load
+          ~config
+          ~trace_id:meta.runtime.trace_id
+      with
+      | Ok ledger -> ledger
+      | Error error ->
+        fail (Keeper_skill_activation_ledger.store_error_to_string error)
+    in
+    match Keeper_skill_activation_ledger.activations ledger with
+    | [ activation ] ->
+      assert_exact_activation
+        snapshot
+        (snapshot_reference snapshot skill_name)
+        activation;
+      (match activation.origin with
+       | Keeper_skill_activation_ledger.Session_composition
+           { tool_name = observed } ->
+         check string "exact composition origin" tool_name observed
+       | Keeper_skill_activation_ledger.Task_composition _
+       | Keeper_skill_activation_ledger.Task_instruction _
+       | Keeper_skill_activation_ledger.Session_instruction ->
+         fail "composition activation kept the wrong typed origin")
+    | activations ->
+      failf "expected one composition activation, got %d" (List.length activations))
+;;
+
+let test_inline_composition_activation_is_durable () =
+  test_composition_activation_is_durable
+    ~skill_name:"gate-inline"
+    "keeper_compose_gate-inline"
+;;
+
+let test_async_composition_activation_is_durable () =
+  test_composition_activation_is_durable
+    ~expected_failure:"background_switch_unavailable"
+    ~skill_name:"gate-async"
+    "keeper_compose_gate-async"
 ;;
 
 (* Guards against an empty-list false pass: a bundle that produced nothing
@@ -268,11 +439,21 @@ let test_the_bundle_is_not_empty () =
       ])
 ;;
 
+let test_skill_bundle_without_activation_context_is_rejected () =
+  check_raises
+    "Skill surface cannot bypass durable activation recording"
+    (Invalid_argument
+       "Skill-bearing Keeper bundle requires a frozen activation context")
+    (fun () ->
+       with_bundle_tools ~record_activations:false
+         (fun _config _meta _snapshot _composition_plan_index _tools -> ()))
+;;
+
 (* The point of the tool is that a body reaches the keeper. A tool that is on
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun _ tools ->
+  with_bundle_tools (fun config meta snapshot _composition_plan_index tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -284,12 +465,35 @@ let test_the_skill_tool_serves_the_body () =
     | Some tool ->
       check bool "the description names the skill it can serve" true
         (contains ~needle:"gate-instruction" tool.schema.description);
-      let served = run_tool tool (`Assoc [ "name", `String "gate-instruction" ]) in
-      check bool "asking by name returns the body" true
+      let reference = instruction_reference () in
+      let served = run_tool tool (Skill_reference.to_yojson reference) in
+      check bool "asking by exact reference returns the body" true
         (contains ~needle:"body" served);
-      let missing = run_tool tool (`Assoc [ "name", `String "no-such-skill" ]) in
-      check bool "a name the catalog does not carry is refused" true
-        (contains ~needle:"no instruction skill named" missing);
+      let ledger =
+        match
+          Keeper_skill_activation_ledger.load
+            ~config
+            ~trace_id:meta.runtime.trace_id
+        with
+        | Ok ledger -> ledger
+        | Error error ->
+          fail (Keeper_skill_activation_ledger.store_error_to_string error)
+      in
+      (match Keeper_skill_activation_ledger.activations ledger with
+       | [ activation ] ->
+         assert_exact_activation snapshot reference activation
+       | activations ->
+         failf "expected one instruction activation, got %d"
+           (List.length activations));
+      let stale =
+        Skill_reference.make
+          ~identity:reference.identity
+          ~content_revision:
+            (Skill_reference.content_revision_of_source_text "stale body")
+      in
+      let missing = run_tool tool (Skill_reference.to_yojson stale) in
+      check bool "an exact reference the turn does not carry is refused" true
+        (contains ~needle:"no instruction Skill matches exact reference" missing);
       check bool "and the refusal lists what it does carry" true
         (contains ~needle:"gate-instruction" missing))
 ;;
@@ -331,6 +535,7 @@ let test_bundle_names_are_unique () =
 
 let test_bundle_matches_expected_projection () =
   with_bundle (fun _ names ->
+    let _snapshot, skill_catalog = skill_snapshot_and_catalog () in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         (* Named from the same fixture the bundle was handed. Passing [] here
@@ -340,7 +545,7 @@ let test_bundle_matches_expected_projection () =
           (List.map
              (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
              (identity_tools ~base_path:(Filename.get_temp_dir_name ())))
-        ~skill_catalog:(skill_catalog ())
+        ~skill_catalog
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
         ()
     in
@@ -356,11 +561,17 @@ let () =
     "keeper_tool_bundle_classifiable"
     [ ( "the bundle"
       , [ test_case "is not empty" `Quick test_the_bundle_is_not_empty
+        ; test_case "requires activation context" `Quick
+            test_skill_bundle_without_activation_context_is_rejected
         ; test_case "names are unique" `Quick test_bundle_names_are_unique
         ; test_case "matches the expected projection" `Quick
             test_bundle_matches_expected_projection
         ; test_case "the skill tool serves the body" `Quick
             test_the_skill_tool_serves_the_body
+        ; test_case "inline composition activation is durable" `Quick
+            test_inline_composition_activation_is_durable
+        ; test_case "async composition activation is durable" `Quick
+            test_async_composition_activation_is_durable
         ] )
     ; ( "the approval policy"
       , [ test_case "can classify every tool in it" `Quick

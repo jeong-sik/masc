@@ -338,6 +338,131 @@ let test_logins_do_not_collide () =
         b.Keeper_oauth_flow.verifier
   | _ -> Alcotest.fail "one of two concurrent logins was lost"
 
+(* ── discovery ──────────────────────────────────────────────────────── *)
+
+(* The two answers as the live servers gave them on 2026-08-26. Recorded, not
+   fetched: what these pin is our reading of the shapes, and a test that
+   needs the network cannot say when a shape changed. *)
+(* Same shape [test_keeper_toml.ml] uses: DUNE_SOURCEROOT when dune sets it,
+   otherwise walk up until the tree looks like this repo. Reading the file
+   rather than pasting it here keeps one copy of what the servers actually
+   said. *)
+let rec ascend_to_repo path =
+  if Sys.file_exists (Filename.concat path "dune-project") then Some path
+  else
+    let parent = Filename.dirname path in
+    if String.equal parent path then None else ascend_to_repo parent
+
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root when Sys.file_exists (Filename.concat root "dune-project") ->
+      Some root
+  | _ -> ascend_to_repo (Sys.getcwd ())
+
+let fixture name =
+  match repo_root () with
+  | None -> Alcotest.failf "cannot find the repo root from %s" (Sys.getcwd ())
+  | Some root ->
+      let path =
+        Filename.concat
+          (Filename.concat root "test/fixtures/oauth_discovery")
+          name
+      in
+      if Sys.file_exists path then
+        In_channel.with_open_bin path In_channel.input_all
+      else Alcotest.failf "recorded answer %s is missing" path
+
+let atlassian_mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
+
+let recorded_get ~expect_first ~expect_second =
+  let asked = ref [] in
+  let get ~url =
+    asked := url :: !asked;
+    if String.equal url expect_first then
+      Ok (200, fixture "atlassian-protected-resource.json")
+    else if String.equal url expect_second then
+      Ok (200, fixture "atlassian-authorization-server.json")
+    else Ok (404, "not found")
+  in
+  (get, asked)
+
+let protected_resource_url =
+  "https://mcp.atlassian.com/.well-known/oauth-protected-resource/v1/mcp/authv2"
+
+let authorization_server_url =
+  "https://auth.atlassian.com/.well-known/oauth-authorization-server/VCeDsk8ZHncYF1g234fKtc4lNipbBhu3"
+
+let test_discovery_reads_both_hops () =
+  let get, asked =
+    recorded_get ~expect_first:protected_resource_url
+      ~expect_second:authorization_server_url
+  in
+  match Keeper_oauth_discovery.discover ~get ~mcp_url:atlassian_mcp_url () with
+  | Error err ->
+      Alcotest.failf "discovery failed: %s"
+        (Keeper_oauth_discovery.error_to_string err)
+  | Ok found ->
+      (* RFC 9728 puts the well-known segment between origin and path.
+         Appending happens to work on this server, which is why the order is
+         worth pinning rather than discovering on one where it does not. *)
+      Alcotest.(check (list string))
+        "both hops, in the RFC's URL shape"
+        [ protected_resource_url; authorization_server_url ]
+        (List.rev !asked);
+      check str "authorize" "https://auth.atlassian.com/authorize"
+        found.Keeper_oauth_discovery.authorize_url;
+      check str "token" "https://auth.atlassian.com/oauth/token"
+        found.Keeper_oauth_discovery.token_url;
+      Alcotest.(check bool)
+        "S256 is offered" true found.Keeper_oauth_discovery.supports_pkce_s256;
+      (* Both of these are what make an operator-registered app unnecessary. *)
+      Alcotest.(check bool)
+        "dynamic registration is offered" true
+        (found.Keeper_oauth_discovery.registration_url <> None);
+      Alcotest.(check bool)
+        "a public client is allowed" true
+        found.Keeper_oauth_discovery.client_secret_optional;
+      Alcotest.(check bool)
+        "Jira scopes are published" true
+        (List.mem "write:jira-work" found.Keeper_oauth_discovery.scopes_supported)
+
+let test_discovery_refuses_a_plaintext_server () =
+  match
+    Keeper_oauth_discovery.discover ~get:(fun ~url:_ -> Ok (200, "{}"))
+      ~mcp_url:"http://mcp.example.com/v1" ()
+  with
+  | Error (Keeper_oauth_discovery.Bad_mcp_url _) -> ()
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "a plaintext MCP server was discovered"
+
+let test_discovery_names_a_server_that_publishes_nothing () =
+  match
+    Keeper_oauth_discovery.discover
+      ~get:(fun ~url:_ -> Ok (404, "not found"))
+      ~mcp_url:atlassian_mcp_url ()
+  with
+  | Error (Keeper_oauth_discovery.Not_published { status; _ }) ->
+      Alcotest.(check int) "the status is kept" 404 status
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "a 404 was read as metadata"
+
+let test_discovery_names_a_resource_with_no_authorization_server () =
+  match
+    Keeper_oauth_discovery.discover
+      ~get:(fun ~url:_ ->
+        Ok (200, {|{"resource":"https://mcp.example.com/v1"}|}))
+      ~mcp_url:"https://mcp.example.com/v1" ()
+  with
+  | Error (Keeper_oauth_discovery.No_authorization_server _) -> ()
+  | Error other ->
+      Alcotest.failf "wrong refusal: %s"
+        (Keeper_oauth_discovery.error_to_string other)
+  | Ok _ -> Alcotest.fail "a resource naming no authorization server was accepted"
+
 let () =
   Alcotest.run "keeper_oauth_identity"
     [ ( "declaration",
@@ -371,6 +496,16 @@ let () =
             test_refresh_asks_for_a_refresh_grant;
           Alcotest.test_case "the renewal window opens before expiry" `Quick
             test_renewal_window_opens_before_expiry;
+        ] );
+      ( "discovery",
+        [ Alcotest.test_case "reads both hops from the recorded answers" `Quick
+            test_discovery_reads_both_hops;
+          Alcotest.test_case "refuses a plaintext MCP server" `Quick
+            test_discovery_refuses_a_plaintext_server;
+          Alcotest.test_case "names a server that publishes nothing" `Quick
+            test_discovery_names_a_server_that_publishes_nothing;
+          Alcotest.test_case "names a resource with no authorization server"
+            `Quick test_discovery_names_a_resource_with_no_authorization_server;
         ] );
       ( "pending",
         [ Alcotest.test_case "a state is redeemed once" `Quick

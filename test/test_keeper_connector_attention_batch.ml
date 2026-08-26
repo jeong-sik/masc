@@ -214,7 +214,7 @@ let connector_event_ids_of_queue queue =
        | Q.Manual_compaction_requested
        | Q.Completion_authority_rejected _
        | Q.Task_cancelled _ | Q.Workspace_message _
-       | Q.Delegate_completed _ -> None)
+       | Q.Delegate_completed _ | Q.Composition_completed _ -> None)
   |> List.sort String.compare
 ;;
 

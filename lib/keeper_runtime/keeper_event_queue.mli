@@ -134,6 +134,13 @@ type stimulus_payload =
           2026-08-17..24, no Keeper ever did (4 delegations, 0 status reads,
           10 cancels). Mirrors [Fusion_completed] and [Hitl_resolved]: an
           async completion the waiting Keeper has to be told about. *)
+  | Composition_completed of composition_completion
+      (** An async composition this Keeper submitted has finished. The tool
+          returns a request id and does not wait, so before this payload the
+          result reached the submitter only if it remembered to read that id
+          back. Measured over 2026-08-18..26: 22 submissions, 12 reads, and a
+          result sat unread for a median of 21.9s against a median 2.7ms of
+          work -- one waited 47 minutes. Mirrors [Delegate_completed]. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -182,6 +189,28 @@ and delegate_terminal =
     hand back — it either did its work through a tool that posted elsewhere,
     or said nothing; the two are not told apart because neither gives the
     asker something to read. [Delegate_failed] carries the failure detail. *)
+
+and composition_completion = {
+  cc_request_id : string;
+  cc_tool : string;
+  cc_terminal : composition_terminal;
+}
+(** Payload for [Composition_completed]. [cc_request_id] is the id the async
+    composition tool returned, so the submitter matches the result to its own
+    request and reads it with [keeper_composition_status]; [cc_tool] names
+    which composition finished, because a Keeper can have several in flight. *)
+
+and composition_terminal =
+  | Composition_succeeded
+  | Composition_failed of string
+  | Composition_cancelled of string
+(** Typed outcome for [Composition_completed]. [Composition_succeeded] carries
+    no body: the result is already durable in the async request record and
+    [keeper_composition_status] already reads it, so copying it here would put
+    the same bytes in two durable stores that can then disagree — the choice
+    [Connector_attention] makes about ambient message content. Failure and
+    cancellation carry their detail, which exists nowhere else the woken
+    Keeper can act on. *)
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -268,6 +297,11 @@ val delegate_completion_post_id : delegate_completion -> post_id
 (** Dedup/correlation id for [Delegate_completed]:
     ["keeper-delegate:<operation_id>"]. One delegation answers once, so the
     operation id alone is a complete key. *)
+
+val composition_completion_post_id : composition_completion -> post_id
+(** Dedup/correlation id for [Composition_completed]:
+    ["keeper-composition:<request_id>"]. One async request settles once, so
+    the request id alone is a complete key. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].

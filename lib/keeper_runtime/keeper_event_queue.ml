@@ -94,6 +94,13 @@ type stimulus_payload =
      looking — measured over 2026-08-17..24, nobody did: 4 delegations
      started, 0 status reads, 10 cancels. *)
   | Delegate_completed of delegate_completion
+  (* An async composition the Keeper submitted has finished. The tool returns
+     a request id and does not wait, so before this payload the result reached
+     the submitter only if it remembered to read that id back -- measured over
+     2026-08-18..26, 22 submissions produced 12 reads, and a result sat unread
+     for a median of 21.9s against a median 2.7ms of work. One waited 47
+     minutes. *)
+  | Composition_completed of composition_completion
 
 and board_attention = {
   candidate_id : string;
@@ -135,6 +142,26 @@ and delegate_terminal =
      variant that says "no text" is the whole fact it acts on. *)
   | Delegate_failed of string
 
+
+and composition_completion = {
+  cc_request_id : string;
+  (* The id the async composition tool handed back, so the submitter matches
+     the result to its own request and can read it with
+     [keeper_composition_status]. *)
+  cc_tool : string;
+  (* Which composition finished. A Keeper can have several in flight and the
+     request id alone does not say which is which. *)
+  cc_terminal : composition_terminal;
+}
+
+and composition_terminal =
+  | Composition_succeeded
+  (* No body. The result is already durable in the async request record and
+     [keeper_composition_status] already reads it; copying it here would put
+     the same bytes in two durable stores that can then disagree. This is the
+     same choice [Connector_attention] makes about ambient message content. *)
+  | Composition_failed of string
+  | Composition_cancelled of string
 
 and hitl_resolution_decision =
   | Hitl_approved
@@ -198,6 +225,9 @@ let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_
 let delegate_completion_post_id (dc : delegate_completion) =
   "keeper-delegate:" ^ dc.dc_operation_id
 
+let composition_completion_post_id (cc : composition_completion) =
+  "keeper-composition:" ^ cc.cc_request_id
+
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
 let manual_compaction_post_id = "manual-compaction-request"
@@ -255,7 +285,7 @@ let identity_payload = function
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
-    | Delegate_completed _
+    | Delegate_completed _ | Composition_completed _
     ) as payload ->
     payload
 
@@ -358,6 +388,7 @@ let payload_kind_label = function
   | Task_cancelled _ -> "task_cancelled"
   | Workspace_message _ -> "workspace_message"
   | Delegate_completed _ -> "keeper_delegate_completed"
+  | Composition_completed _ -> "keeper_composition_completed"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -365,7 +396,8 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested
   | Completion_authority_rejected _
-  | Task_cancelled _ | Workspace_message _ | Delegate_completed _ ->
+  | Task_cancelled _ | Workspace_message _ | Delegate_completed _
+  | Composition_completed _ ->
     false
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -377,7 +409,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
-  | Delegate_completed _ ->
+  | Delegate_completed _ | Composition_completed _ ->
     None
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -650,6 +682,21 @@ let payload_to_yojson = function
       [ "kind", `String "keeper_delegate_completed"
       ; "operation_id", `String dc.dc_operation_id
       ; "keeper", `String dc.dc_keeper
+      ; "terminal", terminal
+      ]
+  | Composition_completed cc ->
+    let terminal =
+      match cc.cc_terminal with
+      | Composition_succeeded -> `Assoc [ "kind", `String "succeeded" ]
+      | Composition_failed detail ->
+        `Assoc [ "kind", `String "failed"; "message", `String detail ]
+      | Composition_cancelled reason ->
+        `Assoc [ "kind", `String "cancelled"; "message", `String reason ]
+    in
+    `Assoc
+      [ "kind", `String "keeper_composition_completed"
+      ; "request_id", `String cc.cc_request_id
+      ; "tool", `String cc.cc_tool
       ; "terminal", terminal
       ]
 
@@ -971,6 +1018,52 @@ let payload_of_yojson json =
     Ok
       (Delegate_completed
          { dc_operation_id = operation_id; dc_keeper = keeper; dc_terminal = terminal })
+  | "keeper_composition_completed" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "request_id"; "tool"; "terminal" ]
+        fields
+    in
+    let* request_id = string_field ~context "request_id" fields in
+    let* tool = string_field ~context "tool" fields in
+    let* terminal_json = required_field ~context "terminal" fields in
+    let* terminal_fields =
+      assoc_fields ~context:"stimulus.payload.terminal" terminal_json
+    in
+    let* terminal_kind =
+      string_field ~context:"stimulus.payload.terminal" "kind" terminal_fields
+    in
+    let* terminal =
+      match terminal_kind with
+      | "succeeded" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind" ]
+            terminal_fields
+        in
+        Ok Composition_succeeded
+      | "failed" | "cancelled" ->
+        let* () =
+          exact_fields
+            ~context:"stimulus.payload.terminal"
+            ~expected:[ "kind"; "message" ]
+            terminal_fields
+        in
+        let* message =
+          string_field ~context:"stimulus.payload.terminal" "message" terminal_fields
+        in
+        Ok
+          (if String.equal terminal_kind "failed"
+           then Composition_failed message
+           else Composition_cancelled message)
+      | value ->
+        Error (Printf.sprintf "unknown keeper composition terminal kind: %s" value)
+    in
+    Ok
+      (Composition_completed
+         { cc_request_id = request_id; cc_tool = tool; cc_terminal = terminal })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =
@@ -1043,5 +1136,8 @@ let continuation_channel_of_payload = function
   | Workspace_message _
   (* The answer arriving is itself the reply; there is nowhere further to
      route it. *)
-  | Delegate_completed _ -> None
+  | Delegate_completed _
+  (* The submitter is the one being woken; there is nowhere further to
+     route it. *)
+  | Composition_completed _ -> None
 ;;

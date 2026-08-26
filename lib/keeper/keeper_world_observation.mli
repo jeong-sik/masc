@@ -28,6 +28,7 @@ type pending_board_event_kind =
           (the parent post for a comment vote). *)
   | Fusion_completed
   | Delegate_completed
+  | Composition_completed
       (** A turn this Keeper asked another Keeper to run has ended. Like
           {!Fusion_completed} the row carries the answer itself, because the
           asker has nowhere else to read it mid-cycle. *)

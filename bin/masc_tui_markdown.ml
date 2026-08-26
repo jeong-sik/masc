@@ -444,6 +444,73 @@ let styled_piece palette (text, kind) =
     let opening, closing = span_of_palette palette kind in
     opening ^ text ^ closing
 
+(* One lexed row, cut to the width in pieces rather than in text.
+
+   This used to keep the pieces only while the row fitted and fall back to
+   splitting the plain text past it, on the reasoning that a code row keeps
+   its alignment before it keeps its colours -- the alignment being why it was
+   fenced. The alignment is worth that, but the two are not actually in
+   tension: what the lexer hands over is plain text with a kind beside it, and
+   the escapes are added after the cut. Cutting the pieces by display cells
+   therefore lands on the same columns the text split landed on, and the row
+   keeps both.
+
+   What it cost was the rows that most need reading. A line short enough to
+   fit kept its colours; a long added line, a memory claim, a wrapped string
+   -- the ones a reader slows down for -- lost every one. *)
+let wrap_pieces ~max_cells pieces =
+  let rows = ref [] and row = ref [] and used = ref 0 in
+  let flush () =
+    if !row <> [] then rows := List.rev !row :: !rows;
+    row := [];
+    used := 0
+  in
+  List.iter
+    (fun (text, kind) ->
+      let rec place text =
+        if String.length text = 0 then ()
+        else
+          let cells = Layout.display_width text in
+          let room = max_cells - !used in
+          if cells <= room then begin
+            row := (text, kind) :: !row;
+            used := !used + cells
+          end
+          else if room <= 0 then begin
+            (* The row is full. [flush] resets [used], so the retry has the
+               whole width to place into and cannot come back here. *)
+            flush ();
+            place text
+          end
+          else begin
+            (* Grapheme-safe: a wide character straddling the cut moves to the
+               next row whole. Cutting by cells here would give it up and pad
+               its columns, which holds the alignment and loses the letter --
+               and a wrapped line of Korean is where that shows. *)
+            let head, tail =
+              match Layout.split_at_cells text room with
+              | "", _ when !row = [] ->
+                  (* A grapheme wider than the row itself. [split_cells] takes
+                     one piece whatever the width, which is the only rule that
+                     ends here; a row one cell over beats never finishing. *)
+                  (match Layout.split_cells ~max_cells:room text with
+                   | chunk :: _ when String.length chunk > 0 ->
+                       ( chunk
+                       , String.sub text (String.length chunk)
+                           (String.length text - String.length chunk) )
+                   | _ -> (text, ""))
+              | split -> split
+            in
+            if String.length head > 0 then row := (head, kind) :: !row;
+            flush ();
+            place tail
+          end
+      in
+      place text)
+    pieces;
+  flush ();
+  List.rev !rows
+
 let diff_row_span palette pieces =
   let non_empty = List.filter (fun (text, _) -> String.length text > 0) pieces in
   match non_empty with
@@ -458,16 +525,17 @@ let fill_styled_row ~width (opening, closing) text =
   let remaining = max 0 (width - Layout.display_width text) in
   opening ^ text ^ String.make remaining ' ' ^ closing
 
-(* One lexed row. In the width budget it draws as its pieces; past it the
-   row falls back to the single-span cell split -- a code row keeps its
-   alignment before it keeps its colours, because the alignment is why it
-   was fenced.
+(* One lexed row. Two regimes, and the diff check comes first.
 
    The diff lexer gives an added or removed row one typed kind from edge to
    edge. That row span includes the gutter and fills the available width;
    every hard-split chunk repeats it, so a narrow pane cannot turn the tail of
    a changed line back into ordinary code. No source-prefix check belongs
-   here: the lexer remains the authority for what is a changed row. *)
+   here: the lexer remains the authority for what is a changed row.
+
+   Every other row wraps as pieces ([wrap_pieces]), so a long code line keeps
+   its per-token colours across the wrap instead of falling back to a
+   single-span cell split. *)
 let styled_code_rows palette ~width pieces =
   let gutter = palette.code_gutter in
   let body_width = max 1 (width - Layout.display_width gutter) in
@@ -481,12 +549,9 @@ let styled_code_rows palette ~width pieces =
       in
       List.map (fun chunk -> fill_styled_row ~width span (gutter ^ chunk)) chunks
   | None ->
-      if cells <= body_width then
-        [ gutter ^ String.concat "" (List.map (styled_piece palette) pieces) ]
-      else
-        let opening, closing = palette.code in
-        Layout.split_cells ~max_cells:body_width plain
-        |> List.map (fun chunk -> opening ^ gutter ^ chunk ^ closing)
+      wrap_pieces ~max_cells:body_width pieces
+      |> List.map (fun row ->
+           gutter ^ String.concat "" (List.map (styled_piece palette) row))
 
 let horizontal cells =
   String.concat "" (List.init (max 0 cells) (fun _ -> "\xe2\x94\x80"))

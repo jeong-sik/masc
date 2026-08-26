@@ -62,6 +62,10 @@ export function Tools() {
   const error = toolsError.value
   const inventory = data?.tool_inventory.tools ?? []
   const usage = data?.tool_usage ?? null
+  const configResolution = data?.config_resolution
+  const runtimeResolution = data?.runtime_resolution
+  const configResolutionWarming = configResolution?.status === 'warming'
+  const runtimeResolutionWarming = runtimeResolution?.status === 'warming'
   const usageCoverageGap = usage ? coverageGapDisplay(usage) : null
   const keeperNames = (data?.keeper_waiting_inventory?.keepers ?? [])
     .map(keeper => keeper.keeper_name)
@@ -135,9 +139,16 @@ export function Tools() {
       </div>
       ${activeView.value === 'executor' ? html`<${ToolExecutor} />` : html`<div>
       <${ConfigResolutionPanel}
-        resolution=${data?.config_resolution}
-        runtimeResolution=${data?.runtime_resolution}
+        resolution=${configResolutionWarming ? undefined : configResolution}
+        runtimeResolution=${runtimeResolutionWarming ? undefined : runtimeResolution}
       />
+      ${configResolutionWarming || runtimeResolutionWarming
+        ? html`<${SectionCard} label="설정 경로" class="section v2-lab-panel mb-4">
+            <div class="text-xs text-[var(--color-fg-muted)]" data-testid="tools-config-resolution-warming">
+              Config and runtime resolution warming
+            </div>
+          <//>`
+        : null}
 
       <${SectionCard} label="프롬프트 레지스트리" class="section v2-lab-panel mb-4">
         <div class="text-xs text-[var(--color-fg-muted)] mb-3">

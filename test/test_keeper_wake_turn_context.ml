@@ -362,7 +362,11 @@ let test_held_task_skills_section_renders () =
     (contains ~needle:"task-364 (held by you) names skills: [{" user
      && contains ~needle:"\"name\":\"mission-snapshot\"" user
      && contains ~needle:"\"name\":\"work-intake\"" user);
-  check bool "tool named" true (contains ~needle:"`keeper_skill`" user)
+  check bool "tool named" true (contains ~needle:"`keeper_skill`" user);
+  check bool "exact object instruction" true
+    (contains ~needle:"with one exact reference object" user);
+  check bool "legacy name instruction absent" false
+    (contains ~needle:"with a name" user)
 
 let test_held_task_skills_section_absent_without_held_tasks () =
   let user = user_message base_observation in

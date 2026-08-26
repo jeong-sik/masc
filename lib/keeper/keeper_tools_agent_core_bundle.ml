@@ -53,6 +53,7 @@ let make_tool_bundle_for_descriptors
       ?(identity_tools : Agent_core.Tool.t list = [])
       ?composition_plan_index
       ?(task_instruction_skills = [])
+      ?skill_activation_context
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -390,6 +391,40 @@ let make_tool_bundle_for_descriptors
         ~task:task_instruction_skills
         ~global:global_instruction_skills
     in
+    let composition_references =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Composition entry ->
+             Some (Keeper_tool_composition_catalog.tool_name entry, reference)
+           | None, _ | Some _, Keeper_skill_catalog.Instruction ->
+             None)
+    in
+    let record_instruction_activation =
+      Option.map
+        (fun context reference ->
+           Keeper_skill_activation_recorder.record_instruction
+             ~config
+             context
+             reference)
+        skill_activation_context
+    in
+    let record_composition_activation =
+      Option.map
+        (fun context ~tool_name ->
+           match List.assoc_opt tool_name composition_references with
+           | Some reference ->
+             Keeper_skill_activation_recorder.record_composition
+               ~config
+               context
+               ~tool_name
+               reference
+           | None ->
+             Error
+               (Keeper_skill_activation_recorder.Composition_reference_missing
+                  { tool_name }))
+        skill_activation_context
+    in
     Keeper_tool_composition_surface.make_tools
         ~instruction_skills
         ~skill_composition_entries:
@@ -399,6 +434,8 @@ let make_tool_bundle_for_descriptors
         ~meta
         ~publication_recovery
         ~ctx_snapshot
+        ?record_instruction_activation
+        ?record_composition_activation
         ?turn_sandbox_factory
         ?turn_ctx_cell
         ?clock
@@ -444,6 +481,7 @@ let make_tool_bundle
       ?identity_tools
       ?composition_plan_index
       ?task_instruction_skills
+      ?skill_activation_context
       ?turn_ctx_cell
       ()
   =
@@ -467,6 +505,7 @@ let make_tool_bundle
     ?identity_tools
     ?composition_plan_index
     ?task_instruction_skills
+    ?skill_activation_context
     ?turn_ctx_cell
     ~descriptors
     ()
@@ -481,6 +520,7 @@ let make_tools
       ?clock
       ?skill_catalog
       ?task_instruction_skills
+      ?skill_activation_context
       ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
@@ -491,8 +531,9 @@ let make_tools
      ~publication_recovery
      ~ctx_snapshot
      ?clock
-      ?skill_catalog
-      ?task_instruction_skills
+     ?skill_catalog
+     ?task_instruction_skills
+     ?skill_activation_context
      ?turn_ctx_cell
      ())
     .tools

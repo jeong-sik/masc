@@ -4,10 +4,12 @@ type ledger_revision = private string
 
 type origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Session_instruction
   | Task_composition of
       { task_id : Keeper_id.Task_id.t
       ; tool_name : string
       }
+  | Session_composition of { tool_name : string }
 
 type activation = private
   { identity : Skill_reference.identity

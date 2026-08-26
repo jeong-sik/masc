@@ -31,6 +31,9 @@ val make_tool_bundle
        (** Exact Task-selected Skill bodies resolved from this turn's frozen
            snapshot. These may include shadowed entries without changing
            global Skill discovery. *)
+  -> ?skill_activation_context:Keeper_skill_activation_recorder.t
+       (** Immutable trace, turn, snapshot, and Task facts captured before the
+           tool closures are built. *)
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
@@ -45,6 +48,7 @@ val make_tools
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?skill_catalog:Keeper_skill_catalog.t
   -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+  -> ?skill_activation_context:Keeper_skill_activation_recorder.t
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Agent_core.Tool.t list

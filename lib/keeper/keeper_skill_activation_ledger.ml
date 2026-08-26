@@ -5,10 +5,12 @@ type workspace_key = string
 
 type origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Session_instruction
   | Task_composition of
       { task_id : Keeper_id.Task_id.t
       ; tool_name : string
       }
+  | Session_composition of { tool_name : string }
 
 type activation =
   { identity : Skill_reference.identity
@@ -102,8 +104,9 @@ let make_activation
   in
   let origin_valid =
     match origin with
-    | Task_instruction _ -> Ok ()
-    | Task_composition { tool_name; _ } ->
+    | Task_instruction _ | Session_instruction -> Ok ()
+    | Task_composition { tool_name; _ }
+    | Session_composition { tool_name } ->
       if Safe_identifier.is_portable_name tool_name
       then Ok ()
       else Error (Invalid_tool_name tool_name)
@@ -135,10 +138,17 @@ let origin_to_yojson = function
       [ "kind", `String "task_instruction"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
       ]
+  | Session_instruction ->
+    `Assoc [ "kind", `String "session_instruction" ]
   | Task_composition { task_id; tool_name } ->
     `Assoc
       [ "kind", `String "task_composition"
       ; "task_id", `String (Keeper_id.Task_id.to_string task_id)
+      ; "tool_name", `String tool_name
+      ]
+  | Session_composition { tool_name } ->
+    `Assoc
+      [ "kind", `String "session_composition"
       ; "tool_name", `String tool_name
       ]
 ;;
@@ -261,23 +271,40 @@ let decode_origin json =
         ~object_name:"origin"
         ~allowed:[ "kind"; "task_id" ]
         fields
+    | "session_instruction" ->
+      exact_fields ~object_name:"origin" ~allowed:[ "kind" ] fields
     | "task_composition" ->
       exact_fields
         ~object_name:"origin"
         ~allowed:[ "kind"; "task_id"; "tool_name" ]
         fields
+    | "session_composition" ->
+      exact_fields
+        ~object_name:"origin"
+        ~allowed:[ "kind"; "tool_name" ]
+        fields
     | kind -> Error (Invalid_origin_kind kind)
   in
-  let* task_id_text = string_field "task_id" fields in
-  let* task_id =
-    Keeper_id.Task_id.of_string task_id_text
-    |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
-  in
   match kind with
-  | "task_instruction" -> Ok (Task_instruction { task_id })
+  | "task_instruction" ->
+    let* task_id_text = string_field "task_id" fields in
+    let* task_id =
+      Keeper_id.Task_id.of_string task_id_text
+      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
+    in
+    Ok (Task_instruction { task_id })
+  | "session_instruction" -> Ok Session_instruction
   | "task_composition" ->
+    let* task_id_text = string_field "task_id" fields in
+    let* task_id =
+      Keeper_id.Task_id.of_string task_id_text
+      |> Result.map_error (fun _ -> Invalid_task_id task_id_text)
+    in
     let* tool_name = string_field "tool_name" fields in
     Ok (Task_composition { task_id; tool_name })
+  | "session_composition" ->
+    let* tool_name = string_field "tool_name" fields in
+    Ok (Session_composition { tool_name })
   | kind -> Error (Invalid_origin_kind kind)
 ;;
 

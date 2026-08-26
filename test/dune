@@ -736,7 +736,7 @@
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
-  masc.skill_config masc.skill_snapshot))
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
@@ -3439,6 +3439,19 @@
   masc.skill_config
   unix
   yojson))
+
+(test
+ (name test_keeper_skill_activation_recorder)
+ (modules test_keeper_skill_activation_recorder)
+ (libraries
+  alcotest
+  masc
+  masc.keeper_registry
+  masc.masc_types
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  unix))
 
 (test
  (name test_asset_sync_report)

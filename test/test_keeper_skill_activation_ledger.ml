@@ -159,6 +159,37 @@ let test_same_name_different_identity_or_revision_is_distinct () =
   | Ok ledger -> check int "three exact activations" 3 (List.length (Ledger.activations ledger))
 ;;
 
+let test_session_origins_roundtrip () =
+  with_session @@ fun config trace_id _session_dir ->
+  let values =
+    [ activation ~revision:'b' ~origin:Ledger.Session_instruction ()
+    ; activation
+        ~revision:'c'
+        ~origin:(Ledger.Session_composition { tool_name = "keeper_compose_review" })
+        ()
+    ]
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok (_, Ledger.Recorded _) -> ()
+       | Ok (_, Already_recorded _) -> fail "session origin was deduplicated"
+       | Error error -> fail (Ledger.store_error_to_string error))
+    values;
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match
+       List.map (fun (activation : Ledger.activation) -> activation.origin)
+         (Ledger.activations ledger)
+     with
+     | [ Ledger.Session_instruction
+       ; Ledger.Session_composition { tool_name }
+       ] ->
+       check string "composition tool" "keeper_compose_review" tool_name
+     | _ -> fail "session origins did not survive durable roundtrip")
+;;
+
 let test_corrupt_ledger_is_typed () =
   with_session @@ fun config trace_id session_dir ->
   let path = Filename.concat session_dir "skill-activations.json" in
@@ -358,6 +389,8 @@ let () =
             test_empty_record_and_idempotent_readback
         ; test_case "exact identity and revision form the dedupe key" `Quick
             test_same_name_different_identity_or_revision_is_distinct
+        ; test_case "session origins survive durable roundtrip" `Quick
+            test_session_origins_roundtrip
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
         ; test_case "copied ledger is bound to its trace" `Quick
             test_copied_ledger_is_rejected_by_session_identity

@@ -9,6 +9,9 @@ module Identity_tools = Masc.Keeper_identity_tools
 module Provider = Keeper_oauth_provider
 module Projection = Masc.Keeper_secret_projection
 
+(* The Keeper name here is deliberately not a word: an ordinary one
+   eventually picks a live Keeper's, which is what
+   test/fixtures/concrete-keeper-identities.txt exists to stop. *)
 let check = Alcotest.check
 let str = Alcotest.string
 
@@ -147,7 +150,7 @@ let test_a_real_sized_token_is_storable () =
   let base_path = temp_base () in
   let provider = provider () in
   (match
-     Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+     Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
        ~scope:Projection.Keeper_secret
        ~name:provider.Provider.access_token_env
        ~value:(String.make live_access_token_chars 'x')
@@ -156,7 +159,7 @@ let test_a_real_sized_token_is_storable () =
   | Error message ->
       Alcotest.failf "a real-sized access token is not storable: %s" message);
   match
-    Projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+    Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
       ~scope:Projection.Keeper_secret
       ~container_path:provider.Provider.refresh_token_file
       ~value:(String.make live_refresh_token_chars 'y')
@@ -173,7 +176,7 @@ let test_a_real_sized_token_survives_the_projection () =
   let provider = provider () in
   let token = String.make live_access_token_chars 'x' in
   (match
-     Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+     Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
        ~scope:Projection.Keeper_secret
        ~name:provider.Provider.access_token_env ~value:token
    with
@@ -181,7 +184,7 @@ let test_a_real_sized_token_survives_the_projection () =
   | Error message -> Alcotest.failf "could not store: %s" message);
   match
     Projection.local_env_for_keeper ~host_env:[||] ~base_path
-      ~keeper_name:"kidsnote" ()
+      ~keeper_name:"attaching-fixture" ()
   with
   | Error message -> Alcotest.failf "projection failed: %s" message
   | Ok None -> Alcotest.fail "no projection for this keeper"
@@ -394,13 +397,13 @@ module Policy = Masc.Keeper_tool_approval_policy
 module Index = Masc.Keeper_identity_tool_index
 
 let offer ~base_path tools =
-  write_catalog ~base_path ~keeper_name:"kidsnote" tools;
+  write_catalog ~base_path ~keeper_name:"attaching-fixture" tools;
   match
-    Identity_tools.load ~base_path ~keeper_name:"kidsnote"
+    Identity_tools.load ~base_path ~keeper_name:"attaching-fixture"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
-      Identity_tools.agent_tools ~base_path ~keeper_name:"kidsnote"
+      Identity_tools.agent_tools ~base_path ~keeper_name:"attaching-fixture"
         ~provider:(provider ()) catalog
   | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
 
@@ -465,7 +468,7 @@ let test_a_name_from_no_service_stays_unknown () =
 
 let store_expiry ~base_path ~provider ~at =
   match
-    Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+    Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
       ~scope:Projection.Keeper_secret
       ~name:provider.Provider.expires_at_env
       ~value:(Printf.sprintf "%.0f" at)
@@ -482,7 +485,7 @@ let test_a_fresh_token_is_left_alone () =
   store_expiry ~base_path ~provider ~at:10_000.0;
   match
     Identity_tools.renew_if_needed ~discover:never_discover ~base_path
-      ~keeper_name:"kidsnote" ~provider ~now:0.0 ~access_token:"still-good" ()
+      ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"still-good" ()
   with
   | Ok token -> check str "unchanged" "still-good" token
   | Error message -> Alcotest.failf "renewed a fresh token: %s" message
@@ -493,7 +496,7 @@ let test_no_stored_expiry_renews_nothing () =
   let base_path = temp_base () in
   match
     Identity_tools.renew_if_needed ~discover:never_discover ~base_path
-      ~keeper_name:"kidsnote" ~provider:(provider ()) ~now:0.0
+      ~keeper_name:"attaching-fixture" ~provider:(provider ()) ~now:0.0
       ~access_token:"unknown-age" ()
   with
   | Ok token -> check str "unchanged" "unknown-age" token
@@ -505,7 +508,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
   (* Inside the declaration's 600s window. *)
   store_expiry ~base_path ~provider ~at:100.0;
   (match
-     Projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+     Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
        ~scope:Projection.Keeper_secret
        ~container_path:provider.Provider.refresh_token_file
        ~value:"the-refresh-token"
@@ -542,7 +545,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
   in
   match
     Identity_tools.renew_if_needed ~token_post ~discover ~base_path
-      ~keeper_name:"kidsnote" ~provider ~now:0.0 ~access_token:"about-to-expire"
+      ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"about-to-expire"
       ()
   with
   | Error message -> Alcotest.failf "renewal failed: %s" message
@@ -555,7 +558,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       (* Stored, or the next turn exchanges the same expiring token again. *)
       (match
          Projection.local_env_for_keeper ~host_env:[||] ~base_path
-           ~keeper_name:"kidsnote" ()
+           ~keeper_name:"attaching-fixture" ()
        with
       | Ok (Some entries) ->
           let has prefix =
@@ -568,7 +571,7 @@ let test_an_expiring_token_is_exchanged_and_stored () =
       | Ok None | Error _ -> Alcotest.fail "no projection after renewal");
       (* A rotated refresh token replaces the spent one. *)
       match
-        Projection.read_file_entry ~base_path ~keeper_name:"kidsnote"
+        Projection.read_file_entry ~base_path ~keeper_name:"attaching-fixture"
           ~scope:Projection.Keeper_secret
           ~container_path:provider.Provider.refresh_token_file
       with

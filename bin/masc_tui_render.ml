@@ -275,12 +275,12 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
           in
           let at = max 0 (min row.gutter_label_at (Message_layout.display_width row.gutter)) in
           (* A plain prefix, not [fit_width]: that one marks an overrun with a
-             trailing "~", which here would land in the middle of the gutter. *)
-          let marked =
-            match Message_layout.split_cells ~max_cells:at row.gutter with
-            | first :: _ -> first
-            | [] -> ""
-          in
+             trailing "~", which here would land in the middle of the gutter.
+             Not [split_cells] either -- it wraps, so it hands back one piece
+             even at zero cells, and a row that continues the speaker above it
+             carries no mark and asks for exactly zero. That drew the clock's
+             first digit twice: "222:32" for a row sent at 22:32. *)
+          let marked = Message_layout.take_cells row.gutter at in
           let label = Message_layout.drop_cells row.gutter at in
           if String.equal label "" then
             Printf.sprintf "%s%s%s%s" (Chat_theme.origin row.style) Ansi.bold

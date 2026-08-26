@@ -1134,6 +1134,41 @@ let test_a_second_message_from_one_speaker_stays_blank () =
         (not (String.equal first.Layout.gutter second.Layout.gutter))
   | _ -> failwith "expected two rows"
 
+(* The layout hands the renderer a margin and the offset to cut it at, and the
+   renderer draws the two halves back to back so the mark can keep the status
+   colour while the kind label recedes. A continuation carries no name, so it
+   asks to be cut at zero -- and a cut that still hands back a piece at zero
+   cells drew the clock's first digit twice. On the Keepers pane a row sent at
+   22:32 read "222:32": the layout was right and the drawing was not, which is
+   why the test above could not see it. *)
+let test_a_continuation_survives_the_renderer_cut () =
+  let entries =
+    [ entry ~timestamp:"22:32:07" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
+        "first"
+    ; entry ~timestamp:"22:32:41" Layout.Keeper "keeper.one" "tui-..bbbbbbbb"
+        "second"
+    ]
+  in
+  let rows =
+    Layout.visible_rows ~origin:Layout.Origin_inline ~inner_width:40 ~height:20
+      entries
+  in
+  match rows with
+  | [ _; second ] ->
+      let gutter = second.Layout.gutter in
+      let at = second.Layout.gutter_label_at in
+      (* Asserted rather than assumed: this row is the whole reason a zero cut
+         happens here, and a continuation that started reporting a boundary
+         would leave the checks below passing on a row that was never it. *)
+      check int "a continuation asks to be cut at zero" 0 at;
+      check string "the renderer redraws the margin it was given" gutter
+        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at);
+      check string "the clock reads once" "22:32"
+        (Layout.take_cells gutter at ^ Layout.drop_cells gutter at
+        |> fun redrawn -> Layout.take_cells redrawn 5)
+  | _ -> failwith "expected two rows"
+;;
+
 (* The margin is paid for out of the body, not out of the frame. A row that
    drew its own width plus a margin would spill past the border it sits in. *)
 let test_the_margin_comes_out_of_the_body () =
@@ -1300,6 +1335,8 @@ let () =
             test_wrapped_rows_indent_under_the_first
         ; test_case "a second message from one speaker stays blank" `Quick
             test_a_second_message_from_one_speaker_stays_blank
+        ; test_case "a continuation survives the renderer cut" `Quick
+            test_a_continuation_survives_the_renderer_cut
         ; test_case "the margin comes out of the body" `Quick
             test_the_margin_comes_out_of_the_body
         ; test_case "scrolling measures the mode it draws" `Quick

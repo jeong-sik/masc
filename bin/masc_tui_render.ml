@@ -1237,7 +1237,8 @@ let render_approvals (state : state) =
                    20)
                 (fit_width (Printf.sprintf "%.0fs left" remaining) 16)
                 (Terminal_text.single_line held.kta_question ^ " — "
-                ^ Terminal_text.single_line held.kta_because)
+                ^ Terminal_text.single_line_or ~default:"(not provided)"
+                    held.kta_because)
         in
         let is_selected = idx = state.approval_cursor in
         let content =
@@ -1291,7 +1292,8 @@ let render_approvals (state : state) =
           Ansi.reset
           Ansi.dim
           (fit_width
-             (Terminal_text.single_line held.kta_because)
+             (Terminal_text.single_line_or ~default:"(not provided)"
+                held.kta_because)
              (max 8 (cols - 12)))
           Ansi.reset
     | None -> ""

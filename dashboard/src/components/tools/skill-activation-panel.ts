@@ -28,21 +28,25 @@ function activationReferenceLabel(activation: DashboardSkillActivation): string 
   })
 }
 
-function originLabel(origin: DashboardSkillActivation['origin']): string {
+function originLabel(invocation: DashboardSkillActivation['invocation']): string {
+  const origin = invocation.origin
   switch (origin.kind) {
     case 'task_instruction':
       return `Task instruction · ${origin.task_id}`
     case 'session_instruction':
       return 'Session instruction'
     case 'task_composition':
-      return `Task composition · ${origin.task_id} · ${origin.tool_name}`
+      return `Task composition · ${origin.task_id} · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
     case 'session_composition':
-      return `Session composition · ${origin.tool_name}`
+      return `Session composition · ${invocation.kind === 'composition' ? invocation.tool_name : ''}`
   }
 }
 
 function servedLabel(activation: DashboardSkillActivation): string {
-  const served = activation.served_content
+  if (activation.invocation.kind === 'composition') {
+    return `composition invocation · ${activation.invocation.tool_name}`
+  }
+  const served = activation.invocation.served_content
   return served.kind === 'skill_body'
     ? `body · ${served.bytes} bytes · ${served.sha256}`
     : `resource ${served.relative_path} · ${served.bytes} bytes · ${served.sha256}`
@@ -65,6 +69,9 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
       <div class="text-xs text-[var(--color-fg-muted)]">
         ${surface.runtime_id} · ${surface.official_client_kind} · ${surface.count} tools
       </div>
+      <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+        snapshot ${surface.skill_snapshot_revision} · deferred resource bound ${surface.skill_resource_read_max_bytes ?? 'not configured'}
+      </code>
       ${surface.tool_delivery.status === 'suppressed'
         ? html`<div class="text-xs text-[var(--color-status-warn)]" data-testid="skill-tool-delivery-suppressed">
             Tool delivery suppressed · ${surface.tool_delivery.reason}
@@ -76,7 +83,7 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
         ${references.length === 0
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">No readable Skills</span>`
           : references.map(reference => html`
-              <code class="text-3xs break-all">${referenceLabel(reference)}</code>
+              <code key=${referenceLabel(reference)} class="text-3xs break-all">${referenceLabel(reference)}</code>
             `)}
       </div>
       ${surface.tool_surface_sha256
@@ -90,10 +97,8 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
 
 function ActivationReceipt({
   projection,
-  offered,
 }: {
   projection: DashboardSkillActivationProjection
-  offered: number | null
 }) {
   if (projection.status === 'no_session') {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">No Keeper session</div>`
@@ -109,7 +114,7 @@ function ActivationReceipt({
   return html`
     <div class="grid gap-2" data-testid="skill-activation-ledger">
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="skill-use-summary">
-        <span class="text-xs">offered ${offered ?? 'unknown'}</span>
+        <span class="text-xs">session totals</span>
         <span class="text-xs">invoked ${summary.instruction_invocations}</span>
         <span class="text-xs">bodies ${summary.skill_bodies_served}</span>
         <span class="text-xs">resources ${summary.skill_resources_served}</span>
@@ -121,14 +126,27 @@ function ActivationReceipt({
         </span>
       </div>
       <div class="text-xs text-[var(--color-fg-muted)]">
-        session ${projection.ledger.session_id} · ${projection.ledger.activations.length} activations
+        session ${projection.ledger.session_id} · ${projection.ledger.activations.length} activations · ${projection.ledger.transition_rejections.length} rejected transitions
+      </div>
+      <div class="grid gap-1" data-testid="skill-scoped-summaries">
+        ${projection.scoped_summaries.map(scoped => html`
+          <div key=${`${scoped.scope.snapshot_revision}\u0000${scoped.scope.turn_ref}\u0000${scoped.scope.runtime_id}\u0000${referenceLabel(scoped.scope.reference)}`} class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
+            <code class="text-3xs break-all">proof ${referenceLabel(scoped.scope.reference)}</code>
+            <code class="text-3xs break-all text-[var(--color-fg-muted)]">
+              snapshot ${scoped.scope.snapshot_revision} · keeper turn ${scoped.scope.turn_ref} · runtime ${scoped.scope.runtime_id}
+            </code>
+            <span class="text-3xs">
+              invoked ${scoped.summary.instruction_invocations} · bodies ${scoped.summary.skill_bodies_served} · resources ${scoped.summary.skill_resources_served} · delivered ${scoped.summary.instruction_deliveries} · actions ${scoped.summary.instruction_actions_observed} · compositions ${scoped.summary.composition_invocations}/${scoped.summary.composition_deliveries}/${scoped.summary.composition_actions_observed} · invalid ${scoped.summary.invalid_transitions}
+            </span>
+          </div>
+        `)}
       </div>
       ${projection.ledger.activations.length === 0
         ? html`<span class="text-xs text-[var(--color-fg-muted)]">No activations recorded</span>`
         : projection.ledger.activations.map(activation => html`
-            <div class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
+            <div key=${activation.skill_tool_use_id} class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
               <code class="text-3xs break-all">${activationReferenceLabel(activation)}</code>
-              <span class="text-3xs">${originLabel(activation.origin)}</span>
+              <span class="text-3xs">${originLabel(activation.invocation)}</span>
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">
                 invoked turn ${activation.agent_core_turn} · id ${activation.skill_tool_use_id} · runtime ${activation.runtime_id} · ${activation.activated_at}
               </code>
@@ -198,9 +216,6 @@ export function SkillActivationPanel(props: SkillActivationPanelProps) {
                 <${SurfaceReceipt} surface=${effectiveSurface} />
                 <${ActivationReceipt}
                   projection=${activations}
-                  offered=${effectiveSurface.status === 'available'
-                    ? effectiveSurface.instruction_skills.length
-                    : null}
                 />
               `}
     </div>

@@ -146,8 +146,11 @@ function keeperReceiptFixture(
       native_posture: 'read',
       tool_groups: [],
       current_task_id: 'task-001',
+      skill_snapshot_revision: 'd'.repeat(64),
+      skill_resource_read_max_bytes: 65_536,
       instruction_skills: [reference],
       composition_skills: [],
+      skills_left_out: [],
       count: 2,
       tools: [],
       tool_surface_sha256: 'b'.repeat(64),
@@ -166,8 +169,27 @@ function keeperReceiptFixture(
         composition_actions_observed: 0,
         invalid_transitions: 0,
       },
+      scoped_summaries: [{
+        scope: {
+          snapshot_revision: 'd'.repeat(64),
+          turn_ref: `${sessionId}#1`,
+          runtime_id: 'openai.codex',
+          reference,
+        },
+        summary: {
+          instruction_invocations: 1,
+          skill_bodies_served: 1,
+          skill_resources_served: 0,
+          instruction_deliveries: 1,
+          instruction_actions_observed: 1,
+          composition_invocations: 0,
+          composition_deliveries: 0,
+          composition_actions_observed: 0,
+          invalid_transitions: 0,
+        },
+      }],
       ledger: {
-        schema: 'masc.skill-activations/v2',
+        schema: 'masc.skill-activations/v3',
         workspace_key: 'e'.repeat(64),
         session_id: sessionId,
         revision: 'c'.repeat(64),
@@ -179,10 +201,14 @@ function keeperReceiptFixture(
             runtime_id: 'openai.codex',
             skill_tool_use_id: 'call-skill-1',
             agent_core_turn: 0,
-            served_content: {
-              kind: 'skill_body',
-              bytes: 12,
-              sha256: 'f'.repeat(64),
+            invocation: {
+              kind: 'instruction',
+              origin: { kind: 'task_instruction', task_id: 'task-001' },
+              served_content: {
+                kind: 'skill_body',
+                bytes: 12,
+                sha256: 'f'.repeat(64),
+              },
             },
             delivery: {
               agent_core_turn: 1,
@@ -195,9 +221,9 @@ function keeperReceiptFixture(
               observed_at: '2026-08-26T00:00:02Z',
             }],
             activated_at: '2026-08-26T00:00:00Z',
-            origin: { kind: 'task_instruction', task_id: 'task-001' },
           },
         ],
+        transition_rejections: [],
       },
     },
   }
@@ -430,7 +456,8 @@ describe('Tools', () => {
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
     expect(container.textContent).toContain('Task instruction · task-001')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
-    expect(container.textContent).toContain('offered 1')
+    expect(container.textContent).toContain('session totals')
+    expect(container.textContent).toContain('proof project-masc/ocaml-coding:ocaml-coding')
     expect(container.textContent).toContain('invoked 1')
     expect(container.textContent).toContain('delivered 1')
     expect(container.textContent).toContain('actions 1')

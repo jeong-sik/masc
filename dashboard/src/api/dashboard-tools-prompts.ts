@@ -536,8 +536,11 @@ export type DashboardEffectiveKeeperSurface =
       native_posture: string | null
       tool_groups: string[]
       current_task_id: string | null
+      skill_snapshot_revision: string
+      skill_resource_read_max_bytes: number | null
       instruction_skills: DashboardSkillReference[]
       composition_skills: DashboardSkillReference[]
+      skills_left_out: string[]
       count: number
       tools: Array<{ name: string; origin: { kind: string } }>
       tool_surface_sha256: string | null
@@ -553,11 +556,32 @@ export type DashboardEffectiveKeeperSurface =
       keeper_name: string
     }
 
-export type DashboardSkillActivationOrigin =
+export type DashboardSkillInstructionOrigin =
   | { kind: 'task_instruction'; task_id: string }
   | { kind: 'session_instruction' }
-  | { kind: 'task_composition'; task_id: string; tool_name: string }
-  | { kind: 'session_composition'; tool_name: string }
+
+export type DashboardSkillCompositionOrigin =
+  | { kind: 'task_composition'; task_id: string }
+  | { kind: 'session_composition' }
+
+export type DashboardSkillActivationInvocation =
+  | {
+      kind: 'instruction'
+      origin: DashboardSkillInstructionOrigin
+      served_content:
+        | { kind: 'skill_body'; bytes: number; sha256: string }
+        | {
+            kind: 'skill_resource'
+            relative_path: string
+            bytes: number
+            sha256: string
+          }
+    }
+  | {
+      kind: 'composition'
+      origin: DashboardSkillCompositionOrigin
+      tool_name: string
+    }
 
 export interface DashboardSkillActivation {
   identity: DashboardSkillReference['identity']
@@ -567,14 +591,7 @@ export interface DashboardSkillActivation {
   runtime_id: string
   skill_tool_use_id: string
   agent_core_turn: number
-  served_content:
-    | { kind: 'skill_body'; bytes: number; sha256: string }
-    | {
-        kind: 'skill_resource'
-        relative_path: string
-        bytes: number
-        sha256: string
-      }
+  invocation: DashboardSkillActivationInvocation
   delivery: { agent_core_turn: number; delivered_at: string } | null
   actions: Array<{
     tool_use_id: string
@@ -583,8 +600,36 @@ export interface DashboardSkillActivation {
     observed_at: string
   }>
   activated_at: string
-  origin: DashboardSkillActivationOrigin
 }
+
+export type DashboardSkillTransitionRejection =
+  | {
+      kind: 'delivery_order'
+      skill_tool_use_id: string
+      activation_turn_ref: string
+      observed_turn_ref: string
+      activation_agent_core_turn: number
+      observed_agent_core_turn: number
+      observed_at: string
+    }
+  | {
+      kind: 'delivery_conflict'
+      skill_tool_use_id: string
+      activation_turn_ref: string
+      observed_turn_ref: string
+      observed_agent_core_turn: number
+      observed_at: string
+    }
+  | {
+      kind: 'action_before_delivery'
+      skill_tool_use_id: string
+      activation_turn_ref: string
+      observed_turn_ref: string
+      action_tool_use_id: string
+      tool_name: string
+      observed_agent_core_turn: number
+      observed_at: string
+    }
 
 export interface DashboardSkillActivationSummary {
   instruction_invocations: number
@@ -598,17 +643,29 @@ export interface DashboardSkillActivationSummary {
   invalid_transitions: number
 }
 
+export interface DashboardSkillScopedSummary {
+  scope: {
+    snapshot_revision: string
+    turn_ref: string
+    runtime_id: string
+    reference: DashboardSkillReference
+  }
+  summary: DashboardSkillActivationSummary
+}
+
 export type DashboardSkillActivationProjection =
   | {
       status: 'available'
       keeper_name: string
       summary: DashboardSkillActivationSummary
+      scoped_summaries: DashboardSkillScopedSummary[]
       ledger: {
         schema: string
         workspace_key: string
         session_id: string
         revision: string
         activations: DashboardSkillActivation[]
+        transition_rejections: DashboardSkillTransitionRejection[]
       }
     }
   | { status: 'no_session'; keeper_name: string }

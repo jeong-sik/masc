@@ -139,9 +139,14 @@ let test_projection_names_equal_turn_surface_authority () =
          (Keeper_tool_composition_surface.For_testing.instruction_skill_description
             instruction_entries)
          tool.schema.description;
+       let input_schema =
+         match tool.schema.input_schema with
+         | Some input_schema -> input_schema
+         | None -> fail "keeper_skill omitted its required input schema"
+       in
        let actual_names =
          match
-           tool.schema.input_schema
+           input_schema
            |> Yojson.Safe.Util.member "properties"
            |> Yojson.Safe.Util.member "name"
            |> Yojson.Safe.Util.member "enum"

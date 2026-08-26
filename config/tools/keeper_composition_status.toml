@@ -1,0 +1,9 @@
+name = "keeper_composition_status"
+description = "Read the exact durable status and structured result of one async Keeper composition request."
+additional_properties = false
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1

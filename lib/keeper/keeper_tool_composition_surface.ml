@@ -135,22 +135,6 @@ let plan_execute_description =
     ]
 ;;
 
-let request_id_input_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( "request_id"
-            , `Assoc
-                [ "type", `String "string"
-                ; "minLength", `Int 1
-                ] )
-          ] )
-    ; "required", `List [ `String "request_id" ]
-    ; "additionalProperties", `Bool false
-    ]
-;;
-
 let request_id_of_validated_input = function
   | `Assoc fields ->
     (match List.assoc_opt "request_id" fields with
@@ -172,12 +156,7 @@ let entry_description (entry : Catalog.entry) =
     entry.description
 ;;
 
-let status_description =
-  "Read the exact durable status and structured result of one async Keeper composition request."
-;;
 
-let cancel_description =
-  "Request cancellation of one async Keeper composition by its exact durable request id."
 ;;
 
 let schema_tool ~name ~description ~input_schema =
@@ -225,12 +204,12 @@ let schema_tools ?(skill_composition_entries = [])
     @ [ plan_execute_tool
       ; schema_tool
           ~name:Catalog.status_tool_name
-          ~description:status_description
-          ~input_schema:request_id_input_schema
+          ~description:Tool_schemas_composition_control.status_schema.description
+          ~input_schema:Tool_schemas_composition_control.status_schema.input_schema
       ; schema_tool
           ~name:Catalog.cancel_tool_name
-          ~description:cancel_description
-          ~input_schema:request_id_input_schema
+          ~description:Tool_schemas_composition_control.cancel_schema.description
+          ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
       ]
   else composition_tools @ [ plan_execute_tool ]
 ;;
@@ -911,6 +890,7 @@ let make_request_control_tool
       ~(config : Workspace.config)
       ~name
       ~description
+      ~input_schema
       ~descriptor
       ~handle
   =
@@ -919,12 +899,12 @@ let make_request_control_tool
     ~base_path:config.base_path
     ~name
     ~description
-    ~input_schema:request_id_input_schema
+    ~input_schema
     (fun _execution_env input ->
       let start_time = Time_compat.now () in
       match
         Tool_input_validation.validate_args
-          ~schema:request_id_input_schema
+          ~schema:input_schema
           ~name
           ~args:input
           ()
@@ -1478,7 +1458,8 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.status_tool_name
-        ~description:status_description
+        ~description:Tool_schemas_composition_control.status_schema.description
+        ~input_schema:Tool_schemas_composition_control.status_schema.input_schema
         ~descriptor:
           (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
         ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
@@ -1487,7 +1468,8 @@ let make_tools
       make_request_control_tool
         ~config
         ~name:Catalog.cancel_tool_name
-        ~description:cancel_description
+        ~description:Tool_schemas_composition_control.cancel_schema.description
+        ~input_schema:Tool_schemas_composition_control.cancel_schema.input_schema
         ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
         ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
     in

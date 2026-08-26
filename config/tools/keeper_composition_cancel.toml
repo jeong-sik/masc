@@ -1,0 +1,9 @@
+name = "keeper_composition_cancel"
+description = "Request cancellation of one async Keeper composition by its exact durable request id."
+additional_properties = false
+
+[[params]]
+name = "request_id"
+type = "string"
+required = true
+min_length = 1

@@ -1891,12 +1891,25 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      bytes the body could not. Sanitize where it lands. *)
   check_identifiers ~module_path:render_path ~binding:"board_read_pane"
     ~callees:sanitizer_calls [ "id" ];
+  (* Every split surface hands its list through one sidebar, so this is the
+     single place a row label can reach the terminal unsanitized. Seven
+     callers now pass titles that came off the wire. *)
+  check_identifiers ~module_path:render_path ~binding:"write_list_sidebar"
+    ~callees:sanitizer_calls [ "label" ];
   check_fields "render_planning_list"
     [ "planning_error"; "pg_due_date"; "pg_title" ];
-  (* [List.mem] asks which tasks name this goal. Membership never reaches the
-     terminal, and the rows it selects are sanitized where they are drawn. *)
-  check_fields ~non_rendering_calls:[ "List.mem" ] "render_planning_detail"
+  (* The drawing moved into [planning_detail_pane] when the goal list came to
+     sit beside the goal; [render_planning_detail] is now the split, and
+     guarding it would guard a function that renders nothing. Same move as
+     #29626 made for [keeper_row_content].
+
+     [String.equal] finds the open goal's row in the sidebar and [List.mem]
+     asks which tasks name this goal. Neither reaches the terminal, and the
+     labels the sidebar draws are sanitized where they are drawn. *)
+  check_fields ~non_rendering_calls:[ "List.mem" ] "planning_detail_pane"
     [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
+  check_fields ~non_rendering_calls:[ "String.equal" ] "render_planning_detail"
+    [ "pg_id" ];
   check_fields "render_keeper_list" [ "keepers_error" ];
   (* #29626 moved the row itself into [keeper_row_content] so the list could
      carry action affordances. The fields the row shows did not change, and

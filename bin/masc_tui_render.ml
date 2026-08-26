@@ -67,6 +67,47 @@ let write_two_panes buf ~left_cols ~left ~right =
     (zip (frame_lines left) (frame_lines right))
 ;;
 
+(* A narrow list beside an open detail: which row you are on, and what else
+   is there. Only the label -- the columns a full list carries do not fit
+   thirty cells, and a truncated author reads as a different author.
+
+   [selected] indexes [labels]; the pane scrolls to keep that row drawn.
+   [focused] says whether the arrow keys are pointed here, which is a
+   different question from which row is open. *)
+let write_list_sidebar buf ~rows ~cols ~title ~focused ~labels ~selected =
+  framed_top buf cols;
+  framed_line buf cols
+    ((if focused then Ansi.bold else Ansi.dim)
+     ^ Printf.sprintf " %s (%d)%s" title (List.length labels)
+         (if focused then "  [j/k]" else "")
+     ^ Ansi.reset);
+  framed_divider buf cols;
+  let content_height = max 0 (rows - framed_chrome_rows) in
+  let first =
+    if selected < content_height then 0 else selected - content_height + 1
+  in
+  for i = 0 to content_height - 1 do
+    match List.nth_opt labels (first + i) with
+    | Some label ->
+      (* A separate name for the sanitized text. Shadowing [label] left four
+         uses that read as raw ones to anything checking by name, the reader
+         included. *)
+      let drawn = Terminal_text.single_line label in
+      framed_line buf cols
+        (if first + i = selected then
+           if focused then
+             Theme.selection ^ " " ^ drawn
+             ^ String.make
+                 (max 0 (cols - 5 - Message_layout.display_width drawn))
+                 ' '
+             ^ Ansi.reset
+           else Ansi.bold ^ " \xe2\x96\xb8 " ^ drawn ^ Ansi.reset
+         else " " ^ drawn)
+    | None -> framed_empty buf cols
+  done;
+  framed_bottom buf cols
+;;
+
 (* A frame, and what it had to clamp to build itself. The clamp travels beside
    the frame rather than being written into the state mid-draw; see
    [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
@@ -1082,12 +1123,7 @@ let render_overview (state : state) =
    arithmetic instead of trusting it. *)
 let boxed_surface_chrome_rows = 10
 
-let render_task_detail (state : state) (task : Masc_domain.task) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
@@ -1249,6 +1285,35 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
   done;
 
   box_bottom buf cols;
+  offset
+;;
+
+(* The task list stays beside the task. Overview's rows are the queue
+   this task sits in, and reading one used to cost the reader their
+   place in it. Below the split width the detail keeps the screen. *)
+let render_task_detail (state : state) (task : Masc_domain.task) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let offset =
+    if cols < keeper_split_threshold_cols then
+      task_detail_pane state ~rows ~cols task buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Tasks"
+        ~focused:false
+        ~labels:
+          (List.map (fun (row : Tui_decode.task) -> row.title) state.tasks)
+        ~selected:state.task_cursor;
+      let answer =
+        task_detail_pane state ~rows ~cols:(cols - left_cols) task right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      answer
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~status:[ Masc_tui_footer.Refresh_interval state.refresh_interval ]
@@ -1261,10 +1326,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
    turns a newline into the six characters [\x0A] and then cuts; an [Edit]
    carrying a page of code read as its first forty characters and there was
    no second screen. This is that screen. *)
-let render_approval_detail (state : state) (row : approval_row) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let approval_detail_pane (state : state) ~rows ~cols (row : approval_row) buf =
   let width = max 8 (cols - 6) in
   let fields =
     match row with
@@ -1310,7 +1372,33 @@ let render_approval_detail (state : state) (row : approval_row) =
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
   done;
-  box_bottom buf cols;
+  box_bottom buf cols
+;;
+
+(* The queue stays beside the ask. Reading one used to hide the rest, and the
+   rest is what tells an operator whether this one is the urgent one. *)
+let approval_sidebar_label (row : approval_row) =
+  match row with
+  | Keeper_tool_row held -> held.Tui_decode.kta_tool
+  | Operator_row item -> item.ap_action_type
+
+let render_approval_detail (state : state) (row : approval_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  if cols < keeper_split_threshold_cols then
+    approval_detail_pane state ~rows ~cols row buf
+  else begin
+    let left_cols = keeper_roster_pane_cols in
+    let left_buf = Buffer.create 1024 in
+    let right_buf = Buffer.create 4096 in
+    write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Asks"
+      ~focused:false
+      ~labels:(List.map approval_sidebar_label (approval_items state))
+      ~selected:state.approval_cursor;
+    approval_detail_pane state ~rows ~cols:(cols - left_cols) row right_buf;
+    write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf
+  end;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:"j/k:scroll  y:confirm  n:deny  Esc:back");
@@ -2029,16 +2117,7 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
 (* The post list beside the read: position context with the open post
    marked, exactly the roster-beside-detail shape. *)
 let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
-  framed_top buf cols;
-  let focused = state.board_focus = Left_pane in
-  framed_line buf cols
-    ((if focused then Ansi.bold else Ansi.dim)
-     ^ Printf.sprintf " Board (%d)%s" (List.length state.board_posts)
-         (if focused then "  [j/k]" else "")
-     ^ Ansi.reset);
-  framed_divider buf cols;
-  let content_height = max 0 (rows - framed_chrome_rows) in
-  let selected_index =
+  let selected =
     let rec find i = function
       | [] -> 0
       | (post : board_post) :: rest ->
@@ -2047,29 +2126,10 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     in
     find 0 state.board_posts
   in
-  let first =
-    if selected_index < content_height then 0
-    else selected_index - content_height + 1
-  in
-  for i = 0 to content_height - 1 do
-    match List.nth_opt state.board_posts (first + i) with
-    | Some (post : board_post) ->
-        let title = Terminal_text.single_line post.bp_title in
-        let line =
-          if first + i = selected_index then
-            if focused then
-              Theme.selection ^ " " ^ title
-              ^ String.make
-                  (max 0 (cols - 5 - Message_layout.display_width title))
-                  ' '
-              ^ Ansi.reset
-            else Ansi.bold ^ " \xe2\x96\xb8 " ^ title ^ Ansi.reset
-          else " " ^ title
-        in
-        framed_line buf cols line
-    | None -> framed_empty buf cols
-  done;
-  framed_bottom buf cols
+  write_list_sidebar buf ~rows ~cols ~title:"Board"
+    ~focused:(state.board_focus = Left_pane)
+    ~labels:(List.map (fun (post : board_post) -> post.bp_title) state.board_posts)
+    ~selected
 
 let render_board_read (state : state) (list_post : board_post) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2347,13 +2407,9 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
 
-let render_planning_detail (state : state)
-    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
-  let terminal_rows, cols = get_terminal_size () in
-  (* The composer owns the terminal's last row; everything this surface
-     lays out fits above it. *)
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let planning_detail_pane (state : state)
+    ~(armed : Goal_phase.Public_action.t option) ~rows ~cols
+    (goal : planning_goal) buf =
 
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
@@ -2488,12 +2544,56 @@ let render_planning_detail (state : state)
   done;
 
   box_bottom buf cols;
+  scroll
+;;
 
+(* The goal list stays beside its detail. Opening one used to replace the
+   other, so reading a row cost the reader their place in the list. Below the
+   split width there is no room for both and the detail keeps the screen,
+   which is the rule the Board read pane already follows. *)
+let render_planning_detail (state : state)
+    ~(armed : Goal_phase.Public_action.t option) (goal : planning_goal) =
+  let terminal_rows, cols = get_terminal_size () in
+  (* The composer owns the terminal's last row; everything this surface
+     lays out fits above it. *)
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let scroll =
+    if cols < keeper_split_threshold_cols then
+      planning_detail_pane state ~armed ~rows ~cols goal buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let goals =
+        match state.planning with
+        | None -> []
+        | Some p -> planning_visible_goals p.pl_goals
+      in
+      let selected =
+        let rec find i = function
+          | [] -> 0
+          | (row : planning_goal) :: rest ->
+            if String.equal row.pg_id goal.pg_id then i else find (i + 1) rest
+        in
+        find 0 goals
+      in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Planning"
+        ~focused:false
+        ~labels:(List.map (fun (row : planning_goal) -> row.pg_title) goals)
+        ~selected;
+      let scroll =
+        planning_detail_pane state ~armed ~rows ~cols:(cols - left_cols) goal
+          right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      scroll
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
          "j/k:scroll  Y:copy link  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
-
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
 
@@ -2789,10 +2889,7 @@ let schedule_detail_lines ~width (row : schedule_row) =
         "Reaction" reaction
     ]
 
-let render_schedule_detail (state : state) (row : schedule_row) =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let schedule_detail_pane (state : state) ~rows ~cols (row : schedule_row) buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s[%s]%s"
@@ -2810,6 +2907,40 @@ let render_schedule_detail (state : state) (row : schedule_row) =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
+  scroll, max_scroll
+;;
+
+(* The schedule list stays beside the schedule. Opening one used to hide the others, and the others
+   are what say whether this is the one to act on. Below the split
+   width there is no room for both and the detail keeps the screen. *)
+let render_schedule_detail (state : state) (row : schedule_row) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let scroll, max_scroll =
+    if cols < keeper_split_threshold_cols then
+      schedule_detail_pane state ~rows ~cols row buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let labels =
+        match state.schedules with
+        | None -> []
+        | Some snapshot ->
+          List.map (fun (row : schedule_row) -> row.sch_schedule_id)
+            snapshot.scs_rows
+      in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
+        ~focused:false ~labels ~selected:state.schedule_cursor;
+      let answer =
+        schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
+          right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      answer
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
@@ -5403,10 +5534,7 @@ let verification_detail_lines ~width
       [ Ansi.dim, "" ]
       @ wrapped_block "Evidence projection error" detail
 
-let render_verification_detail (state : state) request =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let verification_detail_pane (state : state) ~rows ~cols request buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s"
@@ -5423,6 +5551,40 @@ let render_verification_detail (state : state) request =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
+  scroll, max_scroll
+;;
+
+(* The queue stays beside the request under review. Opening one used to hide the others, and the others
+   are what say whether this is the one to act on. Below the split
+   width there is no room for both and the detail keeps the screen. *)
+let render_verification_detail (state : state) request =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let scroll, max_scroll =
+    if cols < keeper_split_threshold_cols then
+      verification_detail_pane state ~rows ~cols request buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let labels =
+        match state.verification with
+        | None -> []
+        | Some snapshot ->
+          List.map (fun (row : Tui_decode.verification_request) -> row.Tui_decode.vr_task_id)
+            snapshot.Tui_decode.vs_requests
+      in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Verify"
+        ~focused:false ~labels ~selected:state.verification_cursor;
+      let answer =
+        verification_detail_pane state ~rows ~cols:(cols - left_cols) request
+          right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      answer
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
@@ -5672,10 +5834,7 @@ let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
     ]
   @ fallback
 
-let render_harness_detail (state : state) verdict =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 4096 in
+let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   box_top buf cols;
   box_line buf cols
     (Printf.sprintf "%s  %s  %s"
@@ -5701,6 +5860,41 @@ let render_harness_detail (state : state) verdict =
     | None -> box_empty buf cols
   done;
   box_bottom buf cols;
+  scroll, max_scroll
+;;
+
+(* The verdict list stays beside the verdict. A verdict is a judgement
+   about one task among many, and which ones came out the same way is
+   most of what it means. Below the split width the detail keeps the
+   screen. *)
+let render_harness_detail (state : state) verdict =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  let scroll, max_scroll =
+    if cols < keeper_split_threshold_cols then
+      harness_detail_pane state ~rows ~cols verdict buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let labels =
+        match state.harness with
+        | None -> []
+        | Some snapshot ->
+          List.map (fun (row : Tui_decode.harness_verdict) -> row.Tui_decode.hv_task_id)
+            snapshot.Tui_decode.hs_verdicts
+      in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Harness"
+        ~focused:false ~labels ~selected:state.harness_cursor;
+      let answer =
+        harness_detail_pane state ~rows ~cols:(cols - left_cols) verdict
+          right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      answer
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
@@ -5996,10 +6190,7 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
-let render_fusion_detail (state : state) run_id =
-  let terminal_rows, cols = get_terminal_size () in
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let buf = Buffer.create 8192 in
+let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   let detail =
     match state.fusion_detail with
     | Some detail when String.equal detail.fud_run.fur_run_id run_id ->
@@ -6041,6 +6232,40 @@ let render_fusion_detail (state : state) run_id =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
+  scroll, max_scroll
+;;
+
+(* The run list stays beside the run. Opening one used to hide the others, and the others
+   are what say whether this is the one to act on. Below the split
+   width there is no room for both and the detail keeps the screen. *)
+let render_fusion_detail (state : state) run_id =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 8192 in
+  let scroll, max_scroll =
+    if cols < keeper_split_threshold_cols then
+      fusion_detail_pane state ~rows ~cols run_id buf
+    else begin
+      let left_cols = keeper_roster_pane_cols in
+      let labels =
+        match state.fusion_runs with
+        | None -> []
+        | Some snapshot ->
+          List.map (fun (row : Tui_decode.fusion_run) -> row.Tui_decode.fur_run_id)
+            snapshot.Tui_decode.fus_runs
+      in
+      let left_buf = Buffer.create 1024 in
+      let right_buf = Buffer.create 4096 in
+      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Fusion"
+        ~focused:false ~labels ~selected:state.fusion_cursor;
+      let answer =
+        fusion_detail_pane state ~rows ~cols:(cols - left_cols) run_id
+          right_buf
+      in
+      write_two_panes buf ~left_cols ~left:left_buf ~right:right_buf;
+      answer
+    end
+  in
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:

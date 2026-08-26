@@ -95,6 +95,28 @@ curl_scheduled_automation() {
     "${BASE_URL}/api/v1/dashboard/scheduled-automation" >"$DASHBOARD_JSON"
 }
 
+curl_scheduled_automation_with_timeout_retry() {
+  local attempt=1
+  local max_attempts=3
+
+  while true; do
+    curl_scheduled_automation
+    if ! jq -e '.error == "computation_timeout"' "$DASHBOARD_JSON" >/dev/null; then
+      return 0
+    fi
+    if (( attempt >= max_attempts )); then
+      return 0
+    fi
+
+    echo "  RETRY: dashboard computation_timeout (attempt ${attempt}/${max_attempts})"
+    # Dashboard_cache retains the timeout envelope for a five-second cooldown.
+    # Wait past that boundary so the retry performs a new projection instead
+    # of reading the same explicit transient result.
+    sleep 6
+    attempt=$((attempt + 1))
+  done
+}
+
 assert_dashboard_matched_supported_non_terminal() {
   local schedule_id="$1"
   jq -e --arg schedule_id "$schedule_id" '
@@ -174,7 +196,7 @@ fi
 echo "  PASS: ${SCHEDULE_ID}"
 
 echo "[3/3] dashboard scheduled-automation reports matched_supported_non_terminal"
-curl_scheduled_automation
+curl_scheduled_automation_with_timeout_retry
 if ! assert_dashboard_matched_supported_non_terminal "$SCHEDULE_ID"; then
   mcp_fail_with_context \
     "dashboard scheduled automation did not prove matched_supported_non_terminal" \

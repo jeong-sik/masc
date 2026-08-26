@@ -115,7 +115,7 @@ let invalidate_index t index =
 let discard_open_scope t stream_scope =
   t.blocks <-
     List.filter
-      (fun (_, block) -> block.stream_scope <> stream_scope)
+      (fun (_, (block : open_block)) -> block.stream_scope <> stream_scope)
       t.blocks;
 ;;
 
@@ -142,7 +142,7 @@ let advance_to_empty_scope t =
 
 let scope_is_sealed t stream_scope =
   List.exists
-    (fun (_, binding) -> binding.stream_scope = stream_scope)
+    (fun (_, (binding : turn_binding)) -> binding.stream_scope = stream_scope)
     t.turns
   || List.exists (fun (_, scope) -> scope = stream_scope) t.unmapped_turns
 ;;
@@ -194,8 +194,9 @@ let quarantine t ~kind ~stream_scope ~block_index detail =
 
 let quarantine_open_scope t ~kind ~detail =
   t.blocks
-  |> List.filter (fun (_, block) -> block.stream_scope = t.current_stream_scope)
-  |> List.iter (fun (index, block) ->
+  |> List.filter (fun (_, (block : open_block)) ->
+    block.stream_scope = t.current_stream_scope)
+  |> List.iter (fun (index, (block : open_block)) ->
     quarantine t ~kind ~stream_scope:block.stream_scope ~block_index:index
       (Printf.sprintf "%s at stream_scope=%d block_index=%d"
          detail block.stream_scope index))
@@ -254,7 +255,7 @@ let ensure_message_scope t =
 
 let finalized_at_current_index t index =
   List.filter
-    (fun (_, finalized) ->
+    (fun (_, (finalized : finalized_block)) ->
        finalized.stream_scope = t.current_stream_scope
        && finalized.block_index = index)
     t.finalized
@@ -265,7 +266,7 @@ let quarantine_finalized_tool_delta t ~kind ~index ~delta_kind =
   | [] -> false
   | finalized ->
     List.iter
-      (fun (_, block) ->
+      (fun (_, (block : finalized_block)) ->
          quarantine t ~kind ~stream_scope:block.stream_scope ~block_index:index
            (Printf.sprintf
               "%s delta arrived after tool block stop at stream_scope=%d block_index=%d"
@@ -285,7 +286,7 @@ let invalidate_header_conflict t ~index ~detail =
           detail block.stream_scope index)
    | None ->
      finalized
-     |> List.iter (fun (_, block) ->
+     |> List.iter (fun (_, (block : finalized_block)) ->
        quarantine t ~kind:Keeper_chat_events.Tool_start_duplicate_index
          ~stream_scope:block.stream_scope ~block_index:index
          (Printf.sprintf "%s at stream_scope=%d block_index=%d"
@@ -359,7 +360,7 @@ let unique ints = List.length ints = List.length (List.sort_uniq Int.compare int
 let source_exists_exactly_once t ~stream_scope ~block_index =
   let open_count =
     List.fold_left
-      (fun count (index, block) ->
+      (fun count (index, (block : open_block)) ->
          if index = block_index && block.stream_scope = stream_scope
          then count + 1
          else count)
@@ -368,7 +369,7 @@ let source_exists_exactly_once t ~stream_scope ~block_index =
   in
   let finalized_count =
     List.fold_left
-      (fun count (_, finalized) ->
+      (fun count (_, (finalized : finalized_block)) ->
          if
            finalized.block_index = block_index
            && finalized.stream_scope = stream_scope
@@ -382,7 +383,9 @@ let source_exists_exactly_once t ~stream_scope ~block_index =
 
 let validate_closed_scope t ~stream_scope ~streamed_block_indices =
   let has_unfinalized_blocks =
-    List.exists (fun (_, block) -> block.stream_scope = stream_scope) t.blocks
+    List.exists
+      (fun (_, (block : open_block)) -> block.stream_scope = stream_scope)
+      t.blocks
   in
   if List.mem stream_scope t.invalid_scopes
   then Error (Printf.sprintf "stream scope %d is invalid" stream_scope)
@@ -405,7 +408,7 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
   let stream_scope = t.current_stream_scope in
   let streamed_block_indices =
     t.finalized
-    |> List.filter_map (fun (_, finalized) ->
+    |> List.filter_map (fun (_, (finalized : finalized_block)) ->
       if finalized.stream_scope = stream_scope
       then Some finalized.block_index
       else None)
@@ -494,7 +497,8 @@ let seal_turn t ~turn ~(tool_source_map : Agent_core.Hooks.admitted_tool_source_
     | None ->
       (match
          List.find_opt
-           (fun (_, binding) -> binding.stream_scope = stream_scope)
+           (fun (_, (binding : turn_binding)) ->
+              binding.stream_scope = stream_scope)
            t.turns
        with
        | Some (recorded_turn, _) ->
@@ -512,7 +516,7 @@ let close_turn_without_sources t ~turn =
   let stream_scope = t.current_stream_scope in
   let streamed_block_indices =
     t.finalized
-    |> List.filter_map (fun (_, finalized) ->
+    |> List.filter_map (fun (_, (finalized : finalized_block)) ->
       if finalized.stream_scope = stream_scope
       then Some finalized.block_index
       else None)
@@ -532,7 +536,8 @@ let close_turn_without_sources t ~turn =
        then Error (Printf.sprintf "Agent Core turn %d already has exact sources" turn)
        else if
          List.exists
-           (fun (_, binding) -> binding.stream_scope = stream_scope)
+           (fun (_, (binding : turn_binding)) ->
+              binding.stream_scope = stream_scope)
            t.turns
          || List.exists
               (fun (_, recorded_scope) -> recorded_scope = stream_scope)
@@ -575,13 +580,13 @@ let record_execution_id t ~tool_call_id ~turn ~planned_index ~execution_id =
   else
     let open_matches =
       List.filter
-        (fun (index, block) ->
+        (fun (index, (block : open_block)) ->
            index = block_index && block.stream_scope = stream_scope)
         t.blocks
     in
     let finalized_matches =
       List.filter
-        (fun (_, finalized) ->
+        (fun (_, (finalized : finalized_block)) ->
            finalized.block_index = block_index
            && finalized.stream_scope = stream_scope)
         t.finalized
@@ -748,7 +753,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
         let provider_message_id = t.current_message_id in
         let finalized_at_index =
           List.filter
-            (fun (_, finalized) ->
+            (fun (_, (finalized : finalized_block)) ->
               finalized.stream_scope = stream_scope
               && finalized.block_index = index)
             t.finalized
@@ -802,7 +807,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
             })
          | conflicts ->
            List.iter
-             (fun (_, finalized) ->
+             (fun (_, (finalized : finalized_block)) ->
                 quarantine t
                   ~kind:Keeper_chat_events.Tool_start_duplicate_index
                   ~stream_scope:finalized.stream_scope
@@ -924,7 +929,8 @@ let on_event t (evt : Agent_core.Types.sse_event) =
     discard_open_scope t stream_scope;
     t.finalized <-
       List.filter
-        (fun (_, block) -> block.stream_scope <> stream_scope)
+        (fun (_, (block : finalized_block)) ->
+           block.stream_scope <> stream_scope)
         t.finalized
   | Agent_core.Types.Connected
   | Agent_core.Types.Ping
@@ -933,7 +939,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
 
 let to_tool_calls t =
   t.finalized
-  |> List.filter (fun (_, finalized) ->
+  |> List.filter (fun (_, (finalized : finalized_block)) ->
     (not (List.mem finalized.stream_scope t.invalid_scopes))
     && not (List.mem (finalized.stream_scope, finalized.block_index) t.quarantined))
   |> List.sort (fun (left, _) (right, _) -> Int.compare left right)

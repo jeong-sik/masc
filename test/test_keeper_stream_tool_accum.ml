@@ -11,7 +11,7 @@ module S = Agent_core.Llm_provider.Complete_stream_acc
 let start_runtime_attempt t =
   ignore
     (A.start_runtime_attempt t
-      : Keeper_chat_events.runtime_attempt_scope_disposition)
+      : Masc.Keeper_chat_events.runtime_attempt_scope_disposition)
 ;;
 
 let record_execution_id ?(turn = 0) ?(planned_index = 0) t ~tool_call_id
@@ -666,7 +666,7 @@ let test_closed_tool_start_is_quarantined () =
   (match A.take_protocol_errors t with
    | [ kind, occurrence, detail ] ->
      check string "typed quarantine kind" "tool_start_duplicate_index"
-       (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+       (Masc.Keeper_chat_events.stream_protocol_error_kind_to_string kind);
      check int "quarantine scope" 0 occurrence.stream_scope;
      check int "quarantine block" 0 occurrence.block_index;
      check (option string) "provider correlation is not invented" None
@@ -780,7 +780,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   let sealed = A.create () in
   let first = A.start_runtime_attempt sealed in
   check bool "first attempt has no prior scope to abandon" false
-    (first = Keeper_chat_events.Abandon_previous_scope);
+    (first = Masc.Keeper_chat_events.Abandon_previous_scope);
   A.on_event sealed
     (start ~index:0 ~tool_id:(Some "sealed-call") ~tool_name:(Some "Read"));
   A.on_event sealed (json_snapshot ~index:0 {|{"path":"sealed.ml"}|});
@@ -788,7 +788,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   seal_turn sealed [ 0 ];
   let fallback = A.start_runtime_attempt sealed in
   check bool "sealed prior scope is preserved" false
-    (fallback = Keeper_chat_events.Abandon_previous_scope);
+    (fallback = Masc.Keeper_chat_events.Abandon_previous_scope);
   let unsealed = A.create () in
   start_runtime_attempt unsealed;
   A.on_event unsealed
@@ -796,7 +796,7 @@ let test_runtime_attempt_transition_uses_seal_authority () =
   A.on_event unsealed (stop ~index:0);
   let fallback = A.start_runtime_attempt unsealed in
   check bool "unsealed finalized prior scope is abandoned" true
-    (fallback = Keeper_chat_events.Abandon_previous_scope)
+    (fallback = Masc.Keeper_chat_events.Abandon_previous_scope)
 ;;
 
 let test_failure_preserves_official_closed_scope () =
@@ -836,7 +836,7 @@ let test_duplicate_start_after_payload_is_quarantined () =
   (match A.take_protocol_errors t with
    | [ kind, occurrence, _ ] ->
      check string "typed ambiguous-start kind" "tool_start_duplicate_index"
-       (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+       (Masc.Keeper_chat_events.stream_protocol_error_kind_to_string kind);
      check int "ambiguous start scope" 0 occurrence.stream_scope;
      check int "ambiguous start block" 0 occurrence.block_index
    | errors -> failf "expected one typed protocol error, got %d" (List.length errors));
@@ -1047,7 +1047,7 @@ let test_media_delta_on_active_tool_block_quarantines_the_call () =
   (match A.take_protocol_errors t with
    | [ kind, occurrence, _ ] ->
      check string "typed media mismatch" "tool_delta_invalid_kind"
-       (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+       (Masc.Keeper_chat_events.stream_protocol_error_kind_to_string kind);
      check int "media mismatch scope" 0 occurrence.stream_scope;
      check int "media mismatch block" 0 occurrence.block_index
    | errors -> failf "expected one typed protocol error, got %d" (List.length errors));
@@ -1063,7 +1063,7 @@ let test_input_delta_after_stop_quarantines_the_call () =
   (match A.take_protocol_errors t with
    | [ kind, occurrence, _ ] ->
      check string "typed late args" "tool_args_without_start"
-       (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+       (Masc.Keeper_chat_events.stream_protocol_error_kind_to_string kind);
      check int "late args scope" 0 occurrence.stream_scope;
      check int "late args block" 0 occurrence.block_index
    | errors -> failf "expected one typed protocol error, got %d" (List.length errors));

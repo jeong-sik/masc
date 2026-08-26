@@ -153,7 +153,9 @@ let append_tool_args ~snapshot tool args =
     args_fragments = if snapshot then [ args ] else args :: tool.args_fragments
   }
 
-let same_occurrence left right =
+let same_occurrence
+    (left : Keeper_chat_events.tool_stream_occurrence)
+    (right : Keeper_chat_events.tool_stream_occurrence) =
   Int.equal left.Keeper_chat_events.stream_scope right.stream_scope
   && Int.equal left.block_index right.block_index
 
@@ -203,10 +205,10 @@ let first_quarantine_kind state occurrence =
 let remember_tool_quarantines state ~kind tools =
   let tool_quarantines =
     List.fold_left
-      (fun quarantines tool ->
+      (fun quarantines (tool : tool_ref) ->
          if
            List.exists
-             (fun quarantine ->
+             (fun (quarantine : tool_quarantine) ->
                 same_occurrence quarantine.occurrence tool.occurrence)
              quarantines
          then quarantines
@@ -216,16 +218,18 @@ let remember_tool_quarantines state ~kind tools =
   { state with tool_quarantines }
 ;;
 
-let finalized_tool_for_occurrence state occurrence =
+let finalized_tool_for_occurrence state
+    (occurrence : Keeper_chat_events.tool_stream_occurrence) =
   List.find_opt
-    (fun finalized ->
+    (fun (finalized : tool_ref) ->
        same_occurrence finalized.occurrence occurrence)
     state.finalized_tools
 
-let remember_finalized_tool state tool =
+let remember_finalized_tool state (tool : tool_ref) =
   if
     List.exists
-      (fun finalized -> same_occurrence finalized.occurrence tool.occurrence)
+      (fun (finalized : tool_ref) ->
+         same_occurrence finalized.occurrence tool.occurrence)
       state.finalized_tools
   then state
   else { state with finalized_tools = tool :: state.finalized_tools }
@@ -275,13 +279,13 @@ let tools_in_current_scope state =
   in
   let finalized =
     state.finalized_tools
-    |> List.filter (fun tool ->
+    |> List.filter (fun (tool : tool_ref) ->
       Option.equal Int.equal current_scope (Some tool.occurrence.stream_scope))
   in
   (active @ finalized)
-  |> List.filter (fun tool ->
+  |> List.filter (fun (tool : tool_ref) ->
     not (occurrence_is_quarantined state tool.occurrence))
-  |> List.sort_uniq (fun left right ->
+  |> List.sort_uniq (fun (left : tool_ref) (right : tool_ref) ->
     let scope =
       Int.compare left.occurrence.stream_scope right.occurrence.stream_scope
     in
@@ -297,7 +301,7 @@ let poison_scope state ~kind ~reason =
     | [] -> [ protocol_error ~reason kind ]
     | tools ->
       List.map
-        (fun tool ->
+        (fun (tool : tool_ref) ->
            protocol_error ~quarantined_occurrence:tool.occurrence
              ~index:tool.occurrence.block_index
              ?tool_call_id:tool.tool_call_id ~reason kind)
@@ -369,7 +373,7 @@ let fail_stream state ~reason =
 ;;
 
 let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
-  let reject tool =
+  let reject (tool : tool_ref) =
     let reason =
       Printf.sprintf "non-input %s delta arrived for a tool-use block" delta_kind
     in

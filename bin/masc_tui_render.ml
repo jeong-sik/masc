@@ -3704,11 +3704,30 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
             ^ Ansi.reset ]
     | Some _ | None -> []
   in
+  (* What one attempt answered. Wrapped, because the message that matters
+     most here is the long one: a provider that registers no client says what
+     to make and where to put it, and a single truncated line is the half of
+     that sentence an operator cannot act on. *)
+  (* Built by the shared function and only coloured here: the key handler
+     counts these rows to know where the list starts, and two places wrapping
+     the same text at their own idea of the width would disagree. *)
+  let attempt =
+    Masc_tui_types.identity_notice ~cols
+      (Option.map Terminal_text.single_line state.identity_attempt_error)
+  in
+  let attempt =
+    List.mapi
+      (fun index line ->
+        if index = List.length attempt - 1
+        then Ansi.dim ^ line ^ Ansi.reset
+        else Theme.bad () ^ line ^ Ansi.reset)
+      attempt
+  in
   if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~keeper:(Terminal_text.single_line k.k_name) ~notice:attempt
     @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =

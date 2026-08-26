@@ -128,6 +128,14 @@ let surface_rows (state : state) =
    the result against their exact wrapped-line count. *)
 let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 
+(* The columns the Identity pane wraps its notice at. Asked of the terminal
+   the same way {!surface_rows} asks for its rows, so the key handler counts
+   the lines the renderer is about to draw. *)
+let identity_pane_columns (state : state) =
+  let _rows, columns = get_terminal_size () in
+  Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
+    ~cols:columns
+
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
@@ -173,7 +181,13 @@ let move_identity_cursor (state : state) ~delta =
             in
             state.detail_scroll <-
               Masc_tui_scroll.ensure_visible
-                ~cursor:(Masc_tui_types.identity_provider_line ~index:cursor)
+                ~cursor:
+                  (Masc_tui_types.identity_provider_line
+                     ~notice:
+                       (Masc_tui_types.identity_notice
+                          ~cols:(identity_pane_columns state)
+                          state.identity_attempt_error)
+                     ~index:cursor)
                 ~height state.detail_scroll
       end
 
@@ -4583,6 +4597,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            (* Another keeper's tab opens at the top of its own list rather
               than at whichever row the last one was left on. *)
            state.identity_cursor <- 0;
+           state.identity_attempt_error <- None;
            launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
@@ -6293,10 +6308,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               ; ils_label = label
               ; ils_url = url
               };
-          state.identity_view_error <- None
+          state.identity_attempt_error <- None
       (* Shown on the tab rather than swallowed: the operator pressed a key
-         and has to learn that nothing is going to open. *)
-      | Error detail -> state.identity_view_error <- Some detail)
+         and has to learn that nothing is going to open. Beside the list
+         rather than instead of it -- one provider refusing is not a reason
+         to take the others off the screen, and the message that matters
+         most here is the one telling them what to do about it. *)
+      | Error detail -> state.identity_attempt_error <- Some detail)
   | Identity_refreshed (keeper_name, result) -> (
       match result with
       (* Re-read rather than patch what is on screen: the catalog the server
@@ -8373,7 +8391,7 @@ let main () =
                       arrows carry on from the row they just started. *)
                    state.identity_cursor <- wanted;
                    state.identity_login <- None;
-                   state.identity_view_error <- None;
+                   state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
@@ -9761,7 +9779,7 @@ let main () =
                with
                | Some (provider_id, label) ->
                    state.identity_login <- None;
-                   state.identity_view_error <- None;
+                   state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())

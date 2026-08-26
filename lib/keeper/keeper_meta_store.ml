@@ -553,10 +553,45 @@ let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta
   if requested_name = ""
   then Ok None
   else
-    read_meta_file_path
-      ~ownership_root:config.Workspace.base_path
-      (keeper_meta_path config requested_name)
-    |> Result.map (Option.map (fun meta -> requested_name, meta))
+    match
+      read_meta_file_path
+        ~ownership_root:config.Workspace.base_path
+        (keeper_meta_path config requested_name)
+    with
+    | Ok (Some meta) -> Ok (Some (requested_name, meta))
+    | Ok None -> (
+        (* task-370: a durable wake enqueues under the keeper's agent_name
+           (e.g. "keeper-taskmaster-agent"), but the meta file is keyed by
+           keeper name (e.g. "taskmaster.json"). Without this fallback the
+           janitor's owner resolution returns owner_unknown forever and the
+           stimulus is retained in an infinite loop (913 consecutive retains
+           observed on 2026-08-25). Resolve through the persisted
+           agent_name -> keeper_name reverse mapping before concluding the
+           owner is unknown. *)
+        match persisted_keeper_name_for_agent_name config ~agent_name:requested_name with
+        | Error detail ->
+          Log.Keeper.warn
+            "read_meta_resolved: agent_name fallback scan failed for %s: %s"
+            requested_name
+            detail;
+          Ok None
+        | Ok None -> Ok None
+        | Ok (Some keeper_name) -> (
+            match
+              read_meta_file_path
+                ~ownership_root:config.Workspace.base_path
+                (keeper_meta_path config keeper_name)
+            with
+            | Ok (Some meta) -> Ok (Some (keeper_name, meta))
+            | Ok None -> Ok None
+            | Error detail ->
+              Log.Keeper.warn
+                "read_meta_resolved: agent_name fallback read failed for %s -> %s: %s"
+                requested_name
+                keeper_name
+                detail;
+              Ok None))
+    | Error detail -> Error detail
 ;;
 
 let read_meta config name : (Keeper_meta_contract.keeper_meta option, string) result =

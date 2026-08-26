@@ -557,7 +557,7 @@ let test_operator_approvals_use_current_contract () =
        ~binding_name:"render_approvals"
        ~callee:"Terminal_text.single_line"
      >= 7);
-  check int "approval renderer sanitizes optional text with defaults" 3
+  check int "approval renderer sanitizes optional text with defaults" 5
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"render_approvals"

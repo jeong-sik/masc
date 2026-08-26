@@ -59,6 +59,12 @@ FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 CURSOR_RE = re.compile(rb"\x1b\[(\d+);(\d+)H\x1b\[\?25h")
 POSITION_RE = re.compile(rb"\x1b\[(\d+);(\d+)H")
+# A lexed OCaml keyword, whichever colour the theme dresses it in. Pinning the
+# code -- yellow, once -- meant #30723's palette change failed four scenarios
+# with a timeout that named a colour instead of the thing under test: that the
+# file arrived lexed rather than printed.
+LEXED_LET = re.compile(rb"\x1b\[[0-9;]*m" + re.escape(b"let") + rb"\x1b\[0m")
+
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 
 def composer_showing(text: bytes, *, prefix: bytes = b"> ") -> re.Pattern[bytes]:
@@ -5598,7 +5604,7 @@ def changes_keeper_and_arrow_detail_interaction(
     # own workspace (?keeper=alpha), so the header names whose tree it is
     # and the bytes arrive lexed.
     code = send_and_wait(
-        process, master_fd, output, b"v", b"\x1b[33mlet\x1b[0m"
+        process, master_fd, output, b"v", LEXED_LET
     )
     code_plain = CSI_RE.sub(b"", code).decode("utf-8")
     if "alpha ▸ repos/masc/lib" not in code_plain:
@@ -5784,14 +5790,16 @@ def code_lane_interaction(
         if needle not in plain:
             raise AssertionError(f"Code did not list {needle!r}: {plain!r}")
     send_and_wait(process, master_fd, output, b"\r", b"a.ml")
-    opened = send_and_wait(
-        process, master_fd, output, b"\r", b"\x1b[33mlet\x1b[0m"
-    )
+    # Which colour a keyword wears belongs to the theme, and the theme moves:
+    # #30723 turned it bright magenta and this waited out its timeout on the
+    # old yellow. What this scenario is about is that the file arrived lexed,
+    # so it asks for a style around the span and not for a particular one.
+    opened = send_and_wait(process, master_fd, output, b"\r", LEXED_LET)
     if re.search(rb"\x1b\[7m\s+1\x1b\[0m", opened) is None:
         raise AssertionError(
             f"the cursor line's gutter is not highlighted: {opened!r}"
         )
-    if b"\x1b[90m(* hi *)\x1b[0m" not in opened:
+    if re.search(rb"\x1b\[[0-9;]*m" + re.escape(b"(* hi *)") + rb"\x1b\[0m", opened) is None:
         raise AssertionError(f"the comment did not colour: {opened!r}")
     # Shift-Right pans the open file sideways by one cell: lowercase h/l now
     # choose the split pane. The keyword span is cut mid-word but its colour
@@ -5799,14 +5807,18 @@ def code_lane_interaction(
     panned = send_and_wait(
         process, master_fd, output, b"\x1b[1;2C\x1b[1;2C", b"(col 3)"
     )
-    if b"\x1b[33mt\x1b[0m x = \x1b[35m1\x1b[0m" not in panned:
+    cut_under_style = re.compile(
+        rb"\x1b\[[0-9;]*m" + re.escape(b"t") + rb"\x1b\[0m x = "
+        rb"\x1b\[[0-9;]*m" + re.escape(b"1") + rb"\x1b\[0m"
+    )
+    if cut_under_style.search(panned) is None:
         raise AssertionError(f"pan did not cut by cells under the style: {panned!r}")
     send_and_wait(
         process,
         master_fd,
         output,
         b"\x1b[1;2D\x1b[1;2D",
-        b"\x1b[33mlet\x1b[0m",
+        LEXED_LET,
     )
     # With the file focused, "/" searches its lines: typing jumps the line
     # cursor (the reverse gutter) to the match, and Enter keeps the query.
@@ -5827,7 +5839,7 @@ def code_lane_interaction(
     # The added row now arrives lexed, so the wait needle is the keyword
     # span rather than the plain text the styles split apart.
     diff_frame = send_and_wait(
-        process, master_fd, output, b"d", b"\x1b[33mlet\x1b[0m"
+        process, master_fd, output, b"d", LEXED_LET
     )
     diff_plain = CSI_RE.sub(b"", diff_frame).decode("utf-8")
     for needle in ("diff vs HEAD: lib/a.ml", "let a = 1", "let x = 1"):
@@ -5837,11 +5849,11 @@ def code_lane_interaction(
             )
     # The added row is the working tree's own line, so it carries the
     # lexer's colours (the keyword span) inside the diff band.
-    if b"\x1b[33mlet\x1b[0m" not in diff_frame:
+    if LEXED_LET.search(diff_frame) is None:
         raise AssertionError(
             f"the added diff row lost the lexer's colours: {diff_frame!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # H swaps the content for the commits that touched the file; Esc swaps
     # back (the lexed keyword span is the proof the content returned).
     # The needle is a commit hash so the wait crosses the "(loading
@@ -5858,7 +5870,7 @@ def code_lane_interaction(
         raise AssertionError(
             f"history footer does not offer the way back: {history_plain!r}"
         )
-    send_and_wait(process, master_fd, output, b"\x1b", b"\x1b[33mlet\x1b[0m")
+    send_and_wait(process, master_fd, output, b"\x1b", LEXED_LET)
     # The search above left the cursor on line 2; the lsp fixtures answer
     # about line 1, so put the cursor back where the question is.
     send_and_wait(process, master_fd, output, b"k", b"\x1b[7m   1\x1b[0m")

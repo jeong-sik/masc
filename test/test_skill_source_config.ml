@@ -12,13 +12,18 @@ let test_absent_section_is_empty () =
   let config = parse_exn "[runtime]\ndefault = \"provider.model\"\n" in
   check int "no implicit sources" 0 (List.length config.sources);
   check bool "no invented lifetime" true (Option.is_none config.activation_lifetime);
-  check bool "no invented precedence" true (Option.is_none config.precedence)
+  check bool "no invented precedence" true (Option.is_none config.precedence);
+  check bool
+    "no invented resource read bound"
+    true
+    (Option.is_none config.resource_read_max_bytes)
 ;;
 
 let ordered_sources =
   {|[skills]
 activation-lifetime = "session"
 precedence = "earlier-source-wins"
+resource-read-max-bytes = 65536
 
 [[skills.sources]]
 id = "project"
@@ -35,7 +40,7 @@ access = "read-write"
 ;;
 
 let skills_header =
-  "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n\n"
+  "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n\n"
 ;;
 
 let configured sources = skills_header ^ sources
@@ -108,6 +113,39 @@ let test_missing_and_wrong_fields () =
     (function
       | Invalid_source_field_type { field = Id; actual = Integer; _ } -> true
       | _ -> false)
+;;
+
+let test_resource_read_max_bytes_contract () =
+  let without_bound =
+    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n"
+  in
+  expect_error without_bound (function
+    | Missing_resource_read_max_bytes -> true
+    | _ -> false);
+  expect_error
+    (without_bound ^ "resource-read-max-bytes = \"65536\"\n")
+    (function
+      | Invalid_resource_read_max_bytes_type String -> true
+      | _ -> false);
+  List.iter
+    (fun value ->
+       expect_error
+         (without_bound ^ Printf.sprintf "resource-read-max-bytes = %d\n" value)
+         (function
+           | Non_positive_resource_read_max_bytes actual -> actual = value
+           | _ -> false))
+    [ 0; -1 ];
+  let config =
+    parse_exn
+      (without_bound ^ "resource-read-max-bytes = 123456\n")
+  in
+  match config.resource_read_max_bytes with
+  | Some value ->
+    check int
+      "positive bound is preserved"
+      123456
+      (resource_read_max_bytes_to_int value)
+  | None -> fail "configured resource read bound was discarded"
 ;;
 
 let test_anchor_and_path_rules () =
@@ -228,6 +266,13 @@ let test_seed_declares_sources () =
       (fun () -> really_input_string channel (in_channel_length channel))
   in
   let config = parse_exn text in
+  (match config.resource_read_max_bytes with
+   | Some value ->
+     check int
+       "seed resource read bound"
+       65536
+       (resource_read_max_bytes_to_int value)
+   | None -> fail "seed omitted the resource read bound");
   let projected =
     List.map
       (fun source ->
@@ -262,7 +307,10 @@ let test_projection_names_policy () =
     check (option string) "activation lifetime" (Some "session")
       (string_field "activation_lifetime");
     check (option string) "precedence" (Some "earlier-source-wins")
-      (string_field "precedence")
+      (string_field "precedence");
+    (match List.assoc_opt "resource_read_max_bytes" fields with
+     | Some (`Int value) -> check int "resource read bound" 65536 value
+     | _ -> fail "resource read bound projection was not an integer")
   | _ -> fail "Skill source projection was not an object"
 ;;
 
@@ -275,6 +323,8 @@ let () =
         ; test_case "duplicates and unknown fields" `Quick
             test_duplicate_and_unexpected_fields
         ; test_case "missing and wrong fields" `Quick test_missing_and_wrong_fields
+        ; test_case "resource read max bytes" `Quick
+            test_resource_read_max_bytes_contract
         ; test_case "anchor and path rules" `Quick test_anchor_and_path_rules
         ; test_case "top-level contract" `Quick
             test_top_level_contract_and_all_diagnostics

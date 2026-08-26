@@ -40,7 +40,7 @@ Use the repository's focused validation wrapper.
 let configured_snapshot ~source_id ~anchor ~path documents =
   let config_text =
     Printf.sprintf
-      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
+      "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = %S\nanchor = %S\npath = %S\naccess = \"read-only\"\n"
       source_id
       anchor
       path
@@ -126,7 +126,11 @@ let instruction_entries snapshot references =
   | Ok selection ->
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
-         selected.reference, selected.skill.description, selected.skill.body)
+         Keeper_tool_composition_surface.instruction_skill
+           ~reference:selected.reference
+           ~description:selected.skill.description
+           ~body:selected.skill.body
+           ())
       selection.selected
 ;;
 
@@ -209,6 +213,8 @@ let test_projection_names_equal_turn_surface_authority () =
          surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256);
+    check (option int) "resource bound follows frozen snapshot" (Some 65536)
+      surface.skill_resource_read_max_bytes;
     let instruction_entries = task_instruction_skills in
     let schema_tool =
       Keeper_tool_composition_surface.schema_tools

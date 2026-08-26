@@ -603,11 +603,6 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
 let respond_board_json reqd json =
   Http.Response.json_value json reqd
 
-(* How many trailing tool-call rows the skill catalog counts usage over.
-   A tail read of this size is a few MB and answers in well under a
-   second; the number rides in the response as [recent_window_rows]. *)
-let skill_usage_window_rows = 2000
-
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -1369,13 +1364,6 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/skills" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let config = Mcp_server.workspace_config state in
-         (* A Keeper turn refreshes this same publication before building its
-            tool bundle. Refresh here too so an operator inspecting the
-            workspace before the next turn sees the exact files that turn
-            will consume, rather than the server-start snapshot. *)
-         ignore
-           (Server_skill_snapshot_runtime.refresh_from_runtime_file
-              ~base_path:config.Workspace.base_path);
          let json =
            match Server_skill_snapshot_runtime.lookup ~base_path:config.Workspace.base_path with
            | Error _error ->
@@ -1395,75 +1383,91 @@ let add_routes ~sw ~clock router =
                ; ("state", `String "uninitialized")
                ]
            | Ok (Ready snapshot) ->
-             (* Usage rides beside the snapshot: one bounded tail read of the
-                tool-call log, then a count per effective skill. Kind and tool
-                name come from the same parser a keeper turn applies to the
-                snapshot's bytes, so nothing here scans the filesystem or
-                builds a competing catalog; a document that parser refuses is
-                reported as such rather than guessed. The window bound rides
-                in the response so a reader knows what the count is over. *)
-             let rows =
-               Keeper_tool_call_log.read_recent_rows ~n:skill_usage_window_rows ()
+             let catalog, diagnostics =
+               Keeper_skill_catalog.of_snapshot snapshot
              in
-             let usage =
-               Skill_catalog_snapshot.effective_entries snapshot
-               |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
-                    let name = entry.identity.name in
-                    let base =
-                      [ ("name", `String name); ("directory", `String entry.directory) ]
-                    in
-                    match
-                      Keeper_skill_catalog.parse_skill
-                        ~directory:entry.directory
-                        entry.source_text
-                    with
-                    | Ok skill ->
-                      (match skill.surface with
-                       | Keeper_skill_catalog.Instruction ->
-                         let summary =
-                           Keeper_skill_usage.summarize ~rows
-                             (Keeper_skill_usage.Instruction_read skill.name)
-                         in
-                         `Assoc
-                           (base
-                           @ [ ("kind", `String "instruction")
-                             ; "recent_use_count", `Int summary.use_count
-                             ; "recent_success_count", `Int summary.success_count
-                             ; "recent_failure_count", `Int summary.failure_count
-                             ])
-                       | Keeper_skill_catalog.Composition composition ->
-                         let tool_name =
-                           Keeper_tool_composition_catalog.tool_name composition
-                         in
-                         let summary =
-                           Keeper_skill_usage.summarize ~rows
-                             (Keeper_skill_usage.Composition_tool tool_name)
-                         in
-                         `Assoc
-                           (base
-                           @ [ ("kind", `String "composition")
-                             ; ("tool_name", `String tool_name)
-                             ; ( "execution"
-                               , `String
-                                   (Keeper_tool_composition_catalog.execution_mode_to_string
-                                      composition.execution) )
-                             ; "recent_use_count", `Int summary.use_count
-                             ; "recent_success_count", `Int summary.success_count
-                             ; "recent_failure_count", `Int summary.failure_count
-                             ]))
-                    | Error error ->
+             let diagnostic_messages identity =
+               diagnostics
+               |> List.filter_map
+                    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+                       if Skill_reference.equal_identity identity diagnostic.identity
+                       then
+                         Some
+                           (Keeper_skill_catalog.error_to_string diagnostic.error)
+                       else None)
+             in
+             let diagnostic_fields identity =
+               match diagnostic_messages identity with
+               | [] -> []
+               | messages ->
+                 [ ("diagnostics", `List (List.map (fun text -> `String text) messages)) ]
+             in
+             let surface_of_skill (skill : Keeper_skill_catalog.skill) =
+               match skill.reference with
+               | None -> None
+               | Some reference ->
+                 let base =
+                   [ ("reference", Skill_reference.to_yojson reference) ]
+                   @ diagnostic_fields reference.identity
+                 in
+                 Some
+                   (match skill.surface with
+                    | Keeper_skill_catalog.Instruction ->
+                      `Assoc (base @ [ ("kind", `String "instruction") ])
+                    | Keeper_skill_catalog.Composition composition ->
                       `Assoc
                         (base
-                        @ [ ("kind", `String "unparsed")
-                          ; ("error", `String (Keeper_skill_catalog.error_to_string error))
+                        @ [ ("kind", `String "composition")
+                          ; ( "tool_name"
+                            , `String
+                                (Keeper_tool_composition_catalog.tool_name composition) )
+                          ; ( "execution"
+                            , `String
+                                (Keeper_tool_composition_catalog.execution_mode_to_string
+                                   composition.execution) )
                           ]))
+             in
+             let projected_references =
+               Keeper_skill_catalog.skills catalog
+               |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+                    skill.reference)
+             in
+             let unavailable_surfaces =
+               diagnostics
+               |> List.filter_map
+                    (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
+                       if
+                         List.exists
+                           (fun reference ->
+                              Skill_reference.equal_identity
+                                reference.Skill_reference.identity
+                                diagnostic.identity)
+                           projected_references
+                       then None
+                       else
+                         Skill_catalog_snapshot.find_exact snapshot diagnostic.identity
+                         |> Option.map (fun entry ->
+                              `Assoc
+                                [ ( "reference"
+                                  , Skill_reference.to_yojson
+                                      (Skill_catalog_snapshot.entry_reference entry) )
+                                ; ("kind", `String "unavailable")
+                                ; ( "error"
+                                  , `String
+                                      (Keeper_skill_catalog.error_to_string
+                                         diagnostic.error) )
+                                ]))
+             in
+             let surfaces =
+               (Keeper_skill_catalog.skills catalog
+                |> List.filter_map surface_of_skill)
+               @ unavailable_surfaces
              in
              `Assoc
                [ ("schema", `String "masc.skill-snapshot/v1")
                ; ("state", `String "ready")
                ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
-               ; ("usage", `List usage)
-               ; ("recent_window_rows", `Int skill_usage_window_rows)
+               ; ("surfaces", `List surfaces)
                ]
          in
          Http.Response.json_value json reqd

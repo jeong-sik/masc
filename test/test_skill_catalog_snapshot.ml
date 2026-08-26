@@ -3,9 +3,10 @@ open Alcotest
 module Snapshot = Skill_catalog_snapshot
 module Reference = Skill_reference
 
-let config_text ?(runtime = "one") sources =
+let config_text ?(runtime = "one") ?(resource_read_max_bytes = 65536) sources =
   Printf.sprintf
-    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\n%s\n[runtime]\ndefault = %S\n"
+    "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = %d\n%s\n[runtime]\ndefault = %S\n"
+    resource_read_max_bytes
     sources
     runtime
 ;;
@@ -244,8 +245,12 @@ let test_revisions_track_only_skill_truth () =
   let sources = source_row ~id:"only" ~path:"skills" in
   let text_one = config_text ~runtime:"provider.one" sources in
   let text_two = config_text ~runtime:"provider.two" sources in
+  let text_with_other_bound =
+    config_text ~runtime:"provider.one" ~resource_read_max_bytes:131072 sources
+  in
   let config_one = parse_config text_one in
   let config_two = parse_config text_two in
+  let config_with_other_bound = parse_config text_with_other_bound in
   let original = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"one") in
   let changed = candidate ~directory:"pkg" (document ~name:"inspect" ~description:"Inspect" ~body:"two") in
   let build config candidate =
@@ -256,6 +261,7 @@ let test_revisions_track_only_skill_truth () =
   let first = build config_one original in
   let unrelated_runtime_change = build config_two original in
   let skill_change = build config_one changed in
+  let resource_bound_change = build config_with_other_bound original in
   check
     string
     "unrelated runtime edit keeps config revision"
@@ -278,7 +284,16 @@ let test_revisions_track_only_skill_truth () =
     "Skill bytes change snapshot revision"
     true
     (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
-     <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change))
+     <> Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision skill_change));
+  check bool "resource bound changes config revision" true
+    (Snapshot.config_revision first |> Option.get |> Snapshot.config_revision_to_string
+     <> (Snapshot.config_revision resource_bound_change
+         |> Option.get
+         |> Snapshot.config_revision_to_string));
+  check bool "resource bound changes snapshot revision" true
+    (Snapshot.snapshot_revision_to_string (Snapshot.snapshot_revision first)
+     <> Snapshot.snapshot_revision_to_string
+          (Snapshot.snapshot_revision resource_bound_change))
 ;;
 
 let test_exact_duplicate_is_rejected () =

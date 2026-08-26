@@ -130,6 +130,7 @@
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   masc.skill_snapshot
+  masc.skill_reference
   masc.skill_snapshot_service
   uri
   fpath

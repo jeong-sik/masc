@@ -1,55 +1,88 @@
 import { describe, expect, it } from 'vitest'
-import type { SkillSnapshotEntry, SkillUsage } from '../api/dashboard-skills'
+import type {
+  SkillReference,
+  SkillSnapshotEntry,
+  SkillSurface,
+} from '../api/dashboard-skills'
 import {
   formatBytes,
   kindLabel,
   mergeSkillRows,
+  resourceReadBoundLabel,
   sortSkillRows,
   stateMessage,
-  usageLabel,
 } from './skills-panel'
 
-function entry(name: string, body_bytes = 100, diagnostics?: string[]): SkillSnapshotEntry {
+function entry(
+  name: string,
+  options: {
+    source_id?: string
+    package_id?: string
+    content_revision?: string
+    body_bytes?: number
+    diagnostics?: string[]
+  } = {},
+): SkillSnapshotEntry {
   return {
-    identity: { source_id: 'workspace', package_id: name, name },
-    content_revision: 'sha',
+    identity: {
+      source_id: options.source_id ?? 'workspace',
+      package_id: options.package_id ?? name,
+      name,
+    },
+    content_revision: options.content_revision ?? `revision-${name}`,
     description: `about ${name}`,
     conformance: 'conformant',
-    diagnostics,
-    body_bytes,
+    diagnostics: options.diagnostics,
+    body_bytes: options.body_bytes ?? 100,
   }
 }
 
-const usage: SkillUsage[] = [
-  { name: 'mission-snapshot', directory: 'mission-snapshot', kind: 'composition', tool_name: 'keeper_compose_mission-snapshot', execution: 'inline', recent_use_count: 5, recent_success_count: 4, recent_failure_count: 1 },
-  { name: 'work-intake', directory: 'work-intake', kind: 'instruction', recent_use_count: 1, recent_success_count: 1, recent_failure_count: 0 },
-  { name: 'broken', directory: 'broken', kind: 'unparsed', error: 'fence declares another name' },
+function reference(snapshotEntry: SkillSnapshotEntry): SkillReference {
+  return {
+    identity: snapshotEntry.identity,
+    content_revision: snapshotEntry.content_revision,
+  }
+}
+
+const mission = entry('mission-snapshot')
+const intake = entry('work-intake')
+const broken = entry('broken')
+const surfaces: SkillSurface[] = [
+  {
+    reference: reference(mission),
+    kind: 'composition',
+    tool_name: 'keeper_compose_mission-snapshot',
+    execution: 'inline',
+  },
+  { reference: reference(intake), kind: 'instruction' },
+  {
+    reference: reference(broken),
+    kind: 'unavailable',
+    error: 'fence declares another name',
+  },
 ]
 
 describe('mergeSkillRows', () => {
-  it('joins usage by name and keeps a skill with no usage row', () => {
-    const rows = mergeSkillRows([entry('work-intake'), entry('orphan')], usage)
-    expect(rows.map(r => [r.name, r.usage?.kind ?? null])).toEqual([
-      ['work-intake', 'instruction'],
-      ['orphan', null],
+  it('joins the parser surface by exact reference', () => {
+    const shadow = entry('work-intake', { source_id: 'shadow-source' })
+    const rows = mergeSkillRows([intake, shadow], surfaces)
+    expect(rows.map(row => [row.source, row.surface?.kind ?? null])).toEqual([
+      ['workspace/work-intake', 'instruction'],
+      ['shadow-source/work-intake', null],
     ])
-    expect(rows[0]!.source).toBe('workspace/work-intake')
   })
 
-  // A server older than the usage join sends {schema,state,snapshot} and no
-  // usage array. The bundle deploys separately, so that pairing is reachable;
-  // it must degrade to "not reported", not throw on a non-iterable.
-  it('renders the snapshot when the server reports no usage at all', () => {
-    const rows = mergeSkillRows([entry('work-intake')], undefined)
-    expect(rows.map(r => [r.name, r.usage])).toEqual([['work-intake', null]])
+  it('keeps the snapshot when the surface projection is unavailable', () => {
+    const rows = mergeSkillRows([intake], undefined)
+    expect(rows.map(row => [row.name, row.surface])).toEqual([['work-intake', null]])
   })
 
-  it('keeps diagnostics and accepts an older server that omits them', () => {
+  it('keeps diagnostics and accepts an omitted diagnostics field', () => {
     const rows = mergeSkillRows(
-      [entry('compatible', 100, ['name differs from directory']), entry('old-server')],
+      [entry('compatible', { diagnostics: ['name differs from directory'] }), entry('plain')],
       [],
     )
-    expect(rows.map(r => r.diagnostics)).toEqual([
+    expect(rows.map(row => row.diagnostics)).toEqual([
       ['name differs from directory'],
       [],
     ])
@@ -57,46 +90,49 @@ describe('mergeSkillRows', () => {
 })
 
 describe('sortSkillRows', () => {
-  it('puts the most used first, unparsed and unknown count as zero, ties by name', () => {
+  it('sorts by exact identity and revision', () => {
     const rows = mergeSkillRows(
-      [entry('work-intake'), entry('broken'), entry('mission-snapshot'), entry('alpha')],
-      usage,
+      [
+        entry('same', { source_id: 'z-source', content_revision: 'b' }),
+        entry('same', { source_id: 'a-source', package_id: 'z-package' }),
+        entry('same', {
+          source_id: 'a-source',
+          package_id: 'a-package',
+          content_revision: 'b',
+        }),
+        entry('same', {
+          source_id: 'a-source',
+          package_id: 'a-package',
+          content_revision: 'a',
+        }),
+      ],
+      [],
     )
-    expect(sortSkillRows(rows).map(r => r.name)).toEqual([
-      'mission-snapshot', 'work-intake', 'alpha', 'broken',
+    expect(
+      sortSkillRows(rows).map(
+        row => `${row.source}/${row.name}/${row.content_revision}`,
+      ),
+    ).toEqual([
+      'a-source/a-package/same/a',
+      'a-source/a-package/same/b',
+      'a-source/z-package/same/revision-same',
+      'z-source/same/same/b',
     ])
   })
 
   it('does not mutate its input', () => {
     const rows = mergeSkillRows([entry('b'), entry('a')], [])
     sortSkillRows(rows)
-    expect(rows.map(r => r.name)).toEqual(['b', 'a'])
+    expect(rows.map(row => row.name)).toEqual(['b', 'a'])
   })
 })
 
 describe('labels', () => {
-  it('names the window beside the count and says why there is none', () => {
-    expect(usageLabel(usage[1]!, 2000)).toBe('1 used · 1 ok / 0 failed (last 2000 rows)')
-    expect(usageLabel(usage[2]!, 2000)).toBe('—')
-    expect(usageLabel(null, 2000)).toBe('—')
-  })
-
-  it('does not claim a window the server never reported', () => {
-    expect(usageLabel(usage[1]!, undefined)).toBe('1 used · 1 ok / 0 failed (window unreported)')
-  })
-
-  it('keeps compatibility with a server that only reports use count', () => {
-    const old: SkillUsage = {
-      name: 'work-intake', directory: 'work-intake', kind: 'instruction', recent_use_count: 2,
-    }
-    expect(usageLabel(old, 2000)).toBe('2 (last 2000 rows)')
-  })
-
-  it('shows the parsed kind, the refusal, or the absence', () => {
-    expect(kindLabel(usage[0]!)).toBe('composition · inline')
-    expect(kindLabel(usage[1]!)).toBe('instruction')
-    expect(kindLabel(usage[2]!)).toBe('unparsed: fence declares another name')
-    expect(kindLabel(null)).toBe('not in usage')
+  it('shows the parsed kind, refusal, or unavailable projection', () => {
+    expect(kindLabel(surfaces[0]!)).toBe('composition · inline')
+    expect(kindLabel(surfaces[1]!)).toBe('instruction')
+    expect(kindLabel(surfaces[2]!)).toBe('unavailable: fence declares another name')
+    expect(kindLabel(null)).toBe('surface unavailable')
   })
 
   it('formats body sizes and snapshot states', () => {
@@ -105,5 +141,21 @@ describe('labels', () => {
     expect(stateMessage('not_registered')).toMatch(/no registered skill snapshot/)
     expect(stateMessage('uninitialized')).toMatch(/not been published/)
     expect(stateMessage('invalid_workspace')).toMatch(/could not be resolved/)
+  })
+
+  it('shows only the configured resource bound', () => {
+    expect(resourceReadBoundLabel({
+      kind: 'configured',
+      revision: 'config-revision',
+      resource_read_max_bytes: 1536,
+    })).toBe('resource read max 1.5 KB')
+    expect(resourceReadBoundLabel({
+      kind: 'configured',
+      revision: 'config-revision',
+      resource_read_max_bytes: null,
+    })).toBe('resource read max unavailable')
+    expect(resourceReadBoundLabel({ kind: 'unreadable' })).toBe(
+      'resource read max unavailable',
+    )
   })
 })

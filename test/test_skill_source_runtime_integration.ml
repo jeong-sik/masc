@@ -5,6 +5,7 @@ let runtime_with_skills =
   {|[skills]
 activation-lifetime = "session"
 precedence = "earlier-source-wins"
+resource-read-max-bytes = 65536
 
 [[skills.sources]]
 id = "project"

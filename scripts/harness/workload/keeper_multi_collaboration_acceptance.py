@@ -838,10 +838,10 @@ def read_skills(url: str, token: str, timeout: float) -> dict[str, Any]:
     return value
 
 
-def composition_skill_status(
+def composition_surface_status(
     *, skills: dict[str, Any], required_tools: Iterable[str], skills_url: str
 ) -> dict[str, Any]:
-    """Check campaign compositions against the runtime's canonical Skill view.
+    """Check campaign compositions against the exact parser surface.
 
     The deleted tool-compositions fixture was a second catalog authority and
     only happened to contain the same names as the mission requirements. The
@@ -851,28 +851,42 @@ def composition_skill_status(
     required = sorted(
         tool for tool in required_tools if tool.startswith("keeper_compose_")
     )
-    usage = skills.get("usage")
-    usage_rows = usage if isinstance(usage, list) else []
+    surfaces = skills.get("surfaces")
+    surface_rows = surfaces if isinstance(surfaces, list) else []
     installed = sorted(
         {
             row["tool_name"]
-            for row in usage_rows
+            for row in surface_rows
             if isinstance(row, dict)
             and row.get("kind") == "composition"
             and isinstance(row.get("tool_name"), str)
         }
     )
-    unparsed = [
-        {"name": row.get("name"), "error": row.get("error")}
-        for row in usage_rows
-        if isinstance(row, dict) and row.get("kind") == "unparsed"
+
+    def surface_name(row: dict[str, Any]) -> str | None:
+        reference = row.get("reference")
+        if not isinstance(reference, dict):
+            return None
+        identity = reference.get("identity")
+        if not isinstance(identity, dict):
+            return None
+        name = identity.get("name")
+        return name if isinstance(name, str) else None
+
+    unavailable = [
+        {
+            "name": surface_name(row),
+            "error": row.get("error"),
+        }
+        for row in surface_rows
+        if isinstance(row, dict) and row.get("kind") == "unavailable"
     ]
     missing = sorted(set(required) - set(installed))
     snapshot_state = skills.get("state")
     if snapshot_state != "ready":
         status = "snapshot_not_ready"
-    elif unparsed:
-        status = "unparsed_skills"
+    elif unavailable:
+        status = "surface_unavailable"
     elif missing:
         status = "missing_tools"
     else:
@@ -884,7 +898,7 @@ def composition_skill_status(
         "required_tools": required,
         "installed_tools": installed,
         "missing_tools": missing,
-        "unparsed_skills": unparsed,
+        "unavailable_surfaces": unavailable,
     }
 
 
@@ -925,14 +939,16 @@ def preflight(
     missing = sorted(required - available)
     skills_url = default_skills_url(mcp_url)
     skills = read_skills(skills_url, token, timeout)
-    compositions = composition_skill_status(
+    composition_surfaces = composition_surface_status(
         skills=skills,
         required_tools=catalog["keeper_required_tools"],
         skills_url=skills_url,
     )
     result = {
         "status": (
-            "passed" if not missing and compositions["status"] == "ok" else "failed"
+            "passed"
+            if not missing and composition_surfaces["status"] == "ok"
+            else "failed"
         ),
         "checked_at": utc_now(),
         "mcp_url": mcp_url,
@@ -945,17 +961,17 @@ def preflight(
         "available_tool_count": len(available),
         "missing_operator_tools": missing,
         "keeper_required_tools": catalog["keeper_required_tools"],
-        "composition_skills": compositions,
+        "composition_surfaces": composition_surfaces,
     }
     if missing:
         raise AcceptanceError(f"deployed runtime is missing operator tools: {missing}")
-    if compositions["status"] != "ok":
+    if composition_surfaces["status"] != "ok":
         raise AcceptanceError(
-            "composition skills are not ready for this campaign: "
-            f"status={compositions['status']} "
-            f"missing={compositions.get('missing_tools')} "
-            f"unparsed={compositions.get('unparsed_skills')} — "
-            f"inspect {compositions['skills_url']}"
+            "composition surfaces are not ready for this campaign: "
+            f"status={composition_surfaces['status']} "
+            f"missing={composition_surfaces.get('missing_tools')} "
+            f"unavailable={composition_surfaces.get('unavailable_surfaces')} — "
+            f"inspect {composition_surfaces['skills_url']}"
         )
     return client, health, result
 

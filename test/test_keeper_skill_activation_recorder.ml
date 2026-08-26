@@ -82,7 +82,7 @@ let make_context ~trace_id ~task_scope =
   match
     Recorder.make
       ~trace_id
-      ~runtime_id:"test.runtime"
+      ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:
         (Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
@@ -146,7 +146,7 @@ let test_invalid_task_scope_fails_closed () =
   match
     Recorder.make
       ~trace_id
-      ~runtime_id:"test.runtime"
+      ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:
         (Ids.Turn_ref.make ~trace_id:"trace-recorder" ~absolute_turn:1)
       ~snapshot_revision
@@ -201,7 +201,7 @@ let test_turn_scope_mismatch_is_rejected_before_recording () =
   match
     Recorder.make
       ~trace_id:trace
-      ~runtime_id:"test.runtime"
+      ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:1)
       ~snapshot_revision
       ~task_scope:Keeper_task_skill_turn.No_task
@@ -209,6 +209,81 @@ let test_turn_scope_mismatch_is_rejected_before_recording () =
   | Error Recorder.Turn_scope_mismatch -> ()
   | Error error -> fail (Recorder.error_to_string error)
   | Ok _ -> fail "cross-trace activation context was accepted"
+;;
+
+let test_runtime_attempt_is_required_before_recording () =
+  with_session @@ fun config trace_id ->
+  let context =
+    match
+      Recorder.make
+        ~trace_id
+        ~runtime_id:(fun () -> None)
+        ~turn_ref:
+          (Ids.Turn_ref.make
+             ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+             ~absolute_turn:1)
+        ~snapshot_revision
+        ~task_scope:Keeper_task_skill_turn.No_task
+    with
+    | Ok context -> context
+    | Error error -> fail (Recorder.error_to_string error)
+  in
+  match
+    Recorder.record_instruction
+      ~config
+      context
+      ~invocation:(invocation "call-before-runtime")
+      ~content:(Recorder.Body "BODY")
+      (reference 'a')
+  with
+  | Error Recorder.Runtime_attempt_missing -> ()
+  | Error error -> fail (Recorder.error_to_string error)
+  | Ok _ -> fail "activation was recorded before runtime selection"
+;;
+
+let test_runtime_provider_tracks_candidate_failover () =
+  with_session @@ fun config trace_id ->
+  let selected_runtime = Atomic.make (Some "runtime-a") in
+  let context =
+    match
+      Recorder.make
+        ~trace_id
+        ~runtime_id:(fun () -> Atomic.get selected_runtime)
+        ~turn_ref:
+          (Ids.Turn_ref.make
+             ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+             ~absolute_turn:1)
+        ~snapshot_revision
+        ~task_scope:Keeper_task_skill_turn.No_task
+    with
+    | Ok context -> context
+    | Error error -> fail (Recorder.error_to_string error)
+  in
+  let record tool_use_id =
+    match
+      Recorder.record_instruction
+        ~config
+        context
+        ~invocation:(invocation tool_use_id)
+        ~content:(Recorder.Body "BODY")
+        (reference 'a')
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Recorder.error_to_string error)
+  in
+  record "call-runtime-a";
+  Atomic.set selected_runtime (Some "runtime-b");
+  record "call-runtime-b";
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    check
+      (list string)
+      "each activation keeps its concrete candidate"
+      [ "runtime-a"; "runtime-b" ]
+      (List.map
+         (fun (activation : Ledger.activation) -> activation.runtime_id)
+         (Ledger.activations ledger))
 ;;
 
 let () =
@@ -223,6 +298,10 @@ let () =
             test_resource_receipt_keeps_path_size_and_digest
         ; test_case "turn scope mismatch is rejected" `Quick
             test_turn_scope_mismatch_is_rejected_before_recording
+        ; test_case "runtime attempt is required" `Quick
+            test_runtime_attempt_is_required_before_recording
+        ; test_case "runtime provider follows failover" `Quick
+            test_runtime_provider_tracks_candidate_failover
         ] )
     ]
 ;;

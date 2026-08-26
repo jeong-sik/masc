@@ -257,6 +257,7 @@ let prepare_agent_setup
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
   let active_checkpoint_owner = ref None in
+  let active_runtime_id = Atomic.make None in
   let tool_result_commit_required () =
     match on_tool_result_ready, !active_checkpoint_owner with
     | None, _ -> false
@@ -267,6 +268,7 @@ let prepare_agent_setup
         (attempt : Keeper_turn_driver.runtime_attempt)
     =
     active_checkpoint_owner := Some attempt.checkpoint_owner;
+    Atomic.set active_runtime_id (Some attempt.runtime_id);
     Option.iter
       (fun observe ->
          observe
@@ -308,9 +310,17 @@ let prepare_agent_setup
       (fun (selected : Keeper_task_skill_turn.selected) ->
          let resource_location =
            match selected.skill.provenance with
-           | Some { source_root = Some source_root; directory; _ } ->
-             Some Keeper_tool_composition_surface.{ source_root; directory }
+           | Some
+               { source_root = Some source_root
+               ; resource_read_max_bytes = Some resource_read_max_bytes
+               ; directory
+               ; _
+               } ->
+             Some
+               Keeper_tool_composition_surface.
+                 { source_root; directory; resource_read_max_bytes }
            | Some { source_root = None; _ }
+           | Some { resource_read_max_bytes = None; _ }
            | None ->
              None
          in
@@ -325,7 +335,7 @@ let prepare_agent_setup
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
       ~trace_id:meta.runtime.trace_id
-      ~runtime_id:runtime_id_string
+      ~runtime_id:(fun () -> Atomic.get active_runtime_id)
       ~turn_ref:
         (Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

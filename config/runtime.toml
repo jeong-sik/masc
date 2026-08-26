@@ -12,6 +12,9 @@
 [skills]
 activation-lifetime = "session"
 precedence = "earlier-source-wins"
+# One resource page fits the existing 64 KiB tool-response envelope without
+# relying on a separate hidden runtime default or ceiling.
+resource-read-max-bytes = 65536
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.

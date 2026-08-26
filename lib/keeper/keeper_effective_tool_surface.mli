@@ -28,6 +28,7 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
+  ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
   ; skills_left_out : string list

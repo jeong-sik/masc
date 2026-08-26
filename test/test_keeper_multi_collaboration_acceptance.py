@@ -128,13 +128,20 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             47,
         )
 
-    def test_composition_preflight_reads_required_tools_from_skill_snapshot(self):
-        report = acceptance.composition_skill_status(
+    def test_composition_preflight_reads_required_tools_from_exact_surface(self):
+        report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
-                "usage": [
+                "surfaces": [
                     {
-                        "name": "mission-snapshot",
+                        "reference": {
+                            "identity": {
+                                "source_id": "fixture",
+                                "package_id": "mission-snapshot",
+                                "name": "mission-snapshot",
+                            },
+                            "content_revision": "a" * 64,
+                        },
                         "kind": "composition",
                         "tool_name": "keeper_compose_mission-snapshot",
                     }
@@ -150,14 +157,21 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         )
         self.assertEqual(report["missing_tools"], [])
 
-    def test_composition_preflight_fails_on_keeper_unparsed_skill(self):
-        report = acceptance.composition_skill_status(
+    def test_composition_preflight_fails_on_unavailable_surface(self):
+        report = acceptance.composition_surface_status(
             skills={
                 "state": "ready",
-                "usage": [
+                "surfaces": [
                     {
-                        "name": "broken",
-                        "kind": "unparsed",
+                        "reference": {
+                            "identity": {
+                                "source_id": "fixture",
+                                "package_id": "broken",
+                                "name": "broken",
+                            },
+                            "content_revision": "b" * 64,
+                        },
+                        "kind": "unavailable",
                         "error": "composition rejected",
                     }
                 ],
@@ -166,12 +180,12 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             skills_url="http://127.0.0.1:8935/api/v1/skills",
         )
 
-        self.assertEqual(report["status"], "unparsed_skills")
+        self.assertEqual(report["status"], "surface_unavailable")
         self.assertEqual(
             report["missing_tools"], ["keeper_compose_mission-snapshot"]
         )
         self.assertEqual(
-            report["unparsed_skills"],
+            report["unavailable_surfaces"],
             [{"name": "broken", "error": "composition rejected"}],
         )
 

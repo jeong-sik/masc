@@ -1,11 +1,8 @@
 // MASC Dashboard — Skills catalog REST client.
 //
 // Reads /api/v1/skills: the published workspace skill snapshot
-// (masc.skill-snapshot/v1, lib/skill_snapshot) plus, beside it, how each
-// effective skill parses for a keeper turn (kind, tool name) and how often
-// it was used in the last `recent_window_rows` recorded tool calls. The
-// envelope is frozen on the OCaml side (server_routes_http_routes_activity.ml)
-// and this panel is its only consumer.
+// (masc.skill-snapshot/v1, lib/skill_snapshot) plus the optional exact
+// parser-derived surface of each effective Skill.
 
 import { get, type GetOptions } from './core'
 
@@ -24,43 +21,47 @@ export interface SkillSnapshotEntry {
   body_bytes: number
 }
 
+export type SkillSnapshotConfig =
+  | {
+      kind: 'configured'
+      revision: string
+      resource_read_max_bytes: number | null
+    }
+  | { kind: 'rejected'; source_revision: string; diagnostics: string[] }
+  | { kind: 'unreadable' }
+
 export interface SkillSnapshot {
   snapshot_revision: string
   catalog_revision: string
+  config: SkillSnapshotConfig
   skills: SkillSnapshotEntry[]
   effective_skills: SkillIdentity[]
   shadows: unknown[]
   rejections: unknown[]
 }
 
-interface SkillUsageCounts {
-  recent_use_count: number
-  recent_success_count?: number
-  recent_failure_count?: number
+export interface SkillReference {
+  identity: SkillIdentity
+  content_revision: string
 }
 
-export type SkillUsage =
-  | ({ name: string; directory: string; kind: 'instruction' } & SkillUsageCounts)
+export type SkillSurface =
+  | { reference: SkillReference; kind: 'instruction'; diagnostics?: string[] }
   | ({
-      name: string
-      directory: string
+      reference: SkillReference
       kind: 'composition'
       tool_name: string
       execution: string
-    } & SkillUsageCounts)
-  | { name: string; directory: string; kind: 'unparsed'; error: string }
+      diagnostics?: string[]
+    })
+  | { reference: SkillReference; kind: 'unavailable'; error: string }
 
 export type SkillsResponse =
   | {
       schema: string
       state: 'ready'
       snapshot: SkillSnapshot
-      // Optional on the wire, not in the contract: the dashboard bundle ships
-      // separately from the OCaml server (vite build -> dist), so a deploy can
-      // put this panel in front of a server that predates the usage join. A
-      // missing field must read as "not reported", never crash the panel.
-      usage?: SkillUsage[]
-      recent_window_rows?: number
+      surfaces?: SkillSurface[]
     }
   | { schema: string; state: 'not_registered' | 'uninitialized' | 'invalid_workspace' }
 

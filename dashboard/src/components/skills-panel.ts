@@ -1,16 +1,13 @@
-// Skills Panel — the published skill snapshot, with what a turn makes of it.
-//
-// One row per effective skill: the kind a keeper turn parses it as, the tool
-// a composition skill became, body size, source, and how many of the last N
-// recorded tool calls used it. A workspace with no published snapshot shows
-// its state by name, because that is what an operator needs to read.
+// Skills Panel — the published skill snapshot and exact parser-derived surface.
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchSkills,
+  type SkillIdentity,
+  type SkillSnapshotConfig,
   type SkillSnapshotEntry,
-  type SkillUsage,
+  type SkillSurface,
   type SkillsResponse,
 } from '../api/dashboard-skills'
 import { SurfaceCard } from './common/card'
@@ -23,68 +20,80 @@ export function isAbortError(e: unknown): boolean {
 }
 
 export interface SkillRow {
+  identity: SkillIdentity
+  content_revision: string
   name: string
   description: string
   source: string
   body_bytes: number
   diagnostics: string[]
-  usage: SkillUsage | null
+  surface: SkillSurface | null
 }
 
-/** Effective skills joined to their usage by name; a skill the turn parser
- *  refused keeps its row with the refusal, never a guessed kind. */
+function referenceKey(identity: SkillIdentity, contentRevision: string): string {
+  return [identity.source_id, identity.package_id, identity.name, contentRevision].join('\u0000')
+}
+
 export function mergeSkillRows(
   entries: readonly SkillSnapshotEntry[],
-  usage: readonly SkillUsage[] = [],
+  surfaces: readonly SkillSurface[] = [],
 ): SkillRow[] {
-  const byName = new Map<string, SkillUsage>()
-  for (const u of usage) byName.set(u.name, u)
+  const byReference = new Map<string, SkillSurface>()
+  for (const surface of surfaces) {
+    byReference.set(
+      referenceKey(surface.reference.identity, surface.reference.content_revision),
+      surface,
+    )
+  }
   return entries.map(entry => ({
+    identity: entry.identity,
+    content_revision: entry.content_revision,
     name: entry.identity.name,
     description: entry.description,
     source: `${entry.identity.source_id}/${entry.identity.package_id}`,
     body_bytes: entry.body_bytes,
     diagnostics: entry.diagnostics ?? [],
-    usage: byName.get(entry.identity.name) ?? null,
+    surface: byReference.get(referenceKey(entry.identity, entry.content_revision)) ?? null,
   }))
 }
 
-export function useCount(usage: SkillUsage | null): number {
-  return usage && usage.kind !== 'unparsed' ? usage.recent_use_count : 0
+function compareText(left: string, right: string): number {
+  if (left < right) return -1
+  if (left > right) return 1
+  return 0
 }
 
-/** Most used first, then by name; stable for equal counts. */
 export function sortSkillRows(rows: readonly SkillRow[]): SkillRow[] {
-  return [...rows].sort(
-    (a, b) => useCount(b.usage) - useCount(a.usage) || a.name.localeCompare(b.name),
+  return [...rows].sort((left, right) =>
+    compareText(left.identity.source_id, right.identity.source_id)
+    || compareText(left.identity.package_id, right.identity.package_id)
+    || compareText(left.identity.name, right.identity.name)
+    || compareText(left.content_revision, right.content_revision),
   )
 }
 
-export function kindLabel(usage: SkillUsage | null): string {
-  if (!usage) return 'not in usage'
-  switch (usage.kind) {
+export function kindLabel(surface: SkillSurface | null): string {
+  if (!surface) return 'surface unavailable'
+  switch (surface.kind) {
     case 'composition':
-      return `composition · ${usage.execution}`
+      return `composition · ${surface.execution}`
     case 'instruction':
       return 'instruction'
-    case 'unparsed':
-      return `unparsed: ${usage.error}`
+    case 'unavailable':
+      return `unavailable: ${surface.error}`
   }
-}
-
-/** "in the last N calls" — the window rides with the response. */
-export function usageLabel(usage: SkillUsage | null, windowRows?: number): string {
-  if (!usage || usage.kind === 'unparsed') return '—'
-  const window = windowRows === undefined ? 'window unreported' : `last ${windowRows} rows`
-  if (usage.recent_success_count === undefined || usage.recent_failure_count === undefined) {
-    return `${usage.recent_use_count} (${window})`
-  }
-  return `${usage.recent_use_count} used · ${usage.recent_success_count} ok / ${usage.recent_failure_count} failed (${window})`
 }
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024).toFixed(1)} KB`
+}
+
+export function resourceReadBoundLabel(config: SkillSnapshotConfig): string {
+  if (config.kind !== 'configured' || config.resource_read_max_bytes === null) {
+    return 'resource read max unavailable'
+  }
+  return `resource read max ${formatBytes(config.resource_read_max_bytes)}`
 }
 
 export function stateMessage(state: Exclude<SkillsResponse['state'], 'ready'>): string {
@@ -139,7 +148,7 @@ export function SkillsPanel() {
   if (res.state !== 'ready') {
     return html`<${EmptyState} message=${stateMessage(res.state)} />`
   }
-  const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.usage))
+  const rows = sortSkillRows(mergeSkillRows(res.snapshot.skills, res.surfaces))
   if (rows.length === 0) {
     return html`<${EmptyState} message="The published snapshot lists no skills." />`
   }
@@ -147,6 +156,7 @@ export function SkillsPanel() {
     <${SurfaceCard} testId="skills-panel">
       <div class="ss-muted" data-testid="skills-revision">
         snapshot ${res.snapshot.snapshot_revision.slice(0, 12)} · catalog ${res.snapshot.catalog_revision.slice(0, 12)}
+        · ${resourceReadBoundLabel(res.snapshot.config)}
         ${res.snapshot.rejections.length > 0
           ? html` · ${res.snapshot.rejections.length} rejected`
           : null}
@@ -154,7 +164,7 @@ export function SkillsPanel() {
       <table class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
-            <th>skill</th><th>kind</th><th>tool</th><th>used</th><th>body</th><th>source</th>
+            <th>skill</th><th>kind</th><th>tool</th><th>body</th><th>source</th>
           </tr>
         </thead>
         <tbody>
@@ -167,9 +177,8 @@ export function SkillsPanel() {
                     diagnostic => html`<div class="mt-1 text-3xs text-[var(--color-status-warn)]">⚠ ${diagnostic}</div>`,
                   )}
                 </td>
-                <td>${kindLabel(row.usage)}</td>
-                <td class="mono">${row.usage?.kind === 'composition' ? row.usage.tool_name : '—'}</td>
-                <td>${usageLabel(row.usage, res.recent_window_rows)}</td>
+                <td>${kindLabel(row.surface)}</td>
+                <td class="mono">${row.surface?.kind === 'composition' ? row.surface.tool_name : '—'}</td>
                 <td>${formatBytes(row.body_bytes)}</td>
                 <td class="mono">${row.source}</td>
               </tr>

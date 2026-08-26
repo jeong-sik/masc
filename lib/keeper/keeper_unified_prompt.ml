@@ -207,7 +207,7 @@ let format_held_task_skills
            in
            render
              Prompt_names.keeper_held_task_skills
-             [ "task_id", entry.held_task_id; "skill_names", skill_references ]
+             [ "task_id", entry.held_task_id; "skill_references", skill_references ]
              ~fallback:(entry.held_task_id ^ ": " ^ skill_references))
         held
     in

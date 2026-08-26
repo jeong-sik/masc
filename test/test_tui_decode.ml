@@ -1518,6 +1518,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "tool_groups", `List [ `String "filesystem" ]
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
       ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
+      ; "skill_resource_read_max_bytes", `Int 65536
       ; "count", `Int 1
       ; ( "tools"
         , `List
@@ -1541,6 +1542,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
             (Tui_decode.Effective_surface_available
                { ets_keeper_name;
                  ets_native_posture = Some native;
+                 ets_skill_resource_read_max_bytes = Some resource_bound;
                  ets_instruction_skills;
                  ets_tools = [ tool ];
                  ets_tool_surface_sha256 = Some digest;
@@ -1549,6 +1551,7 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         _ } ->
       Alcotest.(check string) "Keeper" "codex-mcp-client" ets_keeper_name;
       Alcotest.(check string) "native posture" "read" native;
+      Alcotest.(check int) "resource read bound" 65536 resource_bound;
       Alcotest.(check string)
         "declared instruction skill"
         (Yojson.Safe.to_string (`List [ exact_reference "ocaml-coding" 'a' ]))

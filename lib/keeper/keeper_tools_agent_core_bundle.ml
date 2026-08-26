@@ -395,10 +395,17 @@ let make_tool_bundle_for_descriptors
            | Some reference, Keeper_skill_catalog.Instruction ->
              let resource_location =
                match skill.provenance with
-               | Some { source_root = Some source_root; directory; _ } ->
+               | Some
+                   { source_root = Some source_root
+                   ; resource_read_max_bytes = Some resource_read_max_bytes
+                   ; directory
+                   ; _
+                   } ->
                  Some
-                   Keeper_tool_composition_surface.{ source_root; directory }
+                   Keeper_tool_composition_surface.
+                     { source_root; directory; resource_read_max_bytes }
                | Some { source_root = None; _ }
+               | Some { resource_read_max_bytes = None; _ }
                | None ->
                  None
              in
@@ -417,12 +424,12 @@ let make_tool_bundle_for_descriptors
         ~task:task_instruction_skills
         ~global:global_instruction_skills
     in
-    let composition_references =
+    let composition_skills =
       Keeper_skill_catalog.skills skill_catalog
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
            match skill.reference, skill.surface with
            | Some reference, Keeper_skill_catalog.Composition entry ->
-             Some (Keeper_tool_composition_catalog.tool_name entry, reference)
+             Some Keeper_tool_composition_surface.{ reference; entry }
            | None, _ | Some _, Keeper_skill_catalog.Instruction ->
              None)
     in
@@ -439,25 +446,18 @@ let make_tool_bundle_for_descriptors
     in
     let record_composition_activation =
       Option.map
-        (fun context ~invocation ~tool_name ->
-           match List.assoc_opt tool_name composition_references with
-           | Some reference ->
-             Keeper_skill_activation_recorder.record_composition
-               ~config
-               context
-               ~invocation
-               ~tool_name
-               reference
-           | None ->
-             Error
-               (Keeper_skill_activation_recorder.Composition_reference_missing
-                  { tool_name }))
+        (fun context ~invocation ~tool_name ~reference ->
+           Keeper_skill_activation_recorder.record_composition
+             ~config
+             context
+             ~invocation
+             ~tool_name
+             reference)
         skill_activation_context
     in
     Keeper_tool_composition_surface.make_tools
         ~instruction_skills
-        ~skill_composition_entries:
-          (Keeper_skill_catalog.composition_entries skill_catalog)
+        ~skill_compositions:composition_skills
         ?composition_plan_index
         ~config
         ~meta

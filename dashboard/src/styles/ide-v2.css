@@ -497,6 +497,52 @@
   text-overflow: ellipsis;
 }
 
+.ide-tree .ide-explorer-file-icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+/* Keep the type signal semantic and theme-aware; unlike emoji these icons
+   keep the same footprint in every browser and font stack. */
+.ide-tree .ide-explorer-file-icon--directory {
+  color: var(--accent-brass-bright);
+}
+
+.ide-tree .ide-explorer-file-icon--typescript,
+.ide-tree .ide-explorer-file-icon--javascript {
+  color: var(--accent-ember);
+}
+
+.ide-tree .ide-explorer-file-icon--python,
+.ide-tree .ide-explorer-file-icon--go {
+  color: var(--accent-bile);
+}
+
+.ide-tree .ide-explorer-file-icon--ocaml,
+.ide-tree .ide-explorer-file-icon--rust {
+  color: var(--accent-viscera);
+}
+
+.ide-tree .ide-explorer-file-icon--data,
+.ide-tree .ide-explorer-file-icon--config {
+  color: var(--accent-brass-bright);
+}
+
+.ide-tree .ide-explorer-file-icon--document {
+  color: var(--text-primary);
+}
+
+.ide-tree .ide-explorer-file-icon--markup,
+.ide-tree .ide-explorer-file-icon--style {
+  color: var(--accent-mold);
+}
+
+.ide-tree .ide-explorer-file-icon--file {
+  color: var(--text-dim);
+}
+
 /* ── Center editor ─────────────────────────────────────────────────────────── */
 
 .ide-ed {

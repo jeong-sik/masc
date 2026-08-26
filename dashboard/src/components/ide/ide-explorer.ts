@@ -1,6 +1,16 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import { Search } from 'lucide-preact'
+import {
+  File,
+  FileCode2,
+  FileCog,
+  FileJson2,
+  FileText,
+  Folder,
+  FolderOpen,
+  Search,
+  type LucideIcon,
+} from 'lucide-preact'
 import { activeKeeperName } from '../../keeper-state'
 import { type FileTreeStore, type FileTreeNode, type FileTreeDiffSummary } from './file-tree-store'
 import {
@@ -414,21 +424,66 @@ function SourceHint(source: WorkspaceSource) {
   `
 }
 
-function fileIcon(node: FileTreeNode, expanded: boolean): string {
-  if (node.hasChildren) return expanded ? '📂' : '📁'
-  const dot = node.label.lastIndexOf('.')
-  const ext = dot >= 0 ? node.label.slice(dot) : ''
-  const ICONS: Readonly<Record<string, string>> = {
-    '.ts': '🟦', '.tsx': '🟦',
-    '.js': '🟨', '.jsx': '🟨',
-    '.py': '🐍',
-    '.ml': '🐫', '.mli': '🐫',
-    '.rs': '🦀', '.go': '🔵',
-    '.json': '📋', '.md': '📝',
-    '.html': '🌐', '.css': '🎨',
-    '.toml': '⚙️', '.yaml': '⚙️', '.yml': '⚙️',
+export type FileTreeVisualKind =
+  | 'directory'
+  | 'typescript'
+  | 'javascript'
+  | 'python'
+  | 'ocaml'
+  | 'rust'
+  | 'go'
+  | 'data'
+  | 'document'
+  | 'markup'
+  | 'style'
+  | 'config'
+  | 'file'
+
+export interface FileTreeVisual {
+  readonly kind: FileTreeVisualKind
+  readonly icon: LucideIcon
+}
+
+const FILE_TREE_VISUALS: Readonly<Record<Exclude<FileTreeVisualKind, 'directory'>, FileTreeVisual>> = {
+  typescript: { kind: 'typescript', icon: FileCode2 },
+  javascript: { kind: 'javascript', icon: FileCode2 },
+  python: { kind: 'python', icon: FileCode2 },
+  ocaml: { kind: 'ocaml', icon: FileCode2 },
+  rust: { kind: 'rust', icon: FileCode2 },
+  go: { kind: 'go', icon: FileCode2 },
+  data: { kind: 'data', icon: FileJson2 },
+  document: { kind: 'document', icon: FileText },
+  markup: { kind: 'markup', icon: FileCode2 },
+  style: { kind: 'style', icon: FileCode2 },
+  config: { kind: 'config', icon: FileCog },
+  file: { kind: 'file', icon: File },
+}
+
+export function fileTreeVisual(
+  label: string,
+  hasChildren: boolean,
+  expanded: boolean,
+): FileTreeVisual {
+  if (hasChildren) {
+    return { kind: 'directory', icon: expanded ? FolderOpen : Folder }
   }
-  return ICONS[ext] ?? '📄'
+
+  const dot = label.lastIndexOf('.')
+  const ext = dot > 0 ? label.slice(dot).toLowerCase() : ''
+  const kind: FileTreeVisualKind =
+    ext === '.ts' || ext === '.tsx' ? 'typescript'
+      : ext === '.js' || ext === '.jsx' ? 'javascript'
+        : ext === '.py' ? 'python'
+          : ext === '.ml' || ext === '.mli' ? 'ocaml'
+            : ext === '.rs' ? 'rust'
+              : ext === '.go' ? 'go'
+                : ext === '.json' || ext === '.jsonl' ? 'data'
+                  : ext === '.md' || ext === '.mdx' || ext === '.txt' ? 'document'
+                    : ext === '.html' || ext === '.xml' || ext === '.svg' ? 'markup'
+                      : ext === '.css' || ext === '.scss' || ext === '.sass' ? 'style'
+                        : ext === '.toml' || ext === '.yaml' || ext === '.yml' || ext === '.ini' ? 'config'
+                          : 'file'
+  return FILE_TREE_VISUALS[kind]
 }
 
 function TreeRow(
@@ -441,6 +496,7 @@ function TreeRow(
   loadingChildren = false,
 ) {
   const indent = node.depth * 12
+  const visual = fileTreeVisual(node.label, node.hasChildren, expanded)
   // While a directory's children are being fetched (lazy expand), show a
   // pending glyph in the chevron slot so the expand reads as in-progress.
   const chevron = node.hasChildren
@@ -468,7 +524,12 @@ function TreeRow(
       <span aria-hidden="true" style=${{ color: 'var(--color-fg-muted)', width: '12px', textAlign: 'center' }}>${chevron}</span>
       ${node.keeperId
         ? html`<${KeeperBadge} id=${node.keeperId} variant="sigil" size="sm" />`
-        : html`<span aria-hidden="true" style=${{ width: '14px', height: '14px', textAlign: 'center', fontSize: '12px', lineHeight: '14px' }}>${fileIcon(node, expanded)}</span>`}
+        : html`<${visual.icon}
+            aria-hidden="true"
+            className=${`ide-explorer-file-icon ide-explorer-file-icon--${visual.kind}`}
+            size=${14}
+            strokeWidth=${1.8}
+          />`}
       <span class="ide-explorer-row-label">${node.label}</span>
       ${contextFocus ? ExplorerContextChip(contextFocus) : null}
       ${activeKeepers && activeKeepers.length > 0

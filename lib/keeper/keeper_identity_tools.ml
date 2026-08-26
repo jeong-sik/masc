@@ -327,7 +327,11 @@ let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~remote_name
   | Ok stored_token -> (
     match
       renew_if_needed ~base_path ~keeper_name ~provider
-        ~now:(Unix.gettimeofday ()) ~access_token:stored_token ()
+        (* [Time_compat.now] rather than the raw clock: masc reads time
+           through one module so a deterministic boundary has one place to
+           look, and the determinism gate flags anything that goes around
+           it. *)
+        ~now:(Time_compat.now ()) ~access_token:stored_token ()
     with
     | Error message -> refuse message
     | Ok access_token -> (

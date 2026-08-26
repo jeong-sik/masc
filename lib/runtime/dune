@@ -12,6 +12,7 @@
   masc.toml_line_editor
   base64
   dune-build-info
+  digestif
   unix
   logs
   eio

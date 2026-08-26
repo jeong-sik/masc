@@ -7355,6 +7355,7 @@ let render_tools (state : state) =
                    ets_tool_delivery;
                    ets_native_posture;
                    ets_tool_groups;
+                   ets_skill_resource_read_max_bytes;
                    ets_instruction_skills;
                    ets_skills_left_out;
                    ets_composition_skills;
@@ -7371,6 +7372,11 @@ let render_tools (state : state) =
         in
         let groups =
           match ets_tool_groups with [] -> "all" | xs -> String.concat "," xs
+        in
+        let resource_bound =
+          match ets_skill_resource_read_max_bytes with
+          | Some max_bytes -> Printf.sprintf "%d bytes" max_bytes
+          | None -> "not configured"
         in
         let instruction =
           match ets_instruction_skills with
@@ -7418,6 +7424,8 @@ let render_tools (state : state) =
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
             (Terminal_text.single_line composition);
+          Ansi.dim,
+          "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         (* Said on this surface because this is the one that answers "what can
            this Keeper call". A document the catalog could not read is absent

@@ -210,6 +210,7 @@ type effective_tool_surface =
       ets_tool_delivery : effective_tool_delivery;
       ets_native_posture : string option;
       ets_tool_groups : string list;
+      ets_skill_resource_read_max_bytes : int option;
       ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
          missing from them: a skill left out is absent from what the Keeper

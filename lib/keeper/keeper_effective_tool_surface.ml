@@ -23,6 +23,7 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
+  ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
         (* Documents the catalog could not read, by the directory they were
@@ -111,6 +112,14 @@ let project
   let skill_catalog, _projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
+  let skill_resource_read_max_bytes =
+    match Skill_catalog_snapshot.config_state skill_snapshot with
+    | Configured { config; _ } ->
+      Option.map
+        Skill_source_config.resource_read_max_bytes_to_int
+        config.resource_read_max_bytes
+    | Config_rejected _ | Config_unreadable _ -> None
+  in
   let surface = Keeper_tool_descriptor.tool_groups_to_surface tool_groups in
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
@@ -123,9 +132,17 @@ let project
         (fun (selected : Keeper_task_skill_turn.selected) ->
            let resource_location =
              match selected.skill.provenance with
-             | Some { source_root = Some source_root; directory; _ } ->
-               Some Keeper_tool_composition_surface.{ source_root; directory }
+             | Some
+                 { source_root = Some source_root
+                 ; resource_read_max_bytes = Some resource_read_max_bytes
+                 ; directory
+                 ; _
+                 } ->
+               Some
+                 Keeper_tool_composition_surface.
+                   { source_root; directory; resource_read_max_bytes }
              | Some { source_root = None; _ }
+             | Some { resource_read_max_bytes = None; _ }
              | None ->
                None
            in
@@ -144,9 +161,17 @@ let project
            | Some reference, Keeper_skill_catalog.Instruction ->
              let resource_location =
                match skill.provenance with
-               | Some { source_root = Some source_root; directory; _ } ->
-                 Some Keeper_tool_composition_surface.{ source_root; directory }
+               | Some
+                   { source_root = Some source_root
+                   ; resource_read_max_bytes = Some resource_read_max_bytes
+                   ; directory
+                   ; _
+                   } ->
+                 Some
+                   Keeper_tool_composition_surface.
+                     { source_root; directory; resource_read_max_bytes }
                | Some { source_root = None; _ }
+               | Some { resource_read_max_bytes = None; _ }
                | None ->
                  None
              in
@@ -167,7 +192,8 @@ let project
     in
     let instruction_skills =
       List.map
-        (fun skill -> skill.Keeper_tool_composition_surface.reference)
+        (fun (skill : Keeper_tool_composition_surface.instruction_skill) ->
+           skill.reference)
         readable_instruction_skills
     in
     let composition_skills =
@@ -215,6 +241,7 @@ let project
       ; native_posture
       ; tool_groups = Option.value ~default:[] tool_groups
       ; current_task_id
+      ; skill_resource_read_max_bytes
       ; instruction_skills
       ; composition_skills
       ; skills_left_out
@@ -436,6 +463,10 @@ let to_yojson = function
         , match surface.current_task_id with
           | None -> `Null
           | Some task_id -> `String task_id )
+      ; ( "skill_resource_read_max_bytes"
+        , match surface.skill_resource_read_max_bytes with
+          | Some max_bytes -> `Int max_bytes
+          | None -> `Null )
       ; "instruction_skills", reference_list surface.instruction_skills
       ; "composition_skills", reference_list surface.composition_skills
       ; "skills_left_out", string_list surface.skills_left_out

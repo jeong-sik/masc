@@ -67,7 +67,9 @@ The instruction body and bundled resources have separate observations.
 - `keeper_skill(reference, file)` serves one relative regular file from the
   exact package root.
 - absolute paths, empty components, `.`/`..`, symlinks, directories, and files
-  above the declared size limit are rejected before content is returned.
+  above the turn snapshot's positive
+  `[skills].resource-read-max-bytes` value are rejected before content or an
+  activation is returned.
 - a resource result records its relative path and exact content digest.
 
 Resource bytes are read only on the resource call. They are not placed in the

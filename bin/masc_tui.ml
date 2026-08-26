@@ -3823,7 +3823,27 @@ let selected_surface_reference state =
                Link.reference Task request.vr_task_id)
             (List.nth_opt snapshot.Tui_decode.vs_requests
                state.verification_cursor))
-  | Acting | Approvals
+  | Approvals ->
+      (* An ask names what it is asking about. A keeper's tool ask names the
+         keeper; an operator ask carries a typed target, so the kind is read
+         through [target_type_of_string] rather than matched as text. A
+         Workspace target, or one this build does not know, points at no
+         surface and gets no reference. *)
+      Option.bind
+        (List.nth_opt (approval_items state) state.approval_cursor)
+        (function
+          | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+          | Operator_row item ->
+              Option.bind item.ap_target_id (fun target_id ->
+                  match
+                    Masc.Operator_action_constants.target_type_of_string
+                      item.ap_target_type
+                  with
+                  | Some Masc.Operator_action_constants.Keeper ->
+                      Some (Link.reference Keeper target_id)
+                  | Some Goal -> Some (Link.reference Goal target_id)
+                  | Some Workspace | None -> None))
+  | Acting
   | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
 

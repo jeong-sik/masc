@@ -2783,6 +2783,11 @@ def approval_selection_identity_interaction(
         ):
             raise AssertionError(f"fixture did not select approval B: {selected!r}")
 
+        # An ask names what it is asking about, so the row under the cursor is
+        # followable. The kind is read from the typed target, not matched as
+        # text: this one targets keeper beta.
+        copy_reference(process, master_fd, output, b"masc://keepers/beta")
+
         fixtures[
             "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
         ] = approval_selection_snapshot([approval_new, *initial_items])

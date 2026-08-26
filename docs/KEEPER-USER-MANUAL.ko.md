@@ -189,6 +189,7 @@ Keeper 11개, `.masc` 하나. 그 런타임을 설명할 뿐이고 다른 환경
 
 | 문서 | 용도 |
 |---|---|
+| [`docs/KEEPER-IDENTITY-MANUAL.ko.md`](KEEPER-IDENTITY-MANUAL.ko.md) | Jira·Notion 같은 업무 서비스를 Keeper 에 붙이기 |
 | [`docs/KEEPER-FILE-MODEL.md`](KEEPER-FILE-MODEL.md) | Keeper TOML 항목 규칙 전체 |
 | [`docs/TUI-GUIDE.md`](TUI-GUIDE.md) | 터미널 UI 화면과 키 |
 | [`docs/ENV-CONTRACT.md`](ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |

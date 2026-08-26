@@ -372,6 +372,7 @@ masc/
 | [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) | MCP 클라이언트 설정 |
 | [`docs/TUI-GUIDE.md`](docs/TUI-GUIDE.md) | 터미널 UI 화면, 키, 문제 해결 |
 | [`docs/KEEPER-USER-MANUAL.ko.md`](docs/KEEPER-USER-MANUAL.ko.md) | Keeper 를 만들고 켜고 지켜보는 법 |
+| [`docs/KEEPER-IDENTITY-MANUAL.ko.md`](docs/KEEPER-IDENTITY-MANUAL.ko.md) | Jira·Notion·Google 등 54개 업무 서비스를 Keeper 에 붙이는 법 |
 | [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md) | Keeper 파일과 런타임 배정 규칙 |
 | [`docs/SKILLS.md`](docs/SKILLS.md) | `SKILL.md`로 능력을 선언하고 Keeper에게 건네는 법 |
 | [`docs/ENV-CONTRACT.md`](docs/ENV-CONTRACT.md) | 런타임이 읽는 환경 변수 |

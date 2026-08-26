@@ -2854,6 +2854,14 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_shade_layers)
+ (modules test_tui_shade_layers)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries

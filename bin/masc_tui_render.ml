@@ -242,12 +242,26 @@ let render_chat_row ~theme buf cols (row : Message_layout.row) =
         && Char.equal text.[1] ' '
       then (
         let rest = String.sub text 2 (String.length text - 2) in
+        (* The rail is paid for out of the two spaces that were already there,
+           so a quoted block costs no cells and nothing below it shifts. It
+           runs the height of the block, which is how a reader sees where the
+           quotation ends without reading it.
+
+           [Shade_none] keeps the plain gap. An ambient background is only ever
+           the operator's own message, which is prose and never quoted, so the
+           rail cannot land inside a span this branch would have to restore. *)
+        let rail =
+          match row.shade with
+          | Message_layout.Shade_none -> "  "
+          | Message_layout.Shade_quoted ->
+              Printf.sprintf "%s\xe2\x94\x82%s " Ansi.gray Ansi.reset
+        in
         if context.ambient_background then
           box_line_styled buf cols ~style:context.opening
             (Printf.sprintf "%s  %s" margin (dress rest))
         else
           box_line buf cols
-            (Printf.sprintf "%s  %s%s%s" margin
+            (Printf.sprintf "%s%s%s%s%s" margin rail
                (Chat_theme.body row.style) (dress rest) Ansi.reset))
       else
         box_line_styled buf cols ~style:context.opening (dress text)

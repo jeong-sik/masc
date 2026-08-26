@@ -46,9 +46,14 @@ type origin_display =
   | Origin_inline
   | Origin_bare
 
+type shade =
+  | Shade_none
+  | Shade_quoted
+
 type row = {
   style : style;
   kind : row_kind;
+  shade : shade;
   text : string;
   gutter : string;
 }
@@ -669,6 +674,7 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     Some
       { style = entry.style
       ; kind = Metadata metadata
+      ; shade = Shade_none
       ; text = fitted
       ; gutter = ""
       }
@@ -734,6 +740,15 @@ let short_clock timestamp =
    the body still reads as a block. [Origin_bare] drops the clock and keeps
    the speaker, never the other way round -- losing track of who is talking
    costs more than losing track of when. *)
+(* A tool's output and a recalled memory arrive as text the Keeper did not
+   write, so they are quoted rather than said. Everything else the pane draws
+   is either the Keeper talking or the operator talking, and that is prose.
+
+   Reasoning is the Keeper's own, not a quotation, however folded it is. *)
+let shade_of_style : style -> shade = function
+  | Tool | Status -> Shade_quoted
+  | User | Keeper | Error | Thinking -> Shade_none
+
 let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
   | Origin_row -> None
@@ -793,6 +808,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     |> List.mapi (fun index chunk ->
       { style = entry.style
       ; kind = Body
+      ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
       ; gutter = (if index = 0 then margin else blank)
       })

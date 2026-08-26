@@ -48,6 +48,26 @@ type metadata =
     row from the same origin carries only its new timestamp, so callers never
     have to parse display text to decide what should be highlighted. *)
 
+type shade =
+  | Shade_none
+      (** Prose a person reads. Most of the pane, so no background at all is
+          the default rather than one of several tints. *)
+  | Shade_quoted
+      (** Text the Keeper did not write: a diff, a tool's output, a memory
+          recalled. Drawn one step off the background with a left rail, so a
+          reader can see where the quoted block ends without reading it. *)
+(** How much a row belongs to what is around it.
+
+    Colour says status and indentation says depth; this says belonging, and it
+    is deliberately a closed sum with no room to grow. A fourth tint is not a
+    fourth kind of belonging — three steps is already the most a terminal
+    background can separate before the eye stops reading them as an order. If
+    something needs to be set apart further, that is depth, and indentation is
+    what carries depth.
+
+    Keeping it closed is the point: a variant cannot be added without every
+    renderer answering for it. *)
+
 type row_kind =
   | Metadata of metadata
   | Body
@@ -67,6 +87,8 @@ type origin_display =
 type row = {
   style : style;
   kind : row_kind;
+  shade : shade;
+      (** Which belonging layer this row sits in. See {!shade}. *)
   text : string;
   gutter : string;
       (** What to draw left of the body's rule. Empty under {!Origin_row};

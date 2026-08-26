@@ -335,7 +335,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
           sets reasoning_effort. Every enable_thinking=true turn is then rejected
           as Enable_not_encodable — measured 25/25 on the acceptance harness,
           0/25 after the first five models dropped the declaration. Deployed
-          config has carried none since 2026-08-04; the audit is oas#2716
+          config has carried none since 2026-08-04; the audit is dated 2026-07-20
           (2026-07-20).
 
           This is a property of the endpoint, not of individual models, and
@@ -1985,6 +1985,163 @@ let test_runtime_toml_rejects_repeat_last_n_below_minus_one () =
            String.equal err.path "local.sample.repeat-last-n")
          errs)
 
+(* The samplers above are Ollama /api/chat [options] fields. Declared against a
+   provider that speaks anything else there is no request field to carry them,
+   and before this Gate the value was accepted, dropped, and never reported --
+   so a deployment could "configure" the repetition remedy on an
+   OpenAI-compatible lane and watch the loop continue. Probed 2026-08-25 against
+   ollama.com/v1 with deepseek-v4-flash:0731 at seed 7: repeat_penalty=1.15
+   returned 65 completion tokens against a 63-token baseline, i.e. ignored. *)
+let test_runtime_toml_rejects_repetition_samplers_off_the_ollama_wire () =
+  let content =
+    "[providers.cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://example.invalid/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [cloud.sample]\n\
+     repeat-penalty = 1.15\n\
+     repeat-last-n = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"cloud.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ ->
+    failf "repetition samplers on an OpenAI-compatible provider should be rejected"
+  | Error errs ->
+    let named path =
+      List.exists
+        (fun (err : Runtime_toml.parse_error) -> String.equal err.path path)
+        errs
+    in
+    check bool "names repeat-penalty" true (named "cloud.sample.repeat-penalty");
+    check bool "names repeat-last-n" true (named "cloud.sample.repeat-last-n")
+
+(* The same declaration on the wire that does carry it must keep parsing, so the
+   Gate above is about the wire and not about the keys. *)
+let test_runtime_toml_keeps_repetition_samplers_on_the_ollama_wire () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     repeat-penalty = 1.15\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "ollama-http must still accept the samplers"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check bool "sampler survives" true
+         (Option.is_some binding.Runtime_schema.repeat_penalty)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+(* Measured 2026-08-25 over 1516 turns on ollama_cloud deepseek-v4-flash:0731:
+   output_tokens <= 2048 on 1392 turns, 2048..8192 on 38, then exactly 65536 on
+   86 -- the provider's own cap, reached only by generations that had collapsed
+   into single-token repetition. Nothing at all landed in 8192..65535. Without a
+   declared budget AGENT_CORE omits the wire field and every collapse runs to that
+   cap, so the value has to be declarable per binding. *)
+let test_runtime_toml_parses_max_tokens () =
+  let content =
+    "[providers.cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://example.invalid/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1048576\n\
+     \n\
+     [cloud.sample]\n\
+     max-tokens = 16384\n\
+     \n\
+     [runtime]\n\
+     default = \"cloud.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    failf
+      "max-tokens should parse: %s"
+      (String.concat
+         "; "
+         (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errs))
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "declared max-tokens" (Some 16384)
+         binding.Runtime_schema.max_tokens;
+       (* The declaration is worthless unless it survives into the config the
+          request builder reads, which is the step that was missing entirely. *)
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Error reason -> failf "provider_config should build: %s" reason
+        | Ok provider_config ->
+          check (option int) "reaches Provider_config" (Some 16384)
+            provider_config.Llm_provider.Provider_config.max_tokens)
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_omitted_max_tokens_stays_none () =
+  let content =
+    "[providers.cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://example.invalid/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [cloud.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"cloud.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "a binding without max-tokens must still parse"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "omitted max-tokens stays None" None
+         binding.Runtime_schema.max_tokens
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+(* 0 reads as "configured" while asking for no output at all. Reject it here
+   rather than letting each envelope fail differently at dispatch. *)
+let test_runtime_toml_rejects_non_positive_max_tokens () =
+  let content =
+    "[providers.cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://example.invalid/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [cloud.sample]\n\
+     max-tokens = 0\n\
+     \n\
+     [runtime]\n\
+     default = \"cloud.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "max-tokens = 0 should be rejected"
+  | Error errs ->
+    check bool "names the offending key" true
+      (List.exists
+         (fun (err : Runtime_toml.parse_error) ->
+           String.equal err.path "cloud.sample.max-tokens")
+         errs)
+
 let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
   (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
      "no ceiling declared" and passes every size; a default here would silently
@@ -2856,6 +3013,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; wizard_default = false
     ; max_concurrent = None
     ; max_request_body_bytes = None
+    ; max_tokens = None
     ; price_input = None
     ; price_output = None
     ; keep_alive = None
@@ -4269,6 +4427,16 @@ let () =
             test_runtime_toml_rejects_non_positive_repeat_penalty;
           test_case "repeat-last-n below -1 is rejected" `Quick
             test_runtime_toml_rejects_repeat_last_n_below_minus_one;
+          test_case "repetition samplers off the ollama wire are rejected" `Quick
+            test_runtime_toml_rejects_repetition_samplers_off_the_ollama_wire;
+          test_case "repetition samplers on the ollama wire still parse" `Quick
+            test_runtime_toml_keeps_repetition_samplers_on_the_ollama_wire;
+          test_case "max-tokens parses and reaches Provider_config" `Quick
+            test_runtime_toml_parses_max_tokens;
+          test_case "omitted max-tokens stays None" `Quick
+            test_runtime_toml_omitted_max_tokens_stays_none;
+          test_case "non-positive max-tokens is rejected" `Quick
+            test_runtime_toml_rejects_non_positive_max_tokens;
           test_case
             "keeper dispatch graph enumeration"
             `Quick test_keeper_dispatch_runtime_graph_enumeration;

@@ -2161,8 +2161,9 @@ let test_decode_system_log_requires_the_message () =
   | Error _ -> ()
 
 (* GET /api/v1/keepers/tool-approvals — the Approvals surface's held-call
-   rows. A row missing a field is rejected, not dropped: a listing that
-   silently thins is how a held call goes unanswered again (masc#30034). *)
+   rows. A row missing a core field is rejected, not dropped: a listing that
+   silently thins is how a held call goes unanswered again (masc#30034).
+   [because] is optional for compatibility with servers predating task-345. *)
 let keeper_tool_approvals_json =
   `Assoc
     [ ( "pending"
@@ -2173,6 +2174,7 @@ let keeper_tool_approvals_json =
               ; ("tool", `String "Execute")
               ; ("args", `String "{\"argv\":[\"git\",\"status\"]}")
               ; ("question", `String "Run Execute on git status?")
+              ; ("because", `String "fs tools change something outside this turn")
               ; ("asked_at", `Float 1787555000.)
               ; ("timeout_sec", `Float 180.)
               ]
@@ -2188,8 +2190,33 @@ let test_decode_keeper_tool_approvals () =
       Alcotest.(check string) "tool" "Execute" held.kta_tool;
       Alcotest.(check string) "question" "Run Execute on git status?"
         held.kta_question;
+      Alcotest.(check (option string)) "because rides with the question"
+        (Some "fs tools change something outside this turn") held.kta_because;
       Alcotest.(check (float 0.001)) "asked at" 1787555000. held.kta_asked_at;
       Alcotest.(check (float 0.001)) "budget" 180. held.kta_timeout_sec
+  | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
+
+let test_decode_keeper_tool_approvals_accepts_legacy_row () =
+  let legacy =
+    `Assoc
+      [ ( "pending"
+        , `List
+            [ `Assoc
+                [ ("keeper", `String "orbiter")
+                ; ("tool_call_id", `String "call-legacy")
+                ; ("tool", `String "Execute")
+                ; ("args", `String "{}")
+                ; ("question", `String "Run Execute?")
+                ; ("asked_at", `Float 1787555000.)
+                ; ("timeout_sec", `Float 180.)
+                ] ] )
+      ]
+  in
+  match Tui_decode.decode_keeper_tool_approvals legacy with
+  | Error err -> Alcotest.fail err
+  | Ok [ held ] ->
+      Alcotest.(check (option string)) "legacy server has no because" None
+        held.Tui_decode.kta_because
   | Ok held -> Alcotest.failf "expected one row, got %d" (List.length held)
 
 let test_decode_keeper_tool_approvals_rejects_a_thin_row () =
@@ -2729,6 +2756,8 @@ let () =
     ( "decode_keeper_tool_approvals",
       [ Alcotest.test_case "carries the whole ask" `Quick
           test_decode_keeper_tool_approvals
+      ; Alcotest.test_case "accepts a legacy row without because" `Quick
+          test_decode_keeper_tool_approvals_accepts_legacy_row
       ; Alcotest.test_case "rejects a thin row" `Quick
           test_decode_keeper_tool_approvals_rejects_a_thin_row
       ] );

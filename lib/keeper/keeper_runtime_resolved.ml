@@ -76,7 +76,7 @@ let stream_idle_failsafe_floor_sec =
    local MLX 20.7K-token keeper prompts 2026-08-16, 9/9 canary failures at
    the 120s idle cut). Same magnitude as the RFC-0345 idle floor: a single
    universal liveness ceiling, NOT a per-provider tuned default
-   (RFC-OAS-037 §3). An explicit env/toml value overrides it verbatim. *)
+   (RFC-AC-037 §3). An explicit env/toml value overrides it verbatim. *)
 let first_event_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec
 ;;
@@ -111,7 +111,7 @@ let freeze_from_current () =
     | None ->
       (* Unset: substitute the silent-prefill liveness ceiling so the
          first-event wait is never governed by the much shorter inter-line
-         idle knob (RFC-OAS-037; see [first_event_failsafe_floor_sec]).
+         idle knob (RFC-AC-037; see [first_event_failsafe_floor_sec]).
          Sourced as [Failsafe_floor] so telemetry and the boot log
          distinguish it from an operator-supplied value. *)
       {

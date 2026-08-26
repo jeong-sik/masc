@@ -39,6 +39,11 @@ let observed_fields ~trace_id =
         ] )
   ]
 
+let reading_exn keeper_name state =
+  match Context_state.reading_for_keeper ~keeper_name state with
+  | Some reading -> reading
+  | None -> failf "missing context reading for %s" keeper_name
+
 let test_resolve_binds_keeper_identity_and_current_trace () =
   let seen_name = ref None in
   let seen_trace = ref None in
@@ -51,8 +56,22 @@ let test_resolve_binds_keeper_identity_and_current_trace () =
   in
   check (option string) "keeper name" (Some "keeper-main") !seen_name;
   check (option string) "current trace" (Some "trace-current") !seen_trace;
-  check bool "observation loaded" true (Option.is_some state.observation);
-  check bool "successful load has no error" true (Option.is_none state.error)
+  let reading = reading_exn "keeper-main" state in
+  check bool "observation loaded" true (Option.is_some reading.observation);
+  check bool "successful load has no error" true (Option.is_none reading.error)
+
+let test_snapshot_is_bound_to_one_keeper () =
+  let state =
+    Context_state.resolve_with keeper
+      ~project:(fun ~keeper_name:_ ~current_trace_id ->
+        observed_fields ~trace_id:current_trace_id)
+  in
+  check bool "Keeper A can read its snapshot" true
+    (Option.is_some
+       (Context_state.reading_for_keeper ~keeper_name:"keeper-main" state));
+  check bool "Keeper B cannot read Keeper A's snapshot" true
+    (Option.is_none
+       (Context_state.reading_for_keeper ~keeper_name:"keeper-other" state))
 
 let test_decode_error_is_exclusive () =
   let state =
@@ -60,9 +79,13 @@ let test_decode_error_is_exclusive () =
       ~project:(fun ~keeper_name:_ ~current_trace_id:_ ->
         observed_fields ~trace_id:"trace-prior")
   in
+  let reading = reading_exn "keeper-main" state in
   check bool "failed decode clears observation" true
-    (Option.is_none state.observation);
-  check bool "failed decode preserves error" true (Option.is_some state.error)
+    (Option.is_none reading.observation);
+  check bool "failed decode preserves error" true (Option.is_some reading.error);
+  check bool "error snapshot cannot cross Keeper identity" true
+    (Option.is_none
+       (Context_state.reading_for_keeper ~keeper_name:"keeper-other" state))
 
 let test_empty_selection_clears_loaded_state () =
   let load_count = ref 0 in
@@ -74,11 +97,12 @@ let test_empty_selection_clears_loaded_state () =
   in
   let loaded = Context_state.for_selection ~load (Some keeper) in
   check bool "nonempty selection loads context" true
-    (Option.is_some loaded.observation);
+    (Option.is_some
+       (Context_state.reading_for_keeper ~keeper_name:"keeper-main" loaded));
   let cleared = Context_state.for_selection ~load None in
-  check bool "empty selection clears observation" true
-    (Option.is_none cleared.observation);
-  check bool "empty selection clears error" true (Option.is_none cleared.error);
+  check bool "empty selection clears the stamped reading" true
+    (Option.is_none
+       (Context_state.reading_for_keeper ~keeper_name:"keeper-main" cleared));
   check int "empty selection does not call loader" 1 !load_count
 
 let () =
@@ -86,6 +110,8 @@ let () =
     [ ( "selection"
       , [ test_case "binds current Keeper identity" `Quick
             test_resolve_binds_keeper_identity_and_current_trace
+        ; test_case "snapshot cannot cross Keeper identity" `Quick
+            test_snapshot_is_bound_to_one_keeper
         ; test_case "decode error is exclusive" `Quick
             test_decode_error_is_exclusive
         ; test_case "empty roster clears loaded context" `Quick

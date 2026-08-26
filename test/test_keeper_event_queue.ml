@@ -1863,6 +1863,94 @@ let () =
         true
         (bool_field "operator_action_required" json));
 
+  (* --- durable fleet summary: an empty orphan queue has no lifecycle-bound
+     work to classify, so missing owner metadata is not a storage failure. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-empty-orphan" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-empty-orphan-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        empty;
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Lifecycle_unknown
+              "durable keeper metadata missing")
+      in
+      Alcotest.(check string)
+        "empty orphan summary status"
+        "ok"
+        (string_field "status" json);
+      Alcotest.(check int)
+        "empty orphan is discovered"
+        1
+        (int_field "keeper_count" json);
+      let summary = keeper_summary keeper_name json in
+      Alcotest.(check int)
+        "empty orphan has no pending work"
+        0
+        (int_field "pending_count" summary);
+      Alcotest.(check bool)
+        "empty orphan keeper counts are complete"
+        true
+        (bool_field "counts_complete" summary);
+      Alcotest.(check bool)
+        "empty orphan counts are complete"
+        true
+        (bool_field "counts_complete" json);
+      Alcotest.(check int)
+        "empty orphan has no read error"
+        0
+        (int_field "read_error_count" json);
+      Alcotest.(check bool)
+        "empty orphan needs no operator action"
+        false
+        (bool_field "operator_action_required" json));
+
+  (* --- durable fleet summary: fail-open recovery from an unreadable primary
+     must remain visible even when the recovered orphan queue is empty. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-corrupt-orphan" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-corrupt-orphan-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        empty;
+      write_file
+        (snapshot_path ~base_path ~keeper_name)
+        {|{"schema":"keeper.event_queue.state.v15"}|};
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Lifecycle_unknown
+              "durable keeper metadata missing")
+      in
+      Alcotest.(check string)
+        "corrupt orphan summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check bool)
+        "corrupt orphan counts are incomplete"
+        false
+        (bool_field "counts_complete" json);
+      Alcotest.(check bool)
+        "corrupt orphan retains a read error"
+        true
+        (int_field "read_error_count" json > 0);
+      Alcotest.(check bool)
+        "corrupt orphan requires operator action"
+        true
+        (bool_field "operator_action_required" json));
+
   (* Build the meta through the shared fixture, not a hand-written object: it
      fills every field of the current schema from
      [Keeper_meta_json_current_schema.all_fields], so a schema change cannot

@@ -23,7 +23,7 @@ let test_resolved_config_exposes_timeout_knobs () =
     "resolved config exposes stream_idle_timeout_sec"
     true
     (List.mem "stream_idle_timeout_sec" names);
-  (* RFC-OAS-037: the first-event (TTFT/prefill) budget needs the same
+  (* RFC-AC-037: the first-event (TTFT/prefill) budget needs the same
      configured-vs-effective disambiguation as the idle knob. *)
   Alcotest.(check bool)
     "resolved config exposes first_event_timeout_sec"

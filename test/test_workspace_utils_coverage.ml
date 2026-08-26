@@ -251,6 +251,39 @@ let test_auto_synced_test_base_path_does_not_override_later_requests () =
         (Workspace_utils.resolve_masc_base_path second))
 
 (* ============================================================
+   task-351 quarantine escape guard Tests
+   ============================================================ *)
+
+let test_is_temp_scratch_dir () =
+  let tmp = Filename.get_temp_dir_name () in
+  check bool "OS temp dir is scratch" true
+    (Workspace_utils.is_temp_scratch_dir tmp);
+  check bool "path under OS temp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir
+       (Filename.concat tmp "masc_test_scratch_123"));
+  check bool "/tmp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir "/tmp");
+  check bool "path under /tmp is scratch" true
+    (Workspace_utils.is_temp_scratch_dir "/tmp/foo/bar");
+  check bool "production-like path is not scratch" false
+    (Workspace_utils.is_temp_scratch_dir "/Users/dancer/me")
+
+let test_resolved_base_escapes_temp_request () =
+  let tmp = Filename.get_temp_dir_name () in
+  let scratch = Filename.concat tmp "masc_test_escape_123" in
+  check bool "temp request resolving to temp does not escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request scratch scratch);
+  check bool "temp request resolving to another temp does not escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request scratch
+       (Filename.concat tmp "other"));
+  check bool "temp request resolving to production escapes" true
+    (Workspace_utils.resolved_base_escapes_temp_request scratch
+       "/Users/dancer/me");
+  check bool "non-temp request is never an escape" false
+    (Workspace_utils.resolved_base_escapes_temp_request "/Users/dancer/me"
+       "/Users/dancer/me")
+
+(* ============================================================
    env_opt Tests
    ============================================================ *)
 
@@ -709,6 +742,9 @@ let () =
         test_default_config_syncs_test_base_path_env;
       test_case "auto-synced test base env does not override later requests" `Quick
         test_auto_synced_test_base_path_does_not_override_later_requests;
+      test_case "is_temp_scratch_dir" `Quick test_is_temp_scratch_dir;
+      test_case "resolved_base_escapes_temp_request" `Quick
+        test_resolved_base_escapes_temp_request;
     ];
     "env_opt", [
       test_case "nonexistent" `Quick test_env_opt_nonexistent;

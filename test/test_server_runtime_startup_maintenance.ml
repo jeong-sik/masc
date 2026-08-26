@@ -92,8 +92,8 @@ let test_top_level_store_list_is_ssot () =
   Alcotest.(check (list string))
     "top-level dated stores pinned"
     (* Compared against List.sort String.compare, so this literal is sorted.
-       agent-core-events sits second because a < u; it was oas-events until
-       #27945, which sorted after messages. *)
+       agent-core-events sits second because a < u; its previous name sorted
+       after messages until #27945. *)
     [ "activity-events"
     ; "agent-core-events"
     ; "audit"

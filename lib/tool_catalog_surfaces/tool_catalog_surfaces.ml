@@ -119,7 +119,12 @@ let public_mcp_surface_tools =
 ;;
 
 let spawned_agent_surface_tools =
-  [ "masc_status"
+  [ (* Asking the operator, and reading back what came of it. Both belong on
+       the Keeper surface rather than the operator one: the Keeper is the side
+       that asks, and an operator answers over HTTP, not by calling a tool. *)
+    "masc_ask"
+  ; "masc_ask_status"
+  ; "masc_status"
   ; "masc_tasks"
   ; "masc_transition"
   ; "masc_task_history"

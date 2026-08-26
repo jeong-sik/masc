@@ -2132,7 +2132,9 @@ let test_unattempted_legacy_invocation_requires_typed_readmission () =
                  Some
                    (fun _ ->
                      Hooks.ElicitToolApproval
-                       { Hooks.question = "Approve legacy durable call?" })
+                       { Hooks.question = "Approve legacy durable call?"
+                       ; Hooks.because = "policy: unknown tool surface"
+                       })
              }
            in
            let agent =

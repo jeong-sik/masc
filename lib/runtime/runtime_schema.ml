@@ -280,6 +280,21 @@ type binding =
   ; wizard_default : bool
   ; max_concurrent : int option
   ; max_request_body_bytes : int option
+  ; max_tokens : int option
+    (** Request-side output budget for this binding ([max_tokens] on Chat
+        Completions, [max_output_tokens] on Responses, [num_predict] on Ollama).
+        Absent keeps the field off the wire so the provider's own default
+        decides. masc#24067 removed a resolver that {i invented} this value from
+        a capability ceiling or a flat fallback; a value declared here is
+        explicit deployment intent, which is what that boundary asks callers to
+        carry.
+
+        Measured 2026-08-25 over 1516 turns on
+        [ollama_cloud.deepseek-v4-flash:0731]: [output_tokens] was <= 2048 on
+        1392 turns and 2048..8192 on 38, then exactly 65536 on 86 -- the
+        provider's own cap, reached only by turns that had collapsed into
+        single-token repetition. The 8192..65535 band held nothing at all, so a
+        budget inside it bounds the collapse without touching healthy work. *)
   ; price_input : float option
   ; price_output : float option
   ; keep_alive : string option

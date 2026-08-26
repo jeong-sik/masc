@@ -1,0 +1,155 @@
+module Decode = Masc.Tui_decode
+
+type draft_response =
+  | Draft_chose of string list
+  | Draft_wrote of string
+  | Draft_skipped
+
+type draft = {
+  d_ask_id : string;
+  d_responses : (string * draft_response) list;
+}
+
+let empty_draft ~ask_id = { d_ask_id = ask_id; d_responses = [] }
+let draft_ask_id draft = draft.d_ask_id
+
+let draft_for existing ~(row : Decode.ask_row) =
+  match existing with
+  | Some draft when String.equal draft.d_ask_id row.ar_id -> draft
+  | Some _ | None -> empty_draft ~ask_id:row.ar_id
+
+let response_for draft ~(question : Decode.ask_question) =
+  List.assoc_opt question.aq_id draft.d_responses
+
+let without question_id responses =
+  List.filter (fun (id, _) -> not (String.equal id question_id)) responses
+
+let record draft ~question_id response =
+  { draft with d_responses = (question_id, response) :: without question_id draft.d_responses }
+
+let forget draft ~question_id =
+  { draft with d_responses = without question_id draft.d_responses }
+
+let clear draft ~(question : Decode.ask_question) =
+  forget draft ~question_id:question.aq_id
+
+let skip draft ~(question : Decode.ask_question) =
+  record draft ~question_id:question.aq_id Draft_skipped
+
+let selected_ids draft ~question_id =
+  match List.assoc_opt question_id draft.d_responses with
+  | Some (Draft_chose ids) -> ids
+  | Some (Draft_wrote _) | Some Draft_skipped | None -> []
+
+let toggle_choice draft ~(question : Decode.ask_question)
+    ~(choice : Decode.ask_choice) =
+  let question_id = question.aq_id in
+  let chosen = selected_ids draft ~question_id in
+  let already = List.exists (String.equal choice.ac_id) chosen in
+  let next =
+    match question.aq_mode with
+    | Decode.Ask_single -> if already then [] else [ choice.ac_id ]
+    | Decode.Ask_multi ->
+        if already then List.filter (fun id -> not (String.equal id choice.ac_id)) chosen
+        else chosen @ [ choice.ac_id ]
+  in
+  match next with
+  | [] -> forget draft ~question_id
+  | ids -> record draft ~question_id (Draft_chose ids)
+
+type free_text_slot = { fts_question_id : string; fts_hint : string option }
+
+let free_text_slot (question : Decode.ask_question) =
+  match question.aq_free_text with
+  | Decode.Ask_free_text_allowed { aft_hint } ->
+      Some { fts_question_id = question.aq_id; fts_hint = aft_hint }
+  | Decode.Ask_choices_only -> None
+
+let free_text_hint slot = slot.fts_hint
+
+let set_text draft ~slot ~text =
+  let question_id = slot.fts_question_id in
+  if String.trim text = "" then forget draft ~question_id
+  else record draft ~question_id (Draft_wrote text)
+
+let response_json = function
+  | Draft_chose ids ->
+      `Assoc
+        [
+          ("kind", `String "chose");
+          ("choice_ids", `List (List.map (fun id -> `String id) ids));
+        ]
+  | Draft_wrote text -> `Assoc [ ("kind", `String "wrote"); ("text", `String text) ]
+  | Draft_skipped -> `Assoc [ ("kind", `String "skipped") ]
+
+let answer_json question_id response =
+  `Assoc [ ("question_id", `String question_id); ("response", response_json response) ]
+
+type readiness =
+  | Ready of Yojson.Safe.t
+  | Missing of Decode.ask_question list
+  | Not_open
+
+let readiness draft ~(row : Decode.ask_row) =
+  match row.ar_resolution with
+  | Decode.Ask_answered _ | Decode.Ask_withdrawn _ -> Not_open
+  | Decode.Ask_open ->
+      let belongs = String.equal draft.d_ask_id row.ar_id in
+      let paired =
+        List.map
+          (fun (question : Decode.ask_question) ->
+            let response =
+              if belongs then List.assoc_opt question.aq_id draft.d_responses else None
+            in
+            (question, response))
+          row.ar_questions
+      in
+      let missing =
+        List.filter_map
+          (fun (question, response) -> if response = None then Some question else None)
+          paired
+      in
+      if missing <> [] then Missing missing
+      else
+        Ready
+          (`List
+            (List.filter_map
+               (fun ((question : Decode.ask_question), response) ->
+                 Option.map (answer_json question.aq_id) response)
+               paired))
+
+let request_body ~answers ~actor_id ~session_id =
+  let optional key = function
+    | Some value when String.trim value <> "" -> [ (key, `String value) ]
+    | Some _ | None -> []
+  in
+  `Assoc
+    (("answers", answers) :: (optional "actor_id" actor_id @ optional "session_id" session_id))
+
+type gate =
+  | Ask_gate_blocked_inflight
+  | Ask_gate_arm of string
+  | Ask_gate_submit
+
+let gate_transition ~inflight ~pending ~ask_id =
+  if inflight then Ask_gate_blocked_inflight
+  else
+    match pending with
+    | Some armed when String.equal armed ask_id -> Ask_gate_submit
+    | Some _ | None -> Ask_gate_arm ask_id
+
+let fallback_cursor ~cursor rows = min (max 0 cursor) (max 0 (List.length rows - 1))
+
+let reconcile_cursor ~current_rows ~cursor ~next_rows =
+  let selected =
+    if cursor < 0 then None
+    else Option.map (fun (row : Decode.ask_row) -> row.ar_id) (List.nth_opt current_rows cursor)
+  in
+  match selected with
+  | Some ask_id -> (
+      match
+        List.find_index (fun (row : Decode.ask_row) -> String.equal ask_id row.ar_id) next_rows
+      with
+      | Some index -> index
+      | None -> fallback_cursor ~cursor next_rows)
+  | None -> fallback_cursor ~cursor next_rows

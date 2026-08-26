@@ -58,7 +58,7 @@ Two metrics worth ratcheting now:
 | `bug_model_coverage_specs` | 55 (estimated) | monotonic increase |
 | `domains_without_bug_model` | 0 | monotonic stay-at-zero |
 
-The second metric is the stronger gate — it asserts no domain regresses to zero coverage. Pair this with the existing PPX ratchet (#12151) and the spec-side audit chain has the same structure as the OAS chain (Phase 1→4, ratchet enforced).
+The second metric is the stronger gate — it asserts no domain regresses to zero coverage. Pair this with the existing PPX ratchet (#12151) and the spec-side audit chain has the same structure as the agent_core chain (Phase 1→4, ratchet enforced).
 
 ## 5. CI wire-up plan
 
@@ -69,13 +69,13 @@ The next PR adds:
   run: scripts/tla-bug-model-ratchet.sh   # to be created
 ```
 
-Single CI step, same `structure-ratchet` job as the OAS ratchet. Implementation deferred to a separate PR following the same template pattern.
+Single CI step, same `structure-ratchet` job as the agent_core ratchet. Implementation deferred to a separate PR following the same template pattern.
 
 ## 6. Audit chain pattern — closure observation
 
-Across both Q-P0-3 (OAS, MERGED 4/4) and Q-P0-2 (TLA gap, 8 RFC stubs implemented), the same 4-phase shape emerged:
+Across both Q-P0-3 (agent_core, MERGED 4/4) and Q-P0-2 (TLA gap, 8 RFC stubs implemented), the same 4-phase shape emerged:
 
-| Phase | Q-P0-3 (OAS) | Q-P0-2 (TLA gap) |
+| Phase | Q-P0-3 (agent_core) | Q-P0-2 (TLA gap) |
 |---|---|---|
 | 1 | Layer A/B/C survey | Bug Model + tautology + split-pair survey |
 | 2 | Layer C verdict refined NEEDS SWEEP → PASS via taxonomy | Tautology candidates 21 → 0 via SPECIFICATION diff |
@@ -88,7 +88,7 @@ Both audits exhibit the same self-correcting structure: each phase narrows or ze
 
 1. **`scripts/tla-bug-model-ratchet.sh` + baseline** (1 cycle): mirrors `tla-ppx-ratchet.sh` structure, monotonic-increase strict + monotonic-decrease descriptive
 2. **CI wire-up PR** (1 cycle): adds the single ratchet step to `.github/workflows/ci.yml`
-3. **Phase 4 closure summary**: 6-month review point per OAS Phase 4 deferral discipline
+3. **Phase 4 closure summary**: 6-month review point per agent_core Phase 4 deferral discipline
 4. **Audit pattern doc** (optional): codify the 4-phase shape for future audit chains
 
 ## 8. References

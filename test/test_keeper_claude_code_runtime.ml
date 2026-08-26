@@ -31,6 +31,10 @@ let quota_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
 ;;
 
+let generic_provider_rejection =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-rejected-1","result":"API Error: Sonnet safeguards flagged this message","api_error_status":null}|}
+;;
+
 let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
 ;;
@@ -1041,6 +1045,33 @@ let test_keeper_settles_and_resumes () =
        | _ -> fail "resumed Claude Code turn did not settle")
 ;;
 
+let test_pre_effect_provider_rejection_keeps_failover_open () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture [ Emit generic_provider_rejection ] (fun cli_path ->
+         match run_keeper_turn ~base_path ~cli_path ~goal:"READ_ONLY_SLACK" () with
+         | Error
+             (Agent_core.Error.Provider
+                (Llm_provider.Error.ProviderReportedError { detail; _ })) ->
+           check
+             bool
+             "provider safeguard diagnostic survives without an effect fence"
+             true
+             (Astring.String.is_infix ~affix:"safeguards flagged" detail);
+           let state = load_state base_path in
+           (match state.phase with
+            | Recovery_required required ->
+              check bool
+                "pre-effect provider rejection remains recoverable"
+                true
+                (required.failure = Provider_rejected)
+            | _ -> fail "pre-effect provider rejection did not enter recovery")
+         | Error error -> fail (Agent_core.Error.to_string error)
+         | Ok _ -> fail "provider rejection completed the Keeper turn"))
+;;
+
 let test_quota_enters_typed_recovery () =
   let base_path = temp_workspace () in
   Fun.protect
@@ -1384,6 +1415,10 @@ let () =
             "context overflow maps to input-rejected recovery"
             `Quick
             test_context_overflow_maps_to_input_rejected_recovery
+        ; test_case
+            "pre-effect provider rejection keeps failover open"
+            `Quick
+            test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case
             "spawn failure releases claim"

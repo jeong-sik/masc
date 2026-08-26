@@ -24,6 +24,7 @@ type entry = {
   style : style;
   timestamp : string;
   role_label : string;
+  role_label_mark_cells : int;
   request_label : string;
   body : string;
   markdown_source : markdown_source;
@@ -46,10 +47,16 @@ type origin_display =
   | Origin_inline
   | Origin_bare
 
+type shade =
+  | Shade_none
+  | Shade_quoted
+
 type row = {
   style : style;
   kind : row_kind;
+  shade : shade;
   text : string;
+  gutter_label_at : int;
   gutter : string;
 }
 
@@ -525,6 +532,15 @@ let speaker_mark : style -> string = function
   | Tool -> "\xe2\x96\xa0"
   | Thinking -> "\xc2\xb7"
 
+(* Cells the speaker mark and its separator occupy at the head of a label, or
+   zero when the column was too narrow to keep the mark at all. One reader, so
+   the renderer that styles the mark and the layout that lays it out cannot
+   disagree about where it ends. *)
+let role_label_mark_cells ?(column = chat_role_label_column) ~style () =
+  let column = max 1 column in
+  let cells = display_width (speaker_mark style) + 1 in
+  if column - cells < 1 then 0 else cells
+
 let align_role_label ?(column = chat_role_label_column) ~style label =
   let column = max 1 column in
   let mark = speaker_mark style in
@@ -538,6 +554,7 @@ let align_role_label ?(column = chat_role_label_column) ~style label =
      help telling apart. *)
   let mark_cells = display_width mark + 1 in
   let inner = column - mark_cells in
+  (* Kept in step with [role_label_mark_cells]: both decide on [inner < 1]. *)
   if inner < 1 then
     (* A pane too narrow to hold both keeps the name. Losing track of who is
        talking costs more than losing the shorthand for it. *)
@@ -669,7 +686,9 @@ let metadata_row ~(previous : entry option) ~inner_width (entry : entry) =
     Some
       { style = entry.style
       ; kind = Metadata metadata
+      ; shade = Shade_none
       ; text = fitted
+      ; gutter_label_at = 0
       ; gutter = ""
       }
 
@@ -739,6 +758,15 @@ let short_clock timestamp =
    column's alphabet closed rather than inventing a mark for continuation. *)
 let continued_mark = speaker_mark Thinking
 
+(* A tool's output and a recalled memory arrive as text the Keeper did not
+   write, so they are quoted rather than said. Everything else the pane draws
+   is either the Keeper talking or the operator talking, and that is prose.
+
+   Reasoning is the Keeper's own, not a quotation, however folded it is. *)
+let shade_of_style : style -> shade = function
+  | Tool | Status -> Shade_quoted
+  | User | Keeper | Error | Thinking -> Shade_none
+
 let origin_gutter ~origin ~previous ~inner_width entry =
   match origin with
   | Origin_row -> None
@@ -758,6 +786,16 @@ let origin_gutter ~origin ~previous ~inner_width entry =
       let ceiling = max 0 (inner_width - 2 - min_body_cells) in
       let filled = fit_width (clock ^ entry.role_label) (min ceiling
         (display_width (clock ^ entry.role_label))) in
+      (* Where the kind label starts: past the clock and past the speaker mark.
+         Computed here because this is where the clock is prepended; a renderer
+         deriving it would be measuring the same two things a second time. A
+         gutter cut short by [ceiling] can end before the label, so the offset
+         is clamped to what actually survived. *)
+      let label_at =
+        min (display_width filled)
+          (display_width clock + entry.role_label_mark_cells)
+      in
+
       if continues_previous ~previous entry then
         (* Padded rather than repeated: a second row from the same speaker in
            the same second has nothing new to say, and [fit_width] measures the
@@ -772,14 +810,15 @@ let origin_gutter ~origin ~previous ~inner_width entry =
            drops to the quietest glyph so a row that continues reads as lower
            than the row that started. What is left is the speaker column doing
            the telling -- a name appears only where the speaker changes. *)
+        (* No label to hold back on a row that draws no name. *)
         let continued = clock ^ continued_mark ^ " " in
-        Some (fit_width continued (display_width filled))
-      else Some filled
+        Some (fit_width continued (display_width filled), 0)
+      else Some (filled, label_at)
 
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let gutter = origin_gutter ~origin ~previous ~inner_width entry in
   let gutter_width =
-    match gutter with None -> 0 | Some text -> display_width text
+    match gutter with None -> 0 | Some (text, _) -> display_width text
   in
   let body_width = max min_body_cells (inner_width - 2 - gutter_width) in
   (* Keepers write markdown. Rendering it is the caller's to supply, so this
@@ -802,13 +841,15 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     | chunks -> chunks
   in
   let body_rows =
-    let margin = Option.value gutter ~default:"" in
+    let margin, label_at = Option.value gutter ~default:("", 0) in
     let blank = fit_width "" (display_width margin) in
     body_chunks
     |> List.mapi (fun index chunk ->
       { style = entry.style
       ; kind = Body
+      ; shade = shade_of_style entry.style
       ; text = "  " ^ chunk
+      ; gutter_label_at = (if index = 0 then label_at else 0)
       ; gutter = (if index = 0 then margin else blank)
       })
   in

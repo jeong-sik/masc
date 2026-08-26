@@ -77,7 +77,7 @@ status: Draft
 
 - **작업**: 실패 타입에 두 축을 필수화한다 — (1) 재시도 가능성, (2) 사유 payload. nullary 실패 variant 금지. 경계 통과 시 재시도 가능성을 뒤집는 변환을 타입으로 차단하거나 명시적 근거를 요구. 재시도/회전 자격을 분리(현재 `InvalidRequest` 하나가 둘을 동시에 차단).
 - **장점**: 재발이 구조적으로 막힌다. 새 실패 경로가 컴파일 시점에 결정을 강제받는다.
-- **단점/리스크**: 실패 타입이 공개 경계(agent_core ↔ masc)에 걸쳐 있어 변경 범위가 크다. agent_core 와 masc 는 함께 움직인다. RFC-OAS-035 가 "source compatibility 를 위해 `ProviderUnavailable` 로 투영" 을 명시했으므로 그 결정의 재검토가 선행된다.
+- **단점/리스크**: 실패 타입이 공개 경계(agent_core ↔ masc)에 걸쳐 있어 변경 범위가 크다. agent_core 와 masc 는 함께 움직인다. RFC-AC-035 가 "source compatibility 를 위해 `ProviderUnavailable` 로 투영" 을 명시했으므로 그 결정의 재검토가 선행된다.
 
 ### Path B — 소비 지점 규율 (lint + 명시 match)
 
@@ -96,7 +96,7 @@ status: Draft
 ## 5. 결정 요청
 
 1. **Path A / B / C 중 어느 것인가.** (제안: C → A. 관측을 먼저 세우고 타입 강제로 수렴. B 의 lint 는 A 착지 전 회귀 방지로 병행 가능.)
-2. **agent_core 경계 처리.** RFC-OAS-035 의 `ProviderUnavailable` 투영 결정을 재검토 대상으로 열 것인가, masc 쪽에서만 흡수할 것인가.
+2. **agent_core 경계 처리.** RFC-AC-035 의 `ProviderUnavailable` 투영 결정을 재검토 대상으로 열 것인가, masc 쪽에서만 흡수할 것인가.
 3. **재시도 이탈 시의 목적지 상태.** LAW 1 이 허용하는 `Awaiting` / `Recovering` 중 어느 쪽인가, 아니면 새 typed 상태가 필요한가.
 4. **선행 조사 승인.** 현재 코드베이스의 실패 소비 지점 catch-all 규모 전수 조사(§4 Path B 의 미지수). 규모를 모른 채 lint 를 세우면 대량 위반으로 CI 가 막힌다.
 

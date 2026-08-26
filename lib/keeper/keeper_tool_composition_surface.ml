@@ -188,7 +188,8 @@ let schema_tool ~name ~description ~input_schema =
     (fun _ _ -> invalid_arg "schema-only Keeper tool cannot execute")
 ;;
 
-let schema_tools ?(skill_composition_entries = []) () =
+let schema_tools ?(skill_composition_entries = [])
+      ?(include_instruction_skill = false) () =
   let composition_tools =
     List.map
       (fun (entry : Catalog.entry) ->
@@ -204,6 +205,17 @@ let schema_tools ?(skill_composition_entries = []) () =
       ~description:plan_execute_description
       ~input_schema:plan_execute_input_schema
   in
+  let instruction_tools =
+    if include_instruction_skill
+    then
+      [ schema_tool
+          ~name:Catalog.skill_tool_name
+          ~description:Tool_schemas_skill.schema.description
+          ~input_schema:Tool_schemas_skill.schema.input_schema
+      ]
+    else []
+  in
+  let composition_tools = composition_tools @ instruction_tools in
   if
     List.exists
       (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)

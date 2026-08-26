@@ -128,6 +128,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -472,6 +473,7 @@
   test_runtime_lane_preference
   test_runtime_quota_window
   test_keeper_turn_driver_accept
+  test_keeper_turn_container_reap
   test_keeper_teardown_cancel_protect
   test_keeper_turn_driver_failover
   test_keeper_rotation_eligibility_census
@@ -1151,6 +1153,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -1294,6 +1297,7 @@
   test_workspace_coverage
   test_dashboard_workspace
   test_dashboard_briefing
+  test_dashboard_tool_failure_parity
   test_dashboard_keeper_name
   test_dashboard_briefing_sections
   test_dashboard_cache
@@ -1443,6 +1447,11 @@
   decompress.de
   decompress.gz)
  (deps ../bin/main_eio.exe))
+
+(test
+ (name test_server_bootstrap_durable_demand_owner)
+ (modules test_server_bootstrap_durable_demand_owner)
+ (libraries alcotest masc_test_deps masc_test_runtime))
 
 (test
  (name test_server_runtime_bootstrap)
@@ -2169,6 +2178,8 @@
 
 (include stanzas/test_keeper_approval_resolved_history.inc)
 
+(include stanzas/test_keeper_tool_approval_mode_actor_log.inc)
+
 (include stanzas/test_keeper_toml_parser.inc)
 
 (include stanzas/test_keeper_toml_loader.inc)
@@ -2860,6 +2871,22 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_shade_layers)
+ (modules test_tui_shade_layers)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
+ (name test_tui_role_label_boundary)
+ (modules test_tui_role_label_boundary)
+ (libraries
+  alcotest
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries
@@ -3170,6 +3197,7 @@
 (include stanzas/test_tui_mode.inc)
 (include stanzas/test_lsp_position.inc)
 (include stanzas/test_tui_theme.inc)
+(include stanzas/test_tui_theme_contrast.inc)
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
@@ -3229,6 +3257,26 @@
   yojson))
 
 (test
+ (name test_skill_catalog_snapshot_service)
+ (modules test_skill_catalog_snapshot_service)
+ (libraries
+  alcotest
+  masc.skill_snapshot_service
+  masc.skill_snapshot
+  masc.skill_config
+  unix))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))
+
+(include stanzas/test_rest_approvals_because.inc)
+
+(include stanzas/test_keeper_ask.inc)
+
+(include stanzas/test_keeper_ask_store.inc)
+
+(include stanzas/test_masc_ask_tool_surface.inc)
+
+(include stanzas/test_tui_ask_projection.inc)

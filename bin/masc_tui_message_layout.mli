@@ -32,6 +32,12 @@ type entry = {
   style : style;
   timestamp : string;
   role_label : string;
+  role_label_mark_cells : int;
+      (** Cells the speaker mark occupies at the head of {!role_label}, from
+          {!role_label_mark_cells}. Zero when the column was too narrow to keep
+          the mark. Carried on the entry because the caller is what chose the
+          column, and read back by the renderer to style the mark and the
+          label differently: colour says status, the label only says kind. *)
   request_label : string;
   body : string;
   markdown_source : markdown_source;
@@ -47,6 +53,26 @@ type metadata =
 (** A new origin carries every field the renderer needs for its badge. A later
     row from the same origin carries only its new timestamp, so callers never
     have to parse display text to decide what should be highlighted. *)
+
+type shade =
+  | Shade_none
+      (** Prose a person reads. Most of the pane, so no background at all is
+          the default rather than one of several tints. *)
+  | Shade_quoted
+      (** Text the Keeper did not write: a diff, a tool's output, a memory
+          recalled. Drawn one step off the background with a left rail, so a
+          reader can see where the quoted block ends without reading it. *)
+(** How much a row belongs to what is around it.
+
+    Colour says status and indentation says depth; this says belonging, and it
+    is deliberately a closed sum with no room to grow. A fourth tint is not a
+    fourth kind of belonging — three steps is already the most a terminal
+    background can separate before the eye stops reading them as an order. If
+    something needs to be set apart further, that is depth, and indentation is
+    what carries depth.
+
+    Keeping it closed is the point: a variant cannot be added without every
+    renderer answering for it. *)
 
 type row_kind =
   | Metadata of metadata
@@ -67,7 +93,15 @@ type origin_display =
 type row = {
   style : style;
   kind : row_kind;
+  shade : shade;
+      (** Which belonging layer this row sits in. See {!shade}. *)
   text : string;
+  gutter_label_at : int;
+      (** Cells of {!gutter} that belong to the clock and the speaker mark. The
+          rest is the kind label. The renderer colours what comes before this
+          by status and lets the label recede; without the offset it would have
+          to find the mark by measuring the glyph a second time. Zero on rows
+          whose gutter is blank. *)
   gutter : string;
       (** What to draw left of the body's rule. Empty under {!Origin_row};
           under the other two it holds the origin on a message's first row and
@@ -115,6 +149,15 @@ val dress_bare_links :
 val fit_width : string -> int -> string
 
 val fit_middle : int -> string -> string
+
+val role_label_mark_cells : ?column:int -> style:style -> unit -> int
+(** Cells {!align_role_label} spends on the speaker mark and its separator at
+    the given column, or zero when the column is too narrow to keep the mark.
+
+    The single reader of that arithmetic. A renderer that styles the mark apart
+    from the label asks here rather than measuring the glyph again, so the two
+    cannot drift. *)
+
 (** [fit_middle column label] keeps both ends of [label] in [column] cells,
     dropping the middle and marking the cut with ["…"].
 

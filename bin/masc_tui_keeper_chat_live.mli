@@ -52,8 +52,10 @@ type delta =
       ; tool_name : string
       ; args : string
       ; question : string
+      ; because : string
       }
-      (** The turn is held at this call until it is answered. *)
+      (** The turn is held at this call until it is answered. [because] is
+          why it was held; the pane draws it under the question. *)
   | Approval_settled of
       { call_id : string
       ; outcome : string

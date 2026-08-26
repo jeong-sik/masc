@@ -70,6 +70,39 @@ let publish_keeper_lifecycle
   masc_publish
     (Agent_core.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
 
+(** {1 Native Posture Admission Events} *)
+
+(** Publish a typed event when a keeper's declared [keeper.tools.native]
+    posture could not be honored at lane admission and the lane degraded
+    to a safer posture instead of failing the turn (RFC-0390 admission
+    review: [full] under a non-yolo approval mode or [none] on a client
+    that cannot disable built-ins). Wire event name:
+    [masc.keeper.native_posture_degraded].
+
+    This is the record the reviewer asked for: the downgrade is not
+    silent — operators can subscribe to the wire name or watch the
+    dashboard stream for it. *)
+let publish_native_posture_degraded
+    ~keeper_name
+    ~client_label
+    ~declared
+    ~effective
+    ~reason
+  =
+  let payload =
+    `Assoc
+      [ ("keeper_name", `String keeper_name)
+      ; ("client_label", `String client_label)
+      ; ("declared", `String declared)
+      ; ("effective", `String effective)
+      ; ("reason", `String reason)
+      ; ("timestamp", `Float (Time_compat.now ()))
+      ]
+  in
+  masc_publish
+    (Agent_core.Event_bus.mk_event
+       (Custom ("masc.keeper.native_posture_degraded", payload)))
+
 (** {1 Audit Ledger Events} *)
 
 (** Publish a global audit ledger event to the MASC Event_bus.

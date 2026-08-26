@@ -289,25 +289,31 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
       failf "read back: %s"
         (Keeper_types_profile.keeper_toml_load_error_to_string error)
   in
-  let parsed =
-    parse_or_fail
-      (`Assoc
-         [ "name", `String name
-         ; "instructions", `String "fixture instructions"
-         ; ( "tools"
-           , `Assoc
-               [ "groups", `List [ `String "fs"; `String "core" ]
-               ; "native", `String "full"
-               ] )
-         ])
-  in
-  let meta = { base_meta with tool_groups = parsed.tool_groups_opt } in
-  persist parsed meta;
-  let defaults = read_back () in
-  check (option (list string)) "groups round-trip"
-    (Some [ "fs"; "core" ]) defaults.tool_groups;
-  check (option string) "native full round-trip" (Some "full")
-    (Option.map Runtime_native_tools.to_string defaults.native_tool_posture);
+  List.iter
+    (fun posture ->
+       let parsed =
+         parse_or_fail
+           (`Assoc
+              [ "name", `String name
+              ; "instructions", `String "fixture instructions"
+              ; ( "tools"
+                , `Assoc
+                    [ "groups", `List [ `String "fs"; `String "core" ]
+                    ; "native", `String posture
+                    ] )
+              ])
+       in
+       let meta = { base_meta with tool_groups = parsed.tool_groups_opt } in
+       persist parsed meta;
+       let defaults = read_back () in
+       check (option (list string)) "groups round-trip"
+         (Some [ "fs"; "core" ]) defaults.tool_groups;
+       check (option string)
+         (Printf.sprintf "native %s round-trip" posture)
+         (Some posture)
+         (Option.map Runtime_native_tools.to_string
+            defaults.native_tool_posture))
+    [ "none"; "read"; "full" ];
   let clear =
     parse_or_fail
       (`Assoc
@@ -315,7 +321,7 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
          ; "tools", `Assoc [ "groups", `Null; "native", `Null ]
          ])
   in
-  persist clear meta;
+  persist clear base_meta;
   let cleared = read_back () in
   check (option (list string)) "groups null clears" None cleared.tool_groups;
   check (option string) "native null clears" None

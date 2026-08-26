@@ -112,8 +112,8 @@ const DISCORD_TRIGGER = [
   ['user_only', '특정 사용자(snowflake)만'],
 ];
 const RUNTIMES = [
-  { name: 'ollama_cloud.deepseek-v4-flash', endpoint: 'oas://seoul-1.masc.run', region: 'ap-northeast-2', kind: 'OAS', keepers: 3 },
-  { name: 'deepseek.deepseek-v4-pro', endpoint: 'oas://tokyo-2.masc.run', region: 'ap-northeast-1', kind: 'OAS', keepers: 2 },
+  { name: 'ollama_cloud.deepseek-v4-flash', endpoint: 'agent-core://seoul-1.masc.run', region: 'ap-northeast-2', kind: 'AGENT_CORE', keepers: 3 },
+  { name: 'deepseek.deepseek-v4-pro', endpoint: 'agent-core://tokyo-2.masc.run', region: 'ap-northeast-1', kind: 'AGENT_CORE', keepers: 2 },
   { name: 'ollama.gemma4-26b-a4b-qat', endpoint: 'unix:///var/run/masc.sock', region: 'local', kind: 'Docker', keepers: 1 },
 ];
 const APPROVAL_ACTIONS = [
@@ -203,7 +203,6 @@ function SettingsSurface({ onNav }) {
   // repositories — POST /api/v1/repositories (add-repo-dialog.ts fields)
   const [repos, setRepos] = useSet([
     { id: 'masc', name: 'masc', url: 'https://github.com/jeong-sik/masc.git', branch: 'main', autoSync: true, interval: 300, path: '.masc/repos/masc' },
-    { id: 'oas', name: 'oas', url: 'https://github.com/jeong-sik/oas.git', branch: 'main', autoSync: true, interval: 600, path: '.masc/repos/oas' },
     { id: 'kidsnote', name: 'kidsnote-web', url: 'https://github.com/kidsnote/web.git', branch: 'develop', autoSync: false, interval: 300, path: '.masc/repos/kidsnote-web' },
   ]);
   const [repoAdding, setRepoAdding] = useSet(false);
@@ -327,7 +326,7 @@ function SettingsSurface({ onNav }) {
                 <SetRow label="autoboot_max" hint="부팅 시 자동 기동할 keeper 수"><SetStepper v={maxPar} set={setMaxPar} min={1} max={12} label="autoboot_max" /></SetRow>
                 <SetRow label="플릿 메시지 상한" hint="다른 keeper 발화를 몇 건까지 볼지 · 0 = 끔"><SetStepper v={fleetMax} set={setFleetMax} min={0} max={50} label="플릿 메시지 상한" /></SetRow>
                 <SetRow label="스트림 idle timeout" hint="응답이 멈춘 채 이 시간을 넘기면 중단"><span className="set-ro mono">600s · floor (부팅 로그가 유효값과 출처를 명시)</span></SetRow>
-                <SetRow label="모델 카탈로그" hint="사용 가능한 모델 목록"><span className="set-ro mono">oas-models-overlay.toml · override = OAS_MODEL_CATALOG</span></SetRow>
+                <SetRow label="모델 카탈로그" hint="사용 가능한 모델 목록"><span className="set-ro mono">agent-core-models-overlay.toml · override = MASC_MODEL_CATALOG</span></SetRow>
                 <div className="set-dead">☠ 읽히지 않는 키 — 있으면 제거: <span className="mono">[autonomous] concurrency</span> · <span className="mono">[bootstrap] max_active_keepers</span> · <span className="mono">memory_os_consolidation</span>(이 키가 남아있으면 파서가 unknown 으로 거부). 자동 컴팩션 임계치 설정은 소스에서 삭제되어 이 자리에 더 이상 없습니다.</div>
               </React.Fragment>
             )}

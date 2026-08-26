@@ -215,6 +215,12 @@
  (libraries masc masc.operator masc.masc_core yojson))
 
 (library
+ (name masc_tui_ask_projection)
+ (wrapped false)
+ (modules masc_tui_ask_projection)
+ (libraries masc yojson))
+
+(library
  (name masc_tui_task_selection)
  (wrapped false)
  (modules masc_tui_task_selection)
@@ -314,10 +320,16 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_color)
+ (wrapped false)
+ (modules masc_tui_color)
+ (libraries masc_tui_terminal_palette))
+
+(library
  (name masc_tui_theme)
  (wrapped false)
  (modules masc_tui_theme)
- (libraries masc_tui_terminal_palette))
+ (libraries masc_tui_color masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_palette)
@@ -388,7 +400,8 @@
 (library
  (name masc_tui_frame_presenter)
  (wrapped false)
- (modules masc_tui_frame_presenter))
+ (modules masc_tui_frame_presenter)
+ (libraries masc_tui_terminal_palette))
 
 (library
  (name masc_tui_terminal_profile)
@@ -568,6 +581,7 @@
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_keeper_selection
+  masc_tui_context_state
   masc_tui_message_layout
   masc_tui_metrics_tail
   masc_tui_context_inspector

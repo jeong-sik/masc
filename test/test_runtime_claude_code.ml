@@ -580,7 +580,7 @@ let test_statusless_canonical_prompt_too_long_is_typed () =
 let test_statusless_overflow_prose_remains_turn_failed () =
   with_fixture [ Emit statusless_overflow_prose_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
       check
         bool
         "unrelated statusless rejection keeps its diagnostic"
@@ -593,7 +593,7 @@ let test_statusless_overflow_prose_remains_turn_failed () =
 let test_unrelated_400_remains_turn_failed () =
   with_fixture [ Emit generic_400_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
       check
         bool
         "generic rejection reason survives"
@@ -639,7 +639,7 @@ let test_statusless_input_too_long_is_typed () =
 let test_statusless_generic_error_remains_turn_failed () =
   with_fixture [ Emit statusless_generic_error_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
       check
         bool
         "generic rejection reason survives"
@@ -673,7 +673,7 @@ let test_terminal_reason_prompt_too_long_is_typed () =
 let test_non_overflow_reason_beats_prefix_prose () =
   with_fixture [ Emit non_overflow_reason_with_prefix_prose_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
       check
         bool
         "generic rejection keeps the provider sentence"

@@ -78,7 +78,7 @@ type try_provider_ctx =
   ; first_event_timeout_s : float option
     (* Bound on the silent wait for the FIRST streaming provider event
        (TTFT/prefill), distinct from [stream_idle_timeout_s] which arms only
-       after that event (RFC-OAS-037). *)
+       after that event (RFC-AC-037). *)
   ; body_timeout_s : float option
   ; (* #27349, axis changed by #28417: the ceiling for THIS provider call
        attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line

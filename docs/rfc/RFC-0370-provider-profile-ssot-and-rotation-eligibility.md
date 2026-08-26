@@ -182,5 +182,5 @@ provider가 보고한 1차 사실이며, blast radius는 후보 구성 한 지�
 - admission 게이트 부활. 후보 구성은 셀렉터의 입력이지 dispatch 거부가
   아니다.
 - ollama_cloud에 usage 조회 흉내 (API가 없다 — `Usage_opaque`가 사실).
-- 300.0 상수의 즉시 제거. RFC-OAS-026 §7 순서 제약: idle 감지가 증명될
+- 300.0 상수의 즉시 제거. RFC-AC-026 §7 순서 제약: idle 감지가 증명될
   때까지 총량 backstop은 유지, 카탈로그 선언으로 정본만 이동.

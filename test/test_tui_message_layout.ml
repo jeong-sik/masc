@@ -6,7 +6,15 @@ module Markdown_cache = Masc_tui_markdown_render_cache
 let entry ?(timestamp = "12:34:56")
     ?(markdown_source = Layout.Markdown_streaming) style role request_label body :
     Layout.entry =
-  { style; timestamp; role_label = role; request_label; body; markdown_source }
+  { style
+  ; timestamp
+  ; role_label = role
+  ; role_label_mark_cells =
+      Layout.role_label_mark_cells ~style ()
+  ; request_label
+  ; body
+  ; markdown_source
+  }
 
 let test_keeps_latest_reply () =
   let entries =
@@ -430,6 +438,7 @@ let transcript count =
             "turn %d closed and wrote a line long enough that it wraps more \
              than once at the widths this test uses"
             index;
+        role_label_mark_cells = 0;
         markdown_source = Layout.Markdown_streaming;
       })
 

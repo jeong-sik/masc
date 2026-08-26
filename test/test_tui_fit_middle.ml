@@ -62,7 +62,10 @@ let test_width_is_exact () =
               column
               (width (Layout.fit_middle column name)))
          [ 4; 8; 12; 23; 40 ])
-    [ "long", audit; "short", "rondo"; "empty", "" ]
+    (* #30740 spelled the short case as a word that is also a live Keeper's
+       name, which the identity guard claims. A short fixture only has to be
+       short, so it does not need one. *)
+    [ "long", audit; "short", "brisk"; "empty", "" ]
 ;;
 
 (* As the column shrinks the head's third reaches zero, and the result becomes

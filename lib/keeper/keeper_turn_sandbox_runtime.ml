@@ -484,6 +484,39 @@ let start_container ?timeout_sec (t : t) =
                  if github_identity_is_new && not !keep_github_identity_snapshot
                  then github_identity.cleanup ()))
            (fun () ->
+         (* Collect what an earlier turn left running before adding to it. A
+            turn container is removed by turn-end teardown; when that does not
+            run, nothing else takes it while this process lives, so they
+            accumulate one per turn (#30590). This never targets the current
+            turn's own containers, so it is safe here even though one turn can
+            hold several.
+
+            A failed reap is reported and does not block the turn: refusing to
+            start a turn because a previous container could not be removed
+            would turn a resource leak into a stopped keeper. *)
+         let reaped =
+           Keeper_sandbox_runtime.reap_prior_turn_containers
+             ~base_path:t.config.base_path
+             ~keeper_name:t.meta.name
+             ~turn_id:t.turn_id
+             ~timeout_sec:
+               (Env_config_sandbox.Shell_timeout.timeout_sec
+                  ~bucket:Env_config_sandbox.Shell_timeout.Cleanup_rm
+                  ())
+             ()
+         in
+         if reaped.removed > 0 || reaped.errors <> []
+         then
+           Log.Keeper.info
+             "%s: reaped %d container(s) left by earlier turns (scanned=%d, \
+              absent=%d)%s"
+             t.meta.name
+             reaped.removed
+             reaped.scanned
+             reaped.already_absent
+             (match reaped.errors with
+              | [] -> ""
+              | errors -> "; errors: " ^ String.concat "; " errors);
          let argv =
            Keeper_sandbox_runtime.docker_command_argv ()
            @ [ "run"; "-d"; "--rm"; "--name"; container_name ]
@@ -491,7 +524,7 @@ let start_container ?timeout_sec (t : t) =
            @ Keeper_sandbox_runtime.docker_label_args
                ~base_path:t.config.base_path
                ~keeper_name:t.meta.name
-               ~container_kind:"turn"
+               ~container_kind:Keeper_sandbox_runtime.turn_container_kind
                ~network_label
                ~turn_id:t.turn_id
                ()

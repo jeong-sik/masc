@@ -62,55 +62,144 @@ let measured ~surface =
   (List.length schemas, bytes)
 ;;
 
-(* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools] declaration
-   (surface = All) must keep the tool surface it had before that feature, so a
-   later refactor cannot quietly take a tool away from the Keepers that never
-   opted in. Pinned on 2026-08-23 from the pre-feature surface.
+(* RFC-0389 backward-compat golden: a Keeper with no [keeper.tools]
+   declaration (surface = All) must keep the tool surface it had before that
+   feature, so a later refactor cannot quietly take a tool away from the
+   Keepers that never opted in. Pinned on 2026-08-23 from the pre-feature
+   surface.
 
-   Re-pin only with the PR that moves the surface, and say what the move bought.
-   The two earlier re-pins also restated the new numbers in this comment, and
-   both restatements drifted from the values three lines below (it read 68,881
-   bytes at 82 tools against 72,787 at 86), so this one names no number that
-   lives in the code.
+   The names, not a byte total. The invariant above is about which tools a
+   Keeper can still call, and a byte count answers that only by accident. It
+   was re-pinned four times in two days (#30679): #30539 added
+   [keeper_code_query] and #30588 re-measured it, which is the surface really
+   moving and what this golden is for; #30571 and #30658 only edited a
+   description, and the surface they were asked to re-pin was the same one.
 
-   2026-08-25: re-pinned for [keeper_code_query], the language-server tool added
-   in #30539. That PR wired the tool through the descriptor and the catalog but
-   never ran this file, so main went red on the count and stayed red for every
-   other PR until an unrelated review noticed it. What the growth bought is a
-   question a Keeper could not ask before: where a name is defined and what its
-   type is, answered from the compiler's view of the code rather than from a
-   text match. *)
+   All four landed red on main rather than on the PR that caused them. Someone
+   editing config/tools/*.toml has no reason to run this file, and no type
+   changes to make [dune build @check] say so -- the failure arrives after the
+   merge, on everyone. Naming the tools cuts that to the two occasions where a
+   Keeper's callable set actually changed, and those are worth stopping for.
 
-(* 2026-08-25, an hour later: 74,267 -> 74,521 for the same tool. #30571 grew
-   the [keeper_code_query] description to say that [references] needs the
-   project's reference index, and merged twelve minutes before the re-pin
-   above, which had measured the surface before it. Neither PR touched a file
-   the other did, so nothing conflicted and both were right on their own — the
-   merge order alone produced a number that matched neither. A byte count
-   pinned in one file and moved from another has no way to notice that; what
-   notices is running this file, which is the same thing all four of today's
-   red causes needed.
+   Sizing is not lost by the change: [ceiling_bytes] above bounds the same
+   surface, and the slack check next to it fails when that ceiling drifts far
+   enough to stop measuring. Those two are shaped as a ratchet on purpose --
+   the doc at the top of this file argues that a golden which fails on its own
+   improvement takes main red for the duration, which is exactly what this one
+   did.
 
-   The count did not move: the surface is the same tools describing themselves
-   more fully, which is the distinction this pair of numbers exists to draw.
-   (Phrasing from #30611, which reached the same re-pin independently.) *)
-
-(* 2026-08-26: 74,521 -> 74,507, and this is the first time the number went
-   down. #30658 shortened [masc_goal_upsert]'s description from "Goal metadata
-   and parent linkage" to "flat Goal metadata". The tool takes id, title,
-   metric, target_value, due_date and priority -- there is no parent
-   parameter, so the old sentence advertised something no caller could reach.
-   A shrinking surface is the one direction this pair cannot tell apart on its
-   own: fourteen fewer bytes reads the same whether a description stopped
-   lying or a tool quietly lost a field. The count staying at 87 is what says
-   which happened here. *)
-let all_surface_golden_count = 87
-let all_surface_golden_bytes = 74_507
+   A tool added or removed still fails here, and now says which one. *)
+let all_surface_golden_names =
+  [ "Edit"
+  ; "Execute"
+  ; "Grep"
+  ; "Read"
+  ; "WebFetch"
+  ; "WebSearch"
+  ; "Write"
+  ; "analyze_image"
+  ; "keeper_artifact_read"
+  ; "keeper_broadcast"
+  ; "keeper_code_query"
+  ; "keeper_context_status"
+  ; "keeper_ide_annotate"
+  ; "keeper_library_read"
+  ; "keeper_library_search"
+  ; "keeper_memory_search"
+  ; "keeper_memory_write"
+  ; "keeper_person_note_set"
+  ; "keeper_spawn"
+  ; "keeper_spawn_read"
+  ; "keeper_spawn_stop"
+  ; "keeper_spawn_wait"
+  ; "keeper_surface_post"
+  ; "keeper_surface_read"
+  ; "keeper_task_claim"
+  ; "keeper_task_create"
+  ; "keeper_task_done"
+  ; "keeper_tasks_audit"
+  ; "keeper_tasks_list"
+  ; "keeper_time_now"
+  ; "keeper_tools_list"
+  ; "keeper_voice_agent"
+  ; "keeper_voice_listen"
+  ; "keeper_voice_session_end"
+  ; "keeper_voice_session_start"
+  ; "keeper_voice_sessions"
+  ; "keeper_voice_speak"
+  ; "masc_agent_fitness"
+  ; "masc_board_cleanup"
+  ; "masc_board_comment"
+  ; "masc_board_comment_vote"
+  ; "masc_board_curation_read"
+  ; "masc_board_curation_submit"
+  ; "masc_board_delete"
+  ; "masc_board_hearths"
+  ; "masc_board_list"
+  ; "masc_board_post"
+  ; "masc_board_post_get"
+  ; "masc_board_post_update"
+  ; "masc_board_profile"
+  ; "masc_board_reaction"
+  ; "masc_board_search"
+  ; "masc_board_stats"
+  ; "masc_board_sub_board_create"
+  ; "masc_board_sub_board_delete"
+  ; "masc_board_sub_board_get"
+  ; "masc_board_sub_board_list"
+  ; "masc_board_sub_board_update"
+  ; "masc_board_vote"
+  ; "masc_config"
+  ; "masc_dashboard"
+  ; "masc_deliver"
+  ; "masc_fusion"
+  ; "masc_fusion_status"
+  ; "masc_gc"
+  ; "masc_get_metrics"
+  ; "masc_goal_list"
+  ; "masc_goal_transition"
+  ; "masc_goal_upsert"
+  ; "masc_keeper_delegate"
+  ; "masc_keeper_delegate_cancel"
+  ; "masc_keeper_delegate_status"
+  ; "masc_library_add"
+  ; "masc_library_list"
+  ; "masc_note_add"
+  ; "masc_plan_clear_task"
+  ; "masc_plan_get_task"
+  ; "masc_run_get"
+  ; "masc_run_init"
+  ; "masc_run_list"
+  ; "masc_run_plan"
+  ; "masc_schedule_cancel"
+  ; "masc_schedule_create"
+  ; "masc_schedule_get"
+  ; "masc_schedule_list"
+  ; "masc_task_history"
+  ; "masc_task_set_goal"
+  ]
+;;
 
 let test_all_surface_is_unchanged () =
-  let count, bytes = measured ~surface:All in
-  check int "All surface tool count unchanged" all_surface_golden_count count;
-  check int "All surface bytes unchanged" all_surface_golden_bytes bytes
+  let schemas = Masc.Keeper_tool_descriptor.model_visible_schemas ~surface:All in
+  let names = List.sort String.compare (List.map (fun (s : Masc_domain.tool_schema) -> s.name) schemas) in
+  let missing = List.filter (fun n -> not (List.mem n names)) all_surface_golden_names in
+  let added = List.filter (fun n -> not (List.mem n all_surface_golden_names)) names in
+  (match missing, added with
+   | [], [] -> ()
+   | _ ->
+     failf
+       "the default (All) tool surface changed.\n\
+        gone: %s\n\
+        new:  %s\n\
+        A Keeper with no [keeper.tools] declaration gets this list. Update \
+        all_surface_golden_names in this file with the PR that moves it and say \
+        what the move bought."
+       (if missing = [] then "(none)" else String.concat ", " missing)
+       (if added = [] then "(none)" else String.concat ", " added));
+  check int "All surface tool count unchanged"
+    (List.length all_surface_golden_names)
+    (List.length names)
 ;;
 
 (* RFC-0389: a Declared surface must be strictly smaller than All — that is the

@@ -66,6 +66,7 @@ val of_documents : (string * string) list -> (t, error) result
 
 val empty : t
 val skills : t -> skill list
+val has_instruction_skill : t -> bool
 val find : t -> string -> skill option
 
 val composition_entries : t -> Keeper_tool_composition_catalog.entry list

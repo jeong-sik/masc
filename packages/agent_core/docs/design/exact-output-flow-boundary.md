@@ -6,7 +6,7 @@ Effective: 2026-07-30
 ## Ownership
 
 `Agent_sdk.Exact_output` is the single public surface for exact structured
-output. OAS owns:
+output. agent_core owns:
 
 - immutable resolver snapshots and catalog-admitted opaque target handles;
 - provider-wire admission and separately frozen candidate plans;
@@ -24,7 +24,7 @@ The caller owns:
 - domain schema, codec, and content validation;
 - durable business-state binding, release, quarantine, and completion;
 - operator configuration that names opaque candidate references;
-- every durable business commit or replay policy after OAS returns.
+- every durable business commit or replay policy after agent_core returns.
 
 The outer flow is generic. It contains no coordinator vocabulary and no
 provider, model, tier, price, query-intent, or error-string policy.
@@ -37,16 +37,16 @@ membership and credential outcomes are frozen, but credentials remain
 unselected until their candidate is reached. Snapshot construction validates
 only topology: candidate identities must be nonempty and unique.
 
-The resulting order is immutable. OAS has no ranking store or process-local
+The resulting order is immutable. agent_core has no ranking store or process-local
 history that can reorder a later snapshot. A caller that wants a different
 order must construct a different snapshot explicitly.
 
-Starting the flow allocates one OAS-owned outer-flow identity and precomputes one
+Starting the flow allocates one agent_core-owned outer-flow identity and precomputes one
 immutable visit `(flow ID, 1-based ordinal, candidate identity)` for every
 frozen candidate. This performs no credential selection, request admission,
 call identity allocation, callback, or network effect.
 
-During execution, OAS resolves the frozen credential outcome and prepares only
+During execution, agent_core resolves the frozen credential outcome and prepares only
 the current candidate. Successful request admission freezes one ready plan and
 receives one fresh non-shared attempt. A target-selection or request-admission
 rejection receives no plan, call ID, or execution receipt.
@@ -56,16 +56,16 @@ rejection receives no plan, call ID, or execution receipt.
 `execute_flow_once` is affine. A duplicate or concurrent invocation cannot
 dispatch. For each predetermined candidate:
 
-1. OAS resolves only the current precomputed visit's frozen target and admits
+1. agent_core resolves only the current precomputed visit's frozen target and admits
    its exact request contract.
 2. A typed target-selection or request-admission rejection receives an
    immutable candidate-rejection receipt fixed at `Before_dispatch` and
    `dispatch_count = 0`; it does not enter
    `before_dispatch`.
 3. For an admitted candidate, the caller's `before_dispatch` callback must
-   confirm its durable binding before OAS invokes the unchanged single-plan
+   confirm its durable binding before agent_core invokes the unchanged single-plan
    `execute_once`.
-4. OAS may select the next frozen candidate only after one of these typed
+4. agent_core may select the next frozen candidate only after one of these typed
    outcomes:
    - that candidate rejection receipt;
    - a first-use transport failure whose exact execution receipt is
@@ -77,14 +77,14 @@ dispatch. For each predetermined candidate:
      `dispatch_count = 1`.
 5. The caller's `before_advance` callback receives the typed failure and
    the predetermined successor visit, and must durably confirm release before
-   OAS prepares that successor.
+   agent_core prepares that successor.
 
 Callbacks can stop a transition but cannot select, replace, or reorder a
 candidate.
 
 Advance eligibility is effect-based, not a classifier over rejection causes.
 Every typed target-selection or request-admission rejection is pre-dispatch and
-zero-dispatch, so it is eligible for the predetermined successor. OAS does not
+zero-dispatch, so it is eligible for the predetermined successor. agent_core does not
 infer that a credential, schema, or requirement rejection must behave
 identically across opaque targets. Target-specific credential outcomes, schema
 validators, and capability admission are evidence about the visited candidate,
@@ -101,7 +101,7 @@ The following outcomes are terminal:
 - a final typed candidate rejection, reported as `Flow_candidates_exhausted`;
 - structural success.
 
-After each structural success, OAS invokes the caller's pure `validate`
+After each structural success, agent_core invokes the caller's pure `validate`
 callback exactly once. `Accept` returns the accepted value and prior rejection
 evidence. `Reject_and_advance` preserves the transport success and domain
 rejection as immutable evidence, then advances directly to the predetermined
@@ -113,7 +113,7 @@ retry of the same candidate: every attempt remains affine and every successful
 advance is retained with its exact failed and successor visits. Provider error
 prose is diagnostic only and cannot authorize an advance.
 
-OAS performs no domain commit, replay, ranking update, or lifecycle transition
+agent_core performs no domain commit, replay, ranking update, or lifecycle transition
 after validation. Those effects remain behind the caller's existing domain
 authority rather than a second exact-output Gate.
 
@@ -133,7 +133,7 @@ Every flow evidence projection carries:
 
 After semantic validation succeeds, callers can project their accepted and
 rejected domain values exactly once into a current-only durable transcript.
-OAS preserves the declared candidate order, admissions, measurement receipts,
+agent_core preserves the declared candidate order, admissions, measurement receipts,
 generation attempts, advances, semantic rejections, and final acceptance in
 one integrity-bound snapshot. Decoding reconstructs evidence only; it never
 reconstructs a live affine flow or performs a domain commit.
@@ -165,7 +165,7 @@ invocation returning the error: `No_outward_dispatch` or
 `Outward_dispatch_started`. The fact says only whether that invocation began
 its one outward completion dispatch. It does not claim provider acceptance,
 response receipt, billing, physical execution, retryability, failover
-eligibility, or any Pricing decision. OAS derives it from affine flow control
+eligibility, or any Pricing decision. agent_core derives it from affine flow control
 and private receipt state; callers do not decode phases, counts, HTTP status, or
 provider policy.
 
@@ -176,8 +176,8 @@ provider policy.
 - Pricing is measurement evidence only and is absent from all decisions.
 - Public flow rejections expose provider-neutral dispositions and capacity
   bounds only; provider, model, endpoint, credential environment, schema path,
-  and raw serving-evidence source remain private to OAS.
-- Resolver bootstrap and direct-execution diagnostics remain OAS integration
+  and raw serving-evidence source remain private to agent_core.
+- Resolver bootstrap and direct-execution diagnostics remain agent_core integration
   surfaces, not MASC control inputs. MASC consumers may import only the outer
   flow's provider-neutral visit, disposition, receipt, and provenance
   projections.

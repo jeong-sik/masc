@@ -531,7 +531,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Log.Runtime.info
         ~category:Log.Boundary
         "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
-  (* RFC-OAS-037: same boot observability for the first-event (TTFT/prefill)
+  (* RFC-AC-037: same boot observability for the first-event (TTFT/prefill)
      budget — configured-vs-effective must stay distinguishable at runtime,
      the exact ambiguity #25128 hit for the idle knob. *)
   Keeper_runtime_resolved.(
@@ -941,6 +941,35 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Runtime_default_initialization_failed error)));
+  (match Server_skill_snapshot_runtime.refresh_from_runtime_file ~base_path with
+   | Error error ->
+     Log.Server.error
+       "Skill snapshot workspace rejected at boot: %s"
+       (Server_skill_snapshot_runtime.error_to_string error)
+   | Ok Workspace_retired ->
+     Log.Server.warn "Skill snapshot workspace retired during boot publication"
+   | Ok (Published skill_snapshot | Unchanged skill_snapshot) ->
+     (match Skill_catalog_snapshot.config_state skill_snapshot with
+      | Configured _ ->
+        Log.Server.info
+          "Skill snapshot ready at boot: snapshot_revision=%s catalog_revision=%s skills=%d rejections=%d"
+          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
+           |> Skill_catalog_snapshot.snapshot_revision_to_string)
+          (Skill_catalog_snapshot.catalog_revision skill_snapshot
+           |> Skill_catalog_snapshot.catalog_revision_to_string)
+          (List.length (Skill_catalog_snapshot.entries skill_snapshot))
+          (List.length (Skill_catalog_snapshot.rejections skill_snapshot))
+      | Config_rejected { diagnostics; _ } ->
+        Log.Server.warn
+          "Skill snapshot config rejected at boot: snapshot_revision=%s diagnostics=%d"
+          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
+           |> Skill_catalog_snapshot.snapshot_revision_to_string)
+          (List.length diagnostics)
+      | Config_unreadable _ ->
+        Log.Server.error
+          "Skill snapshot config unreadable at boot: snapshot_revision=%s"
+          (Skill_catalog_snapshot.snapshot_revision skill_snapshot
+           |> Skill_catalog_snapshot.snapshot_revision_to_string)));
   (* masc#28404. Boot refuses only over runtimes something actually routes to,
      which is right — an unassigned runtime is not a reason to stay down. But
      the blocked ones then started silently, and the answer to "why can I not

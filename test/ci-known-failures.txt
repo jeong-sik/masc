@@ -19,6 +19,14 @@
 # off the alias with an enabled_if in their own stanza instead, next to the
 # reason. test_fusion_wake is the current one (#29064).
 #
+# test_audit_keeper_fleet_readiness arrived here on 2026-08-26 by being seen
+# for the first time. Two things hid it: its (rule ...) stanza left the layout
+# manifest executable out of the sandbox, so the suite raised
+# StoreLayoutUnavailable before its first assertion, and a (rule ...) failure
+# named no suite, so the report dropped it whenever anything else was red. Both
+# are fixed in the change that adds this line; the four assertions it actually
+# fails are #30748 and this line comes out when they pass.
+#
 # Measured 2026-08-24 against 42e320b44b, one `dune build @test/runtest-<name>`
 # per suite. The first pass gave test_tools_coverage a 180-second deadline it
 # spent compiling; it runs in 7 seconds once built and fails one assertion of
@@ -37,6 +45,7 @@ test_keeper_keepalive_helpers                # current_task_reconciliation
 test_keeper_tool_matrix                      # inventory: the AGENT_CORE bundle
 test_server_mcp_session_persist              # persistence: save/forget/load round-trip
 test_tools_coverage                          # analyze_image has no masc_/keeper_/tool_ namespace
+test_audit_keeper_fleet_readiness            # provider_turn_evidence: 4 of 30, see #30748
 
 # --- cannot be exercised where it stands ----------------------------------
 # The defence is live: with_deepest_existing_parent descends one component at a

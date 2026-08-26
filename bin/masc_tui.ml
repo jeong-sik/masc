@@ -954,6 +954,7 @@ let forget_queued_history (state : state) (request : Keeper_chat.request) =
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
     ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
+    ~(open_named_image : unit -> unit)
     ~(load_tool_changes : unit -> unit)
     (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
@@ -1121,6 +1122,12 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          this byte and passes the next one through raw, so the composer would
          see the letter after Ctrl-V and never Ctrl-V itself. *)
       paste_image ();
+      true
+    end else if c = Some 15 then begin
+      (* Ctrl-O: look at the picture this conversation last named. The path is
+         already on screen -- the point is not having to retype it into
+         /image, which on a nested evidence path is most of the work. *)
+      open_named_image ();
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       forget_recall state;
@@ -3826,6 +3833,43 @@ let open_image state ~notice path =
           state.image_open <-
             Some { image_path = path; image_bytes = String.length data }))
 
+(* The picture this conversation last named, if it named one. Newest first
+   because that is why the key is pressed: something just arrived. Older ones
+   stay reachable by their path through /image -- cycling would make this key
+   a cursor, and a cursor needs state that has to be told when the
+   conversation changed underneath it.
+
+   Read at the keystroke rather than kept beside the history: the scan costs
+   one pass over what is loaded, once, and a kept list would have to be
+   rewritten at every place a line is appended or a page is paged in. *)
+let newest_named_image state =
+  let in_this_chat entry =
+    match state.msg_target_keeper_name with
+    | None -> true
+    | Some name -> String.equal entry.me_keeper_name name
+  in
+  List.rev state.msg_history
+  |> List.find_map (fun entry ->
+         if not (in_this_chat entry) then None
+         else
+           match List.rev (Masc_tui_image_ref.paths entry.me_text) with
+           | [] -> None
+           (* Last named in the newest line: one message can carry several,
+              and the reader means the one nearest what they just read. *)
+           | last :: _ -> Some last)
+
+(* Ctrl-O. The refusal is text for the pane rather than a cleared screen: a
+   key that did nothing and a key that found nothing look the same otherwise,
+   which is the shape of failure this whole surface keeps having. *)
+let open_named_image state =
+  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  match newest_named_image state with
+  | None ->
+      notice ~role:Message_status
+        (Printf.sprintf "Ctrl-O: this conversation names no %s to look at"
+           Masc_tui_image_ref.extension)
+  | Some path -> open_image state ~notice path
+
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
@@ -5536,12 +5580,17 @@ let handle_composer_key state ~base_path ~mailbox key =
       send_operator_text state ~base_path ~mailbox text;
       true
   | Composer.Edit ->
-      let _handled =
+      (* Annotated: [handle_message_key] takes labelled callbacks, and a
+         missing one leaves a partial application that binds to [_handled]
+         without a word. Saying the type here turns that into a build
+         failure. *)
+      let (_handled : bool) =
         handle_message_key state
           ~submit_message:(fun _ -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
+                   ~open_named_image:(fun () -> open_named_image state)
           ~load_tool_changes:(fun () ->
             match state.msg_target_keeper_name with
             | Some keeper_name ->
@@ -8265,7 +8314,7 @@ let main () =
              if switch_key then
                switch_to_next_keeper_message state ~mailbox:async_messages
              else
-               let _handled =
+               let (_handled : bool) =
                  handle_message_key state
                    ~submit_message:
                      (send_operator_text state ~base_path
@@ -8291,6 +8340,7 @@ let main () =
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
                    ~paste_image:(fun () -> paste_clipboard_image state)
+                   ~open_named_image:(fun () -> open_named_image state)
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->

@@ -3265,6 +3265,7 @@
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
+(include stanzas/test_tui_image_ref.inc)
 
 (test
  (name test_tui_terminal_probe)

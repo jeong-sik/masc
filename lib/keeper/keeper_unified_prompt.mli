@@ -71,14 +71,15 @@ val format_current_task_observation
     provenance, and handoff as an autonomous wake without persisting that
     context. Storage error text is not model-facing content. *)
 
-val effective_instructions :
+val effective_autonomous_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   unit ->
   string
-(** Alias of [effective_autonomous_instructions]; kept for callers that
-    predate the channel-aware rename. *)
+(** Resolve the instruction body for the current Keeper channel. Scheduled
+    autonomous turns may use [meta.autonomous_instructions]; every other
+    channel uses the profile or Keeper default. *)
 
 (** What the prompt knows about one active goal: id, title, and the stored
     phase. [summary_phase] is [None] only for an id the store cannot resolve

@@ -34,10 +34,15 @@ let expected_token ~media_type data =
     digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
     |> to_hex)
 
+let persist_ok ~base_dir ~media_type ~data =
+  match M.persist_result ~base_dir ~media_type ~data with
+  | Ok stored -> stored
+  | Error message -> Alcotest.failf "unexpected persist error: %s" message
+
 let test_persist_round_trip () =
   with_temp_base (fun base_dir ->
     let data = "\137PNG\r\n fake-image-bytes \000\255" in
-    let token, url = M.persist ~base_dir ~media_type:"image/png" ~data in
+    let token, url = persist_ok ~base_dir ~media_type:"image/png" ~data in
     Alcotest.(check string)
       "url is /api/v1/media/<token>"
       ("/api/v1/media/" ^ token)
@@ -56,15 +61,15 @@ let test_persist_round_trip () =
 let test_content_addressed_dedup () =
   with_temp_base (fun base_dir ->
     let data = "identical-payload-bytes" in
-    let t1, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
-    let t2, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
+    let t1, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
+    let t2, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
     Alcotest.(check string) "identical payload dedups to one token" t1 t2)
 
 let test_same_bytes_different_media_type_get_distinct_tokens () =
   with_temp_base (fun base_dir ->
     let data = "same-bytes" in
-    let image_token, _ = M.persist ~base_dir ~media_type:"image/png" ~data in
-    let audio_token, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
+    let image_token, _ = persist_ok ~base_dir ~media_type:"image/png" ~data in
+    let audio_token, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
     Alcotest.(check bool)
       "different media types do not share one extensionless token"
       true
@@ -186,7 +191,9 @@ let test_generated_media_cap_rejects_oversize_raw_media () =
 let test_persist_runs_opportunistic_media_cleanup () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "1" (fun () ->
     with_temp_base (fun base_dir ->
-      let seed_token, _ = M.persist ~base_dir ~media_type:"image/png" ~data:"seed" in
+      let seed_token, _ =
+        persist_ok ~base_dir ~media_type:"image/png" ~data:"seed"
+      in
       let media_dir =
         match M.file_path_of_token ~base_dir ~token:seed_token with
         | Some path -> Filename.dirname path

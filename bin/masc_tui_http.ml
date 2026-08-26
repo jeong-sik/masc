@@ -898,11 +898,16 @@ let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
   let path = if force then runtime_probe_path ^ "?force=1" else runtime_probe_path in
   get_json ~host ~port ~path
 
+type runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.t
+
+let decode_runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.decode
+let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summary
+
 (** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
     [runtime_id = None] clears the explicit assignment back to the default. *)
 let post_runtime_assignment ~(host : string) ~(port : int)
     ~(keeper_name : string) ~(runtime_id : string option) :
-    (unit, string) result =
+    (runtime_config_commit_receipt, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -916,7 +921,7 @@ let post_runtime_assignment ~(host : string) ~(port : int)
     post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
   with
   | Error detail -> Error detail
-  | Ok _ -> Ok ()
+  | Ok json -> decode_runtime_config_commit_receipt json
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
 let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
@@ -1213,9 +1218,13 @@ let post_runtime_config_preview ~(host : string) ~(port : int)
     through the preview first; this route also validates, so a race still
     fails closed. *)
 let post_runtime_config_raw ~(host : string) ~(port : int)
-    ~(source_text : string) : (Yojson.Safe.t, string) result =
-  post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
-    ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+    ~(source_text : string) : (runtime_config_commit_receipt, string) result =
+  match
+    post_json ~host ~port ~path:"/api/v1/runtime/config/raw"
+      ~body:(Yojson.Safe.to_string (`Assoc [ ("source_text", `String source_text) ]))
+  with
+  | Error _ as error -> error
+  | Ok json -> decode_runtime_config_commit_receipt json
 
 (** GET /api/v1/prompts — every prompt the registry serves, with the file
     value, any override, and what is currently effective. *)

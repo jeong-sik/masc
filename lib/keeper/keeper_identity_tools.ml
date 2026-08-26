@@ -24,10 +24,18 @@ let catalog_path ~base_path ~keeper_name ~provider_id =
 
 let tool_to_json (tool : Mcp_client.tool) =
   `Assoc
-    [ "name", `String tool.Mcp_client.name
-    ; "description", `String tool.Mcp_client.description
-    ; "input_schema", tool.Mcp_client.input_schema
-    ]
+    ([ "name", `String tool.Mcp_client.name
+     ; "description", `String tool.Mcp_client.description
+     ; "input_schema", tool.Mcp_client.input_schema
+     ]
+     @
+     (* Written only when the server said something. An absent key and a
+        [false] are different facts and the approval policy treats them the
+        same way for now, but flattening them here would lose the
+        difference for good. *)
+     match tool.Mcp_client.read_only with
+     | Some value -> [ "read_only", `Bool value ]
+     | None -> [])
 ;;
 
 let tool_of_json json =
@@ -38,7 +46,12 @@ let tool_of_json json =
   in
   match member "name", member "description", member "input_schema" with
   | Some (`String name), Some (`String description), Some input_schema ->
-    Some { Mcp_client.name; description; input_schema }
+    let read_only =
+      match member "read_only" with
+      | Some (`Bool value) -> Some value
+      | Some _ | None -> None
+    in
+    Some { Mcp_client.name; description; input_schema; read_only }
   | _ -> None
 ;;
 
@@ -207,22 +220,128 @@ let result_of_call answer =
       (Mcp_client.error_to_string err)
 ;;
 
+let store_tokens ~base_path ~keeper_name ~(provider : Provider.t)
+      (tokens : Keeper_oauth_flow.tokens) =
+  let set_env ~name ~value =
+    Keeper_secret_projection.set_env_entry ~base_path ~keeper_name
+      ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
+  in
+  (* The refresh token first, and only when the provider rotated it. A
+     provider that returns none kept the one already on disk, and writing
+     nothing is what keeps it. *)
+  let* () =
+    match tokens.Keeper_oauth_flow.refresh_token with
+    | None -> Ok ()
+    | Some refresh_token ->
+      Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file ~value:refresh_token
+  in
+  let* () =
+    set_env ~name:provider.Provider.access_token_env
+      ~value:tokens.Keeper_oauth_flow.access_token
+  in
+  set_env ~name:provider.Provider.expires_at_env
+    ~value:(Printf.sprintf "%.0f" tokens.Keeper_oauth_flow.expires_at)
+;;
+
+let stored_expires_at ~base_path ~keeper_name ~(provider : Provider.t) =
+  match
+    projected_env_value ~base_path ~keeper_name
+      ~name:provider.Provider.expires_at_env
+  with
+  | Error _ -> None
+  | Ok value -> float_of_string_opt (String.trim value)
+;;
+
+(* Exchange the refresh token for a new access token when the stored one is
+   inside its declared window. Done where the token is read rather than on a
+   timer: the only moment it matters is the moment before it is used, and a
+   Keeper nobody is running does not need a fresh credential. *)
+(* [token_post] is the OAuth token endpoint's contract, which is not the MCP
+   one: a status and a body rather than a response with headers. Two wire
+   contracts, two injection points, so a test can pin either without
+   pretending they are the same. *)
+let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
+      ~(provider : Provider.t) ~now ~access_token () =
+  match stored_expires_at ~base_path ~keeper_name ~provider with
+  (* No stored expiry means nothing said this token is old. Renewing on a
+     guess would spend a refresh token to replace a working credential. *)
+  | None -> Ok access_token
+  | Some expires_at ->
+    if not (Keeper_oauth_flow.needs_renewal ~provider ~expires_at ~now)
+    then Ok access_token
+    else (
+      let* refresh_token =
+        match
+          Keeper_secret_projection.read_file_entry ~base_path ~keeper_name
+            ~scope:Keeper_secret_projection.Keeper_secret
+            ~container_path:provider.Provider.refresh_token_file
+        with
+        | Error message -> Error message
+        | Ok None ->
+          Error "this keeper has no refresh token; attach it to the provider again"
+        | Ok (Some value) when String.trim value <> "" -> Ok (String.trim value)
+        | Ok (Some _) -> Error "this keeper's refresh token file is empty"
+      in
+      let discover =
+        match discover with
+        | Some discover -> discover
+        | None -> fun ~mcp_url -> Keeper_oauth_discovery.discover ~mcp_url ()
+      in
+      let* discovered =
+        Result.map_error Keeper_oauth_discovery.error_to_string
+          (discover ~mcp_url:provider.Provider.mcp_url)
+      in
+      let* configured_client_id =
+        match
+          Keeper_oauth_client_store.load
+            ~dir:(Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity")
+            ~provider
+        with
+        | Error message -> Error message
+        | Ok (Some client_id) -> Ok client_id
+        | Ok None ->
+          Error "this install has no registered client; attach a keeper first"
+      in
+      let* tokens =
+        Result.map_error Keeper_oauth_flow.exchange_error_to_string
+          (Keeper_oauth_flow.refresh ?post:token_post ~discovered
+             ~client_id:configured_client_id ~refresh_token ~now ())
+      in
+      let* () = store_tokens ~base_path ~keeper_name ~provider tokens in
+      Ok tokens.Keeper_oauth_flow.access_token)
+;;
+
 let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~remote_name
       arguments =
+  let refuse message =
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
+      message
+  in
   match
     projected_env_value ~base_path ~keeper_name
       ~name:provider.Provider.access_token_env
   with
-  | Error message ->
-    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
-      message
-  | Ok access_token ->
-    (match
-       Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
-     with
-     | Error err -> result_of_call (Error err)
-     | Ok client ->
-       result_of_call (Mcp_client.call_tool ?post client ~name:remote_name ~arguments))
+  | Error message -> refuse message
+  | Ok stored_token -> (
+    match
+      renew_if_needed ~base_path ~keeper_name ~provider
+        (* [Time_compat.now] rather than the raw clock: masc reads time
+           through one module so a deterministic boundary has one place to
+           look, and the determinism gate flags anything that goes around
+           it. *)
+        ~now:(Time_compat.now ()) ~access_token:stored_token ()
+    with
+    | Error message -> refuse message
+    | Ok access_token -> (
+      match
+        Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
+      with
+      | Error err -> result_of_call (Error err)
+      | Ok client ->
+        result_of_call
+          (Mcp_client.call_tool ?post client ~name:remote_name ~arguments)))
 ;;
 
 let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
@@ -237,6 +356,14 @@ let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
       | Error detail ->
         { acc with unusable = (name, detail) :: acc.unusable }
       | Ok schema ->
+        (* The policy runs mid-turn with only a name, so what the service
+           said about this tool has to be somewhere it can reach. Recorded
+           before the tool is handed out, not after: a tool the model could
+           call while the row was missing would be asked about with a reason
+           nobody can act on. *)
+        Keeper_identity_tool_index.record
+          (Keeper_identity_tool_index.shared ())
+          ~tool_name:name ~read_only:tool.Mcp_client.read_only;
         let projected =
           Agent_core.Base.Tool.of_schema schema
             (Agent_core.Base.Tool.ignoring_execution_env

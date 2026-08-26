@@ -21,9 +21,12 @@ access_token_env = "ATLASSIAN_ACCESS_TOKEN"
 expires_at_env = "ATLASSIAN_ACCESS_TOKEN_EXPIRES_AT"
 refresh_token_file = "/home/keeper/.atlassian/refresh_token"
 
-# Exchange again this long before the stated expiry. Atlassian's access
-# tokens live one hour; ten minutes of margin covers a turn that starts just
-# under the wire.
+# Exchange again this long before the stated expiry. Measured against the
+# live server on 2026-08-26: an access token came back with expires_in of
+# 28800, so eight hours, and the refresh token alongside it. Ten minutes of
+# margin covers a turn that starts just under the wire. The server states
+# its own expiry on every exchange, so this is margin rather than a copy of
+# a lifetime that could change.
 renew_before_sec = 600
 
 # Parameters this server wants on the authorize call beyond what the OAuth

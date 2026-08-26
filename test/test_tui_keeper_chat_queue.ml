@@ -6,9 +6,21 @@
 
 open Alcotest
 module Queue = Masc_tui_keeper_chat_queue
+module Chat = Masc_tui_keeper_chat_projection
+
+(* What waits is the whole request, built when the operator pressed Enter.
+   These tests are about order, so they build the smallest one that carries a
+   keeper and a message. *)
+let request ~keeper_name text =
+  Chat.create_request ~attachments:[] ~keeper_name ~message:text ()
+;;
+
+let messages queue =
+  List.map (fun (r : Chat.request) -> r.Chat.message) (Queue.waiting queue)
+;;
 
 let push_exn queue ~keeper_name text =
-  match Queue.push queue ~keeper_name text with
+  match Queue.push queue (request ~keeper_name text) with
   | Ok (queue, waiting) -> (queue, waiting)
   | Error detail -> failf "expected the line to queue, got: %s" detail
 ;;
@@ -21,7 +33,7 @@ let test_lines_wait_in_the_order_they_were_written () =
     [ first; second; third ];
   check (list string) "and they wait in submission order"
     [ "one"; "two"; "three" ]
-    (List.map snd (Queue.waiting q))
+    (messages q)
 ;;
 
 (* The operator can switch keepers while a turn runs. A queued line must reach
@@ -31,14 +43,15 @@ let test_a_line_keeps_the_keeper_it_was_written_to () =
   let q, _ = push_exn q ~keeper_name:"bandleader" "for bandleader" in
   match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a waiting line"
-  | Some ((keeper_name, text), rest) ->
-      check string "the oldest goes first" "for bluebird" text;
-      check string "to its own keeper" "bluebird" keeper_name;
+  | Some (first, rest) ->
+      check string "the oldest goes first" "for bluebird" first.Chat.message;
+      check string "to its own keeper" "bluebird" first.Chat.keeper_name;
       (match Queue.take_first_sendable rest ~sendable:(fun _ -> true) with
        | None -> fail "expected the second line to still be waiting"
-       | Some ((keeper_name, text), rest) ->
-           check string "and the next keeps its own" "bandleader" keeper_name;
-           check string "with its own text" "for bandleader" text;
+       | Some (second, rest) ->
+           check string "and the next keeps its own" "bandleader"
+             second.Chat.keeper_name;
+           check string "with its own text" "for bandleader" second.Chat.message;
            check bool "nothing left after both" true (Queue.is_empty rest))
 ;;
 
@@ -53,7 +66,7 @@ let test_the_cap_refuses_rather_than_forgetting () =
   in
   let full = fill Queue.empty Queue.cap in
   check int "the queue is at its cap" Queue.cap (Queue.length full);
-  match Queue.push full ~keeper_name:"k" "one too many" with
+  match Queue.push full (request ~keeper_name:"k" "one too many") with
   | Ok _ -> fail "the cap must refuse"
   | Error detail ->
       check bool "the refusal says the line was not taken" true
@@ -70,7 +83,7 @@ let test_lines_for_a_departed_keeper_are_forgotten () =
   let q, _ = push_exn q ~keeper_name:"leaving" "gone too" in
   let q = Queue.drop_for_keeper q ~keeper_name:"leaving" in
   check (list string) "only the other keeper's line remains" [ "kept" ]
-    (List.map snd (Queue.waiting q));
+    (messages q);
   check int "and the count follows" 1 (Queue.length q)
 ;;
 
@@ -84,12 +97,12 @@ let test_a_busy_keeper_does_not_stall_the_lines_behind_it () =
   let q, _ = push_exn q ~keeper_name:"busy" "waits too" in
   match Queue.take_first_sendable q ~sendable:(fun k -> not (String.equal k "busy")) with
   | None -> fail "the free keeper's line should be sendable"
-  | Some ((keeper_name, text), rest) ->
-      check string "the free keeper's line comes out" "can go" text;
-      check string "with its own keeper" "free" keeper_name;
+  | Some (taken, rest) ->
+      check string "the free keeper's line comes out" "can go" taken.Chat.message;
+      check string "with its own keeper" "free" taken.Chat.keeper_name;
       check (list string) "and the busy keeper's lines keep their order"
         [ "waits"; "waits too" ]
-        (List.map snd (Queue.waiting rest))
+        (messages rest)
 ;;
 
 let test_nothing_sendable_takes_nothing () =
@@ -105,10 +118,53 @@ let test_all_sendable_is_oldest_first () =
   let q, _ = push_exn q ~keeper_name:"b" "two" in
   match Queue.take_first_sendable q ~sendable:(fun _ -> true) with
   | None -> fail "expected a line"
-  | Some ((_, text), rest) ->
-      check string "oldest first" "one" text;
+  | Some (taken, rest) ->
+      check string "oldest first" "one" taken.Chat.message;
       check (list string) "the rest keeps its order" [ "two" ]
-        (List.map snd (Queue.waiting rest))
+        (messages rest)
+;;
+
+(* Editing a waiting line takes that line out, not the newest one. The arrows
+   can walk back past several, and replacing "whichever was last" would drop a
+   line the operator never looked at. *)
+let test_take_removes_the_named_line_and_keeps_the_order () =
+  let one = request ~keeper_name:"k" "one" in
+  let two = request ~keeper_name:"k" "two" in
+  let three = request ~keeper_name:"k" "three" in
+  let queue =
+    List.fold_left
+      (fun queue request ->
+        match Queue.push queue request with
+        | Ok (queue, _) -> queue
+        | Error detail -> failf "push failed: %s" detail)
+      Queue.empty [ one; two; three ]
+  in
+  (match Queue.take queue ~request_id:two.Chat.request_id with
+   | None -> fail "the queue holds this request"
+   | Some (taken, rest) ->
+       check string "the named line comes out" "two" taken.Chat.message;
+       check (list string) "and the rest keeps its order" [ "one"; "three" ]
+         (messages rest));
+  check bool "a request the queue does not hold takes nothing" true
+    (Option.is_none (Queue.take queue ~request_id:"tui-request-not-here"))
+;;
+
+(* [holds] and [take] answer about the same line: the pane asks the first to
+   mark a row as waiting and the send asks the second to replace it. Two
+   answers that disagreed would mark a row the send could not find. *)
+let test_holds_agrees_with_take () =
+  let only = request ~keeper_name:"k" "only" in
+  let queue =
+    match Queue.push Queue.empty only with
+    | Ok (queue, _) -> queue
+    | Error detail -> failf "push failed: %s" detail
+  in
+  check bool "holds says yes" true
+    (Queue.holds queue ~request_id:only.Chat.request_id);
+  check bool "and take agrees" true
+    (Option.is_some (Queue.take queue ~request_id:only.Chat.request_id));
+  check bool "holds says no for a stranger" false
+    (Queue.holds queue ~request_id:"tui-request-stranger")
 ;;
 
 let test_an_empty_queue_takes_nothing () =
@@ -132,6 +188,9 @@ let () =
             test_lines_for_a_departed_keeper_are_forgotten
         ; test_case "a busy keeper does not stall the lines behind it" `Quick
             test_a_busy_keeper_does_not_stall_the_lines_behind_it
+        ; test_case "take removes the named line and keeps the order" `Quick
+            test_take_removes_the_named_line_and_keeps_the_order
+        ; test_case "holds agrees with take" `Quick test_holds_agrees_with_take
         ; test_case "nothing sendable takes nothing" `Quick
             test_nothing_sendable_takes_nothing
         ; test_case "all sendable is oldest first" `Quick

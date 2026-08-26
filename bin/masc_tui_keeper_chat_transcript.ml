@@ -120,6 +120,12 @@ type t =
   ; mutable unreadable_count : int
   ; mutable last_unreadable : string
   ; mutable awaiting : awaiting_approval option
+  ; (* What the server said when it took the request, and how long its chat
+       queue was at that moment. [None] until the acceptance arrives, which is
+       the window this exists for: a wait of minutes used to read as "waiting
+       for the run to start" whether the keeper was busy with something else
+       or the run was stuck. *)
+    mutable admission : (Live.admission * int) option
   }
 
 let create ~keeper_name ~request_id ~started_at =
@@ -136,6 +142,7 @@ let create ~keeper_name ~request_id ~started_at =
   ; unreadable_count = 0
   ; last_unreadable = ""
   ; awaiting = None
+  ; admission = None
   }
 
 (* Consecutive deltas of one kind are one stretch; a delta of another kind in
@@ -452,7 +459,22 @@ type status_kind =
 
 let phase_text t =
   match t.phase with
-  | Waiting -> "waiting for the run to start"
+  | Waiting -> (
+      (* The wait before RUN_STARTED is the one an operator cannot read from
+         the outside. Saying which of the two it is -- the keeper's queue, or a
+         run that should already have begun -- is the difference between slow
+         and stuck. The queue length is the server's count of the whole queue,
+         so it is drawn as that and not as "how many are ahead of you". *)
+      match t.admission with
+      | None -> "waiting for the run to start"
+      | Some (Live.Queued, queue_length) ->
+          Printf.sprintf "queued \xc2\xb7 %s in the keeper's queue"
+            (plural queue_length "message")
+      | Some (Live.Running, _) -> "accepted; the run is starting"
+      | Some (Live.Settled, _) ->
+          (* The server had already run this operation and replayed its
+             outcome. Nothing is waiting on a run that finished. *)
+          "accepted; replaying an operation that already ran")
   | Working when Option.is_some t.awaiting ->
       (* The turn is not working, it is waiting on a person. Saying "working"
          here would read as a slow tool rather than a question on screen. *)
@@ -561,6 +583,10 @@ let apply t (delta : Live.delta) =
          Duplicate_run_start. Nothing to draw differently for it here, and
          moving a finished turn back to Working would be wrong. *)
       | Working | Stream_ended | Stream_failed _ -> ())
+  | Live.Accepted { admission; queue_length } ->
+      (* Recorded, not acted on: the phase still moves on RUN_STARTED. This
+         only answers "why has it not started yet". *)
+      t.admission <- Some (admission, queue_length)
   | Live.Text text ->
       Buffer.add_string t.text_buffer text;
       trail_text t text

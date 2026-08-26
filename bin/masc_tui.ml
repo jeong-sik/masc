@@ -19,6 +19,7 @@ module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
 module Planning_selection = Masc_tui_planning_selection
 module Render_schedule = Masc_tui_render_schedule
+module Link = Masc_tui_link
 module Terminal_profile = Masc_tui_terminal_profile
 module Terminal_title = Masc_tui_terminal_title
 module Terminal_write_repair = Masc_tui_terminal_write_repair
@@ -822,18 +823,11 @@ let own_typed_messages (state : state) =
             | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
-    |> List.map (fun entry -> entry.me_text)
   in
-  (* Newest last, same as [sent], so one walk crosses both without a seam.
-     A line leaves the queue and enters the history in the same step it is
-     dispatched, so it is in exactly one of the two lists at any moment. *)
-  let queued =
-    Chat_queue.waiting state.msg_queued
-    |> List.filter (fun (queued_keeper, _) ->
-           String.equal queued_keeper target)
-    |> List.map snd
-  in
-  sent @ queued
+  (* The queue is not walked here any more. A queued line enters the history
+     when it is typed, not when it is dispatched, so it is already in [sent] --
+     concatenating the queue would put the newest line in the walk twice. *)
+  sent
 
 let set_composer_text (state : state) text =
   Buffer.clear state.msg_input;
@@ -842,6 +836,23 @@ let set_composer_text (state : state) text =
 (* The draft is put aside on the first step back and handed over on the way
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
+(* Land the walk on one line: its text into the composer, and whether that
+   line is still waiting.
+
+   Stepping onto a waiting line makes this an edit of it. The arrows copy, and
+   a copy of a line that has not been sent yet would be sent twice -- the
+   original from the queue and the copy from the composer. Recorded here and
+   acted on at Enter, so the step itself stays what it always was: reversible,
+   and costing nothing if the operator walks on past. *)
+let recall_land (state : state) entries at =
+  let count = List.length entries in
+  let entry = List.nth entries (count - 1 - at) in
+  set_composer_text state entry.me_text;
+  state.msg_recall_replaces <-
+    (if Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
+     then Some entry.me_request_id
+     else None)
+
 let recall_older (state : state) =
   let sent = own_typed_messages state in
   let count = List.length sent in
@@ -855,7 +866,7 @@ let recall_older (state : state) =
       | Some at -> min (at + 1) (count - 1)
     in
     state.msg_recall_at <- Some at;
-    set_composer_text state (List.nth sent (count - 1 - at))
+    recall_land state sent at
   end
 
 let recall_newer (state : state) =
@@ -863,21 +874,38 @@ let recall_newer (state : state) =
   | None -> ()
   | Some 0 ->
       state.msg_recall_at <- None;
+      (* Back at the operator's own draft: it is not an edit of anything. *)
+      state.msg_recall_replaces <- None;
       set_composer_text state state.msg_recall_draft
   | Some at ->
       let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
-      let count = List.length sent in
-      if count > at then set_composer_text state (List.nth sent (count - 1 - at))
+      if List.length sent > at then recall_land state sent at
 
 (* Typing makes the composer the operator's again: the walk is over, so a step
    forward must not replace what they just wrote with a draft from before it. *)
 let forget_recall (state : state) = state.msg_recall_at <- None
 
+(* A queued line is drawn in the conversation, so cancelling one or pulling it
+   back into the composer has to take its row with it. The row is found by the
+   request's own id and not by its text: two identical lines to one keeper are
+   two requests, and dropping "the row that reads like this" would take
+   whichever came first. *)
+let forget_queued_history (state : state) (request : Keeper_chat.request) =
+  state.msg_history <-
+    List.filter
+      (fun entry ->
+        not
+          (String.equal entry.me_request_id request.Keeper_chat.request_id
+           && match entry.me_role with Message_user _ -> true | _ -> false))
+      state.msg_history
+;;
+
 let handle_message_key (state : state) ~(submit_message : string -> unit)
     ~(answer_approval : tool_call_id:string -> allow:bool -> unit)
-    ~(load_older : before:float -> unit) (key : string) : bool =
+    ~(load_older : before:float -> unit) ~(paste_image : unit -> unit)
+    (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -992,8 +1020,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 21 then begin
       (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
          is the operator saying they do not want what is there, and a spill
-         that outlived it would attach to the next message. *)
+         that outlived it would attach to the next message. An edit of a
+         waiting line is abandoned the same way: the line stays queued and the
+         next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
+      state.msg_recall_replaces <- None;
       Buffer.clear state.msg_input;
       true
     end else if c = Some 5 then begin
@@ -1008,21 +1039,36 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
          dispatched. *)
       (match Chat_queue.take_newest state.msg_queued with
        | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some ((queued_keeper, _), rest) ->
+       | Some (request, rest) ->
          state.msg_queued <- rest;
+         forget_queued_history state request;
          add_event state "info"
            (Printf.sprintf "Cancelled queued message to %s"
-              (Keeper_chat.terminal_safe_text queued_keeper)));
+              (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name)));
       true
     end else if c = Some 16 then begin
       (* Ctrl-P: pull the newest waiting line back into the composer. That is
          the edit: fix it and Enter queues it again. *)
       (match Chat_queue.take_newest state.msg_queued with
        | None -> ()
-       | Some ((_, text), rest) ->
+       | Some (request, rest) ->
          state.msg_queued <- rest;
+         forget_queued_history state request;
+         (* The attachments come back with the text. They were staged for this
+            line and taken when it was queued, so leaving them behind would
+            hand the operator a draft whose images had quietly gone. *)
+         state.msg_attachments <-
+           request.Keeper_chat.attachments @ state.msg_attachments;
          Buffer.clear state.msg_input;
-         Buffer.add_string state.msg_input text);
+         Buffer.add_string state.msg_input request.Keeper_chat.message);
+      true
+    end else if c = Some 22 then begin
+      (* Ctrl-V: the clipboard's image, staged for the next message. The key
+         reaches here only because [Masc_tui_termios.disable_literal_next]
+         turned off VLNEXT -- with the terminal's default the tty layer eats
+         this byte and passes the next one through raw, so the composer would
+         see the letter after Ctrl-V and never Ctrl-V itself. *)
+      paste_image ();
       true
     end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
       forget_recall state;
@@ -1208,6 +1254,7 @@ type async_msg =
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
   | Identity_login_started of string * (string * string, string) result
+  | Identity_refreshed of string * (unit, string) result
   | Github_login_lines of string * string list
   | Github_login_finished of string * (unit, string) result
   | Observer_opened of string
@@ -2206,7 +2253,7 @@ let launch_identity_view state ~mailbox keeper_name =
   let port = state.port in
   let run () =
     let result =
-      try Masc_tui_loader.load_identity_providers ~host ~port with
+      try Masc_tui_loader.load_identity_providers ~host ~port ~keeper_name with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
@@ -2238,7 +2285,15 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
             match json with
             | `Assoc fields -> (
                 match List.assoc_opt "authorize_url" fields with
-                | Some (`String url) -> Ok (label, url)
+                | Some (`String url) ->
+                    (* Opened here, on this fiber, because the URL is about
+                       nine hundred characters and a pane truncates it -- an
+                       operator cannot select what is not on screen. It is
+                       still printed below, wrapped, for the machine that has
+                       no opener. *)
+                    (match Masc_tui_browser.open_url url with
+                    | Ok _ | Error _ -> ());
+                    Ok (label, url)
                 | Some _ | None ->
                     Error "the server answered without an authorize_url")
             | _ -> Error "the server answered with something this cannot read")
@@ -2256,6 +2311,42 @@ let launch_identity_login state ~mailbox ~keeper_name ~provider_id ~label =
   | None ->
       enqueue_async mailbox
         (Identity_login_started (keeper_name, Error "Eio switch is unavailable"))
+
+(* Ask every attached service again what tools it has. An operator action
+   rather than a timer: a stale catalog is visible and fixable, while a timer
+   is a network call nobody asked for. *)
+let launch_identity_refresh state ~mailbox ~keeper_name ~provider_ids =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        List.fold_left
+          (fun acc provider_id ->
+            match acc with
+            | Error _ as err -> err
+            | Ok () -> (
+                match
+                  Masc_tui_http.post_keeper_identity_refresh ~host ~port
+                    ~keeper_name ~provider_id
+                with
+                | Ok _ -> Ok ()
+                | Error err -> Error (provider_id ^ ": " ^ err)))
+          (Ok ()) provider_ids
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Identity_refreshed (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_refreshed (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_connectors_load state ~mailbox =
   let host = server_peer_host in
@@ -2945,7 +3036,16 @@ let forget_session_rows_the_transcript_holds state keeper_name rows =
                  (List.exists
                     (String.equal entry.me_request_id)
                     failures_the_transcript_holds)
-        | Message_user _ | Message_keeper | Message_autonomous | Message_tool
+        | Message_user _ ->
+            (* A line still waiting in the queue is not in the transcript the
+               server just sent, because it has not been sent yet. Dropping it
+               with the rest would take it off the screen at the exact moment
+               the turn ahead of it settled -- which is when the operator is
+               watching for it to go -- and it would come back only if and when
+               it was dispatched. It is kept until the queue stops holding
+               it. *)
+            Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
+        | Message_keeper | Message_autonomous | Message_tool
         | Message_thinking | Message_memory ->
             false)
       state.msg_history
@@ -3127,11 +3227,22 @@ let launch_keeper_request state ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
-let queue_keeper_message state ~keeper_name text =
-  match Chat_queue.push state.msg_queued ~keeper_name text with
+let queue_keeper_message state request =
+  match Chat_queue.push state.msg_queued request with
   | Error _ as error -> error
   | Ok (queue, waiting) ->
       state.msg_queued <- queue;
+      (* The line takes its place in the conversation now rather than when it
+         is dispatched. The operator pressed Enter and has to see that it
+         landed somewhere; until this, a queued line lived only in a row
+         beneath the conversation and the pane above it looked as though
+         nothing had been typed.
+
+         [append_user_history_once] is the same call dispatch makes and is
+         keyed on the request id, so when this request does go out the row it
+         already has is the row it keeps -- there is no second copy to
+         reconcile. *)
+      append_user_history_once state request;
       Ok waiting
 ;;
 
@@ -3157,6 +3268,23 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
            (Keeper_chat.terminal_safe_text target))
   | Some target -> (
+      (* An edit of a waiting line replaces it. The original leaves the queue
+         here, before the new request is built, so the two cannot both go out
+         -- which is what recalling a queued line and pressing Enter did:
+         the queue still held the original and the composer queued a copy.
+
+         [None] from [take] is the line having gone out while it was being
+         edited. Nothing to replace then, and this becomes an ordinary new
+         line rather than a send that silently does nothing. *)
+      (match state.msg_recall_replaces with
+       | None -> ()
+       | Some request_id ->
+           state.msg_recall_replaces <- None;
+           (match Chat_queue.take state.msg_queued ~request_id with
+            | None -> ()
+            | Some (original, rest) ->
+                state.msg_queued <- rest;
+                forget_queued_history state original));
       (* Now that the keeper is known, a spilled paste can be written where
          that keeper can read it. Above this point there is no answer to
          "whose workspace", and a file in the wrong one is a message pointing
@@ -3176,18 +3304,30 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
               ()
           in
           launch_keeper_request state ~mailbox request
-      | Queues_behind request -> (
+      | Queues_behind blocking -> (
           (* A turn to this keeper is already running. Hold the line rather than
              refusing it: the operator pressed Enter meaning "send this next",
-             and the turn settling is what "next" is. *)
-          match queue_keeper_message state ~keeper_name:target text with
+             and the turn settling is what "next" is.
+
+             The request is built here, the same way the sending branch builds
+             it, so what waits is what will be sent -- identity and staged
+             attachments included. Building it at dispatch instead is what sent
+             an image with whichever line happened to go next. *)
+          let request =
+            Keeper_chat.create_request
+              ~attachments:(take_pending_attachments state)
+              ~keeper_name:target
+              ~message:text
+              ()
+          in
+          match queue_keeper_message state request with
           | Error detail -> add_event state "error" detail
           | Ok waiting ->
               clear_current_message_draft state;
               add_event state "message"
                 (Printf.sprintf "Queued for %s behind %s (%d waiting)"
                    (Keeper_chat.terminal_safe_text target)
-                   request.Keeper_chat.request_id waiting)))
+                   blocking.Keeper_chat.request_id waiting)))
 ;;
 
 let drain_queued_message state ~base_path ~mailbox =
@@ -3208,19 +3348,32 @@ let drain_queued_message state ~base_path ~mailbox =
         Option.is_none (inflight_for state keeper_name))
     with
     | None -> ()
-    | Some ((keeper_name, text), rest) ->
+    | Some (request, rest) ->
+        let keeper_name = request.Keeper_chat.keeper_name in
         if keeper_available_for_new_message state keeper_name
         then (
           state.msg_queued <- rest;
-          start_keeper_message ~keeper_name state ~base_path ~mailbox text;
+          (* The request that waited is the request that goes. It was built
+             when the operator pressed Enter, so dispatch neither re-reads the
+             staged attachments nor mints a second identity for a line the
+             conversation already shows. *)
+          launch_keeper_request state ~mailbox request;
           next ())
         else (
           (* The keeper this was written to is no longer registered. Sending it
              would fail; holding it would leave a count reporting work that
              never moves. Say what is being let go, and let it go. *)
+          let dropped =
+            Chat_queue.waiting state.msg_queued
+            |> List.filter (fun (queued : Keeper_chat.request) ->
+                   String.equal queued.Keeper_chat.keeper_name keeper_name)
+          in
           let before = Chat_queue.length state.msg_queued in
           state.msg_queued <-
             Chat_queue.drop_for_keeper state.msg_queued ~keeper_name;
+          (* Their rows go with them: a line left in the conversation for a
+             keeper that will never receive it reads as sent. *)
+          List.iter (forget_queued_history state) dropped;
           add_event state "error"
             (Printf.sprintf
                "Keeper %s is no longer registered; %d queued message(s) for it \
@@ -3340,6 +3493,56 @@ let chat_notice state ~keeper_name ~role text =
         (match role with Message_error -> "error" | _ -> "system")
         text
 
+(* Ctrl-V. A terminal never delivers a pasted image: bracketed paste carries
+   text, and a clipboard holding a screenshot has no text form to send. So the
+   bytes are fetched from the clipboard itself and staged the way a dropped
+   file is -- same size limit, same media-type sniff, same staging list.
+
+   The answer goes to the chat pane rather than the event log because that is
+   the surface the operator is looking at when they press this key; with no
+   keeper selected [chat_notice] falls back to the log on its own.
+
+   The draft gets a marker where the image went. Without one, a staged image
+   and a keystroke the terminal ate look identical from the composer, and the
+   operator would learn which it was only after the turn came back. *)
+let paste_clipboard_image state =
+  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  match Masc_tui_clipboard.read_image () with
+  | Error error ->
+    notice ~role:Message_error
+      ("Ctrl-V: " ^ Masc_tui_clipboard.error_to_string error)
+  | Ok bytes ->
+    (* Numbered by staging order and restarting at 1 with each message, so the
+       marker in the draft and the attachment beside it carry the same number:
+       the keeper reads "[Image #2]" and has an image-2.png to look at. *)
+    let index = List.length state.msg_attachments + 1 in
+    let name = Printf.sprintf "image-%d.png" index in
+    (match Masc_tui_attachment.of_bytes ~name bytes with
+     | Error error ->
+       notice ~role:Message_error
+         ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
+     | Ok attachment ->
+       forget_recall state;
+       state.msg_attachments <- state.msg_attachments @ [ attachment ];
+       (* A marker run into the word before it changes that word. Only a draft
+          that does not already end in whitespace needs the separator. *)
+       let needs_separator =
+         Buffer.length state.msg_input > 0
+         && (match Buffer.nth state.msg_input (Buffer.length state.msg_input - 1) with
+             | ' ' | '\n' | '\t' -> false
+             | _ -> true)
+       in
+       if needs_separator then Buffer.add_char state.msg_input ' ';
+       Buffer.add_string state.msg_input (Printf.sprintf "[Image #%d] " index);
+       notice ~role:Message_status
+         (Printf.sprintf
+            "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
+            index
+            attachment.Masc_tui_keeper_chat_projection.mime_type
+            attachment.Masc_tui_keeper_chat_projection.size
+            (List.length state.msg_attachments)))
+;;
+
 (* Whether this terminal draws pictures. Asked once, before the first frame,
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
@@ -3373,6 +3576,61 @@ let write_to_terminal payload =
   in
   output_string stdout payload;
   flush stdout
+
+let selected_surface_reference state =
+  let board () =
+    match state.board_mode with
+    | Board_read post_id -> Some (Link.reference Board_post post_id)
+    | Board_list ->
+        Option.map
+          (fun post -> Link.reference Board_post post.bp_id)
+          (List.nth_opt state.board_posts state.board_cursor)
+    | Board_compose -> None
+  in
+  let planning () =
+    match state.planning_mode with
+    | Planning_detail goal_id -> Some (Link.reference Goal goal_id)
+    | Planning_list ->
+        Option.bind state.planning (fun snapshot ->
+            planning_visible_goals snapshot.pl_goals
+            |> Fun.flip List.nth_opt state.planning_cursor
+            |> Option.map (fun goal -> Link.reference Goal goal.pg_id))
+  in
+  match state.view with
+  | Board -> board ()
+  | Planning -> planning ()
+  | Schedules ->
+      (match state.schedule_detail_id, state.schedules with
+       | Some schedule_id, _ -> Some (Link.reference Schedule schedule_id)
+       | None, Some snapshot ->
+           Option.map
+             (fun row -> Link.reference Schedule row.sch_schedule_id)
+             (List.nth_opt snapshot.scs_rows state.schedule_cursor)
+       | None, None -> None)
+  | Harness ->
+      Option.bind state.harness (fun snapshot ->
+          Option.map
+            (fun verdict -> Link.reference Task verdict.Tui_decode.hv_task_id)
+            (List.nth_opt snapshot.Tui_decode.hs_verdicts state.harness_cursor))
+  | Fusion ->
+      (match state.fusion_mode, state.fusion_runs with
+       | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
+       | Fusion_list, Some snapshot ->
+           Option.map
+             (fun (run : Tui_decode.fusion_run) ->
+                Link.reference Fusion_run run.fur_run_id)
+             (List.nth_opt snapshot.fus_runs state.fusion_cursor)
+       | Fusion_list, None -> None)
+  | Overview | Acting | Keepers _ | Lanes | Approvals | Verification
+  | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
+  | Code | System_logs -> None
+
+let next_board_sort = function
+  | Board_hot -> Board_trending
+  | Board_trending -> Board_recent
+  | Board_recent -> Board_updated
+  | Board_updated -> Board_discussed
+  | Board_discussed -> Board_hot
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -3897,7 +4155,7 @@ let refresh_status results =
   | n, total when n = total -> Masc_tui_types.Connected
   | _ -> Masc_tui_types.Degraded
 
-let load_http_surfaces ~host ~port ~approval_generation
+let load_http_surfaces ~host ~port ~approval_generation ~board_sort
     ~(needs : Masc_tui_types.surface_needs) =
   let when_needed wanted load = if wanted then Some (load ()) else None in
   let http_overview = load_overview ~host ~port in
@@ -3918,7 +4176,8 @@ let load_http_surfaces ~host ~port ~approval_generation
         Masc_tui_http.fetch_keeper_asks ~host ~port ())
   in
   let http_board =
-    when_needed needs.needs_board (fun () -> load_board_list ~host ~port)
+    when_needed needs.needs_board (fun () ->
+        load_board_list ~host ~port ~sort_by:(board_sort_label board_sort))
   in
   let http_planning =
     when_needed needs.needs_planning (fun () -> load_planning ~host ~port)
@@ -4156,7 +4415,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
       try
         enqueue_async mailbox
           (Http_refresh_done
-             (load_http_surfaces ~host ~port ~approval_generation ~needs))
+             (load_http_surfaces ~host ~port ~approval_generation
+                ~board_sort:state.board_sort ~needs))
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -4173,7 +4433,8 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
           ~finally:(fun () -> refresh_inflight := false)
           (fun () ->
              apply_http_surfaces state
-               (load_http_surfaces ~host ~port ~approval_generation ~needs))
+               (load_http_surfaces ~host ~port ~approval_generation
+                  ~board_sort:state.board_sort ~needs))
   end
 
 let board_detail_request_still_current state request =
@@ -5090,6 +5351,7 @@ let handle_composer_key state ~base_path ~mailbox key =
           ~submit_message:(fun _ -> ())
           ~answer_approval:(fun ~tool_call_id:_ ~allow:_ -> ())
           ~load_older:(fun ~before:_ -> ())
+          ~paste_image:(fun () -> paste_clipboard_image state)
           key
       in
       true
@@ -5652,6 +5914,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       (* Shown on the tab rather than swallowed: the operator pressed a key
          and has to learn that nothing is going to open. *)
       | Error detail -> state.identity_view_error <- Some detail)
+  | Identity_refreshed (keeper_name, result) -> (
+      match result with
+      (* Re-read rather than patch what is on screen: the catalog the server
+         just wrote is the answer, and building a second copy of it here is
+         how the two come to disagree. *)
+      | Ok () ->
+          state.identity_view <- None;
+          state.identity_view_error <- None;
+          launch_identity_view state ~mailbox keeper_name
+      | Error detail -> state.identity_view_error <- Some detail)
   | Github_login_lines (keeper_name, lines) ->
       (* Append under the stamped view; a login for another keeper than the
          one on screen still lands on its own stamp. *)
@@ -6209,6 +6481,11 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
 let request_console_write_repair render_schedule =
   Terminal_write_repair.request_repaint render_schedule
 
+let copy_reference_to_terminal render_schedule reference =
+  Terminal_write_repair.note ();
+  write_to_terminal (Link.osc52_copy reference);
+  request_console_write_repair render_schedule
+
 (* One enable/disable pair for SGR mouse reports. Without tracking the
    terminal keeps the wheel for its own scrollback -- which scrolls past the
    TUI's frame on a non-alternate screen -- or turns it into arrow keys only
@@ -6345,6 +6622,26 @@ let read_terminal_probe reader ~palette_requested =
 let bracketed_paste_enable = "\x1b[?2004h"
 let bracketed_paste_disable = "\x1b[?2004l"
 
+(* Raw mode, and the one key the record cannot ask for.
+
+   [Unix.tcsetattr] writes a C-side termios buffer that its last [tcgetattr]
+   filled, and overwrites only the fields [Unix.terminal_io] names. c_cc is not
+   among them, so every call puts back the literal-next key (VLNEXT, Ctrl-V)
+   that the tty layer uses to swallow the next byte -- and Ctrl-V is the paste
+   key. Pairing the two here is what keeps the three places that take raw mode
+   back (session start, the return from Ctrl-Z, the return from $EDITOR) from
+   taking it back without the key.
+
+   The result is not checked because there is nothing left for it to report:
+   the [tcsetattr] on the line above just succeeded on this descriptor, so it
+   is a terminal this process can set. What remains is a hangup between the two
+   calls, and that ends the session either way. *)
+let apply_raw_mode new_term =
+  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+  (* See above: a refusal is a hangup, which ends the session either way. *)
+  ignore (Masc_tui_termios.disable_literal_next Unix.stdin : bool)
+;;
+
 let enter_terminal_session ~cleanup ~terminate ~request_interrupt
     ~request_full_repaint ~suspend ~new_term =
   at_exit cleanup;
@@ -6358,7 +6655,7 @@ let enter_terminal_session ~cleanup ~terminate ~request_interrupt
   Sys.set_signal Sys.sigwinch (Sys.Signal_handle request_full_repaint);
   Sys.set_signal Sys.sigcont (Sys.Signal_handle request_full_repaint);
   Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-  Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term
+  apply_raw_mode new_term
 
 (** Main loop *)
 let main () =
@@ -6414,6 +6711,13 @@ let main () =
 
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
+  (* Read beside [old_term] because the record cannot carry it. The literal-next
+     character is turned off for as long as this program owns the terminal
+     ([apply_raw_mode]) and handed back whenever the terminal is -- at exit and
+     around Ctrl-Z. Restoring [old_term] alone leaves the shell without the
+     key, which the PTY harness catches as a terminal this program did not put
+     back the way it found it. *)
+  let old_literal_next = Masc_tui_termios.literal_next Unix.stdin in
   (* c_icrnl off so Return and Ctrl-J arrive as themselves. With the terminal's
      default translation on, Return is delivered as LF -- the same byte Ctrl-J
      sends -- and the composer cannot tell "send this" from "start a new line".
@@ -6442,7 +6746,15 @@ let main () =
     if Terminal_profile.dynamic_title terminal_profile then
       Terminal_title.clear terminal_title ~write:(output_string stdout)
         ~flush:(fun () -> flush stdout);
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term
+    Unix.tcsetattr Unix.stdin Unix.TCSANOW old_term;
+    (* After the record, not before: [tcsetattr] is what puts the rest of the
+       terminal back, and this character is the part it cannot reach.
+       [-1] means the descriptor was never a terminal, so there is nothing to
+       return. *)
+    if old_literal_next >= 0
+    then
+      (* See the guard above: a refusal here is the terminal already gone. *)
+      ignore (Masc_tui_termios.set_literal_next Unix.stdin old_literal_next : bool)
   in
 
   (* Cleanup on exit *)
@@ -6486,7 +6798,7 @@ let main () =
     Fun.protect
       ~finally:(fun () ->
         Sys.set_signal Sys.sigtstp (Sys.Signal_handle suspend);
-        Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+        apply_raw_mode new_term;
         (* restore_terminal above gave the alternate screen back so the shell
            was usable while stopped. Take it again before the repaint, or the
            frame lands on top of whatever the user did meanwhile. *)
@@ -6593,7 +6905,7 @@ let main () =
      arming gate. The terminal handshake around the child is the pair
      [suspend] already runs around Ctrl-Z. *)
   let reenter_terminal () =
-    Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
+    apply_raw_mode new_term;
     request_full_repaint 0
   in
   (* An empty object is the honest starting point for a partial patch: the
@@ -7575,6 +7887,26 @@ let main () =
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())
+       | Some "R"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name ->
+               let attached =
+                 List.filter_map
+                   (function
+                     | Masc_tui_types.Identity_declared
+                         { idp_id; idp_tools = Some _; _ } -> Some idp_id
+                     | Masc_tui_types.Identity_declared _
+                     | Masc_tui_types.Identity_unreadable _ -> None)
+                   providers
+               in
+               if attached <> [] then
+                 launch_identity_refresh state ~mailbox:async_messages
+                   ~keeper_name:keeper.k_name ~provider_ids:attached
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" when state.view = Resources && not compact_viewport ->
            (match
               Option.bind state.resources_list (fun rows ->
@@ -7686,6 +8018,7 @@ let main () =
                          launch_keeper_older_page state
                            ~mailbox:async_messages ~keeper_name ~before
                      | None -> ())
+                   ~paste_image:(fun () -> paste_clipboard_image state)
                    k
                in
                ()
@@ -7716,7 +8049,8 @@ let main () =
            state.palette_cursor <- 0
        | Some "\023"
          when state.view = Board
-              && terminal_columns >= keeper_split_threshold_cols ->
+              && terminal_columns >= keeper_split_threshold_cols
+              && not state.board_detail_wide ->
            (match state.board_mode with
             | Board_read _ ->
                 state.board_focus <-
@@ -7877,13 +8211,19 @@ let main () =
                        launch_code_history_load state
                          ~mailbox:async_messages ~path)
                 end)
+       | Some ("z" | "Z") when state.view = Board ->
+           (match state.board_mode with
+            | Board_read _ ->
+                state.board_detail_wide <- not state.board_detail_wide;
+                state.board_focus <- Right_pane
+            | Board_list | Board_compose -> ())
        | Some ("h" | "l")
          when terminal_columns >= keeper_split_threshold_cols
               && (match state.view with
                   | Overview | Keepers Keeper_detail | Resources -> true
                   | Board ->
                       (match state.board_mode with
-                       | Board_read _ -> true
+                       | Board_read _ -> not state.board_detail_wide
                        | Board_list | Board_compose -> false)
                   | Code -> Option.is_some state.code_file
                   | Acting | Keepers _ | Lanes | Approvals | Planning
@@ -7907,7 +8247,24 @@ let main () =
             | System_logs -> ())
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
-       | Some "y" | Some "Y" ->
+       | Some "Y" ->
+           (match selected_surface_reference state with
+            | Some reference ->
+                copy_reference_to_terminal render_schedule reference;
+                add_event state "system" ("copied " ^ reference)
+            | None when state.view = Approvals ->
+                (match List.nth_opt (approval_items state) state.approval_cursor with
+                 | Some (Operator_row a) ->
+                     handle_approval_decision state a Confirm
+                       ~mailbox:async_messages
+                 | Some (Keeper_tool_row held) ->
+                     launch_surface_tool_approval state
+                       ~mailbox:async_messages
+                       ~keeper_name:held.kta_keeper
+                       ~tool_call_id:held.kta_tool_call_id ~allow:true
+                 | None -> ())
+            | None -> add_event state "system" "nothing on this surface has a link")
+       | Some "y" ->
            (match state.view with
             | Approvals ->
                 (match List.nth_opt (approval_items state) state.approval_cursor with
@@ -9426,9 +9783,20 @@ let main () =
             | Keepers (Keeper_list | Keeper_detail) ->
                 handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Shutdown
+            | Board ->
+                (match state.board_mode with
+                 | Board_compose -> ()
+                 | Board_list | Board_read _ ->
+                     state.board_sort <- next_board_sort state.board_sort;
+                     add_event state "system"
+                       ("Board order: "
+                        ^ board_sort_label state.board_sort);
+                     start_http_refresh state ~host:server_peer_host
+                       ~port:state.port ~refresh_inflight:http_refresh_inflight
+                       ~mailbox:async_messages)
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "w" | Some "W" ->
            (* Two unrelated bindings share a key: "write" on the Board list,

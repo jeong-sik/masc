@@ -18,6 +18,12 @@ type tool = {
   name : string;
   description : string;
   input_schema : Yojson.Safe.t;
+  read_only : bool option;
+      (** The server's own [annotations.readOnlyHint]. [None] means it did
+          not say, which is not the same as saying no: a caller deciding
+          whether to run this unasked has to treat silence as "might
+          write". masc puts the same field on its own listing, so this is
+          the same vocabulary read in the other direction. *)
 }
 
 type tool_result = {

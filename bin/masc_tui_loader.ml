@@ -630,9 +630,10 @@ let load_schedules ~(host : string) ~(port : int) :
   | Ok json -> decode_schedule_snapshot json
 
 (** Load board post list from /api/v1/board *)
-let load_board_list ~(host : string) ~(port : int) :
+let load_board_list ~(host : string) ~(port : int)
+    ~(sort_by : string) :
     (board_post list, string) result =
-  match fetch_board ~host ~port with
+  match fetch_board ~host ~port ~sort_by with
   | Error err -> Error ("board load failed: " ^ err)
   | Ok json ->
       let* posts = required_list_field json "posts" in
@@ -1030,12 +1031,13 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (sanitize_view_lines (json_block_lines json))
 
-(* What a Keeper can be attached to. A declaration the server could not read
-   comes through as its own case rather than being dropped, so an operator
-   looking for a provider sees why it is not on offer. *)
-let load_identity_providers ~(host : string) ~(port : int) :
-    (Masc_tui_types.identity_provider list, string) result =
-  match Masc_tui_http.fetch_oauth_providers ~host ~port with
+(* What a Keeper can be attached to, and what each of those currently offers
+   it. One fetch rather than two: a list of providers and a list of
+   attachments cannot disagree if they arrive together. *)
+let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : string)
+  : (Masc_tui_types.identity_provider list, string) result
+  =
+  match Masc_tui_http.fetch_attached_tools ~host ~port ~keeper_name with
   | Error err -> Error ("identity providers load failed: " ^ err)
   | Ok json ->
     let rows =
@@ -1054,24 +1056,36 @@ let load_identity_providers ~(host : string) ~(port : int) :
             (fun row ->
               let field key =
                 match row with
-                | `Assoc fields -> (
-                  match List.assoc_opt key fields with
-                  | Some (`String value) -> Some value
-                  | Some _ | None -> None)
+                | `Assoc fields -> List.assoc_opt key fields
                 | _ -> None
               in
-              match field "id", field "label", field "problem" with
-              | Some idp_id, Some idp_label, None ->
-                Some (Masc_tui_types.Identity_declared { idp_id; idp_label })
-              | Some idp_id, _, Some idp_problem ->
+              let string_field key =
+                match field key with
+                | Some (`String value) -> Some value
+                | Some _ | None -> None
+              in
+              match string_field "provider", string_field "problem" with
+              | Some idp_id, Some idp_problem ->
                 Some (Masc_tui_types.Identity_unreadable { idp_id; idp_problem })
-              (* A row with neither is a server saying something this build
-                 does not read; naming it beats leaving a gap in the list. *)
-              | Some idp_id, None, None ->
+              | Some idp_id, None ->
+                let idp_label =
+                  Option.value ~default:idp_id (string_field "provider_label")
+                in
+                let idp_tools =
+                  match field "tools" with
+                  | Some (`List names) ->
+                    Some
+                      (List.filter_map
+                         (function `String name -> Some name | _ -> None)
+                         names)
+                  (* No tools key means the server said this one is not
+                     attached; an empty list would mean attached and
+                     offering nothing. *)
+                  | Some _ | None -> None
+                in
                 Some
-                  (Masc_tui_types.Identity_unreadable
-                     { idp_id; idp_problem = "the server described this in a way this build does not read" })
-              | None, _, _ -> None)
+                  (Masc_tui_types.Identity_declared { idp_id; idp_label; idp_tools })
+              | None, _ -> None)
             rows))
 
 let load_runtime_config_view ~(host : string) ~(port : int) :

@@ -513,7 +513,35 @@ type planning_snapshot = Tui_decode.planning_snapshot
 }
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
-  goals
+  let phase_rank = function
+    | Goal_phase.Executing -> 0
+    | Goal_phase.Verifying -> 1
+    | Goal_phase.Completed -> 2
+    | Goal_phase.Dropped -> 3
+  in
+  (* The server already keeps equally-ranked goals newest first. Group the
+     lifecycle and priority here, but keep that useful recency ordering for
+     ties instead of inventing another timestamp contract in the TUI. *)
+  List.stable_sort
+    (fun left right ->
+       match Int.compare (phase_rank left.pg_phase) (phase_rank right.pg_phase) with
+       | 0 -> Int.compare left.pg_priority right.pg_priority
+       | order -> order)
+    goals
+
+type board_sort =
+  | Board_hot
+  | Board_trending
+  | Board_recent
+  | Board_updated
+  | Board_discussed
+
+let board_sort_label = function
+  | Board_hot -> "hot"
+  | Board_trending -> "trending"
+  | Board_recent -> "recent"
+  | Board_updated -> "updated"
+  | Board_discussed -> "discussed"
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
@@ -550,7 +578,15 @@ let keeper_detail_tab_label = function
     rather than dropped: an operator who came looking for a provider needs to
     see why it is not on offer, not a shorter list. *)
 type identity_provider =
-  | Identity_declared of { idp_id: string; idp_label: string }
+  | Identity_declared of
+      { idp_id: string
+      ; idp_label: string
+      ; idp_tools: string list option
+        (** What this service currently offers this Keeper, or [None] when it
+            was never attached. An empty list is a third fact -- attached and
+            offering nothing -- and reading it as "not attached" would tell an
+            operator to consent again for no reason. *)
+      }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
 (** The providers a key can act on, in the order the screen numbers them.
@@ -559,7 +595,7 @@ type identity_provider =
 let identity_connectable providers =
   List.filter_map
     (function
-      | Identity_declared { idp_id; idp_label } -> Some (idp_id, idp_label)
+      | Identity_declared { idp_id; idp_label; _ } -> Some (idp_id, idp_label)
       | Identity_unreadable _ -> None)
     providers
 
@@ -997,9 +1033,14 @@ type state = {
     (board_post * board_comment list) Masc_tui_board_detail.t;
   mutable board_list_error: string option;
   mutable board_cursor: int;
+  mutable board_sort: board_sort;
   mutable board_scroll: int;
   mutable board_mode: board_mode;
   mutable board_focus: pane_focus;
+  (* Wide terminals normally keep the Board list beside the open post. [z]
+     lets the reader spend those columns on a long post or comment instead;
+     this is an explicit reading choice, so resizing must not reset it. *)
+  mutable board_detail_wide: bool;
   (* The compose draft and its send arm. The arm is the operator's explicit
      answer to "publish what is typed": while it is unset, esc re-offers
      send-or-discard and no other key can send. [board_compose_reply_to]
@@ -1225,6 +1266,14 @@ type state = {
      operator's own text, so pressing down has nothing to give back. *)
   mutable msg_recall_at: int option;
   mutable msg_recall_draft: string;
+  (* The waiting line the composer is editing, if the walk stepped onto one.
+     [Some request_id] makes the next Enter replace that line instead of
+     queueing a second copy of it -- the arrows copy, and a copy of something
+     that has not been sent yet would be sent twice.
+
+     Not cleared by typing: editing is exactly typing over what was recalled,
+     and clearing it there would put the original back in play. *)
+  mutable msg_recall_replaces: string option;
   (* The selected Keeper's turn currently streaming, if any. The request-owned
      copy lives in [msg_inflight]; this slot only chooses what the pane draws.
      Never authoritative -- the recorded reply comes from the strict
@@ -1505,9 +1554,11 @@ let create_state
   board_detail = Masc_tui_board_detail.initial;
   board_list_error = None;
   board_cursor = 0;
+  board_sort = Board_hot;
   board_scroll = 0;
   board_mode = Board_list;
   board_focus = Right_pane;
+  board_detail_wide = false;
   board_draft = Buffer.create 256;
   board_compose_armed = false;
   board_compose_reply_to = None;
@@ -1632,6 +1683,7 @@ let create_state
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = "";
+  msg_recall_replaces = None;
   msg_live = None;
   msg_loaded = [];
   msg_loaded_keeper = None;
@@ -2068,11 +2120,11 @@ let keeper_message_status_rows (state : state) =
          List.length
            (Masc_tui_keeper_chat_transcript.status_rows
               ~now:(Unix.gettimeofday ()) live))
-  (* One row per waiting line, drawn in full so an operator can see which
-     lines are held. Same call the pane makes, for the same reason as the
-     live rows above: a row that is drawn and not counted pushes the frame
-     past the terminal, and the presenter drops whatever ran off the bottom. *)
-  + List.length (Masc_tui_keeper_chat_queue.waiting state.msg_queued)
+  (* The queue reserves nothing here any more. A waiting line is drawn in the
+     conversation, from the moment it is typed, where the operator's own
+     messages already are -- so it costs a history row rather than a row of
+     its own beneath them. Reserving here as well would take a row off the
+     conversation and put nothing in its place. *)
   + (if Option.is_some state.msg_loaded_error then 1 else 0)
   + (if state.msg_memory_visible && Option.is_some state.msg_memory_error then 1 else 0)
   + (if state.msg_memory_visible && state.msg_memory_dropped > 0 then 1 else 0)

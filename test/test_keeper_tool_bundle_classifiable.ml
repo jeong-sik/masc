@@ -115,6 +115,58 @@ let contains ~needle haystack =
   n = 0 || scan 0
 ;;
 
+(* An attached work service's tools reach the bundle the same way the
+   composition ones do, and the policy places them from what the service said
+   about each. Included here rather than only where they are built: this is
+   the gate that walks what the model is actually handed, and a later path
+   that hands one out without recording its annotation would make every call
+   ask with a reason nobody can act on. *)
+let identity_tools ~base_path =
+  let declaration =
+    {|
+id = "atlassian"
+label = "Atlassian"
+mcp_url = "https://mcp.atlassian.com/v1/mcp/authv2"
+access_token_env = "ATLASSIAN_ACCESS_TOKEN"
+expires_at_env = "ATLASSIAN_ACCESS_TOKEN_EXPIRES_AT"
+refresh_token_file = "/home/keeper/.atlassian/refresh_token"
+renew_before_sec = 600
+
+[authorize_params]
+audience = "api.atlassian.com"
+|}
+  in
+  let provider =
+    match Keeper_oauth_provider.load ~file_name:"atlassian" ~contents:declaration with
+    | Ok provider -> provider
+    | Error e ->
+      failf "the gate's own declaration must parse: %s"
+        (Keeper_oauth_provider.error_to_string e)
+  in
+  let schema =
+    `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+  in
+  let catalog =
+    { Keeper_identity_tools.provider_id = "atlassian"
+    ; provider_label = "Atlassian"
+    ; discovered_at = 0.0
+    ; tools =
+        (* One of each thing a service can say, so the gate covers all three
+           arms rather than the convenient one. *)
+        [ { Mcp_client.name = "readsOnly"; description = "reads"
+          ; input_schema = schema; read_only = Some true }
+        ; { Mcp_client.name = "mayWrite"; description = "writes"
+          ; input_schema = schema; read_only = Some false }
+        ; { Mcp_client.name = "saidNothing"; description = "unannotated"
+          ; input_schema = schema; read_only = None }
+        ]
+    }
+  in
+  (Keeper_identity_tools.agent_tools ~base_path ~keeper_name:"bundle-classifiable"
+     ~provider catalog)
+    .Keeper_identity_tools.offered
+;;
+
 let with_bundle_tools f =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let dir =
@@ -145,6 +197,7 @@ let with_bundle_tools f =
            ~publication_recovery
            ~ctx_snapshot
            ~skill_catalog:(skill_catalog ())
+           ~identity_tools:(identity_tools ~base_path:dir)
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () -> f bundle.tools))
@@ -246,7 +299,13 @@ let test_bundle_matches_expected_projection () =
   with_bundle (fun names ->
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
-        ~identity_tool_names:[]
+        (* Named from the same fixture the bundle was handed. Passing [] here
+           while the bundle carries them is what this check exists to catch,
+           and it did. *)
+        ~identity_tool_names:
+          (List.map
+             (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+             (identity_tools ~base_path:(Filename.get_temp_dir_name ())))
         ~skill_catalog:(skill_catalog ())
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     in

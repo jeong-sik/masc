@@ -1,32 +1,54 @@
 import { get, post } from './core'
 import { ensureDevToken } from './dev-token'
 
-/** A provider declared under `config/identity/`. A declaration the server
- *  could not read arrives as its own shape rather than being dropped: an
- *  operator looking for a provider has to see why it is not on offer. */
-export type IdentityProvider =
-  | { id: string; label: string }
-  | { id: string; problem: string }
+/** A declared service and what it currently offers one Keeper. `tools`
+ *  absent means never attached; an empty array means attached and offering
+ *  nothing, which is a different thing to tell an operator. */
+export type AttachedProvider =
+  | { provider: string; provider_label: string; attached: boolean; tools?: string[] }
+  | { provider: string; problem: string }
 
-export function isConnectable(
-  provider: IdentityProvider,
-): provider is { id: string; label: string } {
-  return 'label' in provider
+export function isAttachable(
+  provider: AttachedProvider,
+): provider is {
+  provider: string
+  provider_label: string
+  attached: boolean
+  tools?: string[]
+} {
+  return !('problem' in provider)
 }
 
-interface IdentityProvidersResponse {
-  providers: IdentityProvider[]
+interface AttachedProvidersResponse {
+  providers: AttachedProvider[]
 }
 
-export async function fetchIdentityProviders(
+/** One fetch for both questions. A list of services and a list of
+ *  attachments cannot disagree if they arrive together. */
+export async function fetchAttachedProviders(
+  keeperName: string,
   signal?: AbortSignal,
-): Promise<IdentityProvider[]> {
+): Promise<AttachedProvider[]> {
   await ensureDevToken()
-  const answer = await get<IdentityProvidersResponse>(
-    '/api/v1/keepers/oauth/providers',
+  const answer = await get<AttachedProvidersResponse>(
+    `/api/v1/keepers/oauth/attached-tools?keeper=${encodeURIComponent(keeperName)}`,
     { signal },
   )
   return answer.providers ?? []
+}
+
+/** Ask an attached service again what tools it has. An operator action
+ *  rather than a timer: a stale catalog is visible and fixable, while a
+ *  timer is a network call nobody asked for. */
+export async function refreshIdentityTools(
+  keeperName: string,
+  providerId: string,
+): Promise<void> {
+  await ensureDevToken()
+  await post(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/identity-refresh`,
+    { provider: providerId },
+  )
 }
 
 export interface IdentityLoginStarted {

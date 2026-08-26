@@ -734,7 +734,7 @@
   test_operator_surface_toml_parity)
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.tool_spawn))
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
@@ -2717,6 +2717,17 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_sandbox_mount_warrant)
+ (modules test_keeper_sandbox_mount_warrant)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_keeper_sandbox_image_contract)
+ (modules test_keeper_sandbox_image_contract)
+ (deps %{workspace_root}/Dockerfile.keeper-sandbox)
+ (libraries alcotest))
+
+(test
  (name test_install_script)
  (modules test_install_script)
  (libraries alcotest fs_compat otoml unix)
@@ -2781,7 +2792,8 @@
 (test
  (name test_tui_keeper_chat_queue)
  (modules test_tui_keeper_chat_queue)
- (libraries alcotest astring masc_tui_keeper_chat_queue))
+ (libraries alcotest astring masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_projection))
 
 (test
  (name test_tui_chat_surface_mirror)
@@ -2847,6 +2859,11 @@
  (name test_tui_observer)
  (modules test_tui_observer)
  (libraries alcotest masc_tui_observer yojson))
+
+(test
+ (name test_tui_clipboard)
+ (modules test_tui_clipboard)
+ (libraries alcotest masc_tui_clipboard))
 
 (test
  (name test_tui_keeper_chat_projection)
@@ -3036,6 +3053,16 @@
  (name test_tui_board_detail)
  (modules test_tui_board_detail)
  (libraries alcotest masc_tui_board_detail))
+
+(test
+ (name test_tui_link)
+ (modules test_tui_link)
+ (libraries alcotest base64 masc_tui_link))
+
+(test
+ (name test_tui_planning_order)
+ (modules test_tui_planning_order)
+ (libraries alcotest masc.masc_goal masc_tui_types))
 
 (rule
  (alias runtest-test_tui_keyboard_input)
@@ -3265,6 +3292,11 @@
  (libraries alcotest masc yojson))
 
 (test
+ (name test_composition_control_tool_toml)
+ (modules test_composition_control_tool_toml)
+ (libraries alcotest masc masc.tool_schemas yojson))
+
+(test
  (name test_skill_source_config)
  (modules test_skill_source_config)
  (libraries alcotest masc.skill_config masc.keeper_toml yojson))
@@ -3306,6 +3338,8 @@
 (include stanzas/test_keeper_ask_store.inc)
 
 (include stanzas/test_keeper_oauth_identity.inc)
+
+(include stanzas/test_tui_browser.inc)
 
 (include stanzas/test_mcp_client.inc)
 

@@ -4,6 +4,11 @@ type args_fragment =
   | Args_delta of string
   | Args_snapshot of string
 
+type admission =
+  | Queued
+  | Running
+  | Settled
+
 type delta =
   | Run_started
   | Text of string
@@ -34,6 +39,10 @@ type delta =
       { call_id : string
       ; outcome : string
       }
+  | Accepted of
+      { admission : admission
+      ; queue_length : int
+      }
   | Checkpoint
   | External_effect_completed
   | Run_failed of { message : string }
@@ -53,6 +62,20 @@ let object_field fields name =
   match List.assoc_opt name fields with
   | Some (`Assoc value) -> Some value
   | Some _ | None -> None
+
+let int_field fields name =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Some value
+  | Some _ | None -> None
+
+(* The server's own vocabulary for an operation's state. An unknown word is
+   reported rather than folded into one of these: this reader is lenient about
+   lines it cannot read, not about inventing a state for the pane to draw. *)
+let admission_of_string = function
+  | "Queued" -> Some Queued
+  | "Running" -> Some Running
+  | "Succeeded" | "Failed" | "Cancelled" -> Some Settled
+  | _ -> None
 
 (* [required] reads one string field and names the event in the failure, so an
    Undecodable row says which event was short of what. *)
@@ -92,6 +115,19 @@ let custom_deltas fields =
       | Some value ->
           required ~event:"KEEPER_THINKING_DELTA" ~field:"delta" value
             (fun delta -> Thinking delta))
+  | Some "KEEPER_CHAT_OPERATION_ACCEPTED" -> (
+      let event = "KEEPER_CHAT_OPERATION_ACCEPTED" in
+      match object_field fields "value" with
+      | None -> [ Undecodable (event ^ " value is not an object") ]
+      | Some value -> (
+          match string_field value "state", int_field value "queued_count" with
+          | None, _ -> [ Undecodable (event ^ " has no state") ]
+          | Some _, None -> [ Undecodable (event ^ " has no queued_count") ]
+          | Some state, Some queue_length -> (
+              match admission_of_string state with
+              | Some admission -> [ Accepted { admission; queue_length } ]
+              | None ->
+                  [ Undecodable (event ^ " has an unknown state: " ^ state) ])))
   | Some "KEEPER_TOOL_RESULT_READY" -> (
       match object_field fields "value" with
       | None -> [ Undecodable "KEEPER_TOOL_RESULT_READY value is not an object" ]

@@ -4,6 +4,7 @@ type tool = {
   name : string;
   description : string;
   input_schema : Yojson.Safe.t;
+  read_only : bool option;
 }
 
 type tool_result = {
@@ -313,7 +314,20 @@ let tool_of_json json =
          handing a runtime a tool it cannot describe. *)
       | None -> `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     in
-    Some { name; description; input_schema }
+    let read_only =
+      match member "annotations" json with
+      | None -> None
+      | Some annotations -> (
+        match annotations with
+        | `Assoc pairs -> (
+          match List.assoc_opt "readOnlyHint" pairs with
+          | Some (`Bool value) -> Some value
+          (* Present but not a boolean is the server saying something this
+             cannot read. Silence and nonsense both mean "did not say". *)
+          | Some _ | None -> None)
+        | _ -> None)
+    in
+    Some { name; description; input_schema; read_only }
   | Some _ | None -> None
 
 let list_tools ?(post = default_post) t =

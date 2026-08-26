@@ -9,6 +9,9 @@ module Identity_tools = Masc.Keeper_identity_tools
 module Provider = Keeper_oauth_provider
 module Projection = Masc.Keeper_secret_projection
 
+(* The Keeper name here is deliberately not a word: an ordinary one
+   eventually picks a live Keeper's, which is what
+   test/fixtures/concrete-keeper-identities.txt exists to stop. *)
 let check = Alcotest.check
 let str = Alcotest.string
 
@@ -41,9 +44,10 @@ let temp_base () =
   Unix.mkdir path 0o700;
   path
 
-let tool name =
+let tool ?read_only name =
   {
     Mcp_client.name;
+    read_only;
     description = "does " ^ name;
     input_schema =
       `Assoc
@@ -66,10 +70,14 @@ let write_catalog ~base_path ~keeper_name tools =
             (List.map
                (fun (t : Mcp_client.tool) ->
                  `Assoc
-                   [ ("name", `String t.Mcp_client.name);
-                     ("description", `String t.Mcp_client.description);
-                     ("input_schema", t.Mcp_client.input_schema)
-                   ])
+                   ([ ("name", `String t.Mcp_client.name);
+                      ("description", `String t.Mcp_client.description);
+                      ("input_schema", t.Mcp_client.input_schema)
+                    ]
+                    @
+                    match t.Mcp_client.read_only with
+                    | Some value -> [ ("read_only", `Bool value) ]
+                    | None -> []))
                tools) )
       ]
   in
@@ -130,6 +138,71 @@ let test_an_unreadable_catalog_is_not_no_tools () =
   | Ok None -> Alcotest.fail "a broken catalog read as never attached"
   | Ok (Some _) -> Alcotest.fail "read a broken catalog as a catalog"
 
+(* Measured against the live Atlassian server on 2026-08-26: the access
+   token came back 3,446 characters long and the refresh token 2,792. Both
+   go through the secret projection, and every earlier check here used a
+   short placeholder -- which would have passed while a real one was
+   refused. *)
+let live_access_token_chars = 3_446
+let live_refresh_token_chars = 2_792
+
+let test_a_real_sized_token_is_storable () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  (match
+     Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~name:provider.Provider.access_token_env
+       ~value:(String.make live_access_token_chars 'x')
+   with
+  | Ok () -> ()
+  | Error message ->
+      Alcotest.failf "a real-sized access token is not storable: %s" message);
+  match
+    Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
+      ~scope:Projection.Keeper_secret
+      ~container_path:provider.Provider.refresh_token_file
+      ~value:(String.make live_refresh_token_chars 'y')
+  with
+  | Ok () -> ()
+  | Error message ->
+      Alcotest.failf "a real-sized refresh token is not storable: %s" message
+
+let test_a_real_sized_token_survives_the_projection () =
+  (* Stored is not the same as handed to a runtime. The token reaches a tool
+     call through the projected environment, and that is the array a child
+     process is given. *)
+  let base_path = temp_base () in
+  let provider = provider () in
+  let token = String.make live_access_token_chars 'x' in
+  (match
+     Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~name:provider.Provider.access_token_env ~value:token
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store: %s" message);
+  match
+    Projection.local_env_for_keeper ~host_env:[||] ~base_path
+      ~keeper_name:"attaching-fixture" ()
+  with
+  | Error message -> Alcotest.failf "projection failed: %s" message
+  | Ok None -> Alcotest.fail "no projection for this keeper"
+  | Ok (Some entries) ->
+      let prefix = provider.Provider.access_token_env ^ "=" in
+      let found =
+        Array.to_list entries
+        |> List.find_map (fun entry ->
+               if String.starts_with ~prefix entry then
+                 Some
+                   (String.sub entry (String.length prefix)
+                      (String.length entry - String.length prefix))
+               else None)
+      in
+      check (Alcotest.option Alcotest.int) "the whole token comes through"
+        (Some live_access_token_chars)
+        (Option.map String.length found)
+
 let test_a_written_catalog_comes_back () =
   let base_path = temp_base () in
   write_catalog ~base_path ~keeper_name:"acme-daycare"
@@ -174,7 +247,7 @@ let test_a_schema_that_cannot_be_projected_is_reported () =
      an operator ends up reading code to find out what happened. *)
   let base_path = temp_base () in
   let bad =
-    { Mcp_client.name = "weird"; description = "";
+    { Mcp_client.name = "weird"; description = ""; read_only = None;
       input_schema = `String "not a schema" }
   in
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "fine"; bad ];
@@ -318,6 +391,193 @@ let test_the_projected_token_is_the_one_sent () =
       check str "and the tool's answer comes back" "PK-1"
         output.Agent_core.Types.content
 
+(* ── the approval policy ─────────────────────────────────────────────── *)
+
+module Policy = Masc.Keeper_tool_approval_policy
+module Index = Masc.Keeper_identity_tool_index
+
+let offer ~base_path tools =
+  write_catalog ~base_path ~keeper_name:"attaching-fixture" tools;
+  match
+    Identity_tools.load ~base_path ~keeper_name:"attaching-fixture"
+      ~provider_id:"atlassian"
+  with
+  | Ok (Some catalog) ->
+      Identity_tools.agent_tools ~base_path ~keeper_name:"attaching-fixture"
+        ~provider:(provider ()) catalog
+  | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
+
+let test_the_policy_can_place_an_attached_tool () =
+  (* The bundle gate walks every tool a Keeper is handed through this. A tool
+     it cannot place asks its operator a question with no reason they can act
+     on, which is what four composition tools did before they were
+     classified. *)
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  check Alcotest.bool "classifiable" true
+    (Policy.classifies ~tool_name:"atlassian_getJiraIssue")
+
+let test_a_read_only_tool_runs_unasked () =
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:true "getJiraIssue" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_getJiraIssue" ~input:(`Assoc [])
+  with
+  | Policy.Run _ -> ()
+  | Policy.Ask { because } ->
+      Alcotest.failf "asked about a read the service declared: %s" because
+
+let test_a_writing_tool_is_asked_about () =
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
+  with
+  | Policy.Ask _ -> ()
+  | Policy.Run { because } ->
+      Alcotest.failf "ran a write to somebody else's Jira unasked: %s" because
+
+let test_silence_is_not_permission () =
+  (* A service that annotates nothing leaves the operator deciding. Worse
+     than deciding once, better than writing unasked. *)
+  Index.forget_all (Index.shared ());
+  let base_path = temp_base () in
+  let _ = offer ~base_path [ tool "somethingUnannotated" ] in
+  match
+    Policy.verdict_for ~tool_name:"atlassian_somethingUnannotated"
+      ~input:(`Assoc [])
+  with
+  | Policy.Ask { because } ->
+      check Alcotest.bool "and the reason names the silence" true
+        (Str.string_match (Str.regexp ".*did not say") because 0)
+  | Policy.Run { because } ->
+      Alcotest.failf "an unannotated tool ran unasked: %s" because
+
+let test_a_name_from_no_service_stays_unknown () =
+  (* The index answering "never recorded" must not read as "may write". A
+     name masc has never heard of is still the unclassifiable case, and
+     folding the two would let this arm swallow every unknown tool. *)
+  Index.forget_all (Index.shared ());
+  check Alcotest.bool "not classifiable" false
+    (Policy.classifies ~tool_name:"atlassian_neverOffered")
+
+(* ── renewal ─────────────────────────────────────────────────────────── *)
+
+let store_expiry ~base_path ~provider ~at =
+  match
+    Projection.set_env_entry ~base_path ~keeper_name:"attaching-fixture"
+      ~scope:Projection.Keeper_secret
+      ~name:provider.Provider.expires_at_env
+      ~value:(Printf.sprintf "%.0f" at)
+  with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store an expiry: %s" message
+
+let never_discover ~mcp_url:_ =
+  Alcotest.fail "renewal reached the network when it should not have"
+
+let test_a_fresh_token_is_left_alone () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  store_expiry ~base_path ~provider ~at:10_000.0;
+  match
+    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+      ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"still-good" ()
+  with
+  | Ok token -> check str "unchanged" "still-good" token
+  | Error message -> Alcotest.failf "renewed a fresh token: %s" message
+
+let test_no_stored_expiry_renews_nothing () =
+  (* Replacing a working credential on a guess costs the refresh token and
+     gains nothing. *)
+  let base_path = temp_base () in
+  match
+    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+      ~keeper_name:"attaching-fixture" ~provider:(provider ()) ~now:0.0
+      ~access_token:"unknown-age" ()
+  with
+  | Ok token -> check str "unchanged" "unknown-age" token
+  | Error message -> Alcotest.failf "renewed on a guess: %s" message
+
+let test_an_expiring_token_is_exchanged_and_stored () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  (* Inside the declaration's 600s window. *)
+  store_expiry ~base_path ~provider ~at:100.0;
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name:"attaching-fixture"
+       ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file
+       ~value:"the-refresh-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  (match
+     Keeper_oauth_client_store.save
+       ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity")
+       ~provider ~client_id:"client-abc"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a client id: %s" message);
+  let sent = ref [] in
+  let token_post ~url:_ ~headers:_ ~body =
+    sent := body :: !sent;
+    Ok
+      ( 200,
+        {|{"access_token":"the-new-one","refresh_token":"rotated","expires_in":28800}|}
+      )
+  in
+  let discover ~mcp_url:_ =
+    Ok
+      {
+        Keeper_oauth_discovery.resource = "https://mcp.example.com/v1/mcp";
+        issuer = "https://auth.example.com";
+        authorize_url = "https://auth.example.com/authorize";
+        token_url = "https://auth.example.com/oauth/token";
+        registration_url = None;
+        scopes_supported = [];
+        supports_pkce_s256 = true;
+        client_secret_optional = true;
+      }
+  in
+  match
+    Identity_tools.renew_if_needed ~token_post ~discover ~base_path
+      ~keeper_name:"attaching-fixture" ~provider ~now:0.0 ~access_token:"about-to-expire"
+      ()
+  with
+  | Error message -> Alcotest.failf "renewal failed: %s" message
+  | Ok token ->
+      check str "the call uses the new token" "the-new-one" token;
+      check Alcotest.bool "and it was a refresh_token grant" true
+        (match !sent with
+        | body :: _ -> Str.string_match (Str.regexp ".*grant_type=refresh_token") body 0
+        | [] -> false);
+      (* Stored, or the next turn exchanges the same expiring token again. *)
+      (match
+         Projection.local_env_for_keeper ~host_env:[||] ~base_path
+           ~keeper_name:"attaching-fixture" ()
+       with
+      | Ok (Some entries) ->
+          let has prefix =
+            Array.exists (fun entry -> String.starts_with ~prefix entry) entries
+          in
+          check Alcotest.bool "the new access token is written" true
+            (has (provider.Provider.access_token_env ^ "=the-new-one"));
+          check Alcotest.bool "and so is its expiry" true
+            (has (provider.Provider.expires_at_env ^ "=28800"))
+      | Ok None | Error _ -> Alcotest.fail "no projection after renewal");
+      (* A rotated refresh token replaces the spent one. *)
+      match
+        Projection.read_file_entry ~base_path ~keeper_name:"attaching-fixture"
+          ~scope:Projection.Keeper_secret
+          ~container_path:provider.Provider.refresh_token_file
+      with
+      | Ok (Some value) -> check str "the rotated refresh token" "rotated" value
+      | Ok None | Error _ -> Alcotest.fail "the refresh token went missing"
+
 let () =
   Alcotest.run "keeper_identity_tools"
     [ ( "the written catalog",
@@ -327,6 +587,30 @@ let () =
             test_an_unreadable_catalog_is_not_no_tools;
           Alcotest.test_case "a written catalog comes back" `Quick
             test_a_written_catalog_comes_back;
+          Alcotest.test_case "a real-sized token is storable" `Quick
+            test_a_real_sized_token_is_storable;
+          Alcotest.test_case "a real-sized token survives the projection"
+            `Quick test_a_real_sized_token_survives_the_projection;
+        ] );
+      ( "renewal",
+        [ Alcotest.test_case "a fresh token is left alone" `Quick
+            test_a_fresh_token_is_left_alone;
+          Alcotest.test_case "no stored expiry renews nothing" `Quick
+            test_no_stored_expiry_renews_nothing;
+          Alcotest.test_case "an expiring token is exchanged and stored" `Quick
+            test_an_expiring_token_is_exchanged_and_stored;
+        ] );
+      ( "the approval policy",
+        [ Alcotest.test_case "the policy can place an attached tool" `Quick
+            test_the_policy_can_place_an_attached_tool;
+          Alcotest.test_case "a read-only tool runs unasked" `Quick
+            test_a_read_only_tool_runs_unasked;
+          Alcotest.test_case "a writing tool is asked about" `Quick
+            test_a_writing_tool_is_asked_about;
+          Alcotest.test_case "silence is not permission" `Quick
+            test_silence_is_not_permission;
+          Alcotest.test_case "a name from no service stays unknown" `Quick
+            test_a_name_from_no_service_stays_unknown;
         ] );
       ( "the tool surface",
         [ Alcotest.test_case "names are namespaced by provider" `Quick

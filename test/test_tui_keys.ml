@@ -59,7 +59,12 @@ let test_listing_footers_share_one_shape () =
     (fun surface ->
       check str "the plain listings share one footer" canonical
         (Masc_tui_keys.footer_hints surface))
-    [ Lanes; Harness; System_logs ]
+    [ Lanes; System_logs ]
+
+let test_harness_footer_links_to_overview_task () =
+  check str "Harness names its task link"
+    "j/k:scroll  Y:copy task  Esc:overview  r:refresh  Tab:next  q:quit"
+    (Masc_tui_keys.footer_hints Harness)
 
 (* Tools left the plain group when it grew a per-Keeper axis: the pane now
    shows one Keeper's effective tool surface, so it needs a key to change
@@ -87,7 +92,7 @@ let test_fusion_footer_pins_the_shared_list_projection () =
   (* Pin the shared list footer as display data. The PTY scenario separately
      exercises j, r, Enter, PgDn, and detail Esc through the real dispatch. *)
   check str "fusion names its list keys"
-    "j/k:move  PgUp / PgDn:page  Right / Enter:detail  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Enter:detail  Y:copy  Esc:back  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Fusion)
 
 let test_overview_footer_projects_by_focus () =
@@ -158,6 +163,8 @@ let () =
             test_listing_footers_share_one_shape
         ; Alcotest.test_case "Tools carries the Keeper axis" `Quick
             test_tools_footer_carries_the_keeper_axis
+        ; Alcotest.test_case "Harness links to Overview task" `Quick
+            test_harness_footer_links_to_overview_task
         ; Alcotest.test_case "Repositories offers the Code tree" `Quick
             test_repositories_footer_offers_the_code_tree
         ; Alcotest.test_case "Verification carries the verdict keys" `Quick

@@ -75,6 +75,18 @@ val set_file_entry :
     [secrets/<keeper>/files]. [container_path] must be an absolute container
     path; traversal components and symlink targets are rejected. *)
 
+val read_file_entry :
+  base_path:string ->
+  keeper_name:string ->
+  scope:secret_scope ->
+  container_path:string ->
+  (string option, string) result
+(** Read back one projected file secret. [Ok None] when there is no such
+    file, which is what a Keeper that never had one looks like; an [Error]
+    means something is there and cannot be read, and the two must not be
+    confused. Symlinks and non-regular entries are rejected on the way in
+    exactly as they are on the way out. *)
+
 val delete_file_entry :
   base_path:string ->
   keeper_name:string ->

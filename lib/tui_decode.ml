@@ -77,6 +77,10 @@ type keeper_runtime = {
   kr_proactive_enabled : bool;
   kr_runtime_id : string;
   kr_phase : keeper_phase;
+  (* Declared, not observed. It answers "which sandbox is this keeper set
+     to", which is what a settings view is for; whether a given tool call
+     actually ran there is a different reading and lives with the call. *)
+  kr_sandbox_profile : string;
 }
 
 type keeper_lane_phase =
@@ -2611,6 +2615,11 @@ let decode_keeper_runtime json =
   let* kr_autoboot_enabled = required_bool_field json "autoboot_enabled" in
   let* kr_proactive_enabled = required_bool_field json "proactive_enabled" in
   let* kr_runtime_id = required_string_field json "runtime_id" in
+  (* Under [meta] because the row already carries the keeper's own
+     declaration there; a second top-level copy would be a second place to
+     update. *)
+  let* row_meta = required_object_field json "meta" in
+  let* kr_sandbox_profile = required_string_field row_meta "sandbox_profile" in
   let* raw_phase = required_string_field json "phase" in
   let* kr_phase =
     match keeper_phase_of_string raw_phase with
@@ -2630,6 +2639,7 @@ let decode_keeper_runtime json =
     ; kr_proactive_enabled
     ; kr_runtime_id
     ; kr_phase
+    ; kr_sandbox_profile
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

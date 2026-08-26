@@ -2972,13 +2972,30 @@ let keeper_message_identity ~max_cells state keeper_name =
    asked. Both are on the roster row. *)
 let keeper_flag_cell (runtime : keeper_runtime option) =
   match runtime with
-  | None -> Ansi.dim ^ "- -" ^ Ansi.reset
+  | None -> Ansi.dim ^ "- - -" ^ Ansi.reset
   | Some row ->
       let flag enabled letter =
         if enabled then Ansi.cyan ^ letter ^ Ansi.reset
         else Ansi.dim ^ "-" ^ Ansi.reset
       in
-      flag row.kr_autoboot_enabled "A" ^ " " ^ flag row.kr_proactive_enabled "P"
+      (* The sandbox is a name rather than a yes/no, so it gets a letter of its
+         own instead of the on/off colour the other two use: "D" reads as the
+         profile it stands for, and anything this roster has not been taught
+         shows its own first letter rather than being folded into "L". A word
+         the reader does not recognise is better than a wrong one. *)
+      let sandbox =
+        match row.kr_sandbox_profile with
+        | "docker" -> Ansi.cyan ^ "D" ^ Ansi.reset
+        | "local" -> Ansi.dim ^ "L" ^ Ansi.reset
+        | other when String.length other > 0 ->
+          (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
+        | _ -> Ansi.dim ^ "?" ^ Ansi.reset
+      in
+      flag row.kr_autoboot_enabled "A"
+      ^ " "
+      ^ flag row.kr_proactive_enabled "P"
+      ^ " "
+      ^ sandbox
 
 (* Column header labels line up with the cell budgets
    [Render_schedule.allocate_keeper_columns] hands out, so the arithmetic lives
@@ -2990,7 +3007,7 @@ let keeper_column_header (columns : Render_schedule.keeper_columns) =
     ; " "
     ; Printf.sprintf "%-*s" columns.kcol_name "KEEPER"
     ; (if columns.kcol_show_flags then
-         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P"
+         " " ^ Printf.sprintf "%-*s" Render_schedule.keeper_flags_width "A P S"
        else "")
     ; Printf.sprintf " %*s" Render_schedule.keeper_turns_width "TURNS"
     ; (if columns.kcol_show_runtime then

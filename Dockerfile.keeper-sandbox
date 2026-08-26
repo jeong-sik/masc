@@ -61,6 +61,12 @@ RUN apt-get update \
       unzip \
       zip \
       m4 \
+      procps \
+      lsof \
+      fd-find \
+      zsh \
+      perl \
+      trash-cli \
       libev-dev \
       libgmp-dev \
       libprotobuf-dev \
@@ -76,6 +82,34 @@ RUN apt-get update \
 # They are installed here rather than by opam because the image build runs as a
 # non-root user at that point and the container has no package manager access
 # at run time.
+
+# What keepers actually invoke, measured over 35,919 filesystem tool calls
+# (2026-08-20..26). The apt list above closed procps (ps/pgrep/pkill, 35 uses),
+# lsof (7), fd (2), zsh (3) and trash (39). These three are not apt packages.
+#
+# pnpm is the largest single gap at 103 uses -- the dashboard's vitest runs
+# through it and the image shipped npm only.
+RUN npm install --global --no-fund --no-audit pnpm \
+ && ln -s "$(command -v timeout)" /usr/local/bin/gtimeout \
+ && ln -s "$(command -v fdfind)" /usr/local/bin/fd
+
+# Deliberately absent, with the reason, so the next reader does not "fix" them:
+#
+#   docker      A keeper invoked it 11 times. The client is useless without the
+#               socket, and mounting the socket hands the container the daemon
+#               -- every mount boundary in this file becomes advisory at that
+#               point (OpenClaw shipped exactly that escape, arXiv 2603.27517).
+#               If a keeper needs containers, that is a separate design.
+#   playwright  15 uses, and the browsers are the cost, not the CLI. Adding it
+#               means several hundred MB of image for one keeper's workflow.
+#   ttyd        8 uses, not packaged for this base. TUI PTY work needs its own
+#               answer.
+#   md5         macOS spelling. `md5sum` is present but prints a different
+#               format, so a symlink would produce output that parses wrong --
+#               worse than the command being absent.
+#   masc, sb    Host operator wrappers under /Users/dancer/me/scripts. They are
+#               not a toolchain; a keeper reaching for them is reaching outside
+#               its sandbox, which is the thing being closed.
 
 # MASC_KEEPER_DOCKER_PLAYGROUND_ROOT defaults to /home/keeper/playground and is
 # supplied as a bind mount. The container runs as the host uid/gid

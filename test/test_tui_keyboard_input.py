@@ -1061,6 +1061,8 @@ def planning_goal(goal_id: str, title: str) -> dict[str, object]:
         "title": title,
         "phase": "executing",
         "priority": 1,
+        "metric": f"metric-{goal_id}",
+        "target_value": "100%",
         "verification": {"completion": {"state": "idle"}},
     }
 
@@ -2783,12 +2785,11 @@ def assert_planning_goal_selected(frame: bytes, title: bytes) -> None:
     had required whitespace there.
     """
     plain = CSI_RE.sub(b"", frame)
-    # What sits between the status bracket and the priority is the renderer's
-    # business: #29786 put a proof mark there and this assertion, which only
-    # means "this goal is the selected row", started failing as a shape
-    # mismatch.
+    # What sits between the status bracket, priority, goal id, and title is the
+    # renderer's business. This assertion means only "this goal is the selected
+    # row"; information columns can be inserted without changing that fact.
     selected = re.compile(
-        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[ \t]+" + re.escape(title)
+        rb">[ \t]+\[[^\]\r\n]+\][^\r\n]*?P1[^\r\n]*?" + re.escape(title)
     )
     if selected.search(plain) is None:
         raise AssertionError(f"Planning did not select {title!r}: {frame!r}")
@@ -2825,6 +2826,10 @@ def planning_reorder_identity_interaction(fixtures: HttpFixtures) -> Interaction
     ) -> None:
         open_loaded_planning(process, master_fd, output)
         selected = send_and_wait(process, master_fd, output, b"j", b"plan-beta-29424")
+        if b"metric-goal-b-29424" not in CSI_RE.sub(b"", selected):
+            raise AssertionError(
+                f"Planning selected row omitted its metric/target: {selected!r}"
+            )
         assert_planning_goal_selected(
             frame_containing(selected, b"plan-beta-29424"),
             b"plan-beta-29424",
@@ -5671,11 +5676,15 @@ def changes_keeper_and_arrow_detail_interaction(
         start=0, timeout=3.0,
     )
     preview_plain = CSI_RE.sub(b"", bytes(output)).decode("utf-8")
-    for needle in ("-1 +1", "let a = 1", "let a = 2"):
+    for needle in ("EDIT", "APPLIED", "-1 +1", "let a = 1", "let a = 2"):
         if needle not in preview_plain:
             raise AssertionError(
                 f"the preview missed {needle!r}: {preview_plain[-600:]!r}"
             )
+    raw = bytes(output)
+    for badge in (b"EDIT", b"APPLIED"):
+        if re.search(rb"\x1b\[[0-9;]*m" + badge + rb"[^\x1b]*\x1b\[0m", raw) is None:
+            raise AssertionError(f"Changes badge {badge!r} was not highlighted")
     # Down moves the marked row, not just the window. The mark used to be the
     # window's top row, so on a list that fits the screen it could not move at
     # all and Enter opened the first change whatever the operator pressed.
@@ -6475,7 +6484,18 @@ def schedule_detail_interaction() -> Interaction:
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"MASC Schedules")
+        listing = tab_until(process, master_fd, output, b"MASC Schedules")
+        listing_plain = CSI_RE.sub(b"", listing)
+        for needle in (
+            b"wake:succeeded",
+            b"dispatch:running",
+            b"queue:matched_pending/2 pending",
+            b"reaction:matched_recorded",
+        ):
+            if needle not in listing_plain:
+                raise AssertionError(
+                    f"Schedule list omitted {needle!r}: {listing_plain!r}"
+                )
         detail = send_and_wait(
             process, master_fd, output, b"\x1b[C", b"instance-proof-701"
         )
@@ -6654,13 +6674,37 @@ def fusion_list_detail_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
-        tab_until(process, master_fd, output, b"task-linked-501")
+        harness = tab_until(process, master_fd, output, b"task-linked-501")
+        harness_plain = CSI_RE.sub(b"", harness)
+        for needle in (b"Gate", b"Verdict", b"Evaluator", b"Right / Enter:verdict"):
+            if needle not in harness_plain:
+                raise AssertionError(
+                    f"Harness list omitted {needle!r}: {harness_plain!r}"
+                )
         copy_reference(
             process,
             master_fd,
             output,
             b"masc://overview/tasks/task-linked-501",
         )
+        verdict = send_and_wait(
+            process, master_fd, output, b"\r", b"HARNESS VERDICT"
+        )
+        verdict_plain = CSI_RE.sub(b"", verdict)
+        for needle in (
+            b"linked Harness task",
+            b"Agent",
+            b"beta",
+            b"approve",
+            b"glm-coding",
+            b"Fallback",
+            b"left/Esc:list",
+        ):
+            if needle not in verdict_plain:
+                raise AssertionError(
+                    f"Harness detail omitted {needle!r}: {verdict_plain!r}"
+                )
+        send_and_wait(process, master_fd, output, b"\x1b[D", b"(1 verdicts)")
         read_available(master_fd, output)
         start = len(output)
         os.write(master_fd, b"\t")
@@ -6700,7 +6744,16 @@ def fusion_list_detail_interaction(
         frame_end = output.find(FRAME_END, target_end) + len(FRAME_END)
         loaded = bytes(output[start:frame_end])
         plain = CSI_RE.sub(b"", loaded)
-        for column in (b"TIME", b"STATUS", b"KEEPER", b"PRESET", b"TOPOLOGY", b"RUN"):
+        for column in (
+            b"TIME",
+            b"AGE",
+            b"STATUS",
+            b"KEEPER",
+            b"PRESET",
+            b"TOPOLOGY",
+            b"RUN",
+            b"Flow: Question",
+        ):
             if column not in plain:
                 raise AssertionError(
                     f"Fusion did not draw the {column!r} source column: {plain!r}"

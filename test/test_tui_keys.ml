@@ -63,7 +63,7 @@ let test_listing_footers_share_one_shape () =
 
 let test_harness_footer_links_to_overview_task () =
   check str "Harness names its task link"
-    "j/k:scroll  Y:copy task  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:move  PgUp/PgDn:page  Right / Enter:verdict  Left / Esc:back  Y:copy task  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Harness)
 
 (* Tools left the plain group when it grew a per-Keeper axis: the pane now

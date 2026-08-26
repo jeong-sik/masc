@@ -15,6 +15,10 @@ type config_revision = private string
 type catalog_revision = private string
 type snapshot_revision = private string
 
+type revision_error =
+  | Invalid_revision_length of { actual : int }
+  | Invalid_revision_character of { index : int; found : char }
+
 type identity = private
   { source_id : Skill_source_config.source_id
   ; package_id : package_id
@@ -115,6 +119,8 @@ type build_error =
 
 val package_id_of_directory : string -> (package_id, package_id_error) result
 val package_id_to_string : package_id -> string
+val content_revision_of_string : string -> (content_revision, revision_error) result
+val snapshot_revision_of_string : string -> (snapshot_revision, revision_error) result
 val make_identity :
   source_id:Skill_source_config.source_id ->
   package_id:package_id ->

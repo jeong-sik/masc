@@ -305,17 +305,70 @@ let test_startup_error_is_operator_visible () =
              Yojson.Safe.Util.(status |> member "error" |> to_string))))
 ;;
 
-let slack_message ~ts =
+let slack_message ?(user_name = Some "operator") ~ts () =
   Slack_gateway_state.Message_create
     { channel_id = "C123"
     ; thread_ts = None
     ; user_id = "U123"
-    ; user_name = Some "operator"
+    ; user_name
     ; text = "wake the keeper"
     ; ts
     ; mentions_bot = true
     ; bot_id = None
     }
+;;
+
+(* Slack omits [user_name] when the workspace directory is unavailable. The
+   gateway used to put [user_id] in its place and wrap it back into [Some], so
+   the durable row said the author is called [U123] and the chat pane drew an
+   id where a name goes.
+
+   Driven through [submit_event] rather than the recorder underneath it: the
+   collapse was in the handler, and a test that called past it stayed green
+   with the collapse restored. *)
+let test_a_missing_author_name_is_not_replaced_by_the_id () =
+  with_temp_base (fun () ->
+    match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
+    | Error detail -> fail detail
+    | Ok _ ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let ingress =
+        Connector_ingress_lane.create ~sw ~on_failure:(fun _ -> ()) ()
+      in
+      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_
+          ~metadata:_ ~content:_ =
+        Gate_protocol.Reply
+          { content = "queued"
+          ; structured = None
+          ; stats = None
+          ; message_request = None
+          }
+      in
+      G.For_testing.submit_event
+        ~team_id:"T123"
+        ~deliver:(fun () -> ())
+        ingress
+        ~dispatch_for_delivery:(fun _ -> dispatch)
+        ~clock:(Eio.Stdenv.clock env)
+        ~base_dir:(Env_config_core.base_path ())
+        (slack_message ~user_name:None ~ts:"1710000000.999999" ());
+      match
+        Keeper_external_attention.pending_for_keeper
+          ~base_path:(Env_config_core.base_path ())
+          ~keeper_name:"luna" ~limit:10 ()
+      with
+      | [] -> fail "no attention recorded for a bound channel"
+      | item :: _ ->
+        check (option string) "the id is not offered as a name" None
+          item.Keeper_external_attention.actor
+            .Keeper_external_attention.display_name;
+        (* The id itself is still carried: an author nobody named is still a
+           particular author. *)
+        check (option string) "and the author is still identified" (Some "U123")
+          item.Keeper_external_attention.actor
+            .Keeper_external_attention.actor_id)
 ;;
 
 let test_bound_message_queues_exact_slack_ts () =
@@ -361,7 +414,7 @@ let test_bound_message_queues_exact_slack_ts () =
         ingress ~dispatch_for_delivery
         ~clock:(Eio.Stdenv.clock env)
         ~base_dir:(Env_config_core.base_path ())
-        (slack_message ~ts:"1710000000.123456");
+        (slack_message ~ts:"1710000000.123456" ());
       check bool "accept completed before handoff" true !accepted_before_delivery;
       (match !observed_delivery with
        | Some
@@ -442,7 +495,7 @@ let test_binding_store_failure_does_not_enqueue () =
       ingress ~dispatch_for_delivery
       ~clock:(Eio.Stdenv.clock env)
       ~base_dir:(Env_config_core.base_path ())
-      (slack_message ~ts:"1710000000.654321");
+      (slack_message ~ts:"1710000000.654321" ());
     Eio.Fiber.yield ();
     check bool "no volatile job accepted" false !dispatch_called;
     Eio.Switch.fail sw Exit)
@@ -489,6 +542,8 @@ let () =
     ; ( "ingress handoff"
       , [ test_case "bound message retains exact Slack ts" `Quick
             test_bound_message_queues_exact_slack_ts
+        ; test_case "a missing author name is not replaced by the id" `Quick
+            test_a_missing_author_name_is_not_replaced_by_the_id
         ; test_case "binding store failure does not enqueue" `Quick
             test_binding_store_failure_does_not_enqueue
         ] )

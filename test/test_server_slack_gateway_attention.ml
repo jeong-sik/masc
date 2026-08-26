@@ -33,11 +33,11 @@ let with_temp_base name f =
 let pending ~base_path ~keeper_name =
   A.pending_for_keeper ~base_path ~keeper_name ~limit:10 ()
 
-let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None) ~ts ~route
-    ~urgency () =
+let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None)
+    ?(user_name = Some "user-one") ~ts ~route ~urgency () =
   G.For_testing.record_external_attention ~base_dir:base_path
     ~keeper_name:"alpha" ~team_id ~channel_id:"C1" ~thread_ts ~ts
-    ~user_id:"U1" ~user_name:(Some "user-one") ~content:"hello keeper"
+    ~user_id:"U1" ~user_name ~content:"hello keeper"
     ~mentions_bot:(urgency = A.Mention) ~route ~urgency
 
 let test_triggered_record_is_pending_with_slack_surface () =
@@ -60,6 +60,30 @@ let test_triggered_record_is_pending_with_slack_surface () =
        | _ -> fail "expected Slack surface")
     | items ->
       failf "expected exactly one pending item, got %d" (List.length items))
+
+(* Slack sometimes sends a message with no [user_name]. The gateway used to
+   put [user_id] in its place and wrap that back into [Some], so the stored row
+   said the person is called [U09L0RHPW7P] and the chat pane drew an id where a
+   name goes. One person's 24 messages arrived named half the time.
+
+   [display_name] is [string option]: absence already has a place to live. *)
+let test_a_missing_author_name_stays_missing () =
+  with_temp_base "slack-attention-unnamed" @@ fun base_path ->
+  match
+    record ~base_path ~user_name:None ~ts:"1700000000.000700"
+      ~route:"triggered" ~urgency:A.Mention ()
+  with
+  | None -> fail "record returned None"
+  | Some _ -> (
+    match pending ~base_path ~keeper_name:"alpha" with
+    | [] -> fail "no pending item"
+    | item :: _ ->
+      check (option string) "the id is not offered as a name" None
+        item.A.actor.A.display_name;
+      (* The id is still carried: an author nobody named is still a particular
+         author, and two of them in a channel are two people. *)
+      check (option string) "and the author is still identified" (Some "U1")
+        item.A.actor.A.actor_id)
 
 let test_ambient_record_uses_ambient_urgency () =
   with_temp_base "slack-attention-ambient" @@ fun base_path ->
@@ -149,6 +173,8 @@ let () =
             test_triggered_record_is_pending_with_slack_surface
         ; test_case "ambient record uses ambient urgency" `Quick
             test_ambient_record_uses_ambient_urgency
+        ; test_case "a missing author name stays missing" `Quick
+            test_a_missing_author_name_stays_missing
         ; test_case "duplicate wire delivery keeps one pending" `Quick
             test_duplicate_wire_delivery_keeps_one_pending
         ; test_case "sent reply retires attention" `Quick

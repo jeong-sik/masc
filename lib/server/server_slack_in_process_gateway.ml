@@ -280,9 +280,18 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
       ; metadata
       }
     in
-    (* DET-OK: rendering-only fallback to stable [user_id]; identity keys
-       use [user_id] directly. *)
-    let user_name = Option.value user_name ~default:user_id in
+    (* [user_name] stays an option from here down. It used to be collapsed to
+       [user_id] and then wrapped back into [Some], which reads as "Slack told
+       us this person is called U09L0RHPW7P".
+
+       The comment above called that rendering-only. It is not: the value
+       reaches [display_name], the durable chat row's [speaker_name], and the
+       pane, where an id sits in the place a name goes. 12 of one person's 24
+       messages arrived that way -- the same human, named half the time.
+
+       [display_name] is already [string option], so absence has a place to
+       live. Only the gate's [channel_user_name] needs a string, and that one
+       keeps its documented fallback. *)
     let urgency =
       if mentions_bot || is_app_mention then Keeper_external_attention.Mention
       else
@@ -294,7 +303,7 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
     in
     let attention_event_id =
       record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-        ~thread_ts ~ts ~user_id ~user_name:(Some user_name) ~content:text
+        ~thread_ts ~ts ~user_id ~user_name ~content:text
         ~mentions_bot:(mentions_bot || is_app_mention) ~route:"triggered"
         ~urgency
     in

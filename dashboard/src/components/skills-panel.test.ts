@@ -5,10 +5,15 @@ import type {
   SkillSurface,
 } from '../api/dashboard-skills'
 import {
+  decodeSkillsResponse,
+  SkillsContractError,
+} from '../api/dashboard-skills'
+import {
   formatBytes,
   kindLabel,
   mergeSkillRows,
   resourceReadBoundLabel,
+  skillRowKey,
   sortSkillRows,
   stateMessage,
 } from './skills-panel'
@@ -73,19 +78,39 @@ describe('mergeSkillRows', () => {
   })
 
   it('keeps the snapshot when the surface projection is unavailable', () => {
-    const rows = mergeSkillRows([intake], undefined)
+    const rows = mergeSkillRows([intake], [])
     expect(rows.map(row => [row.name, row.surface])).toEqual([['work-intake', null]])
   })
 
-  it('keeps diagnostics and accepts an omitted diagnostics field', () => {
+  it('merges snapshot and exact surface diagnostics without duplicates', () => {
+    const compatible = entry('compatible', {
+      diagnostics: ['name differs from directory', 'shared diagnostic'],
+    })
     const rows = mergeSkillRows(
-      [entry('compatible', { diagnostics: ['name differs from directory'] }), entry('plain')],
-      [],
+      [compatible, entry('plain')],
+      [{
+        reference: reference(compatible),
+        kind: 'instruction',
+        diagnostics: ['shared diagnostic', 'composition fence malformed'],
+      }],
     )
     expect(rows.map(row => row.diagnostics)).toEqual([
-      ['name differs from directory'],
+      ['name differs from directory', 'shared diagnostic', 'composition fence malformed'],
       [],
     ])
+  })
+
+  it('does not attach diagnostics from a same-name different reference', () => {
+    const shadow = entry('work-intake', { source_id: 'shadow-source' })
+    const rows = mergeSkillRows(
+      [intake, shadow],
+      [{
+        reference: reference(shadow),
+        kind: 'instruction',
+        diagnostics: ['shadow-only diagnostic'],
+      }],
+    )
+    expect(rows.map(row => row.diagnostics)).toEqual([[], ['shadow-only diagnostic']])
   })
 })
 
@@ -124,6 +149,131 @@ describe('sortSkillRows', () => {
     const rows = mergeSkillRows([entry('b'), entry('a')], [])
     sortSkillRows(rows)
     expect(rows.map(row => row.name)).toEqual(['b', 'a'])
+  })
+
+  it('uses the complete exact reference as the Preact row key', () => {
+    const rows = mergeSkillRows([
+      entry('same', { source_id: 'a-source', content_revision: 'revision-a' }),
+      entry('same', { source_id: 'b-source', content_revision: 'revision-b' }),
+    ], [])
+    expect(rows.map(skillRowKey)).toEqual([
+      'a-source\u0000same\u0000same\u0000revision-a',
+      'b-source\u0000same\u0000same\u0000revision-b',
+    ])
+  })
+})
+
+function readyPayload(
+  entries: SkillSnapshotEntry[],
+  readySurfaces: SkillSurface[] | undefined,
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    schema: 'masc.skill-snapshot/v1',
+    state: 'ready',
+    snapshot: {
+      snapshot_revision: 'snapshot-revision',
+      catalog_revision: 'catalog-revision',
+      config: {
+        kind: 'configured',
+        revision: 'config-revision',
+        resource_read_max_bytes: 65_536,
+      },
+      sources: [],
+      skills: entries.map(snapshotEntry => ({
+        ...snapshotEntry,
+        diagnostics: snapshotEntry.diagnostics ?? [],
+      })),
+      effective_skills: entries.map(snapshotEntry => snapshotEntry.identity),
+      shadows: [],
+      rejections: [],
+    },
+  }
+  if (readySurfaces !== undefined) payload.surfaces = readySurfaces
+  return payload
+}
+
+function expectContractCode(run: () => unknown, code: SkillsContractError['code']): void {
+  try {
+    run()
+    throw new Error('expected SkillsContractError')
+  } catch (error) {
+    expect(error).toBeInstanceOf(SkillsContractError)
+    expect((error as SkillsContractError).code).toBe(code)
+  }
+}
+
+describe('decodeSkillsResponse', () => {
+  it('accepts an empty surfaces projection only for an empty snapshot', () => {
+    expect(decodeSkillsResponse(readyPayload([], []))).toMatchObject({
+      state: 'ready',
+      surfaces: [],
+    })
+  })
+
+  it('decodes a complete non-empty exact-reference projection', () => {
+    expect(decodeSkillsResponse(readyPayload(
+      [intake],
+      [{
+        reference: reference(intake),
+        kind: 'instruction',
+        diagnostics: ['server projection diagnostic'],
+      }],
+    ))).toMatchObject({
+      state: 'ready',
+      surfaces: [{
+        reference: reference(intake),
+        kind: 'instruction',
+        diagnostics: ['server projection diagnostic'],
+      }],
+    })
+  })
+
+  it('distinguishes a missing surfaces field from an empty non-empty projection', () => {
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload([intake], undefined)),
+      'ready_surfaces_missing',
+    )
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload([intake], [])),
+      'ready_surfaces_empty',
+    )
+  })
+
+  it('rejects a non-array surfaces carrier with its typed contract code', () => {
+    expectContractCode(
+      () => decodeSkillsResponse({ ...readyPayload([intake], []), surfaces: {} }),
+      'ready_surfaces_invalid',
+    )
+  })
+
+  it('rejects duplicate exact surface references', () => {
+    const surface: SkillSurface = { reference: reference(intake), kind: 'instruction' }
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload([intake], [surface, surface])),
+      'ready_surfaces_duplicate_reference',
+    )
+  })
+
+  it('rejects missing exact-reference coverage even when names match', () => {
+    const shadow = entry('work-intake', { source_id: 'shadow-source' })
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload(
+        [intake, shadow],
+        [{ reference: reference(intake), kind: 'instruction' }],
+      )),
+      'ready_surface_missing_reference',
+    )
+  })
+
+  it('rejects a surface reference absent from the snapshot', () => {
+    const shadow = entry('work-intake', { source_id: 'shadow-source' })
+    expectContractCode(
+      () => decodeSkillsResponse(readyPayload(
+        [intake],
+        [{ reference: reference(shadow), kind: 'instruction' }],
+      )),
+      'ready_surface_unexpected_reference',
+    )
   })
 })
 

@@ -4,6 +4,7 @@
 // (masc.skill-snapshot/v1, lib/skill_snapshot) plus the optional exact
 // parser-derived surface of each effective Skill.
 
+import { Either, ParseResult, Schema } from 'effect'
 import { get, type GetOptions } from './core'
 
 export interface SkillIdentity {
@@ -17,7 +18,7 @@ export interface SkillSnapshotEntry {
   content_revision: string
   description: string
   conformance: string
-  diagnostics?: string[]
+  diagnostics?: readonly string[]
   body_bytes: number
 }
 
@@ -27,17 +28,18 @@ export type SkillSnapshotConfig =
       revision: string
       resource_read_max_bytes: number | null
     }
-  | { kind: 'rejected'; source_revision: string; diagnostics: string[] }
+  | { kind: 'rejected'; source_revision: string; diagnostics: readonly string[] }
   | { kind: 'unreadable' }
 
 export interface SkillSnapshot {
   snapshot_revision: string
   catalog_revision: string
   config: SkillSnapshotConfig
-  skills: SkillSnapshotEntry[]
-  effective_skills: SkillIdentity[]
-  shadows: unknown[]
-  rejections: unknown[]
+  sources: readonly unknown[]
+  skills: readonly SkillSnapshotEntry[]
+  effective_skills: readonly SkillIdentity[]
+  shadows: readonly unknown[]
+  rejections: readonly unknown[]
 }
 
 export interface SkillReference {
@@ -45,26 +47,247 @@ export interface SkillReference {
   content_revision: string
 }
 
+interface SkillSurfaceBase {
+  reference: SkillReference
+  diagnostics?: readonly string[]
+}
+
 export type SkillSurface =
-  | { reference: SkillReference; kind: 'instruction'; diagnostics?: string[] }
-  | ({
-      reference: SkillReference
+  | (SkillSurfaceBase & { kind: 'instruction' })
+  | (SkillSurfaceBase & {
       kind: 'composition'
       tool_name: string
       execution: string
-      diagnostics?: string[]
     })
-  | { reference: SkillReference; kind: 'unavailable'; error: string }
+  | (SkillSurfaceBase & { kind: 'unavailable'; error: string })
 
 export type SkillsResponse =
   | {
       schema: string
       state: 'ready'
       snapshot: SkillSnapshot
-      surfaces?: SkillSurface[]
+      surfaces: readonly SkillSurface[]
     }
-  | { schema: string; state: 'not_registered' | 'uninitialized' | 'invalid_workspace' }
+  | { schema: string; state: 'not_registered' | 'uninitialized' }
+  | {
+      schema: string
+      state: 'invalid_workspace'
+      reason: { code: 'invalid_workspace' }
+    }
+
+export type SkillsContractErrorCode =
+  | 'invalid_response'
+  | 'ready_surfaces_missing'
+  | 'ready_surfaces_empty'
+  | 'ready_surfaces_invalid'
+  | 'ready_surfaces_duplicate_reference'
+  | 'ready_surface_missing_reference'
+  | 'ready_surface_unexpected_reference'
+
+export class SkillsContractError extends Error {
+  readonly code: SkillsContractErrorCode
+
+  constructor(code: SkillsContractErrorCode, detail: string) {
+    super(`invalid skills response: ${detail}`)
+    this.name = 'SkillsContractError'
+    this.code = code
+  }
+}
+
+function contractError(code: SkillsContractErrorCode, detail: string): never {
+  throw new SkillsContractError(code, detail)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+const PositiveSafeIntegerSchema = Schema.Int.pipe(
+  Schema.between(1, Number.MAX_SAFE_INTEGER),
+)
+const OptionalDiagnosticsSchema = Schema.optional(Schema.Array(Schema.String))
+
+const SkillIdentitySchema = Schema.Struct({
+  source_id: Schema.NonEmptyString,
+  package_id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+})
+
+const SkillReferenceSchema = Schema.Struct({
+  identity: SkillIdentitySchema,
+  content_revision: Schema.NonEmptyString,
+})
+
+const SkillSurfaceSchema = Schema.Union(
+  Schema.Struct({
+    reference: SkillReferenceSchema,
+    kind: Schema.Literal('instruction'),
+    diagnostics: OptionalDiagnosticsSchema,
+  }),
+  Schema.Struct({
+    reference: SkillReferenceSchema,
+    kind: Schema.Literal('composition'),
+    tool_name: Schema.NonEmptyString,
+    execution: Schema.NonEmptyString,
+    diagnostics: OptionalDiagnosticsSchema,
+  }),
+  Schema.Struct({
+    reference: SkillReferenceSchema,
+    kind: Schema.Literal('unavailable'),
+    error: Schema.NonEmptyString,
+    diagnostics: OptionalDiagnosticsSchema,
+  }),
+)
+
+const SkillSnapshotConfigSchema = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal('configured'),
+    revision: Schema.NonEmptyString,
+    resource_read_max_bytes: Schema.NullOr(PositiveSafeIntegerSchema),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('rejected'),
+    source_revision: Schema.NonEmptyString,
+    diagnostics: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({ kind: Schema.Literal('unreadable') }),
+)
+
+const SkillSnapshotEntrySchema = Schema.Struct({
+  identity: SkillIdentitySchema,
+  content_revision: Schema.NonEmptyString,
+  description: Schema.NonEmptyString,
+  conformance: Schema.NonEmptyString,
+  diagnostics: Schema.Array(Schema.String),
+  body_bytes: Schema.NonNegativeInt,
+})
+
+const SkillSnapshotSchema = Schema.Struct({
+  snapshot_revision: Schema.NonEmptyString,
+  catalog_revision: Schema.NonEmptyString,
+  config: SkillSnapshotConfigSchema,
+  sources: Schema.Array(Schema.Unknown),
+  skills: Schema.Array(SkillSnapshotEntrySchema),
+  effective_skills: Schema.Array(SkillIdentitySchema),
+  shadows: Schema.Array(Schema.Unknown),
+  rejections: Schema.Array(Schema.Unknown),
+})
+
+const ReadySkillsResponseSchema = Schema.Struct({
+  schema: Schema.Literal('masc.skill-snapshot/v1'),
+  state: Schema.Literal('ready'),
+  snapshot: SkillSnapshotSchema,
+  surfaces: Schema.Array(SkillSurfaceSchema),
+})
+
+const UnreadySkillsResponseSchema = Schema.Union(
+  Schema.Struct({
+    schema: Schema.Literal('masc.skill-snapshot/v1'),
+    state: Schema.Literal('not_registered', 'uninitialized'),
+  }),
+  Schema.Struct({
+    schema: Schema.Literal('masc.skill-snapshot/v1'),
+    state: Schema.Literal('invalid_workspace'),
+    reason: Schema.Struct({ code: Schema.Literal('invalid_workspace') }),
+  }),
+)
+
+const STRICT_PARSE_OPTIONS = {
+  errors: 'all',
+  onExcessProperty: 'error',
+} as const
+
+function decodeWithSchema<A, I>(
+  schema: Schema.Schema<A, I>,
+  raw: unknown,
+  code: SkillsContractErrorCode,
+): A {
+  const result = Schema.decodeUnknownEither(schema, STRICT_PARSE_OPTIONS)(raw)
+  if (Either.isRight(result)) return result.right
+  const detail = ParseResult.ArrayFormatter.formatErrorSync(result.left)
+    .map(issue => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+  return contractError(code, detail)
+}
+
+function referenceKey(reference: SkillReference): string {
+  const { identity } = reference
+  return [
+    identity.source_id,
+    identity.package_id,
+    identity.name,
+    reference.content_revision,
+  ].join('\u0000')
+}
+
+function validateSurfaceCoverage(
+  snapshot: SkillSnapshot,
+  surfaces: readonly SkillSurface[],
+): void {
+  if (snapshot.skills.length > 0 && surfaces.length === 0) {
+    contractError(
+      'ready_surfaces_empty',
+      'root.surfaces must project every non-empty snapshot skill',
+    )
+  }
+  const expected = new Set(
+    snapshot.skills.map(entry => referenceKey({
+      identity: entry.identity,
+      content_revision: entry.content_revision,
+    })),
+  )
+  const observed = new Set<string>()
+  for (const surface of surfaces) {
+    const key = referenceKey(surface.reference)
+    if (observed.has(key)) {
+      contractError(
+        'ready_surfaces_duplicate_reference',
+        'root.surfaces contains a duplicate exact reference',
+      )
+    }
+    if (!expected.has(key)) {
+      contractError(
+        'ready_surface_unexpected_reference',
+        'root.surfaces contains a reference absent from root.snapshot.skills',
+      )
+    }
+    observed.add(key)
+  }
+  if (observed.size !== expected.size) {
+    contractError(
+      'ready_surface_missing_reference',
+      'root.surfaces does not cover every exact snapshot reference',
+    )
+  }
+}
+
+export function decodeSkillsResponse(raw: unknown): SkillsResponse {
+  if (!isRecord(raw)) contractError('invalid_response', 'root must be an object')
+  if (raw.state !== 'ready') {
+    return decodeWithSchema(UnreadySkillsResponseSchema, raw, 'invalid_response')
+  }
+  if (!Object.hasOwn(raw, 'surfaces')) {
+    contractError('ready_surfaces_missing', 'root.surfaces is required for ready state')
+  }
+  if (!Array.isArray(raw.surfaces)) {
+    contractError('ready_surfaces_invalid', 'root.surfaces must be an array')
+  }
+  const snapshotSkills = isRecord(raw.snapshot) ? raw.snapshot.skills : undefined
+  if (Array.isArray(snapshotSkills) && snapshotSkills.length > 0 && raw.surfaces.length === 0) {
+    contractError(
+      'ready_surfaces_empty',
+      'root.surfaces must project every non-empty snapshot skill',
+    )
+  }
+  const decoded = decodeWithSchema(ReadySkillsResponseSchema, raw, 'ready_surfaces_invalid')
+  validateSurfaceCoverage(decoded.snapshot, decoded.surfaces)
+  return decoded
+}
 
 export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse> {
-  return get<SkillsResponse>('/api/v1/skills', opts)
+  const raw = await get<unknown>('/api/v1/skills', opts)
+  return decodeSkillsResponse(raw)
 }

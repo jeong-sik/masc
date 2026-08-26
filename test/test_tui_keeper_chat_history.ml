@@ -254,6 +254,29 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
           ~speaker_name:"vincent"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
+  (* The name where the workspace let us ask, the id where it did not. Both
+     answer "which room"; only one of them reads as a place. *)
+  check string "a named channel reads as the room"
+    "vincent \xc2\xb7 slack #kinossam-dev"
+    (label
+       (addressed ~speaker_name:"vincent"
+          ~surface:
+            (surface "slack"
+               [ "channel_id", `String "C09TK9L4DV4"
+               ; "channel_name", `String "kinossam-dev"
+               ])
+          "from slack"));
+  (* A blank name is the absence the resolver reports, not a room called "". *)
+  check string "a blank name falls back to the id"
+    "vincent \xc2\xb7 slack \xe2\x80\xa6TK9L4DV4"
+    (label
+       (addressed ~speaker_name:"vincent"
+          ~surface:
+            (surface "slack"
+               [ "channel_id", `String "C09TK9L4DV4"
+               ; "channel_name", `String "  "
+               ])
+          "from slack"));
   (* Discord ids are snowflakes: two channels created minutes apart share a
      long prefix, so the head is the half that does not tell them apart. These
      two are real ids from one Keeper's five bindings. *)

@@ -42,6 +42,7 @@ type surface_ref = Surface_ref.t =
   | Slack of {
       team_id : string option;
       channel_id : string;
+      channel_name : string option;
       thread_ts : string option;
     }
   | Webhook of { source : string; event_id : string }

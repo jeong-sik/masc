@@ -23,6 +23,10 @@ type surface_ref = Surface_ref.t =
   | Slack of {
       team_id : string option;
       channel_id : string;
+      channel_name : string option;
+          (** What the room is called, where the workspace let us ask. The id
+              is the identity and stays; the name is for the reader, who has
+              no way to tell [C09TK9L4DV4] from [C09TK9L4DV5]. *)
       thread_ts : string option;
     }
   | Webhook of { source : string; event_id : string }

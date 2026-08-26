@@ -3270,7 +3270,7 @@
 (include stanzas/test_tui_terminal_palette.inc)
 (include stanzas/test_tui_paste.inc)
 (include stanzas/test_tui_graphics.inc)
-(include stanzas/test_connector_person_names.inc)
+(include stanzas/test_connector_names.inc)
 (include stanzas/test_tui_image_ref.inc)
 (include stanzas/test_tui_link_label.inc)
 

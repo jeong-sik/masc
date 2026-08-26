@@ -1240,7 +1240,8 @@ let replay_connector_post_with_outcome
                ~keeper_name:meta.name
                ~content
                ~surface:
-                 (Surface_ref.Slack { team_id = None; channel_id; thread_ts })
+                 (Surface_ref.Slack
+                    { team_id = None; channel_id; channel_name = None; thread_ts })
                ()
            with
            | Error detail ->

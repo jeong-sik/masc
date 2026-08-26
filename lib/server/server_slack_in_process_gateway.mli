@@ -96,6 +96,7 @@ module For_testing : sig
     keeper_name:string ->
     team_id:string option ->
     channel_id:string ->
+    channel_name:string option ->
     thread_ts:string option ->
     ts:string ->
     user_id:string ->

@@ -1,4 +1,5 @@
-(* Names for the people a connector brings in, kept across restarts.
+(* Names for what a connector brings in -- the people and the places -- kept
+   across restarts.
 
    Slack answers [users.info] most of the time and not always: a workspace
    without [users:read], a rate limit, a network blip. The gateway's directory
@@ -13,21 +14,34 @@
    next successful lookup, which is the trade: a stale name reads as a person,
    a raw id reads as nothing.
 
-   Keyed by connector and id, not by keeper: the same Slack user is the same
-   person on every keeper's pane. *)
+   Keyed by connector, scope and id, not by keeper: the same Slack user is the
+   same person on every keeper's pane, and the same channel is the same room.
+
+   People and channels share this rather than each getting a copy. They ask
+   the same question -- what is this id called -- and two stores would be the
+   same ninety lines twice, drifting on the next fix to either. [scope] keeps
+   their id spaces apart. *)
 
 let sanitize_name name =
   Workspace_utils_backend_setup.sanitize_namespace_segment name
 
-let people_dir base_dir =
+type scope =
+  | Person
+  | Channel
+
+let scope_segment = function Person -> "people" | Channel -> "channels"
+
+let names_dir base_dir =
   Filename.concat
     (Common.masc_dir_from_base_path ~base_path:base_dir)
-    "connector_people"
+    "connector_names"
 
-let people_path ~base_dir ~connector =
-  Filename.concat (people_dir base_dir) (sanitize_name connector ^ ".jsonl")
+let names_path ~base_dir ~connector ~scope =
+  Filename.concat
+    (names_dir base_dir)
+    (sanitize_name connector ^ "-" ^ scope_segment scope ^ ".jsonl")
 
-let persistence_surface = "connector_person_names"
+let persistence_surface = "connector_names"
 
 let report_read_drop ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop_counted
@@ -38,11 +52,11 @@ let report_read_drop ~reason ~path ~detail =
 
 (* Append-only, last line wins. A rename is a new line rather than a rewrite,
    so a crash mid-write costs the newest name and not the file. *)
-let remember ~base_dir ~connector ~(id : string) ~(name : string) () =
+let remember ~base_dir ~connector ~scope ~(id : string) ~(name : string) () =
   if String.trim id = "" || String.trim name = "" then ()
   else
     try
-      ignore (Keeper_fs.ensure_dir (people_dir base_dir));
+      ignore (Keeper_fs.ensure_dir (names_dir base_dir));
       let line =
         Yojson.Safe.to_string
           (`Assoc
@@ -51,11 +65,11 @@ let remember ~base_dir ~connector ~(id : string) ~(name : string) () =
             ; ("ts", `Float (Time_compat.now ()))
             ])
       in
-      Fs_compat.append_file (people_path ~base_dir ~connector) (line ^ "\n")
+      Fs_compat.append_file (names_path ~base_dir ~connector ~scope) (line ^ "\n")
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Keeper.warn "connector_person_names: append failed for %s: %s"
+      Log.Keeper.warn "connector_names: append failed for %s: %s"
         (sanitize_name connector) (Printexc.to_string exn)
 
 let parse_row ~file_path line =
@@ -77,8 +91,8 @@ let parse_row ~file_path line =
       ~detail:(Printexc.to_string exn);
     None
 
-let recall ~base_dir ~connector ~(id : string) =
-  let file_path = people_path ~base_dir ~connector in
+let recall ~base_dir ~connector ~scope ~(id : string) =
+  let file_path = names_path ~base_dir ~connector ~scope in
   match Fs_compat.load_file file_path with
   | exception Sys_error _ -> None
   | contents ->

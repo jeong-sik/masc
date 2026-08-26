@@ -15,6 +15,13 @@ type selected =
 
 type t = { selected : selected list }
 
+type task_scope =
+  | No_task
+  | Task of
+      { task_id : string
+      ; references : Skill_reference.t list
+      }
+
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
 let resolve ~snapshot references =
@@ -92,12 +99,17 @@ let of_core_error = function
     None
 ;;
 
-let references_of_observation = function
+let scope_of_observation = function
   | Keeper_world_observation_inputs.Current_task task
   | Recovered_current_task { task; _ } ->
-    task.Masc_domain.skills
+    Task { task_id = task.id; references = task.skills }
   | No_current_task
   | Current_task_missing _
   | Current_task_unavailable _ ->
-    []
+    No_task
+;;
+
+let references = function
+  | No_task -> []
+  | Task { references; _ } -> references
 ;;

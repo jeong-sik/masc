@@ -161,8 +161,8 @@ let test_exact_reference_consumer_rejects_name_fallback () =
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~record_activation:(fun observed ->
         incr activation_attempts;
-        Error
-          (Masc.Keeper_skill_activation_recorder.Task_scope_missing observed))
+        ignore observed;
+        Error Masc.Keeper_skill_activation_recorder.Turn_scope_mismatch)
       ~instruction_skills:
         [ reference, selected.skill.description, selected.skill.body ]
       ()

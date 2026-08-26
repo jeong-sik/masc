@@ -26,6 +26,16 @@ open Masc
 
 module Policy = Keeper_tool_approval_policy
 
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+    Sys.readdir path
+    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+    Unix.rmdir path
+  | Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO
+  | Unix.S_SOCK -> Unix.unlink path
+;;
+
 let with_publication_recovery_registry ~registry_root f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -200,10 +210,43 @@ let with_bundle_tools f =
   in
   (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   Fun.protect
-    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    ~finally:(fun () -> if Sys.file_exists dir then remove_tree dir)
     (fun () ->
        let config = Workspace.default_config dir in
        let meta = make_meta ~name:"bundle-classifiable" () in
+       let trace_id = meta.runtime.trace_id in
+       let session_dir =
+         Keeper_fs.keeper_session_dir
+           config
+           (Keeper_id.Trace_id.to_string trace_id)
+       in
+       Unix.mkdir session_dir 0o700;
+       let reference = instruction_reference () in
+       let snapshot_revision =
+         match
+           Skill_catalog_snapshot.snapshot_revision_of_string
+             (String.make 64 'a')
+         with
+         | Ok revision -> revision
+         | Error _ -> fail "invalid activation snapshot revision"
+       in
+       let skill_activation_context =
+         match
+           Keeper_skill_activation_recorder.make
+             ~trace_id
+             ~turn_ref:
+               (Ids.Turn_ref.make
+                  ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
+                  ~absolute_turn:1)
+             ~snapshot_revision
+             ~task_scope:
+               (Keeper_task_skill_turn.Task
+                  { task_id = "task-001"; references = [ reference ] })
+         with
+         | Ok context -> context
+         | Error error ->
+           fail (Keeper_skill_activation_recorder.error_to_string error)
+       in
        let ctx_snapshot =
          Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
@@ -227,14 +270,15 @@ let with_bundle_tools f =
            ~identity_tools:(identity_tools ~base_path:dir)
            ~composition_plan_index
            ~task_instruction_skills:
-             [ instruction_reference (), "what the gate reads", "body" ]
+             [ reference, "what the gate reads", "body" ]
+           ~skill_activation_context
            ()
        in
        Fun.protect ~finally:bundle.cleanup (fun () ->
-         f composition_plan_index bundle.tools))
+         f config meta composition_plan_index bundle.tools))
 ;;
 
-let with_bundle f = with_bundle_tools (fun composition_plan_index tools ->
+let with_bundle f = with_bundle_tools (fun _config _meta composition_plan_index tools ->
   f composition_plan_index
     (List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools))
 ;;
@@ -272,7 +316,7 @@ let test_the_bundle_is_not_empty () =
    the surface and classifiable but answers nothing would pass every other
    assertion here. *)
 let test_the_skill_tool_serves_the_body () =
-  with_bundle_tools (fun _ tools ->
+  with_bundle_tools (fun config meta _composition_plan_index tools ->
     match
       List.find_opt
         (fun (tool : Agent_core.Tool.t) ->
@@ -288,6 +332,18 @@ let test_the_skill_tool_serves_the_body () =
       let served = run_tool tool (Skill_reference.to_yojson reference) in
       check bool "asking by exact reference returns the body" true
         (contains ~needle:"body" served);
+      let ledger =
+        match
+          Keeper_skill_activation_ledger.load
+            ~config
+            ~trace_id:meta.runtime.trace_id
+        with
+        | Ok ledger -> ledger
+        | Error error ->
+          fail (Keeper_skill_activation_ledger.store_error_to_string error)
+      in
+      check int "body read has one durable activation" 1
+        (List.length (Keeper_skill_activation_ledger.activations ledger));
       let stale =
         Skill_reference.make
           ~identity:reference.identity

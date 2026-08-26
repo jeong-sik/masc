@@ -197,7 +197,7 @@ val run_turn
   -> user_message:string
   -> turn_kind:Turn_record.turn_kind
   -> skill_snapshot:Skill_catalog_snapshot.t
-  -> task_skill_references:Skill_reference.t list
+  -> task_skill_scope:Keeper_task_skill_turn.task_scope
   -> ?user_blocks:Agent_core.Types.content_block list
   -> runtime_id:string
   -> ?world_observation:Keeper_world_observation.world_observation

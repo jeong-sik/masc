@@ -4,7 +4,7 @@ type t
 
 type error =
   | Turn_scope_mismatch
-  | Task_scope_missing of Skill_reference.t
+  | Invalid_task_id of string
   | Composition_reference_missing of { tool_name : string }
   | Activation_rejected of Keeper_skill_activation_ledger.decode_error
   | Store_failed of Keeper_skill_activation_ledger.store_error
@@ -13,8 +13,7 @@ val make :
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
-  task_id:Keeper_id.Task_id.t option ->
-  task_references:Skill_reference.t list ->
+  task_scope:Keeper_task_skill_turn.task_scope ->
   (t, error) result
 (** Capture the immutable facts used by every Skill call in one turn. *)
 

@@ -242,7 +242,7 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
-      ~(task_skill_references : Skill_reference.t list)
+      ~(task_skill_scope : Keeper_task_skill_turn.task_scope)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -294,6 +294,9 @@ let prepare_agent_setup
              "tool result arrived before the resolved runtime attempt owner was observed")
       on_tool_result_ready
   in
+  let task_skill_references =
+    Keeper_task_skill_turn.references task_skill_scope
+  in
   let* task_skill_selection =
     Keeper_task_skill_turn.resolve
       ~snapshot:skill_snapshot
@@ -316,8 +319,7 @@ let prepare_agent_setup
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~absolute_turn:keeper_turn_id)
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
-      ~task_id:meta.current_task_id
-      ~task_references:task_skill_references
+      ~task_scope:task_skill_scope
     |> Result.map_error (fun error ->
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))

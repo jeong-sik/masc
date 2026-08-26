@@ -433,7 +433,12 @@ let toml_lexer text =
         let key_char c = is_identifier_char c || c = '-' || c = '.' in
         let rec extent i = if i < limit && key_char text.[i] then extent (i + 1) else i in
         let stop = extent index in
-        let kind = if assignment_follows stop then kind_keyword else kind_code in
+        (* [kind_type], the colour the Config screen already gives a TOML key.
+           This lexer is replacing a shorter one that could not carry a
+           multi-line string; the colours it painted are the ones the screen
+           and its tests already agree on, so only the multi-line handling
+           changes here. *)
+        let kind = if assignment_follows stop then kind_type else kind_code in
         advance (take_while text index key_char kind runs)
       end
       else if is_digit char
@@ -833,52 +838,6 @@ let yaml_lexer text =
 (* TOML. A table header owns its whole line -- [[repository]] and [tui] are
    the file's structure, and the brackets are part of the name, so the line is
    taken whole rather than the brackets coloured apart from what they hold. *)
-let toml_lexer text =
-  let runs = new_runs kind_code in
-  let limit = String.length text in
-  let line_start = ref 0 in
-  let rec advance index =
-    if index >= limit then ()
-    else
-      let char = text.[index] in
-      if char = '\n' then begin
-        runs_add runs kind_code char;
-        line_start := index + 1;
-        advance (index + 1)
-      end
-      else if char = '#' then advance (take_line_comment text index runs)
-      else if char = '"' then advance (take_ocaml_string text index runs)
-      else if char = '\'' then advance (take_quoted ~quote:'\'' text index runs)
-      else if
-        char = '[' && index = line_content_start ~list_marker:false text !line_start
-      then
-        advance (take_while text index (fun c -> c <> '\n') kind_keyword runs)
-      else if index = line_content_start ~list_marker:false text !line_start then begin
-        match key_end ~delimiter:'=' text index with
-        | Some stop ->
-            paint ~kind:kind_type text index stop runs;
-            advance stop
-        | None ->
-            runs_add runs kind_code char;
-            advance (index + 1)
-      end
-      else if is_digit char then advance (take_number text index runs)
-      else
-        match literal_at text index with
-        | Some word ->
-            String.iter (fun c -> runs_add runs kind_number c) word;
-            advance (index + String.length word)
-        | None ->
-            runs_add runs kind_code char;
-            advance (index + 1)
-  in
-  advance 0;
-  runs_segments runs
-
-(* SQL keywords, lowercased for the comparison because the same query arrives
-   shouted, whispered and mixed. The set is the one a reader needs to see the
-   shape of a statement, not the standard's full reserved list -- a word this
-   does not know stays plain rather than being coloured on a guess. *)
 let sql_reserved =
   [ "add"; "all"; "alter"; "and"; "as"; "asc"; "begin"; "between"; "by"
   ; "case"; "cast"; "commit"; "constraint"; "create"; "cross"; "delete"

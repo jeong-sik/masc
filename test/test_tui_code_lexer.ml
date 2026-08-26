@@ -31,7 +31,7 @@ let test_toml_keys_headers_and_values () =
   check seg "the key, the header and the value each answer"
     [ ("[keeper]", Masc_tui_code_lexer.kind_type)
     ; ("\n", Masc_tui_code_lexer.kind_code)
-    ; ("sandbox_profile", Masc_tui_code_lexer.kind_keyword)
+    ; ("sandbox_profile", Masc_tui_code_lexer.kind_type)
     ; (" = ", Masc_tui_code_lexer.kind_code)
     ; ("\"docker\"", Masc_tui_code_lexer.kind_string)
     ]
@@ -48,7 +48,7 @@ let test_a_multiline_string_stays_one_string () =
   match Masc_tui_code_lexer.toml_lexer source with
   | (key, key_kind) :: (_, _) :: (body, body_kind) :: rest ->
       check Alcotest.string "the key" "description" key;
-      check Alcotest.string "colours as a key" Masc_tui_code_lexer.kind_keyword
+      check Alcotest.string "colours as a key" Masc_tui_code_lexer.kind_type
         key_kind;
       check Alcotest.string "the block colours as a string"
         Masc_tui_code_lexer.kind_string body_kind;
@@ -63,7 +63,7 @@ let test_a_hash_comment_runs_to_the_row_end () =
   check seg "the comment stops at the newline"
     [ ("# why this is here", Masc_tui_code_lexer.kind_comment)
     ; ("\n", Masc_tui_code_lexer.kind_code)
-    ; ("a", Masc_tui_code_lexer.kind_keyword)
+    ; ("a", Masc_tui_code_lexer.kind_type)
     ; (" = ", Masc_tui_code_lexer.kind_code)
     ; ("1", Masc_tui_code_lexer.kind_number)
     ]
@@ -108,8 +108,11 @@ let test_a_shipped_declaration_lexes () =
   Alcotest.(check bool) "the file came back whole" true
     (List.fold_left (fun n (t, _) -> n + String.length t) 0 segments
      = String.length text);
-  Alcotest.(check bool) "keys were found" true (cells Masc_tui_code_lexer.kind_keyword > 0);
-  Alcotest.(check bool) "headers were found" true (cells Masc_tui_code_lexer.kind_type > 0);
+  (* Keys and table headers share [kind_type] with the other config lexers
+     ([yaml_lexer], [json_lexer]), so one count covers both. Two counts over
+     the same colour would read as two facts and check one. *)
+  Alcotest.(check bool) "keys and headers were found" true
+    (cells Masc_tui_code_lexer.kind_type > 0);
   Alcotest.(check bool) "and the descriptions read as strings" true
     (cells Masc_tui_code_lexer.kind_string > 200)
 
@@ -205,7 +208,7 @@ let test_a_toml_table_header_is_taken_whole () =
           "[[repository]]\nname = 1" with
   | header :: _ ->
       check seg "the brackets belong to the name"
-        [ ("[[repository]]", Masc_tui_code_lexer.kind_keyword) ]
+        [ ("[[repository]]", Masc_tui_code_lexer.kind_type) ]
         (List.filter (fun (piece, _) -> piece <> "") header)
   | [] -> Alcotest.fail "the lexer answered no rows"
 

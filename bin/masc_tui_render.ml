@@ -9,6 +9,7 @@ module Board_detail = Masc_tui_board_detail
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
+module Context_state = Masc_tui_context_state
 module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
@@ -3044,41 +3045,48 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Live Context section (Phase 2) *)
     add_section "Live Context";
     (match
-       Terminal_text.optional_single_line state.live_context_error,
-       state.live_context
+       Context_state.reading_for_keeper ~keeper_name:k.k_name
+         state.live_context
      with
-     | Some error, _ ->
-         add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
-     | None, Some observation ->
-         (match Observation_layout.context_summary observation with
-          | Observation_layout.Context_measured observation ->
-              let ratio = observation.ratio in
-              let pct = ratio *. 100.0 in
-              let bar_width =
-                Masc_tui_render_schedule.keeper_context_bar_width
-                  ~inner_width:inner
-              in
-              add_row "Context:"
-                (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
-                   (ctx_color ratio) pct Ansi.reset
-                   (ctx_bar ratio bar_width) observation.tokens
-                   observation.maximum);
-              add_row "Observed:"
-                (Terminal_text.short_timestamp observation.observed_at);
-              add_row "Turn Ref:"
-                (Terminal_text.single_line observation.turn_ref)
-          | Observation_layout.Context_partial observation ->
-              add_row "Context:"
-                (Printf.sprintf "%d tokens; context window not observed"
-                   observation.tokens);
-              add_row "Observed:"
-                (Terminal_text.short_timestamp observation.observed_at);
-              add_row "Turn Ref:"
-                (Terminal_text.single_line observation.turn_ref)
-          | Observation_layout.Context_unavailable reason ->
-              add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
-     | None, None ->
-         add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset));
+     | None ->
+         add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)
+     | Some reading ->
+         (match
+            Terminal_text.optional_single_line reading.error,
+            reading.observation
+          with
+          | Some error, _ ->
+              add_row "Context:" ((Theme.bad ()) ^ error ^ Ansi.reset)
+          | None, Some observation ->
+              (match Observation_layout.context_summary observation with
+               | Observation_layout.Context_measured observation ->
+                   let ratio = observation.ratio in
+                   let pct = ratio *. 100.0 in
+                   let bar_width =
+                     Masc_tui_render_schedule.keeper_context_bar_width
+                       ~inner_width:inner
+                   in
+                   add_row "Context:"
+                     (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
+                        (ctx_color ratio) pct Ansi.reset
+                        (ctx_bar ratio bar_width) observation.tokens
+                        observation.maximum);
+                   add_row "Observed:"
+                     (Terminal_text.short_timestamp observation.observed_at);
+                   add_row "Turn Ref:"
+                     (Terminal_text.single_line observation.turn_ref)
+               | Observation_layout.Context_partial observation ->
+                   add_row "Context:"
+                     (Printf.sprintf "%d tokens; context window not observed"
+                        observation.tokens);
+                   add_row "Observed:"
+                     (Terminal_text.short_timestamp observation.observed_at);
+                   add_row "Turn Ref:"
+                     (Terminal_text.single_line observation.turn_ref)
+               | Observation_layout.Context_unavailable reason ->
+                   add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
+          | None, None ->
+              add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset)));
     add_empty ();
 
     (* Runtime section *)
@@ -3476,7 +3484,17 @@ let render_keeper_message (state : state) =
   | Some keeper_name ->
     let chat_theme = Chat_theme.snapshot () in
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
-    let header =
+    let target_registered =
+      keeper_available_for_new_message state keeper_name
+    in
+    let status_rows = keeper_message_status_rows state in
+    (* Wide terminals keep the roster beside the chat, exactly as the detail
+       view does; the chat lays out against its own pane width. *)
+    let split = keeper_roster_pane_shown state ~cols in
+    let chat_cols =
+      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    in
+    let header_base =
       (* Both features put a mode indicator here: memory arrived on main
          (#30401) while this branch was open. Neither is dropped, but only a
          mode away from its default is spelled -- see
@@ -3495,15 +3513,32 @@ let render_keeper_message (state : state) =
          then ""
          else Printf.sprintf "  %s%s%s" Ansi.dim modes Ansi.reset)
     in
-    let target_registered =
-      keeper_available_for_new_message state keeper_name
+    (* Context is an optional item on the existing row. It may be appended only
+       when the whole item fits the chat box's own interior; [box_line] must
+       never be left to cut a context reading into a different statement. *)
+    let context_separator = "  " in
+    let context_item =
+      if not target_registered then None
+      else
+        match
+          Context_state.reading_for_keeper ~keeper_name state.live_context
+        with
+        | Some { observation = Some observation; error = None } ->
+            Observation_layout.context_header_item
+              ~max_cells:
+                (max 0
+                   (chat_cols - 4
+                   - Message_layout.display_width header_base
+                   - Message_layout.display_width context_separator))
+              observation
+        | Some _ | None -> None
     in
-    let status_rows = keeper_message_status_rows state in
-    (* Wide terminals keep the roster beside the chat, exactly as the detail
-       view does; the chat lays out against its own pane width. *)
-    let split = keeper_roster_pane_shown state ~cols in
-    let chat_cols =
-      Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden ~cols
+    let header =
+      match context_item with
+      | None -> header_base
+      | Some item ->
+          String.concat ""
+            [ header_base; context_separator; Ansi.dim; item; Ansi.reset ]
     in
     if
       not

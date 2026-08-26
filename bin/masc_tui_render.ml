@@ -6992,6 +6992,7 @@ let render_tools (state : state) =
                    ets_native_posture;
                    ets_tool_groups;
                    ets_instruction_skills;
+                   ets_skills_left_out;
                    ets_composition_skills;
                    ets_tools;
                    ets_tool_surface_sha256;
@@ -7044,8 +7045,24 @@ let render_tools (state : state) =
           Printf.sprintf "   instruction skills=%s  composition skills=%s"
             (Terminal_text.single_line instruction)
             (Terminal_text.single_line composition);
-          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest;
-          Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
+          Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+        (* Said on this surface because this is the one that answers "what can
+           this Keeper call". A document the catalog could not read is absent
+           from that answer, and absence with nothing beside it reads as a
+           skill nobody wrote rather than one that did not load. Drawn only
+           when there is one, so a healthy workspace gains no row. *)
+        @ (match ets_skills_left_out with
+           | [] -> []
+           | left_out ->
+             ( (Theme.warn ()),
+               Printf.sprintf "   %d skill(s) left out of the catalog"
+                 (List.length left_out) )
+             :: List.map
+                  (fun entry ->
+                    (Theme.warn ()),
+                    "     " ^ Terminal_text.single_line entry)
+                  left_out)
+        @ [ Ansi.bold, Printf.sprintf "   %-34s %s" "Tool" "Origin" ]
         @ tool_lines
   in
   let catalog_lines =

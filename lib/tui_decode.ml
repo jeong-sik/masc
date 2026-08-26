@@ -1461,6 +1461,11 @@ type effective_tool_surface =
       ets_native_posture : string option;
       ets_tool_groups : string list;
       ets_instruction_skills : string list;
+      (* Documents the catalog could not read. Beside the skills rather than
+         missing from them: a skill left out is absent from what the Keeper
+         can call, and absence with no reason reads as a skill nobody
+         wrote. *)
+      ets_skills_left_out : string list;
       ets_composition_skills : string list;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
@@ -1708,6 +1713,9 @@ let decode_effective_tool_surface json =
       in
       let* ets_native_posture = optional_string_field json "native_posture" in
       let* ets_tool_groups = decode_string_name_list json "tool_groups" in
+      let* ets_skills_left_out =
+        decode_string_name_list json "skills_left_out"
+      in
       let* ets_instruction_skills =
         decode_string_name_list json "instruction_skills"
       in
@@ -1730,6 +1738,7 @@ let decode_effective_tool_surface json =
              ets_native_posture;
              ets_tool_groups;
              ets_instruction_skills;
+             ets_skills_left_out;
              ets_composition_skills;
              ets_tools;
              ets_tool_surface_sha256;

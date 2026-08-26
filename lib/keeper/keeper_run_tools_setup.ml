@@ -173,7 +173,11 @@ let load_skill_catalog ~base_path =
               rejected.directory
               (Keeper_skill_catalog.error_to_string rejected.error))
          keeper_rejections;
-       Ok catalog)
+       (* Returned, not only logged. A log line is where a reader goes to find
+          out what happened after they already suspect something; the surfaces
+          that answer "what can this Keeper call" are where the absence shows
+          up first, and they cannot say it if the loader keeps it. *)
+       Ok (catalog, keeper_rejections))
 ;;
 
 let expected_model_tool_names ~skill_catalog ~identity_tool_names
@@ -360,7 +364,9 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let* skill_catalog = load_skill_catalog ~base_path:config.base_path in
+  let* skill_catalog, _skills_left_out =
+    load_skill_catalog ~base_path:config.base_path
+  in
   let* () = validate_held_task_skill_admission ~config ~meta ~skill_catalog in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta

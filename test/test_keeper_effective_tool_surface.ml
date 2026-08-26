@@ -50,6 +50,54 @@ let skill_catalog () =
       (Keeper_skill_catalog.error_to_string error)
 ;;
 
+let configured_external_skill_catalog () =
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+[[skills.sources]]
+id = "shared-catalog"
+anchor = "absolute"
+path = "/srv/shared-agent-skills"
+access = "read-only"
+|}
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "external Skill source fixture config was rejected"
+  in
+  let source =
+    match config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "external Skill fixture did not contain exactly one source"
+  in
+  let resolved =
+    Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+  in
+  let document = composition_skill ~name:"snapshot" ~execution:"async" in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source = resolved
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/srv/shared-agent-skills"; candidates = 1 }
+    ; candidates =
+        [ Skill_catalog_snapshot.Candidate_document
+            { directory = "snapshot"; source_text = document }
+        ]
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "external Skill snapshot fixture was rejected"
+  in
+  match Keeper_skill_catalog.of_snapshot snapshot with
+  | catalog, [] -> catalog
+  | _, diagnostics ->
+    failf "external Skill projection returned %d diagnostics" (List.length diagnostics)
+;;
+
 let names (surface : Keeper_effective_tool_surface.t) =
   surface.tools
   |> List.map (fun (tool : Keeper_effective_tool_surface.tool) -> tool.name)
@@ -92,12 +140,70 @@ let test_projection_names_equal_turn_surface_authority () =
       (List.exists
          (fun (tool : Keeper_effective_tool_surface.tool) ->
             match tool.origin with
-            | Keeper_effective_tool_surface.Composition_skill
-                { source = "skills/snapshot/SKILL.md" } -> true
+            | Keeper_effective_tool_surface.Composition_skill _ -> true
             | _ -> false)
          surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256)
+;;
+
+let test_external_composition_preserves_snapshot_provenance () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  match
+    Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"fixture"
+      ~runtime_id:"fixture.runtime"
+      ~official_client_kind:"codex"
+      ~native_posture:None
+      ~tool_groups:None
+      ~current_task_id:None
+      ~task_skill_names:[]
+      ~skill_catalog:(configured_external_skill_catalog ())
+  with
+  | Error (_, detail) -> fail detail
+  | Ok surface ->
+    let provenance =
+      List.find_map
+        (fun (tool : Keeper_effective_tool_surface.tool) ->
+           match tool.origin with
+           | Keeper_effective_tool_surface.Composition_skill
+               { provenance = Some provenance } -> Some provenance
+           | Composition_skill { provenance = None }
+           | Descriptor _
+           | Composition_plan
+           | Composition_control -> None)
+        surface.tools
+    in
+    (match provenance with
+     | None -> fail "external composition lost snapshot provenance"
+     | Some provenance ->
+       check string "exact configured source id" "shared-catalog"
+         (Skill_source_config.source_id_to_string provenance.source.id);
+       check string "exact configured source path" "/srv/shared-agent-skills"
+         provenance.source.configured_path;
+       check string "exact package directory" "snapshot" provenance.directory;
+       check string "exact identity source" "shared-catalog"
+         (Skill_source_config.source_id_to_string provenance.identity.source_id));
+    let open Yojson.Safe.Util in
+    let composition_origin =
+      Keeper_effective_tool_surface.to_yojson (Available surface)
+      |> member "tools"
+      |> to_list
+      |> List.find_map (fun tool ->
+        let origin = member "origin" tool in
+        match member "kind" origin with
+        | `String "composition_skill" -> Some origin
+        | _ -> None)
+    in
+    (match composition_origin with
+     | None -> fail "effective-surface JSON omitted composition provenance"
+     | Some origin ->
+       check string "wire source path is exact" "/srv/shared-agent-skills"
+         (origin |> member "skill_provenance" |> member "source" |> member "path"
+          |> to_string);
+       check string "wire identity source is exact" "shared-catalog"
+         (origin |> member "skill_provenance" |> member "identity"
+          |> member "source_id" |> to_string))
 ;;
 
 let test_two_surfaces_have_different_names_and_digests () =
@@ -122,7 +228,7 @@ let test_two_surfaces_have_different_names_and_digests () =
   | Error (_, detail), _ | _, Error (_, detail) -> fail detail
 ;;
 
-let test_instruction_skill_without_read_fails_closed () =
+let test_instruction_skill_does_not_require_a_named_read_tool () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   match
     project
@@ -130,72 +236,10 @@ let test_instruction_skill_without_read_fails_closed () =
       ~task_skill_names:[ "guide" ]
       ~native_posture:Runtime_native_tools.Native_read
   with
-  | Error (reason, _) ->
-    check string "typed conflict" "instruction_skill_unreadable" reason
-  | Ok _ -> fail "instruction skill was projected without Read"
-;;
-
-let rec remove_tree path =
-  if Sys.is_directory path
-  then (
-    Sys.readdir path
-    |> Array.iter (fun name -> remove_tree (Filename.concat path name));
-    Unix.rmdir path)
-  else Sys.remove path
-;;
-
-let test_turn_admission_rechecks_instruction_readability () =
-  let base = Filename.temp_file "keeper-skill-admission-" "" in
-  Sys.remove base;
-  Unix.mkdir base 0o755;
-  Fun.protect
-    ~finally:(fun () -> remove_tree base)
-    (fun () ->
-       let config = Workspace.default_config base in
-       ignore (Workspace.init config ~agent_name:None);
-       let created =
-         match
-           Workspace.add_task_with_result
-             ~created_by:"fixture"
-             ~skills:[ "guide" ]
-             config
-             ~title:"skill admission"
-             ~priority:3
-             ~description:"fixture"
-         with
-         | Ok created -> created
-         | Error error -> fail (Workspace.add_task_error_to_string error)
-       in
-       let current_task_id =
-         match Keeper_id.Task_id.of_string created.task_id with
-         | Ok task_id -> Some task_id
-         | Error detail -> fail detail
-       in
-       let meta =
-         match
-           Masc_test_deps.meta_of_json_fixture
-             (`Assoc
-                [ "name", `String "skill-admission"
-                ; "agent_name", `String "keeper-skill-admission-agent"
-                ; "trace_id", `String "skill-admission-trace"
-                ])
-         with
-         | Ok meta ->
-           { meta with current_task_id; tool_groups = Some [ "board" ] }
-         | Error detail -> fail detail
-       in
-       match
-         Keeper_run_tools_setup.validate_current_task_skill_admission
-           ~config
-           ~meta
-           ~skill_catalog:(skill_catalog ())
-       with
-       | Error error ->
-         check bool "turn admission names Read conflict" true
-           (String_util.contains_substring
-              (Agent_core.Error.to_string error)
-              "model-visible Read tool")
-       | Ok () -> fail "turn admission accepted an unreadable instruction skill")
+  | Error (_, detail) -> fail detail
+  | Ok surface ->
+    check (list string) "instruction remains declared" [ "guide" ]
+      surface.instruction_skills
 ;;
 
 let () =
@@ -206,10 +250,12 @@ let () =
             test_projection_names_equal_turn_surface_authority
         ; test_case "different Keeper declarations change names and digest" `Quick
             test_two_surfaces_have_different_names_and_digests
-        ; test_case "instruction skill requires Read" `Quick
-            test_instruction_skill_without_read_fails_closed
-        ; test_case "turn admission rechecks Read" `Quick
-            test_turn_admission_rechecks_instruction_readability
+        ; test_case
+            "external composition preserves snapshot provenance"
+            `Quick
+            test_external_composition_preserves_snapshot_provenance
+        ; test_case "instruction Skill is independent of a named Read tool" `Quick
+            test_instruction_skill_does_not_require_a_named_read_tool
         ] )
     ]
 ;;

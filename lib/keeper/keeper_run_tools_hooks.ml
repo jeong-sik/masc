@@ -38,6 +38,7 @@ type agent_setup =
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
   ; final_agent_core_turn_ordinal_ref : int option ref
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
@@ -210,6 +211,7 @@ let assemble_hooks
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(trajectory_acc : Trajectory.accumulator option)
+      ~(skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list)
       ?gate_replay_evidence
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -749,6 +751,7 @@ let assemble_hooks
       ; gate_replay_evidence
       ; acc
       ; all_tool_names
+      ; skill_projection_diagnostics
       ; final_agent_core_turn_ordinal_ref
       ; receipt_turn_count_ref
       ; receipt_model_used_ref

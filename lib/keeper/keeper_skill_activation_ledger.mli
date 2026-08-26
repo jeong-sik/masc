@@ -2,14 +2,14 @@
 
 type ledger_revision = private string
 
-type origin =
+type instruction_origin =
   | Task_instruction of { task_id : Keeper_id.Task_id.t }
   | Session_instruction
+
+type composition_origin =
   | Task_composition of
-      { task_id : Keeper_id.Task_id.t
-      ; tool_name : string
-      }
-  | Session_composition of { tool_name : string }
+      { task_id : Keeper_id.Task_id.t }
+  | Session_composition
 
 type delivery =
   { agent_core_turn : int
@@ -34,6 +34,42 @@ type served_content =
       ; sha256 : string
       }
 
+type invocation =
+  | Instruction_invocation of
+      { origin : instruction_origin
+      ; served_content : served_content
+      }
+  | Composition_invocation of
+      { origin : composition_origin
+      ; tool_name : string
+      }
+
+type transition_rejection =
+  | Delivery_order_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; activation_agent_core_turn : int
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+  | Delivery_conflict_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+  | Action_before_delivery_rejected of
+      { skill_tool_use_id : string
+      ; activation_turn_ref : Ids.Turn_ref.t
+      ; observed_turn_ref : Ids.Turn_ref.t
+      ; action_tool_use_id : string
+      ; tool_name : string
+      ; observed_agent_core_turn : int
+      ; observed_at : string
+      }
+
 type activation = private
   { identity : Skill_reference.identity
   ; content_revision : Skill_reference.content_revision
@@ -42,11 +78,10 @@ type activation = private
   ; runtime_id : string
   ; skill_tool_use_id : string
   ; agent_core_turn : int
-  ; served_content : served_content
+  ; invocation : invocation
   ; delivery : delivery option
   ; actions : action list
   ; activated_at : string
-  ; origin : origin
   }
 
 type t
@@ -61,6 +96,18 @@ type summary =
   ; composition_deliveries : int
   ; composition_actions_observed : int
   ; invalid_transitions : int
+  }
+
+type summary_scope =
+  { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+  ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; reference : Skill_reference.t
+  }
+
+type scoped_summary =
+  { scope : summary_scope
+  ; summary : summary
   }
 
 type record_outcome =
@@ -104,6 +151,9 @@ type decode_error =
   | Invalid_action_tool_name_field of string
   | Invalid_action_agent_core_turn of int
   | Invalid_action_time of string
+  | Invalid_transition_rejection_kind of string
+  | Orphan_transition_rejection of string
+  | Transition_rejection_activation_mismatch of string
   | Duplicate_action_tool_use_id
   | Invalid_activated_at of string
   | Duplicate_skill_tool_use_id
@@ -137,12 +187,15 @@ val decode_error_code : decode_error -> string
 
 val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activations : t -> activation list
+val transition_rejections : t -> transition_rejection list
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
 val workspace_key : t -> string
 val session_id : t -> Keeper_id.Trace_id.t
 val summarize : t -> summary
 val summary_to_yojson : summary -> Yojson.Safe.t
+val summarize_by_scope : t -> scoped_summary list
+val scoped_summary_to_yojson : scoped_summary -> Yojson.Safe.t
 
 val make_activation :
   identity:Skill_reference.identity ->
@@ -152,9 +205,8 @@ val make_activation :
   runtime_id:string ->
   skill_tool_use_id:string ->
   agent_core_turn:int ->
-  served_content:served_content ->
+  invocation:invocation ->
   activated_at:string ->
-  origin:origin ->
   (activation, decode_error) result
 
 val to_yojson : t -> Yojson.Safe.t

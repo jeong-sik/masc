@@ -40,6 +40,11 @@ let to_yojson = function
       ; "ledger", Keeper_skill_activation_ledger.to_yojson ledger
       ; ( "summary"
         , Keeper_skill_activation_ledger.(summary_to_yojson (summarize ledger)) )
+      ; ( "scoped_summaries"
+        , `List
+            (List.map
+               Keeper_skill_activation_ledger.scoped_summary_to_yojson
+               (Keeper_skill_activation_ledger.summarize_by_scope ledger)) )
       ]
   | No_session { keeper_name } ->
     `Assoc

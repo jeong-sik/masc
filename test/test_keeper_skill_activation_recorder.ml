@@ -129,14 +129,39 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
   | Error error -> fail (Ledger.store_error_to_string error)
   | Ok ledger ->
     (match
-       List.map (fun (activation : Ledger.activation) -> activation.origin)
+       List.map (fun (activation : Ledger.activation) -> activation.invocation)
          (Ledger.activations ledger)
      with
-     | [ Ledger.Task_instruction { task_id = observed }
-       ; Ledger.Session_composition { tool_name }
+     | [ Ledger.Instruction_invocation
+           { origin = Ledger.Task_instruction { task_id = observed }; _ }
+       ; Ledger.Composition_invocation
+           { origin = Ledger.Session_composition; tool_name }
        ] ->
        check string "Task origin" "task-007" (Keeper_id.Task_id.to_string observed);
-       check string "composition origin" "keeper_compose_global" tool_name
+       check string "composition origin" "keeper_compose_global" tool_name;
+       let summary = Ledger.summarize ledger in
+       check int "one instruction body" 1 summary.skill_bodies_served;
+       check int "composition is not a body" 1 summary.composition_invocations;
+       let composition_json =
+         match Ledger.to_yojson ledger with
+         | `Assoc ledger_fields ->
+           (match List.assoc_opt "activations" ledger_fields with
+            | Some (`List [ _; `Assoc activation_fields ]) ->
+              Option.value
+                ~default:`Null
+                (List.assoc_opt "invocation" activation_fields)
+            | _ -> `Null)
+         | _ -> `Null
+       in
+       (match composition_json with
+        | `Assoc fields ->
+          check (option string) "typed composition JSON" (Some "composition")
+            (match List.assoc_opt "kind" fields with
+             | Some (`String kind) -> Some kind
+             | Some _ | None -> None);
+          check bool "composition JSON has no served content" false
+            (List.mem_assoc "served_content" fields)
+        | _ -> fail "composition invocation JSON missing")
      | _ -> fail "exact references did not derive the expected origins")
 ;;
 
@@ -185,7 +210,11 @@ let test_resource_receipt_keeps_path_size_and_digest () =
   | Error error -> fail (Ledger.store_error_to_string error)
   | Ok ledger ->
     (match Ledger.activations ledger with
-     | [ { served_content = Ledger.Skill_resource observed; _ } ] ->
+     | [ { invocation =
+             Ledger.Instruction_invocation
+               { served_content = Ledger.Skill_resource observed; _ }
+         ; _
+         } ] ->
        check string "relative path" "references/PROOF.md" observed.relative_path;
        check int "exact bytes" 14 observed.bytes;
        check

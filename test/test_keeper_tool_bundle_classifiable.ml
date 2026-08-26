@@ -416,13 +416,13 @@ let test_composition_activation_is_durable ?expected_failure ~skill_name tool_na
         snapshot
         (snapshot_reference snapshot skill_name)
         activation;
-      (match activation.origin with
-       | Keeper_skill_activation_ledger.Session_composition
-           { tool_name = observed } ->
+      (match activation.invocation with
+       | Keeper_skill_activation_ledger.Composition_invocation
+           { origin = Session_composition; tool_name = observed } ->
          check string "exact composition origin" tool_name observed
-       | Keeper_skill_activation_ledger.Task_composition _
-       | Keeper_skill_activation_ledger.Task_instruction _
-       | Keeper_skill_activation_ledger.Session_instruction ->
+       | Keeper_skill_activation_ledger.Composition_invocation
+           { origin = Task_composition _; _ }
+       | Keeper_skill_activation_ledger.Instruction_invocation _ ->
          fail "composition activation kept the wrong typed origin")
     | activations ->
       failf "expected one composition activation, got %d" (List.length activations))

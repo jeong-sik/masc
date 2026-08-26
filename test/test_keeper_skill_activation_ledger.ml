@@ -77,11 +77,25 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ?(runtime_id = "test.runtime") ?skill_tool_use_id ?(agent_core_turn = 0)
     ?(body = "skill body")
     ?(absolute_turn = 1) ?(activated_at = "2026-08-26T00:00:00Z")
-    ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" }) () =
+    ?(origin = Ledger.Task_instruction { task_id = task_id "task-001" })
+    ?invocation () =
   let skill_tool_use_id =
     Option.value
       ~default:(Printf.sprintf "call-%s-%c" source revision)
       skill_tool_use_id
+  in
+  let invocation =
+    Option.value
+      ~default:
+        (Ledger.Instruction_invocation
+           { origin
+           ; served_content =
+               Ledger.Skill_body
+                 { bytes = String.length body
+                 ; sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+                 }
+           })
+      invocation
   in
   Ledger.make_activation
     ~identity:
@@ -95,17 +109,12 @@ let activation_result ?(trace = "trace-one") ?(source = "workspace")
     ~runtime_id
     ~skill_tool_use_id
     ~agent_core_turn
-    ~served_content:
-      (Ledger.Skill_body
-         { bytes = String.length body
-         ; sha256 = Digestif.SHA256.(digest_string body |> to_hex)
-         })
+    ~invocation
     ~activated_at
-    ~origin
 ;;
 
 let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_use_id
-      ?agent_core_turn ?body ?absolute_turn ?activated_at ?origin () =
+      ?agent_core_turn ?body ?absolute_turn ?activated_at ?origin ?invocation () =
   match
     activation_result
       ?trace
@@ -120,6 +129,7 @@ let activation ?trace ?source ?package ?name ?revision ?runtime_id ?skill_tool_u
       ?absolute_turn
       ?activated_at
       ?origin
+      ?invocation
       ()
   with
   | Ok value -> value
@@ -205,7 +215,11 @@ let test_session_origins_roundtrip () =
     [ activation ~revision:'b' ~origin:Ledger.Session_instruction ()
     ; activation
         ~revision:'c'
-        ~origin:(Ledger.Session_composition { tool_name = "keeper_compose_review" })
+        ~invocation:
+          (Ledger.Composition_invocation
+             { origin = Ledger.Session_composition
+             ; tool_name = "keeper_compose_review"
+             })
         ()
     ]
   in
@@ -220,11 +234,12 @@ let test_session_origins_roundtrip () =
   | Error error -> fail (Ledger.store_error_to_string error)
   | Ok ledger ->
     (match
-       List.map (fun (activation : Ledger.activation) -> activation.origin)
+       List.map (fun (activation : Ledger.activation) -> activation.invocation)
          (Ledger.activations ledger)
      with
-     | [ Ledger.Session_instruction
-       ; Ledger.Session_composition { tool_name }
+     | [ Ledger.Instruction_invocation { origin = Ledger.Session_instruction; _ }
+       ; Ledger.Composition_invocation
+           { origin = Ledger.Session_composition; tool_name }
        ] ->
        check string "composition tool" "keeper_compose_review" tool_name
      | _ -> fail "session origins did not survive durable roundtrip")
@@ -304,6 +319,158 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   check int "repeated action observation is idempotent" 0 repeated
 ;;
 
+let test_conflicting_delivery_is_durable_transition_evidence () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-conflict" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_result_ids:[ "call-conflict" ]
+       ~agent_core_turn:1
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_result_ids:[ "call-conflict" ]
+       ~agent_core_turn:2
+       ~delivered_at:"2026-08-26T00:00:02Z"
+   with
+   | Error (Ledger.Conflicting_delivery "call-conflict") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "conflicting delivery was accepted");
+  let persisted =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "persisted invalid transition" 1
+    (Ledger.summarize persisted).invalid_transitions;
+  match Ledger.transition_rejections persisted with
+  | [ Ledger.Delivery_conflict_rejected
+        { skill_tool_use_id = "call-conflict"
+        ; observed_agent_core_turn = 2
+        ; _
+        } ] -> ()
+  | _ -> fail "conflicting delivery rejection did not survive readback"
+;;
+
+let test_action_before_delivery_is_durable_transition_evidence () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-undelivered" () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_action
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~active_skill_tool_use_ids:[ "call-undelivered" ]
+       ~action_tool_use_id:"call-too-early"
+       ~tool_name:"keeper_time_now"
+       ~agent_core_turn:1
+       ~observed_at:"2026-08-26T00:00:01Z"
+   with
+   | Error (Ledger.Action_before_delivery "call-undelivered") -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "action before delivery was accepted");
+  let persisted =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check int "persisted invalid transition" 1
+    (Ledger.summarize persisted).invalid_transitions;
+  match Ledger.transition_rejections persisted with
+  | [ Ledger.Action_before_delivery_rejected
+        { skill_tool_use_id = "call-undelivered"
+        ; action_tool_use_id = "call-too-early"
+        ; _
+        } ] -> ()
+  | _ -> fail "action-before-delivery rejection did not survive readback"
+;;
+
+let test_scoped_summaries_do_not_mix_runtime_or_exact_reference () =
+  with_session @@ fun config trace_id _session_dir ->
+  let first =
+    activation
+      ~skill_tool_use_id:"call-scope-a"
+      ~runtime_id:"runtime-a"
+      ~revision:'a'
+      ()
+  in
+  let second =
+    activation
+      ~skill_tool_use_id:"call-scope-b"
+      ~runtime_id:"runtime-b"
+      ~revision:'b'
+      ()
+  in
+  List.iter
+    (fun value ->
+       match Ledger.record ~config ~trace_id value with
+       | Ok _ -> ()
+       | Error error -> fail (Ledger.store_error_to_string error))
+    [ first; second ];
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_result_ids:[ "call-scope-a" ]
+       ~agent_core_turn:1
+       ~delivered_at:"2026-08-26T00:00:01Z"
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  (match
+     Ledger.observe_delivery
+       ~config
+       ~trace_id
+       ~turn_ref
+       ~tool_result_ids:[ "call-scope-a" ]
+       ~agent_core_turn:2
+       ~delivered_at:"2026-08-26T00:00:02Z"
+   with
+   | Error (Ledger.Conflicting_delivery _) -> ()
+   | Error error -> fail (Ledger.store_error_to_string error)
+   | Ok _ -> fail "scoped conflict was accepted");
+  let ledger =
+    match Ledger.load ~config ~trace_id with
+    | Ok ledger -> ledger
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  match Ledger.summarize_by_scope ledger with
+  | [ first_scope; second_scope ] ->
+    check string "first runtime" "runtime-a" first_scope.scope.runtime_id;
+    check int "first invocation" 1 first_scope.summary.instruction_invocations;
+    check int "first delivery" 1 first_scope.summary.instruction_deliveries;
+    check int "first rejection" 1 first_scope.summary.invalid_transitions;
+    check string "second runtime" "runtime-b" second_scope.scope.runtime_id;
+    check int "second invocation" 1 second_scope.summary.instruction_invocations;
+    check int "second delivery" 0 second_scope.summary.instruction_deliveries;
+    check int "second rejection" 0 second_scope.summary.invalid_transitions;
+    let first_json = Ledger.scoped_summary_to_yojson first_scope in
+    check string "scope reference revision"
+      (String.make 64 'a')
+      Yojson.Safe.Util.(first_json |> member "scope" |> member "reference"
+                        |> member "content_revision" |> to_string)
+  | _ -> fail "scoped summaries did not preserve two exact scope tuples"
+;;
+
 let test_corrupt_ledger_is_typed () =
   with_session @@ fun config trace_id session_dir ->
   let path = Filename.concat session_dir "skill-activations.json" in
@@ -360,6 +527,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
       [ "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "activations", activations
+      ; "transition_rejections", `List []
       ]
   in
   let revision =
@@ -367,11 +535,12 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v2"
+      [ "schema", `String "masc.skill-activations/v3"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision
       ; "activations", activations
+      ; "transition_rejections", `List []
       ]
   in
   let workspace_root = Keeper_fs.session_base_dir config |> Unix.realpath in
@@ -448,11 +617,13 @@ let test_activation_boundaries_are_typed () =
   (match activation_result ~activated_at:"not-a-time" () with
    | Error (Ledger.Invalid_activated_at _) -> ()
    | Error _ | Ok _ -> fail "invalid activation time was not rejected");
-  let invalid_tool_origin =
-    Ledger.Task_composition
-      { task_id = task_id "task-001"; tool_name = "not/a/tool" }
+  let invalid_tool_invocation =
+    Ledger.Composition_invocation
+      { origin = Ledger.Task_composition { task_id = task_id "task-001" }
+      ; tool_name = "not/a/tool"
+      }
   in
-  match activation_result ~origin:invalid_tool_origin () with
+  match activation_result ~invocation:invalid_tool_invocation () with
   | Error (Ledger.Invalid_tool_name _) -> ()
   | Error _ | Ok _ -> fail "invalid composition tool name was not rejected"
 ;;
@@ -537,6 +708,12 @@ let () =
             test_session_origins_roundtrip
         ; test_case "delivery and later action share one exact chain" `Quick
             test_delivery_and_later_action_form_one_exact_chain
+        ; test_case "conflicting delivery is durable evidence" `Quick
+            test_conflicting_delivery_is_durable_transition_evidence
+        ; test_case "action before delivery is durable evidence" `Quick
+            test_action_before_delivery_is_durable_transition_evidence
+        ; test_case "scoped summaries preserve exact runtime and reference" `Quick
+            test_scoped_summaries_do_not_mix_runtime_or_exact_reference
         ; test_case "corrupt payload is typed" `Quick test_corrupt_ledger_is_typed
         ; test_case "copied ledger is bound to its trace" `Quick
             test_copied_ledger_is_rejected_by_session_identity

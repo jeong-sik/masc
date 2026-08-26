@@ -62,13 +62,13 @@ let instruction_origin context reference =
     else Ledger.Session_instruction
 ;;
 
-let composition_origin context ~tool_name reference =
+let composition_origin context reference =
   match context.task_scope with
-  | No_task -> Ledger.Session_composition { tool_name }
+  | No_task -> Ledger.Session_composition
   | Task { task_id; references } ->
     if List.exists (Skill_reference.equal reference) references
-    then Ledger.Task_composition { task_id; tool_name }
-    else Ledger.Session_composition { tool_name }
+    then Ledger.Task_composition { task_id }
+    else Ledger.Session_composition
 ;;
 
 let evidence ~relative_path contents =
@@ -81,7 +81,7 @@ let evidence ~relative_path contents =
       { relative_path = Skill_resource_path.to_string relative_path; bytes; sha256 }
 ;;
 
-let record ~config context ~invocation ~served_content ~origin reference =
+let record ~config context ~tool_invocation ~invocation reference =
   let* runtime_id =
     match context.runtime_id () with
     | Some runtime_id -> Ok runtime_id
@@ -95,11 +95,10 @@ let record ~config context ~invocation ~served_content ~origin reference =
       ~turn_ref:context.turn_ref
       ~runtime_id
       ~skill_tool_use_id:
-        (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
-      ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn invocation)
-      ~served_content
+        (Agent_core.Tool_contract.Invocation.tool_use_id tool_invocation)
+      ~agent_core_turn:(Agent_core.Tool_contract.Invocation.turn tool_invocation)
+      ~invocation
       ~activated_at:(Masc_domain.now_iso ())
-      ~origin
     |> Result.map_error (fun error -> Activation_rejected error)
   in
   Ledger.record ~config ~trace_id:context.trace_id activation
@@ -115,13 +114,22 @@ let record_instruction ~config context ~invocation ~content reference =
     | Resource { relative_path; contents } ->
       evidence ~relative_path:(Some relative_path) contents
   in
-  record ~config context ~invocation ~served_content ~origin reference
+  record
+    ~config
+    context
+    ~tool_invocation:invocation
+    ~invocation:(Ledger.Instruction_invocation { origin; served_content })
+    reference
 ;;
 
 let record_composition ~config context ~invocation ~tool_name reference =
-  let origin = composition_origin context ~tool_name reference in
-  let served_content = evidence ~relative_path:None "" in
-  record ~config context ~invocation ~served_content ~origin reference
+  let origin = composition_origin context reference in
+  record
+    ~config
+    context
+    ~tool_invocation:invocation
+    ~invocation:(Ledger.Composition_invocation { origin; tool_name })
+    reference
 ;;
 
 let observe_delivery ~config context ~tool_result_ids ~agent_core_turn =

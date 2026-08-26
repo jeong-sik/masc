@@ -208,11 +208,16 @@ and verdict_for_undescribed ~tool_name ~input =
     Run { because = "the service says this tool only reads" }
   | Attached_service (Some false) ->
     Ask { because = "the service says this tool can change something there" }
-  (* Silence is not permission. A service that did not annotate its tools
-     leaves an operator deciding, which is worse than deciding once but
-     better than writing to someone else's Jira unasked. *)
+  (* Silence is not permission. On a lane that can ask, this reaches an
+     operator; on one that cannot -- the official-client lanes pass no
+     approval callback -- it is a refusal, so the reason has to say what
+     would change it rather than only what is wrong. *)
   | Attached_service None ->
-    Ask { because = "the service did not say whether this tool only reads" }
+    Ask
+      { because =
+          "the service did not say whether this tool only reads; it runs \
+           once the service annotates it, or while this keeper is set to yolo"
+      }
   | Composition node_tools -> verdict_of_nodes node_tools
   | Ad_hoc_plan ->
     (match ad_hoc_plan_nodes input with

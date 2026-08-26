@@ -13,9 +13,16 @@ describe('interleaveTraceAndTools', () => {
   const think = (text: string, ts?: string): ChatTraceStep =>
     ts === undefined ? { kind: 'think', text } : { kind: 'think', text, ts }
   const traceTool = (name: string, toolCallId: string, ts?: string): ChatTraceStep =>
-    ts === undefined ? { kind: 'tool', name, toolCallId } : { kind: 'tool', name, toolCallId, ts }
+    ts === undefined
+      ? { kind: 'tool', name, toolCallId, executionId: `exec-${toolCallId}` }
+      : { kind: 'tool', name, toolCallId, executionId: `exec-${toolCallId}`, ts }
   const tool = (toolCallId: string) => ({
-    entry: { id: `tool-${toolCallId}`, role: 'tool' } as unknown as KeeperConversationEntry,
+    entry: {
+      id: `tool-${toolCallId}`,
+      role: 'tool',
+      toolCallId,
+      executionId: `exec-${toolCallId}`,
+    } as unknown as KeeperConversationEntry,
     output: null,
   })
   const labels = (items: ReturnType<typeof interleaveTraceAndTools>) =>
@@ -69,12 +76,12 @@ describe('interleaveTraceAndTools', () => {
     expect(labels(out)).toEqual(['think:A', 'tool:X'])
   })
 
-  it('prefers authoritative tool rows over unjoinable trace-only tool steps', () => {
+  it('does not guess that an identity-free trace step matches an authoritative tool row', () => {
     const out = interleaveTraceAndTools(
       [think('A'), { kind: 'tool', name: 'legacy-tool' }],
       [tool('X')],
     )
-    expect(labels(out)).toEqual(['think:A', 'tool:tool-X'])
+    expect(labels(out)).toEqual(['think:A', 'tool:legacy-tool', 'tool:tool-X'])
   })
 
   it('handles empty inputs without error', () => {

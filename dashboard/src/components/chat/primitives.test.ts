@@ -3141,7 +3141,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()
   })
 
-  it('marks trace-only tool steps without tool_call_id as unlinked, not pending', async () => {
+  it('marks trace-only tool steps without execution_id as unlinked, not pending', async () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -3174,7 +3174,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     ;(step?.querySelector('.chat-block-tstep-row') as HTMLElement).click()
     await flushUi()
 
-    expect(step?.textContent).toContain('도구 호출 ID 없음')
+    expect(step?.textContent).toContain('실행 ID 없음')
     expect(step?.textContent).not.toContain('출력 대기 중')
   })
 

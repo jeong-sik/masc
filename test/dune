@@ -3185,12 +3185,22 @@
 (test
  (name test_skill_source_config)
  (modules test_skill_source_config)
- (libraries alcotest masc.skill_config))
+ (libraries alcotest masc.skill_config masc.keeper_toml yojson))
 
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config))
+ (libraries alcotest masc masc.skill_config masc_runtime masc.string_util))
+
+(test
+ (name test_skill_catalog_snapshot)
+ (modules test_skill_catalog_snapshot)
+ (libraries
+  alcotest
+  masc.skill_snapshot
+  masc.skill_config
+  masc.string_util
+  yojson))
 
 (test
  (name test_asset_sync_report)

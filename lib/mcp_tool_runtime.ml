@@ -55,6 +55,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   (* ── Asking the operator (delegated) ────────────────────────── *)
   | Some Tool_schemas_misc.Ask ->
       Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start ctx
+  | Some Tool_schemas_misc.Ask_status ->
+      Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start ctx
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->
@@ -77,7 +79,9 @@ let runtime_tool_policy = function
   | Tool_schemas_misc.Start | Tool_schemas_misc.Broadcast | Tool_schemas_misc.Ask ->
     (* Recording a question writes; the operator surface reads it back. *)
     false, true
-  | Tool_schemas_misc.Messages -> true, true
+  | Tool_schemas_misc.Messages | Tool_schemas_misc.Ask_status ->
+    (* Reading back what was asked changes nothing. *)
+    true, true
 ;;
 
 let () =

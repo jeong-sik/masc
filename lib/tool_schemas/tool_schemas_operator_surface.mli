@@ -16,6 +16,7 @@
     off the Keeper-visible list. *)
 
 val ask : Masc_domain.tool_schema
+val ask_status : Masc_domain.tool_schema
 val broadcast : Masc_domain.tool_schema
 val config : Masc_domain.tool_schema
 val dashboard : Masc_domain.tool_schema

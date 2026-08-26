@@ -57,6 +57,7 @@ type mcp_runtime_operation =
   | Broadcast
   | Messages
   | Ask
+  | Ask_status
 (** Closed vocabulary dispatched by [Mcp_tool_runtime]. *)
 
 val mcp_runtime_operations : mcp_runtime_operation list

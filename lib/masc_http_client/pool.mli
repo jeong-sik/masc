@@ -228,6 +228,16 @@ module For_testing : sig
     Piaf.Body.t ->
     (string * body_progress, string * body_progress) result
 
+  (** The idle-queue decision, separated from the resource so it can be
+      driven with plain values: given (client, last_used) in park order,
+      the first still inside [ttl], what is left, and what was expired on
+      the way. Exposed because the alternative is fabricating a
+      [Piaf.Client.t], and the rule this encodes -- never hand out a
+      connection past its TTL, whether or not the eviction fiber ran
+      (#30831) -- is worth a test that does not need a server. *)
+  val take_live :
+    now:float -> ttl:float -> ('a * float) list -> 'a option * ('a * float) list * 'a list
+
   (** [ensure_host_header ~uri headers] fills in a correct
       ["host"] header (including the port when [uri] names one) when
       [headers] does not already carry one, case-insensitively. Exposed so

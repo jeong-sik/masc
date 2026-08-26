@@ -3,10 +3,17 @@ module Store = Multimodal.Vision_artifact_store
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-(* Thinking is forced off (below), so the budget only needs room for the answer;
-   keep it well above the 64-token point where the 2026-06-25 gemma4 reply
-   truncated entirely into the thinking phase. *)
-let vision_default_max_tokens = 1024
+(* The media_failover vision fleet is entirely /v1 "none" thinking-control
+   lanes — reasoning-capable models with no wire field to disable thinking.
+   Requesting enable_thinking=false there is fail-closed by the agent_core
+   guard (Disable_not_encodable), which broke all image analysis (2026-08).
+   So we leave thinking uncontrolled (enable_thinking=None below — the guard
+   admits it) and rely on clear_thinking/preserve_thinking to keep the reply
+   clean; on /v1 the model's reasoning lands in a separate response field and
+   never enters the JSON content. The budget must now cover the answer PLUS
+   any reasoning the model spends first, since that phase can no longer be
+   suppressed; truncated_of_stop_reason still flags a MaxTokens cut. *)
+let vision_default_max_tokens = 4096
 
 let max_image_bytes () = Env_config_keeper.KeeperVision.max_image_bytes ()
 
@@ -39,7 +46,7 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
        | None -> Some vision_default_max_tokens)
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; enable_thinking = Some false
+  ; enable_thinking = None
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true

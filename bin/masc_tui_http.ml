@@ -962,6 +962,28 @@ let post_operator_confirm ~(host : string) ~(port : int) ~(token : string)
       Masc_tui_operator_projection.decode_confirm_response
         ~expected_token:token ~expected_decision:decision json
 
+(** POST /api/v1/keepers/ask-answer.
+
+    The answers come from [Masc_tui_ask_projection.readiness], which builds
+    them in the ask's question order from choice ids the row itself carried.
+    The store settles on first write, so a second submission gets back the
+    answer that won rather than a bare rejection: the caller reads
+    [state] and [answers] out of the body to say what was chosen. *)
+let post_keeper_ask_answer ~(host : string) ~(port : int)
+    ~(keeper_name : string) ~(ask_id : string) ~(answers : Yojson.Safe.t)
+    ~(actor_id : string option) ~(session_id : string option) :
+    (Yojson.Safe.t, string) result =
+  let payload =
+    match
+      Masc_tui_ask_projection.request_body ~answers ~actor_id ~session_id
+    with
+    | `Assoc fields ->
+        `Assoc (("name", `String keeper_name) :: ("ask_id", `String ask_id) :: fields)
+    | other -> other
+  in
+  post_json ~host ~port ~path:"/api/v1/keepers/ask-answer"
+    ~body:(Yojson.Safe.to_string payload)
+
 (** Fetch /api/v1/board (post list). *)
 let fetch_board ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/board"

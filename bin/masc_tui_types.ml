@@ -383,6 +383,13 @@ type pending_approval_action = Masc_tui_operator_projection.pending_approval_act
   paa_decision: approval_decision;
 }
 
+(* Browsing the questions and answering one are different keyboards. Naming
+   the ask in the mode rather than reading it off a cursor means a list that
+   refreshes underneath cannot silently move the answer to another question. *)
+type ask_answer_mode =
+  | Ask_browsing
+  | Ask_answering of { aam_ask_id: string }
+
 (** Overview snapshot from /api/v1/dashboard/briefing *)
 type workspace_health =
   | Workspace_health_critical
@@ -904,6 +911,17 @@ type state = {
      no open questions. *)
   mutable asks_snapshot: Masc.Tui_decode.asks_snapshot option;
   mutable asks_error: string option;
+  (* Answering happens in its own mode. The surface's own keys are spoken for
+     -- arrows walk the approval queue, y and n decide it -- and a question
+     needs a key per choice, so entering the mode is what frees them up. *)
+  mutable ask_answer_mode: ask_answer_mode;
+  mutable ask_cursor: int;
+  mutable ask_question_cursor: int;
+  (* One answer at a time. The draft carries the ask it belongs to, so moving
+     the cursor cannot post an answer under the wrong question. *)
+  mutable ask_draft: Masc_tui_ask_projection.draft option;
+  mutable pending_ask_submit: string option;
+  mutable ask_submit_inflight: bool;
   (* The tool calls keepers are holding, drawn above the operator actions on
      the same surface. Live registry state on the server; refreshed with the
      surface. *)
@@ -1408,6 +1426,12 @@ let create_state
   approvals_error = None;
   asks_snapshot = None;
   asks_error = None;
+  ask_answer_mode = Ask_browsing;
+  ask_cursor = 0;
+  ask_question_cursor = 0;
+  ask_draft = None;
+  pending_ask_submit = None;
+  ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
   keeper_yolo_names = [];

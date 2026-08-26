@@ -94,3 +94,28 @@ val for_turn : base_path:string -> keeper_name:string -> offering
     wrote down. A provider this Keeper never attached to contributes nothing
     and is not a problem; one whose catalog is unreadable is reported in
     [unusable] rather than passed over. *)
+
+val renew_if_needed :
+  ?token_post:Keeper_oauth_flow.post ->
+  ?discover:
+    (mcp_url:string ->
+     (Keeper_oauth_discovery.t, Keeper_oauth_discovery.error) result) ->
+  base_path:string ->
+  keeper_name:string ->
+  provider:Keeper_oauth_provider.t ->
+  now:float ->
+  access_token:string ->
+  unit ->
+  (string, string) result
+(** The access token to use right now, exchanged for a fresh one first if
+    the stored expiry is inside the declaration's renewal window.
+
+    Done where the token is read rather than on a timer. The only moment
+    freshness matters is the moment before a call, and a Keeper nobody is
+    running does not need a new credential -- a timer would mint one anyway
+    and spend a refresh token to do it.
+
+    A stored expiry that is missing or unreadable renews nothing: replacing
+    a working credential on a guess costs the refresh token and gains
+    nothing. A provider that rotates its refresh token has the new one
+    written down; one that does not keeps what is on disk. *)

@@ -461,6 +461,120 @@ let test_a_name_from_no_service_stays_unknown () =
   check Alcotest.bool "not classifiable" false
     (Policy.classifies ~tool_name:"atlassian_neverOffered")
 
+(* ── renewal ─────────────────────────────────────────────────────────── *)
+
+let store_expiry ~base_path ~provider ~at =
+  match
+    Projection.set_env_entry ~base_path ~keeper_name:"kidsnote"
+      ~scope:Projection.Keeper_secret
+      ~name:provider.Provider.expires_at_env
+      ~value:(Printf.sprintf "%.0f" at)
+  with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store an expiry: %s" message
+
+let never_discover ~mcp_url:_ =
+  Alcotest.fail "renewal reached the network when it should not have"
+
+let test_a_fresh_token_is_left_alone () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  store_expiry ~base_path ~provider ~at:10_000.0;
+  match
+    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+      ~keeper_name:"kidsnote" ~provider ~now:0.0 ~access_token:"still-good" ()
+  with
+  | Ok token -> check str "unchanged" "still-good" token
+  | Error message -> Alcotest.failf "renewed a fresh token: %s" message
+
+let test_no_stored_expiry_renews_nothing () =
+  (* Replacing a working credential on a guess costs the refresh token and
+     gains nothing. *)
+  let base_path = temp_base () in
+  match
+    Identity_tools.renew_if_needed ~discover:never_discover ~base_path
+      ~keeper_name:"kidsnote" ~provider:(provider ()) ~now:0.0
+      ~access_token:"unknown-age" ()
+  with
+  | Ok token -> check str "unchanged" "unknown-age" token
+  | Error message -> Alcotest.failf "renewed on a guess: %s" message
+
+let test_an_expiring_token_is_exchanged_and_stored () =
+  let base_path = temp_base () in
+  let provider = provider () in
+  (* Inside the declaration's 600s window. *)
+  store_expiry ~base_path ~provider ~at:100.0;
+  (match
+     Projection.set_file_entry ~base_path ~keeper_name:"kidsnote"
+       ~scope:Projection.Keeper_secret
+       ~container_path:provider.Provider.refresh_token_file
+       ~value:"the-refresh-token"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a refresh token: %s" message);
+  (match
+     Keeper_oauth_client_store.save
+       ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity")
+       ~provider ~client_id:"client-abc"
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not store a client id: %s" message);
+  let sent = ref [] in
+  let token_post ~url:_ ~headers:_ ~body =
+    sent := body :: !sent;
+    Ok
+      ( 200,
+        {|{"access_token":"the-new-one","refresh_token":"rotated","expires_in":28800}|}
+      )
+  in
+  let discover ~mcp_url:_ =
+    Ok
+      {
+        Keeper_oauth_discovery.resource = "https://mcp.example.com/v1/mcp";
+        issuer = "https://auth.example.com";
+        authorize_url = "https://auth.example.com/authorize";
+        token_url = "https://auth.example.com/oauth/token";
+        registration_url = None;
+        scopes_supported = [];
+        supports_pkce_s256 = true;
+        client_secret_optional = true;
+      }
+  in
+  match
+    Identity_tools.renew_if_needed ~token_post ~discover ~base_path
+      ~keeper_name:"kidsnote" ~provider ~now:0.0 ~access_token:"about-to-expire"
+      ()
+  with
+  | Error message -> Alcotest.failf "renewal failed: %s" message
+  | Ok token ->
+      check str "the call uses the new token" "the-new-one" token;
+      check Alcotest.bool "and it was a refresh_token grant" true
+        (match !sent with
+        | body :: _ -> Str.string_match (Str.regexp ".*grant_type=refresh_token") body 0
+        | [] -> false);
+      (* Stored, or the next turn exchanges the same expiring token again. *)
+      (match
+         Projection.local_env_for_keeper ~host_env:[||] ~base_path
+           ~keeper_name:"kidsnote" ()
+       with
+      | Ok (Some entries) ->
+          let has prefix =
+            Array.exists (fun entry -> String.starts_with ~prefix entry) entries
+          in
+          check Alcotest.bool "the new access token is written" true
+            (has (provider.Provider.access_token_env ^ "=the-new-one"));
+          check Alcotest.bool "and so is its expiry" true
+            (has (provider.Provider.expires_at_env ^ "=28800"))
+      | Ok None | Error _ -> Alcotest.fail "no projection after renewal");
+      (* A rotated refresh token replaces the spent one. *)
+      match
+        Projection.read_file_entry ~base_path ~keeper_name:"kidsnote"
+          ~scope:Projection.Keeper_secret
+          ~container_path:provider.Provider.refresh_token_file
+      with
+      | Ok (Some value) -> check str "the rotated refresh token" "rotated" value
+      | Ok None | Error _ -> Alcotest.fail "the refresh token went missing"
+
 let () =
   Alcotest.run "keeper_identity_tools"
     [ ( "the written catalog",
@@ -474,6 +588,14 @@ let () =
             test_a_real_sized_token_is_storable;
           Alcotest.test_case "a real-sized token survives the projection"
             `Quick test_a_real_sized_token_survives_the_projection;
+        ] );
+      ( "renewal",
+        [ Alcotest.test_case "a fresh token is left alone" `Quick
+            test_a_fresh_token_is_left_alone;
+          Alcotest.test_case "no stored expiry renews nothing" `Quick
+            test_no_stored_expiry_renews_nothing;
+          Alcotest.test_case "an expiring token is exchanged and stored" `Quick
+            test_an_expiring_token_is_exchanged_and_stored;
         ] );
       ( "the approval policy",
         [ Alcotest.test_case "the policy can place an attached tool" `Quick

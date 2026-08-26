@@ -143,6 +143,40 @@ let move_row_cursor (state : state) ~delta ~cursor ~scroll =
       in
       (cursor, Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
 
+(* The Identity tab's provider list. The cursor names a provider while the
+   pane scrolls lines, so the row kept visible is the line that provider is
+   drawn on rather than the cursor itself -- the two differ by whatever the
+   pane prints above the list, which is why that preamble is a value both
+   sides read instead of a number each side counts. *)
+let move_identity_cursor (state : state) ~delta =
+  match state.identity_view with
+  | None -> ()
+  | Some (_, providers) ->
+      let count =
+        List.length (Masc_tui_types.identity_connectable providers)
+      in
+      if count > 0 then begin
+        let cursor =
+          Masc_tui_types.identity_cursor_clamped ~providers
+            state.identity_cursor
+        in
+        let cursor =
+          if delta >= 0 then Masc_tui_scroll.cursor_down ~count cursor
+          else Masc_tui_scroll.cursor_up ~count cursor
+        in
+        state.identity_cursor <- cursor;
+        match scrolled_surface state state.view with
+        | None -> ()
+        | Some scrolled ->
+            let height =
+              surface_body_height ~rows:(surface_rows state) scrolled
+            in
+            state.detail_scroll <-
+              Masc_tui_scroll.ensure_visible
+                ~cursor:(Masc_tui_types.identity_provider_line ~index:cursor)
+                ~height state.detail_scroll
+      end
+
 let keeper_log_content_height (state : state) =
   Metrics_tail.content_height ~terminal_rows:(surface_rows state)
     ~error:state.log_error
@@ -4390,6 +4424,9 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
        | Detail_identity ->
            state.identity_view <- None;
            state.identity_view_error <- None;
+           (* Another keeper's tab opens at the top of its own list rather
+              than at whichever row the last one was left on. *)
+           state.identity_cursor <- 0;
            launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
@@ -8073,6 +8110,9 @@ let main () =
                    wanted
                with
                | Some (provider_id, label) ->
+                   (* Left where the operator pressed, so the marker and the
+                      arrows carry on from the row they just started. *)
+                   state.identity_cursor <- wanted;
                    state.identity_login <- None;
                    state.identity_view_error <- None;
                    launch_identity_login state ~mailbox:async_messages
@@ -8958,6 +8998,8 @@ let main () =
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
                 end
+                else if state.detail_tab = Detail_identity then
+                  move_identity_cursor state ~delta:1
                 else state.detail_scroll <- state.detail_scroll + 1
             | Keepers Keeper_logs ->
                 state.log_scroll <-
@@ -9204,6 +9246,8 @@ let main () =
                   refresh_keeper_detail_selection state ~base_path
                     ~mailbox:async_messages
                 end
+                else if state.detail_tab = Detail_identity then
+                  move_identity_cursor state ~delta:(-1)
                 else if state.detail_scroll > 0 then
                   state.detail_scroll <- state.detail_scroll - 1
             | Keepers Keeper_logs ->
@@ -9383,6 +9427,27 @@ let main () =
                 if state.runtime_pick_cursor > 0 then
                   state.runtime_pick_cursor <- state.runtime_pick_cursor - 1
             | Keepers Keeper_message -> ())
+       (* Enter starts the provider the arrows are on. The digits below still
+          work for the first nine; past that a number is no longer a key, so
+          the cursor is the only way to reach a row. *)
+       | Some "\r" | Some "\n"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 Masc_tui_types.identity_cursor_provider ~providers
+                   state.identity_cursor
+               with
+               | Some (provider_id, label) ->
+                   state.identity_login <- None;
+                   state.identity_view_error <- None;
+                   launch_identity_login state ~mailbox:async_messages
+                     ~keeper_name:keeper.k_name ~provider_id ~label
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "\r" | Some "\n" | Some "right" ->
            (* Enter remains compatible; Right makes list -> detail and Left
               makes detail -> list consistent across the TUI. *)

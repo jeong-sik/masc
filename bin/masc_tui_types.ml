@@ -599,6 +599,36 @@ let identity_connectable providers =
       | Identity_unreadable _ -> None)
     providers
 
+(** The lines the Identity pane prints above the provider rows.
+
+    Here rather than in the renderer because the key handler has to know how
+    far down the pane a provider sits: it moves a cursor over
+    [identity_connectable] and then scrolls the pane's lines so that row
+    stays visible. A header written in the renderer and counted in the key
+    handler is two numbers that drift the first time a line is added. *)
+let identity_preamble ~keeper =
+  [ "  Move with the arrows and press enter to connect " ^ keeper
+    ^ ", R to ask again what tools exist."
+  ; ""
+  ]
+
+(** Which pane line the provider at [index] is drawn on. *)
+let identity_provider_line ~index =
+  List.length (identity_preamble ~keeper:"") + index
+
+(** The cursor held inside the list it names. A cursor left behind by a
+    shorter list answers from the last row rather than from one that is no
+    longer there. *)
+let identity_cursor_clamped ~providers cursor =
+  let count = List.length (identity_connectable providers) in
+  if count = 0 then 0 else max 0 (min cursor (count - 1))
+
+(** The provider a keypress on the cursor would start, if any. *)
+let identity_cursor_provider ~providers cursor =
+  List.nth_opt
+    (identity_connectable providers)
+    (identity_cursor_clamped ~providers cursor)
+
 (** A login the operator has started but not finished: they have to open
     [ils_url] in a browser, and until they come back nothing has been
     written to the Keeper. *)
@@ -954,6 +984,10 @@ type state = {
   mutable identity_view: (string * identity_provider list) option;
   mutable identity_view_error: string option;
   mutable identity_login: identity_login_started option;
+  (* Which provider the arrows are on. Held rather than derived because a
+     screen that renumbered under a moving cursor would start the wrong
+     service; [identity_cursor_clamped] is what keeps it inside the list. *)
+  mutable identity_cursor: int;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -1528,6 +1562,7 @@ let create_state
   identity_view = None;
   identity_view_error = None;
   identity_login = None;
+  identity_cursor = 0;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;

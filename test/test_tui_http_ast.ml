@@ -629,6 +629,51 @@ let test_operator_approvals_use_current_contract () =
        ~module_path:"bin/masc_tui.ml"
        ~callee:"Approval.approval_gate_transition"
      >= 1);
+  check int "approval receipt reads one typed presentation result" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"present_frame"
+       ~callee:"Frame_presenter.present");
+  check int "approval receipt has one post-presentation commit" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"present_frame"
+       ~callee:"commit_presented_approval");
+  check int "presentation compares typed approval authority" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"present_frame"
+       ~callee:"Approval_authority.authority_changed");
+  check int "approval effects reconcile against the current typed list" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"answer_presented_approval"
+       ~callee:"approval_items");
+  check int "approval effects never reselect by mutable cursor" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"answer_presented_approval"
+       ~callee:"List.nth_opt");
+  check int "approval effects require the presented typed identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"answer_presented_approval"
+       ~callee:"Approval_authority.resolve");
+  check int "presented operator rows keep the confirmation gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"answer_presented_approval"
+       ~callee:"handle_approval_decision");
+  check int "presented Keeper rows keep their exact call identity" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui.ml"
+       ~binding_name:"answer_presented_approval"
+       ~callee:"launch_surface_tool_approval");
+  check int "normal approval rendering emits one typed receipt" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml"
+       ~binding_name:"render"
+       ~callee:"approval_items");
   check int "approval refresh preserves selected token identity" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui.ml"
@@ -1411,12 +1456,10 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "main enters the run loop" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"run_loop");
-  check int "presentation consumes the external-write marker as invalidation" 1
-    (Ast_grep
-     .count_applications_with_exact_labelled_unit_call_in_value_binding
-       ~module_path:main_path ~binding_name:"main"
-       ~callee:"Frame_presenter.present" ~label:"invalidate_before"
-       ~nested_callee:"Terminal_write_repair.consume_damage");
+  check int "presentation consumes the external-write marker once" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:main_path ~binding_name:"present_frame"
+       ~callee:"Terminal_write_repair.consume_damage");
   check int "TTY gate validates stdin and stdout" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"require_interactive_terminal" ~callee:"Unix.isatty");

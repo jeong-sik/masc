@@ -14,6 +14,10 @@ type frame = {
   lines : string list;
 }
 
+type present_result =
+  | Presented
+  | Unchanged
+
 type t
 
 val create : synchronized_output:bool -> unit -> t
@@ -41,9 +45,12 @@ val present :
   write:(string -> unit) ->
   flush:(unit -> unit) ->
   frame ->
-  unit
+  present_result
 (** Present one fixed-viewport frame with at most one [write] and one [flush].
     [invalidate_before] discards the cached screen before comparison, coupling
     out-of-band terminal writes to the next full redraw.
     Content updates compare opaque ANSI rows byte-for-byte. Cursor-only moves
-    remain differential and are emitted in the same atomic output buffer. *)
+    remain differential and are emitted in the same atomic output buffer.
+    [Presented] means the terminal accepted output for this frame;
+    [Unchanged] means no bytes were necessary, so semantic input authority
+    must remain with the last frame that was actually emitted. *)

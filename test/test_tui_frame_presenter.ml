@@ -38,15 +38,22 @@ let frame ?(surface_key = "overview") ?(compact_frame = false)
     lines;
   }
 
-let present ?(invalidate_before = false) presenter sink frame =
+let present_result ?(invalidate_before = false) presenter sink frame =
   Presenter.present presenter ~invalidate_before ~write:(write sink)
     ~flush:(flush sink) frame
+
+let present ?(invalidate_before = false) presenter sink frame =
+  ignore
+    (present_result ~invalidate_before presenter sink frame
+      : Presenter.present_result)
 
 let test_first_frame_and_identical_frame () =
   let presenter = Presenter.create ~synchronized_output:true () in
   let captured = sink () in
   let initial = frame [ "top"; "middle"; "bottom" ] in
-  present presenter captured initial;
+  (match present_result presenter captured initial with
+   | Presenter.Presented -> ()
+   | Presenter.Unchanged -> fail "first frame was reported unchanged");
   check int "first frame writes once" 1 (List.length captured.writes);
   check int "first frame flushes once" 1 captured.flushes;
   let full = output captured in
@@ -58,7 +65,9 @@ let test_first_frame_and_identical_frame () =
   check bool "full redraw writes the padded viewport" true
     (contains full "\027[4;1H");
   reset_sink captured;
-  present presenter captured initial;
+  (match present_result presenter captured initial with
+   | Presenter.Unchanged -> ()
+   | Presenter.Presented -> fail "identical frame was reported presented");
   check int "identical frame writes nothing" 0 (List.length captured.writes);
   check int "identical frame does not flush" 0 captured.flushes
 
@@ -172,10 +181,12 @@ let test_write_failure_keeps_snapshot_untrusted () =
   present presenter captured (frame [ "before" ]);
   let raised =
     try
-      Presenter.present presenter
-        ~invalidate_before:false
-        ~write:(fun _ -> failwith "injected write failure")
-        ~flush:(fun () -> ()) (frame [ "after" ]);
+      ignore
+        (Presenter.present presenter
+           ~invalidate_before:false
+           ~write:(fun _ -> failwith "injected write failure")
+           ~flush:(fun () -> ()) (frame [ "after" ])
+          : Presenter.present_result);
       false
     with Failure _ -> true
   in
@@ -190,9 +201,12 @@ let test_write_failure_keeps_snapshot_untrusted () =
     (Presenter.last_frame_is_compact presenter);
   let flush_raised =
     try
-      Presenter.present presenter ~invalidate_before:false ~write:(fun _ -> ())
-        ~flush:(fun () -> failwith "injected flush failure")
-        (frame [ "after flush" ]);
+      ignore
+        (Presenter.present presenter ~invalidate_before:false
+           ~write:(fun _ -> ())
+           ~flush:(fun () -> failwith "injected flush failure")
+           (frame [ "after flush" ])
+          : Presenter.present_result);
       false
     with Failure _ -> true
   in

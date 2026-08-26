@@ -21,10 +21,6 @@ name: Fundamental Check
 # themselves are unchanged.
 
 on:
-  pull_request:
-    # No base filter, for the reason ci.yml carries: the filter matches the
-    # base branch, so these guards skipped every stacked PR — the exact PRs
-    # that reach review with the least evidence.
   push:
     branches: [main]
 
@@ -33,7 +29,8 @@ permissions:
 
 concurrency:
   # A newer main push contains every older commit, so only its guard bundle is
-  # actionable. PR synchronize events likewise supersede the previous head.
+  # actionable. Pull requests run the blocking subset inside ci.yml's existing
+  # Lint job instead of starting two more runners here.
   group: >-
     fundamental-check-${{ github.event_name }}-${{
       github.event.pull_request.number || github.ref
@@ -59,17 +56,7 @@ jobs:
           bash scripts/ci/apt-refresh.sh
           sudo apt-get install -y -qq ripgrep jq
           python -m pip install --quiet --upgrade pip pyyaml
-      - name: Run blocking lints (PR)
-        if: github.event_name == 'pull_request'
-        env:
-          # Typed acknowledgement consumed by check-stale-base-revert.py.
-          # Preserve the former dedicated job's intentional-revert contract.
-          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-        run: |
-          bash scripts/ci/run-lint-suite.sh blocking-pr \
-            "${{ github.event.pull_request.base.sha }}"
-      - name: Run blocking lints (push)
-        if: github.event_name != 'pull_request'
+      - name: Run blocking lints
         run: >-
           bash scripts/ci/run-lint-suite.sh blocking
           "${{ github.event.before }}"

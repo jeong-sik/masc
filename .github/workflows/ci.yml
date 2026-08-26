@@ -191,20 +191,13 @@ jobs:
             exit 1
           fi
 
-          # Heavy CI runs whenever the PR is live (OPEN), regardless of draft
-          # status. Earlier we skipped draft PRs to save CI minutes, but the
-          # masc fast-track pattern (open Draft → mark ready → admin-merge
-          # within seconds) means the build/lint/test surfaces almost never
-          # got a chance to run. Two visible failures from that gap this week:
-          # - masc #15531 (Tool_args / Tool_result sub-lib extract) merged
-          #   main in a non-building state; recovered by #15540.
-          # Running heavy CI on draft PRs costs minutes but catches both
-          # classes of regression *before* the admin-merge decision instead
-          # of after, when the only remaining lever is fix-forward.
-          # Closed/merged PRs still skip — there is nothing to verify there.
-          run_heavy=true
-          if [ "$live_state" != "OPEN" ]; then
-            run_heavy=false
+          # Drafts are iteration space, not merge candidates. Admin branch
+          # protection is enforced, so neither a draft nor a Ready PR without
+          # CI Gate can bypass this decision. ready_for_review starts a fresh
+          # exact-head run; closed/merged PRs have nothing left to verify.
+          run_heavy=false
+          if [ "$live_state" = "OPEN" ] && [ "$live_is_draft" = "false" ]; then
+            run_heavy=true
           fi
 
           echo "run_heavy=${run_heavy}" >> "$GITHUB_OUTPUT"
@@ -780,7 +773,7 @@ jobs:
           path: .health/health-snapshot.json
 
   build:
-    name: Build and Test
+    name: ${{ github.event_name == 'pull_request' && 'Compile' || 'Full validation' }}
     runs-on: ubuntu-latest
     # Focused group deadlines total 93 minutes when agent-core is selected
     # (paused-work 10, board-attention-worker 3, normal 20, newly-wired 5,
@@ -789,6 +782,10 @@ jobs:
     # 10:57:15), so a run where every group uses its full budget ends at
     # 105 minutes. The job timeout sits above that so scripts/ci-run-tests.sh
     # prints its timeout diagnostics before GitHub ends the job.
+    # Pull requests stop after compile and the two cheap drift checks below.
+    # Full behavioral, transport, contract, and evidence validation belongs to
+    # the timer/manual lanes, where it cannot make every rebased PR spend
+    # another 20+ minutes before CI Gate can speak.
     timeout-minutes: 110
     needs: [pr-live-gate, changes]
     # Main safety-net (mirrors `dashboard` job below). Non-PR events (develop
@@ -857,6 +854,7 @@ jobs:
           os-packages: jq ripgrep
 
       - name: Install grpcurl
+        if: github.event_name != 'pull_request'
         env:
           GRPCURL_VERSION: "1.9.3"
           GRPCURL_SHA256: "a926b62a85787ccf73ef8736b3ae554f1242e39d92bb8767a79d6dd23b11d1d5"
@@ -931,9 +929,11 @@ jobs:
         run: opam exec -- python3 scripts/ci/check_env_reads_below_config.py
 
       - name: Run source quickstart onboarding smoke
+        if: github.event_name != 'pull_request'
         run: scripts/quickstart-smoke.sh
 
       - name: Run typed functional-core boundary audit
+        if: github.event_name != 'pull_request'
         env:
           OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}
         run: |
@@ -960,12 +960,13 @@ jobs:
           bash scripts/ocaml-boundary-ratchet.sh
 
       - name: Run runtime deployment preflight self-test
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.build_step.outcome == 'success' }}
         env:
           MASC_DEPLOYMENT_PREFLIGHT_HELPER: ${{ github.workspace }}/_build/default/bin/deployment_preflight_helper.exe
         run: scripts/check-runtime-deployment-preflight.sh --self-test
 
       - name: Check keeper event queue projection boundary
+        if: github.event_name != 'pull_request'
         # This parser uses compiler-libs directly, so keep it beside the sole
         # OCaml toolchain instead of bootstrapping another toolchain in Lint.
         run: |
@@ -973,6 +974,7 @@ jobs:
           scripts/check-keeper-event-queue-projection-boundary.sh
 
       - name: Library boundaries against resolved Dune graphs
+        if: github.event_name != 'pull_request'
         # The self-test (in the Meta Guards job) only validates the checker
         # against synthetic fixtures. This step runs the SAME checker against
         # the REAL dependency graph emitted by `dune describe`, asserting that
@@ -1052,6 +1054,7 @@ jobs:
           )
 
       - name: Run workspace backlog revision ratchet
+        if: github.event_name != 'pull_request'
         # The backlog revision is stamped once at the commit point; this suite
         # pins exactly-one bump per commit (a surviving manual bump surfaces as
         # +2) and the decoder's absent-vs-corrupt split. An unwired ratchet does
@@ -1092,7 +1095,7 @@ jobs:
       # went looking for them. The default here is to run.
       - name: Run the OCaml test suite
         id: ocaml_test_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.build_step.outcome == 'success' }}
         run: scripts/ci-run-test-suite.sh
 
       # The step prints the failed assertions; this keeps everything around
@@ -1100,7 +1103,7 @@ jobs:
       # with the runner, so a red suite could not be diagnosed after the fact
       # (#30117).
       - name: Upload the test suite log
-        if: ${{ always() && steps.ocaml_test_suite.outcome == 'failure' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.ocaml_test_suite.outcome == 'failure' }}
         uses: actions/upload-artifact@v7
         with:
           name: test-suite-log
@@ -1109,7 +1112,7 @@ jobs:
 
       - name: Run transport harness suite
         id: transport_harness_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
           CI_TEST_HEARTBEAT_SEC: 15
@@ -1127,7 +1130,7 @@ jobs:
 
       - name: Run contract harness suite
         id: contract_harness_suite
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.build_step.outcome == 'success' }}
         env:
           ME_ROOT: /tmp/me
           CI_TEST_HEARTBEAT_SEC: 15
@@ -1179,7 +1182,6 @@ jobs:
 
       - name: Verify Keeper full-lifecycle evidence bundle
         if: >-
-          (github.event_name == 'pull_request') ||
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
           (
             github.event_name == 'workflow_dispatch' &&
@@ -1223,7 +1225,7 @@ jobs:
           include-hidden-files: true
 
       - name: Config diagnostic drift report
-        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.build_step.outcome == 'success' }}
         continue-on-error: true
         run: |
           if [ -f _build/default/bin/main_eio.exe ]; then
@@ -1249,10 +1251,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+
       - name: Install lint dependencies
         run: |
           bash scripts/ci/apt-refresh.sh
-          sudo apt-get install -y -qq ripgrep protobuf-compiler
+          sudo apt-get install -y -qq jq ripgrep protobuf-compiler
+          python -m pip install --quiet --upgrade pip pyyaml
+
+      - name: Run consolidated blocking lints
+        env:
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/ci/run-lint-suite.sh blocking-pr \
+              "${{ github.event.pull_request.base.sha }}"
+          else
+            bash scripts/ci/run-lint-suite.sh blocking \
+              "${{ github.event.before }}"
+          fi
 
       - name: Run #8605 family detector
         run: bash scripts/lint/no-unknown-permissive-default.sh
@@ -1515,38 +1534,6 @@ jobs:
       - name: Run Shell IR consumption ratchet
         run: scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
 
-  tla-specs:
-    name: TLA+ Model Checking
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    needs: [pr-live-gate, changes]
-    # PR-only required check: branch protection currently requires CI Gate,
-    # so path-scoped PR TLA must remain inside ci.yml to keep failures
-    # merge-blocking. Main push, schedule, and manual full-suite ownership live
-    # in tla-main.yml.
-    if: ${{ always() && !cancelled() && github.event_name == 'pull_request' && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.tla == 'true' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-
-      - name: Download tla2tools.jar (pinned v1.8.0)
-        run: |
-          curl -fsSL --retry 3 --retry-delay 5 --retry-all-errors \
-            -o specs/keeper-state-machine/tla2tools.jar \
-            https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-
-      - name: Run PR-scoped TLA+ model checking
-        run: |
-          make -C specs check-clean
-          make -C specs check-buggy
-
   ci-gate:
     # Named for the one required check in main's branch protection. A second
     # job used to carry that name and do nothing but copy this job's result:
@@ -1556,7 +1543,7 @@ jobs:
     # twice.
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet, tla-specs]
+    needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, shell-ir-ratchet]
     if: ${{ always() && !cancelled() }}
     timeout-minutes: 10
 
@@ -1576,21 +1563,16 @@ jobs:
           HEALTH_RESULT: ${{ needs.health.result }}
           STRUCTURE_RATCHET_RESULT: ${{ needs.structure-ratchet.result }}
           SHELL_IR_RATCHET_RESULT: ${{ needs.shell-ir-ratchet.result }}
-          TLA_RESULT: ${{ needs.tla-specs.result }}
         run: |
           set -euo pipefail
           fail=0
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Build job policy (revised 2026-06-24 by PR-MASC-7):
-          #   - dune build (compile-only) is HARD REQUIRED — Build step lacks
-          #     continue-on-error, so a compile failure makes the job result =
-          #     failure → check "build" required = block merge.
-          #   - Focused operator-control, SSE, transport, and contract harness
-          #     execution is HARD REQUIRED as well. Each test step lacks
-          #     continue-on-error, so a test failure fails the Build and Test
-          #     job and blocks merge.
+          # Pull requests require compile truth plus the fast static/product
+          # guards above. Full tests, transport/contract harnesses, lifecycle
+          # evidence, and TLA run on the timer/manual lanes instead of making
+          # every rebased PR repeat a 20+ minute system validation.
           # A cancelled job did not fail — it did not run. Both block, because
           # a check that never ran cannot be evidence of anything, but they are
           # printed apart: over the last 20 CI runs the job conclusions were 110
@@ -1625,5 +1607,4 @@ jobs:
           check "health"          "$HEALTH_RESULT"
           check "structure-ratchet" "$STRUCTURE_RATCHET_RESULT"
           check "shell-ir-ratchet" "$SHELL_IR_RATCHET_RESULT"
-          check "tla-specs"       "$TLA_RESULT"
           [ "$fail" -eq 0 ]

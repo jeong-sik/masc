@@ -239,7 +239,15 @@ let is_open = function
 
 let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let base_path = ctx.config.base_path in
-  let keeper_name = ctx.agent_name in
+  (* Same spelling problem as the write side: a Keeper reads its own questions
+     back under the agent alias its runtime spawned with, and the store is
+     keyed on the registry name. Reading through the alias would show an empty
+     list rather than an error, which is the worse failure of the two. *)
+  let keeper_name =
+    match Keeper_identity.keeper_name_of_agent_alias ctx.agent_name with
+    | Some name -> name
+    | None -> ctx.agent_name
+  in
   let include_resolved = bool_field "include_resolved" ctx.arguments in
   let wanted_ask_id = string_option_field "ask_id" ctx.arguments in
   let rows = Keeper_ask_store.rows ~base_path ~keeper_name in

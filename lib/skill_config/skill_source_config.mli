@@ -137,6 +137,7 @@ val resolve :
     their selected anchor; absolute paths are normalized lexically. *)
 
 val source_id_to_string : source_id -> string
+val source_id_of_string : string -> (source_id, string) result
 val top_level_namespace : string
 val anchor_to_string : anchor -> string
 val access_to_string : access -> string

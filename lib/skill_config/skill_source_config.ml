@@ -119,6 +119,12 @@ type resolved_source =
   }
 
 let source_id_to_string id = id
+let source_id_of_string id =
+  if Safe_identifier.is_portable_name id
+  then Ok id
+  else Error (Printf.sprintf "invalid Skill source id %S" id)
+;;
+
 let top_level_namespace = "skills"
 
 let anchor_to_string = function

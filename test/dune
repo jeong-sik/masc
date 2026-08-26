@@ -3213,6 +3213,20 @@
   unix))
 
 (test
+ (name test_keeper_skill_activation_ledger)
+ (modules test_keeper_skill_activation_ledger)
+ (libraries
+  alcotest
+  digestif
+  masc
+  masc.keeper_registry
+  masc.masc_types
+  masc.skill_snapshot
+  masc.skill_config
+  unix
+  yojson))
+
+(test
  (name test_asset_sync_report)
  (modules test_asset_sync_report)
  (libraries alcotest masc))

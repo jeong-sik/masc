@@ -23,13 +23,13 @@ type current_task_observation =
 type claimable_task_identity =
   { task_id : Keeper_id.Task_id.t }
 
-(** One task this keeper holds that names skills. [held_task_id] is the task
-    id; [held_skills] the skill directory names it declares, in declaration
-    order. The current task is never listed here: its own block carries its
-    skills. *)
+(** One task this keeper holds that declares exact Skill references.
+    [held_task_id] is the task id; [held_skills] preserves source, package,
+    name, and content revision in declaration order. The current task is never
+    listed here: its own block carries its references. *)
 type held_task_skills =
   { held_task_id : string
-  ; held_skills : string list
+  ; held_skills : Skill_reference.t list
   }
 
 type backlog_snapshot =

@@ -66,13 +66,14 @@ let lines s = String.split_on_char '\n' s
 
 let test_no_skills_adds_nothing () =
   let rendered = KUP.format_current_task (task ~skills:[]) in
-  check bool "no skill line" false (contains ~needle:"Skills named" rendered)
+  check bool "no skill line" false (contains ~needle:"Skills selected" rendered)
 ;;
 
 let test_one_skill_is_named_with_its_path () =
+  let reference = skill_reference "humanize-korean" 'a' in
   let rendered =
     KUP.format_current_task
-      (task ~skills:[ skill_reference "humanize-korean" 'a' ])
+      (task ~skills:[ reference ])
   in
   check bool "the skill is named" true (contains ~needle:"humanize-korean" rendered);
   (* The keeper is told where to read it, not handed the body: a skill can run
@@ -90,14 +91,15 @@ let test_one_skill_is_named_with_its_path () =
     (contains ~needle:"keeper_skill" rendered);
   let rendered_skill_line =
     lines rendered
-    |> List.find_opt (contains ~needle:"Skills named by this task")
+    |> List.find_opt (contains ~needle:"Skills selected by this task")
     |> Option.value ~default:""
   in
   check
     string
-    "the complete instruction is unchanged"
-    "- Skills named by this task: humanize-korean. Call `keeper_skill` with a \
-     name to read one whole, before you act on it."
+    "the complete instruction carries the exact reference"
+    (Printf.sprintf
+       "- Skills selected by this task: %s. Call `keeper_skill` with one exact reference object to read its frozen body before you act on it."
+       (Skill_reference.list_to_yojson [ reference ] |> Yojson.Safe.to_string))
     rendered_skill_line
 ;;
 
@@ -132,7 +134,7 @@ let test_the_only_difference_is_that_one_line () =
     bool
     "which is the skill line"
     true
-    (contains ~needle:"Skills named by this task" (List.hd added))
+    (contains ~needle:"Skills selected by this task" (List.hd added))
 ;;
 
 let () =

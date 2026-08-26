@@ -508,6 +508,7 @@ let run_turn
       ~(user_message : string)
       ~(turn_kind : Turn_record.turn_kind)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
+      ~(task_skill_references : Skill_reference.t list)
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
@@ -723,6 +724,7 @@ let run_turn
       ~config_root
       ~runtime_config_path
       ~skill_snapshot
+      ~task_skill_references
       ~trajectory_acc
       ~runtime_manifest_context
       ~runtime_manifest_append:

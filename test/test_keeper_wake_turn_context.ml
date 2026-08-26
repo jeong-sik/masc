@@ -7,6 +7,27 @@ module Prompt = Masc.Keeper_unified_prompt
 module Turn = Masc.Keeper_turn
 module Inputs = Masc.Keeper_world_observation_inputs
 
+let skill_reference name revision =
+  let source_id =
+    match Skill_source_config.source_id_of_string "project-masc" with
+    | Ok source_id -> source_id
+    | Error detail -> fail detail
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory name with
+    | Ok package_id -> package_id
+    | Error _ -> failf "invalid Skill package fixture %S" name
+  in
+  let content_revision =
+    match Skill_reference.content_revision_of_string (String.make 64 revision) with
+    | Ok content_revision -> content_revision
+    | Error _ -> fail "invalid Skill revision fixture"
+  in
+  Skill_reference.make
+    ~identity:(Skill_reference.make_identity ~source_id ~package_id ~name)
+    ~content_revision
+;;
+
 (* The shared Keeper prompt identifies the repository root from a Dune sandbox. *)
 let has_repo_prompts root =
   Sys.file_exists (Filename.concat root "config/prompts/keeper.md")
@@ -327,12 +348,20 @@ let test_held_task_skills_section_renders () =
     user_message
       { base_observation with
         held_task_skills =
-          [ { Inputs.held_task_id = "task-364"; held_skills = [ "mission-snapshot"; "work-intake" ] } ]
+          [ { Inputs.held_task_id = "task-364"
+            ; held_skills =
+                [ skill_reference "mission-snapshot" 'a'
+                ; skill_reference "work-intake" 'b'
+                ]
+            }
+          ]
       }
   in
   check bool "heading" true (contains ~needle:"### Skills Named by Tasks You Hold" user);
-  check bool "line names the task and its skills" true
-    (contains ~needle:"task-364 (held by you) names skills: mission-snapshot, work-intake" user);
+  check bool "line names the task and exact skills" true
+    (contains ~needle:"task-364 (held by you) names skills: [{" user
+     && contains ~needle:"\"name\":\"mission-snapshot\"" user
+     && contains ~needle:"\"name\":\"work-intake\"" user);
   check bool "tool named" true (contains ~needle:"`keeper_skill`" user)
 
 let test_held_task_skills_section_absent_without_held_tasks () =
@@ -494,7 +523,10 @@ let test_direct_turn_carries_held_task_skills () =
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:Inputs.No_current_task
       ~held_task_skills:
-        [ { Inputs.held_task_id = "task-364"; held_skills = [ "mission-snapshot" ] } ]
+        [ { Inputs.held_task_id = "task-364"
+          ; held_skills = [ skill_reference "mission-snapshot" 'a' ]
+          }
+        ]
       ~recent_direct_conversation_text:"recent owner message"
       ~worktree_text:""
       ~telemetry_feedback_text:""
@@ -502,8 +534,9 @@ let test_direct_turn_carries_held_task_skills () =
   in
   check bool "held skills heading" true
     (contains ~needle:"### Skills Named by Tasks You Hold" context);
-  check bool "held skills line" true
-    (contains ~needle:"task-364 (held by you) names skills: mission-snapshot" context);
+  check bool "held exact skills line" true
+    (contains ~needle:"task-364 (held by you) names skills: [{" context
+     && contains ~needle:"\"name\":\"mission-snapshot\"" context);
   check bool "no synthetic current task" false (contains ~needle:"### Current Task" context)
 
 let test_direct_turn_has_no_synthetic_task_context () =

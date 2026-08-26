@@ -27,6 +27,10 @@ val make_tool_bundle
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
        (** Turn-local approval state. Composition plans are recorded here
            while their tools are materialized. *)
+  -> ?task_instruction_skills:(Skill_reference.t * string * string) list
+       (** Exact Task-selected Skill bodies resolved from this turn's frozen
+           snapshot. These may include shadowed entries without changing
+           global Skill discovery. *)
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
@@ -40,6 +44,7 @@ val make_tools
   -> ctx_snapshot:Keeper_types.working_context
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?skill_catalog:Keeper_skill_catalog.t
+  -> ?task_instruction_skills:(Skill_reference.t * string * string) list
   -> ?turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell
   -> unit
   -> Agent_core.Tool.t list

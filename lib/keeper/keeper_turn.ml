@@ -532,6 +532,9 @@ let run_keeper_invocation_turn_admitted_inner
                 ~config:ctx.config
                 ~meta
             in
+            let task_skill_references =
+              Keeper_task_skill_turn.references_of_observation current_task
+            in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
@@ -742,6 +745,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:message
 		                                ~turn_kind:Turn_record.Direct
 		                                ~skill_snapshot
+		                                ~task_skill_references
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation

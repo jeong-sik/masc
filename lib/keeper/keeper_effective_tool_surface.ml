@@ -18,8 +18,8 @@ type t =
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
   ; current_task_id : string option
-  ; instruction_skills : string list
-  ; composition_skills : string list
+  ; instruction_skills : Skill_reference.t list
+  ; composition_skills : Skill_reference.t list
         (* Documents the catalog could not read, by the directory they were
            found in. They are here because this is the surface that answers
            "what can this Keeper call": a skill that was left out is absent
@@ -71,8 +71,29 @@ let descriptor_rows descriptors =
     descriptors
 ;;
 
-let instruction_rows skill_catalog =
-  let instruction_skills = Keeper_skill_catalog.instruction_entries skill_catalog in
+let exact_instruction_entries skill_catalog =
+  Keeper_skill_catalog.skills skill_catalog
+  |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+       match skill.reference, skill.surface with
+       | Some reference, Keeper_skill_catalog.Instruction ->
+         Some (reference, skill.description, skill.body)
+       | None, _ | Some _, Keeper_skill_catalog.Composition _ -> None)
+;;
+
+let dedupe_instruction_entries selected global =
+  List.fold_left
+    (fun entries ((reference, _, _) as skill) ->
+       if
+         List.exists
+           (fun (known, _, _) -> Skill_reference.equal reference known)
+           entries
+       then entries
+       else entries @ [ skill ])
+    selected
+    global
+;;
+
+let instruction_rows instruction_skills =
   match instruction_skills with
   | [] -> []
   | _ :: _ ->
@@ -89,7 +110,7 @@ let instruction_rows skill_catalog =
          else None)
 ;;
 
-let composition_rows skill_catalog =
+let composition_rows ~instruction_skills skill_catalog =
   let skill_compositions =
     Keeper_skill_catalog.compositions skill_catalog
     |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
@@ -109,7 +130,7 @@ let composition_rows skill_catalog =
          in
          { name; origin }, schema_tool)
   in
-  let instruction_rows = instruction_rows skill_catalog in
+  let instruction_rows = instruction_rows instruction_skills in
   let rec insert_instruction_rows reversed = function
     | (({ origin = Composition_control; _ }, _) :: _) as control_rows ->
       List.rev_append reversed (instruction_rows @ control_rows)
@@ -117,15 +138,6 @@ let composition_rows skill_catalog =
     | [] -> List.rev_append reversed instruction_rows
   in
   insert_instruction_rows [] composition_rows
-;;
-
-let validate_task_skills ~task_skill_names ~skill_catalog =
-  match Keeper_skill_catalog.instruction_names_for skill_catalog task_skill_names with
-  | Ok instruction_skills -> Ok instruction_skills
-  | Error (Keeper_skill_catalog.Missing_named_skill { name }) ->
-    Error
-      ( "declared_skill_missing"
-      , Printf.sprintf "current task declares missing skill %S" name )
 ;;
 
 let project
@@ -136,22 +148,50 @@ let project
       ~native_posture
       ~tool_groups
       ~current_task_id
-      ~task_skill_names
-      ~skill_catalog
+      ~task_skill_references
+      ~skill_snapshot
   =
+  let skill_catalog, _projection_diagnostics =
+    Keeper_skill_catalog.of_snapshot skill_snapshot
+  in
   let surface = Keeper_tool_descriptor.tool_groups_to_surface tool_groups in
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
   in
-  let rows = descriptor_rows descriptors @ composition_rows skill_catalog in
-  let tools = List.map fst rows in
-  let schema_tools = List.map snd rows in
-  match validate_task_skills ~task_skill_names ~skill_catalog with
+  match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
   | Error _ as error -> error
-  | Ok instruction_skills ->
+  | Ok task_selection ->
+    let task_instruction_entries =
+      List.map
+        (fun (selected : Keeper_task_skill_turn.selected) ->
+           ( selected.reference
+           , selected.skill.description
+           , selected.skill.body ))
+        task_selection.selected
+    in
+    let instruction_entries =
+      dedupe_instruction_entries
+        task_instruction_entries
+        (exact_instruction_entries skill_catalog)
+    in
+    let rows =
+      descriptor_rows descriptors
+      @ composition_rows ~instruction_skills:instruction_entries skill_catalog
+    in
+    let tools = List.map fst rows in
+    let schema_tools = List.map snd rows in
+    let instruction_skills =
+      List.map
+        (fun (selected : Keeper_task_skill_turn.selected) -> selected.reference)
+        task_selection.selected
+    in
     let composition_skills =
-      Keeper_skill_catalog.composition_entries skill_catalog
-      |> List.map (fun (entry : Keeper_tool_composition_catalog.entry) -> entry.name)
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Composition _ ->
+             Some reference
+           | None, _ | Some _, Keeper_skill_catalog.Instruction -> None)
     in
     let tool_surface_sha256 =
       Option.map
@@ -241,7 +281,7 @@ let unavailable keeper_name (reason, detail) =
   Unavailable { keeper_name; reason; detail }
 ;;
 
-let published_skill_catalog ~base_path =
+let published_skill_snapshot ~base_path =
   match Skill_catalog_snapshot_service.find_workspace_of_base_path ~base_path with
   | Error error ->
     Error
@@ -254,7 +294,7 @@ let published_skill_catalog ~base_path =
      | None ->
        Error ("skill_snapshot_uninitialized", "Skill snapshot is not published")
      | Some snapshot ->
-       let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
+       let _catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
        let skills_left_out =
          List.map
            (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
@@ -265,7 +305,7 @@ let published_skill_catalog ~base_path =
                 (Keeper_skill_catalog.error_to_string diagnostic.error))
            diagnostics
        in
-       Ok (catalog, skills_left_out))
+       Ok (snapshot, skills_left_out))
 ;;
 
 let resolve ~config ~keeper_name =
@@ -279,10 +319,10 @@ let resolve ~config ~keeper_name =
     in
     (match task_skills config current_task_id with
      | Error error -> unavailable keeper_name error
-     | Ok task_skill_names ->
-       (match published_skill_catalog ~base_path:config.base_path with
+     | Ok task_skill_references ->
+       (match published_skill_snapshot ~base_path:config.base_path with
         | Error error -> unavailable keeper_name error
-        | Ok (skill_catalog, skills_left_out) ->
+        | Ok (skill_snapshot, skills_left_out) ->
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->
@@ -305,15 +345,20 @@ let resolve ~config ~keeper_name =
                      ~native_posture
                      ~tool_groups:meta.tool_groups
                      ~current_task_id
-                     ~task_skill_names
-                     ~skill_catalog
                      ~skills_left_out
+                     ~task_skill_references
+                     ~skill_snapshot
                  with
                  | Ok surface -> Available surface
-                 | Error error -> unavailable keeper_name error)))))
+                 | Error error ->
+                   unavailable
+                     keeper_name
+                     ( Keeper_task_skill_turn.error_code error
+                     , Keeper_task_skill_turn.error_to_string error ))))))
 ;;
 
 let string_list values = `List (List.map (fun value -> `String value) values)
+let reference_list values = Skill_reference.list_to_yojson values
 
 let origin_to_yojson = function
   | Descriptor { group } ->
@@ -354,8 +399,8 @@ let to_yojson = function
         , match surface.current_task_id with
           | None -> `Null
           | Some task_id -> `String task_id )
-      ; "instruction_skills", string_list surface.instruction_skills
-      ; "composition_skills", string_list surface.composition_skills
+      ; "instruction_skills", reference_list surface.instruction_skills
+      ; "composition_skills", reference_list surface.composition_skills
       ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)
       ; ( "tools"

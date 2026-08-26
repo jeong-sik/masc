@@ -101,8 +101,12 @@ let skill_catalog_config_error detail =
   Agent_core.Error.Config
     (Agent_core.Error.InvalidConfig { field = "skills"; detail })
 ;;
-let expected_model_tool_names ~skill_catalog ~identity_tool_names
-      ~model_visible_descriptors =
+let expected_model_tool_names
+      ?(task_instruction_skills = [])
+      ~skill_catalog
+      ~identity_tool_names
+      ~model_visible_descriptors
+  =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
@@ -111,8 +115,10 @@ let expected_model_tool_names ~skill_catalog ~identity_tool_names
   let composition_names =
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
-  let instruction_skill_names =
-    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
+  let instruction_names =
+    if
+      task_instruction_skills <> []
+      || Keeper_skill_catalog.instruction_entries skill_catalog <> []
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
@@ -135,7 +141,7 @@ let expected_model_tool_names ~skill_catalog ~identity_tool_names
     (Keeper_tool_composition_surface.plan_execute_tool_name
      :: (descriptor_names
          @ composition_names
-         @ instruction_skill_names
+         @ instruction_names
          @ control_names
          (* What the work services this Keeper is attached to offer. Named
             here from the same list the bundle was handed, so the projection
@@ -144,16 +150,29 @@ let expected_model_tool_names ~skill_catalog ~identity_tool_names
          @ identity_tool_names))
 ;;
 
-(* One task's declared skill names against the catalog. Instruction bodies are
-   served by [keeper_skill], so admitting them no longer depends on whether
-   the Keeper's unrelated filesystem surface happens to include [Read]. *)
-let validate_task_skills ~skill_catalog ~task_id (skills : string list) =
-  match Keeper_skill_catalog.instruction_names_for skill_catalog skills with
+(* Every held task is checked against the same immutable snapshot as the
+   current task. The resolver's typed carrier remains intact; only its message
+   is enriched with the task that supplied the bad reference. *)
+let validate_task_skills ~skill_snapshot ~task_id skills =
+  match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot skills with
   | Ok _ -> Ok ()
-  | Error (Keeper_skill_catalog.Missing_named_skill { name }) ->
-    Error
-      (skill_catalog_config_error
-         (Printf.sprintf "task %s declares missing skill %S" task_id name))
+  | Error error ->
+    let core_error = Keeper_task_skill_turn.core_error error in
+    (match core_error with
+     | Agent_core.Error.Internal_carried { message; carrier } ->
+       Error
+         (Agent_core.Error.Internal_carried
+            { message = Printf.sprintf "task %s: %s" task_id message; carrier })
+     | ( Api _
+       | Provider _
+       | Agent _
+       | Mcp _
+       | Config _
+       | Serialization _
+       | Io _
+       | Orchestration _
+       | Internal _ ) as error ->
+       Error error)
 ;;
 
 (* The skills a turn admits are the ones every held task names: the current
@@ -163,7 +182,7 @@ let validate_task_skills ~skill_catalog ~task_id (skills : string list) =
 let validate_held_task_skill_admission
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~skill_catalog
+      ~skill_snapshot
   =
   let tasks = Workspace.get_tasks_safe config in
   let current =
@@ -194,7 +213,7 @@ let validate_held_task_skill_admission
       (fun acc (task_id, skills) ->
          match acc with
          | Error _ -> acc
-         | Ok () -> validate_task_skills ~skill_catalog ~task_id skills)
+         | Ok () -> validate_task_skills ~skill_snapshot ~task_id skills)
       (Ok ())
       (current @ held)
 ;;
@@ -222,6 +241,7 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
+      ~(task_skill_references : Skill_reference.t list)
       ~(trajectory_acc : Trajectory.accumulator option)
       ?runtime_manifest_context
       ?runtime_manifest_append
@@ -273,6 +293,20 @@ let prepare_agent_setup
              "tool result arrived before the resolved runtime attempt owner was observed")
       on_tool_result_ready
   in
+  let* task_skill_selection =
+    Keeper_task_skill_turn.resolve
+      ~snapshot:skill_snapshot
+      task_skill_references
+    |> Result.map_error Keeper_task_skill_turn.core_error
+  in
+  let task_instruction_skills =
+    List.map
+      (fun (selected : Keeper_task_skill_turn.selected) ->
+         ( selected.reference
+         , selected.skill.description
+         , selected.skill.body ))
+       task_skill_selection.selected
+  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
@@ -298,7 +332,7 @@ let prepare_agent_setup
             (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
          (Keeper_skill_catalog.error_to_string diagnostic.error))
     skill_projection_diagnostics;
-  let* () = validate_held_task_skill_admission ~config ~meta ~skill_catalog in
+  let* () = validate_held_task_skill_admission ~config ~meta ~skill_snapshot in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -359,6 +393,7 @@ let prepare_agent_setup
       ~skill_catalog
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
       ?composition_plan_index
+      ~task_instruction_skills
       ~turn_ctx_cell
       ()
   in
@@ -483,7 +518,7 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names ~skill_catalog
+    expected_model_tool_names ~task_instruction_skills ~skill_catalog
       ~identity_tool_names:
         (List.map
            (fun (tool : Agent_core.Tool.t) -> tool.schema.name)

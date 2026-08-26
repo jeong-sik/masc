@@ -32,6 +32,9 @@ type skill = private
   ; conformance : Agent_core.Skill_document.conformance
         (** Specification diagnostics retained for the turn and operator
             projections. Runtime-compatible documents remain usable. *)
+  ; reference : Skill_reference.t option
+        (** Exact snapshot identity. [None] exists only for document-only test
+            catalogs that have no snapshot authority. *)
   ; provenance : provenance option
   ; surface : surface
   }
@@ -105,6 +108,11 @@ val of_snapshot :
     that entry; neither failure rejects the snapshot or an unrelated Keeper
     turn. *)
 
+val project_entry :
+  Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> (skill, error) result
+(** Project one exact snapshot entry, including a shadowed entry. The returned
+    Skill preserves the entry's exact reference and source provenance. *)
+
 val empty : t
 val skills : t -> skill list
 val find : t -> string -> skill option
@@ -119,9 +127,9 @@ val instruction_names_for :
     declaration order. Composition names are valid but omitted. *)
 
 val compositions : t -> composition list
-(** Model-invocable composition entries with their exact snapshot provenance.
-    Catalogs built directly from document strings carry [None]; production
-    snapshot projections carry [Some provenance]. *)
+(** Composition entries with their exact snapshot provenance. Catalogs built
+    directly from document strings carry [None]; production snapshot
+    projections carry [Some provenance]. *)
 
 val composition_entries : t -> Keeper_tool_composition_catalog.entry list
 (** The validated composition entries declared by composition skills, in

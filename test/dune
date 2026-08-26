@@ -3356,6 +3356,11 @@
   yojson))
 
 (test
+ (name test_keeper_task_skill_turn_exact)
+ (modules test_keeper_task_skill_turn_exact)
+ (libraries alcotest masc masc.skill_config masc.skill_reference masc.skill_snapshot yojson))
+
+(test
  (name test_workspace_task_exact_skill_refs)
  (modules test_workspace_task_exact_skill_refs)
  (libraries

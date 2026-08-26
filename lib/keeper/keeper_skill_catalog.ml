@@ -86,9 +86,8 @@ let closes_fence ~fence_char ~length trimmed =
    that makes the difference: a skill that *documents* the composition grammar
    wraps the example in a longer outer fence, the CommonMark way, and the inner
    ```toml composition must then be read as text. Without this state the scanner
-   matched that example, promoted a documentation skill to a composition (or
-   failed it on the name), and — because [of_documents] fails the whole catalog
-   on the first bad file — took every keeper turn down with it. *)
+   matched that example and promoted a documentation skill to a composition
+   (or rejected it on the name). *)
 type fence_scan =
   | Outside
   | Reading_composition of string list
@@ -207,12 +206,6 @@ let partition_documents documents =
          else build (skill :: parsed) rejected rest)
   in
   build [] [] documents
-;;
-
-let of_documents documents =
-  match partition_documents documents with
-  | catalog, [] -> Ok catalog
-  | _, { error; _ } :: _ -> Error error
 ;;
 
 let skills catalog = catalog

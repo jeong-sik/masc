@@ -285,8 +285,7 @@ let test_missing_required_frontmatter_rejected () =
 
 (* A skill that documents the composition grammar must stay a document. Before
    this was enforced, the inner fence of an escaped example was read as a
-   declaration — and since [of_documents] fails the whole catalog on the first
-   bad file, one such skill took every keeper turn down. *)
+   declaration and the skill was rejected or promoted by accident. *)
 let test_escaped_example_stays_an_instruction () =
   let skill = parsed ~directory:"how-to-write-a-skill" documented_composition_document in
   check
@@ -381,18 +380,14 @@ let test_composition_name_must_match_skill () =
   | error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let test_of_documents_sorts_and_rejects_duplicates () =
-  let catalog =
-    match
-      Skill_catalog.of_documents
-        [ "time-memory-query", composition_document
-        ; "release-checklist", instruction_document
-        ]
-    with
-    | Ok catalog -> catalog
-    | Error error ->
-      fail ("valid catalog was rejected: " ^ Skill_catalog.error_to_string error)
+let test_partition_documents_sorts_and_reports_duplicates () =
+  let catalog, rejected =
+    Skill_catalog.partition_documents
+      [ "time-memory-query", composition_document
+      ; "release-checklist", instruction_document
+      ]
   in
+  check int "valid catalog has no rejections" 0 (List.length rejected);
   (match Skill_catalog.skills catalog with
    | [ first; second ] ->
      check string "sorted first" "release-checklist" first.Skill_catalog.name;
@@ -418,16 +413,16 @@ let test_of_documents_sorts_and_rejects_duplicates () =
        (Printf.sprintf
           "expected 1 composition entry, got %d"
           (List.length entries)));
-  match
-    Skill_catalog.of_documents
+  let _catalog, rejected =
+    Skill_catalog.partition_documents
       [ "release-checklist", instruction_document
       ; "release-checklist", instruction_document
       ]
-  with
-  | Ok _ -> fail "duplicate skill directories were accepted"
-  | Error (Skill_catalog.Duplicate_skill { name }) ->
+  in
+  match rejected with
+  | [ { Skill_catalog.error = Skill_catalog.Duplicate_skill { name }; _ } ] ->
     check string "duplicate name" "release-checklist" name
-  | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
+  | _ -> fail "duplicate skill directory was not reported exactly once"
 ;;
 
 let test_partition_documents_isolates_rejections () =
@@ -542,9 +537,9 @@ let test_loader_scans_the_skills_directory () =
 ;;
 
 let skill_catalog_of documents =
-  match Skill_catalog.of_documents documents with
-  | Ok catalog -> catalog
-  | Error error ->
+  match Skill_catalog.partition_documents documents with
+  | catalog, [] -> catalog
+  | _, { error; _ } :: _ ->
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
@@ -696,9 +691,9 @@ let () =
             `Quick
             test_composition_name_must_match_skill
         ; test_case
-            "of_documents sorts by name and rejects duplicates"
+            "partition sorts by name and reports duplicates"
             `Quick
-            test_of_documents_sorts_and_rejects_duplicates
+            test_partition_documents_sorts_and_reports_duplicates
         ; test_case
             "partition_documents isolates rejections"
             `Quick

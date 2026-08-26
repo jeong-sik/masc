@@ -39,13 +39,13 @@ Use the repository's focused validation wrapper.
 
 let skill_catalog_with_description description =
   match
-    Keeper_skill_catalog.of_documents
+    Keeper_skill_catalog.partition_documents
       [ "guide", instruction_skill ~description "guide"
       ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
       ]
   with
-  | Ok catalog -> catalog
-  | Error error ->
+  | catalog, [] -> catalog
+  | _, { error; _ } :: _ ->
     failf "fixture catalog rejected: %s"
       (Keeper_skill_catalog.error_to_string error)
 ;;

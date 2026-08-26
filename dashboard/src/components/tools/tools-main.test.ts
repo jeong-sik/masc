@@ -138,6 +138,7 @@ function keeperReceiptFixture(
       keeper_name: keeperName,
       runtime_id: 'openai.codex',
       official_client_kind: 'codex',
+      tool_delivery: { status: 'delivered' },
       native_posture: 'read',
       tool_groups: [],
       current_task_id: 'task-001',
@@ -392,6 +393,40 @@ describe('Tools', () => {
 
     expect(container.textContent).toContain('Server response omitted skill_activations')
     expect(container.querySelector('[data-testid="skill-effective-surface"]')).toBeNull()
+  })
+
+  it('shows runtime capability suppression as a normal typed posture', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const receipt = keeperReceiptFixture('sangsu')
+    if (receipt.effective_keeper_surface?.status !== 'available') {
+      throw new Error('fixture effective surface is not available')
+    }
+    receipt.effective_keeper_surface.tool_delivery = {
+      status: 'suppressed',
+      reason: 'runtime_tools_unsupported',
+    }
+    receipt.effective_keeper_surface.instruction_skills = []
+    receipt.effective_keeper_surface.composition_skills = []
+    receipt.effective_keeper_surface.tools = []
+    receipt.effective_keeper_surface.count = 0
+    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.querySelector('[data-testid="skill-tool-delivery-suppressed"]'))
+      .not.toBeNull()
+    expect(container.textContent).toContain('runtime_tools_unsupported')
   })
 
   it('rejects a receipt belonging to another Keeper', async () => {

@@ -462,9 +462,38 @@ let resolve_event_identity ?user_directory (ev : Gw.slack_event) =
          }
      | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev)
 
+(* What the directory found, written down, and what it did not find, read back.
+
+   [Slack_user_directory] caches in memory: an hour for a name, five minutes
+   for a failure, and nothing at all across a restart. So the same person
+   arrives named on one message and id-shaped on the next -- one channel had
+   twelve of each from one human.
+
+   A live answer always wins and is remembered. Recall speaks only where there
+   is no live answer and there was one before: a name we have seen, not a name
+   we are asserting. Kept out of [resolve_event_identity] because that one is
+   rendering-only by contract and this reaches the disk. *)
+let remember_resolved_names ~base_dir (ev : Gw.slack_event) =
+  match ev with
+  | Gw.Message_create ({ user_id; user_name; _ } as message) -> (
+    match user_name with
+    | Some name ->
+      Connector_person_names.remember ~base_dir ~connector:State.channel
+        ~id:user_id ~name ();
+      ev
+    | None ->
+      (match
+         Connector_person_names.recall ~base_dir ~connector:State.channel
+           ~id:user_id
+       with
+       | None -> ev
+       | Some name -> Gw.Message_create { message with user_name = Some name }))
+  | Gw.App_mention _ | Gw.Reaction_added _ | Gw.Ignored_event _ -> ev
+
 let submit_event ?deliver ?team_id ?user_directory ingress ~dispatch_for_delivery
     ~clock ~base_dir (ev : Gw.slack_event) =
   let ev = resolve_event_identity ?user_directory ev in
+  let ev = remember_resolved_names ~base_dir ev in
   let submit ~channel_id ~event_id =
     match State.resolve_keeper_for_channel_result ~channel_id with
     | Error reason ->
@@ -664,6 +693,7 @@ let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
 let submit_ambient_event ?team_id ?user_directory ingress ~base_dir
     (ev : Gw.slack_event) =
   let ev = resolve_event_identity ?user_directory ev in
+  let ev = remember_resolved_names ~base_dir ev in
   match ev with
   | Gw.Message_create { channel_id; ts; bot_id = None; _ } -> (
     match State.resolve_keeper_for_channel_result ~channel_id with

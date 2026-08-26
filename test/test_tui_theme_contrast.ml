@@ -69,7 +69,7 @@ let schemes =
   ; { name = "monokai"; light = false
     ; base = [| "272822"; "383830"; "49483e"; "75715e"; "a59f85"; "f8f8f2"
               ; "f5f4f1"; "f9f8f5"; "f92672"; "fd971f"; "f4bf75"; "a6e22e"
-              ; "ae81ff"; "66d9ef"; "ae81ff"; "cc6633" |] }
+              ; "a1efe4"; "66d9ef"; "ae81ff"; "cc6633" |] }
   ]
 ;;
 
@@ -358,6 +358,110 @@ let test_an_unanswered_palette_changes_nothing () =
     schemes
 ;;
 
+
+(* The keeper list draws what is about to happen to a keeper in colour alone.
+   The cell's other three readings are carried by a glyph, a word and a column
+   of their own, and a distinct glyph per action was tried and rejected -- four
+   shapes is what keeps the column legible. So the four colours are the whole
+   signal, and they have to stay apart for a reader who cannot separate red
+   from green: roughly one man in twelve.
+
+   Machado et al. 2009, severity 1.0, the matrices every colour-vision
+   simulator uses. Written here rather than reached for, like the hue check
+   above: an independent computation, not the renderer checking itself. *)
+let simulate_deficiency kind color =
+  let matrix =
+    match kind with
+    | `Deuteranopia ->
+      [| [| 0.367322; 0.860646; -0.227968 |]
+       ; [| 0.280085; 0.672501; 0.047413 |]
+       ; [| -0.011820; 0.042940; 0.968881 |]
+      |]
+    | `Protanopia ->
+      [| [| 0.152286; 1.052583; -0.204868 |]
+       ; [| 0.114503; 0.786281; 0.099216 |]
+       ; [| -0.003882; -0.048116; 1.051998 |]
+      |]
+  in
+  let linear value =
+    let value = float_of_int value /. 255. in
+    if value <= 0.04045 then value /. 12.92
+    else ((value +. 0.055) /. 1.055) ** 2.4
+  in
+  let encode value =
+    let value = Float.max 0. (Float.min 1. value) in
+    let value =
+      if value <= 0.0031308 then 12.92 *. value
+      else (1.055 *. (value ** (1. /. 2.4))) -. 0.055
+    in
+    int_of_float (Float.round (Float.max 0. (Float.min 1. value) *. 255.))
+  in
+  let red = linear (Palette.red color)
+  and green = linear (Palette.green color)
+  and blue = linear (Palette.blue color) in
+  let channel row =
+    (matrix.(row).(0) *. red)
+    +. (matrix.(row).(1) *. green)
+    +. (matrix.(row).(2) *. blue)
+  in
+  Palette.make_rgb ~red:(encode (channel 0)) ~green:(encode (channel 1))
+    ~blue:(encode (channel 2))
+;;
+
+let oklab_distance first second =
+  let lightness, green_red, blue_yellow = oklab first in
+  let other_lightness, other_green_red, other_blue_yellow = oklab second in
+  sqrt
+    (((lightness -. other_lightness) ** 2.)
+     +. ((green_red -. other_green_red) ** 2.)
+     +. ((blue_yellow -. other_blue_yellow) ** 2.))
+;;
+
+(* The measured floor. Green put the closest pair at 0.015 on solarized-dark;
+   magenta puts it at 0.027 across every scheme and both deficiencies. Held
+   just under that, so a colour chosen back toward the collision fails here
+   rather than in someone's terminal. *)
+let action_separation_floor = 0.025
+
+let keeper_action_colours =
+  [ "Auto_restart", Masc_tui_theme.Bright_red
+  ; "Recover", Masc_tui_theme.Bright_yellow
+  ; "Probe", Masc_tui_theme.Bright_cyan
+  ; "Direct_message", Masc_tui_theme.Bright_magenta
+  ]
+;;
+
+let rec pairs = function
+  | [] -> []
+  | first :: rest -> List.map (fun other -> first, other) rest @ pairs rest
+;;
+
+let test_keeper_action_colours_stay_apart_without_red_and_green () =
+  List.iter
+    (fun scheme ->
+      List.iter
+        (fun kind ->
+          List.iter
+            (fun ((left_label, left), (right_label, right)) ->
+              let separation =
+                oklab_distance
+                  (simulate_deficiency kind
+                     (ansi scheme
+                        (Masc_tui_theme.For_testing.ansi_color_index left)))
+                  (simulate_deficiency kind
+                     (ansi scheme
+                        (Masc_tui_theme.For_testing.ansi_color_index right)))
+              in
+              check bool
+                (Printf.sprintf "%s: %s and %s stay %.3f apart" scheme.name
+                   left_label right_label separation)
+                true
+                (separation >= action_separation_floor))
+            (pairs keeper_action_colours))
+        [ `Deuteranopia; `Protanopia ])
+    schemes
+;;
+
 let () =
   Alcotest.run "masc-tui-theme-contrast"
     [ ( "readability across themes"
@@ -374,6 +478,9 @@ let () =
             test_a_failing_theme_entry_is_replaced_and_a_passing_one_is_not
         ; Alcotest.test_case "an unanswered palette changes nothing" `Quick
             test_an_unanswered_palette_changes_nothing
+        ; Alcotest.test_case
+            "keeper action colours stay apart without red and green" `Quick
+            test_keeper_action_colours_stay_apart_without_red_and_green
         ] )
     ]
 ;;

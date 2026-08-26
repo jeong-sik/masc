@@ -1030,6 +1030,50 @@ let load_keeper_github_identity_view ~(host : string) ~(port : int)
   | Error err -> Error ("github identity load failed: " ^ err)
   | Ok json -> Ok (sanitize_view_lines (json_block_lines json))
 
+(* What a Keeper can be attached to. A declaration the server could not read
+   comes through as its own case rather than being dropped, so an operator
+   looking for a provider sees why it is not on offer. *)
+let load_identity_providers ~(host : string) ~(port : int) :
+    (Masc_tui_types.identity_provider list, string) result =
+  match Masc_tui_http.fetch_oauth_providers ~host ~port with
+  | Error err -> Error ("identity providers load failed: " ^ err)
+  | Ok json ->
+    let rows =
+      match json with
+      | `Assoc fields -> (
+        match List.assoc_opt "providers" fields with
+        | Some (`List rows) -> Some rows
+        | Some _ | None -> None)
+      | _ -> None
+    in
+    (match rows with
+     | None -> Error "identity providers response carries no providers list"
+     | Some rows ->
+       Ok
+         (List.filter_map
+            (fun row ->
+              let field key =
+                match row with
+                | `Assoc fields -> (
+                  match List.assoc_opt key fields with
+                  | Some (`String value) -> Some value
+                  | Some _ | None -> None)
+                | _ -> None
+              in
+              match field "id", field "label", field "problem" with
+              | Some idp_id, Some idp_label, None ->
+                Some (Masc_tui_types.Identity_declared { idp_id; idp_label })
+              | Some idp_id, _, Some idp_problem ->
+                Some (Masc_tui_types.Identity_unreadable { idp_id; idp_problem })
+              (* A row with neither is a server saying something this build
+                 does not read; naming it beats leaving a gap in the list. *)
+              | Some idp_id, None, None ->
+                Some
+                  (Masc_tui_types.Identity_unreadable
+                     { idp_id; idp_problem = "the server described this in a way this build does not read" })
+              | None, _, _ -> None)
+            rows))
+
 let load_runtime_config_view ~(host : string) ~(port : int) :
     (string * string list, string) result =
   match Masc_tui_http.fetch_runtime_config_raw ~host ~port with

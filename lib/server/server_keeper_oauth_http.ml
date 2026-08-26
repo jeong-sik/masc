@@ -68,6 +68,20 @@ let handle_callback request reqd =
          ~detail:"A provider sends a code and the state it was given; this request carries neither.")
 ;;
 
+(* What an operator can attach a Keeper to. Names and labels of files that
+   ship with the binary -- nothing about any Keeper -- so it reads like the
+   rest of the operator snapshot. *)
+let handle_providers request reqd =
+  Server_auth.with_public_read
+    (fun _state req reqd ->
+      Http.Response.json_value ~compress:true ~request:req
+        (`Assoc [ "providers", Server_keeper_oauth.declarations_json () ])
+        reqd)
+    request reqd
+;;
+
 let add_routes router =
-  router |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
+  router
+  |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
+  |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
 ;;

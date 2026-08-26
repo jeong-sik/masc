@@ -51,6 +51,45 @@ let identity_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "identity"
 ;;
 
+type declaration =
+  | Declared of { id : string; label : string }
+  | Unreadable of { id : string; problem : string }
+
+let identity_prefix = "identity/"
+
+let declarations () =
+  Embedded_config.file_list
+  |> List.filter_map (fun key ->
+       if String.starts_with ~prefix:identity_prefix key
+          && Filename.check_suffix key ".toml"
+       then (
+         let id = Filename.remove_extension (Filename.basename key) in
+         (* A file that cannot be read is listed with what is wrong with it.
+            Dropping it would show an operator a shorter list and no reason
+            for the provider they came looking for being absent. *)
+         match Embedded_config.read key with
+         | None -> Some (Unreadable { id; problem = "the file is not readable" })
+         | Some contents ->
+           (match Provider.load ~file_name:id ~contents with
+            | Ok provider -> Some (Declared { id; label = provider.Provider.label })
+            | Error err -> Some (Unreadable { id; problem = Provider.error_to_string err })))
+       else None)
+  |> List.sort (fun left right ->
+       let name = function Declared { id; _ } | Unreadable { id; _ } -> id in
+       String.compare (name left) (name right))
+;;
+
+let declarations_json () =
+  `List
+    (List.map
+       (function
+         | Declared { id; label } ->
+           `Assoc [ "id", `String id; "label", `String label ]
+         | Unreadable { id; problem } ->
+           `Assoc [ "id", `String id; "problem", `String problem ])
+       (declarations ()))
+;;
+
 let start ~base_path ~keeper ~provider_id ~now =
   let* provider = provider_of_id provider_id in
   let* redirect_uri = redirect_uri () in

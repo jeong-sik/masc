@@ -8,6 +8,10 @@
 
     Starting a login is authenticated and lives with the other Keeper POSTs
     ([POST /api/v1/keepers/<keeper>/oauth-login]); only the half the browser
-    reaches is here. *)
+    reaches is here.
+
+    Beside it, [GET /api/v1/keepers/oauth/providers] lists what a Keeper can
+    be attached to -- file names and labels that ship with the binary,
+    reading like the rest of the operator snapshot. *)
 
 val add_routes : Http_server_eio.Router.t -> Http_server_eio.Router.t

@@ -99,33 +99,63 @@ meta 검사 범위는 keeper meta(`<base>/.masc/keepers/*.json`)뿐이다. `goal
 
 schedule payload 에서 `schema_version` 을 뺀 바이너리를 처음 올릴 때만 해당한다. 저장된 signal 행은 `payload_digest` 와 `occurrence_id` 를 payload 로부터 다시 계산해 대조하는데, payload 모양이 바뀌었으니 전 행이 어긋난다. preflight 는 첫 어긋난 행에서 멈춘다. board attention candidate ledger 와 같은 방식으로 은퇴시킨다 — 옛 행을 읽는 코드는 만들지 않는다.
 
-```bash
-# 서버 정지 상태에서. 지우기 전에 규모를 기록한다.
-find <base>/.masc/schedules/signals -name '*.jsonl' | wc -l
-find <base>/.masc/schedules/signals -name '*.jsonl' -exec cat {} + | wc -l
-rm -rf <base>/.masc/schedules/signals <base>/.masc/schedules/signal_keys.json
-```
-
-`signal_keys.json` 은 이미 보낸 occurrence 를 다시 안 보내려고 두는 id 목록이라 같이 지운다. 남겨 두면 새 모양으로 계산한 id 와 안 맞아 아무 것도 막지 못한다. 다시 보낼 위험은 상태가 `Due` 인 schedule 에만 있으니, 지우기 전에 `Due` 가 0건인지 확인한다.
+먼저 아직 발화하거나 복구해야 할 occurrence가 없는지 검사한다. `Due`는 signal key를 지운 뒤 다시 발화할 수 있고, `Running`은 wake record의 옛 payload digest와 평탄화된 schedule의 새 digest가 달라 startup recovery가 닫히지 않는다. 둘 중 하나라도 있으면 아무 파일도 옮기지 말고 배포를 중단한다.
 
 ```bash
-python3 -c "import json;d=json.load(open('<base>/.masc/schedules.json'));print(sum(1 for s in d['schedules'] if s.get('status')=='due'))"
-```
-
-`schedules.json` 은 지우지 않는다. 여기에는 아직 안 온 wake 가 들어 있다. 대신 payload 에 남은 `schema_version` 을 턴다. 디코더가 안 읽는 필드라 남겨 둬도 동작에는 영향이 없지만, 남겨 두면 다음 사람이 그게 뭔지 다시 찾아본다.
-
-```bash
-python3 - <<'PY'
-import json, pathlib
-p = pathlib.Path("<base>/.masc/schedules.json")
+python3 - '<base>/.masc/schedules.json' <<'PY'
+import json, pathlib, sys
+p = pathlib.Path(sys.argv[1])
 d = json.loads(p.read_text())
-n = 0
-for s in d["schedules"]:
-    if (s.get("payload") or {}).pop("schema_version", None) is not None:
-        n += 1
-p.write_text(json.dumps(d))
-print("stripped", n)
+blocked_schedules = [
+    (s.get("schedule_id"), s.get("status"))
+    for s in d["schedules"]
+    if s.get("status") in {"due", "running"}
+]
+blocked_wakes = [
+    (w.get("schedule_instance_id"), w.get("schedule_id"), w.get("status"))
+    for w in d["wakes"]
+    if w.get("status") == "running"
+]
+if blocked_schedules or blocked_wakes:
+    print("BLOCKED schedule(s):", blocked_schedules)
+    print("BLOCKED wake(s):", blocked_wakes)
+    raise SystemExit(1)
+print("OK: no due/running schedules or running wakes")
 PY
+```
+
+검사가 통과하면 signal ledger와 dedupe key를 지우지 말고 배포 archive로 옮긴다. `signal_keys.json`은 이미 보낸 occurrence를 다시 안 보내려고 두는 id 목록이라 함께 은퇴한다. 새 payload 모양으로 계산한 id와 일치하지 않아 active 위치에 남겨도 아무 것도 막지 못한다.
+
+```bash
+schedule_retirement_archive='<base>/.masc/_archive/schedule-payload-v1-<deployment-id>'
+if [ -e "$schedule_retirement_archive" ]; then
+  echo "archive already exists: $schedule_retirement_archive" >&2
+  exit 1
+fi
+mkdir -p "$schedule_retirement_archive"
+find '<base>/.masc/schedules/signals' -name '*.jsonl' | wc -l
+find '<base>/.masc/schedules/signals' -name '*.jsonl' -exec cat {} + | wc -l
+if [ -d '<base>/.masc/schedules/signals' ]; then
+  mv '<base>/.masc/schedules/signals' "$schedule_retirement_archive/signals"
+fi
+if [ -f '<base>/.masc/schedules/signal_keys.json' ]; then
+  mv '<base>/.masc/schedules/signal_keys.json' "$schedule_retirement_archive/signal_keys.json"
+fi
+```
+
+`schedules.json`은 지우지 않는다. 여기에는 아직 안 온 wake가 들어 있다. primary와 `.last-good`을 각각 archive에 복사한 뒤, 임시 파일과 rename으로 payload의 퇴역 필드를 원자적으로 제거한다. 새 decoder는 이 필드를 조용히 버리지 않고 거절하므로 둘 다 정리해야 한다.
+
+```bash
+for schedule_ledger_name in schedules.json schedules.json.last-good; do
+  schedule_ledger_path="<base>/.masc/$schedule_ledger_name"
+  if [ ! -f "$schedule_ledger_path" ]; then
+    continue
+  fi
+  cp "$schedule_ledger_path" "$schedule_retirement_archive/$schedule_ledger_name"
+  jq '(.schedules[]?.payload) |= del(.schema_version)' \
+    "$schedule_ledger_path" >"$schedule_ledger_path.tmp"
+  mv "$schedule_ledger_path.tmp" "$schedule_ledger_path"
+done
 ```
 
 ## 7. 기동

@@ -29,7 +29,7 @@ let all_variants =
       }
   ; S.Discord
       { guild_id = None; channel_id = "c2"; parent_channel_id = None; thread_id = None }
-  ; S.Slack { team_id = Some "T1"; channel_id = "C9"; thread_ts = None }
+  ; S.Slack { team_id = Some "T1"; channel_id = "C9"; channel_name = None; thread_ts = None }
   ; S.Webhook { source = "ci"; event_id = "evt-7" }
   ; S.Agent
   ; S.Broadcast

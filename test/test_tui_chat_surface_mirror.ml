@@ -24,7 +24,11 @@ let every_surface : Masc.Surface_ref.t list =
       ; thread_id = None
       }
   ; Masc.Surface_ref.Slack
-      { team_id = Some "t"; channel_id = "c"; thread_ts = None }
+      { team_id = Some "t"
+      ; channel_id = "c"
+      ; channel_name = Some "kinossam-dev"
+      ; thread_ts = None
+      }
   ; Masc.Surface_ref.Webhook { source = "gh"; event_id = "e" }
   ; Masc.Surface_ref.Agent
   ; Masc.Surface_ref.Broadcast

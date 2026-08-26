@@ -539,7 +539,7 @@ let test_mentions_require_exact_resolved_target_roster () =
           (Masc.Surface_ref.Slack
              { team_id = None
              ; channel_id = "C-current"
-             ; thread_ts = Some "thread-other"
+             ; channel_name = None; thread_ts = Some "thread-other"
              })
         ~speaker_id:"UOTHER"
     ]

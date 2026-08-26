@@ -139,7 +139,11 @@ let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
        { Gate_keeper_backend.continuation_channel
        ; surface =
            Surface_ref.Slack
-             { team_id; channel_id; thread_ts = Some reply_to_thread_ts }
+             { team_id
+             ; channel_id
+             ; channel_name = None
+             ; thread_ts = Some reply_to_thread_ts
+             }
        ; conversation_id = Some (slack_conversation_id ~channel_id)
        ; external_message_id = Some ts
        ; workspace_id = team_id
@@ -151,12 +155,47 @@ let slack_delivery ~team_id ~channel_id ~thread_ts ~reply_to_thread_ts ~user_id
 (* Ambient lane (RFC-0226 parity with the Discord gateway)          *)
 (* ---------------------------------------------------------------- *)
 
-let slack_attention_surface ~team_id ~channel_id ~thread_ts =
-  Keeper_external_attention.Slack { team_id; channel_id; thread_ts }
+(* What a channel is called, for the label a reader sees. [conversations.info]
+   answers it once and the name is written down; a workspace without
+   [channels:read] never answers, and then the id stands in for the room the
+   way it always did.
+
+   Asked at most once per channel per process: the store is the cache. A
+   keeper bound to five channels showed the same [discord]/[slack] badge on
+   all five before this, so the id was already better than nothing -- a name
+   is better still. *)
+let resolve_channel_name ~base_dir ~token ~channel_id =
+  match
+    Connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Connector_names.Channel ~id:channel_id
+  with
+  | Some _ as known -> known
+  | None -> (
+    match token with
+    | None -> None
+    | Some token -> (
+      match Slack_rest_client.conversations_info ~token ~channel_id () with
+      | Error _ ->
+        (* A missing scope, a rate limit, a private channel the bot is not in.
+           None of those is a reason to stop the message: the id keeps
+           standing in, and the next inbound retries. *)
+        None
+      | Ok { channel_name = None; _ } -> None
+      | Ok { channel_name = Some name; _ } ->
+        Connector_names.remember ~base_dir ~connector:State.channel
+          ~scope:Connector_names.Channel ~id:channel_id ~name ();
+        Some name))
+
+let slack_attention_surface ~team_id ~channel_id ~channel_name ~thread_ts =
+  Keeper_external_attention.Slack
+    { team_id; channel_id; channel_name; thread_ts }
 
 let record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-    ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot ~route ~urgency =
-  let surface = slack_attention_surface ~team_id ~channel_id ~thread_ts in
+    ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content ~mentions_bot
+    ~route ~urgency =
+  let surface =
+    slack_attention_surface ~team_id ~channel_id ~channel_name ~thread_ts
+  in
   let conversation_id = slack_conversation_id ~channel_id in
   let dedupe_key = Printf.sprintf "slack:%s:%s" conversation_id ts in
   let event_id = Keeper_external_attention.event_id_of_dedupe_key dedupe_key in
@@ -302,8 +341,12 @@ let accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id ~
         Keeper_external_attention.Ambient
     in
     let attention_event_id =
+      let channel_name =
+        resolve_channel_name ~base_dir
+          ~token:(Env_config_slack.bot_token_opt ()) ~channel_id
+      in
       record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-        ~thread_ts ~ts ~user_id ~user_name ~content:text
+        ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:text
         ~mentions_bot:(mentions_bot || is_app_mention) ~route:"triggered"
         ~urgency
     in
@@ -478,13 +521,13 @@ let remember_resolved_names ~base_dir (ev : Gw.slack_event) =
   | Gw.Message_create ({ user_id; user_name; _ } as message) -> (
     match user_name with
     | Some name ->
-      Connector_person_names.remember ~base_dir ~connector:State.channel
-        ~id:user_id ~name ();
+      Connector_names.remember ~base_dir ~connector:State.channel
+        ~scope:Connector_names.Person ~id:user_id ~name ();
       ev
     | None ->
       (match
-         Connector_person_names.recall ~base_dir ~connector:State.channel
-           ~id:user_id
+         Connector_names.recall ~base_dir ~connector:State.channel
+           ~scope:Connector_names.Person ~id:user_id
        with
        | None -> ev
        | Some name -> Gw.Message_create { message with user_name = Some name }))
@@ -577,14 +620,23 @@ let handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
       Slack_observability.record_ambient
         Slack_observability.Ambient_dropped_too_long
     else begin
+      (* Resolved once for this message: the attention record and the durable
+         chat row name the same room. *)
+      let channel_name =
+        resolve_channel_name ~base_dir
+          ~token:(Env_config_slack.bot_token_opt ()) ~channel_id
+      in
       let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~team_id ~channel_id
-          ~thread_ts ~ts ~user_id ~user_name ~content:trimmed ~mentions_bot
+          ~channel_name ~thread_ts ~ts ~user_id ~user_name ~content:trimmed
+          ~mentions_bot
           ~route:"ambient" ~urgency:Keeper_external_attention.Ambient
       in
       Keeper_chat_store.append_user_message
         ~base_dir ~keeper_name ~content:trimmed
-        ~surface:(Surface_ref.Slack { team_id; channel_id; thread_ts })
+        ~surface:
+          (Surface_ref.Slack
+             { team_id; channel_id; channel_name; thread_ts })
         ~conversation_id:(slack_conversation_id ~channel_id)
         ~external_message_id:ts
         ~speaker:

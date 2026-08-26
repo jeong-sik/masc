@@ -34,9 +34,10 @@ let pending ~base_path ~keeper_name =
   A.pending_for_keeper ~base_path ~keeper_name ~limit:10 ()
 
 let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None)
-    ?(user_name = Some "user-one") ~ts ~route ~urgency () =
+    ?(user_name = Some "user-one") ?(channel_name = None) ~ts ~route ~urgency ()
+  =
   G.For_testing.record_external_attention ~base_dir:base_path
-    ~keeper_name:"alpha" ~team_id ~channel_id:"C1" ~thread_ts ~ts
+    ~keeper_name:"alpha" ~team_id ~channel_id:"C1" ~channel_name ~thread_ts ~ts
     ~user_id:"U1" ~user_name ~content:"hello keeper"
     ~mentions_bot:(urgency = A.Mention) ~route ~urgency
 

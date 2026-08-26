@@ -27,6 +27,7 @@ module Theme_choice = Masc_tui_theme_choice
 module File_icon = Masc_tui_file_icon
 module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
+module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 
 (* Every surface lays out against a viewport one row shorter than the
@@ -1650,13 +1651,17 @@ let render_board_list (state : state) =
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
   let count = List.length state.board_posts in
-  let header = Printf.sprintf "%s (%d)  %s  %s"
+  let header = Printf.sprintf "%s (%d)  order:%s  %s  %s"
     (screen_title " MASC Board")
-    count timestamp
+    count (board_sort_label state.board_sort) timestamp
     (connection_badge state) in
 
   box_top buf cols;
   box_line buf cols header;
+  box_divider buf cols;
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (Printf.sprintf "  %-2s %-12s  %-12s  %-16s  %-20s  %5s  %7s"
+       "" "ID" "HEARTH" "AUTHOR" "TITLE" "SCORE" "REPLIES");
   box_divider buf cols;
 
   let board_list_error =
@@ -1670,13 +1675,13 @@ let render_board_list (state : state) =
      | Some err -> render_list_error err
      | None ->
          box_line buf cols (Ansi.dim ^ "  (no board posts)" ^ Ansi.reset));
-    for _ = 1 to rows - 7 do
+    for _ = 1 to rows - 9 do
       box_empty buf cols
     done
   end else begin
     Option.iter render_list_error board_list_error;
     let error_rows = if Option.is_some board_list_error then 1 else 0 in
-    let content_height = max 0 (rows - 7 - error_rows) in
+    let content_height = max 0 (rows - 9 - error_rows) in
     let scroll_offset =
       if state.board_cursor >= content_height then
         state.board_cursor - content_height + 1
@@ -1717,7 +1722,10 @@ let render_board_list (state : state) =
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:move  right/Enter:read  v:vote-up  V:vote-down  w:write  r:refresh  Tab:next");
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         "j/k:move  right/Enter:read  s:sort  Y:copy link  v/V:vote  w:write  r:refresh  Tab:next");
 
   finish_surface state ~surface_key:"board-list" ~rows:terminal_rows
       ~cols buf
@@ -1758,7 +1766,10 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
   box_line buf cols title_line;
   box_line buf cols
     (Ansi.dim ^ "  "
-    ^ fit_width (Terminal_text.single_line post.bp_created_at) 40
+    ^ fit_width
+        (Terminal_text.single_line post.bp_created_at ^ "  \xc2\xb7  "
+         ^ Link.reference Board_post (Terminal_text.single_line post.bp_id))
+        (max 1 (cols - 6))
     ^ Ansi.reset);
   box_divider buf cols;
 
@@ -1895,18 +1906,18 @@ let render_board_read (state : state) (list_post : board_post) =
   let buf = Buffer.create 4096 in
   let footer =
     let pane_hint =
-      if cols >= keeper_split_threshold_cols then
+      if cols >= keeper_split_threshold_cols && not state.board_detail_wide then
         "  h/l:pane  Ctrl-W:switch"
       else ""
     in
     footer_line state ~max_cells:cols
       ~hints:
         (Printf.sprintf
-           "j/k:%s  PgUp/PgDn:page%s  left/Esc:back  c:reply  r:refresh  Tab:next"
+           "j/k:%s  PgUp/PgDn:page%s  z:wide  Y:copy link  left/Esc:back  c:reply  r:refresh  Tab:next"
            (if state.board_focus = Left_pane then "posts" else "scroll")
            pane_hint)
   in
-  if cols < keeper_split_threshold_cols then begin
+  if cols < keeper_split_threshold_cols || state.board_detail_wide then begin
     let scroll = board_read_pane state list_post ~rows ~cols buf in
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
@@ -2005,7 +2016,7 @@ let render_planning_list (state : state) =
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
     now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf "%s  %s  %s"
+  let header = Printf.sprintf "%s  order:phase/P1-P5  %s  %s"
     (screen_title " MASC Planning")
     timestamp
     (connection_badge state) in
@@ -2171,7 +2182,9 @@ let render_planning_detail (state : state)
        box_line buf cols
          (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
-  box_empty buf cols;
+  box_line_styled buf cols ~style:Ansi.dim
+    ("  Link: "
+     ^ Link.reference Goal (Terminal_text.single_line goal.pg_id));
   (* A lifecycle request is the one state the detail carries between frames,
      so it gets a row rather than an event log: the arm says what the next
      press of the same key would do, and the error says what the server said
@@ -2230,7 +2243,10 @@ let render_planning_detail (state : state)
 
   box_bottom buf cols;
 
-  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"j/k:scroll  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         "j/k:scroll  Y:copy link  left/Esc:back  r:refresh  c:complete  x:drop  o:reopen  Tab:next");
 
   finish_surface state ~clamped:(Planning_detail_scroll scroll)
       ~surface_key:"planning-detail" ~rows:terminal_rows ~cols buf
@@ -2429,7 +2445,18 @@ let schedule_detail_lines ~width (row : schedule_row) =
   let summary =
     Option.value ~default:"(no payload summary)" row.sch_payload_summary
   in
+  let target_link =
+    match row.sch_payload_kind, row.sch_payload_target with
+    | Some "keeper_wake", Some keeper ->
+        [ field "Keeper link"
+            (Link.reference Keeper (Terminal_text.single_line keeper))
+        ]
+    | _, _ -> []
+  in
   [ Ansi.bold, "  SCHEDULE"
+  ; field "Link"
+      (Link.reference Schedule
+         (Terminal_text.single_line row.sch_schedule_id))
   ; field "Schedule" row.sch_schedule_id
   ; field "Instance" row.sch_schedule_instance_id
   ; field "Status" row.sch_status
@@ -2449,7 +2476,9 @@ let schedule_detail_lines ~width (row : schedule_row) =
   ; field "Support" row.sch_payload_support
   ; field "Dispatch tool" (optional row.sch_payload_dispatch_tool)
   ; field "Target" (optional row.sch_payload_target)
-  ; field "Digest" row.sch_payload_digest
+  ]
+  @ target_link
+  @ [ field "Digest" row.sch_payload_digest
   ; Ansi.bold, "  Summary"
   ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
@@ -2491,7 +2520,7 @@ let render_schedule_detail (state : state) (row : schedule_row) =
     (footer_line state ~max_cells:cols
        ~hints:
          (Printf.sprintf
-            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  x:cancel  r:refresh  Tab:next"
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  Y:copy link  left/Esc:list  x:cancel  r:refresh  Tab:next"
             scroll max_scroll));
   finish_surface state ~clamped:(Schedule_detail_scroll scroll)
     ~surface_key:"schedule-detail" ~rows:terminal_rows ~cols buf
@@ -4903,7 +4932,7 @@ let render_harness (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   let col_hdr =
-    Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task" "Gate" "Verdict"
+    Printf.sprintf "  %-8s %-14s %-9s %-9s %s" "Time" "Task \xe2\x86\x92 Overview" "Gate" "Verdict"
       "Evaluator"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
@@ -4964,8 +4993,17 @@ let render_harness (state : state) =
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "[%d verdicts, scroll %d]" shown scroll);
   box_bottom buf cols;
+  let link_hint =
+    match List.nth_opt verdicts state.harness_cursor with
+    | None -> ""
+    | Some verdict ->
+        "  selected:"
+        ^ Link.reference Task
+            (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
+  in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+    (footer_line state ~max_cells:cols
+       ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
 let fusion_run_status_color = function
@@ -5087,6 +5125,15 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
   let status = fusion_run_status_to_string run.fur_status in
   let run_lines =
     [ Ansi.bold, "  RUN"
+    ; Ansi.cyan, "  Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence"
+    ; ( Ansi.dim
+      , "  Link: "
+        ^ Link.reference Fusion_run
+            (Terminal_text.single_line run.fur_run_id) )
+    ; ( Ansi.dim
+      , "  Keeper link: "
+        ^ Link.reference Keeper
+            (Terminal_text.single_line run.fur_keeper) )
     ; fusion_run_status_color run.fur_status, "  Status: " ^ status
     ; Ansi.reset, "  Keeper: " ^ Terminal_text.single_line run.fur_keeper
     ; ( Ansi.reset
@@ -5169,25 +5216,31 @@ let fusion_detail_lines ~width (detail : fusion_detail) =
               ]
               @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
         in
-        [ (Theme.ok ()), "  Evidence: recorded"
-        ; Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
+        [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title
         ; Ansi.dim, ""
-        ; Ansi.magenta, "  RESULT"
+        ; Ansi.bold, "  1  QUESTION"
         ]
-        @ judge_lines
-        @ [ Ansi.dim, ""
-          ; Ansi.bold, "  QUESTION"
-          ]
         @ fusion_wrapped_block ~width ~indent:"    " evidence.fe_question
         @ [ Ansi.dim, ""
-          ; Ansi.bold, "  PANEL RESPONSES"
+          ; Ansi.bold, "  2  PANEL RESPONSES"
           ; ( Ansi.dim
             , Printf.sprintf
                 "  %d answered / %d failed  \xc2\xb7  %d input / %d output tokens"
                 answered failed input_tokens output_tokens )
-          ]
+        ]
         @ [ Ansi.dim, "" ]
         @ panel_lines
+        @ [ Ansi.dim, ""
+          ; Ansi.magenta, "  3  JUDGE"
+          ]
+        @ judge_lines
+        @ [ Ansi.dim, ""
+          ; (Theme.ok ()), "  4  EVIDENCE RECORDED"
+          ; ( Ansi.dim
+            , "  Board link: "
+              ^ Link.reference Board_post
+                  (Terminal_text.single_line evidence.fe_post_id) )
+          ]
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->

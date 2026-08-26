@@ -112,11 +112,14 @@ let refresh_loop
   let activity_graph_cache = make_projection_cache () in
   let activity_swimlane_cache = make_projection_cache () in
   let cached_projection ~ttl ~cache label f =
+    (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
     refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
+      (* NDT-OK: wall time only measures operator diagnostics. *)
       let started_at = Unix.gettimeofday () in
       let allocated_before = Gc.allocated_bytes () in
       match f () with
       | value ->
+        (* NDT-OK: elapsed time only selects diagnostic log severity. *)
         let elapsed_s = Unix.gettimeofday () -. started_at in
         let allocated_mb =
           (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0

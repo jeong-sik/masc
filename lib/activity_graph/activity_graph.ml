@@ -373,6 +373,7 @@ let acquire_all_events_workspace_cache root =
       cache
     | None ->
       if Hashtbl.length all_events_workspace_caches >= all_events_workspace_cache_limit
+      (* See [evict_lru_idle_workspace_cache]: its boolean is diagnostic only. *)
       then ignore (evict_lru_idle_workspace_cache ());
       let cache =
         { root
@@ -394,6 +395,7 @@ let release_all_events_workspace_cache cache =
     | Some current when current == cache ->
       cache.active_users <- max 0 (cache.active_users - 1);
       if Hashtbl.length all_events_workspace_caches > all_events_workspace_cache_limit
+      (* See [evict_lru_idle_workspace_cache]: release only needs its effect. *)
       then ignore (evict_lru_idle_workspace_cache ())
     | None | Some _ -> ())
 ;;

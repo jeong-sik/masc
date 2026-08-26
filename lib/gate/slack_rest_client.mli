@@ -136,6 +136,30 @@ type user_info_ok = {
   display_name : string option; (** [profile.display_name]. *)
 }
 
+type conversation_info_ok = {
+  channel_id : string;
+  channel_name : string option;
+}
+(** [channel_name] is absent for a direct message and for a blank name, so a
+    renderer never prints an empty label where a channel goes. *)
+
+val conversations_info :
+  ?clock:_ Eio.Time.clock ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  unit ->
+  (conversation_info_ok, error) result
+(** [conversations.info] for one channel. Needs [channels:read] (public) or
+    [groups:read] (private) on the token; without them Slack answers
+    [missing_scope], which is a typed {!Slack_api} error and not a crash. *)
+
+val build_conversations_info_request :
+  token:string -> channel_id:string -> string * (string * string) list * string
+
+val parse_conversations_info_response :
+  status:int -> body:string -> (conversation_info_ok, error) result
+
 val users_info :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

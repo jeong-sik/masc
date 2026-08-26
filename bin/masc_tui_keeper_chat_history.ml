@@ -17,10 +17,22 @@ module Surface = struct
      naming it would mean the label lied about what it knows. When the id is
      resolved to a name the field carries that instead and nothing here
      changes. *)
+  (* Which room, and which kind of answer that is. A name and an id are cut
+     from opposite ends: Discord ids are snowflakes that share a long prefix,
+     so the tail is what tells two channels apart, while a name differs at the
+     front and loses its meaning from the back -- [#kinossam-dev] cut to a
+     tail reads [...ssam-dev].
+
+     A variant rather than a marker on the string: "does it start with #" is a
+     guess about text, and this is a fact the decoder already knows. *)
+  type channel =
+    | Channel_name of string
+    | Channel_id of string
+
   type t =
     | Dashboard
-    | Discord of { channel : string option }
-    | Slack of { channel : string option }
+    | Discord of { channel : channel option }
+    | Slack of { channel : channel option }
     | Webhook of string
     | Agent
     | Broadcast
@@ -98,8 +110,13 @@ let short_channel reference =
 let connector_label name channel =
   match channel with
   | None -> Some name
-  | Some reference when String.trim reference = "" -> Some name
-  | Some reference -> Some (name ^ " " ^ short_channel (String.trim reference))
+  (* A room name is left whole. The label is fitted to the speaker column
+     further down, and that cut keeps the head -- which is the half of a name
+     that carries it. Cutting again here would only cut it shorter. *)
+  | Some (Surface.Channel_name room) -> Some (name ^ " #" ^ String.trim room)
+  (* An id is cut here because the fit above keeps the wrong half of one. *)
+  | Some (Surface.Channel_id reference) ->
+      Some (name ^ " " ^ short_channel (String.trim reference))
 
 let surface_label : Surface.t -> string option = function
   | Surface.Dashboard -> None
@@ -113,14 +130,31 @@ let surface_label : Surface.t -> string option = function
 
 (* Unknown kinds decode to [None]: a build that meets a surface it was not
    taught draws the row unlabelled rather than inventing a name for it. *)
+let channel_reference_of fields =
+  match string_field fields "channel_name" with
+  | Some name when String.trim name <> "" ->
+      Some (Surface.Channel_name (String.trim name))
+  | Some _ | None -> (
+    (* A blank name is the absence the resolver reports, not a room called
+       "". The id still says which room. *)
+    match string_field fields "channel_id" with
+    | Some id when String.trim id <> "" -> Some (Surface.Channel_id id)
+    | Some _ | None -> None)
+
 let surface_of_json : Yojson.Safe.t -> Surface.t option = function
   | `Assoc fields ->
       (match string_field fields "kind" with
        | Some "dashboard" -> Some Surface.Dashboard
+       (* The name where the workspace let us ask, the id where it did not.
+          Both answer "which room", and the id was always better than the bare
+          connector badge -- five channels of one Keeper read as one place
+          before either. *)
        | Some "discord" ->
-           Some (Surface.Discord { channel = string_field fields "channel_id" })
+           Some
+             (Surface.Discord
+                { channel = channel_reference_of fields })
        | Some "slack" ->
-           Some (Surface.Slack { channel = string_field fields "channel_id" })
+           Some (Surface.Slack { channel = channel_reference_of fields })
        | Some "webhook" ->
            Some
              (Surface.Webhook

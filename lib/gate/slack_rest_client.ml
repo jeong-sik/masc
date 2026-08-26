@@ -257,6 +257,60 @@ let parse_users_info_response ~status ~body =
             | None -> Error (Other "ok=true but missing user.id"))
          | None -> Error (Other "ok=true but missing 'user'"))
 
+type conversation_info_ok = {
+  channel_id : string;
+  channel_name : string option;
+}
+
+let build_conversations_info_request ~token ~channel_id =
+  let url = "https://slack.com/api/conversations.info" in
+  let headers =
+    ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
+    :: auth_headers ~token
+  in
+  (url, headers, "channel=" ^ channel_id)
+
+let parse_conversations_info_response ~status ~body =
+  if status < 200 || status >= 300 then Error (Http_status { code = status; body })
+  else
+    match parse_json_safe body with
+    | Error msg -> Error (Other (Printf.sprintf "response rejected (%s): %s" msg body))
+    | Ok json ->
+      let ok =
+        match Gate_rest_json.bool_field "ok" json with Some b -> b | None -> false
+      in
+      if not ok then
+        let err =
+          match Gate_rest_json.string_field "error" json with
+          | Some e -> e
+          | None -> "conversations.info failed"
+        in
+        Error (Slack_api { error = err })
+      else
+        (match Gate_rest_json.object_field "channel" json with
+         | Some channel ->
+           (match Gate_rest_json.string_field "id" channel with
+            | Some channel_id ->
+              (* A direct message has no [name]. Absent rather than blank, so a
+                 renderer never prints an empty label where a channel goes. *)
+              let channel_name =
+                match Gate_rest_json.string_field "name" channel with
+                | Some name when String.trim name <> "" -> Some name
+                | Some _ | None -> None
+              in
+              Ok { channel_id; channel_name }
+            | None -> Error (Other "ok=true but missing channel.id"))
+         | None -> Error (Other "ok=true but missing 'channel'"))
+
+let conversations_info ?clock ?(timeout_sec = default_http_timeout_sec) ~token
+    ~channel_id () =
+  let (url, headers, body) =
+    build_conversations_info_request ~token ~channel_id
+  in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) -> parse_conversations_info_response ~status ~body
+
 let users_info ?clock ?(timeout_sec = default_http_timeout_sec) ~token ~user_id
     () =
   let (url, headers, body) = build_users_info_request ~token ~user_id in

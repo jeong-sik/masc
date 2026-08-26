@@ -2,7 +2,7 @@
    and an empty answer is never recorded as an answer. *)
 
 open Alcotest
-module Names = Masc.Connector_person_names
+module Names = Masc.Connector_names
 
 let with_temp_base f =
   let base_path =
@@ -28,38 +28,40 @@ let with_temp_base f =
 
 let test_a_name_comes_back () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vincent" ();
   check (option string) "the name it was told" (Some "Vincent")
-    (Names.recall ~base_dir ~connector:"slack" ~id:"U1")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1")
 
 let test_an_unseen_id_says_nothing () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vincent" ();
   check (option string) "someone else is not Vincent" None
-    (Names.recall ~base_dir ~connector:"slack" ~id:"U2")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U2")
 
 (* Connectors do not share an id space, and a Discord snowflake could collide
    with nothing in Slack -- but the store must not be the reason they could. *)
 let test_connectors_do_not_share_names () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vincent" ();
   check (option string) "discord does not read slack's answer" None
-    (Names.recall ~base_dir ~connector:"discord" ~id:"U1")
+    (Names.recall ~base_dir ~connector:"discord" ~scope:Names.Person ~id:"U1")
 
 (* Someone renames themselves. The newest answer is the one to speak. *)
 let test_the_newest_name_wins () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vince" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vince" ();
   check (option string) "the rename is what comes back" (Some "Vince")
-    (Names.recall ~base_dir ~connector:"slack" ~id:"U1")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1")
 
 let test_repeating_a_name_does_not_grow_the_log () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1"
+    ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1"
+    ~name:"Vincent" ();
   let path =
-    Filename.concat base_dir ".masc/connector_people/slack.jsonl"
+    Filename.concat base_dir ".masc/connector_names/slack-people.jsonl"
   in
   let rows =
     Fs_compat.load_file path
@@ -72,16 +74,30 @@ let test_repeating_a_name_does_not_grow_the_log () =
    would let a blank overwrite a name and then be spoken as one. *)
 let test_a_blank_is_not_an_answer () =
   with_temp_base @@ fun base_dir ->
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"Vincent" ();
-  Names.remember ~base_dir ~connector:"slack" ~id:"U1" ~name:"  " ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1" ~name:"  " ();
   check (option string) "the blank did not overwrite the name" (Some "Vincent")
-    (Names.recall ~base_dir ~connector:"slack" ~id:"U1");
-  Names.remember ~base_dir ~connector:"slack" ~id:"  " ~name:"Nobody" ();
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"U1");
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"  " ~name:"Nobody" ();
   check (option string) "a blank id records nothing" None
-    (Names.recall ~base_dir ~connector:"slack" ~id:"  ")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"  ")
+
+(* People and channels share the store and must not share an id space. A
+   Slack channel and a Slack user could in principle be told apart by their
+   prefix; the store must not be the reason they could not. *)
+let test_people_and_channels_do_not_collide () =
+  with_temp_base @@ fun base_dir ->
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"X1"
+    ~name:"Vincent" ();
+  Names.remember ~base_dir ~connector:"slack" ~scope:Names.Channel ~id:"X1"
+    ~name:"kinossam-dev" ();
+  check (option string) "the person keeps their name" (Some "Vincent")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Person ~id:"X1");
+  check (option string) "and the channel keeps its own" (Some "kinossam-dev")
+    (Names.recall ~base_dir ~connector:"slack" ~scope:Names.Channel ~id:"X1")
 
 let () =
-  run "connector person names"
+  run "connector names"
     [ ( "recall"
       , [ test_case "a name comes back" `Quick test_a_name_comes_back
         ; test_case "an unseen id says nothing" `Quick
@@ -93,5 +109,7 @@ let () =
             test_repeating_a_name_does_not_grow_the_log
         ; test_case "a blank is not an answer" `Quick
             test_a_blank_is_not_an_answer
+        ; test_case "people and channels do not collide" `Quick
+            test_people_and_channels_do_not_collide
         ] )
     ]

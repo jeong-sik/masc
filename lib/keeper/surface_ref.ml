@@ -14,6 +14,10 @@ type t =
   | Slack of {
       team_id : string option;
       channel_id : string;
+      channel_name : string option;
+          (** What the room is called, where the workspace let us ask. The id
+              is the identity and stays; the name is for the reader, who has
+              no way to tell [C09TK9L4DV4] from [C09TK9L4DV5]. *)
       thread_ts : string option;
     }
   | Webhook of { source : string; event_id : string }
@@ -48,9 +52,10 @@ let to_json = function
         @ Json_util.string_field_if_present "guild_id" guild_id
         @ Json_util.string_field_if_present "parent_channel_id" parent_channel_id
         @ Json_util.string_field_if_present "thread_id" thread_id)
-  | Slack { team_id; channel_id; thread_ts } ->
+  | Slack { team_id; channel_id; channel_name; thread_ts } ->
       `Assoc
         ([ ("kind", `String "slack"); ("channel_id", `String channel_id) ]
+        @ Json_util.string_field_if_present "channel_name" channel_name
         @ Json_util.string_field_if_present "team_id" team_id
         @ Json_util.string_field_if_present "thread_ts" thread_ts)
   | Webhook { source; event_id } ->
@@ -92,6 +97,7 @@ let of_json json =
            {
              team_id = Json_util.assoc_string_opt "team_id" json;
              channel_id;
+             channel_name = Json_util.assoc_string_opt "channel_name" json;
              thread_ts = Json_util.assoc_string_opt "thread_ts" json;
            })
   | "webhook" ->

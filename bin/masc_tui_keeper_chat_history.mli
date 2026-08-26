@@ -41,10 +41,16 @@
     This library carries no [masc] dependency, so it cannot name that type;
     [test_tui_chat_surface_mirror] holds the two in step. *)
 module Surface : sig
+  type channel =
+    | Channel_name of string
+    | Channel_id of string
+        (** A name and an id are cut from opposite ends when drawn: a snowflake
+            id differs in its tail, a room name in its head. *)
+
   type t =
     | Dashboard
-    | Discord of { channel : string option }
-    | Slack of { channel : string option }
+    | Discord of { channel : channel option }
+    | Slack of { channel : channel option }
     | Webhook of string  (** the [source] the hook goes by *)
     | Agent
     | Broadcast

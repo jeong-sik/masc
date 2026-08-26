@@ -105,6 +105,10 @@ let record_one config (meta : Keeper_meta_contract.keeper_meta) =
           (Ids.Turn_ref.make
              ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
              ~absolute_turn:1)
+        ~runtime_id:"test.runtime"
+        ~skill_tool_use_id:"call-projection"
+        ~agent_core_turn:0
+        ~body:"projection body"
         ~activated_at:"2026-08-26T00:00:00Z"
         ~origin:Ledger.Session_instruction
     with

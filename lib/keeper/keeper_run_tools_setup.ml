@@ -314,6 +314,7 @@ let prepare_agent_setup
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
       ~trace_id:meta.runtime.trace_id
+      ~runtime_id:runtime_id_string
       ~turn_ref:
         (Ids.Turn_ref.make
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)

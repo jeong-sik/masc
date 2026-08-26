@@ -12,6 +12,7 @@ type error =
 val make :
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
+  runtime_id:string ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
   task_scope:Keeper_task_skill_turn.task_scope ->
   (t, error) result
@@ -20,12 +21,15 @@ val make :
 val record_instruction :
   config:Workspace.config ->
   t ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  body:string ->
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result
 
 val record_composition :
   config:Workspace.config ->
   t ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
   tool_name:string ->
   Skill_reference.t ->
   (Keeper_skill_activation_ledger.record_outcome, error) result

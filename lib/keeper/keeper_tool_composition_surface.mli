@@ -72,12 +72,15 @@ val make_tools
        (** The current turn's approval index. When present, every materialized
            composition records its node tools for that exact gate. *)
   -> ?record_instruction_activation:
-       (Skill_reference.t ->
+       (invocation:Agent_core.Tool_contract.Invocation.t ->
+        body:string ->
+        Skill_reference.t ->
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
   -> ?record_composition_activation:
-       (tool_name:string ->
+       (invocation:Agent_core.Tool_contract.Invocation.t ->
+        tool_name:string ->
         ( Keeper_skill_activation_ledger.record_outcome
         , Keeper_skill_activation_recorder.error )
           result)
@@ -109,7 +112,9 @@ module For_testing : sig
   val make_instruction_skill_tool :
     config:Workspace.config ->
     ?record_activation:
-      (Skill_reference.t ->
+      (invocation:Agent_core.Tool_contract.Invocation.t ->
+       body:string ->
+       Skill_reference.t ->
        ( Keeper_skill_activation_ledger.record_outcome
        , Keeper_skill_activation_recorder.error )
          result) ->

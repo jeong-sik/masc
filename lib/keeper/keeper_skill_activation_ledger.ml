@@ -17,6 +17,11 @@ type activation =
   ; content_revision : Skill_reference.content_revision
   ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; skill_tool_use_id : string
+  ; agent_core_turn : int
+  ; body_bytes : int
+  ; body_sha256 : string
   ; activated_at : string
   ; origin : origin
   }
@@ -56,8 +61,13 @@ type decode_error =
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
+  | Invalid_runtime_id
+  | Invalid_skill_tool_use_id
+  | Invalid_agent_core_turn of int
+  | Invalid_body_bytes of int
+  | Invalid_body_sha256 of Skill_reference.revision_error
   | Invalid_activated_at of string
-  | Duplicate_exact_activation
+  | Duplicate_skill_tool_use_id
   | Session_id_mismatch
   | Workspace_key_mismatch
   | Invalid_ledger_revision of Skill_catalog_snapshot.revision_error
@@ -67,6 +77,7 @@ type store_error =
   | Lock_failed of string
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
+  | Invocation_id_collision of string
   | Write_failed of Keeper_fs.durable_write_error
   | Readback_mismatch
 
@@ -88,8 +99,13 @@ let decode_error_code = function
   | Invalid_tool_name _ -> "invalid_tool_name"
   | Invalid_turn_ref _ -> "invalid_turn_ref"
   | Turn_ref_session_mismatch -> "turn_ref_session_mismatch"
+  | Invalid_runtime_id -> "invalid_runtime_id"
+  | Invalid_skill_tool_use_id -> "invalid_skill_tool_use_id"
+  | Invalid_agent_core_turn _ -> "invalid_agent_core_turn"
+  | Invalid_body_bytes _ -> "invalid_body_bytes"
+  | Invalid_body_sha256 _ -> "invalid_body_sha256"
   | Invalid_activated_at _ -> "invalid_activated_at"
-  | Duplicate_exact_activation -> "duplicate_exact_activation"
+  | Duplicate_skill_tool_use_id -> "duplicate_skill_tool_use_id"
   | Session_id_mismatch -> "session_id_mismatch"
   | Workspace_key_mismatch -> "workspace_key_mismatch"
   | Invalid_ledger_revision _ -> "invalid_ledger_revision"
@@ -100,6 +116,7 @@ let store_error_code = function
   | Lock_failed _ -> "lock_failed"
   | Read_failed _ -> "read_failed"
   | Decode_failed error -> "decode_failed." ^ decode_error_code error
+  | Invocation_id_collision _ -> "invocation_id_collision"
   | Write_failed _ -> "write_failed"
   | Readback_mismatch -> "readback_mismatch"
 ;;
@@ -109,12 +126,14 @@ let store_error_to_string = function
   | Read_failed error ->
     "read failed: " ^ Fs_compat.owned_regular_file_read_error_to_string error
   | Decode_failed _ -> "decode failed"
+  | Invocation_id_collision tool_use_id ->
+    "Skill invocation id collision: " ^ tool_use_id
   | Write_failed error ->
     "write failed: " ^ Keeper_fs.durable_write_error_to_string error
   | Readback_mismatch -> "readback mismatch"
 ;;
 
-let schema = "masc.skill-activations/v1"
+let schema = "masc.skill-activations/v2"
 let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let revision ledger = ledger.revision
@@ -122,11 +141,16 @@ let ledger_revision_to_string revision = revision
 let workspace_key ledger = ledger.workspace_key
 let session_id ledger = ledger.session_id
 
-let make_activation
+let make_activation_evidence
       ~(identity : Skill_reference.identity)
       ~content_revision
       ~snapshot_revision
       ~turn_ref
+      ~runtime_id
+      ~skill_tool_use_id
+      ~agent_core_turn
+      ~body_bytes
+      ~body_sha256
       ~activated_at
       ~origin
   =
@@ -151,6 +175,28 @@ let make_activation
   in
   let* () = origin_valid in
   let* () =
+    if String.equal (String.trim runtime_id) ""
+    then Error Invalid_runtime_id
+    else Ok ()
+  in
+  let* () =
+    if String.equal (String.trim skill_tool_use_id) ""
+    then Error Invalid_skill_tool_use_id
+    else Ok ()
+  in
+  let* () =
+    if agent_core_turn < 0
+    then Error (Invalid_agent_core_turn agent_core_turn)
+    else Ok ()
+  in
+  let* () =
+    if body_bytes < 0 then Error (Invalid_body_bytes body_bytes) else Ok ()
+  in
+  let* () =
+    Skill_reference.validate_revision_string body_sha256
+    |> Result.map_error (fun error -> Invalid_body_sha256 error)
+  in
+  let* () =
     if String.equal trace_id "" || Ids.Turn_ref.absolute_turn turn_ref <= 0
     then Error (Invalid_turn_ref (Ids.Turn_ref.to_string turn_ref))
     else Ok ()
@@ -165,9 +211,40 @@ let make_activation
     ; content_revision
     ; snapshot_revision
     ; turn_ref
+    ; runtime_id
+    ; skill_tool_use_id
+    ; agent_core_turn
+    ; body_bytes
+    ; body_sha256
     ; activated_at
     ; origin
     }
+;;
+
+let make_activation
+      ~identity
+      ~content_revision
+      ~snapshot_revision
+      ~turn_ref
+      ~runtime_id
+      ~skill_tool_use_id
+      ~agent_core_turn
+      ~body
+      ~activated_at
+      ~origin
+  =
+  make_activation_evidence
+    ~identity
+    ~content_revision
+    ~snapshot_revision
+    ~turn_ref
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~body_bytes:(String.length body)
+    ~body_sha256:Digestif.SHA256.(digest_string body |> to_hex)
+    ~activated_at
+    ~origin
 ;;
 
 let origin_to_yojson = function
@@ -202,6 +279,11 @@ let activation_to_yojson activation =
           (Skill_catalog_snapshot.snapshot_revision_to_string
              activation.snapshot_revision) )
     ; "turn_ref", Ids.Turn_ref.to_yojson activation.turn_ref
+    ; "runtime_id", `String activation.runtime_id
+    ; "skill_tool_use_id", `String activation.skill_tool_use_id
+    ; "agent_core_turn", `Int activation.agent_core_turn
+    ; "body_bytes", `Int activation.body_bytes
+    ; "body_sha256", `String activation.body_sha256
     ; "activated_at", `String activation.activated_at
     ; "origin", origin_to_yojson activation.origin
     ]
@@ -253,6 +335,12 @@ let string_field field fields =
   match List.assoc_opt field fields with
   | Some (`String value) -> Ok value
   | Some _ | None -> Error (Missing_string { field })
+;;
+
+let int_field field fields =
+  match List.assoc_opt field fields with
+  | Some (`Int value) -> Ok value
+  | Some _ | None -> Error (Expected_object { field })
 ;;
 
 let exact_fields ~object_name ~allowed fields =
@@ -356,6 +444,11 @@ let decode_activation ~expected_trace_id json =
         ; "content_revision"
         ; "snapshot_revision"
         ; "turn_ref"
+        ; "runtime_id"
+        ; "skill_tool_use_id"
+        ; "agent_core_turn"
+        ; "body_bytes"
+        ; "body_sha256"
         ; "activated_at"
         ; "origin"
         ]
@@ -391,6 +484,15 @@ let decode_activation ~expected_trace_id json =
     then Ok ()
     else Error Turn_ref_session_mismatch
   in
+  let* runtime_id = string_field "runtime_id" fields in
+  let* skill_tool_use_id = string_field "skill_tool_use_id" fields in
+  let* agent_core_turn = int_field "agent_core_turn" fields in
+  let* body_bytes = int_field "body_bytes" fields in
+  let* body_sha256 = string_field "body_sha256" fields in
+  let* () =
+    Skill_reference.validate_revision_string body_sha256
+    |> Result.map_error (fun error -> Invalid_body_sha256 error)
+  in
   let* activated_at = string_field "activated_at" fields in
   let* () =
     Time_codec.parse_rfc3339 activated_at
@@ -403,20 +505,22 @@ let decode_activation ~expected_trace_id json =
     | None -> Error (Expected_object { field = "origin" })
   in
   let* origin = decode_origin origin_json in
-  make_activation
+  make_activation_evidence
     ~identity
     ~content_revision
     ~snapshot_revision
     ~turn_ref
+    ~runtime_id
+    ~skill_tool_use_id
+    ~agent_core_turn
+    ~body_bytes
+    ~body_sha256
     ~activated_at
     ~origin
 ;;
 
 let exact_key_equal left right =
-  Skill_reference.equal_identity left.identity right.identity
-  && Skill_reference.equal_content_revision
-       left.content_revision
-       right.content_revision
+  String.equal left.skill_tool_use_id right.skill_tool_use_id
 ;;
 
 let of_projection_yojson json =
@@ -467,7 +571,7 @@ let of_projection_yojson json =
     | [] -> Ok ()
     | activation :: rest ->
       if List.exists (exact_key_equal activation) rest
-      then Error Duplicate_exact_activation
+      then Error Duplicate_skill_tool_use_id
       else ensure_unique rest
   in
   let* () = ensure_unique activations in
@@ -544,7 +648,12 @@ let record ~config ~trace_id activation =
     in
     let* current = read_locked ~ownership_root ~expected_trace_id:trace_id session_dir in
     match List.find_opt (exact_key_equal activation) current.activations with
-    | Some existing -> Ok (current, Already_recorded existing)
+    | Some existing
+      when Yojson.Safe.equal
+             (activation_to_yojson existing)
+             (activation_to_yojson activation) ->
+      Ok (current, Already_recorded existing)
+    | Some _ -> Error (Invocation_id_collision activation.skill_tool_use_id)
     | None ->
       let next =
         make

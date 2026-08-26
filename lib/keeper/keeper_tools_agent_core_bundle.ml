@@ -413,21 +413,24 @@ let make_tool_bundle_for_descriptors
     in
     let record_instruction_activation =
       Option.map
-        (fun context reference ->
+        (fun context ~invocation ~body reference ->
            Keeper_skill_activation_recorder.record_instruction
              ~config
              context
+             ~invocation
+             ~body
              reference)
         skill_activation_context
     in
     let record_composition_activation =
       Option.map
-        (fun context ~tool_name ->
+        (fun context ~invocation ~tool_name ->
            match List.assoc_opt tool_name composition_references with
            | Some reference ->
              Keeper_skill_activation_recorder.record_composition
                ~config
                context
+               ~invocation
                ~tool_name
                reference
            | None ->

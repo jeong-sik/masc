@@ -3446,6 +3446,7 @@
  (libraries
   alcotest
   masc
+  masc.agent_core
   masc.keeper_registry
   masc.masc_types
   masc.skill_config

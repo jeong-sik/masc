@@ -1129,6 +1129,21 @@ let test_static_contradiction_reports_once_until_rearmed () =
         | _ -> None)
       (Masc.Runtime_event_bus.drain subscription)
   in
+  (* Counting the events proves they were sent; this reads what they say. The
+     claim the degradation makes is that an operator can see which posture was
+     asked for and which one runs, so those two fields are what a regression
+     would quietly empty while the count stayed right. *)
+  let posture_pair payload =
+    let field name =
+      match payload with
+      | `Assoc fields ->
+        (match List.assoc_opt name fields with
+         | Some (`String value) -> value
+         | Some _ | None -> failf "native posture event has no string %S" name)
+      | _ -> failf "native posture event payload is not an object"
+    in
+    field "declared", field "effective"
+  in
   let posture_of = function
     | Ok p -> Runtime_native_tools.to_string p
     | Error detail ->
@@ -1157,8 +1172,14 @@ let test_static_contradiction_reports_once_until_rearmed () =
           ~client_label:"Claude Code"
           ~default:Runtime_native_tools.Native_full
           ~none_supported:true));
-  check int "full under Auto publishes per turn" 2
-    (List.length (drained_native_posture_events ()));
+  let full_events = drained_native_posture_events () in
+  check int "full under Auto publishes per turn" 2 (List.length full_events);
+  List.iter
+    (fun payload ->
+      let declared, effective = posture_pair payload in
+      check string "the event names the posture that was declared" "full" declared;
+      check string "the event names the posture that runs" "read" effective)
+    full_events;
   (* [none] on Codex: static contradiction, four turns -> one event. *)
   for _ = 1 to 4 do
     ignore

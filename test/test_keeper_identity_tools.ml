@@ -518,7 +518,10 @@ let test_an_expiring_token_is_exchanged_and_stored () =
   (match
      Keeper_oauth_client_store.save
        ~dir:(Filename.concat (Filename.concat base_path ".masc") "identity")
-       ~provider ~client_id:"client-abc"
+       ~provider
+       { Keeper_oauth_client_store.client_id = "client-abc"
+       ; client_secret = None
+       }
    with
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not store a client id: %s" message);
@@ -540,7 +543,6 @@ let test_an_expiring_token_is_exchanged_and_stored () =
         registration_url = None;
         scopes_supported = [];
         supports_pkce_s256 = true;
-        client_secret_optional = true;
       }
   in
   match

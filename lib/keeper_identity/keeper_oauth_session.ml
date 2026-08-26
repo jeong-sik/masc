@@ -6,13 +6,13 @@ module Discovery = Keeper_oauth_discovery
 module Registration = Keeper_oauth_registration
 module Flow = Keeper_oauth_flow
 module Pending = Keeper_oauth_pending
+module Store = Keeper_oauth_client_store
 
 type start_error =
   | Discovery_failed of Discovery.error
   | Registration_failed of Registration.error
   | No_pkce_s256 of string
   | No_registration of string
-  | No_public_client of string
 
 let start_error_to_string = function
   | Discovery_failed err ->
@@ -31,17 +31,11 @@ let start_error_to_string = function
       "no client id is configured and %s offers no registration endpoint; \
        create an app and configure its client id"
       issuer
-  | No_public_client issuer ->
-    Printf.sprintf
-      "%s wants a client secret at its token endpoint, and there is nowhere \
-       here to keep one; this attaches public clients that prove the \
-       redemption with PKCE instead"
-      issuer
 
 type started = {
   authorize_url : string;
   state : string;
-  client_id : string;
+  credentials : Keeper_oauth_client_store.credentials;
   registered_now : bool;
 }
 
@@ -56,7 +50,7 @@ let start
       ?(discover = default_discover)
       ?(register = default_register)
       ~(provider : Provider.t)
-      ~configured_client_id
+      ~configured
       ~client_name
       ~redirect_uri
       ~keeper
@@ -74,39 +68,42 @@ let start
      redemption has nothing else to prove it with. *)
   if not discovered.Discovery.supports_pkce_s256
   then Error (No_pkce_s256 discovered.Discovery.issuer)
-    (* Asked before registering rather than found out at the exchange: a
-       server that will not take a public client would otherwise be learned
-       about after the operator consented and after a client of ours was
-       left on their account. *)
-  else if not discovered.Discovery.client_secret_optional
-  then Error (No_public_client discovered.Discovery.issuer)
   else
-    let* client_id, registered_now =
-      match configured_client_id with
+    let* credentials, registered_now =
+      match configured with
       (* An operator who made their own app keeps using it. Registering
          anyway would leave a second client behind for no reason. *)
-      | Some client_id when String.trim client_id <> "" -> Ok (client_id, false)
+      | Some ({ Store.client_id; _ } as credentials)
+        when String.trim client_id <> "" -> Ok (credentials, false)
       | Some _ | None ->
         (match discovered.Discovery.registration_url with
          | None -> Error (No_registration discovered.Discovery.issuer)
          | Some registration_url ->
            Result.map
              (fun (r : Registration.registered) ->
-               (r.Registration.client_id, true))
+               ( { Store.client_id = r.Registration.client_id
+                 ; client_secret = r.Registration.client_secret
+                 }
+               , true ))
              (Result.map_error
                 (fun err -> Registration_failed err)
                 (register ~registration_url ~client_name ~redirect_uri)))
     in
+    let client_id = credentials.Store.client_id in
     let flow_pending =
       Flow.begin_authorization ~provider ~discovered ~client_id ~redirect_uri
         ~keeper
     in
     Pending.remember pending ~now ~ttl_sec
-      { Pending.pending = flow_pending; discovered; client_id };
+      { Pending.pending = flow_pending
+      ; discovered
+      ; client_id
+      ; client_secret = credentials.Store.client_secret
+      };
     Ok
       { authorize_url = flow_pending.Flow.authorize_url
       ; state = flow_pending.Flow.state
-      ; client_id
+      ; credentials
       ; registered_now
       }
 
@@ -139,7 +136,9 @@ let finish ?post ~pending ~state ~code ~now () =
       Result.map_error
         (fun err -> Exchange_failed err)
         (Flow.complete ?post ~discovered:in_flight.Pending.discovered
-           ~client_id:in_flight.Pending.client_id ~pending:flow_pending ~code
+           ~client_id:in_flight.Pending.client_id
+           ?client_secret:in_flight.Pending.client_secret ~pending:flow_pending
+           ~code
            ~state ~now ())
     in
     (match tokens.Flow.refresh_token with

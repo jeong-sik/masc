@@ -32,10 +32,6 @@ type t = {
   supports_pkce_s256 : bool;
       (** Absent S256 is disqualifying rather than a weaker default: without
           it the authorization code is bearer material in a redirect. *)
-  client_secret_optional : bool;
-      (** True when the token endpoint accepts ["none"], which is what makes
-          a public client possible -- PKCE proves the redemption instead of a
-          secret nobody could keep on an operator's machine anyway. *)
 }
 
 (** How discovery reads. Injected so the two hops can be exercised against

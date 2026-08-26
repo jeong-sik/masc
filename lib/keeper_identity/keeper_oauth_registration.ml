@@ -17,6 +17,7 @@ let error_to_string = function
 
 type registered = {
   client_id : string;
+  client_secret : string option;
   issued_at : float;
 }
 
@@ -67,8 +68,16 @@ let register
             | Some (`Float seconds) -> seconds
             | Some _ | None -> 0.0
           in
-          (* Any client_secret in this answer stops here. See the mli. *)
-          Ok { client_id; issued_at }
+          (* A secret here is the server saying its token endpoint wants
+             one. Metadata cannot be trusted for this either way: Vercel and
+             Hugging Face both omit "none" from the methods they list and
+             both register a public client. *)
+          let client_secret =
+            match List.assoc_opt "client_secret" pairs with
+            | Some (`String value) when String.trim value <> "" -> Some value
+            | Some _ | None -> None
+          in
+          Ok { client_id; client_secret; issued_at }
         | Some _ | None ->
           Error (Malformed "the answer carries no non-empty client_id"))
      | _ -> Error (Malformed "the answer is not an object"))

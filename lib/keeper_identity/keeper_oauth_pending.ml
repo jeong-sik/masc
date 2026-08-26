@@ -5,6 +5,7 @@ type in_flight = {
   pending : Keeper_oauth_flow.pending;
   discovered : Keeper_oauth_discovery.t;
   client_id : string;
+  client_secret : string option;
 }
 
 type entry = {

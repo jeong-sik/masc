@@ -25,6 +25,9 @@ type in_flight = {
           moved between the two would otherwise be redeemed at the new one
           with a code minted by the old. *)
   client_id : string;
+  client_secret : string option;
+      (** Held with the exchange rather than looked up again at the
+          callback: what redeems this code is what registered for it. *)
       (** Which client asked. Kept for the same reason -- the redemption has
           to name the client the code was issued to. *)
 }

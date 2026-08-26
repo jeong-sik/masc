@@ -22,6 +22,16 @@ val error_to_string : error -> string
 
 type registered = {
   client_id : string;
+  client_secret : string option;
+      (** What the server handed back beside the id, when it handed one back.
+
+          Registration asks for a public client and most servers answer with
+          one. Some answer with a secret anyway, and then it is not optional
+          decoration: their token endpoint refuses a redemption without it.
+          Measured 2026-08-27 -- monday.com returns one; Vercel and Hugging
+          Face echo [none] and return nothing, even though neither lists
+          [none] among the methods its metadata says it supports. Which it
+          is cannot be read off the metadata, only off this answer. *)
   issued_at : float;  (** unix seconds, as the server dated it *)
 }
 
@@ -40,8 +50,7 @@ val register :
   (registered, error) result
 (** Ask for a client id.
 
-    Registers as a public client: the token endpoint is told [none], and PKCE
-    proves the redemption instead. A server may still return a client secret,
-    and this deliberately does not keep it -- storing a credential nothing
-    sends is worse than not having one, because the next reader has to work
-    out whether it matters. *)
+    Asks for a public client: the token endpoint is told [none], and PKCE
+    proves the redemption. A server that answers with a secret anyway is
+    telling the caller its token endpoint wants one, so the secret comes back
+    in {!registered} rather than being dropped. *)

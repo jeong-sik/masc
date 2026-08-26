@@ -29,7 +29,6 @@ type t = {
   registration_url : string option;
   scopes_supported : string list;
   supports_pkce_s256 : bool;
-  client_secret_optional : bool;
 }
 
 type get = url:string -> (int * string, string) result
@@ -124,11 +123,6 @@ let string_list_member pairs key =
     List.filter_map (function `String value -> Some value | _ -> None) items
   | Some _ | None -> []
 
-let bool_member pairs key =
-  match List.assoc_opt key pairs with
-  | Some (`Bool value) -> value
-  | Some _ | None -> false
-
 let require ~url ~key value =
   match value with
   | Some value -> Ok value
@@ -183,9 +177,4 @@ let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
     ; supports_pkce_s256 =
         List.mem "S256"
           (string_list_member server_pairs "code_challenge_methods_supported")
-    ; client_secret_optional =
-        List.mem "none"
-          (string_list_member server_pairs
-             "token_endpoint_auth_methods_supported")
-        || bool_member server_pairs "client_id_metadata_document_supported"
     }

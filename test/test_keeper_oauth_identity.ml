@@ -247,6 +247,42 @@ let recording_post answer =
   in
   (post, seen)
 
+let exchange_body ?client_secret provider =
+  let pending = begin_for provider in
+  let post, seen =
+    recording_post
+      (Ok
+         ( 200,
+           {|{"access_token":"at-1","refresh_token":"rt-1","expires_in":3600}|}
+         ))
+  in
+  let _ =
+    Keeper_oauth_flow.complete ~post ?client_secret
+      ~discovered:(discovered_atlassian ()) ~client_id:"client-abc" ~pending
+      ~code:"the-code" ~state:pending.Keeper_oauth_flow.state ~now:0.0 ()
+  in
+  match !seen with
+  | Some (_, _, body) -> body
+  | None -> Alcotest.fail "the exchange was never sent"
+
+let test_a_secret_rides_along_on_the_redemption () =
+  let provider = load_or_fail atlassian_toml in
+  let body = exchange_body ~client_secret:"s3cret" provider in
+  Alcotest.(check bool)
+    "client_secret is in the form body" true
+    (List.mem_assoc "client_secret" (query_of ("?" ^ body)));
+  check str "and it is the one given" "s3cret"
+    (param (query_of ("?" ^ body)) "client_secret")
+
+let test_no_secret_means_no_parameter () =
+  (* Not an empty one: a server that issued no secret refuses a redemption
+     that carries client_secret= with nothing after it. *)
+  let provider = load_or_fail atlassian_toml in
+  let body = exchange_body provider in
+  Alcotest.(check bool)
+    "no client_secret at all" false
+    (List.mem_assoc "client_secret" (query_of ("?" ^ body)))
+
 let complete_with _provider pending ~state ~answer =
   let post, seen = recording_post answer in
   let result =
@@ -398,6 +434,7 @@ let in_flight_for provider : Keeper_oauth_pending.in_flight =
   { pending = begin_for provider
   ; discovered = discovered_atlassian ()
   ; client_id = "client-abc"
+  ; client_secret = None
   }
 
 let test_a_state_is_redeemed_once () =
@@ -483,13 +520,12 @@ let test_discovery_reads_both_hops () =
         found.Keeper_oauth_discovery.token_url;
       Alcotest.(check bool)
         "S256 is offered" true found.Keeper_oauth_discovery.supports_pkce_s256;
-      (* Both of these are what make an operator-registered app unnecessary. *)
+      (* What makes an operator-registered app unnecessary. Whether the
+         client may be public is deliberately not read here: the metadata
+         says one thing and registration answers another. *)
       Alcotest.(check bool)
         "dynamic registration is offered" true
         (found.Keeper_oauth_discovery.registration_url <> None);
-      Alcotest.(check bool)
-        "a public client is allowed" true
-        found.Keeper_oauth_discovery.client_secret_optional;
       Alcotest.(check bool)
         "Jira scopes are published" true
         (List.mem "write:jira-work" found.Keeper_oauth_discovery.scopes_supported)
@@ -698,7 +734,6 @@ let test_registration_keeps_the_servers_reason () =
 
 let stub_discover
       ?(supports_pkce = true)
-      ?(secret_optional = true)
       ?(registration = Some "https://auth.example.com/dcr")
       ()
   =
@@ -708,23 +743,25 @@ let stub_discover
     Ok
       { base with
         Keeper_oauth_discovery.supports_pkce_s256 = supports_pkce
-      ; client_secret_optional = secret_optional
       ; registration_url = registration
       }
 
 let never_register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
   Alcotest.fail "registered a client when one was already configured"
 
+let credentials ?secret client_id =
+  { Keeper_oauth_client_store.client_id; client_secret = secret }
+
 let start_login ?(configured = None) ?discover ?register provider table =
-  Keeper_oauth_session.start ?discover ?register ~provider
-    ~configured_client_id:configured ~client_name:"masc"
-    ~redirect_uri ~keeper:"oauth-fixture" ~pending:table ~now:0.0 ~ttl_sec:600.0 ()
+  Keeper_oauth_session.start ?discover ?register ~provider ~configured
+    ~client_name:"masc" ~redirect_uri ~keeper:"oauth-fixture" ~pending:table
+    ~now:0.0 ~ttl_sec:600.0 ()
 
 let test_start_uses_a_configured_client_rather_than_registering () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
   match
-    start_login ~configured:(Some "operators-own-app") ~discover:(stub_discover ())
+    start_login ~configured:(Some (credentials "operators-own-app")) ~discover:(stub_discover ())
       ~register:never_register provider table
   with
   | Error err ->
@@ -732,7 +769,8 @@ let test_start_uses_a_configured_client_rather_than_registering () =
         (Keeper_oauth_session.start_error_to_string err)
   | Ok started ->
       check str "the operator's client id is used" "operators-own-app"
-        started.Keeper_oauth_session.client_id;
+        started.Keeper_oauth_session.credentials
+          .Keeper_oauth_client_store.client_id;
       Alcotest.(check bool)
         "and nothing was registered" false
         started.Keeper_oauth_session.registered_now;
@@ -748,6 +786,7 @@ let test_start_registers_when_nobody_configured_one () =
     check str "under our own name" "masc" client_name;
     Ok
       { Keeper_oauth_registration.client_id = "freshly-registered"
+      ; client_secret = None
       ; issued_at = 1.0
       }
   in
@@ -757,7 +796,8 @@ let test_start_registers_when_nobody_configured_one () =
         (Keeper_oauth_session.start_error_to_string err)
   | Ok started ->
       check str "the new client id comes back" "freshly-registered"
-        started.Keeper_oauth_session.client_id;
+        started.Keeper_oauth_session.credentials
+          .Keeper_oauth_client_store.client_id;
       (* The caller has to persist it, or the next login registers again and
          leaves another client record behind. *)
       Alcotest.(check bool)
@@ -767,7 +807,7 @@ let test_start_refuses_a_server_without_pkce () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
   match
-    start_login ~configured:(Some "id") ~discover:(stub_discover ~supports_pkce:false ())
+    start_login ~configured:(Some (credentials "id")) ~discover:(stub_discover ~supports_pkce:false ())
       ~register:never_register provider table
   with
   | Error (Keeper_oauth_session.No_pkce_s256 _) ->
@@ -791,30 +831,62 @@ let test_start_says_when_there_is_no_way_to_get_a_client () =
         (Keeper_oauth_session.start_error_to_string other)
   | Ok _ -> Alcotest.fail "a login started with no client id and no way to get one"
 
-let test_start_refuses_a_server_that_wants_a_client_secret () =
-  (* Before registering, not after consent. A server that will not take a
-     client authenticating with nothing is one this cannot finish with, and
-     finding that out at the exchange means an operator has already consented
-     and a client of ours is sitting on their account for nothing. *)
+let test_a_registration_with_no_secret_is_a_public_client () =
+  (* Measured 2026-08-27: Vercel and Hugging Face both leave "none" out of
+     the methods their metadata lists, and both answer registration with a
+     public client. An earlier version refused on that metadata and turned
+     two working providers into two that could not be attached; the field it
+     read is gone, so there is no longer a place to make that call. What a
+     server accepts is in its registration answer, and this is that half. *)
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
+  let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
+    Ok
+      { Keeper_oauth_registration.client_id = "public-anyway"
+      ; client_secret = None
+      ; issued_at = 1.0
+      }
+  in
   match
-    start_login ~discover:(stub_discover ~secret_optional:false ())
-      ~register:never_register provider table
+    start_login ~discover:(stub_discover ()) ~register provider table
   with
-  | Error (Keeper_oauth_session.No_public_client _) ->
-      Alcotest.(check int) "and holds no login" 0
-        (Keeper_oauth_pending.waiting table ~now:1.0)
-  | Error other ->
-      Alcotest.failf "wrong refusal: %s"
-        (Keeper_oauth_session.start_error_to_string other)
-  | Ok _ -> Alcotest.fail "a login started against a server that wants a secret"
+  | Ok started ->
+      check str "registered despite the metadata" "public-anyway"
+        started.Keeper_oauth_session.credentials
+          .Keeper_oauth_client_store.client_id
+  | Error err ->
+      Alcotest.failf "a login was refused on metadata alone: %s"
+        (Keeper_oauth_session.start_error_to_string err)
+
+let test_a_secret_from_registration_is_kept () =
+  (* monday.com answers a request for a public client with a secret, which is
+     it saying its token endpoint wants one. Dropping it would leave the
+     redemption to fail with the server's word for "who are you". *)
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  let register ~registration_url:_ ~client_name:_ ~redirect_uri:_ =
+    Ok
+      { Keeper_oauth_registration.client_id = "confidential"
+      ; client_secret = Some "s3cret"
+      ; issued_at = 1.0
+      }
+  in
+  match start_login ~discover:(stub_discover ()) ~register provider table with
+  | Ok started ->
+      check
+        (Alcotest.option Alcotest.string)
+        "the caller is handed it to persist" (Some "s3cret")
+        started.Keeper_oauth_session.credentials
+          .Keeper_oauth_client_store.client_secret
+  | Error err ->
+      Alcotest.failf "start failed: %s"
+        (Keeper_oauth_session.start_error_to_string err)
 
 let test_the_callback_finishes_the_login_it_started () =
   let provider = load_or_fail atlassian_toml in
   let table = Keeper_oauth_pending.create () in
   match
-    start_login ~configured:(Some "client-abc") ~discover:(stub_discover ())
+    start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
       ~register:never_register provider table
   with
   | Error err ->
@@ -880,21 +952,55 @@ let test_no_client_until_one_is_registered () =
   let provider = load_or_fail atlassian_toml in
   match Keeper_oauth_client_store.load ~dir ~provider with
   | Ok None -> ()
-  | Ok (Some found) -> Alcotest.failf "found a client nobody registered: %s" found
+  | Ok (Some found) ->
+      Alcotest.failf "found a client nobody registered: %s"
+        found.Keeper_oauth_client_store.client_id
   | Error message -> Alcotest.failf "reading an empty directory failed: %s" message
 
 let test_a_registered_client_comes_back () =
   let dir = temp_dir () in
   let provider = load_or_fail atlassian_toml in
   (match
-     Keeper_oauth_client_store.save ~dir ~provider ~client_id:"client-from-registration"
+     Keeper_oauth_client_store.save ~dir ~provider
+       (credentials "client-from-registration")
    with
   | Ok () -> ()
   | Error message -> Alcotest.failf "saving failed: %s" message);
   match Keeper_oauth_client_store.load ~dir ~provider with
-  | Ok (Some found) -> check str "the id that was saved" "client-from-registration" found
+  | Ok (Some found) ->
+      check str "the id that was saved" "client-from-registration"
+        found.Keeper_oauth_client_store.client_id;
+      check
+        (Alcotest.option Alcotest.string)
+        "and no secret was invented" None
+        found.Keeper_oauth_client_store.client_secret
   | Ok None -> Alcotest.fail "the saved client id did not come back"
   | Error message -> Alcotest.failf "reading back failed: %s" message
+
+let test_a_secret_saved_beside_the_id_comes_back () =
+  let dir = temp_dir () in
+  let provider = load_or_fail atlassian_toml in
+  (match
+     Keeper_oauth_client_store.save ~dir ~provider
+       (credentials ~secret:"s3cret" "confidential")
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "saving failed: %s" message);
+  (match Keeper_oauth_client_store.load ~dir ~provider with
+  | Ok (Some found) ->
+      check
+        (Alcotest.option Alcotest.string)
+        "the secret that was saved" (Some "s3cret")
+        found.Keeper_oauth_client_store.client_secret
+  | Ok None -> Alcotest.fail "the saved client did not come back"
+  | Error message -> Alcotest.failf "reading back failed: %s" message);
+  (* Beside the id rather than inside it, and readable only by this user. *)
+  let mode =
+    (Unix.stat
+       (Filename.concat (Filename.concat dir "atlassian") "client_secret"))
+      .Unix.st_perm
+  in
+  check Alcotest.int "0600" 0o600 mode
 
 let test_an_empty_client_file_is_not_a_client () =
   (* A write that did not finish. Reading it as "no client" would register a
@@ -909,7 +1015,9 @@ let test_an_empty_client_file_is_not_a_client () =
   match Keeper_oauth_client_store.load ~dir ~provider with
   | Error _ -> ()
   | Ok None -> Alcotest.fail "an unfinished write read as having no client"
-  | Ok (Some found) -> Alcotest.failf "read whitespace as a client id: %S" found
+  | Ok (Some found) ->
+      Alcotest.failf "read whitespace as a client id: %S"
+        found.Keeper_oauth_client_store.client_id
 
 let test_the_id_has_to_be_one_path_component () =
   (* [t] is private and the client store joins the id onto a directory
@@ -1027,8 +1135,14 @@ let () =
             test_start_refuses_a_server_without_pkce;
           Alcotest.test_case "says when there is no way to get a client" `Quick
             test_start_says_when_there_is_no_way_to_get_a_client;
-          Alcotest.test_case "refuses a server that wants a client secret"
-            `Quick test_start_refuses_a_server_that_wants_a_client_secret;
+          Alcotest.test_case "no secret back means a public client" `Quick
+            test_a_registration_with_no_secret_is_a_public_client;
+          Alcotest.test_case "a secret from registration is kept" `Quick
+            test_a_secret_from_registration_is_kept;
+          Alcotest.test_case "a secret rides along on the redemption" `Quick
+            test_a_secret_rides_along_on_the_redemption;
+          Alcotest.test_case "no secret means no parameter" `Quick
+            test_no_secret_means_no_parameter;
           Alcotest.test_case "the callback finishes the login it started" `Quick
             test_the_callback_finishes_the_login_it_started;
           Alcotest.test_case "a callback nobody is waiting on says so" `Quick
@@ -1039,6 +1153,8 @@ let () =
             test_no_client_until_one_is_registered;
           Alcotest.test_case "a registered client comes back" `Quick
             test_a_registered_client_comes_back;
+          Alcotest.test_case "a secret saved beside the id comes back" `Quick
+            test_a_secret_saved_beside_the_id_comes_back;
           Alcotest.test_case "an unfinished write is not a client" `Quick
             test_an_empty_client_file_is_not_a_client;
           Alcotest.test_case "the id has to be one path component" `Quick

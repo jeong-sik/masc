@@ -4444,12 +4444,18 @@ let render_keeper_message (state : state) =
          here from a subset of the state is what let the footer say
          [Enter:blocked] on a screen that also showed "queued 1". *)
       let queue_hint () =
-        match Masc_tui_keeper_chat_queue.length state.msg_queued with
-        | 0 -> "Enter:queue for next turn"
-        | waiting ->
-            Printf.sprintf
-              "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
-              waiting
+        (* Walking back onto a waiting line makes the next Enter a replacement
+           rather than a second copy. The operator has to be told which of the
+           two this Enter is: the composer looks identical either way. *)
+        match state.msg_recall_replaces with
+        | Some _ -> "Enter:replace the queued line  Ctrl-U:leave it queued"
+        | None -> (
+            match Masc_tui_keeper_chat_queue.length state.msg_queued with
+            | 0 -> "Enter:queue for next turn"
+            | waiting ->
+                Printf.sprintf
+                  "Enter:queue (%d waiting)  Ctrl-K:cancel last  Ctrl-P:edit last"
+                  waiting)
       in
       match disposition with
       | Queues_behind _ -> queue_hint ()
@@ -4513,9 +4519,12 @@ let render_keeper_message (state : state) =
       else if chat_cols < 120 then
         let compact_enter_hint =
           match disposition with
-          | Queues_behind _ ->
-              Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
-                (Masc_tui_keeper_chat_queue.length state.msg_queued)
+          | Queues_behind _ -> (
+              match state.msg_recall_replaces with
+              | Some _ -> "Enter:replace queued  Ctrl-U:leave it"
+              | None ->
+                  Printf.sprintf "Enter:queue(%d)  Ctrl-K:cancel  Ctrl-P:edit"
+                    (Masc_tui_keeper_chat_queue.length state.msg_queued))
           | Sends -> enter_hint
         in
         let compact_scroll_hint =

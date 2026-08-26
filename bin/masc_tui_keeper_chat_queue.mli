@@ -65,6 +65,13 @@ val drop_for_keeper : t -> keeper_name:string -> t
     holding it forever would make the count say work is pending that never
     moves. *)
 
+val take : t -> request_id:string -> (Chat.request * t) option
+(** Take one named request out, keeping the rest in order. What an edit does
+    to the line it replaces: the original leaves the queue in the same step
+    the new one is built, so the two cannot both go out. [None] when the queue
+    no longer holds it -- it went out while the operator was typing, and the
+    edit becomes an ordinary new line. *)
+
 val holds : t -> request_id:string -> bool
 (** Whether this request is still waiting. The conversation shows a queued
     message from the moment it is typed, and this is how a row learns whether

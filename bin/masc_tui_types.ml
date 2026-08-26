@@ -1266,6 +1266,14 @@ type state = {
      operator's own text, so pressing down has nothing to give back. *)
   mutable msg_recall_at: int option;
   mutable msg_recall_draft: string;
+  (* The waiting line the composer is editing, if the walk stepped onto one.
+     [Some request_id] makes the next Enter replace that line instead of
+     queueing a second copy of it -- the arrows copy, and a copy of something
+     that has not been sent yet would be sent twice.
+
+     Not cleared by typing: editing is exactly typing over what was recalled,
+     and clearing it there would put the original back in play. *)
+  mutable msg_recall_replaces: string option;
   (* The selected Keeper's turn currently streaming, if any. The request-owned
      copy lives in [msg_inflight]; this slot only chooses what the pane draws.
      Never authoritative -- the recorded reply comes from the strict
@@ -1675,6 +1683,7 @@ let create_state
   msg_history = [];
   msg_recall_at = None;
   msg_recall_draft = "";
+  msg_recall_replaces = None;
   msg_live = None;
   msg_loaded = [];
   msg_loaded_keeper = None;

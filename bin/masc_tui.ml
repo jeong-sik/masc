@@ -823,7 +823,6 @@ let own_typed_messages (state : state) =
             | Message_thinking | Message_memory ->
                 false)
            && String.equal entry.me_keeper_name target)
-    |> List.map (fun entry -> entry.me_text)
   in
   (* The queue is not walked here any more. A queued line enters the history
      when it is typed, not when it is dispatched, so it is already in [sent] --
@@ -837,6 +836,23 @@ let set_composer_text (state : state) text =
 (* The draft is put aside on the first step back and handed over on the way
    forward past the newest, so a walk through the history never costs what was
    already typed. *)
+(* Land the walk on one line: its text into the composer, and whether that
+   line is still waiting.
+
+   Stepping onto a waiting line makes this an edit of it. The arrows copy, and
+   a copy of a line that has not been sent yet would be sent twice -- the
+   original from the queue and the copy from the composer. Recorded here and
+   acted on at Enter, so the step itself stays what it always was: reversible,
+   and costing nothing if the operator walks on past. *)
+let recall_land (state : state) entries at =
+  let count = List.length entries in
+  let entry = List.nth entries (count - 1 - at) in
+  set_composer_text state entry.me_text;
+  state.msg_recall_replaces <-
+    (if Chat_queue.holds state.msg_queued ~request_id:entry.me_request_id
+     then Some entry.me_request_id
+     else None)
+
 let recall_older (state : state) =
   let sent = own_typed_messages state in
   let count = List.length sent in
@@ -850,7 +866,7 @@ let recall_older (state : state) =
       | Some at -> min (at + 1) (count - 1)
     in
     state.msg_recall_at <- Some at;
-    set_composer_text state (List.nth sent (count - 1 - at))
+    recall_land state sent at
   end
 
 let recall_newer (state : state) =
@@ -858,13 +874,14 @@ let recall_newer (state : state) =
   | None -> ()
   | Some 0 ->
       state.msg_recall_at <- None;
+      (* Back at the operator's own draft: it is not an edit of anything. *)
+      state.msg_recall_replaces <- None;
       set_composer_text state state.msg_recall_draft
   | Some at ->
       let sent = own_typed_messages state in
       let at = at - 1 in
       state.msg_recall_at <- Some at;
-      let count = List.length sent in
-      if count > at then set_composer_text state (List.nth sent (count - 1 - at))
+      if List.length sent > at then recall_land state sent at
 
 (* Typing makes the composer the operator's again: the walk is over, so a step
    forward must not replace what they just wrote with a draft from before it. *)
@@ -1003,8 +1020,11 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     end else if c = Some 21 then begin
       (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
          is the operator saying they do not want what is there, and a spill
-         that outlived it would attach to the next message. *)
+         that outlived it would attach to the next message. An edit of a
+         waiting line is abandoned the same way: the line stays queued and the
+         next Enter is a new line, not a replacement. *)
       state.msg_spill <- None;
+      state.msg_recall_replaces <- None;
       Buffer.clear state.msg_input;
       true
     end else if c = Some 5 then begin
@@ -3248,6 +3268,23 @@ let start_keeper_message ?keeper_name state ~base_path ~mailbox text =
         (Printf.sprintf "Cannot send: Keeper %s is no longer registered"
            (Keeper_chat.terminal_safe_text target))
   | Some target -> (
+      (* An edit of a waiting line replaces it. The original leaves the queue
+         here, before the new request is built, so the two cannot both go out
+         -- which is what recalling a queued line and pressing Enter did:
+         the queue still held the original and the composer queued a copy.
+
+         [None] from [take] is the line having gone out while it was being
+         edited. Nothing to replace then, and this becomes an ordinary new
+         line rather than a send that silently does nothing. *)
+      (match state.msg_recall_replaces with
+       | None -> ()
+       | Some request_id ->
+           state.msg_recall_replaces <- None;
+           (match Chat_queue.take state.msg_queued ~request_id with
+            | None -> ()
+            | Some (original, rest) ->
+                state.msg_queued <- rest;
+                forget_queued_history state original));
       (* Now that the keeper is known, a spilled paste can be written where
          that keeper can read it. Above this point there is no answer to
          "whose workspace", and a file in the wrong one is a message pointing

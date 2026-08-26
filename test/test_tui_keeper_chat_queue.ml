@@ -124,6 +124,49 @@ let test_all_sendable_is_oldest_first () =
         (messages rest)
 ;;
 
+(* Editing a waiting line takes that line out, not the newest one. The arrows
+   can walk back past several, and replacing "whichever was last" would drop a
+   line the operator never looked at. *)
+let test_take_removes_the_named_line_and_keeps_the_order () =
+  let one = request ~keeper_name:"k" "one" in
+  let two = request ~keeper_name:"k" "two" in
+  let three = request ~keeper_name:"k" "three" in
+  let queue =
+    List.fold_left
+      (fun queue request ->
+        match Queue.push queue request with
+        | Ok (queue, _) -> queue
+        | Error detail -> failf "push failed: %s" detail)
+      Queue.empty [ one; two; three ]
+  in
+  (match Queue.take queue ~request_id:two.Chat.request_id with
+   | None -> fail "the queue holds this request"
+   | Some (taken, rest) ->
+       check string "the named line comes out" "two" taken.Chat.message;
+       check (list string) "and the rest keeps its order" [ "one"; "three" ]
+         (messages rest));
+  check bool "a request the queue does not hold takes nothing" true
+    (Option.is_none (Queue.take queue ~request_id:"tui-request-not-here"))
+;;
+
+(* [holds] and [take] answer about the same line: the pane asks the first to
+   mark a row as waiting and the send asks the second to replace it. Two
+   answers that disagreed would mark a row the send could not find. *)
+let test_holds_agrees_with_take () =
+  let only = request ~keeper_name:"k" "only" in
+  let queue =
+    match Queue.push Queue.empty only with
+    | Ok (queue, _) -> queue
+    | Error detail -> failf "push failed: %s" detail
+  in
+  check bool "holds says yes" true
+    (Queue.holds queue ~request_id:only.Chat.request_id);
+  check bool "and take agrees" true
+    (Option.is_some (Queue.take queue ~request_id:only.Chat.request_id));
+  check bool "holds says no for a stranger" false
+    (Queue.holds queue ~request_id:"tui-request-stranger")
+;;
+
 let test_an_empty_queue_takes_nothing () =
   check bool "empty is empty" true (Queue.is_empty Queue.empty);
   check int "and has no length" 0 (Queue.length Queue.empty);
@@ -145,6 +188,9 @@ let () =
             test_lines_for_a_departed_keeper_are_forgotten
         ; test_case "a busy keeper does not stall the lines behind it" `Quick
             test_a_busy_keeper_does_not_stall_the_lines_behind_it
+        ; test_case "take removes the named line and keeps the order" `Quick
+            test_take_removes_the_named_line_and_keeps_the_order
+        ; test_case "holds agrees with take" `Quick test_holds_agrees_with_take
         ; test_case "nothing sendable takes nothing" `Quick
             test_nothing_sendable_takes_nothing
         ; test_case "all sendable is oldest first" `Quick

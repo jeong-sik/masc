@@ -3805,9 +3805,40 @@ def chat_queue_interaction(gate: GatedHttpResponse) -> Interaction:
             process, master_fd, output, b"\x1b[A", composer_showing(b"queued-one")
         )
 
+        # Standing on a waiting line makes the next Enter a replacement rather
+        # than a second copy, and the footer has to say which one it is: the
+        # composer looks identical either way.
+        wait_for_output(
+            process, master_fd, output, b"Enter:replace", start=0, timeout=5.0
+        )
+        # Edit it and send. The queue keeps two lines, not three -- the
+        # original leaves as the replacement arrives. Before this, the queue
+        # still held the original and the composer queued a copy, so the same
+        # message went out twice.
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"-fixed",
+            composer_showing(b"queued-one-fixed"),
+        )
+        replaced = send_and_wait(
+            process, master_fd, output, b"\r", b"queued-one-fixed"
+        )
+        replaced_plain = CSI_RE.sub(b"", frame_containing(replaced, b"queued-one-fixed"))
+        if not any(
+            marker in replaced_plain
+            for marker in (b"Enter:queue(2)", b"2 waiting")
+        ):
+            raise AssertionError(
+                f"the edit did not replace the queued line; the queue should "
+                f"still hold two: {replaced_plain!r}"
+            )
+
         # Let the turn settle and the queue drain into it. Until it does, Esc
         # means "interrupt the turn" and q is just a letter in the composer.
-        send_and_wait(process, master_fd, output, b"\x15", b"> ")
+        # The Enter above already emptied the composer, so there is nothing to
+        # clear -- and nothing would redraw for a Ctrl-U that changed nothing.
         gate.release.set()
         read_available(master_fd, output)
         wait_for_output(

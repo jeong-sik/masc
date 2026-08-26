@@ -599,6 +599,40 @@ let test_crashed_cycle_records_turn_failure () =
       | KSM.Turn_succeeded -> ()
       | _ -> fail "expected Turn_succeeded when no failures recorded")
 
+let test_operator_interrupt_skips_turn_accounting () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  let base_path = temp_dir "operator-interrupt-turn-accounting" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+      let meta = make_meta "operator-interrupt-turn-accounting" in
+      ignore (R.For_testing.register ~base_path meta.name meta);
+      let outcome =
+        KHL.handle_cycle_exception
+          ~base_path
+          ~meta
+          (Eio.Cancel.Cancelled R.Operator_interrupt)
+      in
+      check int
+        "operator interrupt does not increment turn failures"
+        0
+        (R.get_turn_failures ~base_path meta.name);
+      check bool "selected stimuli stay pending" false outcome.stimuli_acked;
+      (match outcome.cycle_status with
+       | KHL.Turn_cycle_interrupted -> ()
+       | KHL.Turn_cycle_completed
+       | KHL.Turn_cycle_crashed
+       | KHL.Turn_cycle_busy _ ->
+         fail "operator interrupt did not retain its typed cycle status");
+      match KHL.decide_keepalive_cycle_action outcome.cycle_status with
+      | KHL.Skip_interrupted_turn -> ()
+      | KHL.Defer_autonomous_work _ | KHL.Record_turn_status _ ->
+        fail "operator interrupt must not emit turn success or failure")
+
 (* ══════════════════════════════════════════════════════════
    8. Direct keepalive path resolves lifecycle promises
    ══════════════════════════════════════════════════════════ *)
@@ -4533,6 +4567,8 @@ let () =
         test_fresh_presence_preserves_turn_failures;
       test_case "crashed cycle surfaces as turn failure" `Quick
         test_crashed_cycle_records_turn_failure;
+      test_case "operator interrupt skips turn accounting" `Quick
+        test_operator_interrupt_skips_turn_accounting;
     ];
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick

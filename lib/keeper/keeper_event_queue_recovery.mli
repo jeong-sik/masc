@@ -53,6 +53,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; shutdown_reserved : int
   ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option

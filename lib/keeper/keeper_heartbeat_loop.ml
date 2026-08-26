@@ -121,6 +121,7 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
    terminates the Keeper lane. *)
 type keepalive_cycle_status =
   | Turn_cycle_completed
+  | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
 
@@ -130,10 +131,12 @@ type work_heartbeat_action =
 
 type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Skip_interrupted_turn
   | Record_turn_status of work_heartbeat_action
 
 let decide_keepalive_cycle_action = function
   | Turn_cycle_completed -> Record_turn_status Refresh_work_heartbeat
+  | Turn_cycle_interrupted -> Skip_interrupted_turn
   | Turn_cycle_crashed -> Record_turn_status Preserve_work_heartbeat
   | Turn_cycle_busy block -> Defer_autonomous_work block
 ;;
@@ -274,6 +277,22 @@ let record_crashed_cycle_failure ~base_path ~keeper_name exn =
     keeper_name
     (Printexc.to_string exn)
     (if String.equal backtrace "" then "" else "\n" ^ backtrace)
+;;
+
+let handle_cycle_exception ~base_path ~(meta : keeper_meta) exn =
+  if Keeper_registry_types.is_operator_interrupt exn
+  then (
+    Log.Keeper.info
+      ~keeper_name:meta.name
+      "%s: keeper cycle interrupted by operator; no turn failure recorded"
+      meta.name;
+    { meta; cycle_status = Turn_cycle_interrupted; stimuli_acked = false })
+  else (
+    record_crashed_cycle_failure
+      ~base_path
+      ~keeper_name:meta.name
+      exn;
+    { meta; cycle_status = Turn_cycle_crashed; stimuli_acked = false })
 ;;
 
 let manual_compaction_requested_of_stimuli = function
@@ -921,6 +940,11 @@ let run_keepalive_unified_turn
       ; stimuli_acked = !stimuli_acked
       }
     with
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+      handle_cycle_exception
+        ~base_path:ctx.config.base_path
+        ~meta:meta_after_triage
+        exn
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       Printexc.raise_with_backtrace e backtrace
@@ -931,14 +955,10 @@ let run_keepalive_unified_turn
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)
-      record_crashed_cycle_failure
+      handle_cycle_exception
         ~base_path:ctx.config.base_path
-        ~keeper_name:meta_after_triage.name
-        exn;
-      { meta = meta_after_triage
-      ; cycle_status = Turn_cycle_crashed
-      ; stimuli_acked = false
-      }))
+        ~meta:meta_after_triage
+        exn))
     with
   | Ok (`Ran outcome) -> outcome
   | Ok (`Busy ((Keeper_owner.Turn_busy (Some in_flight)) as block)) ->
@@ -1266,6 +1286,11 @@ let run_heartbeat_loop
               "Keeper Owner deferred autonomous work: %s; this keepalive cycle \
                records no turn status, crash, or work-health refresh"
               (Keeper_owner.autonomous_block_to_string block)
+         | Skip_interrupted_turn ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "%s: operator-interrupted cycle records no turn status or work-health refresh"
+             m.name
          | Record_turn_status _ when lifecycle_blocked -> ()
          | Record_turn_status work_heartbeat_action ->
              (* The registry tracks failure count as observation. A

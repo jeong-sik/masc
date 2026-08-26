@@ -119,6 +119,7 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
     | Maintenance_projection ->
       report.converged > 0
       || report.claim_busy > 0
+      || report.shutdown_reserved > 0
       || report.failures <> []
       || Option.is_some report.discovery_error
   in
@@ -126,7 +127,7 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
   then
     Log.Server.info
       "keeper transition outbox %s discovered=%d processed=%d deferred=%d \
-       converged=%d no_pending=%d claim_busy=%d failures=%d"
+       converged=%d no_pending=%d claim_busy=%d shutdown_reserved=%d failures=%d"
       source_label
       report.discovered
       report.processed
@@ -134,6 +135,7 @@ let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
       report.converged
       report.no_pending
       report.claim_busy
+      report.shutdown_reserved
       (List.length report.failures);
   page
 ;;
@@ -199,6 +201,11 @@ let recover_projected_durable_demand_owner
     Log.Server.info
       "keeper durable demand recovery retained keeper=%s reason=projection_claim_busy"
       keeper_name
+  | Error (Keeper_event_queue_recovery.Owner_shutdown_reserved operation_id) ->
+    Log.Server.info
+      "keeper durable demand recovery retained keeper=%s reason=shutdown_reserved operation=%s"
+      keeper_name
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Error error ->
     Log.Server.error
       "keeper durable demand recovery retained keeper=%s reason=projection_unknown detail=%s"

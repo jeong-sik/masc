@@ -99,6 +99,7 @@ val record_provider_timeout_observation :
     no turn accounting, crash accounting, or work-health refresh. *)
 type keepalive_cycle_status =
   | Turn_cycle_completed
+  | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
 
@@ -108,17 +109,21 @@ type work_heartbeat_action =
 
 type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Skip_interrupted_turn
   | Record_turn_status of work_heartbeat_action
 
 val decide_keepalive_cycle_action :
   keepalive_cycle_status -> keepalive_cycle_action
 (** Total accounting decision used by the heartbeat effect shell. Completed
-    cycles record and refresh, crashed cycles record while preserving the
-    existing work-health lease, and busy cycles retain their typed admission
-    block without recording a turn. *)
+    cycles record and refresh. Operator-interrupted cycles record no turn
+    status and do not refresh the work-health lease. Crashed cycles record
+    while preserving the existing lease, and busy cycles retain their typed
+    admission block without recording a turn. *)
 
 (** Outcome of one keepalive cycle evaluation.
 
+    [Turn_cycle_interrupted] is an expected operator cancellation: it does not
+    record success or failure and leaves selected stimuli pending.
     [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
     keep the keeper fiber alive (T6 audit), or a durable event-queue transition
     did not commit. The failure has already been recorded via
@@ -141,6 +146,12 @@ type keepalive_turn_outcome = {
     and logs at ERROR. Does not raise. *)
 val record_crashed_cycle_failure :
   base_path:string -> keeper_name:string -> exn -> unit
+
+(** Convert an exception escaping one autonomous cycle into its accounting
+    outcome. Operator interrupts are expected cancellation and do not mutate
+    the turn-failure counter; every other exception is recorded as a crash. *)
+val handle_cycle_exception :
+  base_path:string -> meta:keeper_meta -> exn -> keepalive_turn_outcome
 
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate

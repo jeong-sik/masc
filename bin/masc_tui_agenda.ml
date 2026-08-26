@@ -19,16 +19,19 @@ type scheduled =
   ; standing : standing
   ; who : string
   ; what : string
+  ; recurrence : string
   }
 
 type awaiting =
   { asked_by : string
   ; question : string
+  ; asked_at : float
+  ; timeout_sec : float
   }
 
 type t =
-  { next : scheduled option
-  ; waiting : int
+  { coming : scheduled list  (** earliest first *)
+  ; blocked : awaiting list
   }
 
 (* [payload_target] arrives as ["keeper:edgar.a.poe"]. The kind is the same on
@@ -48,24 +51,24 @@ let is_coming row = match row.standing with
   | Settled | Unrecognised _ -> false
 ;;
 
-let earliest rows =
-  rows
-  |> List.filter is_coming
-  |> List.fold_left
-       (fun acc row ->
-          match acc with
-          | Some best when String.compare best.at_iso row.at_iso <= 0 -> Some best
-          | Some _ | None -> Some row)
-       None
-;;
+(* RFC 3339 in UTC with a fixed shape, which the projection writes and the
+   decoder passes through, so bytes order the same way instants do. Sorting
+   here rather than trusting the payload: the projection orders active rows
+   ahead of settled ones and then by due time, and a strip that depends on
+   somebody else's sort is a strip that changes when their sort does. *)
+let by_time left right = String.compare left.at_iso right.at_iso
 
 let project ~scheduled ~awaiting =
-  { next = earliest scheduled; waiting = List.length awaiting }
+  { coming = scheduled |> List.filter is_coming |> List.sort by_time
+  ; blocked = awaiting
+  }
 ;;
+
+let next t = match t.coming with row :: _ -> Some row | [] -> None
 
 (* One predicate, two readers: the row the frame draws and the row the
    keypress bound subtracts are the same row or neither exists. *)
-let is_silent t = t.next = None && t.waiting = 0
+let is_silent t = t.coming = [] && t.blocked = []
 let rows_taken t = if is_silent t then 0 else 1
 
 type strip =
@@ -125,15 +128,115 @@ let strip ~now ~localtime ~cols t =
   if is_silent t
   then None
   else begin
-    let waiting = waiting_half t.waiting in
+    let waiting = waiting_half (List.length t.blocked) in
     let reserved =
       if waiting = "" then 0 else Masc_tui_message_layout.display_width waiting + 2
     in
     let clock =
-      match t.next with
+      match next t with
       | None -> ""
       | Some row -> clock_half ~now ~localtime ~cells:(max 0 (cols - reserved)) row
     in
     Some { clock; waiting }
   end
+;;
+
+type tone =
+  | Heading
+  | Wake
+  | Question
+  | Quiet
+
+type line =
+  { tone : tone
+  ; text : string
+  }
+
+(* Cells the left column keeps before the right one is dropped: a clock that
+   has spilled onto a second day ("08:00 08/27") and enough of a name to tell
+   two keepers apart. *)
+let minimum_left_cells = 24
+
+(* Two cells of indent under a heading, and the right-hand column laid against
+   the far edge. One helper so the wake rows and the question rows land on the
+   same two columns; laying each out where it is written is how two lists on
+   one panel end up half a cell apart.
+
+   What the row is for is on the left. The right is context, and it is dropped
+   whole rather than cut when it will not fit: half a cron expression reads as
+   a schedule that is not the one running. *)
+let two_column ~cols left right =
+  let width = Masc_tui_message_layout.display_width in
+  let indent = "  " in
+  let body = max 0 (cols - width indent) in
+  let right = if width right + minimum_left_cells > body then "" else right in
+  let separator = if right = "" then 0 else 2 in
+  let room = max 0 (body - width right - separator) in
+  let left = Masc_tui_message_layout.fit_middle room left in
+  let gap = max 0 (body - width left - width right) in
+  indent ^ left ^ String.make gap ' ' ^ right
+;;
+
+let said row =
+  let who = short_who row.who in
+  match String.trim row.what, String.trim who with
+  | "", "" -> "(untitled)"
+  | "", who -> who
+  | what, "" -> what
+  | what, who -> Printf.sprintf "%s \xc2\xb7 %s" what who
+;;
+
+(* Whole minutes while there are any, then seconds. A held call is denied when
+   this reaches zero, so the number is the reason to look rather than
+   decoration. *)
+let time_left ~now (held : awaiting) =
+  let remaining = held.asked_at +. held.timeout_sec -. now in
+  if Float.compare remaining 0.0 <= 0
+  then "expired"
+  else begin
+    let whole = int_of_float remaining in
+    if whole >= 60
+    then Printf.sprintf "%dm %02ds left" (whole / 60) (whole mod 60)
+    else Printf.sprintf "%ds left" whole
+  end
+;;
+
+let overlay ~now ~localtime ~cols t =
+  let quiet text = { tone = Quiet; text = "  " ^ text } in
+  let wakes =
+    match t.coming with
+    | [] -> [ quiet "nothing is scheduled" ]
+    | rows ->
+      List.map
+        (fun row ->
+           { tone = Wake
+           ; text =
+               two_column
+                 ~cols
+                 (Printf.sprintf
+                    "%-6s  %s"
+                    (hour_and_minute ~now ~localtime row)
+                    (said row))
+                 row.recurrence
+           })
+        rows
+  in
+  let questions =
+    match t.blocked with
+    | [] -> [ quiet "nobody is waiting on you" ]
+    | rows ->
+      List.map
+        (fun (held : awaiting) ->
+           { tone = Question
+           ; text =
+               two_column
+                 ~cols
+                 (Printf.sprintf "%s is holding %s" held.asked_by held.question)
+                 (time_left ~now held)
+           })
+        rows
+  in
+  ({ tone = Heading; text = "Coming up" } :: wakes)
+  @ [ { tone = Quiet; text = "" }; { tone = Heading; text = "Waiting on you" } ]
+  @ questions
 ;;

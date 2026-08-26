@@ -19,8 +19,10 @@ let seoul t = Unix.gmtime (t +. (9.0 *. 3600.0))
 
 let at_2026_08_26_0300z = 1787713200.0
 
-let row ?(standing = Agenda.Coming) at_iso who what : Agenda.scheduled =
-  { at_iso; standing; who; what }
+let row ?(standing = Agenda.Coming) ?(recurrence = "every 3600s") at_iso who what
+  : Agenda.scheduled
+  =
+  { at_iso; standing; who; what; recurrence }
 ;;
 
 let edgar = row "2026-08-26T02:45:00Z" "keeper:edgar.a.poe" "진행 상황 체크"
@@ -30,7 +32,16 @@ let done_earlier =
   row ~standing:Agenda.Settled "2026-08-26T01:00:00Z" "keeper:taskmaster" "정기 보드 스윕"
 ;;
 
-let ask asked_by question : Agenda.awaiting = { asked_by; question }
+(* [kta_asked_at] and [kta_timeout_sec] as the registry reports them: asked a
+   minute before [now], with the five minutes a held call is given before it
+   is denied -- so four remain. *)
+let asked_at_1155 = 1787713140.0
+
+let ask ?(asked_at = asked_at_1155) ?(timeout_sec = 300.0) asked_by question
+  : Agenda.awaiting
+  =
+  { asked_by; question; asked_at; timeout_sec }
+;;
 
 let strip_of ?(now = at_2026_08_26_0300z) ?(cols = 80) t =
   Agenda.strip ~now ~localtime:seoul ~cols t
@@ -181,7 +192,7 @@ let test_the_frame_and_the_bound_read_the_same_number () =
     (calls
        ~module_path:"bin/masc_tui_render.ml"
        ~binding_name:"finish_surface"
-       ~callee:"Agenda.rows_taken"
+       ~callee:"Masc_tui_types.agenda_chrome_rows"
      >= 1);
   check
     bool
@@ -200,6 +211,112 @@ let test_the_frame_and_the_bound_read_the_same_number () =
        ~module_path:"bin/masc_tui_types.ml"
        ~binding_name:"agenda_chrome_rows"
        ~callee:"Masc_tui_agenda.rows_taken")
+;;
+
+
+(* {1 The panel behind [;]} *)
+
+let overlay_of ?(now = at_2026_08_26_0300z) ?(cols = 78) t =
+  Agenda.overlay ~now ~localtime:seoul ~cols t
+;;
+
+let texts lines = List.map (fun (l : Agenda.line) -> l.Agenda.text) lines
+
+let joined lines = String.concat "\n" (texts lines)
+
+let tones_of lines tone =
+  List.filter (fun (l : Agenda.line) -> l.Agenda.tone = tone) lines
+;;
+
+(* The strip names one wake because it has one line. The panel was opened on
+   purpose, so it answers with all of them. *)
+let test_the_panel_lists_every_coming_wake () =
+  let lines = overlay_of (Agenda.project ~scheduled:[ sweep; edgar ] ~awaiting:[]) in
+  check int "both wakes are rows" 2 (List.length (tones_of lines Agenda.Wake));
+  let text = joined lines in
+  check bool "the 11:45 check" true (contains ~needle:"11:45" text);
+  check bool "and the 12:14 sweep" true (contains ~needle:"12:14" text)
+;;
+
+let test_settled_rows_do_not_reach_the_panel () =
+  let lines =
+    overlay_of (Agenda.project ~scheduled:[ done_earlier; edgar ] ~awaiting:[])
+  in
+  check int "one wake, not two" 1 (List.length (tones_of lines Agenda.Wake));
+  check
+    bool
+    "the finished row is not on it"
+    false
+    (contains ~needle:"taskmaster" (joined lines))
+;;
+
+let test_wakes_are_earliest_first () =
+  let lines =
+    overlay_of (Agenda.project ~scheduled:[ sweep; edgar ] ~awaiting:[])
+  in
+  match texts (tones_of lines Agenda.Wake) with
+  | first :: _ -> check bool "the earliest leads" true (contains ~needle:"11:45" first)
+  | [] -> fail "there are wakes to order"
+;;
+
+(* Where the strip draws nothing, the panel says so. The operator pressed a
+   key to ask, and a blank panel reads as a failure to load rather than as an
+   answer. *)
+let test_empty_sections_answer_in_words () =
+  let lines = overlay_of (Agenda.project ~scheduled:[] ~awaiting:[]) in
+  let text = joined lines in
+  check bool "the wake section answers" true (contains ~needle:"nothing is scheduled" text);
+  check bool "so does the other" true (contains ~needle:"nobody is waiting" text);
+  check int "both headings are still drawn" 2 (List.length (tones_of lines Agenda.Heading))
+;;
+
+let test_a_held_call_says_how_long_is_left () =
+  let lines =
+    overlay_of (Agenda.project ~scheduled:[] ~awaiting:[ ask "lane-smith" "Execute" ])
+  in
+  let text = joined lines in
+  check bool "who is holding it" true (contains ~needle:"lane-smith" text);
+  check bool "and what" true (contains ~needle:"Execute" text);
+  check bool "and how long is left" true (contains ~needle:"4m 00s left" text)
+;;
+
+(* A call whose wait has run out is denied, so the row says that rather than
+   counting past zero. *)
+let test_an_expired_call_says_so () =
+  let lines =
+    overlay_of
+      (Agenda.project
+         ~scheduled:[]
+         ~awaiting:[ ask ~timeout_sec:10.0 "lane-smith" "Execute" ])
+  in
+  check bool "expired" true (contains ~needle:"expired" (joined lines))
+;;
+
+(* The rows are laid out before [framed_line] sees them, so they have to be
+   laid out against the width it will fit them to -- the right-hand column was
+   cut on the way through when they were not. *)
+let test_rows_fit_the_width_they_were_given () =
+  let t =
+    Agenda.project
+      ~scheduled:
+        [ row ~recurrence:"cron 45 8-23 * * * Asia/Seoul" "2026-08-26T02:45:00Z"
+            "keeper:edgar.a.poe" "진행 상황 체크"
+        ; row ~recurrence:"daily 20:00:00 Asia/Seoul" "2026-08-26T11:00:00Z"
+            "keeper:taskmaster" "정기 백로그 감사, 목표 진척, agent fitness 점검"
+        ]
+      ~awaiting:[ ask "lane-smith" "Execute" ]
+  in
+  List.iter
+    (fun cols ->
+       List.iter
+         (fun (line : Agenda.line) ->
+            check
+              bool
+              (Printf.sprintf "at %d cells: %S" cols line.Agenda.text)
+              true
+              (Masc_tui_message_layout.display_width line.Agenda.text <= cols))
+         (overlay_of ~cols t))
+    [ 30; 46; 60; 76; 120 ]
 ;;
 
 let () =
@@ -228,6 +345,20 @@ let () =
         ; test_case "waiting uses the badge shape" `Quick
             test_waiting_uses_the_badge_shape
         ; test_case "the halves fit together" `Quick test_the_halves_fit_together
+        ] )
+    ; ( "the panel"
+      , [ test_case "lists every coming wake" `Quick
+            test_the_panel_lists_every_coming_wake
+        ; test_case "settled rows do not reach it" `Quick
+            test_settled_rows_do_not_reach_the_panel
+        ; test_case "wakes are earliest first" `Quick test_wakes_are_earliest_first
+        ; test_case "empty sections answer in words" `Quick
+            test_empty_sections_answer_in_words
+        ; test_case "a held call says how long is left" `Quick
+            test_a_held_call_says_how_long_is_left
+        ; test_case "an expired call says so" `Quick test_an_expired_call_says_so
+        ; test_case "rows fit the width they were given" `Quick
+            test_rows_fit_the_width_they_were_given
         ] )
     ]
 ;;

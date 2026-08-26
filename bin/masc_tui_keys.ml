@@ -21,6 +21,7 @@ let global =
   ; b Meta "r" "refresh the current surface"
   ; b Meta "i" "focus the composer (message the shown keeper)"
   ; b Meta ":" "command palette"
+  ; b Meta ";" "agenda: what is coming, and who is waiting on you"
   ; b Meta "?" "this help"
   ; b Meta "Ctrl-B" "show or hide the keeper roster beside a surface"
   ; b Meta "Ctrl-T" "release the mouse so you can drag-select and copy"

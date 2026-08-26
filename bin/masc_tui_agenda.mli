@@ -38,11 +38,20 @@ type scheduled =
   ; standing : standing
   ; who : string  (** [payload_target], e.g. ["keeper:edgar.a.poe"] *)
   ; what : string  (** [payload_summary], the title the operator wrote *)
+  ; recurrence : string
+        (** [recurrence_summary], e.g. ["every 3600s"]. The strip has no room
+            for it; the overlay does, and it is the difference between "this
+            happens every hour" and "this happens once". *)
   }
 
 type awaiting =
   { asked_by : string
   ; question : string
+  ; asked_at : float
+  ; timeout_sec : float
+        (** A held call is denied when the wait runs out, so the overlay says
+            how long is left. Fields rather than an option: every held call
+            the registry reports carries both. *)
   }
 (** A keeper blocked until the operator answers. No time on purpose: the
     answer is due now, and a countdown would read as permission to wait. *)
@@ -70,3 +79,27 @@ val strip :
 
     A wake that falls on a later day says so. Rendering tomorrow's 08:00 as a
     bare ["08:00"] at 23:50 reads as eight minutes away. *)
+
+(** {1 The overlay}
+
+    The strip answers "is there anything"; this answers "what". They differ on
+    the empty case: the strip draws nothing, because an always-on row saying
+    nothing is happening is texture. The overlay says so in words, because the
+    operator pressed a key to ask and a blank panel would read as a failure to
+    load. *)
+
+type tone =
+  | Heading
+  | Wake
+  | Question
+  | Quiet
+
+type line =
+  { tone : tone
+  ; text : string
+  }
+
+val overlay :
+  now:float -> localtime:(float -> Unix.tm) -> cols:int -> t -> line list
+(** Every wake still coming, earliest first, then everyone blocked on the
+    operator. Not just the one the strip names. *)

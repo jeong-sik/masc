@@ -610,8 +610,7 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
      [scrolled_surface], both from [Agenda.rows_taken] on the same projection.
      Two readers of one number: the row the frame draws is the row the
      keypress stops short of. *)
-  let agenda = Masc_tui_types.agenda state in
-  let agenda_rows = Agenda.rows_taken agenda in
+  let agenda_rows = Masc_tui_types.agenda_chrome_rows state in
   let body_rows =
     max 0 (rows - Composer.rows_for ~terminal_rows:rows - agenda_rows)
   in
@@ -632,9 +631,10 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_string framed line;
        Buffer.add_char framed '\n')
     body;
-  (match agenda_line state agenda ~cols with
-   | Some line -> Buffer.add_string framed (line ^ "\n")
-   | None -> ());
+  (if agenda_rows > 0 then
+     match agenda_line state (Masc_tui_types.agenda state) ~cols with
+     | Some line -> Buffer.add_string framed (line ^ "\n")
+     | None -> ());
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
   finish_frame_with_strip state ?clamped ~surface_key
     ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed
@@ -7797,6 +7797,68 @@ let render_help (state : state) =
     (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
   finish_surface state ~surface_key:"help" ~rows:terminal_rows ~cols buf
 
+(* Rows the agenda panel can show, and how many it has. The keypress bounds
+   the scroll from the same pair the frame draws with -- the shape
+   [Masc_tui_scroll] exists to keep in one place. *)
+let agenda_viewport (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let lines =
+    Agenda.overlay
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols:(framed_inner_width cols)
+      (Masc_tui_types.agenda state)
+  in
+  (List.length lines, Masc_tui_help.content_height ~rows)
+;;
+
+(* The panel behind [;]. The strip above the composer says whether anything is
+   coming; this says what, and who is stopped waiting for an answer.
+
+   Tone rather than a colour per row: the headings carry the structure, a
+   held call is the one thing that needs answering now, and the wakes recede
+   the same way they do on the strip. *)
+let render_agenda (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 2048 in
+  framed_top buf cols;
+  framed_line
+    buf
+    cols
+    (screen_title " Agenda" ^ "  " ^ Ansi.dim ^ "Esc or ; to close" ^ Ansi.reset);
+  framed_divider buf cols;
+  let lines =
+    Agenda.overlay
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols:(framed_inner_width cols)
+      (Masc_tui_types.agenda state)
+  in
+  let content_height = Masc_tui_help.content_height ~rows in
+  let scroll =
+    Masc_tui_scroll.normalize
+      ~count:(List.length lines)
+      ~height:content_height
+      state.agenda_scroll
+  in
+  let paint (line : Agenda.line) =
+    match line.Agenda.tone with
+    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Wake -> Ansi.gray ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+  in
+  lines
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> framed_line buf cols (paint line));
+  framed_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+  finish_surface state ~surface_key:"agenda" ~rows:terminal_rows ~cols buf
+;;
+
 let render_terminal_too_small ~rows ~cols =
   let buf = Buffer.create 64 in
   Buffer.add_string buf
@@ -7821,4 +7883,5 @@ let render (state : state) =
   else if state.palette_open then render_palette state
   else if state.context_inspector_open then render_context_inspector state
   else if state.help_open then render_help state
+  else if state.agenda_open then render_agenda state
   else render_surface state

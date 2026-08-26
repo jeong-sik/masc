@@ -234,7 +234,14 @@ RUN test -d "${OPAM_SWITCH_PREFIX}/lib/yojson" \
 RUN chmod o+rx /home/opam \
  && find /home/opam/.opam -type d -exec chmod o+rx {} + \
  && test -x "${OPAM_SWITCH_PREFIX}/bin/dune" \
- || { echo "opam switch bin not traversable after chmod" >&2; exit 1; }
+ || { echo "chmod failed, or ${OPAM_SWITCH_PREFIX}/bin has no dune" >&2; exit 1; }
+
+# The line above says nothing about whether a keeper can reach that dune. It
+# runs as root, and root traverses a directory whether or not o+rx is set -- so
+# it stays green with the chmod deleted, which was measured. What it does catch
+# is the switch moving out from under ${OPAM_SWITCH_PREFIX}, and that is worth
+# catching early. Reachability is asked at the end of this file, as a uid with
+# no account.
 
 VOLUME ["/tmp/keeper-creds"]
 

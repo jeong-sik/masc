@@ -305,12 +305,31 @@ let test_versions_are_pinned_to_the_project () =
 let test_the_opam_switch_is_traversable () =
   let set = tokens (instruction_lines (read_file (dockerfile_path ()))) in
   check bool "the switch parent is opened for other" true (has "o+rx" set);
+  (* Asked as a line, not a token: the earlier form looked for the whole
+     sentence in a token set that splits on spaces, so it could never match and
+     the check rode entirely on the bare word "traversable" appearing anywhere.
+     What matters is that the chmod covers both the parent and the tree under
+     it -- one of the two alone leaves the switch unreachable. *)
+  let lines =
+    instruction_lines (read_file (dockerfile_path ())) |> String.split_on_char '\n'
+  in
+  let line_has needle line =
+    let n = String.length needle and l = String.length line in
+    let rec go i = i + n <= l && (String.sub line i n = needle || go (i + 1)) in
+    go 0
+  in
   check
     bool
-    "and the build fails if dune is still unreachable"
+    "the parent directory itself is opened"
     true
-    (has "opam switch bin not traversable after chmod" set
-     || has "traversable" set)
+    (List.exists (line_has "chmod o+rx /home/opam") lines);
+  check
+    bool
+    "and so is every directory under the opam root"
+    true
+    (List.exists
+       (fun line -> line_has "/home/opam/.opam" line && line_has "chmod o+rx" line)
+       lines)
 ;;
 
 (* The entrypoint inherited from the base image is `opam exec --`, and masc

@@ -33,6 +33,7 @@ from playwright.sync_api import Browser, sync_playwright
 
 
 WORKTREE = Path(__file__).resolve().parents[1]
+REPOSITORY = "jeong-sik/masc"
 SUPPORT_PATH = WORKTREE / "scripts/capture-tui-keeper-chat.py"
 KEYBOARD_PATH = WORKTREE / "test/test_tui_keyboard_input.py"
 KEEPER = "alpha"
@@ -422,6 +423,13 @@ def run_scenario(
                     "compact mode fetched file changes before Ctrl-D",
                 )
                 require(
+                    all(
+                        lookup["path"] != CHANGES_GET
+                        for lookup in http_fixtures.snapshot()
+                    ),
+                    "compact mode looked up file changes before Ctrl-D",
+                )
+                require(
                     all(marker not in compact for marker in full_only),
                     "compact mode exposed full inline-diff content",
                 )
@@ -450,6 +458,16 @@ def run_scenario(
                 range_visible_ms = round((time.monotonic() - started) * 1000, 3)
                 wait_call_count(observed["changes"], 1, "file-changes GET count")
                 change_call = observed["changes"].snapshot()[0]
+                change_lookups = [
+                    lookup
+                    for lookup in http_fixtures.snapshot()
+                    if lookup["path"] == CHANGES_GET
+                ]
+                require(
+                    len(change_lookups) == 1
+                    and cast(float, change_lookups[0]["received_monotonic"]) >= started,
+                    f"file changes route lookup did not follow Ctrl-D: {change_lookups}",
+                )
                 require(
                     cast(float, change_call["received_monotonic"]) >= started,
                     "file changes were requested before Ctrl-D",
@@ -564,13 +582,6 @@ def run_scenario(
             mcp_body.get("jsonrpc") == "2.0" and mcp_body.get("method") == "initialize",
             f"unexpected MCP request: {mcp_body}",
         )
-        audited_route_lookups = [
-            {
-                **lookup,
-                "method": "POST" if lookup["path"] == MCP_POST else "GET",
-            }
-            for lookup in route_lookups
-        ]
         return {
             "name": "ctrl_d_exact_execution_inline_diff",
             "interaction": {
@@ -590,9 +601,12 @@ def run_scenario(
                 "observed_gets_and_mcp": {
                     name: fixture.snapshot() for name, fixture in observed.items()
                 },
-                "all_route_lookups": audited_route_lookups,
+                "all_route_lookups": route_lookups,
                 "fixture_resolution_outputs": response_observations,
-                "wire_write_completion": "not observed by imported test server",
+                "request_method_and_wire_write_completion": (
+                    "not observed at handler entry by imported test server; "
+                    "completed POST bodies are recorded after respond()"
+                ),
                 "post_requests": [
                     {
                         "path": request_path,
@@ -624,12 +638,18 @@ def pull_request_snapshot(number: int) -> dict[str, object]:
                 "pr",
                 "view",
                 str(number),
+                "--repo",
+                REPOSITORY,
                 "--json",
                 "baseRefName,baseRefOid,headRefOid,isDraft,state,url",
             )
         ),
     )
     snapshot["checked_at"] = support.utc_now()
+    require(
+        snapshot.get("url") == f"https://github.com/{REPOSITORY}/pull/{number}",
+        f"unexpected PR repository: {snapshot.get('url')}",
+    )
     return snapshot
 
 
@@ -734,8 +754,8 @@ def main() -> int:
                 "tui_sync": "off",
             },
             "http_evidence_boundary": (
-                "fixture route resolution and response intent; socket write completion "
-                "is not independently observed"
+                "fixture route lookup and response intent; request method at handler "
+                "entry and socket write completion are not independently observed"
             ),
         }
         with sync_playwright() as playwright:

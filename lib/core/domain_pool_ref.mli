@@ -14,10 +14,12 @@ val domain_count_opt : unit -> int option
 
 val submit_io_or_inline : (unit -> 'a) -> 'a
 (** Submit IO-bound work to the shared domain pool. Runs inline when the
-    process has not installed the pool yet, or when the caller is not on an
-    Eio fiber (raw systhread/Domain) — a pool submit there would perform
-    Eio effects with no handler and raise [Effect.Unhandled]. Job
-    exceptions re-raise; there is no inline re-run on failure. *)
+    process has not installed the pool yet, when the caller is already on the
+    shared executor worker, or when the caller is not on an Eio fiber (raw
+    systhread/Domain). The worker case prevents a one-domain pool from waiting
+    on itself. A raw-domain pool submit would perform Eio effects with no
+    handler and raise [Effect.Unhandled]. Job exceptions re-raise; there is no
+    inline re-run on failure. *)
 
 val submit_cpu_or_inline : (unit -> 'a) -> 'a
 (** CPU-bound variant of {!submit_io_or_inline}, with the same

@@ -43,6 +43,8 @@ type decode_error =
   | Invalid_package_id of Skill_reference.package_id_error
   | Invalid_content_revision of Skill_reference.revision_error
   | Invalid_snapshot_revision of Skill_catalog_snapshot.revision_error
+  | Invalid_workspace_key of Skill_catalog_snapshot.revision_error
+  | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
   | Invalid_tool_name of string
@@ -70,6 +72,8 @@ val empty : workspace_root:string -> trace_id:Keeper_id.Trace_id.t -> t
 val activations : t -> activation list
 val revision : t -> ledger_revision
 val ledger_revision_to_string : ledger_revision -> string
+val workspace_key : t -> string
+val session_id : t -> Keeper_id.Trace_id.t
 
 val make_activation :
   identity:Skill_reference.identity ->
@@ -81,6 +85,11 @@ val make_activation :
   (activation, decode_error) result
 
 val to_yojson : t -> Yojson.Safe.t
+val of_projection_yojson : Yojson.Safe.t -> (t, decode_error) result
+(** Strictly decode the self-contained dashboard projection. This verifies the
+    schema, exact fields, typed ids, activation invariants, uniqueness, and
+    derived ledger revision. It does not assert which workspace requested the
+    projection; callers with that authority use {!of_yojson}. *)
 val of_yojson :
   expected_workspace_root:string ->
   expected_trace_id:Keeper_id.Trace_id.t ->

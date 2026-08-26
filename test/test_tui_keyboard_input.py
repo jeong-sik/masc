@@ -769,11 +769,14 @@ def keeper_metadata(name: str) -> dict[str, object]:
     return metadata
 
 
-def seed_workspace(base_path: str) -> None:
+def seed_workspace(
+    base_path: str,
+    keeper_names: tuple[str, ...] = ("alpha", "beta"),
+) -> None:
     masc_path = Path(base_path) / ".masc"
     keepers_path = masc_path / "keepers"
     keepers_path.mkdir(parents=True)
-    for name in ("alpha", "beta"):
+    for name in keeper_names:
         (keepers_path / f"{name}.json").write_text(
             json.dumps(keeper_metadata(name)), encoding="utf-8"
         )
@@ -1365,6 +1368,7 @@ def run_terminal_scenario(
     preload_input: bytes | None = None,
     extra_args: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
+    conflicting_env_base_path: bool = False,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1382,6 +1386,11 @@ def run_terminal_scenario(
             ):
                 seed_workspace(base_path)
                 set_workspace_base_path(base_path)
+                env_base_path = base_path
+                if conflicting_env_base_path:
+                    inherited_base_path = str(Path(base_path, "inherited"))
+                    seed_workspace(inherited_base_path, ("env-only",))
+                    env_base_path = inherited_base_path
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -1401,8 +1410,8 @@ def run_terminal_scenario(
                     environment.update(extra_env)
                 environment.update(
                     {
-                        "MASC_BASE_PATH": base_path,
-                        "MASC_BASE_PATH_INPUT": base_path,
+                        "MASC_BASE_PATH": env_base_path,
+                        "MASC_BASE_PATH_INPUT": env_base_path,
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
@@ -2196,6 +2205,28 @@ def keeper_selection_identity_interaction(
         failures.append("m opened Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat after beta disappeared")
     if failures:
         raise AssertionError("; ".join(failures))
+    os.write(master_fd, b"q")
+
+
+def cli_base_path_overrides_environment_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    frame = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"2",
+        keeper_row_selected(b"alpha"),
+    )
+    if b"env-only" in frame:
+        raise AssertionError(
+            f"--base-path leaked Keeper metadata from MASC_BASE_PATH: {frame!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -8018,6 +8049,13 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="CLI base path overrides inherited environment",
+        interact=cli_base_path_overrides_environment_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        conflicting_env_base_path=True,
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper message unreliable roster",
         interact=keeper_message_unreliable_roster_interaction(
             unreliable_roster_requests
@@ -8149,9 +8187,25 @@ def run_keyboard_regression(executable: str) -> None:
     )
 
 
+def run_cli_base_path_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="CLI base path overrides inherited environment",
+        interact=cli_base_path_overrides_environment_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        conflicting_env_base_path=True,
+    )
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
+        run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
+        print("tui CLI base-path regression: PASS")
+        return
     if len(sys.argv) != 2:
-        raise SystemExit("usage: test_tui_keyboard_input.py <masc_tui.exe>")
+        raise SystemExit(
+            "usage: test_tui_keyboard_input.py <masc_tui.exe> [cli-base-path]"
+        )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")
 

@@ -101,6 +101,17 @@ let test_the_bound_follows_the_shortened_list () =
   in
   check int "pressing down ten times reaches the last window" 5 (press 10 0)
 
+let test_a_conditional_overflow_row_is_part_of_the_bound () =
+  check int "a fitting list keeps the whole body" 23
+    (Masc_tui_scroll.content_height ~rows:30 ~chrome:7 ~count:23
+       ~preview_keep:None ~overflow_takes_row:true);
+  check int "the first overflowing row reserves its indicator" 22
+    (Masc_tui_scroll.content_height ~rows:30 ~chrome:7 ~count:24
+       ~preview_keep:None ~overflow_takes_row:true);
+  check int "an action notice and overflow both spend their rows" 20
+    (Masc_tui_scroll.content_height ~rows:30 ~chrome:9 ~count:24
+       ~preview_keep:None ~overflow_takes_row:true)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -126,5 +137,9 @@ let () =
             test_the_cursor_stays_inside_the_list
         ; Alcotest.test_case "the window follows the cursor" `Quick
             test_the_window_follows_the_cursor
+        ] )
+    ; ( "layout"
+      , [ Alcotest.test_case "conditional overflow row" `Quick
+            test_a_conditional_overflow_row_is_part_of_the_bound
         ] )
     ]

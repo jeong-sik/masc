@@ -46,3 +46,13 @@ val preview_height : total:int -> keep:int -> int
 
 val body_height : total:int -> keep:int -> int
 (** The list's rows out of [total] once the preview has taken its share. *)
+
+val content_height
+  :  rows:int
+  -> chrome:int
+  -> count:int
+  -> preview_keep:int option
+  -> overflow_takes_row:bool
+  -> int
+(** The list height after fixed chrome, an optional preview, and a conditional
+    overflow indicator have each taken their declared rows. *)

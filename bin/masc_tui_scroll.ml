@@ -24,3 +24,13 @@ let ensure_visible ~cursor ~height scroll =
 
 let preview_height ~total ~keep = max 0 (min (total - keep) (total / 2))
 let body_height ~total ~keep = max 1 (total - preview_height ~total ~keep)
+
+let content_height ~rows ~chrome ~count ~preview_keep ~overflow_takes_row =
+  let total = max 1 (rows - chrome) in
+  let total =
+    match preview_keep with
+    | None -> total
+    | Some _ when count = 0 -> total
+    | Some keep -> body_height ~total ~keep
+  in
+  if overflow_takes_row && count > total then max 1 (total - 1) else total

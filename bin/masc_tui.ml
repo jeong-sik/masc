@@ -97,12 +97,10 @@ let require_interactive_terminal () =
    under its list says so in its [scrolled], and both movers ask here: a bound
    worked out from the full body while the frame draws half of it is not a
    bound, and the rows past the shortened list stop being reachable. *)
-let surface_body_height ~rows { sc_count; sc_chrome; sc_preview_keep } =
-  let total = max 1 (rows - sc_chrome) in
-  match sc_preview_keep with
-  | None -> total
-  | Some _ when sc_count = 0 -> total
-  | Some keep -> Masc_tui_scroll.body_height ~total ~keep
+let surface_body_height ~rows
+    { sc_count; sc_chrome; sc_overflow_takes_row; sc_preview_keep } =
+  Masc_tui_scroll.content_height ~rows ~chrome:sc_chrome ~count:sc_count
+    ~preview_keep:sc_preview_keep ~overflow_takes_row:sc_overflow_takes_row
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with
@@ -845,11 +843,11 @@ let leave_keeper_message state =
     | None -> false
   in
   state.view <-
-    Keepers
-      (match state.msg_return, target_registered with
-       | Keeper_chat_return_detail, true -> Keeper_detail
-       | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
-           Keeper_list);
+    (match state.msg_return, target_registered with
+     | Keeper_chat_return_lanes, _ -> Lanes
+     | Keeper_chat_return_detail, true -> Keepers Keeper_detail
+     | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
+         Keepers Keeper_list);
   state.detail_scroll <- 0;
   if not target_registered then state.log_scroll <- 0
 
@@ -2955,6 +2953,12 @@ let search_land state index =
   | Resources | Tools ->
       ()
 
+(* An action notice spends two rows in the Lanes frame. Re-window immediately
+   after installing it so the row that caused the notice remains visible. *)
+let show_lanes_action_error state detail =
+  state.lanes_action_error <- Some detail;
+  search_land state state.lanes_cursor
+
 let search_jump ?(backwards = false) state ~query ~after =
   let query = String.lowercase_ascii query in
   match surface_row_texts state state.view with
@@ -2974,7 +2978,11 @@ let search_jump ?(backwards = false) state ~query ~after =
               if backwards then (after - step + (total * 2)) mod total
               else (after + step + total) mod total
             in
-            if matches index then search_land state index else scan (step + 1)
+            if matches index then begin
+              if state.view = Lanes then state.lanes_action_error <- None;
+              search_land state index
+            end
+            else scan (step + 1)
           end
         in
         scan 1
@@ -2986,6 +2994,8 @@ let search_jump ?(backwards = false) state ~query ~after =
    cadence ([surface_needs]); the ones here are snapshots that would
    otherwise read as empty until the next tick. *)
 let goto_surface state ~mailbox (destination : surface) =
+  if state.view = Lanes || destination = Lanes then
+    state.lanes_action_error <- None;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
    | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
@@ -6887,6 +6897,7 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           state.lanes <- Some snapshot;
           state.keeper_secrets <- secrets;
           state.lanes_error <- None;
+          state.lanes_action_error <- None;
           let lanes = snapshot.Tui_decode.kls_lanes in
           let fallback_cursor =
             max 0 (min state.lanes_cursor (List.length lanes - 1))
@@ -9442,7 +9453,10 @@ let main () =
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
                 else state.view <- Overview
-            | Acting | Keepers Keeper_list | Lanes -> state.view <- Overview
+            | Lanes ->
+                state.lanes_action_error <- None;
+                state.view <- Overview
+            | Acting | Keepers Keeper_list -> state.view <- Overview
             | Approvals ->
                 (* Esc leaves the ask and returns to the list with the cursor
                    where it was, the way the Changes diff does. *)
@@ -9738,6 +9752,7 @@ let main () =
                    move_row_cursor state ~delta:(1)
                      ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
                  in
+                 state.lanes_action_error <- None;
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
             | Harness ->
@@ -9976,6 +9991,7 @@ let main () =
                    move_row_cursor state ~delta:(-1)
                      ~cursor:state.lanes_cursor ~scroll:state.lanes_scroll
                  in
+                 state.lanes_action_error <- None;
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
             | Harness ->
@@ -10211,28 +10227,23 @@ let main () =
                        ~mailbox:async_messages keeper
                  | None -> ())
             | Lanes ->
-                (match state.lanes with
-                 | None -> ()
-                 | Some snapshot ->
-                     (match
-                        List.nth_opt snapshot.Tui_decode.kls_lanes
-                          state.lanes_cursor
-                      with
-                      | None -> ()
-                      | Some lane ->
-                          (match
-                             List.find_index
-                               (fun (keeper : keeper) ->
-                                 String.equal keeper.k_name lane.kl_keeper)
-                               state.keepers
-                           with
-                           | None -> ()
-                           | Some keeper_cursor ->
-                               state.keeper_cursor <- keeper_cursor;
-                               Option.iter
-                                 (open_keeper_detail state ~base_path
-                                    ~mailbox:async_messages)
-                                 (selected_keeper state))))
+                (match selected_lane_keeper state with
+                 | None ->
+                     show_lanes_action_error state
+                       (if Option.is_some state.keepers_error then
+                          "Cannot open detail: Keeper roster is unavailable"
+                        else
+                          match selected_lane_name state with
+                          | None -> "Cannot open detail: no lane is selected"
+                          | Some keeper_name ->
+                              Printf.sprintf
+                                "Cannot open detail: Keeper %s is not registered"
+                                (Keeper_chat.terminal_safe_text keeper_name))
+                 | Some (keeper_cursor, keeper) ->
+                     state.lanes_action_error <- None;
+                     state.keeper_cursor <- keeper_cursor;
+                     open_keeper_detail state ~base_path
+                       ~mailbox:async_messages keeper)
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -10615,13 +10626,39 @@ let main () =
                 state.view <- Keepers Keeper_logs
             | None -> ())
        | Some "m" | Some "M" | Some "c" | Some "C" ->
-           (* Chat, from the roster as well as from detail, for the same reason
-              logs are reachable from both: the keeper an operator wants to
-              talk to is the one under the cursor. [c] is an alias for [m]
-              because the footer names the action rather than the mnemonic. *)
+           (* Chat from every row that names a Keeper. Lanes and the roster can
+              have different orders, so the Lanes branch uses the exact typed
+              identity join shared with Enter rather than copying its cursor.
+              [c] is an alias for [m] because the footer names the action rather
+              than the mnemonic. *)
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
+            | Lanes ->
+                (match selected_lane_keeper state with
+                 | Some (keeper_cursor, keeper)
+                   when keeper_available_for_new_message state keeper.k_name ->
+                     state.lanes_action_error <- None;
+                     state.keeper_cursor <- keeper_cursor;
+                     open_message_for_keeper
+                       ~return_to:Keeper_chat_return_lanes state keeper.k_name;
+                     launch_keeper_history_load state ~mailbox:async_messages
+                       ~keeper_name:keeper.k_name;
+                     state.view <- Keepers Keeper_message
+                 | Some _ ->
+                     show_lanes_action_error state
+                       "Cannot open chat: Keeper roster is unavailable"
+                 | None ->
+                     show_lanes_action_error state
+                       (if Option.is_some state.keepers_error then
+                          "Cannot open chat: Keeper roster is unavailable"
+                        else
+                          match selected_lane_name state with
+                          | None -> "Cannot open chat: no lane is selected"
+                          | Some keeper_name ->
+                              Printf.sprintf
+                                "Cannot open chat: Keeper %s is not registered"
+                                (Keeper_chat.terminal_safe_text keeper_name)))
             | Keepers Keeper_list
               when Option.is_none state.keepers_error
                    && state.keeper_cursor < List.length state.keepers ->
@@ -10642,7 +10679,7 @@ let main () =
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Keepers Keeper_list
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
-            | Keepers Keeper_message | Lanes
+            | Keepers Keeper_message
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"

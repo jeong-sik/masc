@@ -34,6 +34,14 @@ describe('mergeSkillRows', () => {
     ])
     expect(rows[0]!.source).toBe('workspace/work-intake')
   })
+
+  // A server older than the usage join sends {schema,state,snapshot} and no
+  // usage array. The bundle deploys separately, so that pairing is reachable;
+  // it must degrade to "not reported", not throw on a non-iterable.
+  it('renders the snapshot when the server reports no usage at all', () => {
+    const rows = mergeSkillRows([entry('work-intake')], undefined)
+    expect(rows.map(r => [r.name, r.usage])).toEqual([['work-intake', null]])
+  })
 })
 
 describe('sortSkillRows', () => {
@@ -59,6 +67,10 @@ describe('labels', () => {
     expect(usageLabel(usage[1]!, 2000)).toBe('1 in last 2000 calls')
     expect(usageLabel(usage[2]!, 2000)).toBe('—')
     expect(usageLabel(null, 2000)).toBe('—')
+  })
+
+  it('does not claim a window the server never reported', () => {
+    expect(usageLabel(usage[1]!, undefined)).toBe('1 (window unreported)')
   })
 
   it('shows the parsed kind, the refusal, or the absence', () => {

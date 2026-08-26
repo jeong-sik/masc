@@ -39,6 +39,23 @@ function sourceFreshnessLabel(latestAge: number | null | undefined): string {
   return `latest ${formatElapsedCompact(latestAge)}`
 }
 
+function validateKeeperReceipt(
+  response: DashboardToolsResponse,
+  expectedKeeper: string,
+): string | null {
+  const effectiveSurface = response.effective_keeper_surface
+  if (!effectiveSurface) return 'Server response omitted effective_keeper_surface'
+  const activations = response.skill_activations
+  if (!activations) return 'Server response omitted skill_activations'
+  if (effectiveSurface.keeper_name !== expectedKeeper) {
+    return `effective_keeper_surface belongs to ${effectiveSurface.keeper_name}, not ${expectedKeeper}`
+  }
+  if (activations.keeper_name !== expectedKeeper) {
+    return `skill_activations belongs to ${activations.keeper_name}, not ${expectedKeeper}`
+  }
+  return null
+}
+
 export function Tools() {
   const data = toolsData.value
   const loading = toolsLoading.value
@@ -79,6 +96,13 @@ export function Tools() {
       setKeeperReceiptError(null)
       void fetchDashboardTools({ keeperName: selectedKeeper, signal: current.signal })
         .then(response => {
+          if (current.signal.aborted) return
+          const receiptError = validateKeeperReceipt(response, selectedKeeper)
+          if (receiptError) {
+            setKeeperReceipt(null)
+            setKeeperReceiptError(receiptError)
+            return
+          }
           setKeeperReceipt(response)
         })
         .catch((cause: unknown) => {

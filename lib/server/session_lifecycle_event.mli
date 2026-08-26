@@ -7,7 +7,7 @@
 
     This module is {b wire-inert} at PR-2 — only the variant + JSON
     encoding land. PR-3+ wire the publish calls from the SSE eviction
-    and lifecycle sites in {!Server_mcp_transport_http_sse}. *)
+    and lifecycle sites in {!Server_mcp_transport_http_conn}. *)
 
 type transport = SSE | WS | GRPC
 

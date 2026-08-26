@@ -648,7 +648,7 @@ sequenceDiagram
 sequenceDiagram
     participant C as Client
     participant H as main_eio
-    participant T as server_mcp_transport_http_sse
+    participant T as server_mcp_transport_http_conn
     participant S as Sse
 
     C->>H: GET /mcp (Accept: text/event-stream)
@@ -817,7 +817,7 @@ sequenceDiagram
 | `server_mcp_transport_http.ml` | 924 | HTTP MCP 트랜스포트 통합 |
 | `server_mcp_transport_http_mcp_handlers.ml` | 451 | POST/GET/DELETE /mcp 핸들러 |
 | `server_mcp_transport_http_session.ml` | 225 | MCP 세션 상태 관리 |
-| `server_mcp_transport_http_sse.ml` | 158 | SSE 연결 관리 + rate limiter |
+| `server_mcp_transport_http_conn.ml` | SSE 연결 registry + rate limiter |
 | `server_mcp_transport_http_headers.ml` | 204 | HTTP 헤더 유틸리티 |
 | `server_mcp_transport_http_protocol.ml` | 135 | 프로토콜 버전/세션 유효성 |
 | `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |

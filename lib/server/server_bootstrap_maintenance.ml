@@ -148,6 +148,18 @@ let owner_has_durable_demand state =
   || Keeper_event_queue_state.transition_outbox state <> []
 ;;
 
+(* Why these five are one closed type rather than ad-hoc polymorphic variants:
+   [Owner_unknown] and [Owner_absent] read almost the same in English and mean
+   opposite things (we could not look, versus we looked and it is not there).
+   A closed type makes the compiler name every case at the log site, so a
+   later state cannot slip in behind a wildcard. *)
+type durable_demand_owner_error =
+  | Demand_unknown of string
+  | Owner_unknown of string
+  | Owner_absent
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
+  | Demand_execution_failed of exn * Printexc.raw_backtrace
+
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
   match
     Executor_pool_ref.submit_strict (fun () ->
@@ -156,18 +168,24 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
           ~base_path
           ~keeper_name
       with
-      | Error detail -> Error (`Demand_unknown detail)
+      | Error detail -> Error (Demand_unknown detail)
       | Ok state when not (owner_has_durable_demand state) -> Ok None
       | Ok _state ->
         (match Keeper_meta_store.read_effective_meta config keeper_name with
-         | Error detail -> Error (`Owner_unknown detail)
-         | Ok None -> Error (`Owner_unknown "durable_keeper_metadata_missing")
+         | Error detail -> Error (Owner_unknown detail)
+         (* A store that answered and holds no such keeper is a different fact
+            from a store we could not read. Folding both into [Owner_unknown]
+            made an orphan queue directory -- durable work under a name no
+            keeper owns -- look like a transient lookup failure, so every
+            maintenance cycle logged it as a recoverable owner and moved on.
+            One such directory produced 913 errors in a day. *)
+         | Ok None -> Error Owner_absent
          | Ok (Some meta) -> Ok (Some meta)))
   with
   | Ok outcome -> outcome
-  | Error (Executor_pool_ref.Work_failed failure) ->
-    Error (`Demand_execution_failed failure)
-  | Error error -> Error (`Executor_unavailable error)
+  | Error (Executor_pool_ref.Work_failed (exn, backtrace)) ->
+    Error (Demand_execution_failed (exn, backtrace))
+  | Error error -> Error (Executor_unavailable error)
 ;;
 
 let recover_projected_durable_demand_owner
@@ -195,22 +213,32 @@ let recover_projected_durable_demand_owner
          ~config:ctx.config
          ~keeper_name
      with
-     | Error (`Demand_unknown detail) ->
+     | Error (Demand_unknown detail) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=demand_unknown detail=%s"
          keeper_name
          detail
-     | Error (`Owner_unknown detail) ->
+     | Error (Owner_unknown detail) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
          keeper_name
          detail
-     | Error (`Executor_unavailable error) ->
+     | Error Owner_absent ->
+       Log.Server.error
+         "keeper durable demand orphaned keeper=%s reason=owner_absent: durable \
+          work sits under %s but the Keeper store holds no metadata for that \
+          name, so the work cannot execute until the name is registered or the \
+          directory is removed"
+         keeper_name
+         (Filename.concat
+            (Common.keepers_runtime_dir_of_base ~base_path)
+            keeper_name)
+     | Error (Executor_unavailable error) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
          keeper_name
          (Executor_pool_ref.strict_submit_error_to_string error)
-     | Error (`Demand_execution_failed (exn, backtrace)) ->
+     | Error (Demand_execution_failed (exn, backtrace)) ->
        Log.Server.error
          "keeper durable demand recovery retained keeper=%s reason=demand_execution_failed detail=%s\n%s"
          keeper_name
@@ -307,6 +335,7 @@ let recover_keeper_durable_demand_owners
 ;;
 
 module Recovery_for_testing = struct
+  let load_durable_demand_meta = load_durable_demand_meta
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 

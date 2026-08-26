@@ -1445,6 +1445,11 @@
  (deps ../bin/main_eio.exe))
 
 (test
+ (name test_server_bootstrap_durable_demand_owner)
+ (modules test_server_bootstrap_durable_demand_owner)
+ (libraries alcotest masc_test_deps masc_test_runtime))
+
+(test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
  (libraries

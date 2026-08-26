@@ -239,6 +239,16 @@ let folded_thinking_summary body =
   Printf.sprintf "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
     (List.length lines)
 
+(* What a page says when it holds nothing, in one place.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+let page_failed_note = "  (load failed; nothing here is a reading)"
+
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
   | Tools_compact -> Keeper_chat_transcript.Compact
@@ -2225,7 +2235,7 @@ let render_planning_list (state : state) =
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
        for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
@@ -2526,7 +2536,7 @@ let render_schedule_list (state : state) =
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
        for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
@@ -3518,8 +3528,8 @@ let render_lanes (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.lanes ~error:state.lanes_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no keeper lane snapshots)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5094,7 +5104,7 @@ let render_system_logs (state : state) =
         empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
       with
       | Page_failed -> "  (load failed; the count above is not a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no entries)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5192,8 +5202,8 @@ let render_verification_list (state : state) =
         empty_page_of ~snapshot:state.verification
           ~error:state.verification_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5452,8 +5462,8 @@ let render_harness_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5744,8 +5754,8 @@ let render_fusion_list (state : state) =
       match
         empty_page_of ~snapshot:state.fusion_runs ~error:state.fusion_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6043,8 +6053,8 @@ let render_repositories (state : state) =
         empty_page_of ~snapshot:state.repositories
           ~error:state.repositories_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no repositories registered)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6340,7 +6350,7 @@ let render_changes_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_failed -> page_failed_note
       | Page_unread -> "  (pick a keeper on the Keepers surface, then press r)"
       | Page_empty -> "  (this keeper wrote no files in the window)"
     in
@@ -6582,8 +6592,8 @@ let render_connectors (state : state) =
       match
         empty_page_of ~snapshot:state.connectors ~error:state.connectors_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no connectors registered)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6820,8 +6830,8 @@ let render_runtime (state : state) =
         empty_page_of ~snapshot:state.runtime_surface
           ~error:state.runtime_surface_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no runtime lanes configured)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -7192,8 +7202,8 @@ let render_keeper_calls (state : state) =
   if shown = 0 then begin
     let empty =
       match (state.keeper_calls, state.keeper_calls_error) with
-      | _, Some _ -> "  (load failed; nothing here is a reading)"
-      | None, None -> "  (not loaded yet)"
+      | _, Some _ -> page_failed_note
+      | None, None -> page_unread_note
       | Some _, None -> "  (no calls recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

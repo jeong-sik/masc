@@ -391,6 +391,79 @@ let diff_lexer text =
     lines;
   runs_segments runs
 
+(* {1 Memory journal}
+
+   The Librarian's commit, as the chat pane shows it. It used to arrive as a
+   diff fence, which gave it exactly two colours: the sign said whether a fact
+   arrived or left, and the eight categories -- fact, lesson, code_change,
+   preference, blocker, goal, constraint, validated_approach -- were eight
+   spellings of the same colour. A reader scanning for "what changed in the
+   code" had to read every line.
+
+   Two questions, two channels. The sign keeps the diff colours, since arrived
+   and left is what it has always said. The category takes a colour of its
+   own, grouped by what a reader does about it rather than one hue per word --
+   eight hues is a legend to memorise, and the theme has measured contrast for
+   the ones already in it. *)
+
+(* Where a category ends. The producer writes ["+ [fact] claim"], so the
+   bracket pair is the whole of it and the claim is whatever follows. *)
+let category_span line =
+  if String.length line < 4 then None
+  else if not (Char.equal line.[2] '[') then None
+  else
+    match String.index_from_opt line 3 ']' with
+    | None -> None
+    | Some close -> Some (3, close)
+
+(* One colour per thing a reader would do about it. [fact] stays plain: it is
+   the default kind and the most common, and colouring the majority says
+   nothing about it. *)
+let memory_category_kind = function
+  | "code_change" -> kind_type
+  | "lesson" | "validated_approach" -> kind_keyword
+  | "preference" | "goal" | "constraint" -> kind_string
+  | "blocker" -> kind_number
+  (* [fact] and anything the vocabulary grows that this has not been taught.
+     An unknown category reads as a fact rather than borrowing a colour that
+     would say something about it. *)
+  | _ -> kind_code
+
+let memory_lexer text =
+  let runs = new_runs kind_code in
+  let add kind s = String.iter (fun c -> runs_add runs kind c) s in
+  let lines = String.split_on_char '\n' text in
+  let count = List.length lines in
+  List.iteri
+    (fun index line ->
+      let sign_kind =
+        if String.length line = 0 then kind_code
+        else
+          match line.[0] with
+          | '+' -> kind_diff_added
+          | '-' -> kind_diff_removed
+          | _ -> kind_comment
+      in
+      (match category_span line with
+       | Some (start, close) ->
+           add sign_kind (String.sub line 0 2);
+           add kind_comment "[";
+           let category = String.sub line start (close - start) in
+           add (memory_category_kind category) category;
+           add kind_comment "]";
+           add kind_code
+             (String.sub line (close + 1) (String.length line - close - 1))
+       | None ->
+           (* A drop line, or a shape this has not been taught. The whole line
+              takes the sign's kind, which for a drop is the dimmest one: the
+              reason a fact was let go is not the change itself. *)
+           add sign_kind line);
+      (* The newline belongs to no line's colour: [rows_of_segments] cuts rows
+         on it, and a coloured one would carry the run past the cut. *)
+      if index < count - 1 then add kind_code "\n")
+    lines;
+  runs_segments runs
+
 (* {1 C-family and Python lexers}
 
    These share the shape of [ocaml_lexer] but read the punctuation the curly-
@@ -848,6 +921,7 @@ let lexer_of_language (tag : string) =
   | "bash" | "sh" | "shell" | "zsh" -> Some bash_lexer
   | "json" -> Some json_lexer
   | "diff" | "patch" -> Some diff_lexer
+  | "memory" -> Some memory_lexer
   | "yaml" | "yml" -> Some yaml_lexer
   | "toml" -> Some toml_lexer
   | "sql" -> Some sql_lexer

@@ -80,6 +80,58 @@ let spans language text =
   |> List.concat
   |> List.filter (fun (piece, _) -> piece <> "")
 
+(* The Librarian's commit. Two questions on one line -- did this fact arrive
+   or leave, and what kind of thing is it -- so two channels: the sign keeps
+   the diff colours it always had, and the category takes one of its own. *)
+let test_memory_reads_the_sign_and_the_category () =
+  check seg "arrived, and a change to the code"
+    [ ("+ ", Masc_tui_code_lexer.kind_diff_added)
+    ; ("[", Masc_tui_code_lexer.kind_comment)
+    ; ("code_change", Masc_tui_code_lexer.kind_type)
+    ; ("]", Masc_tui_code_lexer.kind_comment)
+    ; (" api changed", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "memory" "+ [code_change] api changed");
+  check seg "left, and a plain fact"
+    [ ("- ", Masc_tui_code_lexer.kind_diff_removed)
+    ; ("[", Masc_tui_code_lexer.kind_comment)
+    (* [fact] is the default kind and the most common one. Colouring the
+       majority says nothing about it. *)
+    ; ("fact", Masc_tui_code_lexer.kind_code)
+    ; ("]", Masc_tui_code_lexer.kind_comment)
+    ; (" the old thing", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "memory" "- [fact] the old thing")
+
+(* Eight categories and five colours: grouped by what a reader does about it,
+   because eight hues is a legend to memorise. What matters is that the groups
+   stay apart. *)
+let test_the_categories_group_rather_than_collide () =
+  let kind_of category =
+    match spans "memory" (Printf.sprintf "+ [%s] claim" category) with
+    | _ :: _ :: (_, kind) :: _ -> kind
+    | _ -> Alcotest.fail ("no category span for " ^ category)
+  in
+  let same a b = String.equal (kind_of a) (kind_of b) in
+  Alcotest.(check bool) "a lesson and an approach read alike" true
+    (same "lesson" "validated_approach");
+  Alcotest.(check bool) "a preference and a goal read alike" true
+    (same "preference" "goal");
+  Alcotest.(check bool) "a code change is not a lesson" false
+    (same "code_change" "lesson");
+  Alcotest.(check bool) "a blocker is not a preference" false
+    (same "blocker" "preference");
+  (* A category this has not been taught reads as a fact rather than
+     borrowing a colour that would say something about it. *)
+  Alcotest.(check bool) "an unknown category reads as a fact" true
+    (same "some_new_category" "fact")
+
+let test_a_drop_line_is_the_quietest_row () =
+  check seg "the whole line recedes"
+    [ ("drop sha256:0cfb \xe2\x80\x94 the api changed",
+       Masc_tui_code_lexer.kind_comment) ]
+    (spans "memory" "drop sha256:0cfb \xe2\x80\x94 the api changed")
+
 let test_yaml_reads_a_key_a_value_and_a_comment () =
   check seg "the key, the rest, the comment"
     [ ("name", Masc_tui_code_lexer.kind_type)
@@ -247,6 +299,12 @@ let () =
             test_a_digit_inside_a_scalar_is_not_a_value
         ; Alcotest.test_case "a literal inside a scalar is not a literal" `Quick
             test_a_literal_inside_a_scalar_is_not_a_literal
+        ; Alcotest.test_case "memory reads the sign and the category" `Quick
+            test_memory_reads_the_sign_and_the_category
+        ; Alcotest.test_case "the categories group rather than collide" `Quick
+            test_the_categories_group_rather_than_collide
+        ; Alcotest.test_case "a drop line is the quietest row" `Quick
+            test_a_drop_line_is_the_quietest_row
         ; Alcotest.test_case "toml reads a key, a string and a comment" `Quick
             test_toml_reads_a_key_a_string_and_a_comment
         ; Alcotest.test_case "a toml table header is taken whole" `Quick

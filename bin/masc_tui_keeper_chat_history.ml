@@ -241,7 +241,7 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                          (match change_lines with
                           | [] -> [ summary ]
                           | lines ->
-                            (summary :: "```diff" :: lines) @ [ "```" ]))
+                            (summary :: "```memory" :: lines) @ [ "```" ]))
                   })
                dropped_lines
        | Some _, Some _, None | Some _, None, _ | None, _, _ -> None)

@@ -45,19 +45,6 @@ let descriptor_for tool_name =
   | descriptor :: _ -> Some descriptor
   | [] -> Descriptor.find_public tool_name
 
-(* The node tools a composition-shaped call will run, or [None] when this name
-   is not composition-shaped.
-
-   Two sources, because compositions carry their plan in two different places.
-   A [keeper_compose_<name>] entry is declared in the catalog, so the bundle
-   builder wrote its nodes into the index when it materialised the tool. An
-   ad-hoc [keeper_plan_execute] has no catalog entry: its nodes arrive in the
-   tool input, and reading them here judges the plan actually being run rather
-   than a fixed one.
-
-   Both stay pure. The index read is an in-memory lookup and the input read is
-   a JSON walk; neither opens anything, which is what [Hooks.hook] requires of
-   whatever runs inside [pre_tool_use]. *)
 (* The nodes an ad-hoc plan names, read from the tool input. Pure: a JSON
    walk, which is what [Hooks.hook] requires of anything inside
    [pre_tool_use]. *)
@@ -114,19 +101,6 @@ let rec verdict_for ~composition_plan_index ~tool_name ~input =
       ~reads_only:(Descriptor.readonly_for_input descriptor ~input)
       descriptor
 
-(* A name with no descriptor is either a composition, whose nodes each have
-   one, or something this build cannot classify at all.
-
-   Folding the nodes is exact rather than approximate: a plan node may only
-   name a descriptor-backed tool ([Keeper_tool_plan_request.plan_of_json]
-   validates every node against the descriptor list and
-   [Keeper_tool_plan.create] rejects an [Unknown_tool]), so the recursion
-   below always terminates one level down and never re-enters this arm.
-
-   A plan of reads runs. One node that would be asked about makes the whole
-   plan asked about, and the reason names that node -- otherwise the operator
-   sees a composition name and has to go read the plan to learn why they are
-   being asked. *)
 (* One node, judged without its input.
 
    The plan holds input *templates*, not the values a node will receive, so
@@ -200,6 +174,19 @@ and undescribed_kind ?composition_plan_index tool_name =
        | Some read_only -> Attached_service read_only
        | None -> Unknown)
 
+(* A name with no descriptor is either a composition, whose nodes each have
+   one, or something this build cannot classify at all.
+
+   Folding the nodes is exact rather than approximate: a plan node may only
+   name a descriptor-backed tool ([Keeper_tool_plan_request.plan_of_json]
+   validates every node against the descriptor list and
+   [Keeper_tool_plan.create] rejects an [Unknown_tool]), so the recursion
+   below always terminates one level down and never re-enters this arm.
+
+   A plan of reads runs. One node that would be asked about makes the whole
+   plan asked about, and the reason names that node -- otherwise the operator
+   sees a composition name and has to go read the plan to learn why they are
+   being asked. *)
 and verdict_of_nodes node_tools =
   match List.find_map node_asks_for_approval node_tools with
   | Some (node, because) ->

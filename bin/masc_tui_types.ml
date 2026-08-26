@@ -1200,6 +1200,11 @@ type state = {
   mutable harness_error: string option;
   mutable harness_scroll: int;
   mutable harness_cursor: int;
+  (* The verdict opened from the list. Task id alone is not an identity: the
+     same task can pass through several gates, so retain the record timestamp
+     with it. *)
+  mutable harness_detail: (string * float) option;
+  mutable harness_detail_scroll: int;
   mutable fusion_runs: Tui_decode.fusion_snapshot option;
   mutable fusion_error: string option;
   mutable fusion_cursor: int;
@@ -1645,6 +1650,8 @@ let create_state
   harness_error = None;
   harness_scroll = 0;
   harness_cursor = 0;
+  harness_detail = None;
+  harness_detail_scroll = 0;
   fusion_runs = None;
   fusion_error = None;
   fusion_cursor = 0;
@@ -1810,6 +1817,7 @@ type clamped_scroll =
   | Keeper_calls of int
   | Acting of int
   | Verification_detail_scroll of int
+  | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Planning_detail_scroll of int
   (* An open diff's rows are built by the drawing, out of the recorded before
@@ -1830,6 +1838,7 @@ let apply_clamped_scroll (state : state) = function
   | Acting value -> state.acting_scroll <- value
   | Verification_detail_scroll value ->
       state.verification_detail_scroll <- value
+  | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Planning_detail_scroll value -> state.planning_scroll <- value
   | Changes_diff_scroll value -> state.changes_diff_scroll <- value
@@ -1942,10 +1951,12 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
          | None -> 0
          | Some s -> List.length s.Tui_decode.kls_lanes)
   | Harness ->
-      listing ~error:state.harness_error
-        (match state.harness with
-         | None -> 0
-         | Some s -> List.length s.Tui_decode.hs_verdicts)
+      if Option.is_some state.harness_detail then None
+      else
+        listing ~error:state.harness_error
+          (match state.harness with
+           | None -> 0
+           | Some s -> List.length s.Tui_decode.hs_verdicts)
   | Repositories ->
       listing ~error:state.repositories_error
         (match state.repositories with

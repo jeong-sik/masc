@@ -3608,10 +3608,15 @@ let selected_surface_reference state =
              (List.nth_opt snapshot.scs_rows state.schedule_cursor)
        | None, None -> None)
   | Harness ->
-      Option.bind state.harness (fun snapshot ->
-          Option.map
-            (fun verdict -> Link.reference Task verdict.Tui_decode.hv_task_id)
-            (List.nth_opt snapshot.Tui_decode.hs_verdicts state.harness_cursor))
+      (match state.harness_detail with
+       | Some (task_id, _) -> Some (Link.reference Task task_id)
+       | None ->
+           Option.bind state.harness (fun snapshot ->
+               Option.map
+                 (fun verdict ->
+                    Link.reference Task verdict.Tui_decode.hv_task_id)
+                 (List.nth_opt snapshot.Tui_decode.hs_verdicts
+                    state.harness_cursor)))
   | Fusion ->
       (match state.fusion_mode, state.fusion_runs with
        | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
@@ -6383,7 +6388,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       match result with
       | Ok snapshot ->
           state.harness <- Some snapshot;
-          state.harness_error <- None
+          state.harness_error <- None;
+          (match state.harness_detail with
+           | None -> ()
+           | Some (task_id, at) ->
+               if not
+                    (List.exists
+                       (fun verdict ->
+                          String.equal verdict.Masc.Tui_decode.hv_task_id task_id
+                          && Float.equal verdict.hv_at at)
+                       snapshot.Masc.Tui_decode.hs_verdicts)
+               then begin
+                 state.harness_detail <- None;
+                 state.harness_detail_scroll <- 0
+               end)
       | Error detail -> state.harness_error <- Some detail)
   | Fusion_runs_loaded (generation, result) ->
       (match state.fusion_runs_inflight with
@@ -8373,11 +8391,22 @@ let main () =
                   in
                   state.verification_cursor <- cursor;
                   state.verification_scroll <- scroll
+            | Harness ->
+                if Option.is_some state.harness_detail then
+                  state.harness_detail_scroll <-
+                    max 0 (state.harness_detail_scroll + (direction * page))
+                else
+                  let cursor, scroll =
+                    move_row_cursor state ~delta:(direction * page)
+                      ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                  in
+                  state.harness_cursor <- cursor;
+                  state.harness_scroll <- scroll
             | Config when state.config_pane = Config_prompts ->
                 state.config_scroll <-
                   max 0 (state.config_scroll + (direction * page))
             | Overview | Acting | Keepers _ | Lanes | Approvals | Planning
-            | Harness | Repositories | Changes | Connectors
+            | Repositories | Changes | Connectors
             | Runtime | Config | Tools | Resources | System_logs -> ())
        | Some "r" | Some "R" ->
            state.pending_approval_action <- None;
@@ -8562,6 +8591,12 @@ let main () =
                   state.verification_detail_scroll <- 0
                 end
                 else state.view <- Overview
+            | Harness ->
+                if Option.is_some state.harness_detail then begin
+                  state.harness_detail <- None;
+                  state.harness_detail_scroll <- 0
+                end
+                else state.view <- Overview
             | Resources ->
                 if state.resource_focus = Right_pane then
                   state.resource_focus <- Left_pane
@@ -8590,7 +8625,7 @@ let main () =
                   state.changes_tree_diff_path <- None
                 end
                 else state.view <- Overview
-            | Harness | Repositories | Connectors | Runtime
+            | Repositories | Connectors | Runtime
             | Config | Tools
             | System_logs -> state.view <- Overview)
        | Some "left" ->
@@ -8662,6 +8697,9 @@ let main () =
             | Verification ->
                 state.verification_detail_request_id <- None;
                 state.verification_detail_scroll <- 0
+            | Harness ->
+                state.harness_detail <- None;
+                state.harness_detail_scroll <- 0
             | Resources -> state.resource_focus <- Left_pane
             | Changes ->
                 state.changes_diff_row <- None;
@@ -8671,7 +8709,7 @@ let main () =
                 state.changes_tree_diff_path <- None
             | Keepers Keeper_runtime_pick | Keepers Keeper_message
             | Keepers Keeper_list | Acting | Lanes | Approvals
-            | Harness | Repositories | Connectors | Runtime | Config | Tools
+            | Repositories | Connectors | Runtime | Config | Tools
             | System_logs -> ())
        | Some "j" | Some "down" | Some "wheel-down" ->
            (match state.view with
@@ -8855,12 +8893,16 @@ let main () =
                  in
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
-            | Harness -> (let cursor, scroll =
-                   move_row_cursor state ~delta:(1)
-                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                 in
-                 state.harness_cursor <- cursor;
-                 state.harness_scroll <- scroll)
+            | Harness ->
+                if Option.is_some state.harness_detail then
+                  state.harness_detail_scroll <- state.harness_detail_scroll + 1
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:1
+                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                   in
+                   state.harness_cursor <- cursor;
+                   state.harness_scroll <- scroll)
             | Repositories ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(1)
@@ -9084,12 +9126,16 @@ let main () =
                  state.lanes_cursor <- cursor;
                  state.lanes_scroll <- scroll)
             | Harness ->
-                (let cursor, scroll =
-                   move_row_cursor state ~delta:(-1)
-                     ~cursor:state.harness_cursor ~scroll:state.harness_scroll
-                 in
-                 state.harness_cursor <- cursor;
-                 state.harness_scroll <- scroll)
+                if Option.is_some state.harness_detail then
+                  state.harness_detail_scroll <-
+                    max 0 (state.harness_detail_scroll - 1)
+                else
+                  (let cursor, scroll =
+                     move_row_cursor state ~delta:(-1)
+                       ~cursor:state.harness_cursor ~scroll:state.harness_scroll
+                   in
+                   state.harness_cursor <- cursor;
+                   state.harness_scroll <- scroll)
             | Repositories ->
                 (let cursor, scroll =
                    move_row_cursor state ~delta:(-1)
@@ -9353,6 +9399,19 @@ let main () =
                             Some row.Masc.Tui_decode.vr_request_id;
                           state.verification_detail_scroll <- 0)
                        (verification_cursor_row state))
+            | Harness ->
+                (match state.harness_detail, state.harness with
+                 | None, Some snapshot ->
+                     Option.iter
+                       (fun verdict ->
+                          state.harness_detail <-
+                            Some
+                              ( verdict.Masc.Tui_decode.hv_task_id
+                              , verdict.hv_at );
+                          state.harness_detail_scroll <- 0)
+                       (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
+                          state.harness_cursor)
+                 | Some _, _ | None, None -> ())
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
@@ -9432,7 +9491,7 @@ let main () =
                           ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes | Harness
+            | Acting | Lanes
             | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->

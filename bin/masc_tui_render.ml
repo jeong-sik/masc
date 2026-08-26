@@ -1974,6 +1974,29 @@ let render_board_read (state : state) (list_post : board_post) =
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
   end
 
+(* A shared, deliberately small status vocabulary for operational surfaces.
+   Only the status token receives colour; titles and identifiers stay neutral,
+   so colour says what changed rather than becoming row decoration. Unknown
+   producer words remain visible and unranked. *)
+let semantic_status_color status =
+  match String.lowercase_ascii (String.trim status) with
+  | "running" | "executing" | "active" | "in_progress" -> Ansi.cyan
+  | "scheduled" | "due" | "pending" | "waiting" | "verifying"
+  | "fallback" | "unknown" | "queued" | "degraded" | "matched_pending" ->
+      (Theme.warn ())
+  | "failed" | "failure" | "rejected" | "reject" | "refuted"
+  | "unreadable" | "blocked" | "error" | "deny" | "denied" | "read_error"
+  | "not_found" | "unrecognized_detail" | "unrecognized_receipt"
+  | "missing_stimulus_id" | "invalid_stimulus_id" -> (Theme.bad ())
+  | "succeeded" | "success" | "completed" | "complete" | "proven"
+  | "approve" | "approved" | "answered" | "recorded" | "applied" | "ok"
+  | "ready" | "pass" | "passed" | "allowed" | "matched_recorded"
+  | "recognized" ->
+      (Theme.ok ())
+  | "cancelled" | "canceled" | "dropped" | "expired" | "skipped" ->
+      Ansi.dim
+  | _ -> Ansi.reset
+
 let planning_phase_label phase = Goal_phase.to_string phase
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
@@ -2027,6 +2050,25 @@ let planning_proof_detail (goal : planning_goal) =
       Option.map
         (fun note -> (Ansi.dim, "note: " ^ note))
         (Terminal_text.optional_single_line goal.pg_last_review_note)
+;;
+
+let planning_selected_detail (goal : planning_goal) =
+  let metric =
+    match
+      Terminal_text.optional_single_line goal.pg_metric,
+      Terminal_text.optional_single_line goal.pg_target_value
+    with
+    | Some name, Some target ->
+        Printf.sprintf "metric: %s \xe2\x86\x92 %s" name target
+    | Some name, None -> "metric: " ^ name
+    | None, Some target -> "target: " ^ target
+    | None, None -> "metric: \xe2\x80\x94"
+  in
+  match planning_proof_detail goal with
+  | None -> Ansi.dim, Printf.sprintf "%s \xc2\xb7 %s" goal.pg_id metric
+  | Some (colour, proof) ->
+      colour,
+      Printf.sprintf "%s \xc2\xb7 %s \xc2\xb7 %s" goal.pg_id metric proof
 ;;
 
 (** Render the Planning surface (list view). *)
@@ -2112,15 +2154,16 @@ let render_planning_list (state : state) =
               | None -> ""
             in
              let line =
-               Printf.sprintf "  %s[%s]%s %s P%d  %s%s"
+               Printf.sprintf "  %s[%s]%s %s P%d  %-16s %s%s"
                  status_color
                  (fit_width status_label planning_phase_column)
                  Ansi.reset
                  (planning_proof_mark g.pg_proof)
                  g.pg_priority
+                 (fit_width (Terminal_text.single_line g.pg_id) 16)
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 30 - Message_layout.display_width due))
+                    (cols - 47 - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =
@@ -2136,11 +2179,9 @@ let render_planning_list (state : state) =
          match List.nth_opt goals state.planning_cursor with
          | None -> box_empty buf cols
          | Some selected ->
-             (match planning_proof_detail selected with
-              | None -> box_empty buf cols
-              | Some (colour, text) ->
-                  box_line buf cols
-                    (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset))
+             let colour, text = planning_selected_detail selected in
+             box_line buf cols
+               (colour ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset)
        end);
 
   box_bottom buf cols;
@@ -2279,12 +2320,25 @@ let render_planning_detail (state : state)
    text and no colour: the row is still a fact about the store, just one this
    build does not rank. *)
 let schedule_status_color status =
-  match status with
-  | "scheduled" | "due" -> (Theme.warn ())
-  | "running" -> Ansi.cyan
-  | "failed" -> (Theme.bad ())
-  | "succeeded" | "cancelled" | "expired" -> Ansi.dim
-  | _ -> Ansi.reset
+  semantic_status_color status
+
+let schedule_delivery_summary (row : schedule_row) =
+  let queue =
+    match row.sch_queue_projection_status, row.sch_queue_pending_count with
+    | None, None -> "queue:\xe2\x80\x94"
+    | Some status, None -> "queue:" ^ status
+    | None, Some count -> Printf.sprintf "queue:pending=%d" count
+    | Some status, Some count ->
+        Printf.sprintf "queue:%s/%d pending" status count
+  in
+  let reaction =
+    match row.sch_reaction_projection_status with
+    | None -> "reaction:\xe2\x80\x94"
+    | Some status -> "reaction:" ^ status
+  in
+  ( Printf.sprintf "%s \xc2\xb7 dispatch:%s" row.sch_schedule_id
+      row.sch_dispatch_status
+  , Printf.sprintf "%s \xc2\xb7 %s" queue reaction )
 
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
@@ -2360,7 +2414,11 @@ let render_schedule_list (state : state) =
              box_empty buf cols
            done
          end else begin
-           let content_height = rows - 12 in
+           (* Keep two factual rows below the list for delivery state. Without
+              it the list says when a wake is due but not whether the dispatch,
+              queue, and reaction projections agree. Two rows keep all three
+              projections readable at the 100-column regression viewport. *)
+           let content_height = rows - 14 in
            let scroll_offset =
              if state.schedule_cursor >= content_height then
                state.schedule_cursor - content_height + 1
@@ -2388,14 +2446,20 @@ let render_schedule_list (state : state) =
                       | None -> row.sch_source)
                in
                let status_color = schedule_status_color row.sch_status in
+               let last_wake =
+                 Option.value ~default:"\xe2\x80\x94" row.sch_last_wake_status
+               in
                let line =
-                 Printf.sprintf "%s[%s]%s %s  %s  %s"
+                 Printf.sprintf "%s[%s]%s %s  %s  wake:%s%s%s  %s"
                    status_color
                    (fit_width row.sch_status 10)
                    Ansi.reset
                    due
                    (fit_width (Terminal_text.single_line subject)
-                      (max 8 (cols - 60)))
+                      (max 8 (cols - 76)))
+                   (schedule_status_color last_wake)
+                   (fit_width (Terminal_text.single_line last_wake) 10)
+                   Ansi.reset
                    (Ansi.dim ^ row.sch_recurrence_summary ^ Ansi.reset)
                in
                let content =
@@ -2407,7 +2471,17 @@ let render_schedule_list (state : state) =
                box_line buf cols content
              end
              else box_empty buf cols
-           done
+           done;
+           (match List.nth_opt snapshot.scs_rows state.schedule_cursor with
+            | None ->
+                box_empty buf cols;
+                box_empty buf cols
+            | Some selected ->
+                let identity, delivery = schedule_delivery_summary selected in
+                box_line_styled buf cols ~style:(Theme.recede ())
+                  ("  " ^ identity);
+                box_line_styled buf cols ~style:(Theme.recede ())
+                  ("  " ^ delivery))
          end;
          (* The arm and the server's last refusal sit under the list, the
             same rows the goal detail carries them on. *)
@@ -2440,8 +2514,8 @@ let render_schedule_list (state : state) =
       ~cols buf
 
 let schedule_detail_lines ~width (row : schedule_row) =
-  let field label value =
-    ( Ansi.reset
+  let field ?(style = Ansi.reset) label value =
+    ( style
     , Printf.sprintf "  %-14s %s" label (Terminal_text.single_line value) )
   in
   let optional value = Option.value ~default:"\xe2\x80\x94" value in
@@ -2483,8 +2557,9 @@ let schedule_detail_lines ~width (row : schedule_row) =
          (Terminal_text.single_line row.sch_schedule_id))
   ; field "Schedule" row.sch_schedule_id
   ; field "Instance" row.sch_schedule_instance_id
-  ; field "Status" row.sch_status
-  ; field "Dispatch" row.sch_dispatch_status
+  ; field ~style:(schedule_status_color row.sch_status) "Status" row.sch_status
+  ; field ~style:(schedule_status_color row.sch_dispatch_status) "Dispatch"
+      row.sch_dispatch_status
   ; field "Source" row.sch_source
   ; field "Requested by" row.sch_requested_by
   ; field "Scheduled by" row.sch_scheduled_by
@@ -2510,13 +2585,27 @@ let schedule_detail_lines ~width (row : schedule_row) =
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
   @ [ Ansi.dim, ""
     ; Ansi.bold, "  LAST WAKE"
-    ; field "Status" (optional row.sch_last_wake_status)
+    ; field
+        ~style:
+          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+             row.sch_last_wake_status)
+        "Status" (optional row.sch_last_wake_status)
     ; field "Started" (timestamp row.sch_last_wake_started_at_iso)
-    ; field "Error" (optional row.sch_last_wake_error)
+    ; field
+        ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
+        "Error" (optional row.sch_last_wake_error)
     ; Ansi.dim, ""
     ; Ansi.bold, "  DELIVERY EVIDENCE"
-    ; field "Queue" queue
-    ; field "Reaction" reaction
+    ; field
+        ~style:
+          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+             row.sch_queue_projection_status)
+        "Queue" queue
+    ; field
+        ~style:
+          (Option.fold ~none:Ansi.dim ~some:schedule_status_color
+             row.sch_reaction_projection_status)
+        "Reaction" reaction
     ]
 
 let render_schedule_detail (state : state) (row : schedule_row) =
@@ -4949,7 +5038,7 @@ let render_verification (state : state) =
    for, so the row says which evaluator answered and marks the ones that were
    not the intended one. Reading a column of "approve" without that would say
    the gate is working when it may only be degrading quietly. *)
-let render_harness (state : state) =
+let render_harness_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
@@ -5032,13 +5121,14 @@ let render_harness (state : state) =
             | Some reason ->
                 Printf.sprintf "%s (fallback: %s)" v.hv_evaluator reason
           in
+          let verdict = Terminal_text.single_line v.hv_verdict in
           let line =
-            Printf.sprintf "  %-8s %-14s %-9s %-9s %s"
+            Printf.sprintf "  %-8s %-14s %-9s %s%-9s%s %s"
               (Terminal_text.clock_timestamp
                  (Masc_domain.iso8601_of_unix_seconds v.hv_at))
               (Terminal_text.single_line v.hv_task_id)
               (Terminal_text.single_line v.hv_gate)
-              (Terminal_text.single_line v.hv_verdict)
+              (semantic_status_color verdict) verdict Ansi.reset
               (Terminal_text.single_line evaluator)
           in
           let style =
@@ -5066,6 +5156,89 @@ let render_harness (state : state) =
        ~hints:(Masc_tui_keys.footer_hints state.view ^ link_hint));
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
+let harness_detail_lines ~width (verdict : Masc.Tui_decode.harness_verdict) =
+  let field ?(style = Ansi.reset) label value =
+    style,
+    Printf.sprintf "  %-12s %s" label (Terminal_text.single_line value)
+  in
+  let wrapped label text =
+    (Ansi.bold, "  " ^ label)
+    :: (Message_layout.wrap_body ~markdown:document_markdown
+          ~max_cells:(max 1 (width - 6))
+          ~sanitize:Keeper_chat.terminal_safe_text text
+        |> List.map (fun line -> Ansi.reset, "    " ^ line))
+  in
+  let fallback =
+    match verdict.hv_fallback_reason with
+    | None -> [ Ansi.dim, "  Fallback     none; the named evaluator answered" ]
+    | Some reason ->
+        [ (Theme.warn ()), "  FALLBACK EVALUATION" ]
+        @ wrapped "Why the requested evaluator did not run" reason
+  in
+  [ Ansi.bold, "  HARNESS VERDICT"
+  ; field "Task link" (Link.reference Task verdict.hv_task_id)
+  ; field "Task" verdict.hv_task_id
+  ]
+  @ wrapped "Title" verdict.hv_task_title
+  @ [ field "Agent" verdict.hv_agent
+    ; Ansi.dim, ""
+    ; Ansi.bold, "  DECISION"
+    ; field ~style:(semantic_status_color verdict.hv_verdict) "Verdict"
+        verdict.hv_verdict
+    ; field "Gate" verdict.hv_gate
+    ; field "Evaluator" verdict.hv_evaluator
+    ; field "Recorded"
+        (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
+    ; Ansi.dim, ""
+    ]
+  @ fallback
+
+let render_harness_detail (state : state) verdict =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Harness \xe2\x96\xb8 verdict")
+       (Terminal_text.single_line verdict.Masc.Tui_decode.hv_task_id)
+       (connection_badge state));
+  box_divider buf cols;
+  let lines =
+    harness_detail_lines ~width:(max 1 (framed_inner_width cols)) verdict
+  in
+  let content_height = max 1 (rows - 5) in
+  let max_scroll = max 0 (List.length lines - content_height) in
+  let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
+  for index = 0 to content_height - 1 do
+    match List.nth_opt lines (scroll + index) with
+    | Some (style, line) -> box_line_styled buf cols ~style line
+    | None -> box_empty buf cols
+  done;
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (Printf.sprintf
+            "j/k:scroll (%d/%d)  PgUp/PgDn:page  left/Esc:list  Y:copy task  r:refresh"
+            scroll max_scroll));
+  finish_surface state ~clamped:(Harness_detail_scroll scroll)
+    ~surface_key:"harness-detail" ~rows:terminal_rows ~cols buf
+
+let render_harness (state : state) =
+  match state.harness_detail, state.harness with
+  | Some (task_id, at), Some snapshot ->
+      (match
+         List.find_opt
+           (fun verdict ->
+              String.equal verdict.Masc.Tui_decode.hv_task_id task_id
+              && Float.equal verdict.hv_at at)
+           snapshot.Masc.Tui_decode.hs_verdicts
+       with
+       | Some verdict -> render_harness_detail state verdict
+       | None -> render_harness_list state)
+  | Some _, None | None, _ -> render_harness_list state
+
 let fusion_run_status_color = function
   | Fusion_running -> Ansi.cyan
   | Fusion_completed -> (Theme.ok ())
@@ -5074,6 +5247,24 @@ let fusion_run_status_color = function
 let fusion_run_clock run =
   Terminal_text.clock_timestamp
     (Masc_domain.iso8601_of_unix_seconds run.fur_started_at)
+
+let fusion_run_age ~now run =
+  Option.value ~default:"\xe2\x80\x94"
+    (Message_layout.age_text ~now ~since:run.fur_started_at)
+
+let fusion_run_summary run =
+  let flow = "Flow: Question \xe2\x86\x92 Panel \xe2\x86\x92 Judge \xe2\x86\x92 Evidence" in
+  match run.fur_status with
+  | Fusion_running ->
+      (Ansi.cyan, flow ^ " \xc2\xb7 collecting exact evidence")
+  | Fusion_completed ->
+      ( (Theme.ok ())
+      , flow ^ " \xc2\xb7 evidence retained; Enter opens panel and judge" )
+  | Fusion_failed failure ->
+      ( (Theme.bad ())
+      , Printf.sprintf "%s \xc2\xb7 failed [%s]: %s" flow
+          (Terminal_text.single_line failure.frs_failure_code)
+          (Terminal_text.single_line failure.frs_error) )
 
 let render_fusion_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -5085,6 +5276,7 @@ let render_fusion_list (state : state) =
     | Some snapshot -> snapshot.fus_runs
   in
   let shown = List.length runs in
+  let now_epoch = Unix.gettimeofday () in
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp =
     Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
@@ -5105,8 +5297,8 @@ let render_fusion_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ())
-    (Printf.sprintf "  %-8s %-9s %-16s %-10s %-10s %s" "TIME" "STATUS"
-       "KEEPER" "PRESET" "TOPOLOGY" "RUN");
+    (Printf.sprintf "  %-8s %-7s %-9s %-16s %-10s %-10s %s" "TIME" "AGE"
+       "STATUS" "KEEPER" "PRESET" "TOPOLOGY" "RUN");
   box_divider buf cols;
   (match state.fusion_error with
    | None -> ()
@@ -5115,7 +5307,9 @@ let render_fusion_list (state : state) =
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.fusion_error in
-  let content_height = max 1 (rows - chrome_rows) in
+  (* The selected run's lifecycle is a reading, not footer help. Reserve one
+     row for it so every run says where it is in the four-stage flow. *)
+  let content_height = max 1 (rows - chrome_rows - 1) in
   let scroll =
     if state.fusion_cursor >= content_height then
       state.fusion_cursor - content_height + 1
@@ -5143,8 +5337,9 @@ let render_fusion_list (state : state) =
       | Some run ->
           let status = fusion_run_status_to_string run.fur_status in
           let line =
-            Printf.sprintf "%-8s %s%-9s%s %-16s %-10s %-10s %s"
+            Printf.sprintf "%-8s %-7s %s%-9s%s %-16s %-10s %-10s %s"
               (fusion_run_clock run)
+              (fit_width (fusion_run_age ~now:now_epoch run) 7)
               (fusion_run_status_color run.fur_status)
               status Ansi.reset
               (fit_width (Terminal_text.single_line run.fur_keeper) 16)
@@ -5158,6 +5353,11 @@ let render_fusion_list (state : state) =
             box_line buf cols (Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
+  (match List.nth_opt runs state.fusion_cursor with
+   | None -> box_empty buf cols
+   | Some selected ->
+       let style, summary = fusion_run_summary selected in
+       box_line_styled buf cols ~style ("  " ^ summary));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -5488,6 +5688,15 @@ let change_row_summary (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_written { content } ->
       Printf.sprintf "(wrote %d bytes)" (String.length content)
 
+let change_kind_badge (change : Masc.Tui_decode.file_change) =
+  match change.Masc.Tui_decode.fc_kind with
+  | Masc.Tui_decode.Fc_edited _ -> Ansi.magenta, "EDIT"
+  | Masc.Tui_decode.Fc_written _ -> Ansi.cyan, "WRITE"
+
+let change_result_badge (change : Masc.Tui_decode.file_change) =
+  if change.Masc.Tui_decode.fc_succeeded then Theme.ok (), "APPLIED"
+  else Theme.bad (), "FAILED"
+
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
 
@@ -5640,7 +5849,10 @@ let render_changes_list (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  let col_hdr = Printf.sprintf "  %-6s %-10s %-44s %s" "Turn" "Task" "File" "What" in
+  let col_hdr =
+    Printf.sprintf "  %-6s %-10s %-5s %-8s %-38s %s"
+      "Turn" "Task" "Op" "Result" "File" "What"
+  in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;
   (match state.changes_error with
@@ -5719,23 +5931,25 @@ let render_changes_list (state : state) =
       match List.nth_opt changes idx with
       | None -> box_empty buf cols
       | Some change ->
+          let kind_style, kind = change_kind_badge change in
+          let result_style, result = change_result_badge change in
           let line =
-            Printf.sprintf "  %-6s %-10s %-44s %s"
+            Printf.sprintf "  %-6s %-10s %s%-5s%s %s%-8s%s %-38s %s"
               (Option.fold ~none:"-" ~some:string_of_int
                  change.Masc.Tui_decode.fc_turn)
               (Terminal_text.single_line
                  (Option.value ~default:"-" change.Masc.Tui_decode.fc_task_id))
+              kind_style kind Ansi.reset
+              result_style result Ansi.reset
               (Terminal_text.single_line (change_row_address change))
               (change_row_summary change)
           in
           (* A call that failed still changed what the keeper tried to do, and
              it is the row an operator is looking for. Dim marks it as an
              attempt rather than hiding it. *)
-          let style =
-            if change.Masc.Tui_decode.fc_succeeded then Ansi.reset else Ansi.dim
-          in
-          let marker = if idx = cursor then ">" else " " in
-          box_line_styled buf cols ~style (marker ^ String.sub line 1 (String.length line - 1))
+          if idx = cursor then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+          else box_line buf cols line
     done;
   (match cursor_change with
    | None -> ()

@@ -101,6 +101,20 @@ let resource_metadata_of_headers headers =
           if String.starts_with ~prefix:"https://" found then Some found
           else None))
 
+(* RFC 8414 3.1: a terminating "/" in the issuer is removed before the
+   well-known segment goes in. Every Google Workspace MCP server names its
+   authorization server as "https://accounts.google.com/", and the URL built
+   with that slash left on answers 404 while the one without answers 200 --
+   so this is the difference between reaching Google at all and not.
+
+   Only the issuer. A protected resource keeps the path it was given:
+   GitHub's names its metadata under "/mcp/" and serves it there. *)
+let issuer_for_well_known issuer =
+  let length = String.length issuer in
+  if length > 1 && String.ends_with ~suffix:"/" issuer
+  then String.sub issuer 0 (length - 1)
+  else issuer
+
 let fetch_json ~get ~url =
   match get ~url with
   | Error detail -> Error (Transport { url; detail })
@@ -156,7 +170,8 @@ let discover ?(get = default_get) ?(ask = default_ask) ~mcp_url () =
     | [] -> Error (No_authorization_server resource)
   in
   let* server_url =
-    well_known_url ~segment:"oauth-authorization-server" issuer
+    well_known_url ~segment:"oauth-authorization-server"
+      (issuer_for_well_known issuer)
   in
   let* server_pairs = fetch_json ~get ~url:server_url in
   let* authorize_url =

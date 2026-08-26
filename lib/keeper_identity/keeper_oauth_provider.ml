@@ -23,6 +23,7 @@ let error_to_string = function
 
 type t = {
   id : string;
+  client_group : string;
   label : string;
   mcp_url : string;
   access_token_env : string;
@@ -122,6 +123,14 @@ let single_path_component value =
      || String.exists (fun c -> Char.equal c '/') value)
 ;;
 
+(* An optional string, absent meaning the caller's default. *)
+let optional_string_field pairs key =
+  match find pairs key with
+  | None -> Ok None
+  | Some (S_string value) -> Result.map Option.some (non_empty ~key value)
+  | Some (S_int _ | S_array _ | S_other _) ->
+    Error (Wrong_type { field = key; expected = "a string" })
+
 let load ~file_name ~contents =
   match Otoml.Parser.from_string_result contents with
   | Error message -> Error (Malformed_toml message)
@@ -133,6 +142,14 @@ let load ~file_name ~contents =
       else if String.equal id file_name
       then Ok ()
       else Error (Name_mismatch { declared = id; file = file_name })
+    in
+    let* client_group = optional_string_field pairs "client_group" in
+    let client_group = Option.value client_group ~default:id in
+    let* () =
+      if single_path_component client_group
+      then Ok ()
+      else
+        Error (Wrong_type { field = "client_group"; expected = "one path component" })
     in
     let* label = string_field pairs "label" in
     let* mcp_url = https_field pairs "mcp_url" in
@@ -146,6 +163,7 @@ let load ~file_name ~contents =
     else
       Ok
         { id
+        ; client_group
         ; label
         ; mcp_url
         ; access_token_env

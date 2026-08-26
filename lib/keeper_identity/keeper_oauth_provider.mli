@@ -29,6 +29,16 @@ type t = private {
           record is private, so anything built from an id -- a directory
           holding this provider's registered client, for one -- can rely on
           that without checking again. *)
+  client_group : string;
+      (** Which registered client this provider uses, one path component like
+          {!id} and defaulting to it.
+
+          A client belongs to an authorization server, not to a resource, so
+          providers behind the same one can share it. Google publishes eight
+          MCP resources behind accounts.google.com and one Cloud project's
+          app serves all of them; without this an operator would type the
+          same client id and secret eight times, and send the secret over
+          the wire eight times to say one thing. *)
   label : string;  (** what a screen calls this provider *)
   mcp_url : string;
       (** The only endpoint declared. Everything else about the exchange --

@@ -7,8 +7,10 @@
     written down.
 
     Kept next to the workspace rather than in a Keeper's secret projection,
-    because one masc install has one client per provider, whichever Keeper
-    happens to log in first.
+    because one masc install has one client per
+    {!Keeper_oauth_provider.client_group}, whichever Keeper happens to log in
+    first. Providers behind the same authorization server share a group, so
+    one Google app answers for all eight of its resources.
 
     The id is not a secret -- it travels in a browser URL on every login. A
     secret sometimes comes with it: registration asks for a public client and

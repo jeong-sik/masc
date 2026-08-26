@@ -319,6 +319,36 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   check int "repeated action observation is idempotent" 0 repeated
 ;;
 
+let test_official_client_delivery_can_share_the_host_turn () =
+  with_session @@ fun config trace_id _session_dir ->
+  let value = activation ~skill_tool_use_id:"call-skill" ~agent_core_turn:7 () in
+  (match Ledger.record ~config ~trace_id value with
+   | Ok _ -> ()
+   | Error error -> fail (Ledger.store_error_to_string error));
+  let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-one" ~absolute_turn:1 in
+  let ledger, matching_ids =
+    match
+      Ledger.observe_delivery
+        ~config
+        ~trace_id
+        ~turn_ref
+        ~tool_result_ids:[ "call-skill" ]
+        ~agent_core_turn:7
+        ~delivered_at:"2026-08-26T00:00:01Z"
+    with
+    | Ok value -> value
+    | Error error -> fail (Ledger.store_error_to_string error)
+  in
+  check
+    (list string)
+    "same-turn official-client delivery"
+    [ "call-skill" ]
+    matching_ids;
+  match Ledger.activations ledger with
+  | [ { delivery = Some { agent_core_turn = 7; _ }; _ } ] -> ()
+  | _ -> fail "same host-turn delivery was not recorded"
+;;
+
 let test_conflicting_delivery_is_durable_transition_evidence () =
   with_session @@ fun config trace_id _session_dir ->
   let value = activation ~skill_tool_use_id:"call-conflict" () in
@@ -708,6 +738,8 @@ let () =
             test_session_origins_roundtrip
         ; test_case "delivery and later action share one exact chain" `Quick
             test_delivery_and_later_action_form_one_exact_chain
+        ; test_case "official-client delivery can share the host turn" `Quick
+            test_official_client_delivery_can_share_the_host_turn
         ; test_case "conflicting delivery is durable evidence" `Quick
             test_conflicting_delivery_is_durable_transition_evidence
         ; test_case "action before delivery is durable evidence" `Quick

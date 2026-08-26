@@ -46,6 +46,26 @@ val consume_disposition :
     exact invocation and clears it. [None] for a call that did not come
     through the masc dispatch boundary. *)
 
+val set_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  evidence:Keeper_file_change_evidence.t ->
+  unit
+(** Preserve producer-owned file line evidence for the exact physical
+    invocation until the post-tool hook constructs its tool-call row. *)
+
+val consume_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_change_evidence.t option
+(** Return and clear file change evidence for the exact invocation. *)
+
+val peek_file_change_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit ->
+  Keeper_file_change_evidence.t option
+(** Return file change evidence without clearing it. The post-tool hook uses
+    this to build a synchronous row and consumes it only after commit. *)
+
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
     [run_turn] invocation and threaded to every context reader of the
@@ -184,6 +204,7 @@ val log_call :
   ?typed_result:Tool_result.result ->
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
+  ?file_change_evidence:Keeper_file_change_evidence.t ->
   ?composition_tool:string ->
   ?composition_run_id:string ->
   ?composition_node_id:string ->
@@ -226,7 +247,8 @@ val log_call :
     empty preview; model/UI preview projection remains owned by [output]. The
     composition fields are an explicit observation envelope supplied by the
     typed plan executor; readers must not reconstruct them from [tool_use_id]
-    or tool-name strings.
+    or tool-name strings. [file_change_evidence] is producer-owned typed data,
+    persisted independently of the truncated opaque [output] preview.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the
@@ -298,6 +320,9 @@ val reset_for_testing : unit -> unit
 
 val pending_truncation_count_for_testing : unit -> int
 (** Number of live invocation-scoped truncation observations. Test only. *)
+
+val pending_file_change_evidence_count_for_testing : unit -> int
+(** Number of live invocation-scoped file change observations. Test only. *)
 
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)

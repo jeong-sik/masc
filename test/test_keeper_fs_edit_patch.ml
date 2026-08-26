@@ -7,6 +7,8 @@
 module Workspace = Masc.Workspace
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_tool_filesystem_runtime = Masc.Keeper_tool_filesystem_runtime
+module Keeper_file_change_evidence = Masc.Keeper_file_change_evidence
+module Keeper_tool_execution = Masc.Keeper_tool_execution
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Keeper_types = Keeper_types
@@ -21,6 +23,29 @@ module Json = Yojson.Safe.Util
    directly). This test-local shim reproduces its [.raw_output] projection
    so the assertions below keep exercising the real production entry
    point. *)
+let handle_file_write_with_outcome
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~publication_recovery
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+    ~turn_sandbox_factory
+    ~config
+    ~meta
+    ~publication_recovery
+    ?continuation_channel
+    ?gate_context
+    ?gate_grant
+    ~args
+    ()
+;;
+
 let handle_file_write
       ~turn_sandbox_factory
       ~config
@@ -32,7 +57,7 @@ let handle_file_write
       ~args
       ()
   =
-  (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+  (handle_file_write_with_outcome
      ~turn_sandbox_factory
      ~config
      ~meta
@@ -133,6 +158,16 @@ let parse_error raw =
 let parse_int raw field =
   parse raw |> Json.member field |> Json.to_int_option
 
+let check_line_range label ~start_line ~end_line
+      (range : Keeper_file_change_evidence.line_range) =
+  Alcotest.(check int) (label ^ " start") start_line range.start_line;
+  Alcotest.(check int) (label ^ " end") end_line range.end_line
+
+let file_change_evidence (execution : Keeper_tool_execution.t) =
+  match execution.file_change_evidence with
+  | Some evidence -> evidence
+  | None -> Alcotest.fail "expected producer-owned file change evidence"
+
 let parse_string raw field =
   parse raw |> Json.member field |> Json.to_string_option
 
@@ -231,12 +266,165 @@ let test_patch_unique_match () =
   Alcotest.(check string) "file content updated"
     "let x = 42\nlet y = 2\n" after
 
+let test_patch_multiline_line_evidence () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "multiline.ml" in
+  Fs_compat.save_file path "before\nold a\nold b\nafter\n";
+  let execution =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "patch"
+          ; "old_string", `String "old a\nold b"
+          ; "new_string", `String "new a\nnew b\nnew c"
+          ])
+      ()
+  in
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Edited
+      { occurrence_count = 1
+      ; occurrences = Some [ { old_range; new_range = Some new_range } ]
+      } ->
+    check_line_range "old" ~start_line:2 ~end_line:3 old_range;
+    check_line_range "new" ~start_line:2 ~end_line:4 new_range
+  | _ -> Alcotest.fail "expected one multiline Edit occurrence"
+
+let test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.Workspace.base_path ();
+       let path = Filename.concat playground "handler-hook.ml" in
+       Fs_compat.save_file path "before\nold a\nold b\nafter\n";
+       let descriptor =
+         match Keeper_tool_descriptor.find_id "agent.edit_file" with
+         | Some descriptor -> descriptor
+         | None -> Alcotest.fail "agent.edit_file descriptor is absent"
+       in
+       let invocation =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id:"file-change-exact-invocation"
+           ~turn:1
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+       in
+       let input =
+         `Assoc
+           [ "file_path", `String "handler-hook.ml"
+           ; "old_string", `String "old a\nold b"
+           ; "new_string", `String "new a\nnew b\nnew c"
+           ]
+       in
+       let handler =
+         Masc.Keeper_tools_agent_core_handler.make_keeper_tool_handler
+           ~name:descriptor.internal_name
+           ~descriptor
+           ~model_name:descriptor.public_name
+           ~input_schema:descriptor.input_schema
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:
+             (Masc.Keeper_context_runtime.create
+                ~eio:false
+                ~system_prompt:"test")
+           ()
+       in
+       let result = handler ~agent_core_invocation:invocation input in
+       let output =
+         match result with
+         | Tool_result.Completed _ ->
+           Ok
+             { Agent_core.Types.content = Tool_result.message result
+             ; _meta = None
+             }
+         | Tool_result.Deferred _ -> Alcotest.fail "Edit unexpectedly deferred"
+         | Tool_result.Failed { message; _ } ->
+           Alcotest.failf "Edit failed: %s" message
+       in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config
+           ~meta_ref:(ref meta)
+           ~turn_ctx_cell
+           ~trace_id:"file-change-exact-trace"
+           ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore
+           ()
+       in
+       let post_tool_use =
+         match hooks.Agent_core.Hooks.post_tool_use with
+         | Some hook -> hook
+         | None -> Alcotest.fail "production Keeper hooks omitted post_tool_use"
+       in
+       (match
+          post_tool_use
+            (Agent_core.Hooks.PostToolUse
+               { invocation
+               ; tool_name = descriptor.public_name
+               ; input
+               ; output
+               ; result_bytes = String.length (Tool_result.message result)
+               ; duration_ms = 1.0
+               })
+        with
+        | Agent_core.Hooks.Continue -> ()
+        | _ -> Alcotest.fail "production post-tool hook did not continue");
+       match
+         Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
+       with
+       | [ row ] ->
+         let expected =
+           Keeper_file_change_evidence.edited
+             [ Keeper_file_change_evidence.edit_occurrence
+                 ~old_start_line:2
+                 ~new_start_line:2
+                 ~old_string:"old a\nold b"
+                 ~new_string:"new a\nnew b\nnew c"
+             ]
+           |> Keeper_file_change_evidence.to_yojson
+           |> Yojson.Safe.to_string
+         in
+         let actual =
+           Json.member "file_change_evidence" row |> Yojson.Safe.to_string
+         in
+         Alcotest.(check string)
+           "producer evidence reaches the exact durable row"
+           expected
+           actual;
+         Alcotest.(check bool)
+           "same row has a canonical execution id"
+           true
+           (Option.is_some (Safe_ops.json_string_opt "execution_id" row));
+         Alcotest.(check int)
+           "commit acknowledgement consumes exact-invocation evidence"
+           0
+           (Masc.Keeper_tool_call_log.pending_file_change_evidence_count_for_testing
+              ())
+       | rows ->
+         Alcotest.failf "expected one exact file-change row, got %d" (List.length rows))
+
 let test_patch_no_match_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
-  let raw =
-    handle_file_write
+  let execution =
+    handle_file_write_with_outcome
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -251,7 +439,12 @@ let test_patch_no_match_errors () =
           ])
       ()
   in
+  let raw = execution.raw_output in
   Alcotest.(check bool) "ok=false" false (parse_ok raw);
+  Alcotest.(check bool)
+    "failed patch does not claim completed change evidence"
+    true
+    (Option.is_none execution.file_change_evidence);
   match parse_error raw with
   | None -> Alcotest.fail "expected error message"
   | Some msg ->
@@ -318,6 +511,78 @@ let test_patch_replace_all () =
   Alcotest.(check string) "all replaced"
     "x = 2\nx = 2\nx = 2\n" (Fs_compat.load_file path)
 
+let test_patch_replace_all_line_evidence_tracks_new_file_shifts () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "shifted.txt" in
+  Fs_compat.save_file path "before\nx\nmiddle\nx\nafter\n";
+  let execution =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "patch"
+          ; "old_string", `String "x"
+          ; "new_string", `String "x\nextra"
+          ; "replace_all", `Bool true
+          ])
+      ()
+  in
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Edited
+      { occurrence_count = 2
+      ; occurrences =
+          Some
+            [ { old_range = old_first; new_range = Some new_first }
+            ; { old_range = old_second; new_range = Some new_second }
+            ]
+      } ->
+    check_line_range "first old" ~start_line:2 ~end_line:2 old_first;
+    check_line_range "first new" ~start_line:2 ~end_line:3 new_first;
+    check_line_range "second old" ~start_line:4 ~end_line:4 old_second;
+    check_line_range "second new" ~start_line:5 ~end_line:6 new_second
+  | _ -> Alcotest.fail "expected two ordered Edit occurrences"
+
+let test_patch_large_replace_all_omits_ranges_but_keeps_exact_count () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "bounded.txt" in
+  let occurrence_count =
+    Keeper_file_change_evidence.max_recorded_edit_occurrences + 1
+  in
+  Fs_compat.save_file path (String.make occurrence_count 'x');
+  let execution =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "patch"
+          ; "old_string", `String "x"
+          ; "new_string", `String "y"
+          ; "replace_all", `Bool true
+          ])
+      ()
+  in
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Edited
+      { occurrence_count = actual; occurrences = None } ->
+    Alcotest.(check int) "exact occurrence count survives" occurrence_count actual;
+    let json =
+      Keeper_file_change_evidence.to_yojson
+        (file_change_evidence execution)
+    in
+    Alcotest.(check bool)
+      "durable range list is explicitly null"
+      true
+      (Json.member "occurrences" json = `Null)
+  | _ -> Alcotest.fail "expected explicitly omitted oversized range evidence"
+
 let test_patch_empty_old_string_errors () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
@@ -367,8 +632,8 @@ let test_patch_delete_via_empty_new_string () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "keep me\nDELETE_ME\nkeep me too\n";
-  let raw =
-    handle_file_write
+  let execution =
+    handle_file_write_with_outcome
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -383,9 +648,17 @@ let test_patch_delete_via_empty_new_string () =
           ])
       ()
   in
+  let raw = execution.raw_output in
   Alcotest.(check bool) "ok" true (parse_ok raw);
   Alcotest.(check string) "deletion landed"
-    "keep me\nkeep me too\n" (Fs_compat.load_file path)
+    "keep me\nkeep me too\n" (Fs_compat.load_file path);
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Edited
+      { occurrence_count = 1
+      ; occurrences = Some [ { old_range; new_range = None } ]
+      } ->
+    check_line_range "deleted old" ~start_line:2 ~end_line:2 old_range
+  | _ -> Alcotest.fail "expected deletion evidence with an explicit absent new range"
 
 let test_overwrite_unchanged_by_patch_addition () =
   (* Regression: introducing Patch must not break existing overwrite. *)
@@ -409,6 +682,67 @@ let test_overwrite_unchanged_by_patch_addition () =
   Alcotest.(check bool) "ok" true (parse_ok raw);
   Alcotest.(check string) "overwrite wrote bytes"
     "fresh" (Fs_compat.load_file path)
+
+let test_overwrite_and_append_line_evidence () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "write.txt" in
+  let overwrite =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "overwrite"
+          ; "content", `String "one\ntwo\n"
+          ])
+      ()
+  in
+  (match file_change_evidence overwrite with
+   | Keeper_file_change_evidence.Written { new_range = Some range } ->
+     check_line_range "overwrite" ~start_line:1 ~end_line:2 range
+   | _ -> Alcotest.fail "expected full-body Write evidence");
+  let append =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "append"
+          ; "content", `String "three\n"
+          ])
+      ()
+  in
+  Alcotest.(check bool)
+    "append does not claim a whole-file range"
+    true
+    (Option.is_none append.file_change_evidence)
+
+let test_empty_overwrite_has_typed_absent_range () =
+  setup @@ fun ~config ~meta ~playground ~publication_recovery ->
+  let path = Filename.concat playground "empty.txt" in
+  let execution =
+    handle_file_write_with_outcome
+      ~turn_sandbox_factory:None
+      ~config
+      ~meta
+      ~publication_recovery
+      ~args:
+        (`Assoc
+          [ "path", `String path
+          ; "mode", `String "overwrite"
+          ; "content", `String ""
+          ])
+      ()
+  in
+  match file_change_evidence execution with
+  | Keeper_file_change_evidence.Written { new_range = None } -> ()
+  | _ -> Alcotest.fail "expected Write evidence with an explicit absent range"
 
 let test_atomic_writes_preserve_existing_executable_permissions () =
   setup @@ fun ~config ~meta ~playground ~publication_recovery ->
@@ -1061,12 +1395,21 @@ let () =
         [
           Alcotest.test_case "unique match replaces" `Quick
             test_patch_unique_match;
+          Alcotest.test_case "multiline match records old and new ranges" `Quick
+            test_patch_multiline_line_evidence;
+          Alcotest.test_case "exact invocation carries evidence through handler and hook"
+            `Quick
+            test_file_change_evidence_crosses_handler_and_hook_on_exact_invocation;
           Alcotest.test_case "no match returns error" `Quick
             test_patch_no_match_errors;
           Alcotest.test_case "multi match without replace_all rejected"
             `Quick test_patch_multiple_matches_without_replace_all_errors;
           Alcotest.test_case "replace_all applies to every occurrence"
             `Quick test_patch_replace_all;
+          Alcotest.test_case "replace_all ranges track output line shifts" `Quick
+            test_patch_replace_all_line_evidence_tracks_new_file_shifts;
+          Alcotest.test_case "large replace_all keeps count and omits ranges" `Quick
+            test_patch_large_replace_all_omits_ranges_but_keeps_exact_count;
           Alcotest.test_case "empty old_string rejected" `Quick
             test_patch_empty_old_string_errors;
           Alcotest.test_case "missing file rejected" `Quick
@@ -1075,6 +1418,10 @@ let () =
             test_patch_delete_via_empty_new_string;
           Alcotest.test_case "overwrite mode regression" `Quick
             test_overwrite_unchanged_by_patch_addition;
+          Alcotest.test_case "overwrite records ranges but append does not" `Quick
+            test_overwrite_and_append_line_evidence;
+          Alcotest.test_case "empty overwrite records an absent range" `Quick
+            test_empty_overwrite_has_typed_absent_range;
           Alcotest.test_case
             "atomic writes preserve existing executable permissions"
             `Quick

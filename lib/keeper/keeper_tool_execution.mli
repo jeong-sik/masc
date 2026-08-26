@@ -30,6 +30,9 @@ type t = private
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
   ; deferred_kind : deferred_kind option
   ; terminal_effect_receipt : terminal_effect_receipt option
+  ; file_change_evidence : Keeper_file_change_evidence.t option
+      (** Producer-recorded line evidence for a completed filesystem change.
+          This is independent of the opaque [raw_output] projection. *)
   }
 
 val success : string -> t
@@ -66,6 +69,9 @@ val with_gate_authorization : Keeper_gate.authorization -> t -> t
 
 val with_surface_post_receipt : Keeper_surface_post.post_target -> t -> t
 (** Attach the resolved post target only to a completed execution. *)
+
+val with_file_change_evidence : Keeper_file_change_evidence.t -> t -> t
+(** Attach producer-recorded line evidence only to a completed execution. *)
 
 (** Preserve the authoritative {!Tool_result.disposition} from a normal MASC
     handler. [failure_effect_disposition] lets a producer preserve a phase it

@@ -96,7 +96,13 @@ let execute_with_observers
       (fun invocation ->
          Keeper_tool_call_log.set_disposition
            ~invocation
-           ~disposition:result.Keeper_tool_execution.disposition)
+           ~disposition:result.Keeper_tool_execution.disposition;
+         Option.iter
+           (fun evidence ->
+              Keeper_tool_call_log.set_file_change_evidence
+                ~invocation
+                ~evidence)
+           result.file_change_evidence)
       agent_core_invocation;
     let raw_result = result.Keeper_tool_execution.raw_output in
     let producer_data = result.data in

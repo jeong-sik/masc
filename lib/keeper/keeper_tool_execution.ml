@@ -19,6 +19,7 @@ type t =
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
   ; deferred_kind : deferred_kind option
   ; terminal_effect_receipt : terminal_effect_receipt option
+  ; file_change_evidence : Keeper_file_change_evidence.t option
   }
 
 let success raw_output =
@@ -29,6 +30,7 @@ let success raw_output =
   ; disposition = Tool_result.Completed ()
   ; deferred_kind = None
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -40,6 +42,7 @@ let success_data ?metadata data =
   ; disposition = Tool_result.Completed ()
   ; deferred_kind = None
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -51,6 +54,7 @@ let deferred_data ?metadata data =
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some Generic_deferred
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -62,6 +66,7 @@ let deferred_external_effect_data ?metadata data =
   ; disposition = Tool_result.Deferred ()
   ; deferred_kind = Some External_effect_deferred
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -77,6 +82,7 @@ let failure
   ; disposition = Tool_result.Failed class_
   ; deferred_kind = None
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -93,6 +99,7 @@ let failure_data
   ; disposition = Tool_result.Failed class_
   ; deferred_kind = None
   ; terminal_effect_receipt = None
+  ; file_change_evidence = None
   }
 ;;
 
@@ -115,6 +122,13 @@ let with_surface_post_receipt target result =
   | Tool_result.Deferred () | Tool_result.Failed _ -> result
 ;;
 
+let with_file_change_evidence evidence result =
+  match result.disposition with
+  | Tool_result.Completed () ->
+    { result with file_change_evidence = Some evidence }
+  | Tool_result.Deferred () | Tool_result.Failed _ -> result
+;;
+
 let of_tool_result
       ?(failure_effect_disposition = Tool_result.Effect_outcome_unknown)
       (result : Tool_result.result)
@@ -130,6 +144,7 @@ let of_tool_result
     ; disposition = Tool_result.Completed ()
     ; deferred_kind = None
     ; terminal_effect_receipt = None
+    ; file_change_evidence = None
     }
   | Tool_result.Deferred { metadata; _ } ->
     { raw_output
@@ -139,6 +154,7 @@ let of_tool_result
     ; disposition = Tool_result.Deferred ()
     ; deferred_kind = Some Generic_deferred
     ; terminal_effect_receipt = None
+    ; file_change_evidence = None
     }
   | Tool_result.Failed { class_; _ } ->
     { raw_output
@@ -148,5 +164,6 @@ let of_tool_result
     ; disposition = Tool_result.Failed class_
     ; deferred_kind = None
     ; terminal_effect_receipt = None
+    ; file_change_evidence = None
     }
 ;;

@@ -14,6 +14,3 @@
 val sheet : cols:int -> string list -> string list
 (** The rows drawn at this width: the lines as written, or pairs of them
     fitted side by side once a terminal is wide enough to hold two. *)
-
-val content_height : rows:int -> int
-(** The rows left for the sheet once the overlay's own frame is drawn. *)

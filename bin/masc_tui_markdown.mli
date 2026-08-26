@@ -121,4 +121,7 @@ val render : palette:palette -> width:int -> string -> string list
 val inline_segments : string -> (string * string) list
 (** The inline parse alone, as [(text, kind)] pairs where kind is one of
     ["plain"], ["strong"], ["emphasis"], ["code"], ["link_text"] or
-    ["link_target"]. Exposed so the marker handling can be read directly. *)
+    ["link_target"]. A Markdown link keeps its label as ["link_text"] and a
+    printable [" (target)"] as ["link_target"], so the two remain distinct in
+    copied and NO_COLOR text. Exposed so the marker handling can be read
+    directly. *)

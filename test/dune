@@ -2868,6 +2868,20 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_agenda)
+ (modules test_tui_agenda)
+ (deps
+  %{workspace_root}/bin/masc_tui_render.ml
+  %{workspace_root}/bin/masc_tui_types.ml)
+ (libraries
+  alcotest
+  ast_grep
+  masc_tui_agenda
+  masc_tui_markdown_render_cache
+  masc_tui_message_layout
+  unix))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries

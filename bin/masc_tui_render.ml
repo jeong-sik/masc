@@ -13,6 +13,7 @@ module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
+module Agenda = Masc_tui_agenda
 module Markdown = Masc_tui_markdown
 module Markdown_cache = Masc_tui_markdown_render_cache
 module Composer = Masc_tui_composer
@@ -567,6 +568,36 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
   Buffer.add_buffer framed buf;
   finish_frame ?clamped ~surface_key ~cursor ~rows:(rows + 1) ~cols framed
 
+(* The agenda strip: one row above the composer, on every surface.
+
+   Colour splits it the way the layout does. The wake recedes -- a schedule
+   that fires in an hour is ambient, and painting it warn would make the
+   screen shout every hour. The badge does not: a keeper stopped on the
+   operator is the half that has to be read now. *)
+let agenda_line (state : state) agenda ~cols =
+  ignore state;
+  match
+    Agenda.strip
+      ~now:(Unix.gettimeofday ())
+      ~localtime:Unix.localtime
+      ~cols
+      agenda
+  with
+  | None -> None
+  | Some { Agenda.clock; waiting } ->
+    let used =
+      Message_layout.display_width clock + Message_layout.display_width waiting
+    in
+    let gap = String.make (max 0 (cols - used)) ' ' in
+    let painted = function "" -> "" | text -> text in
+    Some
+      (Ansi.gray
+      ^ painted clock
+      ^ Ansi.reset
+      ^ gap
+      ^ (if waiting = "" then "" else (Theme.bad ()) ^ waiting ^ Ansi.reset))
+;;
+
 (* Close a surface: pad its frame to the row above the composer, then draw the
    composer on the terminal's last row.
 
@@ -575,7 +606,15 @@ let finish_frame_with_strip (state : state) ?clamped ~surface_key ~cursor ~rows
    partway up the screen; now it would push the composer up with it, and the
    row an operator reaches for would move per surface. *)
 let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
-  let body_rows = max 0 (rows - Composer.rows_for ~terminal_rows:rows) in
+  (* The strip's rows come off the body here and off the scroll bound in
+     [scrolled_surface], both from [Agenda.rows_taken] on the same projection.
+     Two readers of one number: the row the frame draws is the row the
+     keypress stops short of. *)
+  let agenda = Masc_tui_types.agenda state in
+  let agenda_rows = Agenda.rows_taken agenda in
+  let body_rows =
+    max 0 (rows - Composer.rows_for ~terminal_rows:rows - agenda_rows)
+  in
   let drawn = frame_lines buf in
   let body =
     if List.length drawn <= body_rows then
@@ -593,6 +632,9 @@ let finish_surface (state : state) ?clamped ~surface_key ~rows ~cols buf =
        Buffer.add_string framed line;
        Buffer.add_char framed '\n')
     body;
+  (match agenda_line state agenda ~cols with
+   | Some line -> Buffer.add_string framed (line ^ "\n")
+   | None -> ());
   Buffer.add_string framed (composer_line state ~cols ^ "\n");
   finish_frame_with_strip state ?clamped ~surface_key
     ~cursor:(composer_cursor state ~rows ~cols) ~rows ~cols framed

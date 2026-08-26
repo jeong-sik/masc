@@ -21,7 +21,10 @@ val user_message_background : Masc_tui_terminal_palette.t option -> string
     projected through the process stdout capability. Missing palette,
     disabled colours, and unsupported projection all produce [""]. *)
 
-val recede : Masc_tui_terminal_palette.t option -> string
+val recede
+  :  theme_mode:Masc_tui_terminal_palette.theme_mode option
+  -> Masc_tui_terminal_palette.t option
+  -> string
 (** What a row draws to sit behind the ones around it.
 
     [Sgr.dim] is SGR 2, and SGR 2 blends the foreground toward black. On a
@@ -34,13 +37,15 @@ val recede : Masc_tui_terminal_palette.t option -> string
 
     So this computes instead of naming: the terminal's own text stepped
     toward the terminal's own background, projected through what the process
-    can emit. A terminal that did not answer the palette query falls back to
-    [Sgr.dim], which is what every row drew before this existed -- and on a
-    light terminal that is still the wrong direction. Nothing here can tell
-    which it is: a multiplexer passes no OSC answer through, so the page is
-    unknown rather than dark. Closing that needs the terminal asked a
-    different way, by DECSET 996 and 2031, which tmux does answer and this
-    does not yet send. Disabled colours produce [""]. *)
+    can emit.
+
+    Without a palette the page may still have been reported on its own, by
+    DECSET 996 or 2031, which a multiplexer passes through where it answers
+    no OSC colour query. Where it says light, [Sgr.gray] recedes and
+    [Sgr.dim] does not -- SGR 2 blends toward black, so on a light terminal
+    it walks away from the page. Where it says dark, or says nothing,
+    [Sgr.dim] is what every row drew before this existed and is right on a
+    dark one. Disabled colours produce [""]. *)
 
 (** Raw SGR sequences. Renderers normally want the semantic names below;
     these exist for the [Masc_tui_ansi] shim and for content that really is
@@ -234,6 +239,8 @@ module For_testing : sig
   val recede
     :  colors_enabled:bool
     -> dim:string
+    -> gray:string
+    -> theme_mode:Masc_tui_terminal_palette.theme_mode option
     -> project:
          (Masc_tui_terminal_palette.rgb
           -> Masc_tui_terminal_palette.projected_color option)

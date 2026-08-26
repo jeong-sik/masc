@@ -150,6 +150,7 @@ module Theme = struct
     | Some _ | None ->
       let style =
         Masc_tui_theme.recede
+          ~theme_mode:(Masc_tui_terminal_palette.snapshot_theme_mode probed)
           (Masc_tui_terminal_palette.snapshot_palette probed)
       in
       if Atomic.compare_and_set recede_cache previous

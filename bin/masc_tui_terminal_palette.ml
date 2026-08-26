@@ -183,6 +183,20 @@ let ansi palette index =
   if index < 0 || index >= ansi_slot_count then None else palette.ansi.(index)
 ;;
 
+(* Whether the terminal calls its own page light or dark, asked and answered
+   without any colour crossing the wire.
+
+   OSC 10, 11 and 4 do not survive a multiplexer: tmux and screen can be
+   attached to several terminals at once, so they have no one page to report.
+   DECSET 996 and 2031 are a later answer to the same question that they do
+   pass through, and that Ghostty, Kitty, VTE, Zellij and Contour answer too.
+   It carries no colours, so it cannot replace the palette -- it says which
+   way a colour has to move, which is the half that matters when nothing else
+   is known. *)
+type theme_mode =
+  | Dark
+  | Light
+
 type slot =
   | Foreground
   | Background
@@ -206,11 +220,37 @@ type response =
    which is a state the readers already have to handle. *)
 let osc_query slot = Printf.sprintf "\x1b]%s;?\x1b\\" slot
 
+(* DECSET 996 asks once; 2031 asks to be told again whenever the answer
+   changes, which is how a terminal that follows the desktop's light and dark
+   switch reports it mid-session. Both replies arrive in the same shape, so
+   one parser reads them. *)
+let theme_mode_query = "\x1b[?996n"
+let theme_mode_subscribe = "\x1b[?2031h"
+let theme_mode_unsubscribe = "\x1b[?2031l"
+
 let query =
   String.concat ""
-    (osc_query "10" :: osc_query "11"
+    (theme_mode_subscribe :: theme_mode_query :: osc_query "10"
+     :: osc_query "11"
      :: List.init ansi_slot_count (fun index ->
             osc_query (Printf.sprintf "4;%d" index)))
+;;
+
+(* [CSI ? 997 ; 1 n] dark, [CSI ? 997 ; 2 n] light. The same reply answers the
+   996 question and arrives unasked after 2031, so nothing here cares which
+   prompted it. Any other parameter is a mode this does not know, and an
+   unknown page is not a dark one. *)
+let dark_mode_parameter = 1
+let light_mode_parameter = 2
+
+let parse_theme_mode_parameters body =
+  match String.split_on_char ';' body with
+  | [ "?997"; parameter ] | [ "997"; parameter ] -> (
+    match int_of_string_opt parameter with
+    | Some value when value = dark_mode_parameter -> Some Dark
+    | Some value when value = light_mode_parameter -> Some Light
+    | Some _ | None -> None)
+  | _ -> None
 ;;
 
 let hex_component text =
@@ -302,18 +342,33 @@ let of_responses ~foreground ~background ~ansi =
 
 type snapshot =
   { palette : t option
+  ; theme_mode : theme_mode option
   ; generation : int
   }
 
-let process_palette = Atomic.make { palette = None; generation = 0 }
+let process_palette =
+  Atomic.make { palette = None; theme_mode = None; generation = 0 }
+;;
+
 let snapshot () = Atomic.get process_palette
 let snapshot_palette snapshot = snapshot.palette
+let snapshot_theme_mode snapshot = snapshot.theme_mode
 let snapshot_generation snapshot = snapshot.generation
 let current () = (snapshot ()).palette
 
-let rec set_current palette =
+(* One generation over both, because both decide what a colour comes out as
+   and a reader caching by generation has to be woken by either. A theme
+   switch arrives here through DECSET 2031 long after start-up and can arrive
+   again, so this is not a set-once. *)
+let rec update field =
   let previous = snapshot () in
-  let next = { palette; generation = previous.generation + 1 } in
+  let next = { (field previous) with generation = previous.generation + 1 } in
   if not (Atomic.compare_and_set process_palette previous next) then
-    set_current palette
+    update field
+;;
+
+let set_current palette = update (fun previous -> { previous with palette })
+
+let set_theme_mode theme_mode =
+  update (fun previous -> { previous with theme_mode })
 ;;

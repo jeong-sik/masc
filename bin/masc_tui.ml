@@ -246,6 +246,18 @@ let take_late_palette_publisher reader =
 ;;
 
 let publish_late_terminal_palette reader decoder =
+  (* The page the terminal reports is not the palette and does not wait on
+     it: a multiplexer answers DECSET 996 and no OSC colour query, so this is
+     the only thing that ever arrives there. Published on its own so a colour
+     that has to know which way to move can still be told. *)
+  (match Masc_tui_terminal_probe.theme_mode decoder with
+   | None -> ()
+   | Some _ as theme_mode ->
+     if
+       Masc_tui_terminal_palette.snapshot_theme_mode
+         (Masc_tui_terminal_palette.snapshot ())
+       <> theme_mode
+     then Masc_tui_terminal_palette.set_theme_mode theme_mode);
   match reader.late_palette_publisher with
   | None -> ()
   | Some _ ->

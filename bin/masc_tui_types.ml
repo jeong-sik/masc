@@ -1287,6 +1287,17 @@ type state = {
   mutable msg_loaded_keeper: string option;
   mutable msg_loaded_error: string option;
   mutable msg_loaded_dropped: int;
+  (* Recorded file changes are a separate chat cache. [changes] belongs to the
+     Changes surface and follows its own keeper selection; sharing it would
+     make visiting one surface change what the other says. The canonical
+     execution index is prepared once when a stamped snapshot arrives. *)
+  mutable msg_file_changes: Tui_decode.file_change_snapshot option;
+  mutable msg_file_changes_keeper: string option;
+  mutable msg_file_change_index: Masc_tui_keeper_chat_diff.index;
+  mutable msg_file_changes_loading: bool;
+  mutable msg_file_changes_refresh_pending: bool;
+  mutable msg_file_changes_error: string option;
+  mutable msg_file_changes_generation: int;
   mutable msg_memory_visible: bool;
   mutable msg_memory_error: string option;
   mutable msg_memory_dropped: int;
@@ -1689,6 +1700,13 @@ let create_state
   msg_loaded_keeper = None;
   msg_loaded_error = None;
   msg_loaded_dropped = 0;
+  msg_file_changes = None;
+  msg_file_changes_keeper = None;
+  msg_file_change_index = Masc_tui_keeper_chat_diff.empty;
+  msg_file_changes_loading = false;
+  msg_file_changes_refresh_pending = false;
+  msg_file_changes_error = None;
+  msg_file_changes_generation = 0;
   msg_memory_visible = true;
   msg_memory_error = None;
   msg_memory_dropped = 0;

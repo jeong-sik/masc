@@ -57,6 +57,12 @@ val plain_palette : palette
 (** A palette whose spans are all empty and whose gutters are ASCII. What the
     reader would see with styling stripped. *)
 
+val non_colliding_fence_marker : string list -> string option
+(** Choose a Markdown fence marker that none of [lines] can close under this
+    renderer's own fence grammar. [None] means both supported markers collide.
+    Generated blocks must use this authority rather than reimplementing the
+    security-sensitive closing predicate. *)
+
 type streaming_render = private {
   rows : string list;
   mutable_source_start : int;

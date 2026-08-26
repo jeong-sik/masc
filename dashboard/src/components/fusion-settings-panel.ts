@@ -19,7 +19,6 @@ import {
   readFusionPresetMinAnswered,
   readFusionSettingsResult,
   type FusionSettings,
-  type FusionSettingsParseIssue,
 } from '../lib/fusion-settings'
 import { readFusionPresetView } from '../lib/fusion-preset-view'
 import { fetchFusionConfig } from '../api/dashboard'
@@ -27,6 +26,7 @@ import type { FusionConfigView } from '../api/dashboard'
 import { FusionPresetCard } from './fusion/fusion-preset-card'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import { parseRuntimeTomlEnvironment } from '../lib/runtime-toml-config'
+import { runtimeConfigCommitReceiptNotice } from '../lib/runtime-config-receipt'
 
 type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
@@ -70,40 +70,6 @@ function settingsFromDraft(draft: FusionSettingsDraft): FusionSettings | string 
 
 function parseIssueMessage(issues: readonly { key: string; message: string; token: string | undefined }[]): string {
   return issues.map(issue => `${issue.key}: ${issue.message}${issue.token === undefined ? '' : ` (${issue.token})`}`).join('; ')
-}
-
-function isFusionSettingsParseIssue(value: unknown): value is FusionSettingsParseIssue {
-  return typeof value === 'object' && value !== null && 'key' in value && 'message' in value
-}
-
-function issueArrayMessage(value: unknown): string {
-  if (!Array.isArray(value)) return ''
-  const rendered = value
-    .map(issue => {
-      if (isFusionSettingsParseIssue(issue)) {
-        return `${issue.key}: ${issue.message}${issue.token === undefined ? '' : ` (${issue.token})`}`
-      }
-      if (typeof issue === 'string') return issue
-      if (typeof issue === 'object' && issue !== null) {
-        const record = issue as Record<string, unknown>
-        const key = typeof record.key === 'string' ? record.key : undefined
-        const message = typeof record.message === 'string' ? record.message : undefined
-        const reason = typeof record.reason === 'string' ? record.reason : undefined
-        return [key, message ?? reason].filter(Boolean).join(': ')
-      }
-      return ''
-    })
-    .filter(Boolean)
-  return rendered.join('; ')
-}
-
-function backendValidationMessage(cfg: { message?: string | null; reason?: string | null; issues?: unknown }): string {
-  return (
-    issueArrayMessage(cfg.issues)
-    || cfg.message?.trim()
-    || cfg.reason?.trim()
-    || '백엔드 검증 거부. 변경이 저장되지 않았습니다.'
-  )
 }
 
 function uniqueRuntimeIds(ids: readonly string[]): string[] {
@@ -303,11 +269,6 @@ export function FusionSettingsPanel() {
       }
       const cfg = await saveRuntimeTomlConfig(nextSourceText)
       if (!mountedRef.current) return
-      if (!cfg.ok) {
-        setError(backendValidationMessage(cfg))
-        setState('error')
-        return
-      }
       const parsed = readFusionSettingsResult(cfg.source_text)
       if (!parsed.ok) {
         setError(parseIssueMessage(parsed.issues))
@@ -316,15 +277,12 @@ export function FusionSettingsPanel() {
       }
       setSource(cfg.source_text)
       setDraft(draftFromSettings(cfg.source_text, parsed.settings))
+      const receiptNotice = runtimeConfigCommitReceiptNotice(cfg)
       try {
         await refreshRuntimeConfigConsumers()
-        setSavedMessage(
-          cfg.application?.keeper_overlay.requires_restart
-            ? '저장됨 (Keeper 설정은 재시작 대기)'
-            : '저장됨',
-        )
+        setSavedMessage(`저장됨 · ${receiptNotice}`)
       } catch (err) {
-        setError(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+        setError(`저장됨 · ${receiptNotice} · 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
         setState('error')
         return
       }

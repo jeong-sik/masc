@@ -71,7 +71,7 @@ let for_surface = function
       @ listing_meta
   | Keepers Keeper_detail ->
       [ b Navigate "h/l" "pane" ~help:"move between roster and detail"
-      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / GitHub"
+      ; b Navigate "[ / ]" "tabs" ~help:"detail tabs: Info / Settings / Secrets / GitHub"
       ; b Act "L" "gh login" ~help:"on the GitHub tab: start the gh device-flow login"
       ; b Act "o" "logs" ~help:"open this Keeper's logs"
       ; b Act "Left / Esc" "back"

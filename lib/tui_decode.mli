@@ -554,6 +554,47 @@ val decode_keeper_lanes_snapshot :
     the reading; additional producer fields are outside this light
     projection and do not. *)
 
+(** What the secret projection reports for one Keeper. The producer computes
+    this from the directory: [Secret_absent] when no root is configured,
+    [Secret_empty] when a configured root holds nothing, [Secret_ready] when
+    it holds entries, and [Secret_error] when the root could not be read.
+
+    [Secret_status_unknown] keeps a word this reader does not know rather
+    than folding it into one of the four. A projection whose status the
+    screen cannot name is a different fact from one that is absent, and the
+    operator is the one who needs to see which. *)
+type keeper_secret_status =
+  | Secret_ready
+  | Secret_empty
+  | Secret_absent
+  | Secret_error
+  | Secret_status_unknown of string
+
+val keeper_secret_status_to_string : keeper_secret_status -> string
+
+(** One Keeper's credential surface, as the composite endpoint reports it.
+
+    Values never appear here: the producer sends names, counts and a
+    validation flag, and this reads exactly that. A screen built on this
+    cannot show a secret by accident because it never holds one. *)
+type keeper_secret_projection = {
+  ksp_keeper : string;
+  ksp_status : keeper_secret_status;
+  ksp_root : string;
+  ksp_env_names : string list;
+  ksp_file_paths : string list;  (** container-side mount paths *)
+  ksp_values_validated : bool;
+  ksp_error : string option;
+}
+
+val decode_keeper_secret_projections :
+  Yojson.Safe.t -> (keeper_secret_projection list, string) result
+(** Read every Keeper's secret projection out of the same
+    [GET /api/v1/keepers/composite] body the Lanes table reads. A snapshot
+    without a [secret_projection] object is skipped rather than rejected:
+    the endpoint serves several screens and a Keeper the producer has not
+    projected yet is absence, not a malformed reading. *)
+
 (** Closed lifecycle vocabulary emitted by the Fusion run registry. A failed
     run carries the registry's typed failure fields rather than flattening
     them into a display string. *)

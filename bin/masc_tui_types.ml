@@ -524,13 +524,16 @@ type keeper_mode =
 type keeper_detail_tab =
   | Detail_info
   | Detail_instructions
+  | Detail_secrets
   | Detail_github
 
-let keeper_detail_tabs = [ Detail_info; Detail_instructions; Detail_github ]
+let keeper_detail_tabs =
+  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
   | Detail_instructions -> "Settings"
+  | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
 
 (** Where [Esc] returns after the chat pane was opened. Keeping only the two
@@ -955,6 +958,10 @@ type state = {
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  (* Read from the same composite body as [lanes]. A Keeper the producer has
+     not projected is simply absent from this list, which the Secrets tab
+     shows as "no projection" rather than as an empty credential set. *)
+  mutable keeper_secrets: Tui_decode.keeper_secret_projection list;
   mutable lanes_error: string option;
   mutable lanes_scroll: int;
   mutable lanes_cursor: int;
@@ -1425,6 +1432,7 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
+  keeper_secrets = [];
   lanes_error = None;
   lanes_scroll = 0;
   lanes_cursor = 0;

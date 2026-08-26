@@ -121,6 +121,23 @@ type keeper_lanes_snapshot = {
   kls_lanes : keeper_lane list;
 }
 
+type keeper_secret_status =
+  | Secret_ready
+  | Secret_empty
+  | Secret_absent
+  | Secret_error
+  | Secret_status_unknown of string
+
+type keeper_secret_projection = {
+  ksp_keeper : string;
+  ksp_status : keeper_secret_status;
+  ksp_root : string;
+  ksp_env_names : string list;
+  ksp_file_paths : string list;
+  ksp_values_validated : bool;
+  ksp_error : string option;
+}
+
 type fusion_run_status =
   | Fusion_running
   | Fusion_completed
@@ -2709,6 +2726,72 @@ let decode_keeper_lanes_snapshot json =
   let* items = required_list_field json "snapshots" in
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
+
+let keeper_secret_status_of_string = function
+  | "ready" -> Secret_ready
+  | "empty" -> Secret_empty
+  | "absent" -> Secret_absent
+  | "error" -> Secret_error
+  | other -> Secret_status_unknown other
+
+let keeper_secret_status_to_string = function
+  | Secret_ready -> "ready"
+  | Secret_empty -> "empty"
+  | Secret_absent -> "absent"
+  | Secret_error -> "error"
+  | Secret_status_unknown other -> other
+
+let decode_string_list label items =
+  decode_list label
+    (fun item ->
+      match item with
+      | `String value -> Ok value
+      | _ -> Error (Printf.sprintf "%s: expected a string" label))
+    items
+
+(* The producer sends file mounts as objects carrying both sides of the bind.
+   The screen names the path the Keeper sees, because that is the one a
+   Keeper's own error message will quote back. *)
+let decode_file_mount_paths items =
+  decode_list "file_mounts"
+    (fun item -> required_string_field item "container_path")
+    items
+
+let decode_keeper_secret_projection ~keeper json =
+  let* status = required_string_field json "status" in
+  let ksp_status = keeper_secret_status_of_string status in
+  let* ksp_root = required_string_field json "root" in
+  let* env_items = optional_list_field json "env_names" in
+  let* ksp_env_names = decode_string_list "env_names" env_items in
+  let* mount_items = optional_list_field json "file_mounts" in
+  let* ksp_file_paths = decode_file_mount_paths mount_items in
+  let* validated = optional_bool_field json "values_validated" in
+  let ksp_values_validated = Option.value validated ~default:false in
+  let* ksp_error = optional_string_field json "error" in
+  Ok
+    { ksp_keeper = keeper
+    ; ksp_status
+    ; ksp_root
+    ; ksp_env_names
+    ; ksp_file_paths
+    ; ksp_values_validated
+    ; ksp_error
+    }
+
+let decode_keeper_secret_projections json =
+  let* items = required_list_field json "snapshots" in
+  List.fold_left
+    (fun acc snapshot ->
+      let* acc in
+      match Json_util.assoc_member_opt "secret_projection" snapshot with
+      | None | Some `Null -> Ok acc
+      | Some projection ->
+        let* keeper = required_string_field snapshot "keeper" in
+        let* decoded = decode_keeper_secret_projection ~keeper projection in
+        Ok (decoded :: acc))
+    (Ok [])
+    items
+  |> Result.map List.rev
 
 let fusion_run_status_to_string = function
   | Fusion_running -> "running"

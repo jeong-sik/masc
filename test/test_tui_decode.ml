@@ -2708,6 +2708,131 @@ let test_decode_librarian_page_keeps_the_server_cursor () =
       Alcotest.(check (option (pair (float 0.0) string))) "next cursor"
         (Some (42.5, "judge-older")) page.Tui_decode.lrp_next
 
+(* The composite endpoint serves several screens from one body. These pin the
+   part the Secrets tab reads: names and counts, never a value, and a Keeper
+   the producer has not projected is absence rather than a rejected reading. *)
+
+let secret_projection_json ~status ~env_names ~mounts =
+  `Assoc
+    [ ("status", `String status);
+      ("configured", `Bool true);
+      ("root", `String "/base/.masc/secrets/kidsnote");
+      ("source", `String "workspace_masc_secrets");
+      ("env_count", `Int (List.length env_names));
+      ("file_count", `Int (List.length mounts));
+      ("env_names", `List (List.map (fun n -> `String n) env_names));
+      ("file_mounts",
+       `List
+         (List.map
+            (fun (host, container) ->
+              `Assoc
+                [ ("host_path", `String host);
+                  ("container_path", `String container) ])
+            mounts));
+      ("values_validated", `Bool true);
+      ("error", `Null);
+    ]
+
+let snapshots_json entries =
+  `Assoc
+    [ ("generated_at", `Float 1.0);
+      ("count", `Int (List.length entries));
+      ("snapshots",
+       `List
+         (List.map
+            (fun (keeper, projection) ->
+              match projection with
+              | None -> `Assoc [ ("keeper", `String keeper) ]
+              | Some p ->
+                  `Assoc
+                    [ ("keeper", `String keeper); ("secret_projection", p) ])
+            entries));
+    ]
+
+let test_decode_secret_projection_reads_names_not_values () =
+  let json =
+    snapshots_json
+      [ ( "kidsnote",
+          Some
+            (secret_projection_json ~status:"ready"
+               ~env_names:[ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
+               ~mounts:
+                 [ ( "/base/.masc/secrets/kidsnote/files/app.pem",
+                     "/tmp/masc-runtime/secrets/app.pem" ) ]) );
+      ]
+  in
+  match Tui_decode.decode_keeper_secret_projections json with
+  | Error err -> Alcotest.fail err
+  | Ok [ p ] ->
+      Alcotest.(check string) "keeper" "kidsnote" p.Tui_decode.ksp_keeper;
+      Alcotest.(check string) "status" "ready"
+        (Tui_decode.keeper_secret_status_to_string p.Tui_decode.ksp_status);
+      Alcotest.(check (list string)) "env names"
+        [ "JIRA_API_TOKEN"; "JIRA_BASE_URL"; "JIRA_EMAIL" ]
+        p.Tui_decode.ksp_env_names;
+      Alcotest.(check (list string)) "container-side mount path"
+        [ "/tmp/masc-runtime/secrets/app.pem" ] p.Tui_decode.ksp_file_paths;
+      Alcotest.(check bool) "validated" true p.Tui_decode.ksp_values_validated
+  | Ok other ->
+      Alcotest.failf "expected one projection, read %d" (List.length other)
+
+let test_decode_secret_projection_skips_unprojected_keeper () =
+  let json =
+    snapshots_json
+      [ ("analyst", None);
+        ( "kidsnote",
+          Some
+            (secret_projection_json ~status:"absent" ~env_names:[] ~mounts:[]) );
+      ]
+  in
+  match Tui_decode.decode_keeper_secret_projections json with
+  | Error err -> Alcotest.fail err
+  | Ok [ p ] ->
+      Alcotest.(check string) "the projected one is read" "kidsnote"
+        p.Tui_decode.ksp_keeper
+  | Ok other ->
+      Alcotest.failf "expected one projection, read %d" (List.length other)
+
+let test_decode_secret_projection_keeps_an_unknown_status () =
+  (* Folding a word this reader does not know into [Secret_absent] would tell
+     the operator the credential is missing when the producer said something
+     else entirely. *)
+  let json =
+    snapshots_json
+      [ ( "kidsnote",
+          Some
+            (secret_projection_json ~status:"quarantined" ~env_names:[]
+               ~mounts:[]) );
+      ]
+  in
+  match Tui_decode.decode_keeper_secret_projections json with
+  | Ok [ { Tui_decode.ksp_status = Tui_decode.Secret_status_unknown word; _ } ]
+    ->
+      Alcotest.(check string) "the producer's word survives" "quarantined" word
+  | Ok _ -> Alcotest.fail "an unknown status was folded into a known one"
+  | Error err -> Alcotest.fail err
+
+let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
+  let json =
+    `Assoc
+      [ ("snapshots",
+         `List
+           [ `Assoc
+               [ ("keeper", `String "kidsnote");
+                 ("secret_projection",
+                  `Assoc
+                    [ ("status", `String "ready");
+                      ("root", `String "/base/.masc/secrets/kidsnote");
+                      ("env_names", `List [ `Int 7 ]);
+                    ]);
+               ];
+           ]);
+      ]
+  in
+  match Tui_decode.decode_keeper_secret_projections json with
+  | Ok _ -> Alcotest.fail "a non-string env name was accepted"
+  | Error _ -> ()
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -2983,5 +3108,16 @@ let () =
       [
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
+      ] );
+    ( "keeper_secret_projection",
+      [
+        Alcotest.test_case "reads names, never values" `Quick
+          test_decode_secret_projection_reads_names_not_values;
+        Alcotest.test_case "skips a Keeper with no projection" `Quick
+          test_decode_secret_projection_skips_unprojected_keeper;
+        Alcotest.test_case "keeps an unknown status" `Quick
+          test_decode_secret_projection_keeps_an_unknown_status;
+        Alcotest.test_case "rejects a wrong env name type" `Quick
+          test_decode_secret_projection_rejects_a_wrong_env_name_type;
       ] );
   ]

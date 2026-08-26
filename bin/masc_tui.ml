@@ -1102,7 +1102,11 @@ type async_msg =
       int * string * Masc_tui_context_inspector.reading
   | Keeper_chat_older_loaded of
       int * string * float * (Keeper_chat_history.page, string) result
-  | Lanes_loaded of (Masc.Tui_decode.keeper_lanes_snapshot, string) result
+  | Lanes_loaded of
+      ( Masc.Tui_decode.keeper_lanes_snapshot
+        * Masc.Tui_decode.keeper_secret_projection list,
+        string )
+      result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -3933,6 +3937,10 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            state.keeper_config_view <- None;
            state.keeper_config_view_error <- None;
            launch_keeper_config_view state ~mailbox keeper.k_name
+       | Detail_secrets ->
+           (* Nothing to fetch: the projection arrives with the composite
+              body the Lanes refresh already reads. *)
+           ()
        | Detail_github ->
            state.github_identity_view <- None;
            state.github_identity_view_error <- None;
@@ -5783,8 +5791,9 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
         | Error detail -> state.changes_tree_diff_error <- Some detail)
   | Lanes_loaded result -> (
       match result with
-      | Ok snapshot ->
+      | Ok (snapshot, secrets) ->
           state.lanes <- Some snapshot;
+          state.keeper_secrets <- secrets;
           state.lanes_error <- None
       | Error detail ->
           (* Keep the previous rows visible. The error says that they are
@@ -7152,7 +7161,7 @@ let main () =
                 state.github_identity_view_error <- None;
                 launch_github_identity_view state ~mailbox:async_messages
                   keeper.k_name
-            | _, Detail_info | None, _ -> ())
+            | _, Detail_info | _, Detail_secrets | None, _ -> ())
        | Some (("[" | "]") as bracket)
          when state.view = Changes && not compact_viewport ->
            cycle_changes_keeper state ~mailbox:async_messages
@@ -8518,6 +8527,10 @@ let main () =
                           state.keeper_config_view_error <- None;
                           launch_keeper_config_view state
                             ~mailbox:async_messages k.k_name
+                      | Detail_secrets ->
+                          (* Arrives with the composite body; nothing to
+                             fetch on entering the tab. *)
+                          ()
                       | Detail_github ->
                           state.github_identity_view <- None;
                           state.github_identity_view_error <- None;

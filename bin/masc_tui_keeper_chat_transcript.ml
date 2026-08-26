@@ -667,13 +667,24 @@ let apply_tool_result t ~(occurrence : Live.tool_occurrence) ~execution_id =
             execution_id (occurrence_label owner.occurrence)
             (occurrence_label occurrence))
      | None ->
-       ignore
-         (update_occurrence t occurrence (fun call ->
+       (match
+          update_occurrence t occurrence (fun call ->
             { call with
               result_ready = true
             ; execution_id = Some execution_id
             ; ended = true
-            })))
+            })
+        with
+        | Call_updated -> ()
+        | Call_missing ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence disappeared during update"
+        | Call_ambiguous ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence became ambiguous during update"
+        | Call_conflicting ->
+          note_unreadable t
+            "KEEPER_TOOL_RESULT_READY occurrence conflicted during update"))
 ;;
 
 let apply t (delta : Live.delta) =
@@ -803,10 +814,12 @@ let apply t (delta : Live.delta) =
       (match args with
        | "" -> ()
        | args ->
-           ignore
-             (update_unique_call t ~call_id
-                ~eligible:(fun call -> not call.result_ready && not call.failed)
-                (fun call -> { call with args })));
+         (match
+            update_unique_call t ~call_id
+              ~eligible:(fun call -> not call.result_ready && not call.failed)
+              (fun call -> { call with args })
+          with
+          | Call_updated | Call_missing | Call_ambiguous | Call_conflicting -> ()));
       t.awaiting <- Some { call_id; tool_name; question; because }
   | Live.Approval_settled { call_id; outcome = _ } ->
       (* Cleared whatever the answer was, including none: the prompt is over

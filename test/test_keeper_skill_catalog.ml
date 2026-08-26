@@ -75,6 +75,31 @@ value = {}
 |}
 ;;
 
+let composition_document_with_model_invocation value =
+  Printf.sprintf
+    {|---
+name: manual-clock
+description: Read the clock only when a task explicitly names this skill.
+disable-model-invocation: %s
+---
+
+```toml composition
+[[compositions]]
+name = "manual-clock"
+description = "Read the clock only when a task explicitly names this skill."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+    value
+;;
+
 let parsed ~directory document =
   match Skill_catalog.parse_skill ~directory document with
   | Ok skill -> skill
@@ -468,6 +493,57 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let test_disable_model_invocation_controls_dedicated_tool () =
+  let disabled =
+    skill_catalog_of
+      [ "manual-clock", composition_document_with_model_invocation "true" ]
+  in
+  (match Skill_catalog.find disabled "manual-clock" with
+   | Some skill ->
+     check
+       string
+       "disabled composition remains task-readable"
+       "instruction"
+       (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
+   | None -> fail "disabled composition disappeared from the task skill catalog");
+  check
+    int
+    "disabled composition has no dedicated entry"
+    0
+    (List.length (Skill_catalog.composition_entries disabled));
+  let disabled_surface =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~identity_tool_names:[]
+      ~skill_catalog:disabled
+      ~model_visible_descriptors:[]
+  in
+  check
+    bool
+    "generic task-routed reader remains"
+    true
+    (List.mem Catalog.skill_tool_name disabled_surface);
+  check
+    bool
+    "dedicated composition tool is absent"
+    false
+    (List.mem "keeper_compose_manual-clock" disabled_surface);
+  let enabled =
+    skill_catalog_of
+      [ "manual-clock", composition_document_with_model_invocation "false" ]
+  in
+  let enabled_surface =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~identity_tool_names:[]
+      ~skill_catalog:enabled
+      ~model_visible_descriptors:[]
+  in
+  check
+    bool
+    "boolean false preserves dedicated composition tool"
+    true
+    (List.mem "keeper_compose_manual-clock" enabled_surface)
+;;
+
 let test_composition_skill_joins_projection () =
   let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
   let expected_instruction =
@@ -561,6 +637,10 @@ let () =
             "loader scans the skills directory"
             `Quick
             test_loader_scans_the_skills_directory
+        ; test_case
+            "disable-model-invocation controls the dedicated tool"
+            `Quick
+            test_disable_model_invocation_controls_dedicated_tool
         ; test_case
             "composition skill joins the model projection"
             `Quick

@@ -826,6 +826,44 @@ let test_fused_name_reject_names_the_registered_prefix () =
     result.content
 ;;
 
+(* The seam between the two halves of the fix: the dispatch result AND the
+   post_tool_use_failure event must both carry the repair stem, not the wire
+   name. The message tests above and the keeper-side injection test cannot
+   see this seam — reverting just the event/result name to the raw wire name
+   leaves both green (the message is built from the stem anyway, and the
+   keeper test injects its own event). The seam is what the brake's
+   fingerprint reads. *)
+let test_reject_seam_carries_stem_in_result_and_hook () =
+  let fired = ref None in
+  let hooks =
+    { Hooks.empty with
+      post_tool_use_failure =
+        Some
+          (function
+            | Hooks.PostToolUseFailure { tool_name; stage; _ } ->
+              fired := Some (tool_name, stage);
+              Hooks.Continue
+            | _ -> Hooks.Continue)
+    }
+  in
+  (match
+     run_execute_with_tools
+       ~tools:[ make_echo_tool "Execute" ]
+       ~hooks
+       [ ToolUse { id = "seam"; name = "Execute1941e-861060580025800480"
+                 ; input = `Assoc [] } ]
+   with
+   | [ result ] ->
+     check string "result carries the stem, not the wire tail" "Execute" result.tool_name;
+     (match !fired with
+      | Some (tool_name, stage) ->
+        check string "hook event carries the stem" "Execute" tool_name;
+        check bool "hook stage is validation before execution" true
+          (stage = Hooks.Validation_before_execution)
+      | None -> fail "post_tool_use_failure never fired for the unknown call")
+   | _ -> fail "expected one unknown-tool result")
+;;
+
 let test_typo_name_reject_suggests_closest_registered () =
   let result =
     run_unknown_name
@@ -1569,6 +1607,10 @@ let () =
             "fused name reject names the registered prefix"
             `Quick
             test_fused_name_reject_names_the_registered_prefix
+        ; test_case
+            "reject seam carries the stem in result and hook"
+            `Quick
+            test_reject_seam_carries_stem_in_result_and_hook
         ; test_case
             "typo name reject suggests the closest registered name"
             `Quick

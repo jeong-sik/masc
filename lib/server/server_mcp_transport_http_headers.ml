@@ -27,9 +27,6 @@ let is_http_error_response = function
           | None -> false)
   | _ -> false
 
-let request_runtime_result (deps : deps) =
-  deps.get_runtime_result ()
-
 let env_flag name =
   match Sys.getenv_opt name with
   | Some raw -> (

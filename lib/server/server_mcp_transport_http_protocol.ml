@@ -89,8 +89,6 @@ let protocol_version_from_body = Mcp_transport_protocol.protocol_version_from_bo
 
 let is_http_error_response = Server_mcp_transport_http_headers.is_http_error_response
 
-let request_runtime_result = Server_mcp_transport_http_headers.request_runtime_result
-
 let request_force_json_response =
   Server_mcp_transport_http_headers.request_force_json_response
 

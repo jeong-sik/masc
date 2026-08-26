@@ -426,7 +426,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       in
       let accept_mode = post_context.accept_mode in
       let* runtime =
-        match request_runtime_result deps with
+        match deps.get_runtime_result () with
         | Ok r -> Ok r
         | Error msg ->
             respond_mcp_error ~code:Mcp_error_code.Internal_error ~deps
@@ -896,7 +896,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                stop_sse_session session_id;
                Sse.unregister session_id;
                let resource_cleanup =
-                 match request_runtime_result deps with
+                 match deps.get_runtime_result () with
                  | Ok runtime ->
                      runtime.clear_resource_subscriptions_for_session session_id;
                      "cleared"

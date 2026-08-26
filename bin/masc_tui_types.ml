@@ -759,6 +759,7 @@ type code_history_listing = {
 type config_pane =
   | Config_runtime
   | Config_prompts
+  | Config_themes
 
 type state = {
   mutable agents: agent list;
@@ -844,6 +845,11 @@ type state = {
      the prompt registry is the other, and a prompt is edited the same way —
      $EDITOR over the effective text, the server persists what comes back. *)
   mutable config_pane: config_pane;
+  (* The reader's own choice of colours, and where the cursor sits while they
+     look. [None] follows whatever the terminal reports, which is what masc
+     did before there was a choice to make. *)
+  mutable theme_choice: string option;
+  mutable theme_cursor: int;
   mutable prompts_snapshot: Tui_decode.prompts_snapshot option;
   mutable prompts_error: string option;
   mutable prompts_cursor: int;
@@ -1384,6 +1390,8 @@ let create_state
   resource_scroll = 0;
   resource_focus = Left_pane;
   config_pane = Config_runtime;
+  theme_choice = None;
+  theme_cursor = 0;
   prompts_snapshot = None;
   prompts_error = None;
   prompts_cursor = 0;

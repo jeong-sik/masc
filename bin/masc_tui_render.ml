@@ -23,6 +23,7 @@ module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
+module Theme_choice = Masc_tui_theme_choice
 module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
@@ -7512,6 +7513,66 @@ let render_prompts (state : state) =
          "j/k:select  PgUp/PgDn:read  i:latest input  e:edit  x:clear  c:runtime.toml");
   finish_surface state ~surface_key:"prompts" ~rows:terminal_rows ~cols buf
 
+(* The row the reader is on. A check rather than a colour, because the point
+   of this screen is that colours are about to change. *)
+let chosen_mark = "\xe2\x9c\x93"
+
+let render_themes (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Themes")
+       (Ansi.dim ^ "p: runtime.toml / prompts / themes" ^ Ansi.reset)
+       (connection_badge state));
+  box_divider buf cols;
+  let chosen = state.theme_choice in
+  let entries = Theme_choice.entries () in
+  let content_height = max 1 (rows - 6) in
+  let cursor = max 0 (min state.theme_cursor (List.length entries - 1)) in
+  let scroll = max 0 (cursor - content_height + 1) in
+  box_line_styled buf cols ~style:Ansi.dim
+    (Printf.sprintf "  %-24s %-9s %-10s %s" "theme" "page" "lifted" "")
+  ;
+  List.iteri
+    (fun index (entry : Theme_choice.entry) ->
+      if index >= scroll && index < scroll + content_height then begin
+        let picked =
+          match chosen with
+          | Some name -> String.equal name entry.name
+          | None -> false
+        in
+        let row =
+          Printf.sprintf "  %s %-24s %-9s %-10s"
+            (if picked then chosen_mark else " ")
+            (Terminal_text.single_line entry.name)
+            (if entry.light then "light" else "dark")
+            (match entry.lifted with
+             | 0 -> "none"
+             | count -> Printf.sprintf "%d of %d" count entry.measured)
+        in
+        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
+        else box_line buf cols row
+      end)
+    entries;
+  let drawn = min content_height (List.length entries) in
+  for _ = drawn to content_height - 1 do
+    box_empty buf cols
+  done;
+  box_line_styled buf cols ~style:Ansi.dim
+    (match chosen with
+     | None ->
+       "  following the terminal's own colours \xe2\x80\x94 Enter picks a theme"
+     | Some name ->
+       Printf.sprintf "  %s \xe2\x80\x94 Enter picks another, x follows the terminal again"
+         (Terminal_text.single_line name));
+  box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:(Masc_tui_keys.footer_hints state.view));
+  finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
+
 let render_config (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = max 1 (terminal_rows - Composer.rows_for ~terminal_rows) in
@@ -7637,6 +7698,7 @@ let render_surface (state : state) =
   | Config -> (
     match state.config_pane with
     | Config_prompts -> render_prompts state
+    | Config_themes -> render_themes state
     | Config_runtime -> render_config state)
   | Resources -> render_resources state
   | Code -> render_code state

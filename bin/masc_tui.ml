@@ -7816,6 +7816,22 @@ let main () =
            let page = surface_page_rows () in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
+            | Config when state.config_pane = Config_themes ->
+                (* Applying is the whole action: the palette's generation
+                   bumps and every cached colour rebuilds, which is the same
+                   road a theme switch reported by the terminal takes. A name
+                   no bundled scheme answers to leaves the screen alone rather
+                   than quietly dropping to colours nobody picked. *)
+                let entries = Masc_tui_theme_choice.entries () in
+                (match List.nth_opt entries state.theme_cursor with
+                 | None -> ()
+                 | Some entry ->
+                   if
+                     Masc_tui_theme_choice.apply
+                       entry.Masc_tui_theme_choice.name
+                   then
+                     state.theme_choice <-
+                       Some entry.Masc_tui_theme_choice.name)
             | Code -> ()
             | Board ->
                 (match state.board_mode with
@@ -8248,6 +8264,9 @@ let main () =
                     state.log_scroll
             | Keepers Keeper_calls ->
                 state.keeper_calls_scroll <- state.keeper_calls_scroll + 1
+            | Config when state.config_pane = Config_themes ->
+                let last = List.length (Masc_tui_theme_choice.entries ()) - 1 in
+                state.theme_cursor <- min (max 0 last) (state.theme_cursor + 1)
             | Config when state.config_pane = Config_prompts ->
                 let count =
                   match state.prompts_snapshot with
@@ -8489,6 +8508,8 @@ let main () =
             | Keepers Keeper_calls ->
                 if state.keeper_calls_scroll > 0 then
                   state.keeper_calls_scroll <- state.keeper_calls_scroll - 1
+            | Config when state.config_pane = Config_themes ->
+                state.theme_cursor <- max 0 (state.theme_cursor - 1)
             | Config when state.config_pane = Config_prompts ->
                 let next = max 0 (state.prompts_cursor - 1) in
                 if next <> state.prompts_cursor then begin
@@ -9215,6 +9236,13 @@ let main () =
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
+       | Some "x" | Some "X"
+         when state.view = Config && state.config_pane = Config_themes ->
+           (* Back to whatever the terminal reports. Not a theme named
+              "terminal" -- there is nothing to name, only the absence of a
+              choice, which is where masc started. *)
+           Masc_tui_theme_choice.follow_terminal ();
+           state.theme_choice <- None
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
@@ -9222,10 +9250,13 @@ let main () =
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
+           (* Two of the three are files the server reads; the third is this
+              reader's own colours, which no server has an opinion about. *)
            state.config_pane <-
              (match state.config_pane with
               | Config_runtime -> Config_prompts
-              | Config_prompts -> Config_runtime);
+              | Config_prompts -> Config_themes
+              | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
            state.prompts_librarian_input <- None;

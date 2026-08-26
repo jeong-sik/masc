@@ -59,6 +59,7 @@ type SurfaceSectionId =
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
   | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
+  | 'skills' // SKILL.md catalog keepers load at turn start, with usage (RFC skills-as-tools §2.6).
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -355,6 +356,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: 'Observatory',
       description: 'Activity and runtime evidence.',
       params: { section: 'observatory' },
+    },
+    {
+      id: 'skills',
+      label: 'Skills',
+      description: 'SKILL.md catalog and usage.',
+      params: { section: 'skills' },
     },
     {
       id: 'lanes',

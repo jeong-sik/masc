@@ -300,7 +300,7 @@ describe('monitoring navigation labels', () => {
 
     expect(defaultParamsForTab('monitoring')).toEqual({ section: 'agents' })
     expect(ids).toEqual([
-      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'lanes',
+      'agents', 'internal-agents', 'fleet-health', 'runtime', 'observatory', 'skills', 'lanes',
     ])
     expect(ids).toContain('agents')
     expect(ids).toContain('fleet-health')
@@ -333,6 +333,7 @@ describe('monitoring navigation labels', () => {
       'fleet-health',
       'runtime',
       'observatory',
+      'skills',
       'lanes',
     ])
   })

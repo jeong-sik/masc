@@ -603,6 +603,11 @@ let handle_board_context_inference_request ~state ~sw ~clock ~request reqd body 
 let respond_board_json reqd json =
   Http.Response.json_value json reqd
 
+(* How many trailing tool-call rows the skill catalog counts usage over.
+   A tail read of this size is a few MB and answers in well under a
+   second; the number rides in the response as [recent_window_rows]. *)
+let skill_usage_window_rows = 2000
+
 let add_routes ~sw ~clock router =
   router
   |> Http.Router.get "/api/v1/activity/events" (fun request reqd ->
@@ -1383,10 +1388,69 @@ let add_routes ~sw ~clock router =
                ; ("state", `String "uninitialized")
                ]
            | Ok (Ready snapshot) ->
+             (* Usage rides beside the snapshot: one bounded tail read of the
+                tool-call log, then a count per effective skill. Kind and tool
+                name come from the same parser a keeper turn applies to the
+                snapshot's bytes, so nothing here scans the filesystem or
+                builds a competing catalog; a document that parser refuses is
+                reported as such rather than guessed. The window bound rides
+                in the response so a reader knows what the count is over. *)
+             let rows =
+               Keeper_tool_call_log.read_recent_rows ~n:skill_usage_window_rows ()
+             in
+             let usage =
+               Skill_catalog_snapshot.effective_entries snapshot
+               |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
+                    let name = entry.identity.name in
+                    let base =
+                      [ ("name", `String name); ("directory", `String entry.directory) ]
+                    in
+                    match
+                      Keeper_skill_catalog.parse_skill
+                        ~directory:entry.directory
+                        entry.source_text
+                    with
+                    | Ok skill ->
+                      (match skill.surface with
+                       | Keeper_skill_catalog.Instruction ->
+                         `Assoc
+                           (base
+                           @ [ ("kind", `String "instruction")
+                             ; ( "recent_use_count"
+                               , `Int
+                                   (Keeper_skill_usage.count ~rows
+                                      (Keeper_skill_usage.Instruction_read skill.name)) )
+                             ])
+                       | Keeper_skill_catalog.Composition composition ->
+                         let tool_name =
+                           Keeper_tool_composition_catalog.tool_name composition
+                         in
+                         `Assoc
+                           (base
+                           @ [ ("kind", `String "composition")
+                             ; ("tool_name", `String tool_name)
+                             ; ( "execution"
+                               , `String
+                                   (Keeper_tool_composition_catalog.execution_mode_to_string
+                                      composition.execution) )
+                             ; ( "recent_use_count"
+                               , `Int
+                                   (Keeper_skill_usage.count ~rows
+                                      (Keeper_skill_usage.Composition_tool tool_name)) )
+                             ]))
+                    | Error error ->
+                      `Assoc
+                        (base
+                        @ [ ("kind", `String "unparsed")
+                          ; ("error", `String (Keeper_skill_catalog.error_to_string error))
+                          ]))
+             in
              `Assoc
                [ ("schema", `String "masc.skill-snapshot/v1")
                ; ("state", `String "ready")
                ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
+               ; ("usage", `List usage)
+               ; ("recent_window_rows", `Int skill_usage_window_rows)
                ]
          in
          Http.Response.json_value json reqd

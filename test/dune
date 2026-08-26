@@ -3251,6 +3251,11 @@
  (libraries alcotest masc masc_types))
 
 (test
+ (name test_keeper_skill_usage)
+ (modules test_keeper_skill_usage)
+ (libraries alcotest masc yojson))
+
+(test
  (name test_skill_source_config)
  (modules test_skill_source_config)
  (libraries alcotest masc.skill_config masc.keeper_toml yojson))

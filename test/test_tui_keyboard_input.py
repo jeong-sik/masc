@@ -5503,6 +5503,14 @@ def keeper_lanes_interaction(
         output: bytearray,
         _base_path: str,
     ) -> None:
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"j",
+            keeper_row_selected(b"beta"),
+        )
         unread = tab_until(process, master_fd, output, b"MASC Lanes")
         if b"(not loaded)" not in unread or b"(not loaded yet)" not in unread:
             raise AssertionError(
@@ -5547,17 +5555,11 @@ def keeper_lanes_interaction(
         if b"keeper lanes load failed" not in failed:
             raise AssertionError(f"Lanes hid the load error: {failed!r}")
 
+        # Lane order intentionally differs from the canonical roster, whose
+        # cursor still points at beta. Detail navigation must join kl_keeper
+        # to k_name; copying either numeric cursor would open beta for alpha.
         fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
             [
-                keeper_lane_row(
-                    "alpha",
-                    phase="running",
-                    turn_phase="executing",
-                    idle_seconds=75,
-                    runtime_state="done",
-                    selected_model="claude-opus-5",
-                    diagnosis="running_fiber_alive",
-                ),
                 keeper_lane_row(
                     "beta",
                     phase="new_phase",
@@ -5566,6 +5568,15 @@ def keeper_lanes_interaction(
                     runtime_state=None,
                     selected_model=None,
                     diagnosis=None,
+                ),
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
                 ),
             ]
         )
@@ -5576,27 +5587,27 @@ def keeper_lanes_interaction(
             b"r",
             b"new_phase",
         )
-        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
-        if banded_alpha.search(populated) is None:
+        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
+        if banded_beta.search(populated) is None:
             raise AssertionError(
                 f"Lanes did not band the cursor row: {populated!r}"
             )
+        banded_alpha = re.compile(rb"\x1b\[7m[^\x1b\n]*alpha")
         send_and_wait(
             process,
             master_fd,
             output,
             b"j",
-            re.compile(rb"\x1b\[7m[^\x1b\n]*beta"),
+            banded_alpha,
         )
-        send_and_wait(process, master_fd, output, b"k", banded_alpha)
+        send_and_wait(process, master_fd, output, b"k", banded_beta)
         # "/" arms the row search on any surface with row texts: the footer
         # shows the query, typing jumps the cursor live, Enter keeps the
         # query for n. The list itself never narrows.
-        send_and_wait(process, master_fd, output, b"/", b"/  j/k:scroll")
-        banded_beta = re.compile(rb"\x1b\[7m[^\x1b\n]*beta")
-        send_and_wait(process, master_fd, output, b"bet", banded_beta)
-        send_and_wait(process, master_fd, output, b"\rk", banded_alpha)
-        send_and_wait(process, master_fd, output, b"n", banded_beta)
+        send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+        send_and_wait(process, master_fd, output, b"alp", banded_alpha)
+        send_and_wait(process, master_fd, output, b"\rk", banded_beta)
+        send_and_wait(process, master_fd, output, b"n", banded_alpha)
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",
@@ -5638,6 +5649,62 @@ def keeper_lanes_interaction(
             raise AssertionError(
                 "Lanes discarded the prior reading after refresh failure: "
                 f"{stale_plain!r}"
+            )
+
+        # A later successful reading can shrink the list. The old numeric
+        # cursor was 1; retaining it would leave no selected row and make the
+        # advertised detail key a no-op. The logical alpha selection survives
+        # at its new index 0.
+        fixtures[KEEPER_LANES_PATH] = keeper_lanes_response(
+            [
+                keeper_lane_row(
+                    "alpha",
+                    phase="running",
+                    turn_phase="executing",
+                    idle_seconds=75,
+                    runtime_state="done",
+                    selected_model="claude-opus-5",
+                    diagnosis="running_fiber_alive",
+                )
+            ]
+        )
+        shrunk = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"r",
+            b"MASC Lanes (1 keepers)",
+        )
+        if banded_alpha.search(shrunk) is None:
+            raise AssertionError(
+                "successful lane shrink left no selected Keeper row: "
+                f"{shrunk!r}"
+            )
+        right_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\x1b[C",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        if b"Name: alpha" not in CSI_RE.sub(b"", right_detail):
+            raise AssertionError(
+                "Right did not open the selected lane's existing Keeper detail: "
+                f"{right_detail!r}"
+            )
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Lanes")
+        enter_detail = send_and_wait(
+            process,
+            master_fd,
+            output,
+            b"\r",
+            b"Keepers \xe2\x96\xb8 \x1b[1malpha",
+        )
+        if b"Name: alpha" not in CSI_RE.sub(b"", enter_detail):
+            raise AssertionError(
+                "Enter did not preserve the lane-to-Keeper selection: "
+                f"{enter_detail!r}"
             )
         os.write(master_fd, b"q")
 
@@ -5883,9 +5950,9 @@ def enter_outside_changes_interaction(
 ) -> None:
     """Enter pressed off the Changes surface must not arm its diff view.
 
-    The widened Enter arm sent Acting/Lanes/Approvals/Schedules/Verify/Harness
-    into the Changes handler; with changes loaded, coming back to Changes then
-    drew a diff nobody opened.
+    The widened Enter arm sent Acting/Approvals/Schedules/Verify/Harness into
+    the Changes handler; with changes loaded, coming back to Changes then drew
+    a diff nobody opened. Lanes now owns Enter, so this no-op guard uses Acting.
     """
     populated = tab_until(process, master_fd, output, b"masc:lib/example.ml")
     populated_plain = CSI_RE.sub(b"", populated).decode("utf-8")
@@ -5893,23 +5960,23 @@ def enter_outside_changes_interaction(
         raise AssertionError(
             f"Changes did not draw the fixture row as a list: {populated_plain!r}"
         )
-    lanes = tab_until(process, master_fd, output, b"MASC Lanes")
-    if b"MASC Lanes" not in lanes:
-        raise AssertionError(f"did not reach Lanes: {lanes!r}")
+    acting = tab_until(process, master_fd, output, b"MASC Acting")
+    if b"MASC Acting" not in acting:
+        raise AssertionError(f"did not reach Acting: {acting!r}")
     os.write(master_fd, b"\r")
     back = tab_until(process, master_fd, output, b"masc:lib/example.ml")
     back_plain = CSI_RE.sub(b"", back).decode("utf-8")
     if "Turn" not in back_plain:
         raise AssertionError(
             "returning to Changes did not draw the list columns; Enter on "
-            f"Lanes armed a view it does not own: {back_plain!r}"
+            f"Acting armed a view it does not own: {back_plain!r}"
         )
     # What says a diff is open is the diff view's own frame, not a pair of
     # counts: the marked row previews its diff under the list now, so "-1 +1"
     # is what an unopened list looks like.
     if "esc closes" in back_plain:
         raise AssertionError(
-            "returning to Changes drew a diff nobody opened; Enter on Lanes "
+            "returning to Changes drew a diff nobody opened; Enter on Acting "
             f"reached the Changes handler: {back_plain!r}"
         )
     os.write(master_fd, b"q")

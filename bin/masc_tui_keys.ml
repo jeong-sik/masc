@@ -107,7 +107,11 @@ let for_surface = function
   | Keepers Keeper_runtime_pick ->
       [ b Navigate "j/k" "move"; b Act "Enter" "choose"; b Act "Esc" "back" ]
   | Lanes ->
-      [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
+      [ b Navigate "j/k" "move" ~help:"move the lane cursor"
+      ; b Act "Right / Enter" "detail" ~help:"open the selected Keeper"
+      ; b Act "Esc" "overview"
+      ]
+      @ listing_meta
   | Board ->
       [ b Navigate "j/k" "move"
       ; b Act "Right / Enter" "read" ~help:"read the post"

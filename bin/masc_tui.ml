@@ -4529,6 +4529,35 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
+let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
+  state.view <- Keepers Keeper_detail;
+  state.keeper_detail_focus <- Right_pane;
+  state.detail_scroll <- 0;
+  load_live_context_if_safe state base_path keeper;
+  load_keeper_logs_if_safe state base_path 200 (Some keeper);
+  (* A sticky non-Info tab re-reads for the keeper the cursor now names;
+     without this the pane shows "(loading)" forever after a cursor move,
+     because the stamped answer names the previous keeper. *)
+  match state.detail_tab with
+  | Detail_info -> ()
+  | Detail_instructions ->
+      state.keeper_config_view <- None;
+      state.keeper_config_view_error <- None;
+      launch_keeper_config_view state ~mailbox keeper.k_name
+  | Detail_secrets ->
+      (* Arrives with the composite body; nothing to fetch on entering the
+         tab. *)
+      ()
+  | Detail_github ->
+      state.github_identity_view <- None;
+      state.github_identity_view_error <- None;
+      launch_github_identity_view state ~mailbox keeper.k_name
+  | Detail_identity ->
+      state.identity_view <- None;
+      state.identity_view_error <- None;
+      launch_identity_view state ~mailbox keeper.k_name
+;;
+
 (* Open the runtime event feed on a daemon fiber: one MCP initialize for the
    session id, then the stream, read until it ends. Every step reports back
    through the mailbox; the render fiber owns all state. The fiber ends with
@@ -6704,9 +6733,37 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
   | Lanes_loaded result -> (
       match result with
       | Ok (snapshot, secrets) ->
+          let selected_keeper =
+            match state.lanes with
+            | None -> None
+            | Some previous ->
+                List.nth_opt previous.Tui_decode.kls_lanes state.lanes_cursor
+                |> Option.map (fun lane -> lane.Tui_decode.kl_keeper)
+          in
           state.lanes <- Some snapshot;
           state.keeper_secrets <- secrets;
-          state.lanes_error <- None
+          state.lanes_error <- None;
+          let lanes = snapshot.Tui_decode.kls_lanes in
+          let fallback_cursor =
+            max 0 (min state.lanes_cursor (List.length lanes - 1))
+          in
+          let cursor =
+            match selected_keeper with
+            | None -> fallback_cursor
+            | Some keeper_name ->
+                Option.value ~default:fallback_cursor
+                  (List.find_index
+                     (fun lane ->
+                       String.equal lane.Tui_decode.kl_keeper keeper_name)
+                     lanes)
+          in
+          state.lanes_cursor <- cursor;
+          state.lanes_scroll <- max 0 (min state.lanes_scroll cursor);
+          (* A refresh may reorder or shrink the snapshot. Keep the logical
+             Keeper selected where it still exists, and make the clamped row
+             visible when Lanes is on screen. Off-surface loads still leave a
+             valid cursor for the next visit. *)
+          if state.view = Lanes then search_land state cursor
       | Error detail ->
           (* Keep the previous rows visible. The error says that they are
              stale; clearing them would turn a failed refresh into an empty
@@ -9740,38 +9797,33 @@ let main () =
                    | None -> ())
             | Keepers Keeper_list ->
                 (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.view <- Keepers Keeper_detail;
-                     state.keeper_detail_focus <- Right_pane;
-                     state.detail_scroll <- 0;
-                     load_live_context_if_safe state base_path k;
-                     load_keeper_logs_if_safe state base_path 200 (Some k);
-                     (* A sticky non-Info tab re-reads for the keeper the
-                        cursor now names; without this the pane shows
-                        "(loading)" forever after a cursor move, because the
-                        stamped answer names the previous keeper. *)
-                     (match state.detail_tab with
-                      | Detail_info -> ()
-                      | Detail_instructions ->
-                          state.keeper_config_view <- None;
-                          state.keeper_config_view_error <- None;
-                          launch_keeper_config_view state
-                            ~mailbox:async_messages k.k_name
-                      | Detail_secrets ->
-                          (* Arrives with the composite body; nothing to
-                             fetch on entering the tab. *)
-                          ()
-                      | Detail_github ->
-                          state.github_identity_view <- None;
-                          state.github_identity_view_error <- None;
-                          launch_github_identity_view state
-                            ~mailbox:async_messages k.k_name
-                      | Detail_identity ->
-                          state.identity_view <- None;
-                          state.identity_view_error <- None;
-                          launch_identity_view state ~mailbox:async_messages
-                            k.k_name)
+                 | Some keeper ->
+                     open_keeper_detail state ~base_path
+                       ~mailbox:async_messages keeper
                  | None -> ())
+            | Lanes ->
+                (match state.lanes with
+                 | None -> ()
+                 | Some snapshot ->
+                     (match
+                        List.nth_opt snapshot.Tui_decode.kls_lanes
+                          state.lanes_cursor
+                      with
+                      | None -> ()
+                      | Some lane ->
+                          (match
+                             List.find_index
+                               (fun (keeper : keeper) ->
+                                 String.equal keeper.k_name lane.kl_keeper)
+                               state.keepers
+                           with
+                           | None -> ()
+                           | Some keeper_cursor ->
+                               state.keeper_cursor <- keeper_cursor;
+                               Option.iter
+                                 (open_keeper_detail state ~base_path
+                                    ~mailbox:async_messages)
+                                 (selected_keeper state))))
             | Approvals ->
                 (* The list draws the ask on one row; this is where the whole
                    thing is readable before [y] answers it. *)
@@ -9899,7 +9951,7 @@ let main () =
                           ~mailbox:async_messages))
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
-            | Acting | Lanes
+            | Acting
             | Connectors | Runtime | Config | Resources | Tools
             | System_logs -> ())
        | Some "f" | Some "F" when state.view = Acting ->

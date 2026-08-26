@@ -157,10 +157,12 @@ type surface =
 ```
 
 1. **지시 스킬은 task 가 라우팅한다 (1·2단계).** RFC skills-declared-not-discovered 가
-   배송한 그대로다: `task.skills` 가 이름을 지정하면 current-task 블록에 이름과 경로
-   한 줄이 실리고, keeper 는 기존 `Read` 로 본문을 연다. 전 카탈로그를 프롬프트에
-   늘어놓고 모델이 고르게 하는 방식은 쓰지 않는다 — 이 RFC 초안에 있던 `## Skills`
-   전역 섹션과 `keeper_skill` 읽기 도구는 그 설계에 흡수되어 **만들지 않는다**.
+   배송한 그대로다: `task.skills` 가 이름을 지정하면 current-task 블록에 이름 한
+   줄이 실린다. 전 카탈로그를 프롬프트에 늘어놓고 모델이 고르게 하는 방식은 쓰지
+   않는다 — 이 RFC 초안에 있던 `## Skills` 전역 섹션은 만들지 않았다.
+   (구현 정정: `keeper_skill` 읽기 도구는 결국 **만들었다** — #30635. `.masc/skills`
+   가 샌드박스 루트 옆이라 `Read` 가 거의 실패했기 때문. 본문은 이제 경로+`Read` 가
+   아니라 이 도구로 나간다.)
 2. **합성 스킬 = 도구 (Skill as a Tool).** 합성 block 을 가진 스킬은 기존
    `make_tools` 경로로 `keeper_compose_<name>` 도구가 된다. 실행기·텔레메트리·async
    broker(status/cancel)는 재사용이고 변경이 없다. 도구는 턴 시작에 고정되는

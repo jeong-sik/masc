@@ -160,13 +160,17 @@ RFC-skills-as-tools의 하드컷 목표는 "즉석 합성 문법 제거 + `tool-
 |------|------|------|
 | `tool-compositions.toml` 로더·경로 | **삭제됨** | `keeper_tool_composition_catalog.mli:3` "the standalone tool-compositions.toml path is gone". 남은 언급은 주석의 "예전엔 여기서 왔다" 설명뿐 |
 | 합성 정의 (OCaml 리터럴) | **없음** | 정의는 SKILL.md fence. 코드엔 파서만 |
-| 도구 설명/도움말 (OCaml 산문) | **TOML로 이전** | `tool_help_registry.ml`의 `toml_help_table`이 `config/tools/<name>.toml`의 `[help]`에서 읽음. `details_markdown`은 전부 derived(하드코딩 산문 없음). model-prose 래칫이 OCaml 산문 증가를 막음 |
+| 도구 help 텍스트 (`[help]`) | **부분 이전** | `tool_help_registry.ml`이 `config/tools/<name>.toml`의 `[help]`에서 읽되, `[help]` 를 실제로 가진 도구는 5개뿐. 나머지는 OCaml derived |
+| compose 형제 도구 설명 (OCaml 리터럴) | **남아 있음** | `keeper_plan_execute`·`keeper_composition_status`·`keeper_composition_cancel`의 `description`이 `keeper_tool_composition_surface.ml`의 문자열이고 `config/tools/*.toml`이 없다. `keeper_skill`만 TOML 로 갔다. `plan_execute` 설명은 측정 튜닝 산문이고 주석이 "grammar는 이 문자열에만 살 수 있다"고 명시 — 래칫이 debt 로 추적 |
 | `config/tools/<name>.help.md` (RFC 2.4) | **미채택 — 대체됨** | RFC 2.4가 계획한 md 파일 대신 TOML `[help]` 경로로 갔다. 핵심(산문이 OCaml 밖)은 달성. md 파일은 리팩터가 아니라 형식 취향의 문제라 남겨둠 |
 | 합성 스킬 이름 (OCaml 하드코딩) | **없음** | `keeper_compose_mission-snapshot`은 주석의 예시 한 곳뿐(`keeper_tool_composition_surface.ml:110`). 실제 이름은 파일에서 |
 
-즉 "스킬화 안 된 합성"이나 "코드에 박힌 합성 정의"는 없다. 유일한 형식 미정착은
-도구 도움말이 md가 아니라 TOML `[help]`에 산다는 점이며, 이는 명문화되어 있고 산문이
-OCaml 밖이라는 목표는 충족한다.
+즉 "스킬화 안 된 합성"이나 "코드에 박힌 합성 정의"는 없다. 다만 model-prose 는 두
+갈래로 남는다: 도구 help 는 md 가 아니라 TOML `[help]`에 살고(5개 도구만 채움),
+compose 형제 도구 셋(`keeper_plan_execute`·`keeper_composition_status`·`keeper_composition_cancel`)의
+`description`은 아직 OCaml 리터럴이다 — model-prose 래칫이 debt 로 추적하고,
+`plan_execute` 설명은 주석이 밝히듯 typed object 스키마 때문에 설계상 in-code 다.
+"모든 model-prose 가 OCaml 밖" 은 아직 아니다.
 
 ## 5. 라이브 배치
 

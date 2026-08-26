@@ -273,15 +273,24 @@ let submitted_evidence_item_withheld_to_yojson = function
     submitted_evidence_item_transport_to_yojson item
 ;;
 
-(* Which artifacts keep their content, by index. Smallest first, so the budget
-   buys the most items the judge can actually read.
+(* Which artifacts keep their content, by index.
 
-   Filling in submission order instead would let one large-but-under-cap
-   artifact spend the whole budget and push every later item to a link — and
-   which items the judge sees would then depend on the order the producer
-   happened to list its evidence in, not on the evidence. Sorting decides it by
-   size; ties break on index so the choice is the same on every run. The
-   emitted list stays in submission order. *)
+   What this buys is one thing: the same evidence set makes the same choice
+   every run. Filling in submission order let one large-but-under-cap artifact
+   spend the whole budget, and which items the judge saw then depended on the
+   order the producer happened to list them in. Nothing declares that order —
+   the contract does not ask for most-important-first, and the item type
+   carries no priority — so it was incidental rather than intent.
+
+   Smallest-first is the tiebreak, not the goal, and it is not an optimum.
+   The contract requires support for every item and judges each one
+   independently, so a budget that forces any drop already fails that item;
+   which one is dropped changes who fails, not whether. Size is what is
+   available to sort on, ties break on index, and the emitted list stays in
+   submission order.
+
+   A dropped item is not silent: it carries [content_omitted] and a note
+   naming the cap and the tools that read the file directly. *)
 let carried_artifact_indices items =
   let weighed =
     List.mapi (fun index item -> index, item) items

@@ -1369,6 +1369,13 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/skills" (fun request reqd ->
        with_public_read (fun state _req reqd ->
          let config = Mcp_server.workspace_config state in
+         (* A Keeper turn refreshes this same publication before building its
+            tool bundle. Refresh here too so an operator inspecting the
+            workspace before the next turn sees the exact files that turn
+            will consume, rather than the server-start snapshot. *)
+         ignore
+           (Server_skill_snapshot_runtime.refresh_from_runtime_file
+              ~base_path:config.Workspace.base_path);
          let json =
            match Server_skill_snapshot_runtime.lookup ~base_path:config.Workspace.base_path with
            | Error _error ->

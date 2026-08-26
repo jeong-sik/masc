@@ -1,9 +1,9 @@
 # Skills — SKILL.md 로 능력을 선언한다
 
-masc 의 스킬은 파일 하나로 선언되는 능력이다. `<base_path>/.masc/skills/<name>/SKILL.md`
-한 장이 스킬 하나다. Keeper 턴은 **턴 시작마다** 이 디렉토리를 다시 읽으므로 파일을
-고치면 다음 턴부터 반영된다. `/api/v1/skills`는 별도의 발행 스냅샷이므로 부팅 또는
-runtime config 재적용 때 갱신된다.
+masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의 `[[skills.sources]]`가
+가리키는 `<source>/<name>/SKILL.md` 한 장이 스킬 하나다. 기본 source는 프로젝트와 사용자
+각각의 `.masc/skills`, `.agents/skills`다. Keeper 턴과 `/api/v1/skills`는 같은 발행
+스냅샷을 새로 고쳐 읽으므로 source 우선순위·shadow·거부 결과가 서로 갈리지 않는다.
 
 관련 RFC: `docs/rfc/RFC-skills-as-tools.md` (합성·도구 승격),
 `#30156` skills-declared-not-discovered (task 라우팅). 파서는

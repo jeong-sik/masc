@@ -829,12 +829,26 @@ let load_connectors ~(host : string) ~(port : int) :
   | Error err -> Error ("connector load failed: " ^ err)
   | Ok json -> Tui_decode.decode_connector_snapshot json
 
-(** Load the light Lanes projection from /api/v1/keepers/composite. *)
+(** Load the light Lanes projection from /api/v1/keepers/composite, together
+    with the secret projection the same body carries.
+
+    One fetch, two readings. The endpoint serves several screens and the
+    Secrets tab reads a different part of the same snapshots than the Lanes
+    table does; asking twice would double the request for one body. *)
 let load_keeper_lanes ~(host : string) ~(port : int) :
-    (Tui_decode.keeper_lanes_snapshot, string) result =
+    ( Tui_decode.keeper_lanes_snapshot
+      * Tui_decode.keeper_secret_projection list,
+      string )
+    result =
   match fetch_keeper_lanes ~host ~port with
   | Error err -> Error ("keeper lanes load failed: " ^ err)
-  | Ok json -> Tui_decode.decode_keeper_lanes_snapshot json
+  | Ok json ->
+    (match Tui_decode.decode_keeper_lanes_snapshot json with
+     | Error err -> Error err
+     | Ok lanes ->
+       (match Tui_decode.decode_keeper_secret_projections json with
+        | Error err -> Error err
+        | Ok projections -> Ok (lanes, projections)))
 
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :

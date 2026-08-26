@@ -3209,6 +3209,66 @@ let render_lanes (state : state) =
 (* The detail box alone -- borders, title, scrolled content -- written into
    [buf] at [cols] wide, footer excluded so a caller can lay it beside the
    roster pane. Returns the scroll the frame actually used. *)
+(* What the Keeper carries to reach a service, by name.
+
+   Values are not here to be hidden -- the producer never sends them. The
+   composite body carries names, counts and a validation flag, so this pane
+   cannot show a credential by accident.
+
+   A Keeper absent from the projection list is a different reading from one
+   whose projection says [absent]: the first means the producer has not
+   answered for this Keeper yet, the second means it answered that no root is
+   configured. Saying "none" for both would report a fact the server did not
+   send. *)
+let secret_lines (state : state) (k : keeper) =
+  let dim line = Ansi.dim ^ line ^ Ansi.reset in
+  match
+    List.find_opt
+      (fun (p : Masc.Tui_decode.keeper_secret_projection) ->
+        String.equal p.Masc.Tui_decode.ksp_keeper k.k_name)
+      state.keeper_secrets
+  with
+  | None -> [ dim "  (no projection reported for this Keeper)" ]
+  | Some p ->
+      let status = Masc.Tui_decode.keeper_secret_status_to_string p.ksp_status in
+      let status_line =
+        match p.ksp_status with
+        | Masc.Tui_decode.Secret_ready ->
+            "  Status:  " ^ (Theme.ok ()) ^ status ^ Ansi.reset
+        | Masc.Tui_decode.Secret_error ->
+            "  Status:  " ^ (Theme.bad ()) ^ status ^ Ansi.reset
+        | Masc.Tui_decode.Secret_empty | Masc.Tui_decode.Secret_absent
+        | Masc.Tui_decode.Secret_status_unknown _ ->
+            "  Status:  " ^ Ansi.dim ^ status ^ Ansi.reset
+      in
+      let entry_lines label = function
+        | [] -> [ dim (Printf.sprintf "  %s  -" label) ]
+        | names ->
+            List.mapi
+              (fun index name ->
+                let lead = if index = 0 then label else String.make (String.length label) ' ' in
+                Printf.sprintf "  %s  %s" lead (Terminal_text.single_line name))
+              names
+      in
+      [ status_line
+      ; Printf.sprintf "  Root:    %s" (Terminal_text.single_line p.ksp_root)
+      ; ""
+      ]
+      @ entry_lines "Env: " p.ksp_env_names
+      @ (match p.ksp_file_paths with
+         | [] -> []
+         | paths -> "" :: entry_lines "Files:" paths)
+      @ (match p.ksp_error with
+         | None -> []
+         | Some detail ->
+             [ ""; (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ])
+      @ [ ""
+        ; dim
+            (if p.ksp_values_validated then
+               "  Values were read and validated. They are never sent here."
+             else "  Values were not validated on the last read.")
+        ]
+
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     (* Beside the roster pane the box is the pane separator; alone on the
        surface it is the redundant outer frame, dropped. *)
@@ -3369,6 +3429,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | Detail_info -> info_lines
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
+      | Detail_secrets -> secret_lines state k
       | Detail_github ->
           stamped_or state.github_identity_view
             state.github_identity_view_error
@@ -3392,7 +3453,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
-      | Detail_info | Detail_instructions -> "[ ]:tab"
+      | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
     in
     let title =
       Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold

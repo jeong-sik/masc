@@ -3708,7 +3708,7 @@ function ToolTraceCard({
     (s) => s.output === null && s.entry !== null && turnComplete && coverageStateForEntry(s.entry) === 'hydration-failed',
   ).length
   const unlinkedN = orderedToolSteps.filter(
-    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.toolCallId?.trim(),
+    (s) => !structuralSummary && s.kind === 'tool' && s.entry === null && !s.step.executionId?.trim(),
   ).length
   const totalMs = orderedToolSteps.reduce(
     (sum, s) => sum + (s.output?.duration_ms ?? (s.kind === 'tool' ? traceStepDurationMs(s.step.dur) : 0)),

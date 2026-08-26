@@ -103,6 +103,7 @@ export const interleaveEntries: KeeperConversationEntry[] = [
         kind: 'tool',
         name: 'keeper_memory_search',
         toolCallId: 'tc-missing',
+        executionId: 'exec-missing',
         args: '{"query":"old task context"}',
         ts: '2026-07-05T14:20:03.000Z',
         agentCoreBlockIndex: 13,

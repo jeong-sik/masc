@@ -1608,6 +1608,6 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     const thread = keeperThreads.value.sangsu ?? []
     expect(thread.filter(entry => entry.toolCallId === 'tc-end-replay')).toHaveLength(1)
-    expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeNull()
+    expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeUndefined()
   })
 })

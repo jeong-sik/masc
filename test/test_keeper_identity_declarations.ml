@@ -8,7 +8,13 @@
     just quietly make the first service stop working.
 
     It also means a typo in a declaration is a red test rather than a
-    provider that is missing from an operator's screen at runtime. *)
+    provider that is missing from an operator's screen at runtime.
+
+    An earlier version of this file refused a set larger than nine, because
+    the Identity tab acted on a single digit and a tenth provider would have
+    been drawn with a number no keypress reached. The tab moves a cursor
+    now, so the size of this directory is no longer bounded by the keyboard
+    and the guard is gone rather than raised. *)
 
 module Declarations = Keeper_oauth_declarations
 module Provider = Keeper_oauth_provider
@@ -48,23 +54,6 @@ let test_every_shipped_declaration_reads () =
   match providers () with
   | [] -> Alcotest.fail "no provider is declared; the screen would be empty"
   | _ :: _ -> ()
-
-(* The Identity tab prints a number beside each provider and acts on the
-   digit pressed, so only single digits are reachable. The renderer's %d
-   keeps counting past that: a tenth provider would be listed with a number
-   that does nothing when pressed. Pinned here rather than in the screen's
-   own tests because it is the size of this set that decides it. *)
-let reachable_by_a_digit = 9
-
-let test_the_set_stays_within_what_a_keypress_can_reach () =
-  let count = List.length (providers ()) in
-  if count > reachable_by_a_digit then
-    Alcotest.failf
-      "%d providers are declared but the Identity tab can only start the \
-       first %d: the rest are listed with a number no keypress reaches. \
-       Give the tab a moving selection instead of digits before declaring \
-       another."
-      count reachable_by_a_digit
 
 let test_no_two_providers_share_an_access_token_entry () =
   no_duplicates ~what:"access_token_env"
@@ -123,8 +112,6 @@ let () =
     [ ( "the set as shipped",
         [ Alcotest.test_case "every declaration reads" `Quick
             test_every_shipped_declaration_reads;
-          Alcotest.test_case "the set stays reachable by a keypress" `Quick
-            test_the_set_stays_within_what_a_keypress_can_reach;
           Alcotest.test_case "no two share an access token entry" `Quick
             test_no_two_providers_share_an_access_token_entry;
           Alcotest.test_case "no two share an expiry entry" `Quick

@@ -562,44 +562,6 @@ supports-multimodal-inputs = false
 
 [ollama_cloud.ollama-cloud-deepseek-v4-pro]
 
-[models.ollama-cloud-devstral-2-123b]
-api-name = "devstral-2:123b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-devstral-2-123b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = false
-supports-multimodal-inputs = false
-
-[ollama_cloud.ollama-cloud-devstral-2-123b]
-
-[models.ollama-cloud-devstral-small-2-24b]
-api-name = "devstral-small-2:24b"
-max-context = 262144
-tools-support = true
-thinking-support = false
-streaming = true
-
-[models.ollama-cloud-devstral-small-2-24b.capabilities]
-supports-tool-choice = false
-supports-extended-thinking = false
-supports-reasoning-budget = false
-thinking-control-format = "none"
-supports-response-format-json = true
-supports-structured-output = true
-supports-image-input = true
-supports-multimodal-inputs = true
-
-[ollama_cloud.ollama-cloud-devstral-small-2-24b]
-
 [models.ollama-cloud-gemini-3-flash-preview]
 api-name = "gemini-3-flash-preview"
 max-context = 1048576
@@ -1179,13 +1141,12 @@ staged_judge_group_size = 3
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "ollama_cloud.ollama-cloud-devstral-2-123b",
-  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud_native.minimax-m3-native-structured",
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 # Fusion judges request provider-native structured output. Keep this on a
 # runtime whose model resolves through the AGENT_CORE catalog with native schema support.
-judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
+judge = "ollama_cloud_native.minimax-m3-native-structured"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
 with your best independent analysis. Do not defer to other models; give your \
@@ -1214,8 +1175,7 @@ web_tools = false
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
-  "ollama_cloud.ollama-cloud-devstral-2-123b",
-  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud_native.minimax-m3-native-structured",
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 panel_system_prompt = """
@@ -1241,7 +1201,7 @@ web_tools = false
 # checked-in schema-capable runtime set is intentionally narrow; distinct labels
 # still preserve lens identity for judge-of-judges routing.
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-2-123b"
+model = "ollama_cloud_native.minimax-m3-native-structured"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1251,7 +1211,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+model = "ollama_cloud.ollama-cloud-ministral-3-14b"
 label = "coverage"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1278,8 +1238,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 # (judge_of_judges topology도 동일 preset으로 사용 가능 — 6 lens 병렬 후 meta).
 [fusion.presets.council]
 panel = [
-  "ollama_cloud.ollama-cloud-devstral-2-123b",
-  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud_native.minimax-m3-native-structured",
   "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 panel_system_prompt = """
@@ -1299,7 +1258,7 @@ prose and no code fences.
 web_tools = false
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-2-123b"
+model = "ollama_cloud_native.minimax-m3-native-structured"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1309,7 +1268,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+model = "ollama_cloud.ollama-cloud-ministral-3-14b"
 label = "coverage"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1329,7 +1288,7 @@ gracefully. Respond with ONLY the requested JSON object, no prose and no code fe
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-2-123b"
+model = "ollama_cloud_native.minimax-m3-native-structured"
 label = "feasibility"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1339,7 +1298,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 """
 
 [[fusion.presets.council.judges]]
-model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
+model = "ollama_cloud.ollama-cloud-ministral-3-14b"
 label = "simplicity"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \

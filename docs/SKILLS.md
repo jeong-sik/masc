@@ -72,7 +72,7 @@ keeper 가 task 를 둘 이상 들고 있으면(Claimed/InProgress) current task
 
 ### 합성 스킬 (composition) — Skill as a Tool
 
-본문의 fence 안 문법은 `tool-compositions.toml` 이 쓰던 카탈로그 문법 **그대로**다.
+본문의 fence 안 문법은 `Keeper_tool_composition_catalog`의 닫힌 문법이다.
 fence 는 정확히 하나의 composition 을 선언하고, 그 `name` 은 스킬 이름과 같아야 한다.
 
 ````markdown
@@ -144,10 +144,3 @@ error로 거부한다. 반면 이름 불일치·한계 초과·확장 키는 `ru
   `keeper_tool_call_evidence_committed` 로도 흐른다. 이벤트에는 `success`, `disposition`,
   `duration_ms`가 포함된다. run 전체는 `record_kind=composition_run` 종결 행으로 별도
   기록되며 async는 durable settlement 이후에만 종결된다.
-
-## 6. 배포 주의 — #30208~#30220 창
-
-skills 스캔(#30208)과 toml 경로 삭제(#30220) 사이의 바이너리는 **양쪽을 다 읽고
-이름 충돌을 거부**한다. 그 창의 바이너리가 도는 동안 같은 이름을 skills 에 미리
-놓으면 모든 턴이 막힌다 — 실제로 키퍼 7명이 4.5분 막혔다 (#30238). 런타임 파일
-플립은 `/health` 의 `binary_commit` 으로 실행 중 바이너리를 확인하고 하라.

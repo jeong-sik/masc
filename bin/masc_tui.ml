@@ -5823,8 +5823,21 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       end
   | Runtime_config_view_loaded result -> (
       match result with
-      | Ok view ->
-          state.runtime_config_view <- Some view;
+      | Ok (path, lines) ->
+          (* Lexed once here, not per frame and not per row. TOML opens a string
+             with a triple quote that closes several rows later -- masc's own
+             tool declarations are written that way -- so a row cannot tell on
+             its own whether it is inside one. The Code surface loads the same
+             way for the same reason. *)
+          let rows =
+            Masc_tui_code_lexer.rows_of_source
+              ~language:(Masc_tui_code_lexer.language_of_path path)
+              (String.concat "\n" lines)
+            |> List.map
+                 (List.map (fun (text, kind) ->
+                      (Masc.Tui_decode.sanitize_terminal_text text, kind)))
+          in
+          state.runtime_config_view <- Some (path, rows);
           state.runtime_config_view_error <- None
       | Error detail -> state.runtime_config_view_error <- Some detail)
   | Code_entries_loaded (dir, result) ->
@@ -7298,13 +7311,22 @@ let main () =
   let handle_runtime_config_edit () =
     match state.runtime_config_view with
     | None -> add_event state "error" "config not loaded yet; r to reload"
-    | Some (_, lines) -> (
+    | Some (_, rows) -> (
       match Masc_tui_editor.editor_command () with
       | None ->
         add_event state "error"
           "no $EDITOR set; export EDITOR to edit runtime.toml here"
       | Some _ -> (
-        let stem = String.concat "\n" lines in
+        (* Rebuilt from the rows on screen rather than kept as a second copy.
+           The editor has to receive the file as it is, and the colours are a
+           reading of that file, not a change to it -- dropping the kinds gives
+           back exactly what was loaded. *)
+        let stem =
+          String.concat "\n"
+            (List.map
+               (fun segments -> String.concat "" (List.map fst segments))
+               rows)
+        in
         match
           Masc_tui_editor.roundtrip ~restore:restore_terminal
             ~reenter:reenter_terminal stem

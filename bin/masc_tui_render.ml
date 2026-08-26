@@ -373,6 +373,27 @@ let awaiting_approval_notice (state : state) =
 (* The server names itself in every footer, because "which masc is this"
    is a question every surface can raise and none of them answered: the tail
    named only its listening endpoint and two checkouts there read identically. *)
+(* One hue per token kind, shared by every surface that draws lexed rows. Code
+   and Config read the same files through the same lexer, so a second copy of
+   this table would be a second answer to the same question the first time one
+   of them gained a kind. *)
+let lexed_span (text, kind) =
+  if String.length text = 0 then ""
+  else
+    let style =
+      if String.equal kind Masc_tui_code_lexer.kind_keyword then
+        Theme.Syntax.keyword
+      else if String.equal kind Masc_tui_code_lexer.kind_string then
+        Theme.Syntax.string
+      else if String.equal kind Masc_tui_code_lexer.kind_comment then Ansi.gray
+      else if String.equal kind Masc_tui_code_lexer.kind_number then Ansi.magenta
+      else if String.equal kind Masc_tui_code_lexer.kind_type then
+        Ansi.bold ^ Ansi.blue
+      else ""
+    in
+    if String.equal style "" then text else style ^ text ^ Ansi.reset
+;;
+
 let footer_line ?(status = []) (state : state) ~max_cells ~hints =
   (* An armed "/" search shows its query where every surface already looks
      for its keys. One seam instead of a per-surface indicator. *)
@@ -7201,24 +7222,7 @@ let render_code (state : state) =
   let entries = state.code_entries in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
-  let span (text, kind) =
-    if String.length text = 0 then ""
-    else
-      let style =
-        if String.equal kind Masc_tui_code_lexer.kind_keyword then
-          Theme.Syntax.keyword
-        else if String.equal kind Masc_tui_code_lexer.kind_string then
-          Theme.Syntax.string
-        else if String.equal kind Masc_tui_code_lexer.kind_comment then
-          Ansi.gray
-        else if String.equal kind Masc_tui_code_lexer.kind_number then
-          Ansi.magenta
-        else if String.equal kind Masc_tui_code_lexer.kind_type then
-          Ansi.bold ^ Ansi.blue
-        else ""
-      in
-      if String.equal style "" then text else style ^ text ^ Ansi.reset
-  in
+  let span = lexed_span in
   let list_pane pane_buf pane_cols =
     framed_top pane_buf pane_cols;
     let list_focused = state.code_focus_file = Left_pane in
@@ -8098,13 +8102,17 @@ let render_config (state : state) =
        for _ = 2 to content_height do
          box_empty buf cols
        done
-   | None, Some (_, lines) ->
-       let total = List.length lines in
+   | None, Some (_, rows) ->
+       let total = List.length rows in
        let max_scroll = max 0 (total - content_height) in
        let scroll = max 0 (min state.config_scroll max_scroll) in
        for i = 0 to content_height - 1 do
-         match List.nth_opt lines (scroll + i) with
-         | Some line ->
+         match List.nth_opt rows (scroll + i) with
+         | Some segments ->
+             (* Painted through [lexed_span], the same table the Code surface
+                reads. The runtime config is TOML and the lexer answers for it,
+                so a key here is the colour a key is there. *)
+             let line = String.concat "" (List.map lexed_span segments) in
              box_line buf cols
                (Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
                   Ansi.reset line)

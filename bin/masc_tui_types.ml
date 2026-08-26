@@ -939,7 +939,11 @@ type state = {
   mutable prompts_librarian_input: (string * string list) option;
   mutable prompts_librarian_input_error: string option;
   mutable prompts_librarian_input_loading: bool;
-  mutable runtime_config_view: (string * string list) option;
+  (* Rows of coloured segments, the shape the Code surface keeps, so this one
+     reads the same way. Plain text is derived where it is needed rather than
+     stored beside them: two copies of the same rows drift the moment one is
+     rebuilt and the other is not. *)
+  mutable runtime_config_view: (string * (string * string) list list) option;
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
@@ -2032,7 +2036,7 @@ let scrolled_surface_rows (state : state) : surface -> scrolled option =
       listing ~error:state.runtime_config_view_error
         (match state.runtime_config_view with
          | None -> 0
-         | Some (_, lines) -> List.length lines)
+         | Some (_, rows) -> List.length rows)
   (* Acting counts rows the drawing builds out of formatted text, not rows the
      state holds; counting them here would be a second copy of the formatting,
      so it reports a [clamped_scroll] instead. Overview, Keepers, Board,

@@ -31,6 +31,7 @@ val bash_lexer : string -> segment list
 val json_lexer : string -> segment list
 val c_like_lexer : string -> segment list
 val python_lexer : string -> segment list
+val toml_lexer : string -> segment list
 
 val lexer_of_language : string -> (string -> segment list) option
 (** ["ocaml"|"ml"|"mli"], ["bash"|"sh"|"shell"|"zsh"], ["json"]. An unknown

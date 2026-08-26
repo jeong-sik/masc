@@ -95,8 +95,47 @@ let drop_archive_tasks config ~ids =
       ] in
       write_json config arch_path archive_json)
 
+let task_ids_of_event_json json =
+  [ Json_util.get_string json "task"; Json_util.get_string json "task_id" ]
+  |> List.filter_map (function
+    | Some id -> task_id_to_int id
+    | None -> None)
+
+let event_history_task_ids config =
+  let events_dir = Filename.concat (masc_dir config) "events" in
+  if not (Sys.file_exists events_dir) then []
+  else
+    Sys.readdir events_dir
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.concat_map (fun month ->
+      let month_path = Filename.concat events_dir month in
+      if not (Sys.file_exists month_path) then []
+      else if Sys.is_directory month_path then
+        Sys.readdir month_path
+        |> Array.to_list
+        |> List.sort String.compare
+        |> List.map (Filename.concat month_path)
+      else [ month_path ])
+    |> List.concat_map (fun path ->
+      if Sys.file_exists path && not (Sys.is_directory path) then
+        Fs_compat.load_file path
+        |> String.split_on_char '\n'
+        |> List.filter_map (fun line ->
+          if String.equal line "" then None
+          else
+            match Yojson.Safe.from_string line with
+            | json -> Some (task_ids_of_event_json json)
+            | exception Yojson.Json_error _ -> None)
+        |> List.concat
+      else [])
+
 let next_task_number config (backlog : backlog) =
   let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
   let archive_ids = read_archive_task_ids config in
-  let max_id = List.fold_left max 0 (backlog_ids @ archive_ids) in
+  (* Event history outlives both the live backlog and its archive after a
+     workspace restore. Reusing an id that history still names aliases two
+     unrelated task lifecycles in [masc_task_history]. *)
+  let event_ids = event_history_task_ids config in
+  let max_id = List.fold_left max 0 (backlog_ids @ archive_ids @ event_ids) in
   max_id + 1

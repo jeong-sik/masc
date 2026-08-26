@@ -4,6 +4,7 @@ type standard_field =
   | License
   | Compatibility
   | Metadata
+  | Allowed_tools
 
 type field =
   | Standard of standard_field
@@ -141,6 +142,7 @@ let standard_field_of_key = function
   | "license" -> Some License
   | "compatibility" -> Some Compatibility
   | "metadata" -> Some Metadata
+  | "allowed-tools" -> Some Allowed_tools
   | _ -> None
 ;;
 
@@ -442,6 +444,11 @@ let decode ~directory_name contents =
                  | Ok value -> value, []
                  | Error diagnostic -> None, [ diagnostic ]
                in
+               let allowed_tools_diagnostics =
+                 match optional_string fields Allowed_tools "allowed-tools" with
+                 | Ok _ -> []
+                 | Error diagnostic -> [ diagnostic ]
+               in
                let metadata, metadata_values, metadata_diagnostics = metadata fields in
                let extension_values = extensions fields in
                let extension_diagnostics =
@@ -468,6 +475,7 @@ let decode ~directory_name contents =
                  name_diagnostics
                  @ license_diagnostics
                  @ compatibility_diagnostics
+                 @ allowed_tools_diagnostics
                  @ metadata_diagnostics
                  @ extension_diagnostics
                  @ length_diagnostics
@@ -510,6 +518,7 @@ let standard_field_to_string = function
   | License -> "license"
   | Compatibility -> "compatibility"
   | Metadata -> "metadata"
+  | Allowed_tools -> "allowed-tools"
 ;;
 
 let field_to_string = function

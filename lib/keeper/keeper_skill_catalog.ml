@@ -170,8 +170,7 @@ let reject_invocation_policy ~skill
     List.find_opt
       (fun (field, _) ->
          String.equal field "disable-model-invocation"
-         || String.equal field "masc-composition-tool"
-         || String.equal field "allowed-tools")
+         || String.equal field "masc-composition-tool")
       extensions
   with
   | None -> Ok ()

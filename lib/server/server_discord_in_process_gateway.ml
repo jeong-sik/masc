@@ -136,9 +136,14 @@ let discord_conversation_id ~guild_id ~channel_id =
   in
   Printf.sprintf "discord:%s:channel:%s" guild_label channel_id
 
-let discord_attention_surface ~guild_id ~channel_id =
+let discord_attention_surface ~guild_id ~channel_id ~channel_name =
   Keeper_external_attention.Discord
-    { guild_id; channel_id; parent_channel_id = None; thread_id = None }
+    { guild_id
+    ; channel_id
+    ; channel_name
+    ; parent_channel_id = None
+    ; thread_id = None
+    }
 
 let discord_chat_metadata ~guild_id ~channel_id ~message_id =
   [
@@ -155,7 +160,7 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
        { Gate_keeper_backend.continuation_channel
        ; surface =
            Surface_ref.Discord
-             { guild_id; channel_id; parent_channel_id; thread_id }
+             { guild_id; channel_id; channel_name = None; parent_channel_id; thread_id }
        ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
        ; external_message_id = Some message_id
        ; workspace_id = guild_id
@@ -169,10 +174,48 @@ let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
        ~user_id:author_id
        ())
 
+(* What a channel is called. [get_channel] answers it once and the name is
+   written down; a bot without access to that channel never gets an answer,
+   and then the id keeps standing in for the room the way it always did.
+
+   One keeper here is bound to five channels, and before the id was drawn they
+   all read as the same [discord] badge. A name reads as a place. *)
+let resolve_channel_name ~base_dir ~channel_id =
+  match
+    Connector_names.recall ~base_dir ~connector:State.channel
+      ~scope:Connector_names.Channel ~id:channel_id
+  with
+  | Some _ as known -> known
+  | None -> (
+    match bot_token_opt () with
+    | None -> None
+    | Some token -> (
+      match Discord_rest_client.snowflake_of_string channel_id with
+      | Error _ -> None
+      | Ok snowflake -> (
+        match
+          Discord_rest_client.get_channel ~token ~channel_id:snowflake ()
+        with
+        (* No access, a rate limit, a deleted channel. None of those stops the
+           message: the id stands in and the next inbound retries. *)
+        | Error _ -> None
+        | Ok json -> (
+          match Json_util.get_string json "name" with
+          | Some name when String.trim name <> "" ->
+            let name = String.trim name in
+            Connector_names.remember ~base_dir ~connector:State.channel
+              ~scope:Connector_names.Channel ~id:channel_id ~name ();
+            Some name
+          (* A direct message has no name. Absent, not blank. *)
+          | Some _ | None -> None))))
+
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
-      ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
+      ~channel_name ~message_id ~author_id ~author_name ~content ~mentions_bot
+      ~route ~urgency
   =
-  let surface = discord_attention_surface ~guild_id ~channel_id in
+  let surface =
+    discord_attention_surface ~guild_id ~channel_id ~channel_name
+  in
   let conversation_id = discord_conversation_id ~guild_id ~channel_id in
   let dedupe_key =
     Printf.sprintf "discord:%s:%s" conversation_id message_id
@@ -307,7 +350,10 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
         | Some _ -> Keeper_external_attention.Ambient
     in
     let attention_event_id =
-      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+    (* Resolved once for this message, so the attention record and the
+       durable chat row name the same room. *)
+    let channel_name = resolve_channel_name ~base_dir ~channel_id in
+      record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
         ~message_id ~author_id ~author_name ~content ~mentions_bot
         ~route:"triggered" ~urgency
     in
@@ -499,8 +545,11 @@ let handle_ambient ?resolved_keeper_name ~base_dir
     else begin
       let parent_channel_id = State.parent_channel_of_thread ~channel_id in
       let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+      (* Resolved once for this message, so the attention record and the
+         durable chat row name the same room. *)
+      let channel_name = resolve_channel_name ~base_dir ~channel_id in
       let attention_event_id =
-        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
+        record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id ~channel_name
           ~message_id ~author_id ~author_name ~content:trimmed
           ~mentions_bot:false ~route:"ambient"
           ~urgency:Keeper_external_attention.Ambient
@@ -512,6 +561,7 @@ let handle_ambient ?resolved_keeper_name ~base_dir
              {
                guild_id;
                channel_id;
+               channel_name;
                parent_channel_id;
                thread_id;
              })

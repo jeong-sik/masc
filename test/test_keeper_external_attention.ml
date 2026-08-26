@@ -18,6 +18,7 @@ let discord_surface ?thread_id ?parent_channel_id channel_id =
     {
       guild_id = Some "guild-1";
       channel_id;
+      channel_name = None;
       parent_channel_id;
       thread_id;
     }

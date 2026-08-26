@@ -1185,6 +1185,7 @@ let replay_connector_post_with_outcome
               (Surface_ref.Discord
                  { guild_id = None
                  ; channel_id
+                 ; channel_name = None
                  ; parent_channel_id = None
                  ; thread_id = None
                  })

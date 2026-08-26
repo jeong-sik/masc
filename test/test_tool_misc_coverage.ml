@@ -794,6 +794,7 @@ let attention_item ~event_id ~received_at ~urgency ~conversation_id ~preview () 
     Surface_ref.Discord
       { guild_id = Some "guild-1"
       ; channel_id = "chan-1"
+      ; channel_name = None
       ; parent_channel_id = None
       ; thread_id = None
       }

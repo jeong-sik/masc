@@ -165,6 +165,7 @@ let test_connector_row_is_not_fleet () =
       (Masc.Surface_ref.Discord
          { guild_id = None
          ; channel_id = "c1"
+         ; channel_name = None
          ; parent_channel_id = None
          ; thread_id = None
          })

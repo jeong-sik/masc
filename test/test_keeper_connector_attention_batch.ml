@@ -111,6 +111,7 @@ let discord_surface ~channel_id =
   A.Discord
     { guild_id = Some "guild-batch"
     ; channel_id
+    ; channel_name = None
     ; parent_channel_id = None
     ; thread_id = None
     }

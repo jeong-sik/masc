@@ -20,6 +20,7 @@ let every_surface : Masc.Surface_ref.t list =
   ; Masc.Surface_ref.Discord
       { guild_id = Some "g"
       ; channel_id = "c"
+      ; channel_name = None
       ; parent_channel_id = None
       ; thread_id = None
       }

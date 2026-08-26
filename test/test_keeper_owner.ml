@@ -169,6 +169,7 @@ let test_operation_payload_preserves_connector_route () =
     Surface_ref.Discord
       { guild_id = Some "guild-1"
       ; channel_id = "thread-7"
+      ; channel_name = None
       ; parent_channel_id = Some "channel-3"
       ; thread_id = Some "thread-7"
       }
@@ -2359,6 +2360,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
              Surface_ref.Discord
                { guild_id = Some "guild-1"
                ; channel_id = "channel-1"
+               ; channel_name = None
                ; parent_channel_id = None
                ; thread_id = None
                }

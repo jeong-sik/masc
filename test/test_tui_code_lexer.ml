@@ -104,6 +104,37 @@ let test_a_yaml_key_survives_its_list_marker () =
     ]
     (spans "yaml" "- name: masc")
 
+(* A digit inside a scalar belongs to the scalar. [actions/checkout@v4] is a
+   name; colouring its [4] picks one character out of a word and says it means
+   something on its own. The same boundary holds the three literal words. *)
+let test_a_digit_inside_a_scalar_is_not_a_value () =
+  check seg "the version is part of the name"
+    [ ("uses", Masc_tui_code_lexer.kind_type)
+    ; (": actions/checkout@v4", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "yaml" "uses: actions/checkout@v4");
+  check seg "a value standing on its own is still a value"
+    [ ("port", Masc_tui_code_lexer.kind_type)
+    ; (": ", Masc_tui_code_lexer.kind_code)
+    ; ("8935", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "yaml" "port: 8935")
+
+let test_a_literal_inside_a_scalar_is_not_a_literal () =
+  check seg "a word that contains one is not one"
+    (* One run: the delimiter and the word are both plain, and adjacent
+       characters of one kind are one segment. *)
+    [ ("mode", Masc_tui_code_lexer.kind_type)
+    ; (" = true-ish", Masc_tui_code_lexer.kind_code)
+    ]
+    (spans "toml" "mode = true-ish");
+  check seg "and one standing on its own still is"
+    [ ("mode", Masc_tui_code_lexer.kind_type)
+    ; (" = ", Masc_tui_code_lexer.kind_code)
+    ; ("true", Masc_tui_code_lexer.kind_number)
+    ]
+    (spans "toml" "mode = true")
+
 let test_toml_reads_a_key_a_string_and_a_comment () =
   check seg "the key, the delimiter, the string, the comment"
     [ ("name", Masc_tui_code_lexer.kind_type)
@@ -212,6 +243,10 @@ let () =
             test_a_yaml_line_with_no_colon_holds_no_key
         ; Alcotest.test_case "a yaml key survives its list marker" `Quick
             test_a_yaml_key_survives_its_list_marker
+        ; Alcotest.test_case "a digit inside a scalar is not a value" `Quick
+            test_a_digit_inside_a_scalar_is_not_a_value
+        ; Alcotest.test_case "a literal inside a scalar is not a literal" `Quick
+            test_a_literal_inside_a_scalar_is_not_a_literal
         ; Alcotest.test_case "toml reads a key, a string and a comment" `Quick
             test_toml_reads_a_key_a_string_and_a_comment
         ; Alcotest.test_case "a toml table header is taken whole" `Quick

@@ -657,6 +657,24 @@ let paint ~kind text start stop (runs : runs) =
     runs_add runs kind text.[i]
   done
 
+(* Whether a scalar is still running at this character. A digit inside one is
+   part of it, not a value of its own: [actions/checkout@v4] is a name, and
+   colouring its [4] as a number picks one character out of a word and says it
+   means something. Asked of the character before a digit, so a number is a
+   number only where a scalar was not already under way.
+
+   These formats have no identifier rule to lean on -- an unquoted scalar is
+   whatever is not punctuation -- so the set is the characters those scalars
+   are actually written with. *)
+let scalar_continues = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+  | '_' | '.' | '-' | '/' | '@' | '+' | '%' | '~' -> true
+  | _ -> false
+
+let number_begins_at text index =
+  is_digit text.[index]
+  && (index = 0 || not (scalar_continues text.[index - 1]))
+
 (* The words both config formats spell as values rather than as text. Matched
    on word boundaries: [nullable] is not [null], and a key called [true] is
    still a key because the key branch runs first. *)
@@ -664,14 +682,16 @@ let config_literals = [ "true"; "false"; "null" ]
 
 let literal_at text index =
   let limit = String.length text in
-  if index > 0 && is_identifier_char text.[index - 1] then None
+  (* The same boundary a number is held to: [x-true] and [true-ish] are one
+     scalar each, and the word inside one is not the value [true]. *)
+  if index > 0 && scalar_continues text.[index - 1] then None
   else
     List.find_opt
       (fun word ->
         starts_at text index word
         &&
         let after = index + String.length word in
-        after >= limit || not (is_identifier_char text.[after]))
+        after >= limit || not (scalar_continues text.[after]))
       config_literals
 
 (* YAML as far as a tokenizer can honestly go: comments, keys, quoted text and
@@ -706,7 +726,8 @@ let yaml_lexer text =
             runs_add runs kind_code char;
             advance (index + 1)
       end
-      else if is_digit char then advance (take_number text index runs)
+      else if number_begins_at text index then
+        advance (take_number text index runs)
       else
         match literal_at text index with
         | Some word ->
@@ -751,7 +772,8 @@ let toml_lexer text =
             runs_add runs kind_code char;
             advance (index + 1)
       end
-      else if is_digit char then advance (take_number text index runs)
+      else if number_begins_at text index then
+        advance (take_number text index runs)
       else
         match literal_at text index with
         | Some word ->

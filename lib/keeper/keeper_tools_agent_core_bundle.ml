@@ -386,16 +386,9 @@ let make_tool_bundle_for_descriptors
              None)
     in
     let instruction_skills =
-      List.fold_left
-        (fun selected ((reference, _, _) as skill) ->
-           if
-             List.exists
-               (fun (known, _, _) -> Skill_reference.equal reference known)
-               selected
-           then selected
-           else selected @ [ skill ])
-        task_instruction_skills
-        global_instruction_skills
+      Keeper_tool_composition_surface.merge_instruction_skills
+        ~task:task_instruction_skills
+        ~global:global_instruction_skills
     in
     Keeper_tool_composition_surface.make_tools
         ~instruction_skills

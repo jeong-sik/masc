@@ -1149,6 +1149,27 @@ let make_request_control_tool
    for the tool are not, and the model-prose ratchet is what says so. *)
 let skill_reference_input_schema = skill_tool_schema.input_schema
 
+let merge_instruction_skills ~task ~global =
+  List.fold_left
+    (fun selected ((reference, _, _) as skill) ->
+       if
+         List.exists
+           (fun (known, _, _) -> Skill_reference.equal reference known)
+           selected
+       then selected
+       else selected @ [ skill ])
+    task
+    global
+;;
+
+let instruction_skill_schema_tool ~instruction_skills =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~name:skill_tool_schema.name
+    ~description:(instruction_skill_description instruction_skills)
+    ~input_schema:skill_reference_input_schema
+    (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute")
+;;
+
 let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in

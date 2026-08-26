@@ -394,6 +394,36 @@ let test_masc_add_task_schema () =
   match find_registered_tool "masc_add_task" with
   | None -> Alcotest.fail "masc_add_task not found"
   | Some schema ->
+      let managed_binding =
+        match
+          Masc.Agent_core_tool_contract.agent_core_binding_by_name
+            "masc_add_task"
+        with
+        | Some binding -> binding
+        | None -> Alcotest.fail "managed masc_add_task binding missing"
+      in
+      Alcotest.(check string)
+        "managed profile uses canonical description"
+        schema.description
+        managed_binding.description;
+      Alcotest.(check string)
+        "managed profile uses canonical input schema"
+        (Yojson.Safe.to_string schema.input_schema)
+        (Yojson.Safe.to_string managed_binding.input_schema);
+      let managed_schema =
+        match
+          List.find_opt
+            (fun (candidate : Masc_domain.tool_schema) ->
+               String.equal candidate.name "masc_add_task")
+            Masc.Agent_core_tool_contract.agent_core_tool_schemas
+        with
+        | Some managed_schema -> managed_schema
+        | None -> Alcotest.fail "managed profile schema missing masc_add_task"
+      in
+      Alcotest.(check string)
+        "managed discovery and full discovery are schema-identical"
+        (Yojson.Safe.to_string schema.input_schema)
+        (Yojson.Safe.to_string managed_schema.input_schema);
       (match get_json_assoc "properties" schema.input_schema with
        | Some props ->
            Alcotest.(check bool) "has title" true (List.mem_assoc "title" props);
@@ -422,38 +452,40 @@ let test_masc_add_task_schema () =
                  (get_json_bool "additionalProperties" contract_schema)
              | None -> Alcotest.fail "masc_add_task missing contract property")
           ; (match List.assoc_opt "skills" props with
+             | None -> Alcotest.fail "masc_add_task missing skills property"
              | Some skills_schema ->
-               (match get_json_assoc "items" skills_schema with
-                | None -> Alcotest.fail "masc_add_task skills missing item schema"
-                | Some item_fields ->
-                  let item_schema = `Assoc item_fields in
-                  Alcotest.(check (option bool))
-                    "Skill references reject additional properties"
-                    (Some false)
-                    (get_json_bool "additionalProperties" item_schema);
-                  (match get_json_assoc "properties" item_schema with
-                   | None -> Alcotest.fail "Skill reference missing properties"
-                   | Some reference_properties ->
-                     Alcotest.(check bool)
-                       "Skill reference has identity"
-                       true
-                       (List.mem_assoc "identity" reference_properties);
-                     Alcotest.(check bool)
-                       "Skill reference has content revision"
-                       true
-                       (List.mem_assoc
-                          "content_revision"
-                          reference_properties);
-                     (match List.assoc_opt "identity" reference_properties with
-                      | None -> Alcotest.fail "Skill reference identity missing"
-                      | Some identity_schema ->
-                        Alcotest.(check (option bool))
-                          "Skill identity rejects additional properties"
-                          (Some false)
-                          (get_json_bool
-                             "additionalProperties"
-                             identity_schema)))))
-             | None -> Alcotest.fail "masc_add_task missing skills property")
+               let item_fields =
+                 match get_json_assoc "items" skills_schema with
+                 | Some fields -> fields
+                 | None -> Alcotest.fail "masc_add_task skills missing item schema"
+               in
+               let item_schema = `Assoc item_fields in
+               Alcotest.(check (option bool))
+                 "Skill references reject additional properties"
+                 (Some false)
+                 (get_json_bool "additionalProperties" item_schema);
+               let reference_properties =
+                 match get_json_assoc "properties" item_schema with
+                 | Some properties -> properties
+                 | None -> Alcotest.fail "Skill reference missing properties"
+               in
+               Alcotest.(check bool)
+                 "Skill reference has identity"
+                 true
+                 (List.mem_assoc "identity" reference_properties);
+               Alcotest.(check bool)
+                 "Skill reference has content revision"
+                 true
+                 (List.mem_assoc "content_revision" reference_properties);
+               let identity_schema =
+                 match List.assoc_opt "identity" reference_properties with
+                 | Some schema -> schema
+                 | None -> Alcotest.fail "Skill reference identity missing"
+               in
+               Alcotest.(check (option bool))
+                 "Skill identity rejects additional properties"
+                 (Some false)
+                 (get_json_bool "additionalProperties" identity_schema))
        | None -> Alcotest.fail "masc_add_task missing properties");
       (match get_json_list "required" schema.input_schema with
        | Some reqs ->
@@ -461,7 +493,40 @@ let test_masc_add_task_schema () =
              (List.mem (`String "title") reqs);
            Alcotest.(check bool) "goal_id not required" false
              (List.mem (`String "goal_id") reqs)
-       | None -> Alcotest.fail "masc_add_task missing required field")
+       | None -> Alcotest.fail "masc_add_task missing required field");
+      let skills =
+        `List
+          [ `Assoc
+              [ ( "identity"
+                , `Assoc
+                    [ "source_id", `String "project-masc"
+                    ; "package_id", `String "ocaml-coding"
+                    ; "name", `String "ocaml-coding"
+                    ] )
+              ; "content_revision", `String (String.make 64 'a')
+              ]
+          ]
+      in
+      let arguments =
+        `Assoc
+          [ "title", `String "Exact Skill Task"
+          ; "description", `String "Managed profile"
+          ; "skills", skills
+          ]
+      in
+      (match
+         Masc.Agent_core_tool_contract.resolve_requested_tool_call
+           ~agent_name:"managed"
+           ~requested_name:"masc_add_task"
+           ~arguments
+       with
+       | Ok ("masc_add_task", projected) ->
+         Alcotest.(check string)
+           "managed projection preserves exact Skill references"
+           (Yojson.Safe.to_string arguments)
+           (Yojson.Safe.to_string projected)
+       | Ok (name, _) -> Alcotest.failf "unexpected operation %s" name
+       | Error detail -> Alcotest.fail detail)
 
 let test_masc_batch_add_tasks_schema () =
   match find_registered_tool "masc_batch_add_tasks" with

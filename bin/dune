@@ -737,6 +737,7 @@
   masc_tui_terminal_title
   masc_tui_runtime_config_receipt
   masc.runtime
+  masc.skill_reference
   ;; masc_tui_render names Fusion_types directly to label a run's topology.
   ;; Tui_decode carries the type through fur_topology, but dune does not open a
   ;; transitive library's module names, so masc_tui lists masc.fusion_core.

@@ -16,6 +16,24 @@ let assoc_field name value = (name, value)
 let string_prop = Tool_schema_dsl.string_prop
 let object_schema = Tool_schema_dsl.object_schema
 
+let identity_arg_bindings = function
+  | `Assoc schema_fields ->
+    (match List.assoc_opt "properties" schema_fields with
+     | Some (`Assoc properties) ->
+       List.map (fun (name, _schema) -> name, Input_field name) properties
+     | Some _ | None -> [])
+  | _ -> []
+
+let canonical_add_task =
+  match
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+         String.equal schema.name "masc_add_task")
+      Task.Schemas.schemas
+  with
+  | Some schema -> schema
+  | None -> invalid_arg "canonical masc_add_task schema is not registered"
+
 let task_item_schema =
   object_schema ~required:[ "title"; "description" ]
     [
@@ -28,18 +46,9 @@ let agent_core_bindings : agent_core_tool_binding list =
     {
       name = "masc_add_task";
       canonical_operation = "masc_add_task";
-      description = "Create a single new task in the MASC backlog. Use when you identify work that any agent can pick up. Returns a task-XXX ID for tracking.";
-      input_schema =
-        object_schema ~required:[ "title"; "description" ]
-          [
-            assoc_field "title" (string_prop "Task title");
-            assoc_field "description" (string_prop "Task description");
-          ];
-      arg_bindings =
-        [
-          ("title", Input_field "title");
-          ("description", Input_field "description");
-        ];
+      description = canonical_add_task.description;
+      input_schema = canonical_add_task.input_schema;
+      arg_bindings = identity_arg_bindings canonical_add_task.input_schema;
     };
     {
       name = "masc_batch_add_tasks";

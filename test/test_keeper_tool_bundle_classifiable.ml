@@ -342,6 +342,7 @@ let test_bundle_matches_expected_projection () =
              (identity_tools ~base_path:(Filename.get_temp_dir_name ())))
         ~skill_catalog:(skill_catalog ())
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
+        ()
     in
     check
       (list string)

@@ -264,6 +264,7 @@ let test_the_boot_projection_keeps_all_four () =
         ~identity_tool_names:[]
       ~skill_catalog:empty_catalog
       ~model_visible_descriptors:(TD.model_visible_descriptors ())
+      ()
   in
   List.iter
     (fun name ->

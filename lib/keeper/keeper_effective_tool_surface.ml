@@ -71,73 +71,24 @@ let descriptor_rows descriptors =
     descriptors
 ;;
 
-let exact_instruction_entries skill_catalog =
-  Keeper_skill_catalog.skills skill_catalog
-  |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
-       match skill.reference, skill.surface with
-       | Some reference, Keeper_skill_catalog.Instruction ->
-         Some (reference, skill.description, skill.body)
-       | None, _ | Some _, Keeper_skill_catalog.Composition _ -> None)
-;;
-
-let dedupe_instruction_entries selected global =
-  List.fold_left
-    (fun entries ((reference, _, _) as skill) ->
-       if
-         List.exists
-           (fun (known, _, _) -> Skill_reference.equal reference known)
-           entries
-       then entries
-       else entries @ [ skill ])
-    selected
-    global
-;;
-
-let instruction_rows instruction_skills =
-  match instruction_skills with
-  | [] -> []
-  | _ :: _ ->
-    Keeper_tool_composition_surface.schema_tools ~instruction_skills ()
-    |> List.filter_map (fun (schema_tool : Agent_core.Tool.t) ->
-         if
-           String.equal
-             schema_tool.schema.name
-             Keeper_tool_composition_catalog.skill_tool_name
-         then
-           Some
-             ( { name = schema_tool.schema.name; origin = Instruction_skill }
-             , schema_tool )
-         else None)
-;;
-
-let composition_rows ~instruction_skills skill_catalog =
+let composition_rows skill_catalog =
   let skill_compositions =
     Keeper_skill_catalog.compositions skill_catalog
     |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
       composition.entry, composition.provenance)
   in
-  let composition_rows =
-    Keeper_tool_composition_surface.schema_tool_rows ~skill_compositions ()
-    |> List.map (fun (origin, (schema_tool : Agent_core.Tool.t)) ->
-         let name = schema_tool.schema.name in
-         let origin =
-           match origin with
-           | Keeper_tool_composition_surface.Declared_composition provenance ->
-             Composition_skill { provenance }
-           | Keeper_tool_composition_surface.Plan_execute -> Composition_plan
-           | Keeper_tool_composition_surface.Async_status
-           | Keeper_tool_composition_surface.Async_cancel -> Composition_control
-         in
-         { name; origin }, schema_tool)
-  in
-  let instruction_rows = instruction_rows instruction_skills in
-  let rec insert_instruction_rows reversed = function
-    | (({ origin = Composition_control; _ }, _) :: _) as control_rows ->
-      List.rev_append reversed (instruction_rows @ control_rows)
-    | row :: rest -> insert_instruction_rows (row :: reversed) rest
-    | [] -> List.rev_append reversed instruction_rows
-  in
-  insert_instruction_rows [] composition_rows
+  Keeper_tool_composition_surface.schema_tool_rows ~skill_compositions ()
+  |> List.map (fun (origin, (schema_tool : Agent_core.Tool.t)) ->
+       let name = schema_tool.schema.name in
+       let origin =
+         match origin with
+         | Keeper_tool_composition_surface.Declared_composition provenance ->
+           Composition_skill { provenance }
+         | Keeper_tool_composition_surface.Plan_execute -> Composition_plan
+         | Keeper_tool_composition_surface.Async_status
+         | Keeper_tool_composition_surface.Async_cancel -> Composition_control
+       in
+       { name; origin }, schema_tool)
 ;;
 
 let project
@@ -161,29 +112,30 @@ let project
   match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
   | Error _ as error -> error
   | Ok task_selection ->
-    let task_instruction_entries =
+    let task_instruction_skills =
       List.map
         (fun (selected : Keeper_task_skill_turn.selected) ->
-           ( selected.reference
-           , selected.skill.description
-           , selected.skill.body ))
+           selected.reference, selected.skill.description, selected.skill.body)
         task_selection.selected
     in
-    let instruction_entries =
-      dedupe_instruction_entries
-        task_instruction_entries
-        (exact_instruction_entries skill_catalog)
-    in
-    let rows =
-      descriptor_rows descriptors
-      @ composition_rows ~instruction_skills:instruction_entries skill_catalog
-    in
-    let tools = List.map fst rows in
-    let schema_tools = List.map snd rows in
     let instruction_skills =
       List.map
         (fun (selected : Keeper_task_skill_turn.selected) -> selected.reference)
         task_selection.selected
+    in
+    let global_instruction_skills =
+      Keeper_skill_catalog.skills skill_catalog
+      |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
+           match skill.reference, skill.surface with
+           | Some reference, Keeper_skill_catalog.Instruction ->
+             Some (reference, skill.description, skill.body)
+           | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
+             None)
+    in
+    let readable_instruction_skills =
+      Keeper_tool_composition_surface.merge_instruction_skills
+        ~task:task_instruction_skills
+        ~global:global_instruction_skills
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog
@@ -193,6 +145,23 @@ let project
              Some reference
            | None, _ | Some _, Keeper_skill_catalog.Instruction -> None)
     in
+    let instruction_rows =
+      match readable_instruction_skills with
+      | [] -> []
+      | skills ->
+        let schema_tool =
+          Keeper_tool_composition_surface.instruction_skill_schema_tool
+            ~instruction_skills:skills
+        in
+        [ { name = schema_tool.schema.name; origin = Instruction_skill }, schema_tool ]
+    in
+    let rows =
+      descriptor_rows descriptors
+      @ instruction_rows
+      @ composition_rows skill_catalog
+    in
+    let tools = List.map fst rows in
+    let schema_tools = List.map snd rows in
     let tool_surface_sha256 =
       Option.map
         (fun native_posture ->

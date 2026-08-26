@@ -137,6 +137,20 @@ let test_exact_reference_consumer_rejects_name_fallback () =
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
   in
+  let schema_tool =
+    Masc.Keeper_tool_composition_surface.instruction_skill_schema_tool
+      ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
+  in
+  check string
+    "executable and effective-surface descriptions match"
+    tool.schema.description
+    schema_tool.schema.description;
+  check string
+    "executable and effective-surface schemas match"
+    (Option.map Yojson.Safe.to_string tool.schema.input_schema
+     |> Option.value ~default:"absent")
+    (Option.map Yojson.Safe.to_string schema_tool.schema.input_schema
+     |> Option.value ~default:"absent");
   let exact_output = run_skill_tool tool (Reference.to_yojson reference) in
   check bool "exact input reads body" true
     (String_util.contains_substring exact_output "EXACT_BODY");

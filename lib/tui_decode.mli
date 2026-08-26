@@ -205,13 +205,13 @@ type effective_tool_surface =
       ets_official_client_kind : string;
       ets_native_posture : string option;
       ets_tool_groups : string list;
-      ets_instruction_skills : string list;
+      ets_instruction_skills : Skill_reference.t list;
       (* Documents the catalog could not read. Beside the skills rather than
          missing from them: a skill left out is absent from what the Keeper
          can call, and absence with no reason reads as a skill nobody
          wrote. *)
       ets_skills_left_out : string list;
-      ets_composition_skills : string list;
+      ets_composition_skills : Skill_reference.t list;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }

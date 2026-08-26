@@ -331,6 +331,11 @@
  (modules masc_tui_mode))
 
 (library
+ (name masc_tui_file_icon)
+ (wrapped false)
+ (modules masc_tui_file_icon))
+
+(library
  (name masc_tui_theme_catalog)
  (wrapped false)
  (modules masc_tui_theme_catalog)
@@ -649,6 +654,7 @@
   masc_tui_frame
   masc_tui_attachment
   masc_tui_keys
+  masc_tui_file_icon
   masc_tui_theme
   masc_tui_theme_catalog
   masc_tui_theme_choice

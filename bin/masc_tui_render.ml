@@ -24,6 +24,7 @@ module Keeper_control = Masc_tui_keeper_control
 module Task_selection = Masc_tui_task_selection
 module Tool_tree = Masc_tui_tool_tree
 module Theme_choice = Masc_tui_theme_choice
+module File_icon = Masc_tui_file_icon
 module Approval_detail = Masc_tui_approval_detail
 module Planning_detail = Masc_tui_planning_detail
 module Status = Masc.Keeper_status_runtime
@@ -6860,14 +6861,37 @@ let render_code (state : state) =
     for i = 0 to list_rows_budget - 1 do
       match List.nth_opt entries (first + i) with
       | Some node ->
-          let marker =
-            if node.Masc.Tui_decode.wt_has_children then "\xe2\x96\xb8 "
-            else "  "
-          in
           let name =
             Terminal_text.single_line node.Masc.Tui_decode.wt_label
           in
           let selected = first + i = cursor in
+          (* A folder keeps the "▸" it has always drawn; a file takes a
+             type mark by extension. The colour is dropped on the selected
+             row, where the selection band already owns the whole line and a
+             mid-line reset would tear a hole in it. *)
+          let marker =
+            if node.Masc.Tui_decode.wt_has_children then
+              if selected then "\xe2\x96\xb8 "
+              else Ansi.blue ^ "\xe2\x96\xb8 " ^ Ansi.reset
+            else
+              let kind =
+                File_icon.kind_of_name node.Masc.Tui_decode.wt_label
+              in
+              let glyph = File_icon.glyph kind in
+              if selected then glyph ^ " "
+              else
+                let colour =
+                  match kind with
+                  | File_icon.Code -> Ansi.cyan
+                  | File_icon.Data -> Ansi.yellow
+                  | File_icon.Prose -> Ansi.green
+                  | File_icon.Script -> Ansi.magenta
+                  | File_icon.Web -> Ansi.blue
+                  | File_icon.Media -> Ansi.bright_magenta
+                  | File_icon.Plain -> Ansi.dim
+                in
+                colour ^ glyph ^ Ansi.reset ^ " "
+          in
           let line =
             if selected then
               Theme.selection ^ " " ^ marker ^ name

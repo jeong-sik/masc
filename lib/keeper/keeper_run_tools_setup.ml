@@ -190,7 +190,8 @@ let load_skill_catalog ~base_path =
     Error (skill_catalog_config_error "skills path kind is unavailable")
 ;;
 
-let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
+let expected_model_tool_names ~skill_catalog ~identity_tool_names
+      ~model_visible_descriptors =
   let descriptor_names =
     model_visible_descriptors
     |> List.concat_map Keeper_tool_descriptor.keeper_model_names
@@ -221,7 +222,15 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
   List.sort_uniq
     String.compare
     (Keeper_tool_composition_surface.plan_execute_tool_name
-     :: (descriptor_names @ composition_names @ instruction_skill_names @ control_names))
+     :: (descriptor_names
+         @ composition_names
+         @ instruction_skill_names
+         @ control_names
+         (* What the work services this Keeper is attached to offer. Named
+            here from the same list the bundle was handed, so the projection
+            check keeps meaning "the surface is what it was built from"
+            rather than being widened into always passing. *)
+         @ identity_tool_names))
 ;;
 
 (* One task's declared skills against the catalog and the tool surface:
@@ -377,6 +386,29 @@ let prepare_agent_setup
     ; assistant_turn_texts = []
     }
   in
+  (* What this Keeper is attached to. A disk read of what was written down
+     when it attached, not a call to the provider: a turn that had to reach
+     Atlassian before it could start would fail whenever Atlassian was slow,
+     for a question whose answer changes about never. *)
+  let identity_offering =
+    Keeper_identity_tools.for_turn
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:meta.name
+  in
+  List.iter
+    (fun (name, problem) ->
+      Log.Keeper.emit
+        Log.Warn
+        ~keeper_name:meta.name
+        ~category:Log.Tool
+        ~details:
+          (`Assoc
+             [ "error_kind", `String "keeper_identity_tool_unusable"
+             ; "tool", `String name
+             ; "problem", `String problem
+             ])
+        "An attached service names a tool this turn cannot offer")
+    identity_offering.Keeper_identity_tools.unusable;
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
@@ -393,6 +425,7 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ~skill_catalog
+      ~identity_tools:identity_offering.Keeper_identity_tools.offered
       ~turn_ctx_cell
       ()
   in
@@ -517,7 +550,12 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names ~skill_catalog ~model_visible_descriptors
+    expected_model_tool_names ~skill_catalog
+      ~identity_tool_names:
+        (List.map
+           (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+           identity_offering.Keeper_identity_tools.offered)
+      ~model_visible_descriptors
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

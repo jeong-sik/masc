@@ -58,7 +58,20 @@ let handle_callback request reqd =
             ~heading:
               (Printf.sprintf "%s is attached to %s" attached.Server_keeper_oauth.keeper
                  attached.Server_keeper_oauth.provider_label)
-            ~detail:"You can close this tab. The credentials are in that Keeper's own secret scope."
+            ~detail:
+              (match attached.Server_keeper_oauth.tool_discovery with
+               | Ok count ->
+                 Printf.sprintf
+                   "%d tools are now on that Keeper's surface. You can close this tab."
+                   count
+               (* Attached, but the tool list did not come back. Saying so
+                  beats a page that reads like success and a Keeper with no
+                  new tools. *)
+               | Error problem ->
+                 Printf.sprintf
+                   "The credentials are stored, but asking what tools exist did \
+                    not work: %s"
+                   problem)
         | Error message ->
           respond_page ~status:`Bad_request reqd ~title:"masc"
             ~heading:"That login could not be finished" ~detail:message)
@@ -80,8 +93,31 @@ let handle_providers request reqd =
     request reqd
 ;;
 
+(* What each declared provider currently offers one Keeper. Names only --
+   the same reason the secret projection reports names: a screen has no use
+   for a credential and every use for knowing whether one is there. *)
+let handle_attached_tools request reqd =
+  Server_auth.with_public_read
+    (fun state req reqd ->
+      let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+      match Server_utils.query_param req "keeper" with
+      | None ->
+        Http.Response.json_value ~compress:true ~request:req
+          (`Assoc [ "error", `String "keeper is required" ])
+          reqd
+      | Some keeper ->
+        Http.Response.json_value ~compress:true ~request:req
+          (`Assoc
+            [ "keeper", `String keeper
+            ; "providers", Server_keeper_oauth.attached_tools_json ~base_path ~keeper
+            ])
+          reqd)
+    request reqd
+;;
+
 let add_routes router =
   router
   |> Http.Router.get Server_keeper_oauth.callback_path handle_callback
   |> Http.Router.get "/api/v1/keepers/oauth/providers" handle_providers
+  |> Http.Router.get "/api/v1/keepers/oauth/attached-tools" handle_attached_tools
 ;;

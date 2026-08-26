@@ -488,6 +488,15 @@ let all =
       ~category:"media"
       "Maximum image bytes accepted by the vision tool"
   ; setting
+      ~range:(int_range ~min:4096 ~max:131072 ())
+      ~env_name:"MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS"
+      ~exposure:(Toml_and_env "vision.max_output_tokens")
+      ~value_kind:Integer
+      ~default:"65536"
+      ~consumers:[ "Keeper vision tool" ]
+      ~category:"media"
+      "Output-token budget for the vision tool, shared by reasoning and answer"
+  ; setting
       ~range:(float_range ~min:0.0 ~max:5.0 ())
       ~env_name:"MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC"
       ~exposure:Env_only

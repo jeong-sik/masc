@@ -544,6 +544,8 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
                  "MASC_KEEPER_MEMORY_OS_LIBRARIAN is malformed"))
        | "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" ->
          display_int (Env_config_keeper.KeeperVision.max_image_bytes ())
+       | "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" ->
+         display_int (Env_config_keeper.KeeperVision.max_output_tokens ())
        | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" ->
          display_float (Env_config_keeper.KeeperVision.candidate_backoff_base_sec ())
        | "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_MAX_SEC" ->

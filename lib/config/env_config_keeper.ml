@@ -356,6 +356,26 @@ module KeeperVision = struct
     |> clamp_int ~min_value:1 ~max_value:max_image_bytes_ceiling
   ;;
 
+  let max_output_tokens_default = 64 * 1024
+  let max_output_tokens_floor = 4096
+  let max_output_tokens_ceiling = 128 * 1024
+
+  (** Maximum output tokens for the one-shot vision sub-call. On the
+      OpenAI-compatible /v1 endpoint the vision fleet uses, this single budget is
+      shared by the model's reasoning phase and the visible answer, so a cap that
+      only fits the answer lets reasoning drain it and truncate the reply
+      mid-JSON (2026-08-27 MiniMax M3 finding). Default 65536 clears OpenAI's
+      >= 25000 reasoning-plus-output reserve with headroom and matches OSS
+      reasoning tooling; it is a ceiling billed only for tokens generated, not a
+      target, so raising it costs nothing on a normal reply. Range:
+      [4096, 131072], the ceiling being M3's declared output limit.
+
+      @category Policies @ops_class operator *)
+  let max_output_tokens () =
+    get_int_nonneg ~default:max_output_tokens_default "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS"
+    |> clamp_int ~min_value:max_output_tokens_floor ~max_value:max_output_tokens_ceiling
+  ;;
+
   (** Base delay before trying the next vision runtime after a failed provider
       attempt. A small default avoids tight failover loops while keeping the tool
       responsive. Range: [0, 5] seconds; 0 disables inter-candidate delay.

@@ -235,7 +235,7 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let fallback =
     Vt.provider_for_vision { base with max_tokens = None }
   in
-  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
+  assert (fallback.max_tokens = Some (Vt.vision_default_max_tokens ()));
   (match configured.response_format with
    | Agent_core.Types.Off -> ()
    | Agent_core.Types.JsonMode
@@ -277,6 +277,10 @@ let assert_float_eq label expected actual =
 let test_vision_env_knobs_are_bounded () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "999999999" (fun () ->
     assert (Vt.max_image_bytes () = 10 * 1024 * 1024));
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "999999999" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 128 * 1024));
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "1" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 4096));
   with_env "MASC_KEEPER_VISION_CANDIDATE_BACKOFF_BASE_SEC" "999" (fun () ->
     assert_float_eq
       "base backoff ceiling"
@@ -1115,12 +1119,15 @@ let truncated_json_response ~stop_reason : Agent_core.Types.api_response =
   ; telemetry = None
   }
 
-let test_vision_default_max_tokens_is_reasoning_sized () =
+let test_vision_output_tokens_default_and_env () =
   (* Reasoning models count thinking as output tokens; a 4096 cap let the
      reasoning phase truncate the answer (2026-08-27 MiniMax M3 live probe).
-     Pinned above the ~25000 reasoning-reserve floor so a shrink back is a
-     deliberate, reviewed change rather than silent drift. *)
-  assert (Vt.vision_default_max_tokens = 32768)
+     The default is now generous (65536, above the ~25000 reasoning-plus-output
+     reserve) so reasoning has room for the answer, and operators can retune it
+     through the env knob. *)
+  assert (Vt.vision_default_max_tokens () = 65536);
+  with_env "MASC_KEEPER_VISION_MAX_OUTPUT_TOKENS" "50000" (fun () ->
+    assert (Vt.vision_default_max_tokens () = 50000))
 
 let test_truncated_structured_response_reads_as_truncation () =
   (* mid-JSON parse failure + MaxTokens stop = the budget cut the reply short,
@@ -1148,7 +1155,7 @@ let test_truncated_structured_response_reads_as_truncation () =
   | _ -> failwith "valid structured JSON must classify as Vo_ok"
 
 let () =
-  test_vision_default_max_tokens_is_reasoning_sized ();
+  test_vision_output_tokens_default_and_env ();
   test_truncated_structured_response_reads_as_truncation ();
   test_truncated_of_stop_reason ();
   test_message_of_request ();

@@ -1,8 +1,7 @@
-(** Coverage tests for Tool_agent — Agent management and fitness
+(** Coverage tests for Tool_agent — Agent metrics, fitness, and card
 
     Tests dispatch routing, handler execution, helper functions for:
-    masc_agents, masc_agent_update, masc_get_metrics, masc_agent_fitness,
-    retired masc_collaboration_graph absence, masc_agent_card
+    masc_get_metrics, masc_agent_fitness, masc_agent_card
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
@@ -56,41 +55,12 @@ let test_dispatch_unknown () =
   Alcotest.(check bool) "unknown returns None" true (result = None);
   )
 
-let test_dispatch_agents_removed () =
-  with_ctx (fun ctx ->
-  (* masc_agents removed (2026-06-09): dead agent-status surface. *)
-  let result = Tool_agent.dispatch ctx ~name:"masc_agents" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agents removed" true (result = None);
-  )
-
-let test_dispatch_register_capabilities_removed () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.dispatch ctx ~name:"masc_register_capabilities" ~args:(`Assoc []) in
-  Alcotest.(check bool) "register_capabilities removed" true (result = None);
-  )
-
-let test_dispatch_collaboration_graph_removed () =
-  with_ctx (fun ctx ->
-  let result = Tool_agent.dispatch ctx ~name:"masc_collaboration_graph" ~args:(`Assoc []) in
-  Alcotest.(check bool) "collaboration graph removed" true (result = None);
-  )
-
-let test_dispatch_agent_update_removed () =
-  with_ctx (fun ctx ->
-  (* masc_agent_update removed (2026-06-09): dead agent-status surface. *)
-  let result = Tool_agent.dispatch ctx ~name:"masc_agent_update" ~args:(`Assoc []) in
-  Alcotest.(check bool) "agent_update removed" true (result = None);
-  )
-
 let test_dispatch_agent_card () =
   with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_agent_card" ~args:(`Assoc []) in
   Alcotest.(check bool) "agent_card dispatches" true (result <> None);
   )
 
-
-(* test_handle_agents removed (2026-06-09): handle_agents deleted with the
-   dead agent-status surface. *)
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
@@ -113,9 +83,6 @@ let test_handle_agent_card_rejects_unknown_action () =
   Alcotest.(check bool) "mentions invalid action" true
     (String.contains (Tool_result.message result) 'b');
   )
-
-(* agent_update handler tests removed (2026-06-09): handle_agent_update deleted
-   with the dead agent-status surface. *)
 
 (* ============================================================
    Handler tests — get_metrics
@@ -249,12 +216,6 @@ let () =
   Alcotest.run "Tool_agent" [
     ("dispatch", [
       Alcotest.test_case "unknown returns None" `Quick test_dispatch_unknown;
-      Alcotest.test_case "agents removed" `Quick test_dispatch_agents_removed;
-      Alcotest.test_case "register_capabilities removed" `Quick
-        test_dispatch_register_capabilities_removed;
-      Alcotest.test_case "collaboration_graph removed" `Quick
-        test_dispatch_collaboration_graph_removed;
-      Alcotest.test_case "agent_update removed" `Quick test_dispatch_agent_update_removed;
       Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);
     ("agents", [

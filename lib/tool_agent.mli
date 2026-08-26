@@ -1,5 +1,5 @@
 
-(** Tool_agent - Agent management, metrics, and capability discovery handlers *)
+(** Tool_agent - Agent metrics, fitness, and card handlers. *)
 
 type context = {
   config: Workspace.config;

@@ -21,7 +21,6 @@
   workspace_utils_ops
   workspace_utils_paths_backend
   workspace_state
-  workspace_agent
   workspace_gc
   workspace_init
   workspace_lifecycle

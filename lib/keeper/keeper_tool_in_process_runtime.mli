@@ -192,8 +192,8 @@ val handle_masc_run_with_outcome
   -> Keeper_tool_execution.t
 
 (** RFC-0182 §3.1 — [handle_masc_agent_with_outcome] is the descriptor-projection
-    cluster handler for [masc_agents] / [masc_agent_update] /
-    [masc_get_metrics] / [masc_agent_fitness] / [masc_agent_card].
+    cluster handler for [masc_get_metrics] / [masc_agent_fitness] /
+    [masc_agent_card].
     Constructs a [Tool_agent.context] from [config + meta.name] and calls
     [Tool_agent.dispatch]. *)
 val handle_masc_agent_with_outcome

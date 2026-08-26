@@ -342,8 +342,7 @@ let claim_next_r
              config new_backlog;
            (* Update agent status — takes [with_file_lock] on the
              agent file via [Workspace_task.update_local_agent_state] to
-             keep the record consistent with concurrent
-             [Workspace_agent.update_agent_r] or other task transitions
+             keep the record consistent with concurrent task transitions
              that hold the agent-file lock (PR #6634). *)
            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task.id });

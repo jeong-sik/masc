@@ -1,4 +1,4 @@
-(** Tool_agent - Agent management, metrics, and capability discovery handlers *)
+(** Tool_agent - Agent metrics, fitness, and card handlers. *)
 
 open Tool_args
 
@@ -17,12 +17,7 @@ type context = {
                   call sites (Not_found in get_metrics,
                   Validation_error in agent_card) are caller-input
                   rejections.
-   [result_to_response] : [Workspace.update_agent_r] Ok/Error
-                  projection.  Error is classified
-                  [Workflow_rejection] until [Masc_domain] grows
-                  a typed failure_class per error variant — at
-                  that point assignment can move to the domain
-                  layer. *)
+*)
 
 let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
@@ -165,11 +160,6 @@ let agent_card_action_of_string raw =
   | "get" -> Some Agent_card_get
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
-
-(* masc_agents / masc_agent_update handlers removed (2026-06-09): both read/
-   wrote the disk-backed .masc/agents/ registry whose producer
-   (Workspace_eio.register_agent) had zero call sites. Live agent status is
-   served by the `who` resource (Session.get_agent_statuses). *)
 
 (** Handle masc_get_metrics *)
 let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args

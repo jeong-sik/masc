@@ -2651,13 +2651,6 @@ let test_next_task_number_includes_durable_event_history () =
 ;;
 
 (* ============================================================ *)
-(* Update Agent Tests                                            *)
-(* ============================================================ *)
-
-(* test_update_agent_status / _capabilities / _not_found removed (2026-06-09):
-   Workspace.update_agent_r deleted with the dead agent-status surface. *)
-
-(* ============================================================ *)
 (* Archive Task Tests                                            *)
 (* ============================================================ *)
 

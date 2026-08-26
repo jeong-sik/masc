@@ -41,7 +41,6 @@ include Workspace_task_schedule
 
 (* Task/agent/message query and listing *)
 include Workspace_query
-include Workspace_agent
 
 (* Heartbeat & GC *)
 include Workspace_gc
@@ -218,6 +217,5 @@ let () =
                   ()))
          active_agents)
 ;;
-
 
 

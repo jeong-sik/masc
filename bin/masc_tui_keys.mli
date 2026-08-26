@@ -1,11 +1,9 @@
 (** The key bindings, declared once.
 
-    Dispatch stays the ordered match in masc_tui.ml — this table does not
-    route keys. It is the single source the *displays* read: footer hints and
-    the help overlay project from here, so they cannot drift from each other
-    the way twenty-four hand-written footer strings and a second hand-written
-    help table did (the old help documented g/G/f on System logs, where none
-    of them are bound).
+    Dispatch mostly stays the ordered match in masc_tui.ml. Cross-surface
+    shortcuts whose spelling is shared with the displays classify here too.
+    Footer hints and the help overlay project from the same binding records,
+    so behaviour and the two displays cannot silently choose different keys.
 
     Conventions the projections enforce: keys spell as typed (j/k, Enter,
     Esc, Tab, Ctrl-B); hints read [key:label] joined by two spaces; groups
@@ -26,7 +24,13 @@ type binding = {
 }
 
 val global : binding list
-(** Bindings that work on every surface: Tab, r, i, ?, :, Ctrl-B, Ctrl-T, q. *)
+(** Shared bindings shown once in Help. Text input and modal panels can own a
+    printable key before its cross-surface fallback runs; each such binding's
+    help text states that boundary. *)
+
+val opens_keepers : message_mode:bool -> string -> bool
+(** Whether [key] is the shared Keepers jump after earlier input owners have
+    declined it. Message mode never treats printable [2] as this jump. *)
 
 val for_surface : Masc_tui_types.surface -> binding list
 (** The surface's own bindings, in declaration order within each group.

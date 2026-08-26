@@ -848,12 +848,12 @@ so. The count above it is then stale, not a fresh reading.
 
 ## Keybindings
 
-Global, outside message input:
+Cross-surface shortcuts. An active field or panel handles its own keys first:
 
 | Key | Action |
 |-----|--------|
 | `Tab` | Next surface: Overview -> Acting -> Keepers -> Lanes -> Approvals -> Board -> Planning -> ... -> System Logs -> Overview |
-| `2` | Jump to Keepers from anywhere |
+| `2` | Jump to Keepers when the active field or panel does not use the number |
 | `r` | Force refresh |
 | `q` twice | Quit; any other input after the first `q` cancels |
 
@@ -924,8 +924,8 @@ Within a surface:
   Fusion    --Right/Enter-->  Run evidence detail
 ```
 
-`2` reaches Keepers from any surface. `Esc` returns one level within Keepers,
-Board, Planning, and Fusion.
+`2` reaches Keepers after the active field or panel has declined it.
+`Esc` returns one level within Keepers, Board, Planning, and Fusion.
 
 ## Requirements
 

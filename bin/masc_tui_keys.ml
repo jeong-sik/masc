@@ -1,7 +1,8 @@
-(* The key table — data first, two projections after. Dispatch does not read
-   this; the displays do. When a key is added to the match in masc_tui.ml,
-   its row here is the discoverability contract (#30356 taught the cost of
-   the two drifting apart). *)
+(* The key table — data first, then the display projections. Most dispatch
+   remains the ordered match in masc_tui.ml; cross-surface shortcuts whose
+   spelling is shared with the displays classify through this module too.
+   That keeps one binding record authoritative for both behaviour and
+   discoverability (#30356 taught the cost of the two drifting apart). *)
 
 open Masc_tui_types
 
@@ -16,8 +17,13 @@ type binding = {
 
 let b ?help group key label = { key; label; help; group }
 
+let keepers_jump =
+  b Meta "2" "keepers"
+    ~help:"jump to Keepers when the active field or panel does not use 2"
+
 let global =
   [ b Meta "Tab / Shift-Tab" "next / previous surface"
+  ; keepers_jump
   ; b Meta "r" "refresh the current surface"
   ; b Meta "i" "focus the composer (message the shown keeper)"
   ; b Meta ":" "command palette"
@@ -50,7 +56,6 @@ let for_surface = function
       ; b Act "t" "tasks" ~help:"hand j/k to the task list"
       ; b Act "Right / Enter" "open" ~help:"open the selected task"
       ; b Act "Left / Esc" "back" ~help:"close detail / back to events"
-      ; b Meta "2" "keepers"
       ]
       @ listing_meta
   | Acting ->
@@ -314,13 +319,16 @@ let footer_hints_overview ~task_focus =
   let dead =
     if task_focus then [ "t" ] else [ "Right / Enter"; "Left / Esc" ]
   in
-  for_surface Overview
+  keepers_jump :: for_surface Overview
   |> List.filter (fun b -> not (List.mem b.key dead))
   |> List.map (fun b ->
          if b.key = "j/k" then
            { b with label = (if task_focus then "tasks" else "events") }
          else b)
   |> hints_of_bindings
+
+let opens_keepers ~message_mode key =
+  (not message_mode) && String.equal key keepers_jump.key
 
 (* The Fusion detail view: the keys table owns the key list; the renderer
    owns the live scroll numbers it appends after them. ([view] stays

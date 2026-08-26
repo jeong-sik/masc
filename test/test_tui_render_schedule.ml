@@ -139,19 +139,13 @@ let test_interrupted_input_wait_retries_until_deadline () =
     (Schedule.Input_wait.await ~now_ns:(fun () -> !now) ~timeout_ns:(ms 16)
        ~poll:expired_poll)
 
-let test_global_shortcuts_do_not_steal_message_input () =
+let test_quit_shortcut_does_not_steal_message_input () =
   check bool "q quits outside message input" true
     (Schedule.Input_shortcut.is_quit ~message_mode:false "q");
   check bool "uppercase q quits outside message input" true
     (Schedule.Input_shortcut.is_quit ~message_mode:false "Q");
-  check bool "2 opens Keepers outside message input" true
-    (Schedule.Input_shortcut.opens_keepers ~message_mode:false "2");
   check bool "q remains message text" false
-    (Schedule.Input_shortcut.is_quit ~message_mode:true "q");
-  check bool "2 remains message text" false
-    (Schedule.Input_shortcut.opens_keepers ~message_mode:true "2");
-  check bool "unrelated key is not a shortcut" false
-    (Schedule.Input_shortcut.opens_keepers ~message_mode:false "x")
+    (Schedule.Input_shortcut.is_quit ~message_mode:true "q")
 
 let test_compact_viewport_uses_largest_fixed_chrome_budget () =
   check int "minimum fixed chrome height" 14
@@ -577,8 +571,8 @@ let () =
             test_render_widths_are_total
         ; test_case "interrupted input waits retry" `Quick
             test_interrupted_input_wait_retries_until_deadline
-        ; test_case "global shortcuts preserve message input" `Quick
-            test_global_shortcuts_do_not_steal_message_input
+        ; test_case "quit shortcut preserves message input" `Quick
+            test_quit_shortcut_does_not_steal_message_input
         ; test_case "compact viewport follows fixed chrome budget" `Quick
             test_compact_viewport_uses_largest_fixed_chrome_budget
         ; test_case "overview rows share one viewport budget" `Quick

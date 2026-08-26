@@ -1504,8 +1504,9 @@ let handle_voice_with_outcome
    [None] means the dispatcher does not recognise the name (the descriptor →
    dispatcher mapping is misconfigured if this fires for a tool reachable via
    [descriptors_for_internal]). *)
-let dispatch_option_to_execution ~name = function
-  | Some result -> Keeper_tool_execution.of_tool_result result
+let dispatch_option_to_execution ?failure_effect_disposition ~name = function
+  | Some result ->
+    Keeper_tool_execution.of_tool_result ?failure_effect_disposition result
   | None ->
     Keeper_tool_execution.failure
       (Yojson.Safe.to_string
@@ -1609,8 +1610,22 @@ let handle_keeper_code_query_with_outcome ~(config : Workspace.config) ~(meta : 
 let handle_keeper_spawn_with_outcome ~name ~args =
   match Spawn_turn_registry.get_opt (), Eio_context.get_switch_opt () with
   | Some registry, Some sw ->
+    let failure_effect_disposition =
+      match Tool_schemas_spawn.find_definition name with
+      | Some { action = Tool_schemas_spawn.Start; _ } ->
+        Tool_result.Effect_outcome_unknown
+      | Some
+          { action =
+              ( Tool_schemas_spawn.Read
+              | Tool_schemas_spawn.Wait
+              | Tool_schemas_spawn.Stop )
+          ; _
+          } ->
+        Tool_result.Proven_pre_effect
+      | None -> Tool_result.Effect_outcome_unknown
+    in
     Tool_spawn.dispatch { Tool_spawn.registry; sw } ~name ~args
-    |> dispatch_option_to_execution ~name
+    |> dispatch_option_to_execution ~failure_effect_disposition ~name
   | (Some _ | None), (Some _ | None) ->
     Keeper_tool_execution.failure
       (Yojson.Safe.to_string

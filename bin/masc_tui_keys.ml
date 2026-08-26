@@ -365,8 +365,31 @@ let entries bindings =
     (fun { key; label; help; _ } -> (key, Option.value help ~default:label))
     bindings
 
-let help_sections () =
-  ("Global", entries global)
-  :: List.map
-       (fun (title, surface) -> (title, entries (for_surface surface)))
-       help_surfaces
+(* The reader's own surface first, then the keys that work everywhere, then
+   the rest as reference. A sheet that opens on Planning while the reader is
+   on Overview is a list to search rather than an answer: the question [?]
+   asks is "what can I do here", and twenty other surfaces are what sits
+   underneath that answer.
+
+   [current] is matched exactly rather than by ring position. The Keepers
+   sub-modes are three sections here and one entry on the strip, and a reader
+   in the chat is asking for the chat's keys, not the roster's. A surface with
+   no section of its own simply matches nothing and the sheet reads as it did
+   before this argument existed. *)
+let here_marker = " \xc2\xb7 you are here"
+
+let help_sections ?current () =
+  let sections =
+    List.map
+      (fun (title, surface) -> (surface, (title, entries (for_surface surface))))
+      help_surfaces
+  in
+  let here, rest =
+    match current with
+    | None -> ([], sections)
+    | Some current ->
+        List.partition (fun (surface, _) -> surface = current) sections
+  in
+  List.map (fun (_, (title, keys)) -> (title ^ here_marker, keys)) here
+  @ ("Global", entries global)
+    :: List.map (fun (_, section) -> section) rest

@@ -3331,7 +3331,7 @@ let secret_lines (state : state) (k : keeper) =
    [Masc_tui_types.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
-let identity_lines (state : state) (k : keeper) providers =
+let identity_lines (state : state) (k : keeper) ~cols providers =
   let connectable = Masc_tui_types.identity_connectable providers in
   let tools_of id =
     List.find_map
@@ -3388,13 +3388,25 @@ let identity_lines (state : state) (k : keeper) providers =
   let started =
     match state.identity_login with
     | Some login when String.equal login.ils_keeper k.k_name ->
-        [ "";
-          Ansi.bold ^ "  Open this to consent as "
-          ^ Terminal_text.single_line login.ils_label ^ ":" ^ Ansi.reset;
-          "  " ^ Terminal_text.single_line login.ils_url;
-          Ansi.dim
-          ^ "  Nothing is written to this keeper until you come back."
-          ^ Ansi.reset ]
+        (* Wrapped, not truncated. The URL is about nine hundred characters
+           and a pane cuts it at its own width; a cut URL cannot be selected
+           or copied, so the login stopped there. The TUI opens it as well --
+           this is what is left when the machine has no opener. *)
+        let url = Terminal_text.single_line login.ils_url in
+        let width = max 20 (cols - 6) in
+        let rec fold at acc =
+          if at >= String.length url then List.rev acc
+          else
+            let take = min width (String.length url - at) in
+            fold (at + take) (("    " ^ String.sub url at take) :: acc)
+        in
+        ("" :: (Ansi.bold ^ "  A browser should have opened to consent as "
+                ^ Terminal_text.single_line login.ils_label ^ "." ^ Ansi.reset)
+         :: (Ansi.dim ^ "  If it did not, the URL is here:" ^ Ansi.reset)
+         :: fold 0 [])
+        @ [ Ansi.dim
+            ^ "  Nothing is written to this keeper until you come back."
+            ^ Ansi.reset ]
     | Some _ | None -> []
   in
   if numbered = [] && rejected = [] then
@@ -3572,7 +3584,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       | Detail_identity ->
           stamped_or
             (Option.map
-               (fun (stamp, providers) -> (stamp, identity_lines state k providers))
+               (fun (stamp, providers) ->
+                 (stamp, identity_lines state k ~cols providers))
                state.identity_view)
             state.identity_view_error
     in

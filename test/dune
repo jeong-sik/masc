@@ -2717,6 +2717,17 @@
  (libraries masc_test_deps masc.runtime))
 
 (test
+ (name test_keeper_sandbox_mount_warrant)
+ (modules test_keeper_sandbox_mount_warrant)
+ (libraries alcotest masc_test_deps))
+
+(test
+ (name test_keeper_sandbox_image_contract)
+ (modules test_keeper_sandbox_image_contract)
+ (deps %{workspace_root}/Dockerfile.keeper-sandbox)
+ (libraries alcotest))
+
+(test
  (name test_install_script)
  (modules test_install_script)
  (libraries alcotest fs_compat otoml unix)
@@ -3327,6 +3338,8 @@
 (include stanzas/test_keeper_ask_store.inc)
 
 (include stanzas/test_keeper_oauth_identity.inc)
+
+(include stanzas/test_tui_browser.inc)
 
 (include stanzas/test_mcp_client.inc)
 

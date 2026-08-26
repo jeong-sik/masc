@@ -505,8 +505,8 @@ let test_disable_model_invocation_controls_dedicated_tool () =
    | Some skill ->
      check
        string
-       "disabled composition remains task-readable"
-       "instruction"
+       "disabled composition keeps its declared kind"
+       "composition"
        (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
    | None -> fail "disabled composition disappeared from the task skill catalog");
   check
@@ -522,8 +522,8 @@ let test_disable_model_invocation_controls_dedicated_tool () =
   in
   check
     bool
-    "generic task-routed reader remains"
-    true
+    "generic model reader is absent"
+    false
     (List.mem Catalog.skill_tool_name disabled_surface);
   check
     bool

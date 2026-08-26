@@ -26,7 +26,6 @@ import subprocess
 import sys
 import threading
 import time
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -42,13 +41,6 @@ DEFAULT_CATALOG = (
     / "fixtures"
     / "keeper-multi-collaboration"
     / "missions.json"
-)
-COMPOSITION_FIXTURE = (
-    REPO_ROOT
-    / "scripts"
-    / "fixtures"
-    / "keeper-multi-collaboration"
-    / "tool-compositions.toml"
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 # Mission ids are identifiers, not positions: RW19 held the persistence tier
@@ -791,6 +783,13 @@ def default_health_url(mcp_url: str) -> str:
     )
 
 
+def default_skills_url(mcp_url: str) -> str:
+    parsed = urllib.parse.urlsplit(mcp_url)
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, "/api/v1/skills", "", "")
+    )
+
+
 def read_health(url: str, token: str, timeout: float) -> dict[str, Any]:
     headers = {"Accept": "application/json"}
     if token:
@@ -824,43 +823,69 @@ def health_binary_commit(health: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def composition_catalog_status(masc_root: str) -> dict[str, Any]:
-    """Compare the composition names this campaign's fixture requires against
-    the skills installed at the deployed runtime.
+def read_skills(url: str, token: str, timeout: float) -> dict[str, Any]:
+    headers = {"Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError) as error:
+        raise AcceptanceError(f"skills snapshot read failed: {error}") from error
+    if not isinstance(value, dict):
+        raise AcceptanceError("skills snapshot response is not a JSON object")
+    return value
 
-    keeper_compose_* tools are declared by SKILL.md composition fences:
-    Keeper_run_tools_setup scans <masc_root>/skills/ on every turn, and the
-    skill directory name equals the composition name by contract, so the
-    presence of skills/<name>/SKILL.md is the installation check. A missing
-    or incomplete install would otherwise make every composition mission
-    fail eight minutes in with a downstream browser timeout instead of
-    failing here (masc#28975, run e0-r3-20260818)."""
-    with open(COMPOSITION_FIXTURE, "rb") as handle:
-        fixture = tomllib.load(handle)
+
+def composition_skill_status(
+    *, skills: dict[str, Any], required_tools: Iterable[str], skills_url: str
+) -> dict[str, Any]:
+    """Check campaign compositions against the runtime's canonical Skill view.
+
+    The deleted tool-compositions fixture was a second catalog authority and
+    only happened to contain the same names as the mission requirements. The
+    mission catalog already declares its required keeper_compose_* tools, and
+    /api/v1/skills reports the exact snapshot a Keeper turn consumes.
+    """
     required = sorted(
-        entry["name"] for entry in fixture.get("compositions", [])
+        tool for tool in required_tools if tool.startswith("keeper_compose_")
     )
-    skills_dir = pathlib.Path(masc_root) / "skills"
-    report: dict[str, Any] = {
-        "required": required,
-        "skills_dir": str(skills_dir),
-        "fixture_path": str(COMPOSITION_FIXTURE),
-    }
-    if not skills_dir.is_dir():
-        report["status"] = "missing_dir"
-        report["installed"] = []
-        report["missing"] = required
-        return report
+    usage = skills.get("usage")
+    usage_rows = usage if isinstance(usage, list) else []
     installed = sorted(
-        entry.name
-        for entry in skills_dir.iterdir()
-        if entry.is_dir() and (entry / "SKILL.md").is_file()
+        {
+            row["tool_name"]
+            for row in usage_rows
+            if isinstance(row, dict)
+            and row.get("kind") == "composition"
+            and isinstance(row.get("tool_name"), str)
+        }
     )
+    unparsed = [
+        {"name": row.get("name"), "error": row.get("error")}
+        for row in usage_rows
+        if isinstance(row, dict) and row.get("kind") == "unparsed"
+    ]
     missing = sorted(set(required) - set(installed))
-    report["installed"] = installed
-    report["missing"] = missing
-    report["status"] = "ok" if not missing else "missing_names"
-    return report
+    snapshot_state = skills.get("state")
+    if snapshot_state != "ready":
+        status = "snapshot_not_ready"
+    elif unparsed:
+        status = "unparsed_skills"
+    elif missing:
+        status = "missing_tools"
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "skills_url": skills_url,
+        "snapshot_state": snapshot_state,
+        "required_tools": required,
+        "installed_tools": installed,
+        "missing_tools": missing,
+        "unparsed_skills": unparsed,
+    }
 
 
 def preflight(
@@ -898,7 +923,13 @@ def preflight(
     available = client.list_tools()
     required = set(catalog["operator_required_tools"])
     missing = sorted(required - available)
-    compositions = composition_catalog_status(health_masc_root(health))
+    skills_url = default_skills_url(mcp_url)
+    skills = read_skills(skills_url, token, timeout)
+    compositions = composition_skill_status(
+        skills=skills,
+        required_tools=catalog["keeper_required_tools"],
+        skills_url=skills_url,
+    )
     result = {
         "status": (
             "passed" if not missing and compositions["status"] == "ok" else "failed"
@@ -914,15 +945,17 @@ def preflight(
         "available_tool_count": len(available),
         "missing_operator_tools": missing,
         "keeper_required_tools": catalog["keeper_required_tools"],
-        "composition_catalog": compositions,
+        "composition_skills": compositions,
     }
     if missing:
         raise AcceptanceError(f"deployed runtime is missing operator tools: {missing}")
     if compositions["status"] != "ok":
         raise AcceptanceError(
-            "composition catalog is not installed for this campaign: "
-            f"status={compositions['status']} missing={compositions.get('missing')} — "
-            f"install {compositions['fixture_path']} at {compositions['installed_path']}"
+            "composition skills are not ready for this campaign: "
+            f"status={compositions['status']} "
+            f"missing={compositions.get('missing_tools')} "
+            f"unparsed={compositions.get('unparsed_skills')} — "
+            f"inspect {compositions['skills_url']}"
         )
     return client, health, result
 

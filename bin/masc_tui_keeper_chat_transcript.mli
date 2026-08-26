@@ -107,6 +107,7 @@ val make_tool_activity :
   args:string ->
   outcome:tool_outcome ->
   duration:string option ->
+  unit ->
   tool_activity
 (** Build an activity and derive its [subject] through the shared tool-subject
     authority. History and live projection must not derive it independently. *)

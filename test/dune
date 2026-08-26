@@ -2777,6 +2777,7 @@
  (libraries
   alcotest
   fmt
+  masc.string_util
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_transcript))
 

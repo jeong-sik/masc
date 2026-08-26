@@ -389,7 +389,7 @@ let test_tool_result_ready_requires_exact_canonical_identity () =
     invalid_values
 
 let tool_start ?(scope = 0) ?(block_index = 0) ?provider_message_id ~call_id
-    ~name =
+    ~name () =
   event "TOOL_CALL_START"
     ([ "runId", `String run_id
      ; "toolStreamScope", `Int scope
@@ -404,7 +404,7 @@ let tool_start ?(scope = 0) ?(block_index = 0) ?provider_message_id ~call_id
 ;;
 
 let tool_result_ready ?(scope = 0) ?(block_index = 0) ?provider_message_id
-    ~call_id ~execution_id =
+    ~call_id ~execution_id () =
   event "CUSTOM"
     [ "runId", `String run_id
     ; "name", `String "KEEPER_TOOL_RESULT_READY"
@@ -446,11 +446,11 @@ let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
   in
   (match
      decode_completed
-       [ tool_start ~block_index:0 ~call_id:"reused" ~name:"Read"
-       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first"
-       ; tool_start ~block_index:1 ~call_id:"reused" ~name:"Write"
-       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first"
-       ; tool_result_ready ~block_index:1 ~call_id:"reused" ~execution_id:"exec-second"
+       [ tool_start ~block_index:0 ~call_id:"reused" ~name:"Read" ()
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first" ()
+       ; tool_start ~block_index:1 ~call_id:"reused" ~name:"Write" ()
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first" ()
+       ; tool_result_ready ~block_index:1 ~call_id:"reused" ~execution_id:"exec-second" ()
        ]
    with
    | Ok (Chat.Turn_completed _) -> ()
@@ -458,9 +458,9 @@ let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
    | Error error -> fail (Chat.stream_error_to_string error));
   (match
      decode_completed
-       [ tool_start ~call_id:"call-once" ~name:"Read"
-       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
-       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
+       [ tool_start ~call_id:"call-once" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
        ]
    with
    | Ok (Chat.Turn_completed _) -> ()
@@ -468,9 +468,9 @@ let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
    | Error error -> fail (Chat.stream_error_to_string error));
   (match
      decode_completed
-       [ tool_start ~call_id:"call-once" ~name:"Read"
-       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
-       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-two"
+       [ tool_start ~call_id:"call-once" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one" ()
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-two" ()
        ]
    with
    | Error
@@ -484,12 +484,12 @@ let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
    | Ok _ -> fail "conflicting canonical identity was accepted");
   (match
      decode_completed
-       [ tool_start ~block_index:0 ~call_id:"first" ~name:"Read"
-       ; tool_start ~block_index:1 ~call_id:"second" ~name:"Write"
+       [ tool_start ~block_index:0 ~call_id:"first" ~name:"Read" ()
+       ; tool_start ~block_index:1 ~call_id:"second" ~name:"Write" ()
        ; tool_result_ready ~block_index:0 ~call_id:"first"
-           ~execution_id:"exec-reused"
+           ~execution_id:"exec-reused" ()
        ; tool_result_ready ~block_index:1 ~call_id:"second"
-           ~execution_id:"exec-reused"
+           ~execution_id:"exec-reused" ()
        ]
    with
    | Error
@@ -505,9 +505,9 @@ let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
    | Ok _ -> fail "one canonical execution was accepted for two occurrences");
   match
     decode_completed
-      [ tool_start ~block_index:0 ~call_id:"duplicate" ~name:"Read"
-      ; tool_start ~block_index:1 ~call_id:"duplicate" ~name:"Write"
-      ; tool_result_ready ~block_index:1 ~call_id:"duplicate" ~execution_id:"exec-second"
+      [ tool_start ~block_index:0 ~call_id:"duplicate" ~name:"Read" ()
+      ; tool_start ~block_index:1 ~call_id:"duplicate" ~name:"Write" ()
+      ; tool_result_ready ~block_index:1 ~call_id:"duplicate" ~execution_id:"exec-second" ()
       ]
   with
   | Ok (Chat.Turn_completed _) -> ()
@@ -525,23 +525,23 @@ let test_tool_metadata_and_quarantine_are_write_once () =
     | Ok _ -> fail (label ^ " was accepted")
   in
   expect_protocol_error "changed tool name for one occurrence"
-    [ tool_start ~call_id:"call-1" ~name:"Read"
-    ; tool_start ~call_id:"call-1" ~name:"Write"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_start ~call_id:"call-1" ~name:"Write" ()
     ];
   expect_protocol_error "changed provider call id on an idempotent result"
-    [ tool_start ~call_id:"call-1" ~name:"Read"
-    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
-    ; tool_result_ready ~call_id:"changed" ~execution_id:"exec-1"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
+    ; tool_result_ready ~call_id:"changed" ~execution_id:"exec-1" ()
     ];
   expect_protocol_error "changed provider message correlation"
     [ tool_start ~provider_message_id:"message-a" ~call_id:"call-1"
-        ~name:"Read"
+        ~name:"Read" ()
     ; tool_result_ready ~provider_message_id:"message-b" ~call_id:"call-1"
-        ~execution_id:"exec-1"
+        ~execution_id:"exec-1" ()
     ];
   expect_protocol_error "arguments changed after canonical result"
-    [ tool_start ~call_id:"call-1" ~name:"Read"
-    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
     ; event "TOOL_CALL_ARGS"
         [ "runId", `String run_id
         ; "toolStreamScope", `Int 0
@@ -551,12 +551,12 @@ let test_tool_metadata_and_quarantine_are_write_once () =
         ]
     ];
   expect_protocol_error "result after quarantine"
-    [ tool_start ~call_id:"call-1" ~name:"Read"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
     ; tool_quarantined ()
-    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
     ];
   expect_protocol_error "arguments after quarantine"
-    [ tool_start ~call_id:"call-1" ~name:"Read"
+    [ tool_start ~call_id:"call-1" ~name:"Read" ()
     ; tool_quarantined ()
     ; event "TOOL_CALL_ARGS"
         [ "runId", `String run_id
@@ -568,8 +568,8 @@ let test_tool_metadata_and_quarantine_are_write_once () =
     ];
   (match
      decode_completed
-       [ tool_start ~call_id:"call-1" ~name:"Read"
-       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+       [ tool_start ~call_id:"call-1" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
        ; tool_quarantined ()
        ]
    with
@@ -582,8 +582,8 @@ let test_tool_metadata_and_quarantine_are_write_once () =
   (match
      decode_completed
        [ tool_quarantined ()
-       ; tool_start ~call_id:"call-1" ~name:"Read"
-       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+       ; tool_start ~call_id:"call-1" ~name:"Read" ()
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1" ()
        ]
    with
    | Ok (Chat.Turn_completed _) -> ()

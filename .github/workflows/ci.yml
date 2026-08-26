@@ -815,7 +815,9 @@ jobs:
         # ubuntu-latest starts with roughly 14 GB free but preinstalls the
         # Android SDK (~9 GB), .NET (~1.6 GB), GHC/Haskell (~1 GB), CodeQL
         # (~5 GB), Swift, Boost, Miniconda and Vcpkg that this OCaml build never
-        # uses. Private-repository runners have a 72 GB root device rather than
+        # uses. The hosted tool cache and Linuxbrew are also unused: this job
+        # installs its pinned OCaml switch and system packages explicitly.
+        # Private-repository runners have a 72 GB root device rather than
         # the 145 GB device observed on public-repository runs; the original
         # cleanup left only 38 GB there, while a cold full build plus its opam
         # switch needs more than that (masc#22954 recurrence, 2026-08-26).
@@ -832,11 +834,14 @@ jobs:
           set -euo pipefail
           echo "Disk before cleanup:"
           df -h /
+          echo "Unused hosted caches before cleanup:"
+          sudo du -sh /opt/hostedtoolcache /home/linuxbrew 2>/dev/null || true
           cleanup_pids=()
           sudo rm -rf /usr/local/lib/android & cleanup_pids+=("$!")
           sudo rm -rf /usr/share/dotnet & cleanup_pids+=("$!")
           sudo rm -rf /opt/ghc /usr/local/.ghcup & cleanup_pids+=("$!")
-          sudo rm -rf /opt/hostedtoolcache/CodeQL & cleanup_pids+=("$!")
+          sudo rm -rf /opt/hostedtoolcache & cleanup_pids+=("$!")
+          sudo rm -rf /home/linuxbrew & cleanup_pids+=("$!")
           sudo rm -rf /usr/share/swift & cleanup_pids+=("$!")
           sudo rm -rf /usr/local/share/boost & cleanup_pids+=("$!")
           sudo rm -rf /usr/share/miniconda & cleanup_pids+=("$!")

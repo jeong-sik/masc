@@ -225,12 +225,19 @@ let test_the_skill_tool_serves_the_body () =
     | Some tool ->
       check bool "the description names the skill it can serve" true
         (contains ~needle:"gate-instruction" tool.schema.description);
-      let served = run_tool tool (`Assoc [ "name", `String "gate-instruction" ]) in
-      check bool "asking by name returns the body" true
+      let reference = instruction_reference () in
+      let served = run_tool tool (Skill_reference.to_yojson reference) in
+      check bool "asking by exact reference returns the body" true
         (contains ~needle:"body" served);
-      let missing = run_tool tool (`Assoc [ "name", `String "no-such-skill" ]) in
-      check bool "a name the catalog does not carry is refused" true
-        (contains ~needle:"no instruction skill named" missing);
+      let stale =
+        Skill_reference.make
+          ~identity:reference.identity
+          ~content_revision:
+            (Skill_reference.content_revision_of_source_text "stale body")
+      in
+      let missing = run_tool tool (Skill_reference.to_yojson stale) in
+      check bool "an exact reference the turn does not carry is refused" true
+        (contains ~needle:"no instruction Skill matches exact reference" missing);
       check bool "and the refusal lists what it does carry" true
         (contains ~needle:"gate-instruction" missing))
 ;;

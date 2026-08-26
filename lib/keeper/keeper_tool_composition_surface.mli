@@ -67,6 +67,16 @@ val make_tools
            ({!Keeper_skill_catalog.composition_entries}). Same validated type
            as catalog entries; materialized by the same closure. The caller
            that loaded both catalogs refuses cross-source name collisions. *)
+  -> ?record_instruction_activation:
+       (Skill_reference.t ->
+        ( Keeper_skill_activation_ledger.record_outcome
+        , Keeper_skill_activation_recorder.error )
+          result)
+  -> ?record_composition_activation:
+       (tool_name:string ->
+        ( Keeper_skill_activation_ledger.record_outcome
+        , Keeper_skill_activation_recorder.error )
+          result)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
@@ -91,7 +101,13 @@ val make_tools
 module For_testing : sig
   val make_instruction_skill_tool :
     config:Workspace.config ->
+    ?record_activation:
+      (Skill_reference.t ->
+       ( Keeper_skill_activation_ledger.record_outcome
+       , Keeper_skill_activation_recorder.error )
+         result) ->
     instruction_skills:(Skill_reference.t * string * string) list ->
+    unit ->
     Agent_core.Tool.t
 
   val status_result :

@@ -159,6 +159,7 @@ let test_disabled_explicit_reference_is_readable_without_global_discovery () =
     Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:[ reference, selected.skill.description, selected.skill.body ]
+      ()
   in
   let schema_tool =
     Masc.Keeper_tool_composition_surface.instruction_skill_schema_tool
@@ -177,6 +178,24 @@ let test_disabled_explicit_reference_is_readable_without_global_discovery () =
   let exact_output = run_skill_tool tool (Reference.to_yojson reference) in
   check bool "exact input reads body" true
     (String_util.contains_substring exact_output "QUIET_BODY");
+  let activation_attempts = ref 0 in
+  let failing_tool =
+    Masc.Keeper_tool_composition_surface.For_testing.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~record_activation:(fun observed ->
+        incr activation_attempts;
+        Error
+          (Masc.Keeper_skill_activation_recorder.Task_scope_missing observed))
+      ~instruction_skills:
+        [ reference, selected.skill.description, selected.skill.body ]
+      ()
+  in
+  let failed_output =
+    run_skill_tool failing_tool (Reference.to_yojson reference)
+  in
+  check int "activation attempted once" 1 !activation_attempts;
+  check bool "body withheld when activation recording fails" false
+    (String_util.contains_substring failed_output "QUIET_BODY");
   let legacy_output = run_skill_tool tool (`Assoc [ "name", `String "quiet" ]) in
   check bool "name fallback rejected" false
     (String_util.contains_substring legacy_output "QUIET_BODY")

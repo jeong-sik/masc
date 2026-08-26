@@ -194,6 +194,20 @@ let prepare_agent_setup
          , selected.skill.body ))
       task_skill_selection.selected
   in
+  let* skill_activation_context =
+    Keeper_skill_activation_recorder.make
+      ~trace_id:meta.runtime.trace_id
+      ~turn_ref:
+        (Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~absolute_turn:keeper_turn_id)
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+      ~task_id:meta.current_task_id
+      ~task_references:task_skill_references
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal
+           (Keeper_skill_activation_recorder.error_to_string error))
+  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
@@ -255,6 +269,7 @@ let prepare_agent_setup
       ?hitl_resolution
       ~skill_catalog
       ~task_instruction_skills
+      ~skill_activation_context
       ~turn_ctx_cell
       ()
   in

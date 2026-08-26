@@ -1,5 +1,6 @@
 module Catalog = Keeper_tool_composition_catalog
 module Executor = Keeper_tool_plan_executor
+module Activation_ledger = Keeper_skill_activation_ledger
 
 let plan_execute_tool_name = Catalog.plan_execute_tool_name
 
@@ -986,7 +987,31 @@ let instruction_skill_schema_tool ~instruction_skills =
     (fun _ _ -> invalid_arg "schema-only instruction Skill tool cannot execute")
 ;;
 
-let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills =
+let activation_failure ?reference ~tool_name ~start_time error =
+  let reference_field =
+    Option.to_list
+      (Option.map
+         (fun reference -> "reference", Skill_reference.to_yojson reference)
+         reference)
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    ~data:
+      (`Assoc
+         (( "skill_activation_error"
+          , Keeper_skill_activation_recorder.error_to_yojson error )
+          :: reference_field))
+    (Keeper_skill_activation_recorder.error_to_string error)
+;;
+
+let make_instruction_skill_tool
+      ~(config : Workspace.config)
+      ?record_activation
+      ~instruction_skills
+      ()
+  =
   let name = Catalog.skill_tool_name in
   let description = instruction_skill_description instruction_skills in
   Tool_bridge.agent_core_tool_of_masc_with_execution_env
@@ -1017,13 +1042,33 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
                 instruction_skills
             with
             | Some (reference, _, body) ->
-              Tool_result.make_ok ~tool_name:name ~start_time
-                ~data:
-                  (`Assoc
-                     [ "reference", Skill_reference.to_yojson reference
-                     ; "body", `String body
-                     ])
-                ()
+              (match record_activation with
+               | Some record ->
+                 (match record reference with
+                  | Error error ->
+                    activation_failure
+                      ~reference
+                      ~tool_name:name
+                      ~start_time
+                      error
+                  | Ok
+                      ( Activation_ledger.Recorded _
+                      | Activation_ledger.Already_recorded _ ) ->
+                    Tool_result.make_ok ~tool_name:name ~start_time
+                      ~data:
+                        (`Assoc
+                           [ "reference", Skill_reference.to_yojson reference
+                           ; "body", `String body
+                           ])
+                      ())
+               | None ->
+                 Tool_result.make_ok ~tool_name:name ~start_time
+                   ~data:
+                     (`Assoc
+                        [ "reference", Skill_reference.to_yojson reference
+                        ; "body", `String body
+                        ])
+                   ())
             | (* A reference the frozen catalog does not carry is the caller's
                  error and says so with the exact references it does carry,
                  rather than an empty
@@ -1054,6 +1099,8 @@ end
 let make_tools
       ?(instruction_skills = [])
       ?(skill_composition_entries = [])
+      ?record_instruction_activation
+      ?record_composition_activation
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -1170,18 +1217,39 @@ let make_tools
                            ])
                      message
                  | Ok plan ->
-                async_submission_result
-                  ~entry
-                  ~plan
-                  ~tool_name
-                  ~parent_invocation
-                  ~config
-                  ~meta
-                  ~publication_recovery
-                  ~ctx_snapshot
-                  ~turn_context
-                  ?clock
-                  ())
+                   (match record_composition_activation with
+                    | Some record ->
+                      (match record ~tool_name with
+                       | Error error ->
+                         activation_failure ~tool_name ~start_time error
+                       | Ok
+                           ( Activation_ledger.Recorded _
+                           | Activation_ledger.Already_recorded _ ) ->
+                         async_submission_result
+                           ~entry
+                           ~plan
+                           ~tool_name
+                           ~parent_invocation
+                           ~config
+                           ~meta
+                           ~publication_recovery
+                           ~ctx_snapshot
+                           ~turn_context
+                           ?clock
+                           ())
+                    | None ->
+                      async_submission_result
+                        ~entry
+                        ~plan
+                        ~tool_name
+                        ~parent_invocation
+                        ~config
+                        ~meta
+                        ~publication_recovery
+                        ~ctx_snapshot
+                        ~turn_context
+                        ?clock
+                        ()))
               | Catalog.Inline ->
                 (match
                    Catalog.instantiate
@@ -1213,6 +1281,20 @@ let make_tools
                            ])
                      message
                  | Ok plan ->
+             let activation =
+               match record_composition_activation with
+               | None -> Ok ()
+               | Some record ->
+                 (match record ~tool_name with
+                  | Error error -> Error error
+                  | Ok
+                      ( Activation_ledger.Recorded _
+                      | Activation_ledger.Already_recorded _ ) ->
+                    Ok ())
+             in
+             (match activation with
+              | Error error -> activation_failure ~tool_name ~start_time error
+              | Ok () ->
              let run_id = Keeper_tool_plan.Run_id.fresh () in
              let composition_run_id = Keeper_tool_plan.Composition_run_id.fresh () in
              let execution =
@@ -1314,7 +1396,7 @@ let make_tools
                   ~tool_name
                   ~class_:Tool_result.Runtime_failure
                   ~start_time
-                  "composition result manifest persistence failed"))))))
+                  "composition result manifest persistence failed")))))))
   in
   let plan_execute_tool =
     let tool_name = plan_execute_tool_name in
@@ -1496,7 +1578,12 @@ let make_tools
     | [] -> composition_tools
     | skills ->
       composition_tools
-      @ [ make_instruction_skill_tool ~config ~instruction_skills:skills ]
+      @ [ make_instruction_skill_tool
+            ~config
+            ?record_activation:record_instruction_activation
+            ~instruction_skills:skills
+            ()
+        ]
   in
   if not has_async
   then composition_tools

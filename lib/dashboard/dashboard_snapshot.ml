@@ -33,6 +33,41 @@ let slot : t option Atomic.t = Atomic.make None
 
 let current () = Atomic.get slot
 
+type projection_cache_entry =
+  { refreshed_at : float
+  ; value : Yojson.Safe.t
+  }
+
+type projection_cache = projection_cache_entry option Atomic.t
+
+let make_projection_cache () : projection_cache = Atomic.make None
+
+let should_reuse_projection ~now ~ttl ~refreshed_at =
+  let age = now -. refreshed_at in
+  age >= 0.0 && age < ttl
+;;
+
+let refresh_projection ~now ~ttl ~(cache : projection_cache) compute =
+  let started_at = now () in
+  match Atomic.get cache with
+  | Some entry
+    when should_reuse_projection
+           ~now:started_at
+           ~ttl
+           ~refreshed_at:entry.refreshed_at ->
+    entry.value
+  | previous ->
+    (match compute () with
+     | value ->
+       Atomic.set cache (Some { refreshed_at = now (); value });
+       value
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       (match previous with
+        | Some entry -> entry.value
+        | None -> raise exn))
+;;
+
 let dashboard_shell_payload_json_ref :
   (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
   ref (fun ?light:_ _config -> `Null)
@@ -65,15 +100,41 @@ let refresh_loop
   =
   let log_failure label exn =
     Log.Dashboard.warn
-      "dashboard_snapshot refresh: %s failed (snapshot held at previous publish): %s"
+      "dashboard_snapshot refresh: %s failed (last good retained): %s"
       label (Printexc.to_string exn)
   in
-  let safe label f =
-    try f () with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      log_failure label exn;
-      `Null
+  let shell_cache = make_projection_cache () in
+  let shell_light_cache = make_projection_cache () in
+  let tools_cache = make_projection_cache () in
+  let telemetry_cache = make_projection_cache () in
+  let namespace_truth_cache = make_projection_cache () in
+  let activity_events_cache = make_projection_cache () in
+  let activity_graph_cache = make_projection_cache () in
+  let activity_swimlane_cache = make_projection_cache () in
+  let cached_projection ~ttl ~cache label f =
+    refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
+      let started_at = Unix.gettimeofday () in
+      let allocated_before = Gc.allocated_bytes () in
+      match f () with
+      | value ->
+        let elapsed_s = Unix.gettimeofday () -. started_at in
+        let allocated_mb =
+          (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0
+        in
+        if elapsed_s >= 5.0 || allocated_mb >= 256.0
+        then
+          Log.Dashboard.warn
+            "dashboard_snapshot heavy refresh: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+            label elapsed_s allocated_mb ttl
+        else
+          Log.Dashboard.debug
+            "dashboard_snapshot refreshed: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
+            label elapsed_s allocated_mb ttl;
+        value
+      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+      | exception exn ->
+        log_failure label exn;
+        raise exn)
   in
   let compute () =
     let shell =
@@ -84,21 +145,21 @@ let refresh_loop
          executor_pool.ml run_worker), so Fiber.all resolves against the
          worker's context, not the main domain's.  Do not "fix" this to
          [~light:true]; that would change [shell] to the light shape. *)
-      safe "shell" (fun () ->
+      cached_projection ~ttl:30.0 ~cache:shell_cache "shell" (fun () ->
         (!dashboard_shell_payload_json_ref) config)
     in
     let shell_light =
       (* RFC-0204 section 8.3 ("A"): publish the light projection too so
          [shell?light=true] reads it wait-free. *)
-      safe "shell_light" (fun () ->
-        (!dashboard_shell_payload_json_ref) ~light:true config)
+      cached_projection ~ttl:0.0 ~cache:shell_light_cache "shell_light"
+        (fun () -> (!dashboard_shell_payload_json_ref) ~light:true config)
     in
     let tools =
-      safe "tools" (fun () ->
+      cached_projection ~ttl:60.0 ~cache:tools_cache "tools" (fun () ->
         (!dashboard_tools_http_json_ref) config)
     in
     let telemetry_summary =
-      safe "telemetry_summary" (fun () ->
+      cached_projection ~ttl:30.0 ~cache:telemetry_cache "telemetry_summary" (fun () ->
         let base_path = config.base_path in
         let masc_root = Workspace.masc_root_dir config in
         let keeper_keepalive_interval_s =
@@ -116,15 +177,14 @@ let refresh_loop
           ())
     in
     let namespace_truth =
-      match state with
-      | None -> `Null
-      | Some state ->
-        safe "namespace_truth" (fun () ->
-          match
-            (!namespace_truth_snapshot_callback) state
-          with
-          | Some json -> json
-          | None -> `Null)
+      cached_projection ~ttl:0.0 ~cache:namespace_truth_cache
+        "namespace_truth" (fun () ->
+          match state with
+          | None -> `Null
+          | Some state ->
+            (match (!namespace_truth_snapshot_callback) state with
+             | Some json -> json
+             | None -> `Null))
     in
     let activity_events_default =
       (* RFC-0201 Step 1.  Snapshot the dashboard panel's default
@@ -132,7 +192,8 @@ let refresh_loop
          down to their requested limit per call.  The cost is paid
          once per [interval_sec] in this background fiber, not on the
          request path. *)
-      safe "activity_events_default" (fun () ->
+      cached_projection ~ttl:10.0 ~cache:activity_events_cache
+        "activity_events_default" (fun () ->
         Activity_graph.json_response config ~kinds:[] ~after_seq:0
           ~limit:1000 ())
     in
@@ -144,7 +205,8 @@ let refresh_loop
          [timeline_limit=80], [since_ms=None].  Snapshot that
          exact shape; handlers return it as-is for matching queries
          (the result is aggregated and not sliceable). *)
-      safe "activity_graph_default" (fun () ->
+      cached_projection ~ttl:10.0 ~cache:activity_graph_cache
+        "activity_graph_default" (fun () ->
         Activity_graph.graph_json config ~kinds:[] ~limit:500
           ~timeline_limit:80 ())
     in
@@ -152,7 +214,8 @@ let refresh_loop
       (* RFC-0201 Step 3.  Same shape as activity_graph_default —
          dashboard's [fetchSwimlane()] sends no params (actions.ts:77),
          so snapshot [limit=500], [since_ms=None]. *)
-      safe "activity_swimlane_default" (fun () ->
+      cached_projection ~ttl:10.0 ~cache:activity_swimlane_cache
+        "activity_swimlane_default" (fun () ->
         Activity_graph.agent_spans_json config ~limit:500 ())
     in
     {
@@ -216,3 +279,11 @@ let make_for_test ~shell ?(shell_light = `Null) ~tools ~namespace_truth
 ;;
 
 let reset_for_test () = Atomic.set slot None
+
+module For_testing = struct
+  type cache = projection_cache
+
+  let make_cache = make_projection_cache
+  let refresh_projection = refresh_projection
+  let should_reuse_projection = should_reuse_projection
+end

@@ -171,13 +171,20 @@ val cache_stats : unit -> cache_stats
 
 module For_testing : sig
   val reset_current_day_cache_for_testing : unit -> unit
-  (** Clears the boundary-keyed current-day parse cache and its
-      delta-line counter so a test observes cold-start behavior. *)
+  (** Clears the workspace-owned parse and aggregate caches. *)
 
   val reset_past_day_cache_for_testing : unit -> unit
-  (** Clears the [(path, mtime) -> event list] past-day cache. *)
+  (** Clears the per-path, full-fingerprint event-list past-day cache. *)
 
-  val current_day_parsed_line_count : unit -> int
+  val current_day_rebuild_count : unit -> int
+
+  val all_events_rebuild_count : unit -> int
+  (** Number of full retained-list aggregate rebuilds since the current-day
+      cache was reset.  Repeated unchanged projections must reuse one build. *)
+
+  val touch_workspace_cache : string -> unit
+  val workspace_cache_count : unit -> int
+  val workspace_cache_mem : string -> bool
 
   val past_day_cache_entry_count : unit -> int
 

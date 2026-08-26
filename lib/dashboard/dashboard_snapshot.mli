@@ -67,7 +67,9 @@ val refresh_loop :
   unit ->
   unit
 (** Run forever in the given switch.  Every [interval_sec] seconds,
-    recompute a fresh {!t} and publish via [Atomic.set].  If a refresh
+    publish a fresh {!t} via [Atomic.set]. Lightweight fields refresh each
+    cycle; allocation-heavy immutable projections retain their last good value
+    behind bounded 10s/30s/60s component TTLs. If a refresh
     raises, the {b previous} snapshot stays live (no torn state) and
     the error is logged.  Cancellation via the switch propagates
     cleanly through {!Eio.Time.sleep}.
@@ -110,3 +112,18 @@ val register_dashboard_tools_http_json : (Workspace.config -> Yojson.Safe.t) -> 
 val register_namespace_truth_snapshot :
   (Mcp_server.server_state -> Yojson.Safe.t option) -> unit
 
+module For_testing : sig
+  type cache
+
+  val make_cache : unit -> cache
+
+  val refresh_projection :
+    now:(unit -> float) ->
+    ttl:float ->
+    cache:cache ->
+    (unit -> Yojson.Safe.t) ->
+    Yojson.Safe.t
+
+  val should_reuse_projection :
+    now:float -> ttl:float -> refreshed_at:float -> bool
+end

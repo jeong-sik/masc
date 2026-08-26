@@ -225,36 +225,53 @@ let parse_events_from_file config path =
 
    Past-day files are immutable: once the calendar day rolls over,
    no process appends to that JSONL again.  Cache the parsed event
-   list per (path, mtime).  On re-read, if mtime matches the cached
+   list per full file fingerprint. On re-read, if device/inode/size/mtime/ctime
+   match the cached
    entry, reuse the parsed list and skip [Fs_compat.load_file] +
-   line split + parse.  Only the current-day file (whose mtime
+   line split + parse.  Only the current-day file (whose fingerprint
    changes on append) is reparsed each refresh. *)
 module Past_day_path_map = Stdlib.Map.Make (String)
 
-(* [Atomic.t] holding an immutable persistent map keeps reads
-   wait-free across HTTP fibers and the refresh fiber.  CAS update
-   loses only the *parse result* on contention; the underlying
-   file remains the SSOT, so a lost insert just causes a re-parse
-   on the next call. *)
-let past_day_cache : (float * event list) Past_day_path_map.t Atomic.t =
-  Atomic.make Past_day_path_map.empty
+type file_fingerprint =
+  { device : int
+  ; inode : int
+  ; size : int
+  ; mtime : float
+  ; ctime : float
+  }
 
-let past_day_cache_lookup path mtime =
-  match Past_day_path_map.find_opt path (Atomic.get past_day_cache) with
-  | Some (cached_mtime, parsed) when Float.equal cached_mtime mtime ->
-    Some parsed
-  | _ -> None
+let file_fingerprint path =
+  match Unix.stat path with
+  | st ->
+    Some
+      { device = st.Unix.st_dev
+      ; inode = st.Unix.st_ino
+      ; size = st.Unix.st_size
+      ; mtime = st.Unix.st_mtime
+      ; ctime = st.Unix.st_ctime
+      }
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+;;
 
-let rec past_day_cache_insert path mtime parsed =
-  let prev = Atomic.get past_day_cache in
-  let next = Past_day_path_map.add path (mtime, parsed) prev in
-  if not (Atomic.compare_and_set past_day_cache prev next) then
-    past_day_cache_insert path mtime parsed
+let same_file_identity left right =
+  left.device = right.device && left.inode = right.inode
+;;
 
-let file_mtime path =
-  try Some (Unix.stat path).Unix.st_mtime with _ -> None  (* cancel-guard-ok: guards Unix.stat: no Eio cancellation point *)
+let same_file_fingerprint left right =
+  same_file_identity left right
+  && left.size = right.size
+  && Float.equal left.mtime right.mtime
+  && Float.equal left.ctime right.ctime
+;;
 
-let reset_past_day_cache_for_testing () = Atomic.set past_day_cache Past_day_path_map.empty
+let same_file_signature left right =
+  List.equal
+    (fun (left_path, left_fingerprint) (right_path, right_fingerprint) ->
+       String.equal left_path right_path
+       && Option.equal same_file_fingerprint left_fingerprint right_fingerprint)
+    left
+    right
+;;
 
 (* What the caches are holding, so an operator reads it instead of estimating
    it. Sizing this from outside meant taking process RSS, reading [live_words]
@@ -270,13 +287,6 @@ type cache_stats = {
   past_day_files : int;  (** parsed day files held *)
   past_day_records : int;  (** events across them *)
 }
-
-let cache_stats () =
-  let cache = Atomic.get past_day_cache in
-  { past_day_files = Past_day_path_map.cardinal cache
-  ; past_day_records =
-      Past_day_path_map.fold (fun _ (_, events) acc -> acc + List.length events) cache 0
-  }
 
 (* P0-4 (masc perf root-cause report, 2026-07-15, item (1)): the 2s
    [Dashboard_snapshot.refresh_loop] calls [read_all_events] up to 3x per
@@ -296,96 +306,168 @@ let cache_stats () =
    non-default HTTP query) without threading a shared value through
    [Dashboard_snapshot.compute]. *)
 type current_day_entry = {
-  cd_boundary : int;
+  cd_fingerprint : file_fingerprint;
   cd_events : event list;  (* unsorted — callers always re-sort by [seq] *)
 }
 
-let current_day_cache : (string, current_day_entry) Hashtbl.t = Hashtbl.create 4
-let current_day_cache_mu = Stdlib.Mutex.create ()
+type all_events_cache_entry =
+  { signature : (string * file_fingerprint option) list
+  ; events : event list
+  }
 
-(* For_testing observability only: counts non-blank lines folded through
-   the incremental *delta* path (NOT the initial cold-miss full parse, nor
-   the invalid-UTF-8 / shrink fallback rescans below), so a test can prove
-   that growth behind a warm cache re-parses only the appended lines. *)
-let current_day_parse_counter = Atomic.make 0
+type all_events_workspace_cache =
+  { root : string
+  ; mutex : Stdlib.Mutex.t
+  ; mutable entry : all_events_cache_entry option
+  ; mutable past_day_cache :
+      (file_fingerprint * event list) Past_day_path_map.t
+  ; current_day_cache : (string, current_day_entry) Hashtbl.t
+  ; mutable last_used : int
+  ; mutable active_users : int
+  }
+
+(* The three default dashboard activity projections are built back-to-back.
+   Per-file caches avoid JSON parsing, but [read_all_events] still rebuilt and
+   sorted the complete retained event list independently for each projection.
+   Cache that immutable aggregate per workspace by a full file fingerprint so
+   unchanged readers share one sorted list without serializing other roots. *)
+let all_events_workspace_caches :
+    (string, all_events_workspace_cache) Hashtbl.t =
+  Hashtbl.create 4
+
+let all_events_workspace_caches_mu = Stdlib.Mutex.create ()
+let all_events_workspace_cache_limit = 16
+let all_events_workspace_use_counter = ref 0
+let all_events_rebuild_counter = Atomic.make 0
+
+let evict_lru_idle_workspace_cache () =
+  let candidate =
+    Hashtbl.fold
+      (fun candidate_root candidate current ->
+         if candidate.active_users <> 0
+         then current
+         else
+           match current with
+           | None -> Some (candidate_root, candidate.last_used)
+           | Some (_, oldest) when candidate.last_used < oldest ->
+             Some (candidate_root, candidate.last_used)
+           | Some _ -> current)
+      all_events_workspace_caches
+      None
+  in
+  match candidate with
+  | None -> false
+  | Some (root, _) ->
+    Hashtbl.remove all_events_workspace_caches root;
+    true
+;;
+
+let acquire_all_events_workspace_cache root =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    incr all_events_workspace_use_counter;
+    let last_used = !all_events_workspace_use_counter in
+    match Hashtbl.find_opt all_events_workspace_caches root with
+    | Some cache ->
+      cache.last_used <- last_used;
+      cache.active_users <- cache.active_users + 1;
+      cache
+    | None ->
+      if Hashtbl.length all_events_workspace_caches >= all_events_workspace_cache_limit
+      then ignore (evict_lru_idle_workspace_cache ());
+      let cache =
+        { root
+        ; mutex = Stdlib.Mutex.create ()
+        ; entry = None
+        ; past_day_cache = Past_day_path_map.empty
+        ; current_day_cache = Hashtbl.create 1
+        ; last_used
+        ; active_users = 1
+        }
+      in
+      Hashtbl.add all_events_workspace_caches root cache;
+      cache)
+;;
+
+let release_all_events_workspace_cache cache =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    match Hashtbl.find_opt all_events_workspace_caches cache.root with
+    | Some current when current == cache ->
+      cache.active_users <- max 0 (cache.active_users - 1);
+      if Hashtbl.length all_events_workspace_caches > all_events_workspace_cache_limit
+      then ignore (evict_lru_idle_workspace_cache ())
+    | None | Some _ -> ())
+;;
+
+let reset_all_events_cache_for_testing () =
+  Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+    Hashtbl.reset all_events_workspace_caches;
+    all_events_workspace_use_counter := 0);
+  Atomic.set all_events_rebuild_counter 0
+;;
+
+let current_day_rebuild_counter = Atomic.make 0
+
+let reset_past_day_cache_for_testing () =
+  let caches =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.fold (fun _ cache acc -> cache :: acc) all_events_workspace_caches [])
+  in
+  List.iter
+    (fun cache ->
+       Stdlib.Mutex.protect cache.mutex (fun () ->
+         cache.past_day_cache <- Past_day_path_map.empty;
+         cache.entry <- None))
+    caches
+;;
+
+let cache_stats () =
+  let caches =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.fold (fun _ cache acc -> cache :: acc) all_events_workspace_caches [])
+  in
+  List.fold_left
+    (fun stats cache ->
+       let files, records =
+         Stdlib.Mutex.protect cache.mutex (fun () ->
+           ( Past_day_path_map.cardinal cache.past_day_cache
+           , Past_day_path_map.fold
+               (fun _ (_, events) acc -> acc + List.length events)
+               cache.past_day_cache
+               0 ))
+       in
+       { past_day_files = stats.past_day_files + files
+       ; past_day_records = stats.past_day_records + records
+       })
+    { past_day_files = 0; past_day_records = 0 }
+    caches
+;;
 
 let reset_current_day_cache_for_testing () =
-  Stdlib.Mutex.protect current_day_cache_mu (fun () -> Hashtbl.reset current_day_cache);
-  Atomic.set current_day_parse_counter 0
+  reset_all_events_cache_for_testing ();
+  Atomic.set current_day_rebuild_counter 0
 
-(* Incrementally parses the current-day file. New writes are sanitized
-   before append ([emit] -> [sanitize_event_traced]), so the appended
-   delta is expected to be valid UTF-8; if a delta line is nonetheless
-   invalid (at-rest corruption from before that sanitize call existed, or
-   an external writer), fall back to the full repair-aware
-   [parse_events_from_file] — the same path this file already takes today
-   — and reset the cache boundary so the next call stays correct. A
-   cached boundary past the current file size (rotation/truncation) gets
-   the same full-rescan treatment as the two precedents above. *)
-let parse_current_day_events_cached config path : event list =
-  match Unix.stat path with
-  | exception (Unix.Unix_error _ | Sys_error _) ->
-    (* Should not happen: [path] came from [collect_event_files], which
-       only lists files that exist. Defensive fallback for a delete race. *)
-    parse_events_from_file config path
-  | st ->
-    let size = st.Unix.st_size in
-    let cached =
-      Stdlib.Mutex.protect current_day_cache_mu (fun () ->
-        Hashtbl.find_opt current_day_cache path)
-    in
-    (match cached with
-     | Some e when e.cd_boundary = size -> e.cd_events
-     | _ ->
-       let full_reparse_and_cache () =
-         let events = parse_events_from_file config path in
-         (* Other masc processes (stdio clients, workers) append to the
-            same file. If it grew between the stat above and this parse,
-            the parse may already include lines past [size]; caching
-            [size] as the boundary would make the next delta fold append
-            those lines a second time, and the duplicates would then live
-            in the cache until the next truncation. Only cache when the
-            post-parse size still matches — otherwise skip; the next call
-            re-parses and retries. *)
-         (match Unix.stat path with
-          | exception (Unix.Unix_error _ | Sys_error _) -> ()
-          | st_after when st_after.Unix.st_size = size ->
-            Stdlib.Mutex.protect current_day_cache_mu (fun () ->
-              Hashtbl.replace current_day_cache path
-                { cd_boundary = size; cd_events = events })
-          | _ -> ());
-         events
-       in
-       (match cached with
-        | Some e when e.cd_boundary > size ->
-          (* boundary past the file size: shrink/rotation/truncation *)
-          full_reparse_and_cache ()
-        | Some e ->
-          let invalid_utf8 = ref false in
-          let rev_new_events, boundary =
-            Fs_compat.fold_appended_lines ~path ~from:e.cd_boundary ~init:[]
-              ~f:(fun acc line ->
-                if not (String.is_valid_utf_8 line) then begin
-                  invalid_utf8 := true;
-                  acc
-                end
-                else begin
-                  Atomic.incr current_day_parse_counter;
-                  match parse_event_line line with
-                  | Some ev -> ev :: acc
-                  | None -> acc
-                end)
-          in
-          if !invalid_utf8 then
-            full_reparse_and_cache ()
-          else begin
-            let events = List.rev_append rev_new_events e.cd_events in
-            Stdlib.Mutex.protect current_day_cache_mu (fun () ->
-              Hashtbl.replace current_day_cache path
-                { cd_boundary = boundary; cd_events = events });
-            events
-          end
-        | None -> full_reparse_and_cache ()))
+(* The current-day file is mutable. An exact full fingerprint hit is safe to
+   reuse; every change takes one repair-aware full reparse. The dashboard now
+   refreshes activity projections on a bounded component TTL and the aggregate
+   cache shares this parsed list, so correctness does not depend on proving an
+   append-only prefix across external writers. *)
+let parse_current_day_events_cached cache config path : event list =
+  match file_fingerprint path with
+  | None -> parse_events_from_file config path
+  | Some fingerprint ->
+    (match Hashtbl.find_opt cache.current_day_cache path with
+     | Some entry
+       when same_file_fingerprint entry.cd_fingerprint fingerprint ->
+       entry.cd_events
+     | None | Some _ ->
+       let events = parse_events_from_file config path in
+       Atomic.incr current_day_rebuild_counter;
+       (match file_fingerprint path with
+        | Some after when same_file_fingerprint fingerprint after ->
+          Hashtbl.replace cache.current_day_cache path
+            { cd_fingerprint = after; cd_events = events }
+        | None | Some _ -> ());
+       events)
 
 (* P0-4 item (2): [past_day_cache] never removed an entry once inserted, so
    a file pruned from disk by the existing 24h [MASC_JSONL_RETENTION_DAYS]
@@ -406,45 +488,70 @@ let parse_current_day_events_cached config path : event list =
    it — the "Scattered Hardcoded Defaults" anti-pattern
    software-development.md warns against. Mirroring the existing knob
    instead of introducing a new one keeps a single retention SSOT. *)
-let evict_stale_cache_entries ~live_paths =
+let evict_stale_cache_entries cache ~live_paths =
   let live_set = StringSet.of_list live_paths in
-  let rec evict_past_day () =
-    let prev = Atomic.get past_day_cache in
-    let next = Past_day_path_map.filter (fun path _ -> StringSet.mem path live_set) prev in
-    if Past_day_path_map.cardinal next <> Past_day_path_map.cardinal prev
-    && not (Atomic.compare_and_set past_day_cache prev next)
-    then evict_past_day ()
-  in
-  evict_past_day ();
-  Stdlib.Mutex.protect current_day_cache_mu (fun () ->
-    Hashtbl.filter_map_inplace
-      (fun path entry -> if StringSet.mem path live_set then Some entry else None)
-      current_day_cache)
+  cache.past_day_cache <-
+    Past_day_path_map.filter
+      (fun path _ -> StringSet.mem path live_set)
+      cache.past_day_cache;
+  Hashtbl.filter_map_inplace
+    (fun path entry -> if StringSet.mem path live_set then Some entry else None)
+    cache.current_day_cache
 
 let read_all_events config =
-  let current_day = day_path config in
-  let files = collect_event_files config in
-  evict_stale_cache_entries ~live_paths:files;
-  files
-  |> List.fold_left
-       (fun acc path ->
-         let rows =
-           if String.equal path current_day then
-             parse_current_day_events_cached config path
-           else
-             match file_mtime path with
-             | None -> parse_events_from_file config path
-             | Some mtime ->
-               (match past_day_cache_lookup path mtime with
-                | Some cached -> cached
-                | None ->
-                  let parsed = parse_events_from_file config path in
-                  past_day_cache_insert path mtime parsed;
-                  parsed)
+  let root = root_dir config in
+  let cache = acquire_all_events_workspace_cache root in
+  Fun.protect
+    ~finally:(fun () -> release_all_events_workspace_cache cache)
+    (fun () ->
+       Stdlib.Mutex.protect cache.mutex (fun () ->
+         let current_day = day_path config in
+         let files = collect_event_files config in
+         evict_stale_cache_entries cache ~live_paths:files;
+         let signature_for paths =
+           List.map (fun path -> path, file_fingerprint path) paths
          in
-         List.rev_append rows acc)
-       []
-  |> List.sort (fun a b -> Int.compare a.seq b.seq)
+         let signature = signature_for files in
+         match cache.entry with
+         | Some cached when same_file_signature cached.signature signature ->
+           cached.events
+         | None | Some _ ->
+           let events =
+             files
+             |> List.fold_left
+                  (fun acc path ->
+                     let rows =
+                       if String.equal path current_day
+                       then parse_current_day_events_cached cache config path
+                       else
+                         match file_fingerprint path with
+                         | None -> parse_events_from_file config path
+                         | Some fingerprint ->
+                           (match Past_day_path_map.find_opt path cache.past_day_cache with
+                            | Some (cached_fingerprint, parsed)
+                              when same_file_fingerprint
+                                     cached_fingerprint
+                                     fingerprint ->
+                              parsed
+                            | None | Some _ ->
+                              let parsed = parse_events_from_file config path in
+                              cache.past_day_cache <-
+                                Past_day_path_map.add
+                                  path
+                                  (fingerprint, parsed)
+                                  cache.past_day_cache;
+                              parsed)
+                     in
+                     List.rev_append rows acc)
+                  []
+             |> List.sort (fun a b -> Int.compare a.seq b.seq)
+           in
+           Atomic.incr all_events_rebuild_counter;
+           let files_after = collect_event_files config in
+           let signature_after = signature_for files_after in
+           if same_file_signature signature_after signature
+           then cache.entry <- Some { signature; events };
+           events))
 
 let max_event_seq events =
   List.fold_left (fun acc (value : event) -> max acc value.seq) 0 events
@@ -924,8 +1031,24 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
 module For_testing = struct
   let reset_current_day_cache_for_testing = reset_current_day_cache_for_testing
   let reset_past_day_cache_for_testing = reset_past_day_cache_for_testing
-  let current_day_parsed_line_count () = Atomic.get current_day_parse_counter
+  let current_day_rebuild_count () = Atomic.get current_day_rebuild_counter
+  let all_events_rebuild_count () = Atomic.get all_events_rebuild_counter
+  let touch_workspace_cache root =
+    let cache = acquire_all_events_workspace_cache root in
+    release_all_events_workspace_cache cache
+  ;;
+
+  let workspace_cache_count () =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.length all_events_workspace_caches)
+  ;;
+
+  let workspace_cache_mem root =
+    Stdlib.Mutex.protect all_events_workspace_caches_mu (fun () ->
+      Hashtbl.mem all_events_workspace_caches root)
+  ;;
+
   let past_day_cache_entry_count () =
-    Past_day_path_map.cardinal (Atomic.get past_day_cache)
+    (cache_stats ()).past_day_files
   let current_day_path = day_path
 end

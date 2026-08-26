@@ -73,12 +73,25 @@ RUN apt-get update \
       libsqlite3-dev \
       libssl-dev \
       libzstd-dev \
+      libncurses-dev \
       protobuf-compiler \
       zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 # The -dev packages above are the depexts opam reports for this dependency set
 # (`opam install --deps-only --depext-only --dry-run`): libgmp-dev,
 # libprotobuf-dev, libsqlite3-dev, libssl-dev, pkg-config, protobuf-compiler.
+#
+# libncurses-dev is here because the build stopped without it, not because the
+# list said so. Measured 2026-08-26: the opam solve fails with
+#
+#     Missing dependency: conf-ncurses
+#     depends on the unavailable system package 'ncurses-dev'
+#
+# conf-ncurses names the depext `ncurses-dev`, which is not a package on
+# Ubuntu 24.04 -- the name there is `libncurses-dev`. The image on disk was
+# built 2026-08-12 and predates whatever pulled conf-ncurses into the solve,
+# so the failure only appears on a rebuild. Anyone rebuilding before this line
+# existed got exit 20 out of the opam stage with no other clue.
 # They are installed here rather than by opam because the image build runs as a
 # non-root user at that point and the container has no package manager access
 # at run time.

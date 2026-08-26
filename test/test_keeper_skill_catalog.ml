@@ -75,12 +75,12 @@ value = {}
 |}
 ;;
 
-let composition_document_with_model_invocation value =
+let composition_document_with_tool_surface ?(key = "masc-composition-tool") value =
   Printf.sprintf
     {|---
 name: manual-clock
 description: Read the clock only when a task explicitly names this skill.
-disable-model-invocation: %s
+%s: %s
 ---
 
 ```toml composition
@@ -97,7 +97,7 @@ kind = "literal"
 value = {}
 ```
 |}
-    value
+    key value
 ;;
 
 let parsed ~directory document =
@@ -507,10 +507,10 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let test_disable_model_invocation_controls_dedicated_tool () =
+let test_masc_composition_tool_controls_dedicated_tool () =
   let disabled =
     skill_catalog_of
-      [ "manual-clock", composition_document_with_model_invocation "true" ]
+      [ "manual-clock", composition_document_with_tool_surface "false" ]
   in
   (match Skill_catalog.find disabled "manual-clock" with
    | Some skill ->
@@ -543,7 +543,7 @@ let test_disable_model_invocation_controls_dedicated_tool () =
     (List.mem "keeper_compose_manual-clock" disabled_surface);
   let enabled =
     skill_catalog_of
-      [ "manual-clock", composition_document_with_model_invocation "false" ]
+      [ "manual-clock", composition_document_with_tool_surface "true" ]
   in
   let enabled_surface =
     Masc.Keeper_run_tools_setup.expected_model_tool_names
@@ -553,9 +553,51 @@ let test_disable_model_invocation_controls_dedicated_tool () =
   in
   check
     bool
-    "boolean false preserves dedicated composition tool"
+    "boolean true preserves dedicated composition tool"
     true
     (List.mem "keeper_compose_manual-clock" enabled_surface)
+;;
+
+let test_masc_composition_tool_rejects_non_boolean_values () =
+  List.iter
+    (fun (source, expected_kind) ->
+       match
+         Skill_catalog.parse_skill
+           ~directory:"manual-clock"
+           (composition_document_with_tool_surface source)
+       with
+       | Error
+           (Skill_catalog.Invalid_masc_composition_tool
+             { skill = "manual-clock"; actual }) ->
+         check string ("value " ^ source) expected_kind actual
+       | Error error ->
+         fail
+           (Printf.sprintf
+              "value %s returned the wrong error: %s"
+              source
+              (Skill_catalog.error_to_string error))
+       | Ok _ -> fail ("non-boolean value was silently accepted: " ^ source))
+    [ {|"true"|}, "string"
+    ; "1", "number"
+    ; "null", "null"
+    ; "[true]", "sequence"
+    ; "{ enabled: true }", "mapping"
+    ]
+;;
+
+let test_legacy_disable_model_invocation_is_rejected () =
+  match
+    Skill_catalog.parse_skill
+      ~directory:"manual-clock"
+      (composition_document_with_tool_surface
+         ~key:"disable-model-invocation"
+         "true")
+  with
+  | Error (Skill_catalog.Removed_disable_model_invocation { skill }) ->
+    check string "error names the skill" "manual-clock" skill
+  | Error error ->
+    fail ("legacy key returned the wrong error: " ^ Skill_catalog.error_to_string error)
+  | Ok _ -> fail "legacy key was silently assigned MASC-specific semantics"
 ;;
 
 let test_composition_skill_joins_projection () =
@@ -652,9 +694,17 @@ let () =
             `Quick
             test_loader_scans_the_skills_directory
         ; test_case
-            "disable-model-invocation controls the dedicated tool"
+            "masc-composition-tool controls the dedicated tool"
             `Quick
-            test_disable_model_invocation_controls_dedicated_tool
+            test_masc_composition_tool_controls_dedicated_tool
+        ; test_case
+            "masc-composition-tool rejects non-booleans"
+            `Quick
+            test_masc_composition_tool_rejects_non_boolean_values
+        ; test_case
+            "legacy disable-model-invocation is rejected"
+            `Quick
+            test_legacy_disable_model_invocation_is_rejected
         ; test_case
             "composition skill joins the model projection"
             `Quick

@@ -34,6 +34,16 @@ val counts : row list -> int * int
 (** Removed and added line counts, for a caller that wants to say how large a
     change is before drawing it. *)
 
+val preview : context:int -> max_rows:int -> row list -> row list * int
+(** [preview ~context ~max_rows rows] keeps at most [context] unchanged lines
+    on either side of the changed middle and never returns more than
+    [max_rows] rows. Changed rows take the budget before context; if the
+    changed middle alone is longer, its leading [max_rows] rows are kept.
+
+    The second result is the exact number of omitted rows from [rows]. A
+    caller must draw that count rather than letting a bounded preview read as
+    the whole recorded change. Non-positive limits return no rows. *)
+
 val line_number_cell : int option -> string
 (** One line-number column, five cells wide.
 

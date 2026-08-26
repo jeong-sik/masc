@@ -327,6 +327,16 @@ let fence_marker line =
   else if starts_at trimmed 0 "~~~" then Some "~~~"
   else None
 
+let non_colliding_fence_marker lines =
+  let collides marker =
+    List.exists
+      (fun line -> Option.exists (String.equal marker) (fence_marker line))
+      lines
+  in
+  if not (collides "```") then Some "```"
+  else if not (collides "~~~") then Some "~~~"
+  else None
+
 let is_rule line =
   let trimmed = String.trim line in
   let distinct char =

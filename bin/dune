@@ -421,6 +421,18 @@
  (libraries uucp uuseg))
 
 (library
+ (name masc_tui_keeper_chat_diff)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_diff)
+ (libraries
+  masc
+  masc_tui_diff
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_transcript
+  masc_tui_markdown
+  masc_tui_message_layout))
+
+(library
  (name masc_tui_markdown_render_cache)
  (wrapped false)
  (modules masc_tui_markdown_render_cache)
@@ -615,6 +627,7 @@
   masc_tui_code_lexer
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_transcript
   masc_tui_keeper_control
   masc_tui_keeper_selection
@@ -670,6 +683,7 @@
   masc_tui_code_lexer
   masc_tui_span
   masc_tui_diff
+  masc_tui_keeper_chat_diff
   masc
   masc.auth
   masc.masc_random_id

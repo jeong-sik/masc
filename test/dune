@@ -2925,6 +2925,17 @@
  (libraries alcotest masc_tui_diff))
 
 (test
+ (name test_tui_keeper_chat_diff)
+ (modules test_tui_keeper_chat_diff)
+ (libraries
+  alcotest
+  masc
+  masc_tui_keeper_chat_diff
+  masc_tui_keeper_chat_transcript
+  masc_tui_message_layout
+  yojson))
+
+(test
  (name test_tui_git_diff_decode)
  (modules test_tui_git_diff_decode)
  (libraries alcotest masc yojson))

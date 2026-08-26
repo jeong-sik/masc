@@ -65,6 +65,28 @@ let test_counts () =
   check int "added" 1 added
 ;;
 
+let test_preview_keeps_nearby_context_and_states_omission () =
+  let rows =
+    Diff.rows
+      ~before:"a\nb\nc\nd\nold\ne\nf\ng\nh"
+      ~after:"a\nb\nc\nd\nnew\ne\nf\ng\nh"
+  in
+  let preview, omitted = Diff.preview ~context:2 ~max_rows:5 rows in
+  check (list string) "nearest context surrounds the changed middle"
+    [ " c"; " d"; "-old"; "+new"; " e" ]
+    (render preview);
+  check int "the missing rows are counted" 4 omitted
+;;
+
+let test_preview_gives_changed_rows_the_budget_first () =
+  let rows = Diff.rows ~before:"old-1\nold-2\nold-3" ~after:"new-1\nnew-2" in
+  let preview, omitted = Diff.preview ~context:3 ~max_rows:3 rows in
+  check (list string) "the changed middle is not displaced by context"
+    [ "-old-1"; "-old-2"; "-old-3" ]
+    (render preview);
+  check int "remaining additions are declared omitted" 2 omitted
+;;
+
 (* A line that repeats must not let the prefix walk past the change. Both
    halves start with the same two lines; only the third differs. *)
 let test_repeated_lines_do_not_swallow_the_change () =
@@ -107,6 +129,10 @@ let () =
       , [ test_case "trailing newline" `Quick test_trailing_newline_is_not_a_line
         ; test_case "empty sides" `Quick test_empty_sides
         ; test_case "counts" `Quick test_counts
+        ; test_case "bounded preview keeps nearby context" `Quick
+            test_preview_keeps_nearby_context_and_states_omission
+        ; test_case "bounded preview prioritises changes" `Quick
+            test_preview_gives_changed_rows_the_budget_first
         ] )
     ; ( "line numbers"
       , [ test_case "absence is spelled" `Quick

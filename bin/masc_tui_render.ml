@@ -13,6 +13,7 @@ module Observation_layout = Masc_tui_observation_layout
 module Context_state = Masc_tui_context_state
 module Keeper_activity = Masc_tui_keeper_activity
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_diff = Masc_tui_keeper_chat_diff
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Render_schedule = Masc_tui_render_schedule
 module Agenda = Masc_tui_agenda
@@ -3827,6 +3828,55 @@ let render_keeper_message (state : state) =
           ~reasoning:state.msg_reasoning_visibility
           ~tools:state.msg_tool_visibility
       in
+      let diff_status =
+        let snapshot_status ~stale snapshot =
+          let missing_ids =
+            Keeper_chat_diff.missing_execution_ids
+              state.msg_file_change_index
+          in
+          let ambiguous_ids =
+            Keeper_chat_diff.ambiguous_execution_ids
+              state.msg_file_change_index
+          in
+          let gaps =
+            [ ( snapshot.Masc.Tui_decode.fcs_over_budget
+              , "oversized" )
+            ; (snapshot.Masc.Tui_decode.fcs_malformed, "malformed")
+            ; (missing_ids, "no execution id")
+            ; (ambiguous_ids, "duplicate execution ids")
+            ]
+            |> List.filter_map (fun (count, label) ->
+              if count = 0 then None
+              else Some (Printf.sprintf "%d %s" count label))
+          in
+          Printf.sprintf "diffs %.0fh%s%s"
+            snapshot.Masc.Tui_decode.fcs_window_hours
+            (if stale then " stale" else "")
+            (match gaps with
+             | [] -> ""
+             | gaps -> " partial · " ^ String.concat " · " gaps)
+        in
+        match state.msg_tool_visibility with
+        | Tools_compact -> ""
+        | Tools_full ->
+            if
+              not
+                (Option.equal String.equal state.msg_file_changes_keeper
+                   (Some keeper_name))
+            then "diffs pending"
+            else if state.msg_file_changes_loading then "diffs loading"
+            else
+              match state.msg_file_changes_error, state.msg_file_changes with
+              | Some _, Some snapshot -> snapshot_status ~stale:true snapshot
+              | Some _, None -> "diffs unavailable"
+              | None, Some snapshot -> snapshot_status ~stale:false snapshot
+              | None, None -> "diffs pending"
+      in
+      let modes =
+        [ modes; diff_status ]
+        |> List.filter (fun item -> not (String.equal item ""))
+        |> String.concat " · "
+      in
       Printf.sprintf "%s  %s%s"
         (screen_title
          (Printf.sprintf " Keepers \xe2\x96\xb8 %s \xe2\x96\xb8 chat" display_keeper_name))
@@ -3955,6 +4005,21 @@ let render_keeper_message (state : state) =
     let role_label_column =
       Message_layout.chat_role_label_width ~pane_cells:chat_cols
     in
+    let tool_mode = tool_projection_mode state in
+    let tool_line_cells =
+      max 24 (min 120 (chat_cols - role_label_column - 8))
+    in
+    let file_change_index =
+      if
+        Option.equal String.equal state.msg_file_changes_keeper
+          (Some keeper_name)
+      then state.msg_file_change_index
+      else Keeper_chat_diff.empty
+    in
+    let projected_tool_rows projection =
+      Keeper_chat_diff.rows ~mode:tool_mode ~max_line_cells:tool_line_cells
+        file_change_index projection
+    in
     let layout_entries =
       (* The position distinguishes rows whose durable timestamp and request
          fields tie. A history reorder can only cause a miss: the exact body is
@@ -4010,7 +4075,8 @@ let render_keeper_message (state : state) =
             | Message_tool -> (
                 match tool_projection with
                 | None -> message.me_text
-                | Some projection -> String.concat "\n" projection.rows)
+                | Some projection ->
+                    String.concat "\n" (projected_tool_rows projection))
             | Message_thinking | Message_user _ | Message_keeper
             | Message_autonomous
             | Message_status | Message_error | Message_memory ->
@@ -4108,7 +4174,7 @@ let render_keeper_message (state : state) =
                   in
                   Some
                     (entry (tool_block_style projection) "TOOLS"
-                       (String.concat "\n" projection.rows))
+                       (String.concat "\n" (projected_tool_rows projection)))
               | Keeper_chat_transcript.Trail_text text ->
                   Some
                     (entry

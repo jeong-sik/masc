@@ -1067,6 +1067,9 @@ type file_change_snapshot = {
 
 val decode_file_change_snapshot :
   Yojson.Safe.t -> (file_change_snapshot, string) result
+(** Decode one Keeper-stamped snapshot. Every inner change must carry the same
+    Keeper identity; a mixed response is rejected rather than indexed under
+    the top-level name. *)
 
 (** {1 What the tree holds}
 

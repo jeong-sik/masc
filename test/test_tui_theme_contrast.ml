@@ -15,83 +15,37 @@ let bool = Alcotest.bool
 module Color = Masc_tui_color
 module Palette = Masc_tui_terminal_palette
 
+module Catalog = Masc_tui_theme_catalog
+
+(* The schemes are the ones masc ships, not a copy of them. A number here is
+   what a reader who picks that theme sees. *)
 type scheme =
   { name : string
-  ; light : bool
-  ; base : string array (* base00 .. base0F, sixteen hex bodies *)
+  ; palette : Palette.t
   }
 
 let schemes =
-  [ { name = "default-dark"; light = false
-    ; base = [| "181818"; "282828"; "383838"; "585858"; "b8b8b8"; "d8d8d8"
-              ; "e8e8e8"; "f8f8f8"; "ab4642"; "dc9656"; "f7ca88"; "a1b56c"
-              ; "86c1b9"; "7cafc2"; "ba8baf"; "a16946" |] }
-  ; { name = "default-light"; light = true
-    ; base = [| "f8f8f8"; "e8e8e8"; "d8d8d8"; "b8b8b8"; "585858"; "383838"
-              ; "282828"; "181818"; "ab4642"; "dc9656"; "f7ca88"; "a1b56c"
-              ; "86c1b9"; "7cafc2"; "ba8baf"; "a16946" |] }
-  ; { name = "solarized-dark"; light = false
-    ; base = [| "002b36"; "073642"; "586e75"; "657b83"; "839496"; "93a1a1"
-              ; "eee8d5"; "fdf6e3"; "dc322f"; "cb4b16"; "b58900"; "859900"
-              ; "2aa198"; "268bd2"; "6c71c4"; "d33682" |] }
-  ; { name = "solarized-light"; light = true
-    ; base = [| "fdf6e3"; "eee8d5"; "93a1a1"; "839496"; "657b83"; "586e75"
-              ; "073642"; "002b36"; "dc322f"; "cb4b16"; "b58900"; "859900"
-              ; "2aa198"; "268bd2"; "6c71c4"; "d33682" |] }
-  ; { name = "gruvbox-dark-hard"; light = false
-    ; base = [| "1d2021"; "3c3836"; "504945"; "665c54"; "bdae93"; "d5c4a1"
-              ; "ebdbb2"; "fbf1c7"; "fb4934"; "fe8019"; "fabd2f"; "b8bb26"
-              ; "8ec07c"; "83a598"; "d3869b"; "d65d0e" |] }
-  ; { name = "nord"; light = false
-    ; base = [| "2E3440"; "3B4252"; "434C5E"; "4C566A"; "D8DEE9"; "E5E9F0"
-              ; "ECEFF4"; "8FBCBB"; "BF616A"; "D08770"; "EBCB8B"; "A3BE8C"
-              ; "88C0D0"; "81A1C1"; "B48EAD"; "5E81AC" |] }
-  ; { name = "dracula"; light = false
-    ; base = [| "282a36"; "21222c"; "44475A"; "6272a4"; "9ea8c7"; "f8f8f2"
-              ; "f8f8f2"; "ffffff"; "ff5555"; "FFB86C"; "f1fa8c"; "50fa7b"
-              ; "8be9fd"; "bd93f9"; "ff79c6"; "993333" |] }
-  ; { name = "onedark"; light = false
-    ; base = [| "282c34"; "353b45"; "3e4451"; "545862"; "565c64"; "abb2bf"
-              ; "b6bdca"; "c8ccd4"; "e06c75"; "d19a66"; "e5c07b"; "98c379"
-              ; "56b6c2"; "61afef"; "c678dd"; "be5046" |] }
-  ; { name = "tokyo-night-dark"; light = false
-    ; base = [| "1A1B26"; "16161E"; "2F3549"; "444B6A"; "787C99"; "A9B1D6"
-              ; "CBCCD1"; "D5D6DB"; "C0CAF5"; "A9B1D6"; "0DB9D7"; "9ECE6A"
-              ; "B4F9F8"; "2AC3DE"; "BB9AF7"; "F7768E" |] }
-  ; { name = "catppuccin-mocha"; light = false
-    ; base = [| "1e1e2e"; "181825"; "313244"; "45475a"; "585b70"; "cdd6f4"
-              ; "f5e0dc"; "b4befe"; "f38ba8"; "fab387"; "f9e2af"; "a6e3a1"
-              ; "94e2d5"; "89b4fa"; "cba6f7"; "f2cdcd" |] }
-  ; { name = "github"; light = true
-    ; base = [| "ffffff"; "f6f8fa"; "afb8c1"; "8c959f"; "6e7781"; "424a53"
-              ; "32383f"; "1f2328"; "953800"; "0550ae"; "bf8700"; "0a3069"
-              ; "116329"; "8250df"; "cf222e"; "82071e" |] }
-  ; { name = "monokai"; light = false
-    ; base = [| "272822"; "383830"; "49483e"; "75715e"; "a59f85"; "f8f8f2"
-              ; "f5f4f1"; "f9f8f5"; "f92672"; "fd971f"; "f4bf75"; "a6e22e"
-              ; "a1efe4"; "66d9ef"; "ae81ff"; "cc6633" |] }
-  ]
+  List.map
+    (fun bundled ->
+      match Catalog.to_palette bundled with
+      | Some palette -> { name = Catalog.name bundled; palette }
+      | None ->
+        Alcotest.failf "bundled scheme %s has malformed hex"
+          (Catalog.name bundled))
+    Catalog.bundled
 ;;
 
-let color_of_hex text =
-  let component offset =
-    int_of_string ("0x" ^ String.sub text offset 2)
-  in
-  Palette.make_rgb ~red:(component 0) ~green:(component 2) ~blue:(component 4)
+
+
+
+let ansi scheme index =
+  match Palette.ansi scheme.palette index with
+  | Some color -> color
+  | None -> Alcotest.failf "%s has no entry for ANSI %d" scheme.name index
 ;;
 
-let base scheme index = color_of_hex scheme.base.(index)
-
-(* tinted-shell's base16 template: which palette entry each ANSI colour is.
-   Bright 9 through 14 repeat 1 through 6 under base16; base24 splits them. *)
-let ansi_slot =
-  [| 0x0; 0x8; 0xB; 0xA; 0xD; 0xE; 0xC; 0x5
-   ; 0x3; 0x8; 0xB; 0xA; 0xD; 0xE; 0xC; 0x7 |]
-;;
-
-let ansi scheme index = base scheme ansi_slot.(index)
-let background scheme = base scheme 0x0
-let foreground scheme = base scheme 0x5
+let background scheme = Palette.background scheme.palette
+let foreground scheme = Palette.foreground scheme.palette
 
 (* Every colour something draws a meaning through, state and role alike, and
    the one table both the reading tests and the lifting tests measure. The

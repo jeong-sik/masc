@@ -167,7 +167,7 @@ let json_response_with_source_and_base ~status ~source ~base_path req reqd json 
    credentials, .ssh) or the agent's internal state (.git config URLs,
    .masc*/ stores). Both guards read this one list so they cannot drift:
    the file read routes reject any request whose path contains a
-   confidential component (see [resolve_workspace_path]) and the tree
+   confidential component (see [resolve_workspace_file]) and the tree
    listing hides the same components (see [scan_dir]). Anything blocked
    from reads is therefore also hidden from the tree.
 
@@ -317,10 +317,6 @@ type path_rejection =
   | Confidential_component of string
   | Symlink_escape
 
-type path_resolution =
-  | Path_ok of string
-  | Path_rejected of path_rejection
-
 type workspace_file = {
   lexical_path : string;
   resolved_path : string;
@@ -343,9 +339,7 @@ let workspace_file_read_max_bytes = Env_config_runtime.Workspace_file.max_read_b
    3. a symlink whose real target resolves outside [base] (B2).
    [resolve_workspace_file] carries both paths: the lexical path under
    [base] for Git pathspecs, and the realpath-resolved target for file
-   I/O.  The compatibility wrapper [resolve_workspace_path] preserves
-   the older lexical [Path_ok] contract used by tests and callers that
-   only need admission control. *)
+   I/O. *)
 let resolve_workspace_file base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
@@ -375,11 +369,6 @@ let resolve_workspace_file base requested =
                 lexical_path = full;
                 resolved_path = resolved_full;
               }
-
-let resolve_workspace_path base requested =
-  match resolve_workspace_file base requested with
-  | Ok file -> Path_ok file.lexical_path
-  | Error rejection -> Path_rejected rejection
 
 let run_blocking_file_io f =
   try Eio_unix.run_in_systhread ~label:"workspace-file-read" f with
@@ -429,7 +418,7 @@ let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) fil
 
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
-   Assumes [resolve_workspace_path] has already enforced the prefix
+   Assumes the workspace-file resolver has already enforced the prefix
    invariant. *)
 let rel_under base safe =
   if safe = base then ""

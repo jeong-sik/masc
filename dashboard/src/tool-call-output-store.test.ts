@@ -10,11 +10,9 @@ import {
   toolCallOutputHydrationContract,
   toolCallOutputHydrationFailureReason,
   toolCallOutputHydrationStatus,
-  toolCallIdFromToolEntryId,
-  toolCallOutputsById,
+  toolCallOutputsByExecutionId,
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
-  toolEntryIdFromCallId,
 } from './tool-call-output-store'
 
 function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
@@ -35,77 +33,75 @@ describe('tool-call-output-store', () => {
     resetToolCallOutputs()
   })
 
-  it('records entries keyed by tool_use_id', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'hello' })])
-    expect(toolCallOutputsById.value.get('toolu_abc')?.output).toBe('hello')
+  it('records entries keyed by canonical execution_id', () => {
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'hello' })])
+    expect(toolCallOutputsByExecutionId.value.get('exec-abc')?.output).toBe('hello')
   })
 
-  it('looks up by the chat entry id, stripping the tool- prefix', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'hello' })])
-    expect(lookupToolCallOutput('tool-toolu_abc')?.output).toBe('hello')
+  it('looks up by canonical execution_id', () => {
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'hello' })])
+    expect(lookupToolCallOutput('exec-abc')?.output).toBe('hello')
   })
 
-  it('exports the shared chat-entry id convention', () => {
-    expect(toolEntryIdFromCallId('toolu_abc')).toBe('tool-toolu_abc')
-    expect(toolCallIdFromToolEntryId('tool-toolu_abc')).toBe('toolu_abc')
-    expect(toolCallIdFromToolEntryId('chat-toolu_abc')).toBeNull()
-  })
-
-  it('looks up by a bare tool_use_id (no prefix) as well', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'hello' })])
-    expect(lookupToolCallOutput('toolu_abc')?.output).toBe('hello')
-  })
-
-  it('preserves provider tool_use_id whitespace as opaque transcript identity', () => {
+  it('preserves canonical identity bytes after rejecting blank values', () => {
     recordToolCallOutputs([
-      toolCall({ tool_use_id: '  toolu_abc \t', output: 'hello' }),
+      toolCall({ execution_id: '  exec-abc \t', output: 'hello' }),
     ])
-    expect(lookupToolCallOutput('tool-  toolu_abc \t')?.output).toBe('hello')
-    expect(lookupToolCallOutput('tool-toolu_abc')).toBeNull()
-    expect(toolCallOutputsById.value.has('  toolu_abc \t')).toBe(true)
+    expect(lookupToolCallOutput('  exec-abc \t')?.output).toBe('hello')
+    expect(lookupToolCallOutput('exec-abc')).toBeNull()
+    expect(toolCallOutputsByExecutionId.value.has('  exec-abc \t')).toBe(true)
   })
 
   it('returns null for an unknown id', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc' })])
-    expect(lookupToolCallOutput('tool-missing')).toBeNull()
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc' })])
+    expect(lookupToolCallOutput('exec-missing')).toBeNull()
   })
 
-  it('skips entries without a tool_use_id (no stable join key)', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: undefined })])
-    expect(toolCallOutputsById.value.size).toBe(0)
+  it('skips entries without an execution_id', () => {
+    recordToolCallOutputs([toolCall({ execution_id: undefined, tool_use_id: 'provider-only' })])
+    expect(toolCallOutputsByExecutionId.value.size).toBe(0)
   })
 
-  it('skips entries with a whitespace-only tool_use_id', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: ' \t ' })])
-    expect(toolCallOutputsById.value.size).toBe(0)
+  it('skips entries with a whitespace-only execution_id', () => {
+    recordToolCallOutputs([toolCall({ execution_id: ' \t ' })])
+    expect(toolCallOutputsByExecutionId.value.size).toBe(0)
   })
 
-  it('overwrites an earlier entry for the same id (idempotent re-hydration)', () => {
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'first' })])
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc', output: 'second' })])
-    expect(lookupToolCallOutput('tool-toolu_abc')?.output).toBe('second')
+  it('overwrites an earlier entry for the same execution (idempotent re-hydration)', () => {
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'first' })])
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc', output: 'second' })])
+    expect(lookupToolCallOutput('exec-abc')?.output).toBe('second')
+  })
+
+  it('does not collide when a provider id is reused', () => {
+    recordToolCallOutputs([
+      toolCall({ execution_id: 'exec-first', tool_use_id: 'reused', output: 'first' }),
+      toolCall({ execution_id: 'exec-second', tool_use_id: 'reused', output: 'second' }),
+    ])
+    expect(lookupToolCallOutput('exec-first')?.output).toBe('first')
+    expect(lookupToolCallOutput('exec-second')?.output).toBe('second')
   })
 
   it('replaces the map reference on change so signal subscribers re-render', () => {
-    const before = toolCallOutputsById.value
-    recordToolCallOutputs([toolCall({ tool_use_id: 'toolu_abc' })])
-    expect(toolCallOutputsById.value).not.toBe(before)
+    const before = toolCallOutputsByExecutionId.value
+    recordToolCallOutputs([toolCall({ execution_id: 'exec-abc' })])
+    expect(toolCallOutputsByExecutionId.value).not.toBe(before)
   })
 
   it('does not replace the map reference when nothing changed', () => {
-    const before = toolCallOutputsById.value
-    recordToolCallOutputs([toolCall({ tool_use_id: undefined })])
-    expect(toolCallOutputsById.value).toBe(before)
+    const before = toolCallOutputsByExecutionId.value
+    recordToolCallOutputs([toolCall({ execution_id: undefined })])
+    expect(toolCallOutputsByExecutionId.value).toBe(before)
   })
 
   it('preserves an externalised blob output descriptor', () => {
     recordToolCallOutputs([
       toolCall({
-        tool_use_id: 'toolu_blob',
+        execution_id: 'exec-blob',
         output: { _blob: { sha256: 'abc', bytes: 9000, mime: 'application/json', preview: 'preview…' } },
       }),
     ])
-    const stored = lookupToolCallOutput('tool-toolu_blob')?.output
+    const stored = lookupToolCallOutput('exec-blob')?.output
     expect(typeof stored).toBe('object')
     expect(stored).toMatchObject({ _blob: { preview: 'preview…' } })
   })

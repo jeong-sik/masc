@@ -1,11 +1,17 @@
 type tool_ref = {
-  tool_call_id : string;
+  occurrence : Keeper_chat_events.tool_stream_occurrence;
+  tool_call_id : string option;
   tool_call_name : string;
+  args_fragments : string list;
 }
 
 type block_state =
   | Active_tool of tool_ref
-  | Invalid_tool_block of { failed_tool_call_id : string option }
+  | Occupied_non_tool_block
+  | Invalid_tool_block of
+      { failed_tool_call_id : string option
+      ; quarantined_occurrence : Keeper_chat_events.tool_stream_occurrence option
+      }
   | Invalid_media_block
   | Active_media of
       { media_type : string
@@ -17,18 +23,24 @@ type block_state =
          chunks and is persisted to {!Keeper_chat_media_store} at the block stop,
          emitting a reader-facing URL instead of a byte count. *)
 
+type stream_phase =
+  | Accepting_content
+  | Stop_reason_seen of Agent_core.Types.stop_reason
+  | Message_stopped
+
 type state =
   { blocks_by_index : (int * block_state) list
+  ; current_stream_scope : int option
+  ; stream_phase : stream_phase
+  ; scope_failure :
+      (Keeper_chat_events.stream_protocol_error_kind * string) option
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
   ; message_open : bool
-  ; text_by_index : (int * string) list
-        (* Raw (pre-redaction) text accumulated per block index in the current
-           provider message.  Drives the deterministic text-delta dedup below;
-           cleared at [MessageStop] because block indices restart per message. *)
-  ; text_dedup_logged : bool
-        (* One warn log per stream is enough; every occurrence still bumps the
-           [masc_keeper_stream_text_delta_dedup_total] counter. *)
+  ; current_provider_message_id : string option
+  ; current_message_start :
+      (string * string * Agent_core.Types.api_usage option) option
+  ; finalized_tools : tool_ref list
   ; max_wire_bytes : int
         (* Read once per stream. [Keeper_chat_media_store.max_wire_bytes]
            resolves an env var on every call, so reading it again at finalize
@@ -43,13 +55,48 @@ type translated_event = {
 
 let empty_state () =
   { blocks_by_index = []
+  ; current_stream_scope = None
+  ; stream_phase = Accepting_content
+  ; scope_failure = None
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
   ; message_open = false
-  ; text_by_index = []
-  ; text_dedup_logged = false
+  ; current_provider_message_id = None
+  ; current_message_start = None
+  ; finalized_tools = []
   ; max_wire_bytes = Keeper_chat_media_store.max_wire_bytes ()
   }
+
+let reset_runtime_attempt_state state =
+  { state with
+    blocks_by_index = []
+  ; current_stream_scope = None
+  ; stream_phase = Accepting_content
+  ; scope_failure = None
+  ; current_message_has_text = false
+  ; last_completed_message_has_text = false
+  ; message_open = false
+  ; current_provider_message_id = None
+  ; current_message_start = None
+  }
+;;
+
+let enter_stream_scope state stream_scope =
+  match state.current_stream_scope with
+  | Some current when current = stream_scope -> state
+  | None -> { state with current_stream_scope = Some stream_scope }
+  | Some _ ->
+    { state with
+      blocks_by_index = []
+    ; current_stream_scope = Some stream_scope
+    ; stream_phase = Accepting_content
+    ; scope_failure = None
+    ; current_message_has_text = false
+    ; message_open = false
+    ; current_provider_message_id = None
+    ; current_message_start = None
+    }
+;;
 
 let terminal_message_had_text state =
   if state.message_open
@@ -65,8 +112,9 @@ let replace_block bridge_state index block =
       (index, block) :: List.remove_assoc index bridge_state.blocks_by_index
   }
 
-let invalidate_block bridge_state index ~failed_tool_call_id =
-  replace_block bridge_state index (Invalid_tool_block { failed_tool_call_id })
+let invalidate_block ?quarantined_occurrence bridge_state index ~failed_tool_call_id =
+  replace_block bridge_state index
+    (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence })
 
 let invalidate_media_block bridge_state index =
   replace_block bridge_state index Invalid_media_block
@@ -76,23 +124,210 @@ let remove_block bridge_state index =
     blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index
   }
 
+let occupy_non_tool_index bridge_state index =
+  match stream_block_for_index bridge_state index with
+  | None -> replace_block bridge_state index Occupied_non_tool_block
+  | Some _ -> bridge_state
+
 let tool_start_is_replay existing tool =
-  String.equal existing.tool_call_id tool.tool_call_id
+  Option.equal String.equal existing.tool_call_id tool.tool_call_id
   && String.equal existing.tool_call_name tool.tool_call_name
+
+let append_tool_args ~snapshot tool args =
+  { tool with
+    args_fragments = if snapshot then [ args ] else args :: tool.args_fragments
+  }
+
+let same_occurrence left right =
+  Int.equal left.Keeper_chat_events.stream_scope right.stream_scope
+  && Int.equal left.block_index right.block_index
+
+let finalized_tool_for_occurrence state occurrence =
+  List.find_opt
+    (fun finalized ->
+       same_occurrence finalized.occurrence occurrence)
+    state.finalized_tools
+
+let remember_finalized_tool state tool =
+  if
+    List.exists
+      (fun finalized -> same_occurrence finalized.occurrence tool.occurrence)
+      state.finalized_tools
+  then state
+  else { state with finalized_tools = tool :: state.finalized_tools }
 
 let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
   Agent_core.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
     (Agent_core.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
-let has_any_tool_identity ~tool_id ~tool_name =
-  match tool_id, tool_name with
-  | None, None -> false
-  | _ -> true
+let stream_start_is_media content_type =
+  String.equal content_type "image"
+  || String.equal content_type "audio"
+  || String.equal content_type "document"
+;;
 
-let protocol_error ?index ?tool_call_id ?event_type ?reason ?raw_bytes kind =
+let protocol_error ?quarantined_occurrence ?index ?tool_call_id ?event_type ?reason
+    ?raw_bytes kind =
   Keeper_chat_events.Agent_core_stream_protocol_error
-    { kind; index; tool_call_id; event_type; reason; raw_bytes }
+    { kind
+    ; quarantined_occurrence
+    ; index
+    ; tool_call_id
+    ; event_type
+    ; reason
+    ; raw_bytes
+    }
+
+let message_start_equal
+    (left_id, left_model, left_usage)
+    (right_id, right_model, right_usage) =
+  String.equal left_id right_id
+  && String.equal left_model right_model
+  && Option.equal ( = ) left_usage right_usage
+;;
+
+let tools_in_current_scope state =
+  let current_scope = state.current_stream_scope in
+  let active =
+    state.blocks_by_index
+    |> List.filter_map (fun (_, block) ->
+      match block with
+      | Active_tool tool -> Some tool
+      | Occupied_non_tool_block
+      | Invalid_tool_block _
+      | Active_media _
+      | Invalid_media_block -> None)
+  in
+  let finalized =
+    state.finalized_tools
+    |> List.filter (fun tool ->
+      Option.equal Int.equal current_scope (Some tool.occurrence.stream_scope))
+  in
+  active @ finalized
+  |> List.sort_uniq (fun left right ->
+    let scope =
+      Int.compare left.occurrence.stream_scope right.occurrence.stream_scope
+    in
+    if scope <> 0
+    then scope
+    else Int.compare left.occurrence.block_index right.occurrence.block_index)
+;;
+
+let poison_scope state ~kind ~reason =
+  let tools = tools_in_current_scope state in
+  let chat_events =
+    match tools with
+    | [] -> [ protocol_error ~reason kind ]
+    | tools ->
+      List.map
+        (fun tool ->
+           protocol_error ~quarantined_occurrence:tool.occurrence
+             ~index:tool.occurrence.block_index
+             ?tool_call_id:tool.tool_call_id ~reason kind)
+        tools
+  in
+  let blocks_by_index =
+    List.map
+      (fun (index, block) ->
+         match block with
+         | Active_tool tool ->
+           ( index
+           , Invalid_tool_block
+               { failed_tool_call_id = tool.tool_call_id
+               ; quarantined_occurrence = Some tool.occurrence
+               } )
+         | Occupied_non_tool_block
+         | Invalid_tool_block _
+         | Active_media _
+         | Invalid_media_block -> index, block)
+      state.blocks_by_index
+  in
+  { bridge_state =
+      { state with
+        blocks_by_index
+      ; scope_failure = Some (kind, reason)
+      ; message_open = false
+      }
+  ; chat_events
+  }
+;;
+
+let poison_scope_with state ~kind ~reason ~diagnostic extra_events =
+  let had_tools = tools_in_current_scope state <> [] in
+  let poisoned = poison_scope state ~kind ~reason in
+  { poisoned with
+    chat_events =
+      (if had_tools then poisoned.chat_events else [ diagnostic ]) @ extra_events
+  }
+;;
+
+let start_runtime_attempt state =
+  let reason = "tool occurrence superseded by a new runtime attempt" in
+  let terminalized =
+    if tools_in_current_scope state = []
+    then { bridge_state = state; chat_events = [] }
+    else
+      poison_scope state ~kind:Keeper_chat_events.Tool_attempt_superseded
+        ~reason
+  in
+  { terminalized with
+    bridge_state = reset_runtime_attempt_state terminalized.bridge_state
+  ; chat_events =
+      terminalized.chat_events
+      @ [ Keeper_chat_events.Agent_core_runtime_attempt_started ]
+  }
+;;
+
+let fail_stream state ~reason =
+  match state.scope_failure with
+  | Some _ -> { bridge_state = state; chat_events = [] }
+  | None ->
+    poison_scope state ~kind:Keeper_chat_events.Sse_stream_incomplete ~reason
+;;
+
+let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
+  let reject tool =
+    let reason =
+      Printf.sprintf "non-input %s delta arrived for a tool-use block" delta_kind
+    in
+    Some
+      { bridge_state =
+          invalidate_block ~quarantined_occurrence:tool.occurrence
+            bridge_state index ~failed_tool_call_id:tool.tool_call_id
+      ; chat_events =
+          [ protocol_error ~quarantined_occurrence:tool.occurrence
+              ~index ?tool_call_id:tool.tool_call_id ~reason
+              Keeper_chat_events.Tool_delta_invalid_kind
+          ]
+      }
+  in
+  match stream_block_for_index bridge_state index with
+  | Some (Active_tool tool) -> reject tool
+  | Some (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+    let reason =
+      Printf.sprintf "non-input %s delta arrived for an invalid tool-use block"
+        delta_kind
+    in
+    Some
+      { bridge_state
+      ; chat_events =
+          [ protocol_error ?quarantined_occurrence ~index
+              ?tool_call_id:failed_tool_call_id ~reason
+              Keeper_chat_events.Tool_delta_invalid_kind
+          ]
+      }
+  | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) -> None
+  | None ->
+    let occurrence : Keeper_chat_events.tool_stream_occurrence =
+      { stream_scope
+      ; provider_message_id = bridge_state.current_provider_message_id
+      ; block_index = index
+      }
+    in
+    (match finalized_tool_for_occurrence bridge_state occurrence with
+     | Some tool -> reject tool
+     | None -> None)
 
 let media_persist_error_kind = function
   | Keeper_chat_media_store.Unsupported_source_type _ ->
@@ -147,6 +382,44 @@ let finalize_media_block ~max_wire_bytes ~redact_text ~base_dir ~index ~media_ty
           (media_persist_error_kind err)
       ]
 
+let close_open_content_blocks ~redact_text ~base_dir state =
+  let ordered =
+    List.sort
+      (fun (left, _) (right, _) -> Int.compare left right)
+      state.blocks_by_index
+  in
+  let state = { state with blocks_by_index = [] } in
+  List.fold_left
+    (fun ({ bridge_state; chat_events } : translated_event) (index, block) ->
+       match block with
+       | Active_tool tool ->
+         { bridge_state = remember_finalized_tool bridge_state tool
+         ; chat_events =
+             chat_events
+             @ [ Keeper_chat_events.Tool_call_end
+                   { occurrence = tool.occurrence
+                   ; tool_call_id = tool.tool_call_id
+                   }
+               ]
+         }
+       | Active_media { media_type; source_type; chunks; encoded_bytes } ->
+         { bridge_state =
+             replace_block bridge_state index Occupied_non_tool_block
+         ; chat_events =
+             chat_events
+             @ finalize_media_block
+                 ~max_wire_bytes:bridge_state.max_wire_bytes
+                 ~redact_text ~base_dir ~index ~media_type ~source_type
+                 ~chunks ~encoded_bytes
+         }
+       | Occupied_non_tool_block
+       | Invalid_tool_block _
+       | Invalid_media_block ->
+         { bridge_state = replace_block bridge_state index block; chat_events })
+    { bridge_state = state; chat_events = [] }
+    ordered
+;;
+
 let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
   Keeper_chat_events.Agent_core_content_block_start
     { index
@@ -158,62 +431,51 @@ let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
 let content_block_stop_event ~index =
   Keeper_chat_events.Agent_core_content_block_stop { index }
 
-(* B5 ("no duplicate streaming strings"): some OpenAI-compatible providers send
-   each chunk's [content] as the cumulative text so far instead of an
-   incremental delta, and a reconnecting transport can re-send a chunk that was
-   already delivered.  Both surface here as a [TextDelta] whose bytes the user
-   has already seen.  The reconciliation below is decided by exact byte length
-   and exact prefix identity against the per-block accumulated text — a
-   deterministic retransmission/snapshot check, not a heuristic string
-   similarity judgement, so it stays inside the constitution's "no logic by
-   string comparison" rule (same exact-prefix discipline as the
-   claude_code/codex [Turn_finished] reconciliations). *)
-type text_delta_action =
-  | Append_delta
-  | Snapshot_reconcile of string (* emit only the not-yet-seen suffix *)
-  | Duplicate_retransmission (* emit nothing *)
+let tool_occurrence bridge_state ~stream_scope ~block_index =
+  { Keeper_chat_events.stream_scope
+  ; provider_message_id = bridge_state.current_provider_message_id
+  ; block_index
+  }
 
-let classify_text_delta ~accumulated text =
-  let acc_len = String.length accumulated in
-  let text_len = String.length text in
-  if acc_len = 0 || text_len = 0 then Append_delta
-  else if text_len > acc_len && String.starts_with ~prefix:accumulated text then
-    Snapshot_reconcile (String.sub text acc_len (text_len - acc_len))
-  else if text_len <= acc_len && String.starts_with ~prefix:text accumulated then
-    Duplicate_retransmission
-  else Append_delta
-
-let stream_text_dedup_metric = Keeper_metrics.(to_string StreamTextDeltaDedup)
-
-let observe_text_dedup ~already_logged ~action ~index ~accumulated_bytes
-    ~delta_bytes =
-  Otel_metric_store.inc_counter stream_text_dedup_metric
-    ~labels:[ "action", action ]
-    ();
-  if not already_logged then
-    Log.Keeper.warn
-      "keeper stream text delta dedup engaged: action=%s index=%d \
-       accumulated_bytes=%d delta_bytes=%d (later occurrences in this stream \
-       are counted metric-only)"
-      action index accumulated_bytes delta_bytes
-
-let tool_args_event ~redact_text ~snapshot bridge_state index args =
+let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args =
   let open Keeper_chat_events in
   match stream_block_for_index bridge_state index with
   | Some (Active_tool tool) ->
+      let bridge_state =
+        replace_block bridge_state index
+          (Active_tool (append_tool_args ~snapshot tool args))
+      in
       let args = redact_text args in
       let chat_event =
         if snapshot then
-          Tool_call_args_snapshot { tool_call_id = tool.tool_call_id; snapshot = args }
-        else Tool_call_args { tool_call_id = tool.tool_call_id; delta = args }
+          Tool_call_args_snapshot
+            { occurrence = tool.occurrence
+            ; tool_call_id = tool.tool_call_id
+            ; snapshot = args
+            }
+        else
+          Tool_call_args
+            { occurrence = tool.occurrence
+            ; tool_call_id = tool.tool_call_id
+            ; delta = args
+            }
       in
       { bridge_state; chat_events = [ chat_event ] }
-  | Some (Invalid_tool_block { failed_tool_call_id }) ->
+  | Some (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
       { bridge_state;
         chat_events =
-          [ protocol_error ?tool_call_id:failed_tool_call_id ~index
+          [ protocol_error ?quarantined_occurrence
+              ?tool_call_id:failed_tool_call_id ~index
               ~reason:"tool argument event arrived after invalid tool block start"
               Tool_args_without_start ]
+      }
+  | Some Occupied_non_tool_block ->
+      { bridge_state
+      ; chat_events =
+          [ protocol_error ~index
+              ~reason:"tool argument event arrived for an occupied non-tool block"
+              Tool_args_without_start
+          ]
       }
   | Some Invalid_media_block ->
       { bridge_state;
@@ -230,77 +492,131 @@ let tool_args_event ~redact_text ~snapshot bridge_state index args =
               Tool_args_without_start ]
       }
   | None ->
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~index
-              ~reason:"tool argument event arrived before tool start"
-              Tool_args_without_start ]
-      }
+      let occurrence : Keeper_chat_events.tool_stream_occurrence =
+        { stream_scope
+        ; provider_message_id = bridge_state.current_provider_message_id
+        ; block_index = index
+        }
+      in
+      (match finalized_tool_for_occurrence bridge_state occurrence with
+       | Some tool ->
+         { bridge_state =
+             invalidate_block ~quarantined_occurrence:tool.occurrence
+               bridge_state index ~failed_tool_call_id:tool.tool_call_id
+         ; chat_events =
+             [ protocol_error ~quarantined_occurrence:tool.occurrence
+                 ~index ?tool_call_id:tool.tool_call_id
+                 ~reason:"tool argument event arrived after tool block stop"
+                 Tool_args_without_start
+             ]
+         }
+       | None ->
+         { bridge_state = occupy_non_tool_index bridge_state index
+         ; chat_events =
+             [ protocol_error ~index
+                 ~reason:"tool argument event arrived before tool start"
+                 Tool_args_without_start
+             ]
+         })
 
-let translate ~redact_text ~base_dir bridge_state
+let content_event_allowed state (evt : Agent_core.Types.sse_event) =
+  match evt, state.stream_phase with
+  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _),
+    Accepting_content -> true
+  | Agent_core.Types.ContentBlockStop _,
+    (Accepting_content | Stop_reason_seen _) -> true
+  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
+    | Agent_core.Types.ContentBlockStop _),
+    (Stop_reason_seen _ | Message_stopped) -> false
+  | _ -> true
+;;
+
+let translate ~redact_text ~base_dir ~stream_scope bridge_state
     (evt : Agent_core.Types.sse_event) =
   let open Agent_core.Types in
   let open Keeper_chat_events in
+  let bridge_state = enter_stream_scope bridge_state stream_scope in
+  match bridge_state.scope_failure with
+  | Some _ -> { bridge_state; chat_events = [] }
+  | None when not (content_event_allowed bridge_state evt) ->
+    poison_scope bridge_state ~kind:Keeper_chat_events.Stream_event_after_terminal
+      ~reason:"content event arrived after the provider content became terminal"
+  | None ->
   match evt with
   | Connected ->
       { bridge_state; chat_events = [ Agent_core_stream_connected ] }
   | MessageStart { id; model; usage } ->
-      { bridge_state =
-          { bridge_state with
-            current_message_has_text = false
-          ; message_open = true
-          }
-      ;
-        chat_events =
-          [
-            Agent_core_stream_message_start
-              { provider_message_id = id; model; usage };
-          ]
-      }
-  | MessageDelta { stop_reason; usage } ->
-      { bridge_state;
-        chat_events = [ Agent_core_stream_message_delta { stop_reason; usage } ]
-      }
-  | MessageStop ->
-      (* Block indices are scoped to one provider message. A keeper dispatch is a
-         multi-turn tool loop: each AGENT_CORE call is a separate stream whose block
-         indices restart at 0. Clear the per-message block table at message end
-         so the next call's reused index cannot collide with a stale [Active_tool]
-         (the cross-message [tool_args_without_start] seen with deepseek-v4-flash
-         via ollama_cloud, an OpenAI-compat stream carrying no wire
-         content_block_stop). Close any tool block still open here with a
-         [Tool_call_end] rather than dropping it silently — with AGENT_CORE now emitting
-         balanced ContentBlockStop the open set is normally already empty. *)
-      let block_ends =
-        List.concat_map
-          (fun (index, block) ->
-            match block with
-            | Active_tool tool ->
-                [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
-            | Invalid_tool_block _ -> []
-            | Invalid_media_block -> []
-            | Active_media { media_type; source_type; chunks; encoded_bytes } ->
-                (* RFC-0301: media block still open at message end (no balanced
-                   ContentBlockStop) — persist and surface it rather than drop it
-                   silently on the block-table clear below. *)
-                finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes
-                  ~redact_text ~base_dir ~index ~media_type
-                  ~source_type ~chunks ~encoded_bytes)
-          bridge_state.blocks_by_index
+      let incoming_start = id, model, usage in
+      let provider_message_id =
+        if String.trim id = "" then None else Some id
       in
-      { bridge_state =
-          { blocks_by_index = []
-          ; current_message_has_text = false
-          ; last_completed_message_has_text =
-              bridge_state.current_message_has_text
-          ; message_open = false
-          ; text_by_index = []
-          ; text_dedup_logged = bridge_state.text_dedup_logged
-          ; max_wire_bytes = bridge_state.max_wire_bytes
-          }
-      ;
-        chat_events = block_ends @ [ Agent_core_stream_message_stop ]
-      }
+      let message_start =
+        Agent_core_stream_message_start
+          { provider_message_id = id; model; usage }
+      in
+      if bridge_state.stream_phase <> Accepting_content
+      then
+        poison_scope bridge_state ~kind:Stream_event_after_terminal
+          ~reason:"MessageStart arrived after the provider message became terminal"
+      else if Option.is_none bridge_state.current_message_start
+      then
+        { bridge_state =
+            { bridge_state with
+              current_message_has_text = false
+            ; message_open = true
+            ; current_provider_message_id = provider_message_id
+            ; current_message_start = Some incoming_start
+            }
+        ; chat_events = [ message_start ]
+        }
+      else if
+        Option.equal message_start_equal
+          (Some incoming_start) bridge_state.current_message_start
+      then { bridge_state; chat_events = [ message_start ] }
+      else
+        let poisoned =
+          poison_scope bridge_state ~kind:Tool_message_start_conflict
+            ~reason:"conflicting MessageStart invalidated the provider stream scope"
+        in
+        { poisoned with chat_events = message_start :: poisoned.chat_events }
+  | MessageDelta { stop_reason; usage } ->
+      let message_delta = Agent_core_stream_message_delta { stop_reason; usage } in
+      (match bridge_state.stream_phase, stop_reason with
+       | Accepting_content, None ->
+         { bridge_state; chat_events = [ message_delta ] }
+       | Accepting_content, Some stop_reason ->
+         let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
+         { bridge_state =
+             { closed.bridge_state with
+               stream_phase = Stop_reason_seen stop_reason
+             }
+         ; chat_events = message_delta :: closed.chat_events
+         }
+       | Stop_reason_seen _, None ->
+         { bridge_state; chat_events = [ message_delta ] }
+       | Stop_reason_seen recorded, Some replay when recorded = replay ->
+         { bridge_state; chat_events = [ message_delta ] }
+       | Stop_reason_seen _, Some _
+       | Message_stopped, None
+       | Message_stopped, Some _ ->
+         poison_scope bridge_state ~kind:Stream_event_after_terminal
+           ~reason:"MessageDelta conflicted with the frozen terminal state")
+  | MessageStop ->
+      (match bridge_state.stream_phase with
+       | Message_stopped ->
+         { bridge_state; chat_events = [ Agent_core_stream_message_stop ] }
+       | Accepting_content | Stop_reason_seen _ ->
+         let closed = close_open_content_blocks ~redact_text ~base_dir bridge_state in
+         { bridge_state =
+             { closed.bridge_state with
+               stream_phase = Message_stopped
+             ; current_message_has_text = false
+             ; last_completed_message_has_text =
+                 bridge_state.current_message_has_text
+             ; message_open = false
+             }
+         ; chat_events = closed.chat_events @ [ Agent_core_stream_message_stop ]
+         })
   | Ping ->
       { bridge_state; chat_events = [ Agent_core_stream_ping ] }
   | Timeout reason ->
@@ -308,77 +624,82 @@ let translate ~redact_text ~base_dir bridge_state
         chat_events =
           [ Event_error { message = redact_text ("Timeout: " ^ reason) } ]
       }
+  | ContentBlockDelta { index; delta = TextSnapshot _ } ->
+      poison_scope bridge_state ~kind:Sse_parse_failed
+        ~reason:
+          (Printf.sprintf
+             "unresolved text snapshot crossed the canonical stream boundary at index %d"
+             index)
   | ContentBlockDelta { index; delta = TextDelta text } -> (
-      let accumulated =
-        (* [text_by_index] is deterministic local bridge state keyed by
-           content-block index; absent key = no prior text. DET-OK *)
-        Option.value ~default:"" (List.assoc_opt index bridge_state.text_by_index)
-      in
-      match classify_text_delta ~accumulated text with
-      | Append_delta ->
-          { bridge_state =
-              { bridge_state with
-                current_message_has_text =
-                  bridge_state.current_message_has_text || not (String.equal text "")
-              ; text_by_index =
-                  (index, accumulated ^ text)
-                  :: List.remove_assoc index bridge_state.text_by_index
-              }
-          ; chat_events = [ Text_delta (redact_text text) ]
-          }
-      | Snapshot_reconcile suffix ->
-          (* Cumulative snapshot: the provider re-sent the accumulated text and
-             then some.  Forward only the suffix; [suffix] is non-empty by
-             construction. *)
-          observe_text_dedup ~already_logged:bridge_state.text_dedup_logged
-            ~action:"reconcile" ~index ~accumulated_bytes:(String.length accumulated)
-            ~delta_bytes:(String.length text);
-          { bridge_state =
-              { bridge_state with
-                current_message_has_text = true
-              ; text_by_index =
-                  (index, text) :: List.remove_assoc index bridge_state.text_by_index
-              ; text_dedup_logged = true
-              }
-          ; chat_events = [ Text_delta (redact_text suffix) ]
-          }
-      | Duplicate_retransmission ->
-          (* Exact retransmission of bytes already delivered for this block:
-             drop so the user never sees the same string twice. *)
-          observe_text_dedup ~already_logged:bridge_state.text_dedup_logged
-            ~action:"drop" ~index ~accumulated_bytes:(String.length accumulated)
-            ~delta_bytes:(String.length text);
-          { bridge_state = { bridge_state with text_dedup_logged = true }
-          ; chat_events = []
-          })
+      match
+        reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"text"
+          bridge_state
+      with
+      | Some rejected -> rejected
+      | None ->
+        let bridge_state = occupy_non_tool_index bridge_state index in
+        { bridge_state =
+            { bridge_state with
+              current_message_has_text =
+                bridge_state.current_message_has_text || not (String.equal text "")
+            }
+        ; chat_events = [ Text_delta (redact_text text) ]
+        })
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
-      { bridge_state;
-        chat_events =
-          [ Agent_core_thinking_delta { index; delta = redact_text text } ]
-      }
+      (match
+         reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"thinking"
+           bridge_state
+       with
+       | Some rejected -> rejected
+       | None ->
+         { bridge_state = occupy_non_tool_index bridge_state index
+         ; chat_events =
+             [ Agent_core_thinking_delta { index; delta = redact_text text } ]
+         })
   | ContentBlockDelta
       { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
       (* MiniMax split-reasoning stream (#2347): project the reasoning payload
          through the thinking-delta lane so keepers surface it like other
          provider reasoning. AGENT_CORE owns the typed text projection. *)
-      let text =
-        Agent_core.Types.reasoning_details_text ~reasoning_content ~details
-      in
-      { bridge_state;
-        chat_events = [ Agent_core_thinking_delta { index; delta = redact_text text } ]
-      }
+      (match
+         reject_non_input_tool_delta ~stream_scope ~index
+           ~delta_kind:"reasoning-details" bridge_state
+       with
+       | Some rejected -> rejected
+       | None ->
+         let bridge_state = occupy_non_tool_index bridge_state index in
+         let text =
+           Agent_core.Types.reasoning_details_text ~reasoning_content ~details
+         in
+         { bridge_state
+         ; chat_events =
+             [ Agent_core_thinking_delta { index; delta = redact_text text } ]
+         })
   | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
-      { bridge_state;
-        chat_events =
-          [ Agent_core_thinking_signature_delta
-              { index; signature_bytes = String.length signature } ]
-      }
+      (match
+         reject_non_input_tool_delta ~stream_scope ~index
+           ~delta_kind:"thinking-signature" bridge_state
+       with
+       | Some rejected -> rejected
+       | None ->
+         { bridge_state = occupy_non_tool_index bridge_state index
+         ; chat_events =
+             [ Agent_core_thinking_signature_delta
+                 { index; signature_bytes = String.length signature }
+             ]
+         })
   | ContentBlockDelta
       { index; delta = MediaDelta { media_type; source_type; data } } ->
       (* RFC-0301: accumulate the media payload across chunks in the block state;
          the persisted URL is emitted once at the block stop (or at message end if
          the stream never closes the block), not a per-chunk count. *)
-      (match stream_block_for_index bridge_state index with
+      (match
+         reject_non_input_tool_delta ~stream_scope ~index ~delta_kind:"media"
+           bridge_state
+       with
+       | Some rejected -> rejected
+       | None ->
+       match stream_block_for_index bridge_state index with
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type
          ->
@@ -401,17 +722,27 @@ let translate ~redact_text ~base_dir bridge_state
                    ~reason:"media delta metadata changed for active media block"
                    Media_delta_invalid_block ]
            }
+       | Some Occupied_non_tool_block ->
+         { bridge_state
+         ; chat_events =
+             [ protocol_error ~index
+                 ~reason:"media delta arrived for an occupied non-tool block"
+                 Media_delta_invalid_block
+             ]
+         }
        | Some (Active_tool tool) ->
            { bridge_state;
              chat_events =
-               [ protocol_error ~index ~tool_call_id:tool.tool_call_id
+               [ protocol_error ~index ?tool_call_id:tool.tool_call_id
                    ~reason:"media delta arrived for an active tool block"
                    Media_delta_invalid_block ]
            }
-      | Some (Invalid_tool_block { failed_tool_call_id }) ->
+      | Some
+          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
           { bridge_state;
             chat_events =
-              [ protocol_error ?tool_call_id:failed_tool_call_id ~index
+              [ protocol_error ?quarantined_occurrence
+                  ?tool_call_id:failed_tool_call_id ~index
                   ~reason:"media delta arrived for an invalid tool block"
                   Media_delta_invalid_block ]
           }
@@ -431,36 +762,66 @@ let translate ~redact_text ~base_dir bridge_state
                 }))
   | ContentBlockStart { index; content_type; tool_id; tool_name }
     when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name -> (
-      match tool_id, tool_name with
-      | Some tid, Some tname
-        when String.trim tid <> "" && String.trim tname <> "" ->
-      let tool = { tool_call_id = tid; tool_call_name = tname } in
+      let tool_call_id =
+        Option.bind tool_id (fun id ->
+          if String.trim id = "" then None else Some id)
+      in
+      match tool_call_id, tool_name with
+      | Some _, Some tname when String.trim tname <> "" ->
+      let occurrence = tool_occurrence bridge_state ~stream_scope ~block_index:index in
+      let tool =
+        { occurrence
+        ; tool_call_id
+        ; tool_call_name = tname
+        ; args_fragments = []
+        }
+      in
       let existing_block = stream_block_for_index bridge_state index in
       let block_start =
-        content_block_start_event ~index ~content_type ~tool_id:(Some tid)
+        content_block_start_event ~index ~content_type ~tool_id
           ~tool_name:(Some tname)
       in
       (match existing_block with
-       | Some (Active_tool existing) when tool_start_is_replay existing tool ->
+       | Some (Active_tool existing)
+         when tool_start_is_replay existing tool && existing.args_fragments = [] ->
            { bridge_state; chat_events = [ block_start ] }
        | Some (Active_tool existing) ->
            { bridge_state =
-               invalidate_block bridge_state index
-                 ~failed_tool_call_id:(Some existing.tool_call_id);
+               invalidate_block ~quarantined_occurrence:existing.occurrence
+                 bridge_state index
+                 ~failed_tool_call_id:existing.tool_call_id;
              chat_events =
                [ block_start;
-                 protocol_error ~index ~tool_call_id:existing.tool_call_id
+                 protocol_error ~quarantined_occurrence:existing.occurrence
+                   ~index ?tool_call_id:existing.tool_call_id
                    ~reason:
                      (Printf.sprintf
                         "tool-use block index already active: existing tool %s/%s, incoming tool %s/%s"
-                        existing.tool_call_id existing.tool_call_name tid tname)
+                        (Option.value ~default:"<provider-id-absent>"
+                           existing.tool_call_id)
+                        existing.tool_call_name
+                        (Option.value ~default:"<provider-id-absent>" tool_call_id)
+                        tname)
                    Tool_start_duplicate_index ]
            }
-       | Some (Invalid_tool_block { failed_tool_call_id }) ->
+       | Some Occupied_non_tool_block ->
+         { bridge_state =
+             invalidate_block bridge_state index
+               ~failed_tool_call_id:tool_call_id
+         ; chat_events =
+             [ block_start
+             ; protocol_error ~index ?tool_call_id
+                 ~reason:"tool-use block start arrived for an occupied index"
+                 Tool_start_duplicate_index
+             ]
+         }
+       | Some
+           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
            { bridge_state;
              chat_events =
                [ block_start;
-                 protocol_error ?tool_call_id:failed_tool_call_id ~index
+                 protocol_error ?quarantined_occurrence
+                   ?tool_call_id:failed_tool_call_id ~index
                    ~reason:"tool-use block index already invalid"
                    Tool_start_duplicate_index ]
            }
@@ -483,71 +844,154 @@ let translate ~redact_text ~base_dir bridge_state
                    Tool_start_duplicate_index ]
            }
        | None ->
-           { bridge_state = replace_block bridge_state index (Active_tool tool);
-             chat_events =
-               [ block_start;
-                 Tool_call_start { tool_call_id = tid; tool_call_name = tname } ]
-           })
-      | _ ->
+           (match finalized_tool_for_occurrence bridge_state occurrence with
+            | Some finalized ->
+              { bridge_state =
+                  invalidate_block
+                    ~quarantined_occurrence:finalized.occurrence
+                    bridge_state index
+                    ~failed_tool_call_id:finalized.tool_call_id
+              ; chat_events =
+                  [ block_start
+                  ; protocol_error
+                      ~quarantined_occurrence:finalized.occurrence
+                      ~index ?tool_call_id:finalized.tool_call_id
+                      ~reason:"tool-use block start arrived after block stop"
+                      Tool_start_duplicate_index
+                  ]
+              }
+            | None ->
+              { bridge_state = replace_block bridge_state index (Active_tool tool)
+              ; chat_events =
+                  [ block_start
+                  ; Tool_call_start
+                      { occurrence; tool_call_id; tool_call_name = tname }
+                  ]
+              }))
+      | None, _ | _, None | Some _, Some _ ->
           let block_start =
             content_block_start_event ~index ~content_type ~tool_id ~tool_name
           in
-          { bridge_state =
-              invalidate_block bridge_state index ~failed_tool_call_id:None;
-            chat_events =
-              [ block_start;
-                protocol_error ~index
-                  ~reason:"tool-use block start missed tool id or name"
-                  Tool_start_missing_identity ]
-          })
+          let invalidate ?quarantined_occurrence ?tool_call_id () =
+            { bridge_state =
+                invalidate_block ?quarantined_occurrence bridge_state index
+                  ~failed_tool_call_id:tool_call_id
+            ; chat_events =
+                [ block_start
+                ; protocol_error ?quarantined_occurrence ~index ?tool_call_id
+                    ~reason:"tool-use block start missed tool id or name"
+                    Tool_start_missing_identity
+                ]
+            }
+          in
+          (match stream_block_for_index bridge_state index with
+           | Some (Active_tool existing) ->
+             invalidate ~quarantined_occurrence:existing.occurrence
+               ?tool_call_id:existing.tool_call_id ()
+           | Some
+               (Invalid_tool_block
+                 { failed_tool_call_id; quarantined_occurrence }) ->
+             invalidate ?quarantined_occurrence
+               ?tool_call_id:failed_tool_call_id ()
+           | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+             invalidate ()
+           | None ->
+             let occurrence =
+               tool_occurrence bridge_state ~stream_scope ~block_index:index
+             in
+             (match finalized_tool_for_occurrence bridge_state occurrence with
+              | Some finalized ->
+                invalidate ~quarantined_occurrence:finalized.occurrence
+                  ?tool_call_id:finalized.tool_call_id ()
+              | None -> invalidate ())))
   | ContentBlockStart { index; content_type; tool_id; tool_name } ->
       let block_start =
         content_block_start_event ~index ~content_type ~tool_id ~tool_name
       in
-      if String.equal content_type Runtime_native_tools.stream_content_type
-      then { bridge_state; chat_events = [ block_start ] }
-      else if has_any_tool_identity ~tool_id ~tool_name then
+      let conflict ?quarantined_occurrence ?tool_call_id reason =
         { bridge_state =
-            invalidate_block bridge_state index
-              ~failed_tool_call_id:(Option.bind tool_id (fun id ->
-                   if String.trim id = "" then None else Some id));
-          chat_events =
-            [ block_start;
-              protocol_error ~index
-                ~reason:"non-tool content block carried tool id or name"
-                Tool_start_missing_identity ]
+            invalidate_block ?quarantined_occurrence bridge_state index
+              ~failed_tool_call_id:tool_call_id
+        ; chat_events =
+            [ block_start
+            ; protocol_error ?quarantined_occurrence ~index ?tool_call_id
+                ~reason Tool_start_duplicate_index
+            ]
         }
-      else { bridge_state; chat_events = [ block_start ] }
+      in
+      (match stream_block_for_index bridge_state index with
+       | Some (Active_tool existing) ->
+         conflict ~quarantined_occurrence:existing.occurrence
+           ?tool_call_id:existing.tool_call_id
+           "non-tool content block header replaced an active tool occurrence"
+       | Some
+           (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+         conflict ?quarantined_occurrence
+           ?tool_call_id:failed_tool_call_id
+           "non-tool content block header reused an invalid index"
+       | Some (Occupied_non_tool_block | Active_media _ | Invalid_media_block) ->
+         { bridge_state; chat_events = [ block_start ] }
+       | None ->
+         let occurrence =
+           tool_occurrence bridge_state ~stream_scope ~block_index:index
+         in
+         (match finalized_tool_for_occurrence bridge_state occurrence with
+          | Some finalized ->
+            conflict ~quarantined_occurrence:finalized.occurrence
+              ?tool_call_id:finalized.tool_call_id
+              "non-tool content block header reused a closed tool occurrence"
+          | None ->
+            if stream_start_is_media content_type
+            then { bridge_state; chat_events = [ block_start ] }
+            else
+              { bridge_state =
+                  replace_block bridge_state index Occupied_non_tool_block
+              ; chat_events = [ block_start ]
+              }))
   | ContentBlockDelta { index; delta = InputJsonDelta args } ->
-      tool_args_event ~redact_text ~snapshot:false bridge_state index args
+      tool_args_event ~redact_text ~stream_scope ~snapshot:false bridge_state index args
   | ContentBlockDelta { index; delta = InputJsonSnapshot args } ->
-      tool_args_event ~redact_text ~snapshot:true bridge_state index args
+      tool_args_event ~redact_text ~stream_scope ~snapshot:true bridge_state index args
   | ContentBlockStop { index } -> (
       let block_stop = content_block_stop_event ~index in
       match stream_block_for_index bridge_state index with
       | Some (Active_tool tool) ->
-          { bridge_state = remove_block bridge_state index;
+          let bridge_state =
+            remove_block bridge_state index
+            |> fun state -> remember_finalized_tool state tool
+          in
+          { bridge_state;
             chat_events =
-              [ block_stop; Tool_call_end { tool_call_id = tool.tool_call_id } ]
+              [ block_stop
+              ; Tool_call_end
+                  { occurrence = tool.occurrence
+                  ; tool_call_id = tool.tool_call_id
+                  }
+              ]
           }
-      | Some (Invalid_tool_block { failed_tool_call_id }) ->
-          { bridge_state = remove_block bridge_state index;
-            chat_events =
+      | Some Occupied_non_tool_block ->
+        { bridge_state; chat_events = [ block_stop ] }
+      | Some
+          (Invalid_tool_block { failed_tool_call_id; quarantined_occurrence }) ->
+          { bridge_state
+          ; chat_events =
               [ block_stop;
-                protocol_error ?tool_call_id:failed_tool_call_id ~index
+                protocol_error ?quarantined_occurrence
+                  ?tool_call_id:failed_tool_call_id ~index
                   ~reason:"content block stop arrived for invalid tool block"
                   Tool_stop_without_start ]
           }
       | Some Invalid_media_block ->
-          { bridge_state = remove_block bridge_state index;
-            chat_events = [ block_stop ]
+          { bridge_state
+          ; chat_events = [ block_stop ]
           }
       | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           (* RFC-0301: the media block is complete — concat the accumulated chunks,
              persist to the media store, and emit the reader-facing URL (not a
              byte count). *)
-          { bridge_state = remove_block bridge_state index;
-            chat_events =
+          { bridge_state =
+              replace_block bridge_state index Occupied_non_tool_block
+          ; chat_events =
               block_stop
               :: finalize_media_block ~max_wire_bytes:bridge_state.max_wire_bytes
                    ~redact_text ~base_dir ~index ~media_type
@@ -561,78 +1005,97 @@ let translate ~redact_text ~base_dir bridge_state
         | None -> message
         | Some error_type -> error_type ^ ": " ^ message
       in
-      { bridge_state;
-        chat_events =
-          [ protocol_error ?event_type:error_type ~reason:(redact_text message)
-              Sse_error;
-            Event_error
-              { message = redact_text ("Provider stream error: " ^ reason) } ]
-      }
+      poison_scope_with bridge_state ~kind:Sse_error
+        ~reason:(redact_text message)
+        ~diagnostic:
+          (protocol_error ?event_type:error_type ~reason:(redact_text message)
+             Sse_error)
+        [ Event_error
+            { message = redact_text ("Provider stream error: " ^ reason) }
+        ]
   | NDJSONError { message; error_type; raw } ->
       let reason =
         match error_type with
         | None -> message
         | Some error_type -> error_type ^ ": " ^ message
       in
-      { bridge_state;
-        chat_events =
-          [ protocol_error ?event_type:error_type
-              ~reason:(redact_text message)
-              ~raw_bytes:(String.length raw)
-              Ndjson_error;
-            Event_error
-              { message =
-                  redact_text ("Provider NDJSON stream error: " ^ reason) } ]
-      }
+      poison_scope_with bridge_state ~kind:Ndjson_error
+        ~reason:(redact_text message)
+        ~diagnostic:
+          (protocol_error ?event_type:error_type
+             ~reason:(redact_text message)
+             ~raw_bytes:(String.length raw)
+             Ndjson_error)
+        [ Event_error
+            { message =
+                redact_text ("Provider NDJSON stream error: " ^ reason) }
+        ]
   | SSEParseFailed { raw; reason } ->
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~reason:(redact_text reason)
-              ~raw_bytes:(String.length raw) Sse_parse_failed;
-            Event_error
-              { message =
-                  redact_text ("Provider stream parse failed: " ^ reason) } ]
-      }
+      poison_scope_with bridge_state ~kind:Sse_parse_failed
+        ~reason:(redact_text reason)
+        ~diagnostic:
+          (protocol_error ~reason:(redact_text reason)
+             ~raw_bytes:(String.length raw) Sse_parse_failed)
+        [ Event_error
+            { message =
+                redact_text ("Provider stream parse failed: " ^ reason) }
+        ]
   | NDJSONParseFailed { raw; reason } ->
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~reason:(redact_text reason)
-              ~raw_bytes:(String.length raw) Ndjson_parse_failed;
-            Event_error
-              { message =
-                  redact_text ("Provider NDJSON stream parse failed: " ^ reason) } ]
-      }
+      poison_scope_with bridge_state ~kind:Ndjson_parse_failed
+        ~reason:(redact_text reason)
+        ~diagnostic:
+          (protocol_error ~reason:(redact_text reason)
+             ~raw_bytes:(String.length raw) Ndjson_parse_failed)
+        [ Event_error
+            { message =
+                redact_text ("Provider NDJSON stream parse failed: " ^ reason) }
+        ]
   | SSEUnknownEventType { event_type; raw } ->
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~event_type ~raw_bytes:(String.length raw)
-              Sse_unknown_event_type ]
-      }
+      poison_scope_with bridge_state ~kind:Sse_unknown_event_type
+        ~reason:("unknown provider event type: " ^ event_type)
+        ~diagnostic:
+          (protocol_error ~event_type ~raw_bytes:(String.length raw)
+             Sse_unknown_event_type)
+        []
   | SSEUnsupportedPart { provider_kind; part; raw } ->
       let provider = Agent_core.Llm_provider.Provider_kind.to_string provider_kind in
       let reason = redact_text (Printf.sprintf "%s.part.%s" provider part) in
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~event_type:part ~reason
-              ~raw_bytes:(String.length raw) Sse_unsupported_part;
-            Event_error
-              { message = "Provider stream capability unsupported: " ^ reason } ]
-      }
+      poison_scope_with bridge_state ~kind:Sse_unsupported_part ~reason
+        ~diagnostic:
+          (protocol_error ~event_type:part ~reason
+             ~raw_bytes:(String.length raw) Sse_unsupported_part)
+        [ Event_error
+            { message = "Provider stream capability unsupported: " ^ reason }
+        ]
   | SSEUnsupportedResponse { provider_kind; response; raw } ->
       let provider = Agent_core.Llm_provider.Provider_kind.to_string provider_kind in
       let reason = redact_text (Printf.sprintf "%s.response.%s" provider response) in
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~event_type:response ~reason
-              ~raw_bytes:(String.length raw) Sse_unsupported_response;
-            Event_error
-              { message = "Provider stream capability unsupported: " ^ reason } ]
-      }
+      poison_scope_with bridge_state ~kind:Sse_unsupported_response ~reason
+        ~diagnostic:
+          (protocol_error ~event_type:response ~reason
+             ~raw_bytes:(String.length raw) Sse_unsupported_response)
+        [ Event_error
+            { message = "Provider stream capability unsupported: " ^ reason }
+        ]
   | StreamIncomplete { reason } ->
-      { bridge_state;
-        chat_events =
-          [ protocol_error ~reason:(redact_text reason) Sse_stream_incomplete;
-            Event_error
-              { message =
-                  redact_text ("Provider stream incomplete: " ^ reason) } ]
+      let redacted_reason = redact_text reason in
+      let quarantined =
+        poison_scope bridge_state ~kind:Sse_stream_incomplete
+          ~reason:redacted_reason
+      in
+      { quarantined with
+        bridge_state =
+          { quarantined.bridge_state with
+            scope_failure = bridge_state.scope_failure
+          ; message_open = bridge_state.message_open
+          }
+      ; chat_events =
+          (if tools_in_current_scope bridge_state = []
+           then []
+           else quarantined.chat_events)
+          @ [ protocol_error ~reason:redacted_reason Sse_stream_incomplete
+            ; Event_error
+                { message =
+                    redact_text ("Provider stream incomplete: " ^ reason) }
+            ]
       }

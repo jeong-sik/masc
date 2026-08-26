@@ -56,6 +56,7 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks
+  ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator

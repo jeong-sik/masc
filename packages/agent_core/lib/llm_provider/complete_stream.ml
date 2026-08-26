@@ -18,6 +18,42 @@ let emit_stream_event on_event evt =
       (Printexc.to_string exn)
 ;;
 
+let stream_error_event = function
+  | Types.Stream_provider_error { message; error_type; raw } ->
+    Types.SSEError { message; error_type; raw }
+  | Types.Stream_parse_failed { reason; raw } ->
+    Types.SSEParseFailed { reason; raw }
+  | Types.Stream_ndjson_parse_failed { reason; raw } ->
+    Types.NDJSONParseFailed { reason; raw }
+  | Types.Stream_incomplete { reason } -> Types.StreamIncomplete { reason }
+  | Types.Stream_unknown_event { event_type; raw } ->
+    Types.SSEUnknownEventType { event_type; raw }
+  | Types.Stream_unsupported_part { provider_kind; part; raw } ->
+    Types.SSEUnsupportedPart { provider_kind; part; raw }
+  | Types.Stream_unsupported_response { provider_kind; response; raw } ->
+    Types.SSEUnsupportedResponse { provider_kind; response; raw }
+;;
+
+let event_carries_stream_failure = function
+  | Types.SSEError _
+  | Types.NDJSONError _
+  | Types.SSEParseFailed _
+  | Types.NDJSONParseFailed _
+  | Types.SSEUnknownEventType _
+  | Types.SSEUnsupportedPart _
+  | Types.SSEUnsupportedResponse _ -> true
+  | Types.Connected
+  | Types.MessageStart _
+  | Types.ContentBlockStart _
+  | Types.ContentBlockDelta _
+  | Types.ContentBlockStop _
+  | Types.MessageDelta _
+  | Types.MessageStop
+  | Types.Ping
+  | Types.Timeout _
+  | Types.StreamIncomplete _ -> false
+;;
+
 let record_streaming_metrics (metrics : Metrics.t) = function
   | Telemetry_event.Streaming_first_chunk { provider; model; ttfrc_ms = Some ttfrc_ms; _ }
     -> metrics.on_streaming_first_chunk ~provider ~model_id:model ~ttfrc_ms
@@ -406,7 +442,7 @@ let complete_stream_http
         | Types.MessageStart _ -> `Skip
         | Types.ContentBlockStart { content_type = "tool_use"; _ } -> `Tool_call_start
         | Types.ContentBlockStart _ -> `Substrate
-        | Types.ContentBlockDelta { delta = TextDelta _; _ } -> `Answer
+        | Types.ContentBlockDelta { delta = TextDelta _ | TextSnapshot _; _ } -> `Answer
         | Types.ContentBlockDelta { delta = MediaDelta _; _ } -> `Answer
         | Types.ContentBlockDelta { delta = ThinkingDelta _; _ } -> `Thinking
         | Types.ContentBlockDelta { delta = ReasoningDetailsDelta _; _ } -> `Thinking
@@ -515,8 +551,9 @@ let complete_stream_http
               | None -> ()
               | Some observe -> observe ~provider ~model ~chunk
             in
-            let body_logic () =
+              let body_logic () =
               let acc = Complete_stream_acc.create_stream_acc () in
+              let failure_emitted = ref false in
               let openai_state = ref None in
               let streaming_reasoning =
                 (Reasoning_dialect.for_provider_config config).streaming
@@ -547,60 +584,70 @@ let complete_stream_http
                      first_event_at_ref := Some elapsed_ms
                    | Some _ | None -> ());
                   stream_idle_state := Http_client.Awaiting_first_delta);
-                if
-                  Option.is_none !first_token_at_ref
-                  && List.exists Streaming.sse_event_is_first_token_signal events
-                then first_token_at_ref := elapsed_ms;
+                let project_event emitted_evt =
+                  if
+                    Option.is_none !first_token_at_ref
+                    && Streaming.sse_event_is_first_token_signal emitted_evt
+                  then first_token_at_ref := elapsed_ms;
+                  emit_stream_event on_event emitted_evt;
+                  match classify_chunk_kind emitted_evt with
+                  | `Skip -> ()
+                  | `Thinking ->
+                    stream_idle_state := Http_client.Streaming_thinking;
+                    incr n_thinking
+                  | `Answer ->
+                    stream_idle_state := Http_client.Streaming_answer;
+                    incr n_answer
+                  | `Tool_call_start ->
+                    stream_idle_state := Http_client.Streaming_tool_call;
+                    incr n_tool_call_start
+                  | `Tool_call_arg_delta ->
+                    stream_idle_state := Http_client.Streaming_tool_call;
+                    incr n_tool_call_arg_delta
+                  | `Tool_call_complete ->
+                    stream_idle_state := Http_client.Streaming_tool_call;
+                    incr n_tool_call_complete
+                  | `Substrate ->
+                    stream_idle_state := Http_client.Streaming_substrate;
+                    incr n_substrate
+                  | `Heartbeat ->
+                    stream_idle_state := Http_client.Streaming_heartbeat;
+                    incr n_heartbeat
+                  | `Done ->
+                    stream_idle_state := Http_client.Streaming_done;
+                    incr n_done
+                  | `Wire_error format ->
+                    stream_idle_state := Http_client.Streaming_unknown;
+                    terminal_state
+                    := Telemetry_event.Terminal_error
+                         (Complete_stream_error.wire_error_terminal_label format)
+                  | `Provider_reported_error ->
+                    stream_idle_state := Http_client.Streaming_unknown;
+                    terminal_state
+                    := Telemetry_event.Terminal_error
+                         Complete_stream_error.provider_reported_terminal_label
+                  | `Capability_mismatch ->
+                    stream_idle_state := Http_client.Streaming_unknown;
+                    terminal_state
+                    := Telemetry_event.Terminal_error
+                         Complete_stream_error.capability_mismatch_terminal_label
+                in
                 List.iter
                   (fun evt ->
-                     emit_stream_event on_event evt;
-                     Complete_stream_acc.accumulate_event acc evt;
-                     (* Agent Core contract: classify each delta for the
-                        [Streaming_summary] kind_breakdown that fires at
-                        finalize. Wire errors set terminal_state; per-chunk
-                        emission of [Streaming_chunk_n] is no longer
-                        published — only the lifecycle summary is. *)
-                     match classify_chunk_kind evt with
-                     | `Skip -> ()
-                     | `Thinking ->
-                       stream_idle_state := Http_client.Streaming_thinking;
-                       incr n_thinking
-                     | `Answer ->
-                       stream_idle_state := Http_client.Streaming_answer;
-                       incr n_answer
-                     | `Tool_call_start ->
-                       stream_idle_state := Http_client.Streaming_tool_call;
-                       incr n_tool_call_start
-                     | `Tool_call_arg_delta ->
-                       stream_idle_state := Http_client.Streaming_tool_call;
-                       incr n_tool_call_arg_delta
-                     | `Tool_call_complete ->
-                       stream_idle_state := Http_client.Streaming_tool_call;
-                       incr n_tool_call_complete
-                     | `Substrate ->
-                       stream_idle_state := Http_client.Streaming_substrate;
-                       incr n_substrate
-                     | `Heartbeat ->
-                       stream_idle_state := Http_client.Streaming_heartbeat;
-                       incr n_heartbeat
-                     | `Done ->
-                       stream_idle_state := Http_client.Streaming_done;
-                       incr n_done
-                     | `Wire_error format ->
-                       stream_idle_state := Http_client.Streaming_unknown;
-                       terminal_state
-                       := Telemetry_event.Terminal_error
-                            (Complete_stream_error.wire_error_terminal_label format)
-                     | `Provider_reported_error ->
-                       stream_idle_state := Http_client.Streaming_unknown;
-                       terminal_state
-                       := Telemetry_event.Terminal_error
-                            Complete_stream_error.provider_reported_terminal_label
-                     | `Capability_mismatch ->
-                       stream_idle_state := Http_client.Streaming_unknown;
-                       terminal_state
-                       := Telemetry_event.Terminal_error
-                            Complete_stream_error.capability_mismatch_terminal_label)
+                     if not (Complete_stream_acc.stream_failed acc)
+                     then
+                       match Complete_stream_acc.resolve_event acc evt with
+                       | Types.Stream_event_accepted emitted_evt ->
+                         project_event emitted_evt
+                       | Types.Stream_event_suppressed -> ()
+                       | Types.Stream_event_rejected failure ->
+                         failure_emitted := true;
+                         let emitted_evt =
+                           if event_carries_stream_failure evt
+                           then evt
+                           else stream_error_event failure
+                         in
+                         project_event emitted_evt)
                   events;
                 (* No thinking-only wall-clock cutoff: active reasoning
                      deltas ARE stream liveness. [stream_idle_timeout_s]
@@ -857,6 +904,10 @@ let complete_stream_http
                   match Complete_stream_acc.finalize_stream_acc acc with
                   | Ok _ as ok -> ok
                   | Error serr ->
+                    if not !failure_emitted
+                    then (
+                      failure_emitted := true;
+                      emit_stream_event on_event (stream_error_event serr));
                     (match !terminal_state with
                      | Telemetry_event.Terminal_done ->
                        terminal_state

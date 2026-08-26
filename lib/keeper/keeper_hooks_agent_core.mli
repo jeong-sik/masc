@@ -153,6 +153,25 @@ val emit_cost_event :
 
 (** {1 Hook factory} *)
 
+type tool_stream_observation =
+  | Runtime_attempt_started of
+      { runtime_id : string
+      ; lane_attempt_index : int
+      ; checkpoint_owner : Runtime_execution.checkpoint_owner
+      }
+      (** The turn driver resolved this exact lane candidate and is about to
+          dispatch it. This is the attempt boundary for streamed occurrences;
+          assignment ids and provider message ids are not substitutes. *)
+  | Turn_collected of
+      { turn : int
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
+      (** Agent Core retained the exact pre-admission mapping before tools run. *)
+  | Turn_closed_without_sources of { turn : int }
+      (** A producer without a pre-admission sidecar completed the turn. Its
+          streamed calls stay delivery-only; no ordinal or provider-id guess
+          is allowed to attach a canonical execution. *)
+
 val make_hooks :
   config:Workspace.config ->
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
@@ -160,6 +179,7 @@ val make_hooks :
   trace_id:string ->
   keeper_turn_id:int ->
   on_after_turn_ordinal:(int -> unit) ->
+  ?on_tool_stream_observation:(tool_stream_observation -> unit) ->
   ?on_after_turn_response:(response:Agent_core.Types.api_response -> unit) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
@@ -167,16 +187,23 @@ val make_hooks :
                      success:bool ->
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
-  ?on_tool_result_ready:(tool_call_id:string -> unit) ->
+  ?tool_result_commit_required:(unit -> bool) ->
+  ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_core.Hooks.hooks
 (** Build the [Agent_core.Hooks.hooks] record used by the keeper turn loop:
     passive pre-tool timing, post-tool accounting, idle detection, and
-    trajectory hooks wired together. [on_after_turn_response] observes each
-    provider turn's assistant response right after the turn ordinal is
-    recorded. [on_tool_result_ready] runs only after
-    the exact tool-call log row is synchronously committed. Cost remains part of post-turn
-    observation. *)
+    trajectory hooks wired together. [on_tool_stream_observation] reports an
+    exact Agent Core admission mapping or an unavailable-sidecar turn close
+    without conflating those states.
+    [on_after_turn_response] observes each provider turn's assistant
+    response right after the turn ordinal is recorded. [on_tool_result_ready]
+    runs only after the exact tool-call log
+    row is synchronously committed and carries the provider call id, Agent
+    Core occurrence coordinates, and canonical execution id written to that
+    row. [tool_result_commit_required] makes log-commit failure strict only for
+    the active producer contract; official-client delivery-only attempts remain
+    best effort. Cost remains part of post-turn observation. *)
 
 val hook_introspection_json : unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard

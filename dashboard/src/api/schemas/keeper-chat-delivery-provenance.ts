@@ -29,8 +29,8 @@ export const KeeperChatDeliveryKeySchema = Schema.Union(
     request_id: KeeperRequestIdSchema,
   }),
   Schema.Struct({
-    kind: Schema.Literal('continuation'),
-    intent_id: KeeperRequestIdSchema,
+    kind: Schema.Literal('workspace_message'),
+    request_id: KeeperRequestIdSchema,
   }),
 )
 
@@ -40,6 +40,10 @@ export const KeeperChatTranscriptSlotSchema = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal('tool_call'),
     execution_id: KeeperExecutionIdSchema,
+    ordinal: Schema.NonNegativeInt,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal('tool_delivery'),
     ordinal: Schema.NonNegativeInt,
   }),
 )

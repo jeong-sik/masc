@@ -839,6 +839,9 @@ export type ChatTraceToolStep = {
   kind: 'tool'
   name: string
   toolCallId?: string
+  executionId?: string
+  /** Live-only delivery occurrence. Provider IDs are not row identity. */
+  toolOccurrenceId?: string
   status?: 'pending' | 'ok' | 'err'
   dur?: string
   args?: string
@@ -974,6 +977,14 @@ export interface KeeperConversationEntry {
   // Exact append-once identity for history reconciliation. This preserves the
   // backend SSOT pair instead of flattening it into a role-qualified request id.
   deliveryProvenance?: KeeperChatDeliveryProvenance | null
+  // Canonical physical tool execution. Provider tool-call identity remains
+  // optional correlation data; neither conversation row identity nor output
+  // hydration substitutes one for the other.
+  executionId?: string | null
+  // Provider correlation is explicit data, never encoded in [id].
+  toolCallId?: string | null
+  // Live lifecycle state for selecting the current provider occurrence.
+  toolCallEnded?: boolean
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null

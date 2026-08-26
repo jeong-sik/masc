@@ -138,6 +138,7 @@ type trace_step =
   | Trace_tool of {
       name : string;
       tool_call_id : string option;
+      execution_id : Ids.Execution_id.t option;
       status : trace_tool_status option;
       dur : string option;
       args : Yojson.Safe.t option;
@@ -331,10 +332,21 @@ let trace_step_to_yojson = function
        @ Json_util.string_field_if_present "detail" detail
        @ Json_util.string_field_if_present "ts" ts)
   | Trace_tool
-      { name; tool_call_id; status; dur; args; result; ts; agent_core_block_index } ->
+      { name
+      ; tool_call_id
+      ; execution_id
+      ; status
+      ; dur
+      ; args
+      ; result
+      ; ts
+      ; agent_core_block_index
+      } ->
     `Assoc
       ([ ("kind", `String "tool"); ("name", `String name) ]
        @ Json_util.string_field_if_present "tool_call_id" tool_call_id
+       @ Json_util.string_field_if_present "execution_id"
+           (Option.map Ids.Execution_id.to_string execution_id)
        @ trace_status_to_yojson status
        @ Json_util.string_field_if_present "dur" dur
        @ opt_json_field "args" args
@@ -691,6 +703,11 @@ let block_of_yojson json : chat_block option =
                       (match get_step_string "tool_call_id" with
                        | Some _ as v -> v
                        | None -> get_step_string "toolCallId")
+                  ; execution_id =
+                      (match get_step_string "execution_id" with
+                       | Some raw when String.trim raw <> "" ->
+                         Some (Ids.Execution_id.of_string raw)
+                       | Some _ | None -> None)
                   ; status
                   ; dur = get_step_string "dur"
                   ; args = List.assoc_opt "args" step_fields

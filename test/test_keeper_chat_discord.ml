@@ -346,14 +346,22 @@ let test_tool_activity_uses_native_surface_without_messages () =
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-tool"; thread_id = "thread-tool" }
       ; Masc.Keeper_chat_events.Tool_call_start
-          { tool_call_id = "call-1"; tool_call_name = "keeper_surface_read" }
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-1"
+          ; tool_call_name = "keeper_surface_read"
+          }
       ; Masc.Keeper_chat_events.Tool_context_block
           { tool_call_id = "call-1"
           ; name = "keeper_surface_read"
           ; args_summary = "surface=discord"
           ; result_summary = Some "private tool result"
           }
-      ; Masc.Keeper_chat_events.Tool_call_end { tool_call_id = "call-1" }
+      ; Masc.Keeper_chat_events.Tool_call_end
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-1"
+          }
       ; Masc.Keeper_chat_events.Text_delta "done"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-tool" }
       ]

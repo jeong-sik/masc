@@ -96,6 +96,7 @@ let trace_step_of_trajectory = function
       (Keeper_chat_blocks.Trace_tool
          { name = tool_call.tool_name
          ; tool_call_id = None
+         ; execution_id = None
          ; status
          ; dur
          ; args = None

@@ -6,6 +6,7 @@ type t =
 
 type custom_event_name =
   | Connected
+  | Runtime_attempt_started
   | Stream_message_start
   | Stream_message_delta
   | Stream_message_stop
@@ -41,6 +42,7 @@ let ag_role (role : Keeper_chat_events.role) =
 
 let custom_event_name_to_string = function
   | Connected -> "KEEPER_CONNECTED"
+  | Runtime_attempt_started -> "KEEPER_RUNTIME_ATTEMPT_STARTED"
   | Stream_message_start -> "KEEPER_STREAM_MESSAGE_START"
   | Stream_message_delta -> "KEEPER_STREAM_MESSAGE_DELTA"
   | Stream_message_stop -> "KEEPER_STREAM_MESSAGE_STOP"
@@ -115,6 +117,8 @@ let project ~timestamp ~redact_text ~redact_json state event =
       state, Some (custom ~timestamp ~redact_json state External_effect_completed value)
   | Agent_core_stream_connected ->
       state, Some (custom ~timestamp ~redact_json state Connected `Null)
+  | Agent_core_runtime_attempt_started ->
+      state, Some (custom ~timestamp ~redact_json state Runtime_attempt_started `Null)
   | Agent_core_stream_message_start { provider_message_id; model; usage } ->
       let value =
         `Assoc
@@ -184,29 +188,42 @@ let project ~timestamp ~redact_text ~redact_json state event =
   | Continuation_checkpoint event ->
       state, Some (custom ~timestamp ~redact_json state Continuation_checkpoint
                      (continuation_checkpoint_to_json ~redact_text event))
-  | Tool_call_start { tool_call_id; tool_call_name } ->
+  | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
-             ~tool_call_name:(Some tool_call_name) Ag_ui.Tool_call_start) )
-  | Tool_call_args { tool_call_id; delta } ->
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_call_name:(Some tool_call_name)
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
+             Ag_ui.Tool_call_start) )
+  | Tool_call_args { occurrence; tool_call_id; delta } ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
              ~delta:(Some delta) Ag_ui.Tool_call_args) )
-  | Tool_call_args_snapshot { tool_call_id; snapshot } ->
+  | Tool_call_args_snapshot { occurrence; tool_call_id; snapshot } ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
              ~snapshot:(Some (`String snapshot)) Ag_ui.Tool_call_args) )
-  | Tool_call_end { tool_call_id } ->
+  | Tool_call_end { occurrence; tool_call_id } ->
       ( state
       , Some
           (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id:(Some tool_call_id)
+             ~run_id:state.run_id ~tool_call_id
+             ~tool_stream_scope:(Some occurrence.stream_scope)
+             ~provider_message_id:occurrence.provider_message_id
+             ~tool_call_block_index:(Some occurrence.block_index)
              Ag_ui.Tool_call_end) )
   | Tool_approval_requested { tool_call_id; tool_call_name; args; question; because } ->
       ( state
@@ -227,11 +244,19 @@ let project ~timestamp ~redact_text ~redact_json state event =
                 [ "tool_call_id", `String tool_call_id
                 ; "outcome", `String outcome
                 ])) )
-  | Tool_result_ready { tool_call_id } ->
+  | Tool_result_ready { occurrence; tool_call_id; execution_id } ->
       ( state
       , Some
           (custom ~timestamp ~redact_json state Tool_result_ready
-             (`Assoc [ "tool_call_id", `String tool_call_id ])) )
+             (`Assoc
+                ([ "toolStreamScope", `Int occurrence.stream_scope
+                 ; "toolCallBlockIndex", `Int occurrence.block_index
+                 ; "executionId", `String (Ids.Execution_id.to_string execution_id)
+                 ]
+                 @ json_opt "providerMessageId"
+                     (Option.map (fun value -> `String value) occurrence.provider_message_id)
+                 @ json_opt "toolCallId"
+                     (Option.map (fun value -> `String value) tool_call_id)))) )
   | Link_block _
   | Image_block _
   | Status_block _

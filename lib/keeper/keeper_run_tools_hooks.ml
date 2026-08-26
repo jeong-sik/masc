@@ -34,6 +34,7 @@ type agent_setup =
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks
+  ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
@@ -72,7 +73,12 @@ type ctx =
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
-  ; on_tool_result_ready : (tool_call_id:string -> unit) option
+  ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
+  ; tool_result_commit_required : unit -> bool
+  ; on_tool_result_ready :
+      (tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit) option
+  ; on_tool_stream_observation :
+      (Keeper_hooks_agent_core.tool_stream_observation -> unit) option
   ; tools : Agent_core.Tool.t list
   }
 
@@ -269,11 +275,13 @@ let assemble_hooks
         ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
         ~keeper_turn_id
         ~on_after_turn_ordinal:(fun turn -> final_agent_core_turn_ordinal_ref := Some turn)
+        ?on_tool_stream_observation:ctx.on_tool_stream_observation
         ~on_after_turn_response:
           (fun ~response ->
              Keeper_run_tools_hook_accumulator.record_assistant_turn_text
                acc
                response)
+        ~tool_result_commit_required:ctx.tool_result_commit_required
         ?on_tool_result_ready:ctx.on_tool_result_ready
         ?trajectory_acc
         ~on_tool_executed:
@@ -745,6 +753,7 @@ let assemble_hooks
       ; terminal_effect_state
       ; user_message
       ; hooks
+      ; on_runtime_attempt = ctx.on_runtime_attempt
       ; model_input_projection
       ; gate_replay_evidence
       ; acc

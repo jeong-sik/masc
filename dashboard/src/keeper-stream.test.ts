@@ -28,7 +28,11 @@ import {
   upsertTrackedKeeperChatOperation,
 } from './keeper-chat-operations-local'
 
-function assistantEntry(): void {
+function toolOccurrence(blockIndex = 0, streamScope = 0) {
+  return { toolStreamScope: streamScope, toolCallBlockIndex: blockIndex }
+}
+
+function assistantEntry(operationId?: string): void {
   appendThreadEntry('sangsu', {
     id: 'reply-1',
     role: 'assistant',
@@ -39,6 +43,9 @@ function assistantEntry(): void {
     timestamp: new Date().toISOString(),
     delivery: 'sending',
     streamState: 'opening',
+    ...(operationId
+      ? { deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant') }
+      : {}),
     details: null,
   })
 }
@@ -63,6 +70,42 @@ describe('Keeper operation stream projection', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('안녕')
     expect(entry?.delivery).toBe('streaming')
+  })
+
+  it('resets unfinished narrative at a runtime attempt boundary and keeps tool evidence', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      messageId: 'failed-message',
+      delta: 'failed reply',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 0, delta: 'failed reasoning' },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(1),
+      toolCallId: 'call-kept',
+      toolCallName: 'Read',
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_RUNTIME_ATTEMPT_STARTED',
+      value: null,
+    })).toBeNull()
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.rawText).toBe('')
+    expect(reply?.traceSteps).toEqual([
+      expect.objectContaining({ kind: 'tool', toolCallId: 'call-kept' }),
+    ])
+    expect(
+      keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'call-kept'),
+    ).toBeDefined()
   })
 
   const streamMessageOnce = (): void => {
@@ -602,17 +645,20 @@ describe('applyKeeperStreamEvent tool calls', () => {
   })
 
   it('streams a live tool-call entry above the assistant bubble', () => {
-    assistantEntry()
+    assistantEntry('kmsg-tool-1')
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-1',
       toolCallName: 'masc_status',
     })).toBeNull()
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: '{"fast":' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-1', delta: 'true}' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(), toolCallId: 'tc-1', delta: '{"fast":' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(), toolCallId: 'tc-1', delta: 'true}' })
 
     const thread = keeperThreads.value.sangsu ?? []
-    const toolIndex = thread.findIndex(entry => entry.id === 'tool-tc-1')
+    const toolIndex = thread.findIndex(entry => entry.toolCallId === 'tc-1')
     const replyIndex = thread.findIndex(entry => entry.id === 'reply-1')
     expect(toolIndex).toBeGreaterThanOrEqual(0)
     expect(toolIndex).toBeLessThan(replyIndex)
@@ -622,30 +668,46 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(tool.label).toBe('masc_status')
     expect(tool.text).toBe('{"fast":true}')
     expect(tool.delivery).toBe('streaming')
+    expect(tool.deliveryProvenance).toEqual({
+      delivery_key: { kind: 'operation', operation_id: 'kmsg-tool-1' },
+      transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
+    })
     const reply = thread[replyIndex]!
     expect(reply.traceSteps).toEqual([
       {
         kind: 'tool',
         name: 'masc_status',
         toolCallId: 'tc-1',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
         status: 'pending',
         args: '{"fast":true}',
         ts: expect.any(String),
+        agentCoreBlockIndex: 0,
       },
     ])
 
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-1' })
-    const argsFinished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END',
+      ...toolOccurrence(), toolCallId: 'tc-1' })
+    const argsFinished = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-1')
     expect(argsFinished?.delivery).toBe('streaming')
     expect(argsFinished?.streamState).toBe('streaming')
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-1' },
+      value: { ...toolOccurrence(), toolCallId: 'tc-1', executionId: 'exec-tc-1' },
     })
-    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-1')
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-1')
     expect(finished?.delivery).toBe('delivered')
     expect(finished?.streamState).toBeNull()
+    expect(finished?.executionId).toBe('exec-tc-1')
+    expect(finished?.deliveryProvenance).toEqual({
+      delivery_key: { kind: 'operation', operation_id: 'kmsg-tool-1' },
+      transcript_slot: {
+        kind: 'tool_call',
+        execution_id: 'exec-tc-1',
+        ordinal: 0,
+      },
+    })
   })
 
   it('preserves opaque provider tool-call ids throughout the live stream', () => {
@@ -653,26 +715,29 @@ describe('applyKeeperStreamEvent tool calls', () => {
     const toolCallId = '  tc-opaque \t'
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId,
       toolCallName: 'masc_status',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
       toolCallId,
       delta: '{}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
       toolCallId,
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: toolCallId },
+      value: { ...toolOccurrence(), toolCallId: toolCallId, executionId: 'exec-opaque' },
     })
 
     const thread = keeperThreads.value.sangsu ?? []
-    expect(thread.find(entry => entry.id === `tool-${toolCallId}`)).toMatchObject({
+    expect(thread.find(entry => entry.toolCallId === toolCallId)).toMatchObject({
       text: '{}',
       delivery: 'delivered',
     })
@@ -686,24 +751,54 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
+  it('does not overwrite a settled canonical execution identity', () => {
+    assistantEntry('kmsg-tool-conflict')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
+      toolCallId: 'tc-conflict',
+      toolCallName: 'Read',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'tc-conflict', executionId: 'exec-first' },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'tc-conflict', executionId: 'exec-second' },
+    })).toBe('KEEPER_TOOL_RESULT_READY conflicts with the recorded execution_id')
+
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-conflict')
+    expect(tool?.executionId).toBe('exec-first')
+    expect(tool?.deliveryProvenance?.transcript_slot).toEqual({
+      kind: 'tool_call',
+      execution_id: 'exec-first',
+      ordinal: 0,
+    })
+  })
+
   it('keeps a ready tool delivered when the provider end arrives later', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-ready-first',
       toolCallName: 'masc_status',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-ready-first' },
+      value: { ...toolOccurrence(), toolCallId: 'tc-ready-first', executionId: 'exec-ready-first' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
       toolCallId: 'tc-ready-first',
     })
 
-    const finished = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-ready-first')
+    const finished = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-ready-first')
     expect(finished?.delivery).toBe('delivered')
     expect(finished?.streamState).toBeNull()
   })
@@ -712,21 +807,24 @@ describe('applyKeeperStreamEvent tool calls', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-snapshot',
       toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
       toolCallId: 'tc-snapshot',
       snapshot: '{"limit":1}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
       toolCallId: 'tc-snapshot',
       snapshot: '{"limit":2}',
     })
 
-    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-snapshot')
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-snapshot')
     expect(tool?.text).toBe('{"limit":2}')
     expect(tool?.rawText).toBe('{"limit":2}')
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
@@ -735,9 +833,11 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'tool',
         name: 'masc_board_list',
         toolCallId: 'tc-snapshot',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
         status: 'pending',
         args: '{"limit":2}',
         ts: expect.any(String),
+        agentCoreBlockIndex: 0,
       },
     ])
   })
@@ -751,22 +851,25 @@ describe('applyKeeperStreamEvent tool calls', () => {
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-ordered',
       toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
       toolCallId: 'tc-ordered',
       delta: '{"limit":1}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
       toolCallId: 'tc-ordered',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-ordered' },
+      value: { ...toolOccurrence(), toolCallId: 'tc-ordered', executionId: 'exec-ordered' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -782,9 +885,12 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'tool',
         name: 'masc_board_list',
         toolCallId: 'tc-ordered',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
+        executionId: 'exec-ordered',
         status: 'ok',
         args: '{"limit":1}',
         ts: expect.any(String),
+        agentCoreBlockIndex: 0,
       },
       { kind: 'think', text: 'think B', ts: expect.any(String) },
     ])
@@ -805,22 +911,25 @@ describe('applyKeeperStreamEvent tool calls', () => {
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END' })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-progress',
       toolCallName: 'Execute',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
       toolCallId: 'tc-progress',
       delta: '{"argv":["pr","list"]}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
       toolCallId: 'tc-progress',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-progress' },
+      value: { ...toolOccurrence(), toolCallId: 'tc-progress', executionId: 'exec-progress' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
@@ -842,9 +951,12 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'tool',
         name: 'Execute',
         toolCallId: 'tc-progress',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
+        executionId: 'exec-progress',
         status: 'ok',
         args: '{"argv":["pr","list"]}',
         ts: expect.any(String),
+        agentCoreBlockIndex: 0,
       },
     ])
   })
@@ -866,11 +978,13 @@ describe('applyKeeperStreamEvent tool calls', () => {
       })
       applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'TOOL_CALL_START',
+        ...toolOccurrence(index),
         toolCallId: `tc-progress-${index}`,
         toolCallName: 'Execute',
       })
       applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'TOOL_CALL_END',
+        ...toolOccurrence(index),
         toolCallId: `tc-progress-${index}`,
       })
     }
@@ -906,22 +1020,25 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(7),
       toolCallId: 'tc-agentCore',
       toolCallName: 'masc_board_list',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(7),
       toolCallId: 'tc-agentCore',
       delta: '{"limit":1}',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_END',
+      ...toolOccurrence(7),
       toolCallId: 'tc-agentCore',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-agentCore' },
+      value: { ...toolOccurrence(7), toolCallId: 'tc-agentCore', executionId: 'exec-agent-core' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -935,6 +1052,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
         kind: 'tool',
         name: 'masc_board_list',
         toolCallId: 'tc-agentCore',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-7',
+        executionId: 'exec-agent-core',
         status: 'ok',
         args: '{"limit":1}',
         ts: expect.any(String),
@@ -943,7 +1062,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
-  it('marks the active tool errored when a server protocol error carries tool_call_id', () => {
+  it('keeps a provider-correlated server protocol error on the assistant diagnostic', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
@@ -957,6 +1076,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(2),
       toolCallId: 'tc-first',
       toolCallName: 'keeper_memory_search',
     })
@@ -982,20 +1102,19 @@ describe('applyKeeperStreamEvent tool calls', () => {
     })
 
     const thread = keeperThreads.value.sangsu ?? []
-    expect(thread.find(entry => entry.id === 'tool-tc-second')).toBeUndefined()
-    const tool = thread.find(entry => entry.id === 'tool-tc-first')
-    expect(tool?.delivery).toBe('error')
-    expect(tool?.streamState).toBeNull()
-    expect(tool?.error).toBe(
-      'tool_start_duplicate_index | index=2 | tool_call_id=tc-first | tool-use block index already active',
-    )
+    expect(thread.find(entry => entry.toolCallId === 'tc-second')).toBeUndefined()
+    const tool = thread.find(entry => entry.toolCallId === 'tc-first')
+    expect(tool?.delivery).toBe('streaming')
+    expect(tool?.streamState).toBe('streaming')
+    expect(tool?.error).toBeUndefined()
     const reply = thread.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
         name: 'keeper_memory_search',
         toolCallId: 'tc-first',
-        status: 'err',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-2',
+        status: 'pending',
         ts: expect.any(String),
         agentCoreBlockIndex: 2,
       },
@@ -1003,23 +1122,317 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.rawText).toContain('[stream protocol] tool_start_duplicate_index')
   })
 
-  it('records a protocol error instead of guessing the tool when toolCallId is missing', () => {
+  it('marks the exact occurrence instead of a provider-correlated sibling', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(0),
+      toolCallId: 'tc-first',
+      toolCallName: 'Read',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(1),
+      toolCallId: 'tc-second',
+      toolCallName: 'Write',
+    })
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(1),
+      toolCallId: 'tc-first',
+      delta: '{}',
+    })
+
+    const tools = (keeperThreads.value.sangsu ?? []).filter(entry => entry.role === 'tool')
+    const first = tools.find(entry => entry.toolCallId === 'tc-first')
+    expect(first?.delivery).toBe('streaming')
+    expect(first?.error).toBeUndefined()
+    expect(tools.find(entry => entry.toolCallId === 'tc-second')).toMatchObject({
+      delivery: 'error',
+      error: 'TOOL_CALL_ARGS provider correlation conflicts with its server occurrence',
+    })
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps?.filter(step => step.kind === 'tool').map(step => ({
+      toolOccurrenceId: step.toolOccurrenceId,
+      status: step.status,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
+    }))).toEqual([
+      {
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
+        status: 'pending',
+        agentCoreBlockIndex: 0,
+      },
+      {
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-1',
+        status: 'err',
+        agentCoreBlockIndex: 1,
+      },
+    ])
+  })
+
+  it('keeps a protocol error without quarantine occurrence assistant-only', () => {
+    assistantEntry()
+    for (const [blockIndex, toolCallName] of [[0, 'Read'], [1, 'Write']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        ...toolOccurrence(blockIndex),
+        toolCallId: 'tc-duplicate-error',
+        toolCallName,
+      })
+    }
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        index: 1,
+        tool_call_id: 'tc-duplicate-error',
+        reason: 'provider correlation is ambiguous',
+      },
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const tools = thread.filter(entry => entry.toolCallId === 'tc-duplicate-error')
+    expect(tools.map(entry => entry.delivery)).toEqual(['streaming', 'streaming'])
+    expect(tools.map(entry => entry.error)).toEqual([undefined, undefined])
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.error).toBe(
+      'tool_args_without_start | index=1 | tool_call_id=tc-duplicate-error | provider correlation is ambiguous',
+    )
+    expect(reply?.traceSteps?.filter(step => step.kind === 'tool').map(step => ({
+      status: step.status,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
+    }))).toEqual([
+      { status: 'pending', agentCoreBlockIndex: 0 },
+      { status: 'pending', agentCoreBlockIndex: 1 },
+    ])
+  })
+
+  it('keeps QUARANTINE then RESULT failed on the exact duplicate-provider occurrence', () => {
+    assistantEntry()
+    for (const [blockIndex, toolCallName] of [[0, 'Read'], [1, 'Write']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        ...toolOccurrence(blockIndex),
+        toolCallId: 'tc-quarantined-duplicate',
+        toolCallName,
+      })
+    }
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        index: 1,
+        tool_call_id: 'tc-quarantined-duplicate',
+        reason: 'exact occurrence quarantined',
+        quarantined_occurrence: {
+          ...toolOccurrence(1),
+          providerMessageId: 'provider-message-1',
+        },
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      ...toolOccurrence(1),
+      toolCallId: 'tc-quarantined-duplicate',
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: {
+        ...toolOccurrence(1),
+        toolCallId: 'tc-quarantined-duplicate',
+        executionId: 'exec-quarantined-after',
+      },
+    })).toBe('KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence')
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const tools = thread.filter(entry => entry.toolCallId === 'tc-quarantined-duplicate')
+    expect(tools.map(entry => entry.delivery)).toEqual(['streaming', 'error'])
+    expect(tools.map(entry => entry.executionId)).toEqual([undefined, undefined])
+    expect(tools.map(entry => entry.error)).toEqual([
+      undefined,
+      'tool_args_without_start | index=1 | tool_call_id=tc-quarantined-duplicate | exact occurrence quarantined',
+    ])
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps?.filter(step => step.kind === 'tool').map(step => ({
+      status: step.status,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
+    }))).toEqual([
+      { status: 'pending', agentCoreBlockIndex: 0 },
+      { status: 'err', agentCoreBlockIndex: 1 },
+    ])
+  })
+
+  it('freezes an exact quarantined occurrence against later args', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
+      toolCallId: 'tc-quarantine-args',
+      toolCallName: 'Read',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
+      toolCallId: 'tc-quarantine-args',
+      snapshot: '{"path":"before.ml"}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_replay_mismatch',
+        reason: 'exact occurrence quarantined',
+        quarantined_occurrence: toolOccurrence(),
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(),
+      toolCallId: 'tc-quarantine-args',
+      snapshot: '{"path":"after.ml"}',
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const tool = thread.find(entry => entry.toolCallId === 'tc-quarantine-args')
+    expect(tool).toMatchObject({
+      text: '{"path":"before.ml"}',
+      rawText: '{"path":"before.ml"}',
+      toolCallEnded: true,
+      delivery: 'error',
+      error: 'tool_replay_mismatch | exact occurrence quarantined',
+    })
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps?.find(step => step.kind === 'tool')).toMatchObject({
+      args: '{"path":"before.ml"}',
+      status: 'err',
+    })
+  })
+
+  it('keeps RESULT then QUARANTINE failed and tombstoned for later result replay', () => {
+    assistantEntry()
+    for (const [blockIndex, toolCallName] of [[0, 'Read'], [1, 'Write']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        ...toolOccurrence(blockIndex),
+        toolCallId: 'tc-result-before-quarantine',
+        toolCallName,
+      })
+    }
+    const result = {
+      type: 'CUSTOM' as const,
+      name: 'KEEPER_TOOL_RESULT_READY' as const,
+      value: {
+        ...toolOccurrence(1),
+        toolCallId: 'tc-result-before-quarantine',
+        executionId: 'exec-result-before-quarantine',
+      },
+    }
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', result)).toBeNull()
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        index: 1,
+        tool_call_id: 'tc-result-before-quarantine',
+        reason: 'late exact occurrence quarantine',
+        quarantined_occurrence: {
+          ...toolOccurrence(1),
+          providerMessageId: 'provider-message-1',
+        },
+      },
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', result)).toBe(
+      'KEEPER_TOOL_RESULT_READY targets a quarantined tool occurrence',
+    )
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const tools = thread.filter(entry => entry.toolCallId === 'tc-result-before-quarantine')
+    expect(tools.map(entry => entry.delivery)).toEqual(['streaming', 'error'])
+    expect(tools.map(entry => entry.executionId)).toEqual([
+      undefined,
+      'exec-result-before-quarantine',
+    ])
+    expect(tools.map(entry => entry.error)).toEqual([
+      undefined,
+      'tool_args_without_start | index=1 | tool_call_id=tc-result-before-quarantine | late exact occurrence quarantine',
+    ])
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps?.filter(step => step.kind === 'tool').map(step => ({
+      executionId: step.executionId,
+      status: step.status,
+      agentCoreBlockIndex: step.agentCoreBlockIndex,
+    }))).toEqual([
+      { executionId: undefined, status: 'pending', agentCoreBlockIndex: 0 },
+      {
+        executionId: 'exec-result-before-quarantine',
+        status: 'err',
+        agentCoreBlockIndex: 1,
+      },
+    ])
+  })
+
+  it('does not let a quarantine for an unopened occurrence poison a later tool', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        reason: 'no row existed yet',
+        quarantined_occurrence: toolOccurrence(0),
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(0),
+      toolCallId: 'tc-after-unopened-quarantine',
+      toolCallName: 'Read',
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: {
+        ...toolOccurrence(0),
+        toolCallId: 'tc-after-unopened-quarantine',
+        executionId: 'exec-after-unopened-quarantine',
+      },
+    })).toBeNull()
+
+    const tool = keeperThreads.value.sangsu?.find(
+      entry => entry.toolCallId === 'tc-after-unopened-quarantine',
+    )
+    expect(tool?.delivery).toBe('delivered')
+    expect(tool?.executionId).toBe('exec-after-unopened-quarantine')
+  })
+
+  it('routes providerless tool events by server occurrence', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-no-fallback',
       toolCallName: 'masc_board_post',
     })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', delta: '{"post_id":"p-1"}' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(), delta: '{"post_id":"p-1"}' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
+    })
 
-    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-no-fallback')
-    expect(tool?.text).toBe('')
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.toolCallId === 'tc-no-fallback')
+    expect(tool?.text).toBe('{"post_id":"p-1"}')
     expect(tool?.delivery).toBe('streaming')
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
-    expect(reply?.rawText).toContain('[stream protocol] TOOL_CALL_ARGS missing toolCallId')
-    expect(reply?.rawText).toContain('[stream protocol] TOOL_CALL_END missing toolCallId')
-    expect(reply?.error).toBe('TOOL_CALL_END missing toolCallId')
+    expect(reply?.error).toBeUndefined()
   })
 
   it('records server stream protocol errors on the assistant entry', () => {
@@ -1041,38 +1454,158 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(reply?.rawText).toContain('[stream protocol] tool_args_without_start')
   })
 
-  it('keeps duplicate TOOL_CALL_START events idempotent', () => {
+  it('keeps a later occurrence when a provider id is reused', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
       toolCallId: 'tc-repeat',
       toolCallName: 'masc_board_post',
     })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', toolCallId: 'tc-repeat', delta: '{"post_id":"p-1"}' })
-    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END', toolCallId: 'tc-repeat' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(), toolCallId: 'tc-repeat', delta: '{"post_id":"p-1"}' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END',
+      ...toolOccurrence(), toolCallId: 'tc-repeat' })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'CUSTOM',
       name: 'KEEPER_TOOL_RESULT_READY',
-      value: { tool_call_id: 'tc-repeat' },
+      value: { ...toolOccurrence(), toolCallId: 'tc-repeat', executionId: 'exec-repeat' },
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
+      ...toolOccurrence(1),
       toolCallId: 'tc-repeat',
       toolCallName: 'masc_board_post',
     })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END',
+      ...toolOccurrence(1), toolCallId: 'tc-repeat' })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(), toolCallId: 'tc-repeat', executionId: 'exec-repeat' },
+    })).toBeNull()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(1), toolCallId: 'tc-repeat', executionId: 'exec-repeat-2' },
+    })
 
     const thread = keeperThreads.value.sangsu ?? []
-    expect(thread.filter(entry => entry.id === 'tool-tc-repeat')).toHaveLength(1)
+    expect(thread.filter(entry => entry.toolCallId === 'tc-repeat')).toHaveLength(2)
     const reply = thread.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
         name: 'masc_board_post',
         toolCallId: 'tc-repeat',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-0',
+        executionId: 'exec-repeat',
         status: 'ok',
         args: '{"post_id":"p-1"}',
         ts: expect.any(String),
+        agentCoreBlockIndex: 0,
+      },
+      {
+        kind: 'tool',
+        name: 'masc_board_post',
+        toolCallId: 'tc-repeat',
+        toolOccurrenceId: 'tool-delivery-reply-1-stream-0-block-1',
+        executionId: 'exec-repeat-2',
+        status: 'ok',
+        ts: expect.any(String),
+        agentCoreBlockIndex: 1,
       },
     ])
+  })
+
+  it('joins same-message duplicate provider ids by server occurrence', () => {
+    assistantEntry()
+    for (const [blockIndex, toolCallName] of [[0, 'Read'], [1, 'Write']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        ...toolOccurrence(blockIndex),
+        toolCallId: 'tc-ambiguous',
+        toolCallName,
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_END',
+        ...toolOccurrence(blockIndex),
+        toolCallId: 'tc-ambiguous',
+      })
+    }
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_TOOL_RESULT_READY',
+      value: { ...toolOccurrence(1), toolCallId: 'tc-ambiguous', executionId: 'exec-write' },
+    })).toBeNull()
+
+    const tools = (keeperThreads.value.sangsu ?? [])
+      .filter(entry => entry.toolCallId === 'tc-ambiguous')
+    expect(tools).toHaveLength(2)
+    expect(tools.map(entry => entry.executionId ?? null)).toEqual([null, 'exec-write'])
+  })
+
+  it('keeps parallel duplicate provider occurrences distinct by content block', () => {
+    assistantEntry()
+    for (const [index, toolCallName] of [[3, 'Read'], [5, 'Write']] as const) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTENT_BLOCK_START',
+        value: {
+          index,
+          content_type: 'tool_use',
+          tool_call_id: 'tc-parallel-duplicate',
+          tool_call_name: toolCallName,
+        },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'TOOL_CALL_START',
+        ...toolOccurrence(index),
+        toolCallId: 'tc-parallel-duplicate',
+        toolCallName,
+      })
+    }
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      ...toolOccurrence(5),
+      toolCallId: 'tc-parallel-duplicate',
+      delta: '{}',
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    const tools = thread.filter(entry => entry.toolCallId === 'tc-parallel-duplicate')
+    expect(tools).toHaveLength(2)
+    expect(tools.map(entry => entry.id)).toEqual([
+      'tool-delivery-reply-1-stream-0-block-3',
+      'tool-delivery-reply-1-stream-0-block-5',
+    ])
+    expect(tools.map(entry => entry.delivery)).toEqual(['streaming', 'streaming'])
+    expect(tools.map(entry => entry.text)).toEqual(['', '{}'])
+    expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeUndefined()
+  })
+
+  it('treats an exact repeated provider end as idempotent', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      ...toolOccurrence(),
+      toolCallId: 'tc-end-replay',
+      toolCallName: 'Read',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
+      toolCallId: 'tc-end-replay',
+    })
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      ...toolOccurrence(),
+      toolCallId: 'tc-end-replay',
+    })).toBeNull()
+
+    const thread = keeperThreads.value.sangsu ?? []
+    expect(thread.filter(entry => entry.toolCallId === 'tc-end-replay')).toHaveLength(1)
+    expect(thread.find(entry => entry.id === 'reply-1')?.error).toBeNull()
   })
 })

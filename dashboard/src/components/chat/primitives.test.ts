@@ -70,6 +70,8 @@ function dataTransferWith(files: File[]): DataTransfer {
 function toolEntry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id'>,
 ): KeeperConversationEntry {
+  const providerId = overrides.toolCallId
+    ?? (overrides.id.startsWith('tool-') ? overrides.id.slice('tool-'.length) : null)
   return {
     role: 'tool',
     source: 'tool_result',
@@ -81,6 +83,8 @@ function toolEntry(
     streamState: null,
     details: null,
     error: null,
+    toolCallId: providerId,
+    executionId: overrides.executionId ?? (providerId ? `exec-${providerId}` : null),
     ...overrides,
   }
 }
@@ -94,6 +98,7 @@ function toolCallOutput(overrides: Partial<ToolCallEntry> & Pick<ToolCallEntry, 
     output: 'context window ok',
     success: true,
     duration_ms: 12,
+    execution_id: overrides.execution_id ?? `exec-${overrides.tool_use_id}`,
     ...overrides,
   }
 }
@@ -139,7 +144,7 @@ describe('ChatTranscript', () => {
     resetToolCallOutputs()
   })
 
-  it('surfaces tool output joined by tool_use_id in the collapsed preview', () => {
+  it('surfaces tool output joined by execution_id in the collapsed preview', () => {
     recordToolCallOutputs([toolCallOutput({ tool_use_id: 'toolu_x', output: 'context window 42%' })])
     render(
       html`<${ChatTranscript}
@@ -2704,6 +2709,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
                 kind: 'tool',
                 name: 'masc_board_list',
                 toolCallId: 'tc-prov',
+                executionId: 'exec-prov',
                 status: 'ok',
                 args: '{"limit":1}',
                 agentCoreBlockIndex: 4,
@@ -2774,6 +2780,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
                 kind: 'tool',
                 name: 'keeper_context_status',
                 toolCallId: 't-order',
+                executionId: 'exec-t-order',
                 status: 'ok',
                 ts: '2026-03-24T00:00:02.000Z',
               },

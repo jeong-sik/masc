@@ -3489,6 +3489,7 @@ type file_change = {
   fc_keeper : string;
   fc_turn : int option;
   fc_task_id : string option;
+  fc_execution_id : string option;
   fc_location : file_change_location;
   fc_kind : file_change_kind;
   fc_succeeded : bool;
@@ -3553,12 +3554,22 @@ let decode_file_change json =
   let* fc_keeper = required_string_field json "keeper" in
   let* fc_turn = optional_int_or_null json "turn" in
   let* fc_task_id = optional_string_field json "task_id" in
+  let* fc_execution_id = optional_string_field json "execution_id" in
   let* location_json = required_object_field json "location" in
   let* fc_location = decode_file_change_location location_json in
   let* kind_json = required_object_field json "change" in
   let* fc_kind = decode_file_change_kind kind_json in
   let* fc_succeeded = required_bool_field json "succeeded" in
-  Ok { fc_at; fc_keeper; fc_turn; fc_task_id; fc_location; fc_kind; fc_succeeded }
+  Ok
+    { fc_at
+    ; fc_keeper
+    ; fc_turn
+    ; fc_task_id
+    ; fc_execution_id
+    ; fc_location
+    ; fc_kind
+    ; fc_succeeded
+    }
 
 (* ── Workspace tree (/api/v1/workspace/tree, /workspace/children) ──────
 

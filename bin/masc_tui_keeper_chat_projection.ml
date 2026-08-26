@@ -60,6 +60,12 @@ type operation_reconciliation =
     }
   | Operation_cancelled
 
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  }
+
 type stream_error =
   | Malformed_event of string
   | Request_id_mismatch of {
@@ -77,6 +83,25 @@ type stream_error =
     }
   | Unknown_event_type of string
   | Unknown_custom_event of string
+  | Tool_event_without_start of
+      { event_type : string
+      ; occurrence : tool_occurrence
+      }
+  | Tool_result_without_start of tool_occurrence
+  | Quarantined_tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+  | Conflicting_tool_result of {
+      occurrence : tool_occurrence;
+      recorded_execution_id : string;
+      received_execution_id : string;
+    }
+  | Reused_tool_execution_id of {
+      execution_id : string;
+      recorded_occurrence : tool_occurrence;
+      received_occurrence : tool_occurrence;
+    }
   | Duplicate_run_start
   | Missing_run_start of string
   | Missing_acceptance
@@ -225,6 +250,30 @@ let stream_error_to_string = function
       Printf.sprintf "Keeper chat emitted unknown event type %S" event_type
   | Unknown_custom_event name ->
       Printf.sprintf "Keeper chat emitted unknown custom event %S" name
+  | Tool_event_without_start { event_type; occurrence } ->
+      Printf.sprintf
+        "Keeper chat %s names no stream occurrence %d/%d"
+        event_type occurrence.stream_scope occurrence.block_index
+  | Tool_result_without_start occurrence ->
+      Printf.sprintf
+        "Keeper chat tool result names no stream occurrence %d/%d"
+        occurrence.stream_scope occurrence.block_index
+  | Quarantined_tool_result { occurrence; execution_id } ->
+      Printf.sprintf
+        "Keeper chat quarantined stream occurrence %d/%d cannot own execution %S"
+        occurrence.stream_scope occurrence.block_index execution_id
+  | Conflicting_tool_result
+      { occurrence; recorded_execution_id; received_execution_id } ->
+      Printf.sprintf
+        "Keeper chat tool occurrence %d/%d changed canonical execution from %S to %S"
+        occurrence.stream_scope occurrence.block_index recorded_execution_id
+        received_execution_id
+  | Reused_tool_execution_id
+      { execution_id; recorded_occurrence; received_occurrence } ->
+      Printf.sprintf
+        "Keeper chat execution %S already belongs to stream occurrence %d/%d, not %d/%d"
+        execution_id recorded_occurrence.stream_scope recorded_occurrence.block_index
+        received_occurrence.stream_scope received_occurrence.block_index
   | Duplicate_run_start -> "Keeper chat stream repeated RUN_STARTED"
   | Missing_run_start event_type ->
       Printf.sprintf "Keeper chat event %S arrived before RUN_STARTED" event_type
@@ -289,6 +338,9 @@ let stream_error_acceptance_observed = function
   | Stream_interrupted { accepted }
   | Run_failed { accepted; _ } -> accepted
   | Duplicate_acceptance | Duplicate_reply_details | Unknown_custom_event _
+  | Tool_event_without_start _ | Tool_result_without_start _
+  | Quarantined_tool_result _
+  | Conflicting_tool_result _ | Reused_tool_execution_id _
   | Duplicate_run_start | Missing_run_start _ | Missing_reply_details
   | Missing_text_end | Replayed_failed | Replayed_cancelled -> true
   | Malformed_event _ | Request_id_mismatch _ | Duplicate_terminal
@@ -344,7 +396,11 @@ let error_certainty ?(was_unverified = false) error =
             (Malformed_event _ | Request_id_mismatch _ | Duplicate_acceptance
             | Duplicate_reply_details | Duplicate_terminal
             | Event_before_acceptance _ | Event_identity_mismatch _
-            | Unknown_event_type _ | Unknown_custom_event _ | Duplicate_run_start
+            | Unknown_event_type _ | Unknown_custom_event _
+            | Tool_event_without_start _ | Tool_result_without_start _
+            | Quarantined_tool_result _
+            | Conflicting_tool_result _ | Reused_tool_execution_id _
+            | Duplicate_run_start
             | Missing_run_start _ | Missing_acceptance | Stream_interrupted _
             | Missing_reply_details | Missing_text_end)
         ; _
@@ -398,6 +454,13 @@ let required_nonnegative_int ~surface field fields =
   | Some _ ->
       Error (Printf.sprintf "%s.%s must be a nonnegative integer" surface field)
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+
+let optional_nonnegative_int ~surface field fields =
+  match List.assoc_opt field fields with
+  | None -> Ok None
+  | Some (`Int value) when value >= 0 -> Ok (Some value)
+  | Some _ ->
+      Error (Printf.sprintf "%s.%s must be a nonnegative integer" surface field)
 
 let required_finite_nonnegative_number ~surface field fields =
   let valid value = Float.is_finite value && value >= 0.0 in
@@ -518,6 +581,14 @@ type terminal =
       code : string option;
     }
 
+type decoded_tool_call = {
+  occurrence : tool_occurrence;
+  tool_call_id : string option;
+  tool_name : string;
+  execution_id : string option;
+  ended : bool;
+}
+
 type decode_state = {
   acceptance : acceptance option;
   reply_details : reply_details option;
@@ -525,6 +596,8 @@ type decode_state = {
   run_started : bool;
   text_started : bool;
   text_ended : bool;
+  tool_calls : decoded_tool_call list;
+  quarantined_tool_occurrences : tool_occurrence list;
 }
 
 let initial_decode_state =
@@ -534,6 +607,8 @@ let initial_decode_state =
     run_started = false;
     text_started = false;
     text_ended = false;
+    tool_calls = [];
+    quarantined_tool_occurrences = [];
   }
 
 let require_acceptance state event_type =
@@ -565,7 +640,8 @@ type sse_line =
   | Sse_noncanonical_data
 
 let current_custom_names =
-  [ "KEEPER_CONNECTED"; "KEEPER_STREAM_MESSAGE_START"
+  [ "KEEPER_CONNECTED"; "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  ; "KEEPER_STREAM_MESSAGE_START"
   ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
   ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
   ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
@@ -575,9 +651,187 @@ let current_custom_names =
   ; "KEEPER_TOOL_APPROVAL_REQUESTED"; "KEEPER_TOOL_APPROVAL_SETTLED"
   ]
 
+let known_custom_names =
+  [ "KEEPER_CHAT_OPERATION_ACCEPTED"; "KEEPER_REPLY_DETAILS" ]
+  @ current_custom_names
+
+let null_custom_names =
+  [ "KEEPER_CONNECTED"; "KEEPER_RUNTIME_ATTEMPT_STARTED"
+  ; "KEEPER_STREAM_MESSAGE_STOP"; "KEEPER_STREAM_PING"
+  ]
+
+let validate_custom_value ~name value =
+  if List.mem name null_custom_names && value <> `Null
+  then
+    Error
+      (Malformed_event
+         (Printf.sprintf "Keeper chat CUSTOM event %s.value must be null" name))
+  else Ok ()
+;;
+
 let validate_current_custom_name name =
   if List.mem name current_custom_names then Ok ()
   else Error (Unknown_custom_event name)
+
+let decode_tool_occurrence ~surface fields =
+  let* stream_scope = required_nonnegative_int ~surface "toolStreamScope" fields in
+  let* block_index = required_nonnegative_int ~surface "toolCallBlockIndex" fields in
+  let* provider_message_id = optional_string ~surface "providerMessageId" fields in
+  let* tool_call_id = optional_string ~surface "toolCallId" fields in
+  Ok ({ stream_scope; block_index; provider_message_id }, tool_call_id)
+;;
+
+let same_tool_occurrence left right =
+  left.stream_scope = right.stream_scope && left.block_index = right.block_index
+;;
+
+let provider_correlation_conflicts left right =
+  match left, right with
+  | Some left, Some right -> not (String.equal left right)
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+let occurrence_correlation_conflicts left right =
+  provider_correlation_conflicts left.provider_message_id right.provider_message_id
+;;
+
+let decode_tool_result_ready value =
+  let surface = "KEEPER_TOOL_RESULT_READY.value" in
+  let* fields =
+    exact_object_fields ~surface
+      ~allowed:
+        [ "toolStreamScope"; "toolCallBlockIndex"; "providerMessageId"
+        ; "toolCallId"; "executionId"
+        ]
+      value
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* occurrence, tool_call_id =
+    decode_tool_occurrence ~surface fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* execution_id =
+    required_string ~surface "executionId" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  Ok (occurrence, tool_call_id, execution_id)
+
+let decode_stream_protocol_error value =
+  let surface = "KEEPER_STREAM_PROTOCOL_ERROR.value" in
+  let* fields =
+    exact_object_fields ~surface
+      ~allowed:
+        [ "kind"; "quarantined_occurrence"; "index"; "tool_call_id"
+        ; "event_type"; "reason"; "raw_bytes"
+        ]
+      value
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* kind =
+    required_string ~surface "kind" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* () =
+    match Masc.Keeper_chat_events.stream_protocol_error_kind_of_string kind with
+    | Some _ -> Ok ()
+    | None -> Error (Malformed_event (surface ^ ".kind is unknown"))
+  in
+  let* _ =
+    optional_nonnegative_int ~surface "index" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* _ =
+    optional_nonnegative_int ~surface "raw_bytes" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* _ =
+    optional_string ~surface "tool_call_id" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* _ =
+    optional_string ~surface "event_type" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  let* _ =
+    optional_string ~surface "reason" fields
+    |> Result.map_error (fun detail -> Malformed_event detail)
+  in
+  match List.assoc_opt "quarantined_occurrence" fields with
+  | None -> Ok None
+  | Some occurrence ->
+    let occurrence_surface = surface ^ ".quarantined_occurrence" in
+    let* occurrence_fields =
+      exact_object_fields ~surface:occurrence_surface
+        ~allowed:[ "toolStreamScope"; "toolCallBlockIndex"; "providerMessageId" ]
+        occurrence
+      |> Result.map_error (fun detail -> Malformed_event detail)
+    in
+    let* occurrence, _ =
+      decode_tool_occurrence ~surface:occurrence_surface occurrence_fields
+      |> Result.map_error (fun detail -> Malformed_event detail)
+    in
+    Ok (Some occurrence)
+
+let update_decoded_tool_call state occurrence update =
+  { state with
+    tool_calls =
+      List.map
+        (fun call ->
+          if same_tool_occurrence call.occurrence occurrence
+          then update call
+          else call)
+        state.tool_calls
+  }
+;;
+
+let settle_tool_result state ~occurrence ~tool_call_id ~execution_id =
+  if
+    List.exists
+      (fun quarantined -> same_tool_occurrence quarantined occurrence)
+      state.quarantined_tool_occurrences
+  then Error (Quarantined_tool_result { occurrence; execution_id })
+  else
+    match
+      List.find_opt
+        (fun call -> same_tool_occurrence call.occurrence occurrence)
+        state.tool_calls
+    with
+    | None -> Error (Tool_result_without_start occurrence)
+    | Some call
+      when occurrence_correlation_conflicts call.occurrence occurrence
+           || provider_correlation_conflicts call.tool_call_id tool_call_id ->
+      Error
+        (Malformed_event
+           "KEEPER_TOOL_RESULT_READY provider correlation conflicts with its stream occurrence")
+    | Some { execution_id = Some recorded_execution_id; _ }
+      when String.equal recorded_execution_id execution_id ->
+      Ok state
+    | Some { execution_id = Some recorded_execution_id; _ } ->
+      Error
+        (Conflicting_tool_result
+           { occurrence
+           ; recorded_execution_id
+           ; received_execution_id = execution_id
+           })
+    | Some { execution_id = None; _ } ->
+      (match
+         List.find_opt
+           (fun call ->
+              Option.exists (String.equal execution_id) call.execution_id)
+           state.tool_calls
+       with
+       | Some owner ->
+         Error
+           (Reused_tool_execution_id
+              { execution_id
+              ; recorded_occurrence = owner.occurrence
+              ; received_occurrence = occurrence
+              })
+       | None ->
+         Ok
+           (update_decoded_tool_call state occurrence (fun call ->
+              { call with execution_id = Some execution_id; ended = true })))
+;;
 
 let validate_running_fields request state ~surface ~allowed fields =
   let* () = validate_exact_fields ~surface ~allowed fields in
@@ -600,6 +854,7 @@ let decode_custom_event ~request state fields =
     | Some value -> Ok value
     | None -> Error (Malformed_event (surface ^ ".value is required"))
   in
+  let* () = validate_custom_value ~name value in
   if String.equal name "KEEPER_CHAT_OPERATION_ACCEPTED" then
     let* () =
       validate_exact_fields ~surface
@@ -628,6 +883,41 @@ let decode_custom_event ~request state fields =
       | None ->
           let* reply_details = decode_reply_details value in
           Ok { state with reply_details = Some reply_details }
+    else if String.equal name "KEEPER_TOOL_RESULT_READY" then
+      let* occurrence, tool_call_id, execution_id = decode_tool_result_ready value in
+      settle_tool_result state ~occurrence ~tool_call_id ~execution_id
+    else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
+      let* quarantined_occurrence = decode_stream_protocol_error value in
+      (match quarantined_occurrence with
+       | None -> Ok state
+       | Some occurrence ->
+         (match
+            List.find_opt
+              (fun call -> same_tool_occurrence call.occurrence occurrence)
+              state.tool_calls
+          with
+          | Some call
+            when occurrence_correlation_conflicts call.occurrence occurrence ->
+            Error
+              (Malformed_event
+                 "KEEPER_STREAM_PROTOCOL_ERROR quarantine provider correlation conflicts with its stream occurrence")
+          | Some _ ->
+            let state =
+              update_decoded_tool_call state occurrence (fun call ->
+                { call with ended = true })
+            in
+            Ok
+              { state with
+                quarantined_tool_occurrences =
+                  if
+                    List.exists
+                      (fun quarantined ->
+                         same_tool_occurrence quarantined occurrence)
+                      state.quarantined_tool_occurrences
+                  then state.quarantined_tool_occurrences
+                  else occurrence :: state.quarantined_tool_occurrences
+              }
+          | None -> Ok state))
     else
       let* () = validate_current_custom_name name in
       Ok state
@@ -789,34 +1079,84 @@ let decode_data_event ~request state json =
           let* fields =
             validate_running_fields request state ~surface
               ~allowed:
-                [ "type"; "threadId"; "timestamp"; "runId"; "toolCallId"
-                ; "toolCallName"
+                [ "type"; "threadId"; "timestamp"; "runId"
+                ; "toolStreamScope"; "toolCallBlockIndex"; "providerMessageId"
+                ; "toolCallId"; "toolCallName"
                 ]
               fields
           in
-          let* _ =
-            required_string ~surface "toolCallId" fields
+          let* occurrence, tool_call_id =
+            decode_tool_occurrence ~surface fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
-          let* _ =
+          let* tool_name =
             required_string ~surface "toolCallName" fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
-          Ok state
+          (match
+             List.find_opt
+               (fun call -> same_tool_occurrence call.occurrence occurrence)
+               state.tool_calls
+           with
+           | Some call
+             when String.equal call.tool_name tool_name
+                  && not
+                       (occurrence_correlation_conflicts
+                          call.occurrence occurrence)
+                  && not
+                       (provider_correlation_conflicts
+                          call.tool_call_id tool_call_id) ->
+             Ok state
+           | Some _ ->
+             Error
+               (Malformed_event
+                  (surface ^ " metadata conflicts with its stream occurrence"))
+           | None ->
+             Ok
+               { state with
+                 tool_calls =
+                   { occurrence
+                   ; tool_call_id
+                   ; tool_name
+                   ; execution_id = None
+                   ; ended = false
+                   }
+                   :: state.tool_calls
+               })
       | "TOOL_CALL_ARGS" ->
           let surface = "Keeper chat TOOL_CALL_ARGS" in
           let* fields =
             validate_running_fields request state ~surface
               ~allowed:
-                [ "type"; "threadId"; "timestamp"; "runId"; "toolCallId"
-                ; "delta"; "snapshot"
+                [ "type"; "threadId"; "timestamp"; "runId"
+                ; "toolStreamScope"; "toolCallBlockIndex"; "providerMessageId"
+                ; "toolCallId"; "delta"; "snapshot"
                 ]
               fields
           in
-          let* _ =
-            required_string ~surface "toolCallId" fields
+          let* occurrence, tool_call_id =
+            decode_tool_occurrence ~surface fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
+          let* call =
+            match
+              List.find_opt
+                (fun call -> same_tool_occurrence call.occurrence occurrence)
+                state.tool_calls
+            with
+            | None ->
+              Error (Tool_event_without_start { event_type = "TOOL_CALL_ARGS"; occurrence })
+            | Some call when call.ended ->
+              Error (Malformed_event (surface ^ " arrived after TOOL_CALL_END"))
+            | Some call
+              when occurrence_correlation_conflicts call.occurrence occurrence
+                   || provider_correlation_conflicts call.tool_call_id tool_call_id ->
+              Error
+                (Malformed_event
+                   (surface ^ " provider correlation conflicts with its stream occurrence"))
+            | Some call -> Ok call
+          in
+          let _ = call in
           (match List.assoc_opt "delta" fields, List.assoc_opt "snapshot" fields with
            | Some (`String _), None | None, Some (`String _) -> Ok state
            | Some _, None ->
@@ -832,14 +1172,34 @@ let decode_data_event ~request state json =
           let* fields =
             validate_running_fields request state ~surface
               ~allowed:
-                [ "type"; "threadId"; "timestamp"; "runId"; "toolCallId" ]
+                [ "type"; "threadId"; "timestamp"; "runId"
+                ; "toolStreamScope"; "toolCallBlockIndex"; "providerMessageId"
+                ; "toolCallId"
+                ]
               fields
           in
-          let* _ =
-            required_string ~surface "toolCallId" fields
+          let* occurrence, tool_call_id =
+            decode_tool_occurrence ~surface fields
             |> Result.map_error (fun detail -> Malformed_event detail)
           in
-          Ok state
+          (match
+             List.find_opt
+               (fun call -> same_tool_occurrence call.occurrence occurrence)
+               state.tool_calls
+           with
+           | None ->
+             Error (Tool_event_without_start { event_type = "TOOL_CALL_END"; occurrence })
+           | Some call
+             when occurrence_correlation_conflicts call.occurrence occurrence
+                  || provider_correlation_conflicts call.tool_call_id tool_call_id ->
+             Error
+               (Malformed_event
+                  (surface ^ " provider correlation conflicts with its stream occurrence"))
+           | Some call when call.ended -> Ok state
+           | Some _ ->
+             Ok
+               (update_decoded_tool_call state occurrence (fun call ->
+                  { call with ended = true })))
       | unknown -> Error (Unknown_event_type unknown))
 
 let protocol_failure state stream_error =

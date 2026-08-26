@@ -64,6 +64,7 @@ type agent_setup =
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks
+  ; on_runtime_attempt : Keeper_turn_driver.runtime_attempt -> unit
   ; model_input_projection : Agent_core.Agent.model_input_projection
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
@@ -103,7 +104,9 @@ val prepare_agent_setup
   -> ?runtime_manifest_context:Keeper_runtime_manifest.turn_context
   -> ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit)
   -> ?continuation_channel:Keeper_continuation_channel.t
-  -> ?on_tool_result_ready:(tool_call_id:string -> unit)
+  -> ?on_tool_stream_observation:
+       (Keeper_hooks_agent_core.tool_stream_observation -> unit)
+  -> ?on_tool_result_ready:(tool_call_id:string -> turn:int -> planned_index:int -> execution_id:Ids.Execution_id.t -> unit)
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
   -> unit
   -> (agent_setup, Agent_core.Error.t) result

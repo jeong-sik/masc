@@ -224,9 +224,33 @@ const KEEPER_CHAT_AG_UI_FIELDS_BY_TYPE = new Map<string, ReadonlySet<string>>([
   ['TEXT_MESSAGE_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'role'])],
   ['TEXT_MESSAGE_CONTENT', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId', 'delta'])],
   ['TEXT_MESSAGE_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'messageId'])],
-  ['TOOL_CALL_START', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId', 'toolCallName'])],
-  ['TOOL_CALL_ARGS', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId', 'delta', 'snapshot'])],
-  ['TOOL_CALL_END', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'toolCallId'])],
+  ['TOOL_CALL_START', new Set([
+    ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
+    'runId',
+    'toolStreamScope',
+    'toolCallBlockIndex',
+    'providerMessageId',
+    'toolCallId',
+    'toolCallName',
+  ])],
+  ['TOOL_CALL_ARGS', new Set([
+    ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
+    'runId',
+    'toolStreamScope',
+    'toolCallBlockIndex',
+    'providerMessageId',
+    'toolCallId',
+    'delta',
+    'snapshot',
+  ])],
+  ['TOOL_CALL_END', new Set([
+    ...KEEPER_CHAT_AG_UI_BASE_FIELDS,
+    'runId',
+    'toolStreamScope',
+    'toolCallBlockIndex',
+    'providerMessageId',
+    'toolCallId',
+  ])],
   ['CUSTOM', new Set([...KEEPER_CHAT_AG_UI_BASE_FIELDS, 'runId', 'name', 'value'])],
 ])
 
@@ -243,6 +267,12 @@ const KEEPER_STREAM_PROTOCOL_ERROR_KINDS = new Set([
   'tool_start_missing_identity',
   'tool_args_without_start',
   'tool_stop_without_start',
+  'tool_replay_mismatch',
+  'tool_delta_invalid_kind',
+  'tool_attempt_superseded',
+  'tool_message_start_conflict',
+  'stream_event_after_terminal',
+  'tool_occurrence_mapping_invalid',
   'media_delta_invalid_block',
   'media_source_unsupported',
   'media_decode_failed',
@@ -269,14 +299,15 @@ function exactCustomObject(
   value: unknown,
   name: string,
   allowedFields: readonly string[],
+  path = 'ag_ui_event.value',
 ): SafeParseResult<Record<string, unknown>> {
   if (!isRecord(value)) {
-    return fail('ag_ui_event.value', `Expected ${name} object payload`)
+    return fail(path, `Expected ${name} object payload`)
   }
   const allowed = new Set(allowedFields)
   const unknown = Object.keys(value).find(key => !allowed.has(key))
   return unknown
-    ? fail(`ag_ui_event.value.${unknown}`, `Unexpected ${name} payload field`)
+    ? fail(`${path}.${unknown}`, `Unexpected ${name} payload field`)
     : ok(value)
 }
 
@@ -309,6 +340,44 @@ function optionalString(
   return value[field] === undefined || (typeof value[field] === 'string' && value[field].trim() !== '')
     ? ok(true)
     : fail(`ag_ui_event.value.${field}`, `Expected non-empty optional ${field}`)
+}
+
+function validateToolStreamOccurrence(
+  value: Record<string, unknown>,
+  path: string,
+): SafeParseResult<true> {
+  for (const field of ['toolStreamScope', 'toolCallBlockIndex'] as const) {
+    const fieldValue = value[field]
+    if (
+      typeof fieldValue !== 'number'
+      || !Number.isSafeInteger(fieldValue)
+      || fieldValue < 0
+    ) {
+      return fail(`${path}.${field}`, `Expected ${field} non-negative integer`)
+    }
+  }
+  for (const field of ['providerMessageId', 'toolCallId'] as const) {
+    const fieldValue = value[field]
+    if (
+      fieldValue !== undefined
+      && (typeof fieldValue !== 'string' || fieldValue.trim() === '')
+    ) {
+      return fail(`${path}.${field}`, `Expected non-empty optional ${field}`)
+    }
+  }
+  return ok(true)
+}
+
+function validateQuarantinedToolOccurrence(value: unknown): SafeParseResult<true> {
+  const path = 'ag_ui_event.value.quarantined_occurrence'
+  const occurrence = exactCustomObject(
+    value,
+    'quarantined_occurrence',
+    ['toolStreamScope', 'toolCallBlockIndex', 'providerMessageId'],
+    path,
+  )
+  if (!occurrence.success) return occurrence
+  return validateToolStreamOccurrence(occurrence.data, path)
 }
 
 function validateUsage(value: unknown): SafeParseResult<true> {
@@ -369,6 +438,7 @@ function validateKeeperCustomPayload(
 ): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
+    'KEEPER_RUNTIME_ATTEMPT_STARTED',
     'KEEPER_STREAM_MESSAGE_STOP',
     'KEEPER_STREAM_PING',
   ].includes(name)) {
@@ -410,6 +480,7 @@ function validateKeeperCustomPayload(
   // record stays a statement about the wire rather than about this function.
   const allowedFields: Record<KeeperChatCustomEventName, readonly string[]> = {
     KEEPER_CONNECTED: [],
+    KEEPER_RUNTIME_ATTEMPT_STARTED: [],
     KEEPER_STREAM_MESSAGE_STOP: [],
     KEEPER_STREAM_PING: [],
     KEEPER_EXTERNAL_EFFECT_COMPLETED: ['target'],
@@ -428,10 +499,24 @@ function validateKeeperCustomPayload(
     KEEPER_THINKING_DELTA: ['index', 'delta'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref'],
-    KEEPER_STREAM_PROTOCOL_ERROR: ['kind', 'index', 'tool_call_id', 'event_type', 'reason', 'raw_bytes'],
+    KEEPER_STREAM_PROTOCOL_ERROR: [
+      'kind',
+      'index',
+      'tool_call_id',
+      'event_type',
+      'reason',
+      'raw_bytes',
+      'quarantined_occurrence',
+    ],
     KEEPER_CONTINUATION_CHECKPOINT: ['message', 'request_id'],
     KEEPER_REPLY_DETAILS: ['reply', 'turn_outcome', 'turn_ref'],
-    KEEPER_TOOL_RESULT_READY: ['tool_call_id'],
+    KEEPER_TOOL_RESULT_READY: [
+      'toolStreamScope',
+      'toolCallBlockIndex',
+      'providerMessageId',
+      'toolCallId',
+      'executionId',
+    ],
   }
   const object = exactCustomObject(payload, name, allowedFields[name])
   if (!object.success) return object
@@ -460,8 +545,10 @@ function validateKeeperCustomPayload(
     }
     case 'KEEPER_CONTENT_BLOCK_STOP':
       return requiredInteger(value, 'index')
-    case 'KEEPER_TOOL_RESULT_READY':
-      return requiredString(value, 'tool_call_id')
+    case 'KEEPER_TOOL_RESULT_READY': {
+      const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event.value')
+      return occurrence.success ? requiredString(value, 'executionId') : occurrence
+    }
     case 'KEEPER_TOOL_APPROVAL_REQUESTED': {
       const toolCallId = requiredString(value, 'tool_call_id')
       if (!toolCallId.success) return toolCallId
@@ -484,6 +571,7 @@ function validateKeeperCustomPayload(
       return requiredInteger(value, 'queued_count')
     }
     case 'KEEPER_CONNECTED':
+    case 'KEEPER_RUNTIME_ATTEMPT_STARTED':
     case 'KEEPER_STREAM_MESSAGE_STOP':
     case 'KEEPER_STREAM_PING':
       // Answered above, before the field map: these carry a null payload.
@@ -523,7 +611,13 @@ function validateKeeperCustomPayload(
         const index = requiredInteger(value, 'index')
         if (!index.success) return index
       }
-      return value.raw_bytes === undefined ? ok(true) : requiredInteger(value, 'raw_bytes')
+      if (value.raw_bytes !== undefined) {
+        const rawBytes = requiredInteger(value, 'raw_bytes')
+        if (!rawBytes.success) return rawBytes
+      }
+      return value.quarantined_occurrence === undefined
+        ? ok(true)
+        : validateQuarantinedToolOccurrence(value.quarantined_occurrence)
     }
     case 'KEEPER_CONTINUATION_CHECKPOINT': {
       const message = requiredString(value, 'message')
@@ -568,6 +662,7 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
     'runId',
     'messageId',
     'delta',
+    'providerMessageId',
     'toolCallId',
     'toolCallName',
     'message',
@@ -604,23 +699,23 @@ function validateKeeperChatAgUiEvent(value: Record<string, unknown>): SafeParseR
         ? ok(true)
         : fail('ag_ui_event.messageId', 'Expected non-empty AG-UI messageId')
     case 'TOOL_CALL_START':
-      if (typeof value.toolCallId !== 'string' || value.toolCallId.trim() === '') {
-        return fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+      {
+        const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event')
+        if (!occurrence.success) return occurrence
       }
       return typeof value.toolCallName === 'string' && value.toolCallName.trim() !== ''
         ? ok(true)
         : fail('ag_ui_event.toolCallName', 'Expected non-empty AG-UI toolCallName')
     case 'TOOL_CALL_ARGS':
-      if (typeof value.toolCallId !== 'string' || value.toolCallId.trim() === '') {
-        return fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+      {
+        const occurrence = validateToolStreamOccurrence(value, 'ag_ui_event')
+        if (!occurrence.success) return occurrence
       }
       return typeof value.delta === 'string' || typeof value.snapshot === 'string'
         ? ok(true)
         : fail('ag_ui_event', 'Expected AG-UI tool args delta or snapshot')
     case 'TOOL_CALL_END':
-      return typeof value.toolCallId === 'string' && value.toolCallId.trim() !== ''
-        ? ok(true)
-        : fail('ag_ui_event.toolCallId', 'Expected non-empty AG-UI toolCallId')
+      return validateToolStreamOccurrence(value, 'ag_ui_event')
     case 'CUSTOM':
       if (typeof value.name !== 'string' || !isKeeperCustomEventName(value.name)) {
         return fail('ag_ui_event.name', 'Expected a supported Keeper custom event name')

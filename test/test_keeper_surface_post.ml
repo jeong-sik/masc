@@ -493,6 +493,7 @@ let roster_message ~surface ~speaker_id : Store.chat_message =
   ; ts = 1.0
   ; attachments = None
   ; tool_call_id = None
+  ; execution_id = None
   ; tool_call_name = None
   ; surface = Some surface
   ; conversation_id = None

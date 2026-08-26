@@ -19,6 +19,12 @@ let record ~invocation ~execution_id =
     ~finally:(fun () -> Mutex.unlock lock)
     (fun () -> Invocation_table.replace table invocation execution_id)
 
+let discard ~invocation =
+  Mutex.lock lock;
+  Fun.protect
+    ~finally:(fun () -> Mutex.unlock lock)
+    (fun () -> Invocation_table.remove table invocation)
+
 let take ~invocation =
   Mutex.lock lock;
   Fun.protect

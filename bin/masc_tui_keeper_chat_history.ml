@@ -113,6 +113,7 @@ type parsed =
       { at : float
       ; turn_id : string option
       ; call_id : string option
+      ; execution_id : string option
       ; tool_name : string
       ; args : string
       }
@@ -375,6 +376,7 @@ let add_trace_step summary (step : Yojson.Safe.t) =
               { summary with
                 tools =
                   Transcript.make_tool_activity
+                    ?execution_id:(string_field fields "execution_id")
                     ~call_id:(string_field fields "tool_call_id") ~tool_name
                     ~args ~outcome:(persisted_outcome fields)
                     ~duration:(string_field fields "dur")
@@ -571,6 +573,7 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                   { at
                   ; turn_id
                   ; call_id = string_field fields "tool_call_id"
+                  ; execution_id = string_field fields "execution_id"
                   ; tool_name
                   ; args = content
                   }
@@ -587,12 +590,17 @@ let fold_tool_blocks parsed_rows =
   let flush pending acc =
     match List.rev pending with
     | [] -> acc
-    | (at, turn_id, _, _, _) :: _ as calls ->
+    | (at, turn_id, _, _, _, _) :: _ as calls ->
         let activities =
           List.map
-            (fun (_, _, call_id, tool_name, args) ->
-              Transcript.make_tool_activity ~call_id ~tool_name ~args
-                ~outcome:Transcript.Returned ~duration:None)
+            (fun (_, _, call_id, execution_id, tool_name, args) ->
+              let outcome =
+                match execution_id with
+                | Some _ -> Transcript.Returned
+                | None -> Transcript.Outcome_unrecorded
+              in
+              Transcript.make_tool_activity ?execution_id ~call_id ~tool_name ~args
+                ~outcome ~duration:None)
             calls
         in
         { at
@@ -604,10 +612,10 @@ let fold_tool_blocks parsed_rows =
   in
   let rec loop pending acc = function
     | [] -> List.rev (flush pending acc)
-    | Tool_call { at; turn_id; call_id; tool_name; args } :: rest ->
-        let next = (at, turn_id, call_id, tool_name, args) in
+    | Tool_call { at; turn_id; call_id; execution_id; tool_name; args } :: rest ->
+        let next = (at, turn_id, call_id, execution_id, tool_name, args) in
         (match pending with
-         | (_, pending_turn, _, _, _) :: _ when pending_turn <> turn_id ->
+         | (_, pending_turn, _, _, _, _) :: _ when pending_turn <> turn_id ->
              loop [ next ] (flush pending acc) rest
          | _ -> loop (next :: pending) acc rest)
     | Utterance row :: rest -> loop [] (row :: flush pending acc) rest

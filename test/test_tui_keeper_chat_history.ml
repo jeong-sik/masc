@@ -16,8 +16,8 @@ let addressed ?(ts = 1.0) ?speaker_name ?surface content =
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
-let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
-    ?transcript_slot ?turn_ref content =
+let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
+    ?delivery_key ?transcript_slot ?turn_ref content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
@@ -33,6 +33,9 @@ let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?tool_call_name ?delivery_key
      @ (match tool_call_id with
         | None -> []
         | Some id -> [ "tool_call_id", `String id ])
+     @ (match execution_id with
+        | None -> []
+        | Some id -> [ "execution_id", `String id ])
      @ (match tool_call_name with
         | None -> []
         | Some name -> [ "tool_call_name", `String name ]))
@@ -285,6 +288,13 @@ let test_consecutive_tool_rows_become_one_block () =
                 rows);
            check bool "the rows carry the finished marker" true
              (List.for_all (fun r -> String.length r > 0) rows)
+           ; check (list bool)
+               "delivery-only rows do not claim a recorded return"
+               [ true; true ]
+               (List.map
+                  (fun (activity : Transcript.tool_activity) ->
+                    activity.outcome = Transcript.Outcome_unrecorded)
+                  block.activities)
        | History.Addressed_to_keeper _ | History.Said_by_keeper
        | History.Autonomous_reply
        | History.Delivery_failed _ | History.Reasoning _
@@ -300,9 +310,9 @@ let test_history_keeps_producer_tool_call_identity () =
   let decoded =
     decode
       (`List
-         [ row ~ts:2.0 ~role:"tool" ~tool_call_id:"c1"
+         [ row ~ts:2.0 ~role:"tool" ~tool_call_id:"c1" ~execution_id:"exec-1"
              ~tool_call_name:"read_file" args_a
-         ; row ~ts:3.0 ~role:"tool" ~tool_call_id:"c2"
+         ; row ~ts:3.0 ~role:"tool" ~tool_call_id:"c2" ~execution_id:"exec-2"
              ~tool_call_name:"edit_file" args_b
          ])
   in
@@ -314,6 +324,11 @@ let test_history_keeps_producer_tool_call_identity () =
         (List.map
            (fun (activity : Transcript.tool_activity) -> activity.call_id)
            activities);
+      check (list (option string)) "canonical identities stay separate"
+        [ Some "exec-1"; Some "exec-2" ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) -> activity.execution_id)
+           activities);
       check (list string) "the same subject authority names both calls"
         [ "lib/a.ml"; "lib/b.ml" ]
         (List.map
@@ -324,6 +339,12 @@ let test_history_keeps_producer_tool_call_identity () =
         [ None; None ]
         (List.map
            (fun (activity : Transcript.tool_activity) -> activity.duration)
+           activities);
+      check (list bool) "canonical result rows are recorded as returned"
+        [ true; true ]
+        (List.map
+           (fun (activity : Transcript.tool_activity) ->
+             activity.outcome = Transcript.Returned)
            activities)
   | rows -> failf "expected one history tool block, got %d rows" (List.length rows)
 
@@ -375,10 +396,16 @@ let test_an_autonomous_turn_draws_what_it_did () =
            let rows = full_tool_rows block in
            check int "every tool step is a row" 4 (List.length rows);
            let activities = block.activities in
-           check (list (option string)) "trace identities stay typed"
-             [ Some "trace-1"; Some "trace-2"; Some "trace-3"; None ]
+           check (list (option string)) "trace has no provider identities"
+             [ None; None; None; None ]
              (List.map
                 (fun (activity : Transcript.tool_activity) -> activity.call_id)
+                activities);
+           check (list (option string)) "trace ids are canonical executions"
+             [ Some "trace-1"; Some "trace-2"; Some "trace-3"; None ]
+             (List.map
+                (fun (activity : Transcript.tool_activity) ->
+                  activity.execution_id)
                 activities);
            check (list (option string)) "trace durations are not inferred"
              [ Some "32ms"; Some "1200ms"; None; None ]

@@ -355,6 +355,7 @@ let test_adapter_terminal_success_once () =
 let test_protocol_diagnostic_cannot_mask_final_failure () =
   let protocol_error : Masc.Keeper_chat_events.stream_protocol_error =
     { kind = Masc.Keeper_chat_events.Sse_error
+    ; quarantined_occurrence = None
     ; index = None
     ; tool_call_id = None
     ; event_type = Some "error"
@@ -549,7 +550,9 @@ let test_native_activity_failure_does_not_affect_delivery () =
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-activity"; thread_id = "thread-activity" }
       ; Masc.Keeper_chat_events.Tool_call_start
-          { tool_call_id = "call-activity"
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-activity"
           ; tool_call_name = "keeper_surface_post"
           }
       ; Masc.Keeper_chat_events.Tool_context_block
@@ -559,7 +562,10 @@ let test_native_activity_failure_does_not_affect_delivery () =
           ; result_summary = Some "private result"
           }
       ; Masc.Keeper_chat_events.Tool_call_end
-          { tool_call_id = "call-activity" }
+          { occurrence =
+              { stream_scope = 0; provider_message_id = None; block_index = 0 }
+          ; tool_call_id = Some "call-activity"
+          }
       ; Masc.Keeper_chat_events.Text_delta "final"
       ; Masc.Keeper_chat_events.Run_finished { run_id = "run-activity" }
       ]

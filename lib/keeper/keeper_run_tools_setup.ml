@@ -345,6 +345,7 @@ let prepare_agent_setup
       ?runtime_manifest_context
       ?runtime_manifest_append
       ?continuation_channel
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
       ()
@@ -352,6 +353,44 @@ let prepare_agent_setup
   =
   let ( let* ) = Result.bind in
   let runtime_id_string = runtime_id in
+  let active_checkpoint_owner = ref None in
+  let tool_result_commit_required () =
+    match on_tool_result_ready, !active_checkpoint_owner with
+    | None, _ -> false
+    | Some _, Some Runtime_execution.Official_client -> false
+    | Some _, (Some Runtime_execution.Masc_agent_core | None) -> true
+  in
+  let on_runtime_attempt
+        (attempt : Keeper_turn_driver.runtime_attempt)
+    =
+    active_checkpoint_owner := Some attempt.checkpoint_owner;
+    Option.iter
+      (fun observe ->
+         observe
+           (Keeper_hooks_agent_core.Runtime_attempt_started
+              { runtime_id = attempt.runtime_id
+              ; lane_attempt_index = attempt.lane_attempt_index
+              ; checkpoint_owner = attempt.checkpoint_owner
+              }))
+      on_tool_stream_observation
+  in
+  let on_tool_result_ready =
+    Option.map
+      (fun notify ~tool_call_id ~turn ~planned_index ~execution_id ->
+         match !active_checkpoint_owner with
+         | Some Runtime_execution.Masc_agent_core ->
+           notify ~tool_call_id ~turn ~planned_index ~execution_id
+         | Some Runtime_execution.Official_client ->
+           (* Official clients execute dynamic tools without an Agent Core
+              pre-admission source sidecar. Keep those persisted chat rows
+              delivery-only. The owner comes from the exact resolved candidate
+              attempt, including heterogeneous lane fallbacks. *)
+           ()
+         | None ->
+           failwith
+             "tool result arrived before the resolved runtime attempt owner was observed")
+      on_tool_result_ready
+  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
@@ -653,6 +692,9 @@ let prepare_agent_setup
     ; receipt_runtime_observation_ref
     ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
+    ; on_runtime_attempt
+    ; tool_result_commit_required
+    ; on_tool_stream_observation
     ; on_tool_result_ready
     ; tools
     }

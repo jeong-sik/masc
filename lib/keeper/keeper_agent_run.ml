@@ -498,6 +498,7 @@ let run_turn
       ?(history_assistant_source = "direct_assistant")
       ?temperature
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?(trajectory_acc : Trajectory.accumulator option)
@@ -677,6 +678,7 @@ let run_turn
       ~meta
       ~publication_recovery
       ?continuation_channel
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
       ~turn_ctx_cell
@@ -1040,6 +1042,7 @@ let run_turn
                       ?agent_core_checkpoint:resume_agent_core_checkpoint
                       ?event_bus
                       ?trace_link
+                      ~on_runtime_attempt:s.Keeper_run_tools.on_runtime_attempt
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)

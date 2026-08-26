@@ -649,6 +649,10 @@ val assistant_message_of_response
 
 type content_delta =
   | TextDelta of string
+  | TextSnapshot of string
+  (** A complete text value at this content-block index. Unlike [TextDelta],
+          this explicitly authorizes exact-prefix reconciliation; ordinary
+          incremental chunks must remain [TextDelta]. *)
   | ThinkingDelta of string
   | ThinkingSignatureDelta of string
   | ReasoningDetailsDelta of
@@ -807,6 +811,12 @@ type stream_error =
       ; response : string
       ; raw : string
       }
+
+(** Canonical decision for one provider stream event. *)
+type stream_event_resolution =
+  | Stream_event_accepted of sse_event
+  | Stream_event_suppressed
+  | Stream_event_rejected of stream_error
 
 (** {1 Convenience Constructors} *)
 

@@ -1979,7 +1979,10 @@ let render_board_read (state : state) (list_post : board_post) =
    so colour says what changed rather than becoming row decoration. Unknown
    producer words remain visible and unranked. *)
 let semantic_status_color status =
-  match String.lowercase_ascii (String.trim status) with
+  (* Status producers already own their canonical wire vocabulary. Keeping
+     that spelling intact also preserves Planning's Goal_phase SSOT: a renderer
+     must not normalize domain status strings behind the decoder's back. *)
+  match String.trim status with
   | "running" | "executing" | "active" | "in_progress" -> Ansi.cyan
   | "scheduled" | "due" | "pending" | "waiting" | "verifying"
   | "fallback" | "unknown" | "queued" | "degraded" | "matched_pending" ->

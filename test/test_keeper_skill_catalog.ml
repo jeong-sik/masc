@@ -75,7 +75,7 @@ value = {}
 |}
 ;;
 
-let composition_document_with_tool_surface ?(key = "masc-composition-tool") value =
+let composition_document_with_invocation_policy ~key value =
   Printf.sprintf
     {|---
 name: manual-clock
@@ -430,6 +430,29 @@ let test_of_documents_sorts_and_rejects_duplicates () =
   | Error error -> fail ("unexpected error: " ^ Skill_catalog.error_to_string error)
 ;;
 
+let test_partition_documents_isolates_rejections () =
+  let catalog, rejections =
+    Skill_catalog.partition_documents
+      [ "release-checklist", instruction_document
+      ; "broken", "---\nname: broken\n---\n\n# Missing description\n"
+      ]
+  in
+  check
+    (list string)
+    "valid skill remains usable"
+    [ "release-checklist" ]
+    (Skill_catalog.skills catalog
+     |> List.map (fun skill -> skill.Skill_catalog.name));
+  match rejections with
+  | [ { Skill_catalog.directory; error = Skill_catalog.Definition_rejected _ } ] ->
+    check string "rejection names its package" "broken" directory
+  | [ rejected ] ->
+    fail
+      ("wrong rejection: " ^ Skill_catalog.error_to_string rejected.error)
+  | rejected ->
+    failf "expected one isolated rejection, got %d" (List.length rejected)
+;;
+
 let write_file path content =
   let channel = open_out_bin path in
   Fun.protect
@@ -463,9 +486,7 @@ let test_loader_scans_the_skills_directory () =
             0
             (List.length (Skill_catalog.skills catalog))
         | Error _ -> fail "missing skills directory did not load as empty");
-       let skills_dir =
-         Masc.Keeper_run_tools_setup.skills_dir_of_base_path ~base_path
-       in
+       let skills_dir = Filename.concat (Filename.concat base_path ".masc") "skills" in
        Unix.mkdir (Filename.dirname skills_dir) 0o755;
        Unix.mkdir skills_dir 0o755;
        let skill_dir = Filename.concat skills_dir "release-checklist" in
@@ -486,18 +507,38 @@ let test_loader_scans_the_skills_directory () =
              fail
                (Printf.sprintf "expected 1 skill, got %d" (List.length skills)))
         | Error _ -> fail "valid skills directory failed to load");
+       let agents_root = Filename.concat base_path ".agents" in
+       let agents_skills = Filename.concat agents_root "skills" in
+       Unix.mkdir agents_root 0o755;
+       Unix.mkdir agents_skills 0o755;
+       let agent_skill_dir = Filename.concat agents_skills "agent-review" in
+       Unix.mkdir agent_skill_dir 0o755;
+       write_file
+         (Filename.concat agent_skill_dir "SKILL.md")
+         "---\nname: agent-review\ndescription: Review through the configured Agent Skills source.\n---\n\n# Agent review\n";
+       (match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
+        | Ok catalog ->
+          check
+            (list string)
+            "turn consumes the configured multi-source snapshot"
+            [ "agent-review"; "release-checklist" ]
+            (Skill_catalog.skills catalog
+             |> List.map (fun skill -> skill.Skill_catalog.name))
+        | Error _ -> fail "configured .agents skill source did not reach the turn");
        (* A missing description, not a missing name: the directory supplies a
           name, so that is no longer the defect a broken install shows. *)
        write_file
          (Filename.concat (Filename.concat skills_dir "half-installed") "SKILL.md")
          "---\nname: half-installed\n---\n";
        match Masc.Keeper_run_tools_setup.load_skill_catalog ~base_path with
-       | Error
-           (Agent_core.Error.Config
-             (Agent_core.Error.InvalidConfig { field = "skills"; detail })) ->
-         check bool "detail names the defect" true (String.length detail > 0)
-       | Ok _ | Error _ ->
-         fail "broken SKILL.md did not return a typed config error")
+       | Ok catalog ->
+         check
+           (list string)
+           "one broken optional skill does not stop unrelated turns"
+           [ "agent-review"; "release-checklist" ]
+           (Skill_catalog.skills catalog
+            |> List.map (fun skill -> skill.Skill_catalog.name))
+       | Error _ -> fail "one broken Skill stopped the whole Keeper catalog")
 ;;
 
 let skill_catalog_of documents =
@@ -507,97 +548,66 @@ let skill_catalog_of documents =
     fail ("valid skill catalog was rejected: " ^ Skill_catalog.error_to_string error)
 ;;
 
-let test_masc_composition_tool_controls_dedicated_tool () =
-  let disabled =
-    skill_catalog_of
-      [ "manual-clock", composition_document_with_tool_surface "false" ]
-  in
-  (match Skill_catalog.find disabled "manual-clock" with
-   | Some skill ->
-     check
-       string
-       "disabled composition remains task-readable"
-       "instruction"
-       (Skill_catalog.surface_to_string skill.Skill_catalog.surface)
-   | None -> fail "disabled composition disappeared from the task skill catalog");
-  check
-    int
-    "disabled composition has no dedicated entry"
-    0
-    (List.length (Skill_catalog.composition_entries disabled));
-  let disabled_surface =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-      ~identity_tool_names:[]
-      ~skill_catalog:disabled
-      ~model_visible_descriptors:[]
-  in
-  check
-    bool
-    "generic task-routed reader remains"
-    true
-    (List.mem Catalog.skill_tool_name disabled_surface);
-  check
-    bool
-    "dedicated composition tool is absent"
-    false
-    (List.mem "keeper_compose_manual-clock" disabled_surface);
-  let enabled =
-    skill_catalog_of
-      [ "manual-clock", composition_document_with_tool_surface "true" ]
-  in
-  let enabled_surface =
-    Masc.Keeper_run_tools_setup.expected_model_tool_names
-      ~identity_tool_names:[]
-      ~skill_catalog:enabled
-      ~model_visible_descriptors:[]
-  in
-  check
-    bool
-    "boolean true preserves dedicated composition tool"
-    true
-    (List.mem "keeper_compose_manual-clock" enabled_surface)
-;;
-
-let test_masc_composition_tool_rejects_non_boolean_values () =
+let test_invocation_policy_fields_are_rejected () =
   List.iter
-    (fun (source, expected_kind) ->
+    (fun (key, value) ->
        match
          Skill_catalog.parse_skill
            ~directory:"manual-clock"
-           (composition_document_with_tool_surface source)
+           (composition_document_with_invocation_policy ~key value)
        with
-       | Error
-           (Skill_catalog.Invalid_masc_composition_tool
-             { skill = "manual-clock"; actual }) ->
-         check string ("value " ^ source) expected_kind actual
+       | Error (Skill_catalog.Removed_invocation_policy { skill; field }) ->
+         check string "error names the skill" "manual-clock" skill;
+         check string "error names the removed field" key field
        | Error error ->
          fail
            (Printf.sprintf
-              "value %s returned the wrong error: %s"
-              source
+              "%s returned the wrong error: %s"
+              key
               (Skill_catalog.error_to_string error))
-       | Ok _ -> fail ("non-boolean value was silently accepted: " ^ source))
-    [ {|"true"|}, "string"
-    ; "1", "number"
-    ; "null", "null"
-    ; "[true]", "sequence"
-    ; "{ enabled: true }", "mapping"
+       | Ok _ -> fail (key ^ " was silently assigned invocation semantics"))
+    [ "masc-composition-tool", "false"
+    ; "masc-composition-tool", "true"
+    ; "disable-model-invocation", "true"
     ]
 ;;
 
-let test_legacy_disable_model_invocation_is_rejected () =
-  match
-    Skill_catalog.parse_skill
-      ~directory:"manual-clock"
-      (composition_document_with_tool_surface
-         ~key:"disable-model-invocation"
-         "true")
-  with
-  | Error (Skill_catalog.Removed_disable_model_invocation { skill }) ->
-    check string "error names the skill" "manual-clock" skill
+(* Portable input may carry the experimental ecosystem key, but the decoded
+   document and Keeper catalog deliberately retain no value or semantics for
+   it. *)
+let test_allowed_tools_is_discarded () =
+  let document =
+    {|---
+name: release-checklist
+description: Walk the release checklist before shipping.
+allowed-tools: Read Bash(git:*)
+---
+
+# Release checklist
+|}
+  in
+  match Skill_catalog.parse_skill ~directory:"release-checklist" document with
   | Error error ->
-    fail ("legacy key returned the wrong error: " ^ Skill_catalog.error_to_string error)
-  | Ok _ -> fail "legacy key was silently assigned MASC-specific semantics"
+    fail
+      ("a standard skill field stopped the skill loading: "
+      ^ Skill_catalog.error_to_string error)
+  | Ok skill ->
+    check string "the skill is the one it names" "release-checklist"
+      skill.Skill_catalog.name;
+    (* The point of the removal: nothing downstream carries the field, so
+       nothing reads it as an effective permission. Checked on the body the
+       catalog keeps, which is what a turn is handed. *)
+    let body = skill.Skill_catalog.body in
+    let mentions needle =
+      let nl = String.length needle and hl = String.length body in
+      let rec go i =
+        i + nl <= hl
+        && (String.equal (String.sub body i nl) needle || go (i + 1))
+      in
+      go 0
+    in
+    check bool "the body does not carry the hint" false
+      (mentions "allowed-tools")
 ;;
 
 let test_composition_skill_joins_projection () =
@@ -690,21 +700,21 @@ let () =
             `Quick
             test_of_documents_sorts_and_rejects_duplicates
         ; test_case
+            "partition_documents isolates rejections"
+            `Quick
+            test_partition_documents_isolates_rejections
+        ; test_case
             "loader scans the skills directory"
             `Quick
             test_loader_scans_the_skills_directory
         ; test_case
-            "masc-composition-tool controls the dedicated tool"
+            "invocation policy fields are rejected"
             `Quick
-            test_masc_composition_tool_controls_dedicated_tool
+            test_invocation_policy_fields_are_rejected
         ; test_case
-            "masc-composition-tool rejects non-booleans"
+            "allowed-tools is discarded"
             `Quick
-            test_masc_composition_tool_rejects_non_boolean_values
-        ; test_case
-            "legacy disable-model-invocation is rejected"
-            `Quick
-            test_legacy_disable_model_invocation_is_rejected
+            test_allowed_tools_is_discarded
         ; test_case
             "composition skill joins the model projection"
             `Quick

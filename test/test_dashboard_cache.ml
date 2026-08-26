@@ -803,6 +803,30 @@ let test_compute_leaves_caller_domain ~clock ~sw ~dm () =
         true
         (d <> caller_domain))
 
+let test_nested_shared_pool_submission_does_not_starve ~clock ~sw ~dm () =
+  Dashboard_cache.invalidate_all ();
+  let pool = Domain_pool.create ~sw ~domain_count:1 dm in
+  let previous_domain_pool = Domain_pool_ref.get () in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous_domain_pool with
+      | None -> Domain_pool_ref.clear_for_tests ()
+      | Some previous -> Domain_pool_ref.set previous)
+    (fun () ->
+      Domain_pool_ref.set pool;
+      Executor_pool_ref.For_testing.with_pool (Domain_pool.executor_pool pool)
+      @@ fun () ->
+      let result =
+        Dashboard_cache.get_or_compute_with_timeout
+          "nested-shared-executor-pool"
+          ~ttl:60.0
+          ~clock
+          ~timeout_sec:0.2
+          (fun () ->
+            Domain_pool_ref.submit_io_or_inline (fun () -> `String "ok"))
+      in
+      check_json "nested shared-pool submit completes" (`String "ok") result)
+
 (* -- The timeout envelope has one producer and one recognizer -------------- *)
 
 (** Every timeout path returns the same envelope and the recognizer that sits
@@ -868,6 +892,9 @@ let () =
         [
           test_case "compute leaves the caller domain" `Quick
             (test_compute_leaves_caller_domain ~clock ~sw
+               ~dm:(Eio.Stdenv.domain_mgr env));
+          test_case "nested shared-pool submit does not starve" `Quick
+            (test_nested_shared_pool_submission_does_not_starve ~clock ~sw
                ~dm:(Eio.Stdenv.domain_mgr env));
         ] );
       ( "correctness",

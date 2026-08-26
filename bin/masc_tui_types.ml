@@ -606,15 +606,45 @@ let identity_connectable providers =
     [identity_connectable] and then scrolls the pane's lines so that row
     stays visible. A header written in the renderer and counted in the key
     handler is two numbers that drift the first time a line is added. *)
-let identity_preamble ~keeper =
-  [ "  Move with the arrows and press enter to connect " ^ keeper
-    ^ ", R to ask again what tools exist."
-  ; ""
-  ]
+(** What one attempt answered, as pane rows.
 
-(** Which pane line the provider at [index] is drawn on. *)
-let identity_provider_line ~index =
-  List.length (identity_preamble ~keeper:"") + index
+    Built here rather than at each side because two places wrapping the same
+    text at their own idea of the width would draw a different number of
+    lines, and the key handler's idea of where the list starts would stop
+    matching the renderer's.
+
+    Wrapped, because the message that matters most is the long one: a
+    provider that registers no client says what to make and where to put it,
+    and a single truncated line is the half of that sentence an operator
+    cannot act on. *)
+let identity_notice ~cols detail =
+  match detail with
+  | None -> []
+  | Some text ->
+    (* Two for this indent, two for the one the pane adds, four for the box
+       around it. Wrapping wider than that is a line the frame truncates --
+       which is the whole failure this exists to undo. *)
+    List.map
+      (fun line -> "  " ^ line)
+      (Masc_tui_message_layout.wrap_words ~max_cells:(max 20 (cols - 8)) text)
+    @ [ "  There is a form for it on the dashboard, in this panel, marked \
+         \xeb\x82\xb4 \xec\x95\xb1 \xec\x93\xb0\xea\xb8\xb0."
+      ]
+
+let identity_preamble ~keeper ~notice =
+  ((("  Move with the arrows and press enter to connect " ^ keeper
+     ^ ", R to ask again what tools exist.")
+    :: "" :: notice)
+   @ if notice = [] then [] else [ "" ])
+
+(** Which pane line the provider at [index] is drawn on.
+
+    [notice] is what the preamble is carrying: a message about the attempt
+    just made belongs where the operator is looking rather than below
+    fifty-odd rows they would have to scroll past. It moves the list down,
+    so the row a keypress scrolls to moves with it. *)
+let identity_provider_line ~notice ~index =
+  List.length (identity_preamble ~keeper:"" ~notice) + index
 
 (** The cursor held inside the list it names. A cursor left behind by a
     shorter list answers from the last row rather than from one that is no
@@ -992,6 +1022,10 @@ type state = {
      screen that renumbered under a moving cursor would start the wrong
      service; [identity_cursor_clamped] is what keeps it inside the list. *)
   mutable identity_cursor: int;
+  (* What one attempt answered, as against [identity_view_error], which is
+     the list itself failing to load. A refusal from one provider is not a
+     reason to take the other fifty-odd off the screen. *)
+  mutable identity_attempt_error: string option;
   mutable github_identity_view_error: string option;
   mutable task_cursor: int;
   mutable task_detail_id: string option;
@@ -1577,6 +1611,7 @@ let create_state
   identity_view_error = None;
   identity_login = None;
   identity_cursor = 0;
+  identity_attempt_error = None;
   github_identity_view_error = None;
   task_cursor = 0;
   task_detail_id = None;

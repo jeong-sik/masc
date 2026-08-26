@@ -3,7 +3,7 @@ rfc: "0389"
 title: "Keeper 별 도구 표면 — 101개를 전원에게 매 턴 보내는 것을 그만둔다"
 status: Draft
 created: 2026-08-22
-updated: 2026-08-22
+updated: 2026-08-27
 author: claude
 supersedes: []
 superseded_by: null
@@ -106,9 +106,10 @@ JSON 에만 실리고 가시성에는 관여하지 않는다. `keeper_model_name
 
 도구 표면의 일부는 이미 코드 밖에서 선언된다.
 
-- `<config-root>/tool-compositions.toml` — `Keeper_tool_composition_catalog` 가 읽는 닫힌
-  문법의 합성 카탈로그. 라이브 카탈로그에 9개 합성이 있고, 각각이 `<name>` 도구로 모델 표면에
-  올라간다 (비동기 합성이 하나라도 있으면 status/cancel 도구 2개가 더 붙는다).
+- `runtime.toml [[skills.sources]]` 아래 `SKILL.md` — 본문의 composition fence를
+  `Keeper_tool_composition_catalog`가 파싱한다. 각 effective composition skill이
+  `keeper_compose_<name>` 도구로 올라가고, 비동기 합성이 하나라도 있으면 status/cancel
+  도구 2개가 더 붙는다. 독립 `tool-compositions.toml` 경로는 삭제됐다.
 - `keeper_plan_execute` (`keeper_tool_composition_surface.ml`) — 모델이 즉석에서 DAG 를 짜서
   도구를 합성·병렬 실행하는 도구.
 
@@ -140,12 +141,12 @@ masc#29337 은 GLM-5-Turbo 가 `tool_use` 이름 자리에 인자를 섞어 보�
 # <config-root>/keepers/<name>.toml
 [keeper.tools]
 groups = ["board", "workspace", "memory"]        # keeper_tool_group 의 wire 이름
-compositions = ["mission-snapshot"]              # tool-compositions.toml 의 name
+skills = ["mission-snapshot"]                    # configured Skill name
 ```
 
 - `groups` 는 `keeper_tool_group_to_string` 과 1:1 인 닫힌 enum 이다. 모르는 이름은 TOML
   로드 에러다 (`Keeper_types_profile` 의 unknown-key 정책과 같다).
-- `compositions` 는 카탈로그 `name` 과 1:1 이다. 카탈로그에 없는 이름은 로드 에러다.
+- `skills` 는 effective Skill snapshot의 `name`과 1:1 이다. 없는 이름은 로드 에러다.
 - `Core_group` 과 `Meta_group` 은 항상 포함한다. 자기기술 도구(`masc_tool_help`,
   `keeper_tools_list`) 없이 Keeper 가 표면을 되짚을 방법이 없기 때문이다.
 - `[keeper.tools]` 테이블이 **없으면 전체 표면** 이다. 지금과 같은 동작이고, 조용한 기본값이
@@ -161,7 +162,7 @@ val model_visible_schemas
   -> Masc_domain.tool_schema list
 ```
 
-`Keeper_tool_surface.t` 는 `All | Declared of { groups : keeper_tool_group list; compositions : string list }` 다.
+`Keeper_tool_surface.t` 는 `All | Declared of { groups : keeper_tool_group list; skills : string list }` 다.
 `Declared` 의 합성 항목이 부르는 노드 도구가 `groups` 밖이면 로드 시점에 에러다 (§1.5 의
 모순을 선언 시점에 막는다). 런타임 문자열 매칭은 없다.
 

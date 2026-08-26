@@ -1,9 +1,9 @@
 # Skills — SKILL.md 로 능력을 선언한다
 
-masc 의 스킬은 파일 하나로 선언되는 능력이다. `<base_path>/.masc/skills/<name>/SKILL.md`
-한 장이 스킬 하나다. Keeper 턴은 **턴 시작마다** 이 디렉토리를 다시 읽으므로 파일을
-고치면 다음 턴부터 반영된다. `/api/v1/skills`는 별도의 발행 스냅샷이므로 부팅 또는
-runtime config 재적용 때 갱신된다.
+masc 의 스킬은 파일 하나로 선언되는 능력이다. `runtime.toml`의 `[[skills.sources]]`가
+가리키는 `<source>/<name>/SKILL.md` 한 장이 스킬 하나다. 기본 source는 프로젝트와 사용자
+각각의 `.masc/skills`, `.agents/skills`다. Keeper 턴과 `/api/v1/skills`는 같은 발행
+스냅샷을 새로 고쳐 읽으므로 source 우선순위·shadow·거부 결과가 서로 갈리지 않는다.
 
 관련 RFC: `docs/rfc/RFC-skills-as-tools.md` (합성·도구 승격),
 `#30156` skills-declared-not-discovered (task 라우팅). 파서는
@@ -32,13 +32,18 @@ description: Walk the release checklist before shipping.
   없거나 frontmatter 구조를 읽을 수 없을 때만 문서를 거부한다.
 - `metadata.openclaw` 같은 다른 런타임의 네임스페이스도 문서를 막지는 않는다. 편차의
   정확한 이유는 `/api/v1/skills`와 Monitor › Skills에 표시된다.
-- 무시하지 **않는** 확장 키가 하나 있다: `masc-composition-tool: false`. 합성 fence가
-  있어도 그 스킬은 `keeper_compose_<name>` 도구로 승격되지 않는다 — 파일은 정상 로드되고
-  `keeper_skill`로 본문을 읽는 것도 그대로다. 이 키는 boolean만 받는다. `"false"`, `0`,
-  `null`처럼 타입이 다르면 활성으로 되돌리지 않고 카탈로그 오류로 거부한다.
-- `disable-model-invocation`은 MASC에서 거부한다. 다른 클라이언트의 동명 키는 모델 호출
-  전체를 제어하지만 MASC의 동작은 composition 도구 하나만 숨기므로 같은 이름으로 다른
-  의미를 제공하지 않는다.
+- `masc-composition-tool`과 `disable-model-invocation`은 모두 거부한다. composition의
+  존재와 표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지
+  않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark
+  외부 fence로 감싼다.
+- 실험적 `allowed-tools`는 입력 호환을 위해 형식만 확인한 뒤 버린다. 런타임 객체와 공개
+  projection 어디에도 보존하지 않는다.
+  표준의 이 필드는 도구 제한이 아니라 구현체별 사전 승인 힌트다. 이를 이유로 표준 스킬
+  전체를 거부하지도, MASC 권한처럼 표시하지도 않는다. 모든 도구 호출은 기존 MASC 승인
+  게이트만 따른다.
+- 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
+  제외된 이름을 task가 지명한 경우에만 admission이 typed missing 오류로 막는다. 정확한
+  파싱 오류는 `/api/v1/skills`의 `rejections` 또는 `usage.kind = "unparsed"`에 남는다.
 - 본문은 통째로 보존된다. keeper 는 `keeper_skill` 도구로 이름을 대고 본문을 통째 받는다 (#30635 이전에는 경로+`Read` 였다 — `.masc/skills` 가 샌드박스 루트 옆이라 `Read` 가 거의 실패해서 도구로 바꿨다).
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다
@@ -51,8 +56,7 @@ description: Walk the release checklist before shipping.
 | 1 | 합성 스킬 | `keeper_compose_<name>` 도구로 승격 |
 | 2+ | 오류 | 턴이 typed config error 로 거부된다 |
 
-fence 개수가 유일한 갈림길은 아니다. fence 가 하나여도 frontmatter 에
-`masc-composition-tool: false`가 있으면 승격이 일어나지 않고 지시 스킬처럼 남는다
+frontmatter invocation-policy 필드는 이 결정을 덮어쓸 수 없다
 (`keeper_skill_catalog.ml`).
 
 ### 지시 스킬 (instruction)

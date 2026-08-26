@@ -10,14 +10,15 @@ status: reference
 
 ## 0. 한 눈에
 
-스킬은 `<base>/.masc/skills/<name>/SKILL.md` 파일 하나로 선언한다. 본문에
+스킬은 `runtime.toml`의 `[[skills.sources]]` 아래 `<name>/SKILL.md` 파일 하나로 선언한다. 본문에
 ```` ```toml composition ```` fence가 있으면 **합성 스킬**(도구가 된다), 없으면
 **지시 스킬**(`keeper_skill` 도구로 본문을 읽는다). 같은 카탈로그를 세 곳이 읽는다:
 턴 시작(도구 표면 조립), 프롬프트(지명된 스킬 안내), 대시보드(`/api/v1/skills`).
 
 ```mermaid
 flowchart TD
-  F["SKILL.md 파일<br/>&lt;base&gt;/.masc/skills/&lt;name&gt;/"] --> P
+  F["SKILL.md 파일<br/>configured skills source/&lt;name&gt;/"] --> SNAP
+  SNAP["Skill_catalog_snapshot<br/>source precedence + immutable bytes"] --> P
 
   subgraph parse["파싱 (한 곳의 권위)"]
     P["Agent_core.Skill_document.decode<br/>frontmatter 계약 + 이름 판정"] --> S
@@ -61,40 +62,41 @@ flowchart LR
   Q -->|"2+"| ERR2["Error<br/>Multiple_compositions"]
   COM --> NM{"fence name<br/>= 스킬 이름?"}
   NM -->|"아니오"| ERR3["Error<br/>Composition_name_mismatch"]
-  NM -->|"예"| MI{"masc-composition-<br/>tool?"}
-  MI -->|"false"| HID["승격 없음<br/>지시 스킬처럼 남는다"]
-  MI -->|"없음 / true"| OK["keeper_compose_&lt;name&gt; 로 승격"]
+  NM -->|"예"| OK["keeper_compose_&lt;name&gt; 로 승격"]
 ```
 
-fence 개수가 유일한 갈림길은 아니다. frontmatter `masc-composition-tool: false`는
-합성이 정상 파싱되고 스킬도 로드되지만 **모델이 볼 수 있는 도구로는 안 올린다** — 절차를
-파일로 남기되 dedicated composition tool만 숨기는 손잡이다. 값은 boolean이어야 하며
-다른 타입은 조용히 승격 허용으로 되돌아가지 않고 카탈로그 오류가 된다. 다른 클라이언트의
-`disable-model-invocation`과 의미가 다르므로 그 레거시 키는 명시적으로 거부한다.
+fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
+`disable-model-invocation`은 둘 다 명시적으로 거부한다. composition 선언을 남겨 놓고
+도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴 CommonMark 외부 fence로 감싼다.
 
-**실패와 편차는 다르다**: `of_documents`가 문서를 실제로 파싱하지 못하면 카탈로그
-전체가 `Error`다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/
-plan 오류·중복 스킬은 turn-blocking이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
+**실패와 편차는 다르다**: strict validator인 `of_documents`는 첫 파싱 실패를 `Error`로
+돌려준다. 실제 turn loader는 `partition_documents`로 잘못된 문서만 표면에서 제외하고
+나머지 스킬을 계속 제공한다. 그 이름을 task가 지명하면 admission에서 typed missing으로
+막힌다. 구조 오류·사용 가능한 runtime 이름 부재·`description` 누락·fence/plan 오류·중복
+스킬은 해당 문서의 rejection이다. 이름 불일치·한계 초과·확장 키는 로드 가능한
 `Runtime_compatible diagnostics`이며 API와 Dashboard에 보인다. SKILL.md가 없는
-디렉터리는 스킬이 아니므로 조용히 건너뛴다(`keeper_run_tools_setup.ml`의
-`Exact_missing → Keeper_skill_catalog.empty`).
+디렉터리는 스킬이 아니므로 source scanner가 조용히 건너뛴다.
 
 ## 2. 카탈로그를 읽는 세 소비자
 
 카탈로그 로드는 `Keeper_run_tools_setup.load_skill_catalog`
-(`lib/keeper/keeper_run_tools_setup.ml:120`) 하나로 통일된다.
-`skills_dir_of_base_path = <base>/.masc/skills`. 세 소비자가 같은 로드를 쓴다:
+하나로 통일된다. 이 함수는 `Skill_catalog_snapshot_service`를 refresh한 뒤
+`effective_entries`의 정확한 bytes를 Keeper 카탈로그로 만든다. `/api/v1/skills`도 같은
+publisher를 refresh하므로 세 소비자가 source 우선순위까지 같은 로드를 쓴다:
 
 ```mermaid
 sequenceDiagram
   participant Turn as 키퍼 턴
   participant Setup as keeper_run_tools_setup
+  participant Snap as skill_catalog_snapshot
   participant Cat as Keeper_skill_catalog
   participant Surface as keeper_tool_composition_surface
   participant Model as 모델(LLM)
 
   Turn->>Setup: prepare_agent_setup
-  Setup->>Cat: load_skill_catalog ~base_path
+  Setup->>Snap: refresh configured sources
+  Snap-->>Setup: effective_entries + exact source_text
+  Setup->>Cat: of_documents
   Setup->>Setup: validate_held_task_skill_admission
   Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_composition_entries

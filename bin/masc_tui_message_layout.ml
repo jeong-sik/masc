@@ -355,6 +355,31 @@ let take_cells text cells =
   let prefix, _, _ = cell_prefix text (max 0 cells) in
   prefix
 
+(* The longest prefix that fits in [cells] without cutting a grapheme, and
+   what is left of the text. Where {!take_cells} cuts by cells and gives up a
+   wide grapheme that straddles the boundary -- padding its cells so the
+   columns to the right stay put -- this one moves that grapheme to the tail
+   and keeps every character. One is for a fixed column, the other for
+   wrapping, where nothing may be lost.
+
+   Escapes are carried into the prefix: they set a style, cost no cells, and
+   the text after them opens under it. A prefix can therefore come back empty
+   of visible cells and non-empty of bytes; the caller reads the tail to know
+   whether it moved. *)
+let split_at_cells text cells =
+  if cells <= 0 then ("", text)
+  else
+    let rec walk used cut = function
+      | [] -> cut
+      | piece :: rest ->
+          if piece.ansi then walk used piece.end_offset rest
+          else if used + piece.cell_width <= cells then
+            walk (used + piece.cell_width) piece.end_offset rest
+          else cut
+    in
+    let cut = walk 0 0 (display_pieces text) in
+    (String.sub text 0 cut, String.sub text cut (String.length text - cut))
+
 let fit_width text width =
   if width <= 0 then ""
   else

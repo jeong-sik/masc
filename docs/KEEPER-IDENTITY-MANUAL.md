@@ -71,6 +71,65 @@ carries neither an expiry nor a refresh token. Turn on token rotation for the
 Slack app, token expiration for the GitHub app. Without it the approval
 succeeds and the last step does not.
 
+### In order
+
+**0. Settle the callback URL first**
+
+What goes in the app is this:
+
+```
+<this masc's base URL>/api/v1/keepers/oauth/callback
+```
+
+`MASC_HTTP_BASE_URL` decides the base URL; without it, it comes from the bind
+address. The current value is the `url` field of `/.well-known/agent.json`.
+
+**Slack requires that URL to be https.** Its documentation says a "Redirect
+URL must also use HTTPS", so `http://127.0.0.1:8935/...` cannot be entered in
+the app at all. To use Slack, point `MASC_HTTP_BASE_URL` at an https address
+that reaches this server and restart. That value does more than the callback:
+it is also the Host the server will answer to, and a request arriving through
+a tunnel it does not recognise is refused with
+`request_authority_untrusted`.
+
+Google and Figma do not document whether they take an http local address. Try
+the current one, and fall back to the same https address if refused.
+
+**1. Slack**
+
+1. Create an app at `api.slack.com/apps`.
+2. OAuth & Permissions → Redirect URLs → add the callback.
+3. **Turn on token rotation.** masc refuses an answer carrying neither an
+   expiry nor a refresh token, so without it the consent succeeds and the
+   exchange does not.
+4. Set the user token scopes you want.
+5. Copy the Client ID and Client Secret from Basic Information.
+6. Dashboard → that Keeper → `업무 서비스 연결` → `내 앱 쓰기` on the Slack row.
+7. Press Slack to connect.
+
+**2. Figma**
+
+1. Create an app at `figma.com/developers/apps`.
+2. Add the callback as a Redirect URL.
+3. Copy the Client ID and Client Secret. **The secret is shown once.**
+4. Save them under `내 앱 쓰기`.
+5. Press Figma to connect.
+
+**3. GitHub**
+
+As Slack, with an OAuth App: callback, **token expiration on**, then the id
+and secret.
+
+**4. Google — one app for eight**
+
+1. Google Cloud Console → your project → APIs & Services → Credentials.
+2. Create an OAuth client ID (Web application).
+3. Add the callback under Authorized redirect URIs.
+4. Enter the id and secret under `내 앱 쓰기` **once**. Whether you enter it
+   against Gmail or Sheets, all eight read it.
+5. Press each product you want. One app, but **one consent per product** --
+   each asks for its own scopes.
+
 ## Once attached
 
 Tool names read `<service>_<original name>`, so fetching a Jira issue is

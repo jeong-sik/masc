@@ -15,7 +15,10 @@ type verdict =
 val verdict_because : verdict -> string
 
 val verdict_for :
-  tool_name:string -> input:Yojson.Safe.t -> verdict
+  composition_plan_index:Keeper_tool_composition_plan_index.t option ->
+  tool_name:string ->
+  input:Yojson.Safe.t ->
+  verdict
 (** Decide about one call.
 
     A name this build cannot place is asked about: it is not a safe tool, and
@@ -24,10 +27,11 @@ val verdict_for :
 
     A name with no descriptor is not automatically that. Composition tools are
     materialised outside the descriptor registry and are judged by the tools
-    their plan runs — from the catalog for [keeper_compose_*], from the input
-    for [keeper_plan_execute]. A plan of reads runs; one node that would be
-    asked about makes the whole plan asked about, and the reason names that
-    node.
+    their plan runs — from the turn-local [composition_plan_index] for
+    [keeper_compose_*], from the input for [keeper_plan_execute]. A plan of
+    reads runs; one node that would be asked about makes the whole plan asked
+    about, and the reason names that node. An absent index asks rather than
+    borrowing another turn's plan.
 
     A tool from a work service this Keeper is attached to is judged by what
     that service said: [annotations.readOnlyHint] on its own listing, carried
@@ -41,7 +45,10 @@ val verdict_for :
     what a keeper does, and an operator asked about every read would stop
     reading the questions. *)
 
-val classifies : tool_name:string -> bool
+val classifies :
+  composition_plan_index:Keeper_tool_composition_plan_index.t option ->
+  tool_name:string ->
+  bool
 (** Whether this build can place [tool_name] at all.
 
     Not the same question as {!verdict_for}, and not answerable by calling it

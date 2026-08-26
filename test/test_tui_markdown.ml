@@ -197,6 +197,62 @@ let test_a_table_becomes_columns () =
 (* The rule has to measure the same cells as the gutter it stands in for, or
    the one row whose job is to say where the columns divide draws the divide
    somewhere else. *)
+let contains needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec go i =
+    i + nl <= hl
+    && (String.equal (String.sub haystack i nl) needle || go (i + 1))
+  in
+  go 0
+
+(* A fenced row too long for the pane used to lose every colour the lexer had
+   found: the wrap was done on the plain text and the pieces thrown away. The
+   rows that most need reading -- a long added line, a memory claim, a wrapped
+   string -- were exactly the ones that lost it. *)
+let test_a_wrapped_code_row_keeps_its_colours () =
+  let rows =
+    render ~width:26 "```diff\n+ aaaa bbbb cccc dddd eeee ffff\n```"
+  in
+  let marked = List.filter (contains "<+>") rows in
+  (* Asserted as more than one: a single marked row is what the old code drew
+     for a line that fitted, and this line does not fit. *)
+  Alcotest.(check bool) "the line wrapped onto more than one row" true
+    (List.length marked > 1)
+
+(* And nothing is lost on the way. A wide grapheme straddling the cut has to
+   move to the next row whole -- giving it up and padding its columns holds
+   the alignment and drops the letter, which is what a Korean line makes
+   visible and an ASCII one hides. *)
+let test_wrapping_a_code_row_loses_no_character () =
+  let line = "let x = \xed\x95\x9c\xea\xb8\x80\xec\x9d\x84 \xec\x84\x9e\xec\x9d\x80 \xea\xb8\xb4 \xec\xa4\x84 tail" in
+  let gutter = Markdown.plain_palette.Markdown.code_gutter in
+  (* Several widths rather than one. Whether a grapheme straddles the cut
+     depends on where the cut lands, and a single width that happens to fall
+     on a boundary tests nothing -- the first draft of this did exactly that
+     and stayed green against a wrap that dropped the letter. *)
+  List.iter
+    (fun width ->
+      let body =
+        render ~width ~palette:Markdown.plain_palette
+          (* A lexed language, so this takes the piece wrap rather than the
+             plain fallback a fence with no lexer takes. *)
+          ("```bash\n" ^ line ^ "\n```")
+        |> List.filter_map (fun row ->
+             let g = String.length gutter in
+             if String.length row >= g && String.equal (String.sub row 0 g) gutter
+             then Some (String.sub row g (String.length row - g))
+             else None)
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%d: it did wrap" width) true (List.length body > 1);
+      (* Joined as they are, not trimmed: a row that legitimately ends in a
+         space is indistinguishable from a padded one once trimmed, and the
+         space the wrap fell on is a lost character too. *)
+      Alcotest.(check string)
+        (Printf.sprintf "%d: every character survived the wrap" width)
+        line (String.concat "" body))
+    [ 21; 22; 23; 24; 25; 26; 27; 28 ]
+
 let test_the_rule_joint_measures_the_gutter () =
   List.iter
     (fun (name, (palette : Markdown.palette)) ->
@@ -629,6 +685,10 @@ let () =
             test_a_heading_carries_its_level
         ; Alcotest.test_case "a table becomes columns" `Quick
             test_a_table_becomes_columns
+        ; Alcotest.test_case "a wrapped code row keeps its colours" `Quick
+            test_a_wrapped_code_row_keeps_its_colours
+        ; Alcotest.test_case "wrapping a code row loses no character" `Quick
+            test_wrapping_a_code_row_loses_no_character
         ; Alcotest.test_case "the rule joint measures the gutter" `Quick
             test_the_rule_joint_measures_the_gutter
         ; Alcotest.test_case "a framed table stays inside its width" `Quick

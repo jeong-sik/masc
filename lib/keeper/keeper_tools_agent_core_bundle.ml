@@ -51,6 +51,7 @@ let make_tool_bundle_for_descriptors
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_tools : Agent_core.Tool.t list = [])
+      ?composition_plan_index
       ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
@@ -378,6 +379,7 @@ let make_tool_bundle_for_descriptors
         ~instruction_skills:(Keeper_skill_catalog.instruction_entries skill_catalog)
         ~skill_composition_entries:
           (Keeper_skill_catalog.composition_entries skill_catalog)
+        ?composition_plan_index
         ~config
         ~meta
         ~publication_recovery
@@ -425,6 +427,7 @@ let make_tool_bundle
       ?hitl_resolution
       ?skill_catalog
       ?identity_tools
+      ?composition_plan_index
       ?turn_ctx_cell
       ()
   =
@@ -446,6 +449,7 @@ let make_tool_bundle
     ?hitl_resolution
     ?skill_catalog
     ?identity_tools
+    ?composition_plan_index
     ?turn_ctx_cell
     ~descriptors
     ()

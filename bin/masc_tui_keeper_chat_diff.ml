@@ -159,21 +159,35 @@ let omission_row ~max_line_cells omitted =
 let attempted_suffix (change : Masc.Tui_decode.file_change) =
   if change.fc_succeeded then "" else " · failed attempt"
 
-let address_row ~max_line_cells change =
-  clipped ~max_cells:max_line_cells ("↳ " ^ change_address change)
+let address_row ~max_line_cells ~summary change =
+  let prefix = "↳ " in
+  let suffix = " " ^ summary in
+  let address =
+    let address = change_address change |> Projection.terminal_safe_text in
+    let address_cells =
+      max 1
+        (max_line_cells - Layout.display_width prefix
+       - Layout.display_width suffix)
+    in
+    if Layout.display_width address <= address_cells then address
+    else Layout.fit_middle address_cells address
+  in
+  clipped ~max_cells:max_line_cells (prefix ^ address ^ suffix)
 
 let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     ~replace_all =
   let detail =
     if replace_all then
-      Printf.sprintf
-        "  replace-all template · -%d +%d per match · match count unavailable%s"
-        removed added (attempted_suffix change)
+      "  replace-all template · match count unavailable"
+      ^ attempted_suffix change
     else
-      Printf.sprintf "  recorded replacement · -%d +%d%s" removed added
-        (attempted_suffix change)
+      "  recorded replacement" ^ attempted_suffix change
   in
-  let address = address_row ~max_line_cells change in
+  let summary =
+    if replace_all then Printf.sprintf "(+%d -%d per match)" added removed
+    else Printf.sprintf "(+%d -%d)" added removed
+  in
+  let address = address_row ~max_line_cells ~summary change in
   if removed = 0 && added = 0 then
     [ address
     ; clipped ~max_cells:max_line_cells (detail ^ " · no textual delta")
@@ -184,12 +198,18 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     address :: detail :: (preview_block ~max_line_cells ~language:"diff" lines
                           @ omission_row ~max_line_cells omitted)
 
-let written_section ~max_line_cells change ~preview ~omitted ~row_count =
-  let address = address_row ~max_line_cells change in
+let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
+      ~preview ~omitted ~row_count =
+  let summary =
+    if change.fc_succeeded then
+      Printf.sprintf "(%d row%s written)" row_count
+        (if row_count = 1 then "" else "s")
+    else Printf.sprintf "(%d-row write attempt)" row_count
+  in
+  let address = address_row ~max_line_cells ~summary change in
   let detail =
     Printf.sprintf
-      "  recorded write body · %d row%s · previous content unavailable%s"
-      row_count (if row_count = 1 then "" else "s")
+      "  recorded write body · previous content unavailable%s"
       (attempted_suffix change)
     |> clipped ~max_cells:max_line_cells
   in

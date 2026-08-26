@@ -55,12 +55,16 @@ type error =
       { skill : string
       ; declared : string
       }
-  | Removed_disable_model_invocation of { skill : string }
-  | Invalid_masc_composition_tool of
+  | Removed_invocation_policy of
       { skill : string
-      ; actual : string
+      ; field : string
       }
   | Duplicate_skill of { name : string }
+
+type rejected_document = private
+  { directory : string
+  ; error : error
+  }
 
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
@@ -73,6 +77,13 @@ val of_documents : (string * string) list -> (t, error) result
     document fails the whole catalog — a broken skill file is a boot error,
     never a silently missing skill. Skills are ordered by name so prompt
     rendering does not depend on directory scan order. *)
+
+val partition_documents :
+  (string * string) list -> t * rejected_document list
+(** Build the usable catalog and retain every rejected document separately.
+    A rejected document never contributes a tool or instruction. Runtime
+    callers use this form so one bad optional Skill cannot stop unrelated
+    Keeper turns; strict validators keep using {!of_documents}. *)
 
 val empty : t
 val skills : t -> skill list
@@ -89,8 +100,8 @@ val instruction_names_for :
 
 val composition_entries : t -> Keeper_tool_composition_catalog.entry list
 (** The validated composition entries declared by composition skills, in
-    catalog (name) order. The tool surface materializes these exactly like
-    entries from [tool-compositions.toml]. *)
+    catalog (name) order. The tool surface materializes these directly from
+    the effective Skill snapshot. *)
 
 val surface_to_string : surface -> string
 (** ["instruction"] or ["composition"] — diagnostics and dashboard wire. *)

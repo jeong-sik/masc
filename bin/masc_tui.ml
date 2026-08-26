@@ -128,6 +128,14 @@ let surface_rows (state : state) =
    the result against their exact wrapped-line count. *)
 let surface_page_rows (state : state) = max 1 (surface_rows state - 8)
 
+(* The columns the Identity pane wraps its notice at. Asked of the terminal
+   the same way {!surface_rows} asks for its rows, so the key handler counts
+   the lines the renderer is about to draw. *)
+let identity_pane_columns (state : state) =
+  let _rows, columns = get_terminal_size () in
+  Masc_tui_roster_pane.content_cols ~hidden:state.roster_pane_hidden
+    ~cols:columns
+
 (* A row cursor over a plain listing: the keypress moves the cursor and the
    window follows with the smallest move that keeps it visible. Reads the
    same [scrolled_surface] bound the drawing uses, so the cursor cannot name
@@ -173,7 +181,13 @@ let move_identity_cursor (state : state) ~delta =
             in
             state.detail_scroll <-
               Masc_tui_scroll.ensure_visible
-                ~cursor:(Masc_tui_types.identity_provider_line ~index:cursor)
+                ~cursor:
+                  (Masc_tui_types.identity_provider_line
+                     ~notice:
+                       (Masc_tui_types.identity_notice
+                          ~cols:(identity_pane_columns state)
+                          state.identity_attempt_error)
+                     ~index:cursor)
                 ~height state.detail_scroll
       end
 
@@ -635,7 +649,16 @@ let parse_args () =
     | "full" -> Tools_full
     | _ -> Tools_compact
   in
-  (base, r, !port, !refresh, reasoning_visibility, tool_visibility)
+  let base_path_input =
+    if !base_path <> "" then !base_path else base
+  in
+  ( base_path_input
+  , base
+  , r
+  , !port
+  , !refresh
+  , reasoning_visibility
+  , tool_visibility )
 
 let save_message_draft state =
   match state.msg_target_keeper_name with
@@ -3792,7 +3815,58 @@ let selected_surface_reference state =
                 Link.reference Fusion_run run.fur_run_id)
              (List.nth_opt snapshot.fus_runs state.fusion_cursor)
        | Fusion_list, None -> None)
-  | Overview | Acting | Keepers _ | Lanes | Approvals | Verification
+  (* These four hold an id already and were answering None, so Ctrl-] did
+     nothing on them: a lane names its keeper, a verification request names the
+     task it is waiting on, the roster names the keeper under the cursor, and
+     Overview names the task. Following was built and left switched off for
+     most of the screens that could use it. *)
+  | Overview ->
+      (match state.task_detail_id with
+       | Some task_id -> Some (Link.reference Task task_id)
+       | None ->
+           Option.map
+             (fun (row : Tui_decode.task) -> Link.reference Task row.id)
+             (List.nth_opt state.tasks state.task_cursor))
+  | Keepers _ ->
+      Option.map
+        (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
+        (List.nth_opt state.keepers state.keeper_cursor)
+  | Lanes ->
+      Option.bind state.lanes (fun snapshot ->
+          Option.map
+            (fun (lane : Tui_decode.keeper_lane) ->
+               Link.reference Keeper lane.kl_keeper)
+            (List.nth_opt snapshot.Tui_decode.kls_lanes state.lanes_cursor))
+  | Verification ->
+      (* The task, not the request: a verification request is a question about
+         a task, and the task is the thing another surface can open. *)
+      Option.bind state.verification (fun snapshot ->
+          Option.map
+            (fun (request : Tui_decode.verification_request) ->
+               Link.reference Task request.vr_task_id)
+            (List.nth_opt snapshot.Tui_decode.vs_requests
+               state.verification_cursor))
+  | Approvals ->
+      (* An ask names what it is asking about. A keeper's tool ask names the
+         keeper; an operator ask carries a typed target, so the kind is read
+         through [target_type_of_string] rather than matched as text. A
+         Workspace target, or one this build does not know, points at no
+         surface and gets no reference. *)
+      Option.bind
+        (List.nth_opt (approval_items state) state.approval_cursor)
+        (function
+          | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+          | Operator_row item ->
+              Option.bind item.ap_target_id (fun target_id ->
+                  match
+                    Masc.Operator_action_constants.target_type_of_string
+                      item.ap_target_type
+                  with
+                  | Some Masc.Operator_action_constants.Keeper ->
+                      Some (Link.reference Keeper target_id)
+                  | Some Goal -> Some (Link.reference Goal target_id)
+                  | Some Workspace | None -> None))
+  | Acting
   | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
   | Code | System_logs -> None
 
@@ -4532,6 +4606,7 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
            (* Another keeper's tab opens at the top of its own list rather
               than at whichever row the last one was left on. *)
            state.identity_cursor <- 0;
+           state.identity_attempt_error <- None;
            launch_identity_view state ~mailbox keeper.k_name)
 ;;
 
@@ -6242,10 +6317,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
               ; ils_label = label
               ; ils_url = url
               };
-          state.identity_view_error <- None
+          state.identity_attempt_error <- None
       (* Shown on the tab rather than swallowed: the operator pressed a key
-         and has to learn that nothing is going to open. *)
-      | Error detail -> state.identity_view_error <- Some detail)
+         and has to learn that nothing is going to open. Beside the list
+         rather than instead of it -- one provider refusing is not a reason
+         to take the others off the screen, and the message that matters
+         most here is the one telling them what to do about it. *)
+      | Error detail -> state.identity_attempt_error <- Some detail)
   | Identity_refreshed (keeper_name, result) -> (
       match result with
       (* Re-read rather than patch what is on screen: the catalog the server
@@ -7081,7 +7159,8 @@ let main () =
      to protect, so it routes them the same way and before anything can ask the
      catalog a question. *)
   Provider_diag_log_sink.install ();
-  let ( base_path
+  let ( base_path_input
+      , base_path
       , workspace
       , port
       , refresh
@@ -7089,6 +7168,12 @@ let main () =
       , tool_visibility ) =
     parse_args ()
   in
+  (* Publish the path selected by this process before any workspace-backed
+     store opens. Otherwise inherited path variables can make the screen read
+     local Keeper metadata from a different workspace than its server. *)
+  Unix.putenv Env_config_core.base_path_input_env_key base_path_input;
+  Unix.putenv Env_config_core.base_path_env_key base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
   require_interactive_terminal ();
   (* stderr is this terminal -- [lsof] on a running surface shows fd 1 and fd 2
      on the same [/dev/ttys*]. Everything that writes there writes into the
@@ -7721,12 +7806,14 @@ let main () =
           | Ok _ -> add_event state "system" (declared_name ^ ": keeper created")
           | Error detail -> add_event state "error" detail))
   in
+  let consume_resize_request () =
+    if Atomic.exchange resize_requested false then
+      invalidate_frame_for_resize frame_presenter render_schedule
+  in
   let run_loop () =
     while true do
       request_console_write_repair render_schedule;
-      if Atomic.exchange resize_requested false then begin
-        invalidate_frame_for_resize frame_presenter render_schedule
-      end;
+      consume_resize_request ();
       (* A second Ctrl-C while the first still stands ends the session; a lone
          one only says so. The notice is an event rather than a footer line
          because it has to survive the frame the operator is looking at, and
@@ -7753,6 +7840,10 @@ let main () =
           ~maximum:maximum_input_wait_seconds
       in
       let input = read_input ~timeout:input_timeout input_reader () in
+      (* SIGWINCH can arrive while [read_input] is waiting. Consume it before
+         this input sees the old frame; the next loop would be one key too
+         late. *)
+      consume_resize_request ();
       (* Any deliberate input withdraws a standing Ctrl-C. Without this the
          armed state outlives the moment it was meant for, and a Ctrl-C typed
          minutes apart from another would read as a double press. *)
@@ -7779,10 +7870,18 @@ let main () =
           | Some (Key name) -> Some name
           | Some (Pasted _) | Some (Graphics_reply _) | None -> None
       in
+      (* Async agenda state can change the usable row budget after the last
+         paint. Read the compact marker from that paint, not from the newer
+         state. An invalidated or not-yet-painted frame stays compact until
+         presentation succeeds, so its hidden surface cannot consume input. *)
+      let compact_viewport =
+        Frame_presenter.last_frame_is_compact frame_presenter
+      in
       (match input with
        (* Both sides of this arm are wanted: the guard decides whether a paste
           is handled at all, and the rewrite decides what text it carries. *)
-       | Some (Pasted paste) when not dismissed_image ->
+       | Some (Pasted paste)
+         when not dismissed_image && not compact_viewport ->
            (* A dropped or Finder-copied file arrives shell-escaped. The
               filesystem is the check that keeps this from touching text that
               merely looks like a path: an existing file is what the operator
@@ -7807,10 +7906,7 @@ let main () =
        | Some (Pasted _) | Some (Graphics_reply _) | Some (Key _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      let terminal_rows, terminal_columns = get_terminal_size () in
-      let compact_viewport =
-        Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
-      in
+      let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && state.view = Keepers Keeper_message
       in
@@ -7866,10 +7962,11 @@ let main () =
        | Some _ when composer_claimed -> ()
        | Some _
          when quit_key
-              && Option.is_none state.search
-              && not
-                   (state.view = Board
-                   && state.board_mode = Board_compose) ->
+              && (compact_viewport
+                 || (Option.is_none state.search
+                    && not
+                         (state.view = Board
+                         && state.board_mode = Board_compose))) ->
            if state.quit_armed then raise Break
            else begin
              state.quit_armed <- true;
@@ -7899,6 +7996,10 @@ let main () =
                 state.roster_pane_hidden <- hidden;
                 if hidden then state.keeper_message_focus <- Right_pane;
                 Render_schedule.request render_schedule Render_schedule.Force)
+       (* The compact fallback owns every remaining key. Put this before every
+          modal and surface branch: those states are hidden, and a question,
+          search cursor, or draft must not move behind the fallback. *)
+       | Some _ when compact_viewport -> ()
        (* Answering is modal. A question needs a key per choice, and this
           surface already spent its arrows and its y/n on the approval queue,
           so the keys have to come from somewhere. Quit and the chrome
@@ -7932,7 +8033,7 @@ let main () =
        (* [/context] is modal: the summary and exact prompt text must not leak
           keys into the composer underneath. The quit confirmation and chrome
           toggles remain global above it, matching Help and Palette. *)
-       | Some k when state.context_inspector_open && not compact_viewport ->
+       | Some k when state.context_inspector_open ->
            let prompt_blocks () =
              match state.context_inspector_reading with
              | Some (_, { Masc_tui_context_inspector.prompt = Ok capture; _ }) ->
@@ -8056,7 +8157,7 @@ let main () =
        (* The help overlay is modal: it answers scrolling and closing, and
           swallows everything else so a surface binding cannot fire under a
           screen that is describing it. Quit stays global above. *)
-       | Some k when state.help_open && not compact_viewport ->
+       | Some k when state.help_open ->
            (match k with
             | "?" | "esc" ->
                 state.help_open <- false;
@@ -8076,7 +8177,7 @@ let main () =
        (* Modal for the same reason the help sheet is: a panel that is
           answering "what is coming" should not have a surface binding fire
           underneath it. *)
-       | Some k when state.agenda_open && not compact_viewport ->
+       | Some k when state.agenda_open ->
            (match k with
             | ";" | "esc" ->
                 state.agenda_open <- false;
@@ -8093,7 +8194,7 @@ let main () =
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
-       | Some k when state.palette_open && not compact_viewport ->
+       | Some k when state.palette_open ->
            let close () =
              state.palette_open <- false;
              state.palette_query <- "";
@@ -8220,8 +8321,7 @@ let main () =
        (* Row search: typing moves the surface's row cursor live to the
           first match from the top; Enter keeps the query for n/N, Esc keeps
           nothing. The list itself never narrows -- see [search] in types. *)
-       | Some k
-         when Option.is_some state.search && not compact_viewport ->
+       | Some k when Option.is_some state.search ->
            let query = Option.value state.search ~default:"" in
            (match k with
             | "esc" -> state.search <- None
@@ -8242,11 +8342,10 @@ let main () =
                 search_jump state ~query:longer ~after:(-1)
             | _ -> ())
        | Some "/"
-         when Option.is_some (surface_row_texts state state.view)
-              && not compact_viewport ->
+         when Option.is_some (surface_row_texts state state.view) ->
            state.search <- Some ""
        | Some (("[" | "]") as bracket)
-         when state.view = Keepers Keeper_detail && not compact_viewport ->
+         when state.view = Keepers Keeper_detail ->
            (* Tabs inside the detail pane: [ and ] walk the same short list
               the pane's title row draws. Non-Info tabs read over HTTP on
               entry; the stamped keeper name keeps a slow answer from being
@@ -8280,18 +8379,15 @@ let main () =
                 state.identity_view_error <- None;
                 launch_identity_view state ~mailbox:async_messages keeper.k_name
             | _, Detail_info | _, Detail_secrets | None, _ -> ())
-       | Some (("[" | "]") as bracket)
-         when state.view = Changes && not compact_viewport ->
+       | Some (("[" | "]") as bracket) when state.view = Changes ->
            cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
-       | Some (("[" | "]") as bracket)
-         when state.view = Tools && not compact_viewport ->
+       | Some (("[" | "]") as bracket) when state.view = Tools ->
            cycle_tools_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "L"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_github
-              && not compact_viewport ->
+              && state.detail_tab = Detail_github ->
            (match selected_keeper state with
             | Some keeper ->
                 state.github_identity_view <-
@@ -8304,7 +8400,6 @@ let main () =
        | Some digit
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
-              && not compact_viewport
               && String.length digit = 1
               && digit.[0] >= '1'
               && digit.[0] <= '9' -> (
@@ -8322,15 +8417,14 @@ let main () =
                       arrows carry on from the row they just started. *)
                    state.identity_cursor <- wanted;
                    state.identity_login <- None;
-                   state.identity_view_error <- None;
+                   state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
            | Some _, (Some _ | None) | None, _ -> ())
        | Some "R"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
+              && state.detail_tab = Detail_identity -> (
            match (selected_keeper state, state.identity_view) with
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name ->
@@ -8347,7 +8441,7 @@ let main () =
                  launch_identity_refresh state ~mailbox:async_messages
                    ~keeper_name:keeper.k_name ~provider_ids:attached
            | Some _, (Some _ | None) | None, _ -> ())
-       | Some "\r" when state.view = Resources && not compact_viewport ->
+       | Some "\r" when state.view = Resources ->
            (match
               Option.bind state.resources_list (fun rows ->
                   List.nth_opt rows state.resources_cursor)
@@ -8356,9 +8450,9 @@ let main () =
                 state.resource_focus <- Right_pane;
                 launch_resource_read state ~mailbox:async_messages ~uri
             | None -> ())
-       | Some "J" when state.view = Resources && not compact_viewport ->
+       | Some "J" when state.view = Resources ->
            state.resource_scroll <- state.resource_scroll + 1
-       | Some "K" when state.view = Resources && not compact_viewport ->
+       | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
@@ -8366,7 +8460,6 @@ let main () =
            let after = Option.value (search_row_cursor state) ~default:0 in
            search_jump state ~query:state.search_last ~after
              ~backwards:(String.equal direction "N")
-       | Some _ when compact_viewport -> ()
        (* In chat, printable keys normally belong to the draft. Keep [?] as
           the documented global Help key when the draft is empty; once a
           sentence has started it remains an ordinary question mark. This
@@ -8490,13 +8583,13 @@ let main () =
                   cycle_surface state ~mailbox:async_messages
                     ~backwards:(k = "shift-tab")
               | _ -> ())
-       | Some "?" when not compact_viewport ->
+       | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-       | Some ";" when not compact_viewport ->
+       | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
-       | Some ":" when not compact_viewport ->
+       | Some ":" ->
            state.palette_open <- true;
            state.palette_query <- "";
            state.palette_cursor <- 0
@@ -8718,8 +8811,31 @@ let main () =
                    operator actually was rather than where they land. *)
                 state.followed_from <- Some (state.view, None);
                 goto_surface state ~mailbox:async_messages destination;
+                (* Landing on the surface is half the move. Every one of
+                   these already has a "this one is open" state, and without
+                   setting it the operator arrives at the top of a list and
+                   goes looking for the row they just followed. *)
                 (match destination, opened with
                  | Overview, Some task_id -> state.task_detail_id <- Some task_id
+                 | Planning, Some goal_id ->
+                     state.planning_mode <- Planning_detail goal_id
+                 | Board, Some post_id -> state.board_mode <- Board_read post_id
+                 | Schedules, Some schedule_id ->
+                     state.schedule_detail_id <- Some schedule_id
+                 | Fusion, Some run_id -> state.fusion_mode <- Fusion_detail run_id
+                 | Keepers _, Some keeper_name ->
+                     (* The roster is a cursor, not an id, so this puts the
+                        cursor on the named keeper and leaves it there. A name
+                        the roster does not carry leaves the cursor alone
+                        rather than moving it somewhere arbitrary. *)
+                     (match
+                        List.find_index
+                          (fun (keeper : Tui_decode.keeper) ->
+                             String.equal keeper.k_name keeper_name)
+                          state.keepers
+                      with
+                      | Some index -> state.keeper_cursor <- index
+                      | None -> ())
                  | _, _ -> ());
                 add_event state "system" ("followed " ^ reference))
        | Some "\x14" ->
@@ -9233,7 +9349,11 @@ let main () =
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                if state.keeper_detail_focus = Left_pane then begin
+                if
+                  Masc_tui_roster_pane.arrows_go_left
+                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~preferring_left:(state.keeper_detail_focus = Left_pane)
+                then begin
                   state.keeper_cursor <-
                     Masc_tui_scroll.cursor_down
                       ~count:(List.length state.keepers)
@@ -9481,7 +9601,11 @@ let main () =
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
-                if state.keeper_detail_focus = Left_pane then begin
+                if
+                  Masc_tui_roster_pane.arrows_go_left
+                    ~hidden:state.roster_pane_hidden ~cols:terminal_columns
+                    ~preferring_left:(state.keeper_detail_focus = Left_pane)
+                then begin
                   state.keeper_cursor <-
                     Masc_tui_scroll.cursor_up
                       ~count:(List.length state.keepers)
@@ -9676,8 +9800,7 @@ let main () =
           the cursor is the only way to reach a row. *)
        | Some "\r" | Some "\n"
          when state.view = Keepers Keeper_detail
-              && state.detail_tab = Detail_identity
-              && not compact_viewport -> (
+              && state.detail_tab = Detail_identity -> (
            match (selected_keeper state, state.identity_view) with
            | Some keeper, Some (stamp, providers)
              when String.equal stamp keeper.k_name -> (
@@ -9687,7 +9810,7 @@ let main () =
                with
                | Some (provider_id, label) ->
                    state.identity_login <- None;
-                   state.identity_view_error <- None;
+                   state.identity_attempt_error <- None;
                    launch_identity_login state ~mailbox:async_messages
                      ~keeper_name:keeper.k_name ~provider_id ~label
                | None -> ())
@@ -10279,7 +10402,7 @@ let main () =
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_librarian_input_read ()
-       | Some "p" | Some "P" when state.view = Config && not compact_viewport ->
+       | Some "p" | Some "P" when state.view = Config ->
            (* One surface, two files the server reads: runtime.toml and the
               prompt registry. [p] moves between them and loads the list the
               first time it is asked for. *)
@@ -10383,12 +10506,11 @@ let main () =
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
-         when state.view = Config && state.config_pane = Config_prompts
-              && not compact_viewport ->
+         when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()
-       | Some "b" when state.view = Connectors && not compact_viewport ->
+       | Some "b" when state.view = Connectors ->
            handle_connector_bind ()
-       | Some "u" when state.view = Connectors && not compact_viewport ->
+       | Some "u" when state.view = Connectors ->
            handle_connector_unbind ()
        | Some "a" | Some "A" ->
            (match state.view with

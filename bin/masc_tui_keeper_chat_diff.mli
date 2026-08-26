@@ -47,5 +47,7 @@ val rows :
     annotations and source rows are counted explicitly.
 
     An [Edited] record is labelled as a replacement (or replace-all template),
-    not a whole-file diff. A [Written] record is labelled as recorded body with
-    previous content unavailable, because its producer never read [before]. *)
+    not a whole-file diff. Its typed path and [+added -removed] size share one
+    heading. A [Written] record reports its body row count instead of inventing
+    a removal count, because its producer never read [before]; a failed call is
+    labelled as an attempt rather than as rows written. *)

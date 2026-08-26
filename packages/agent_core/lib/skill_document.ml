@@ -73,7 +73,6 @@ type t =
   ; compatibility : string option
   ; metadata : (string * string) list
   ; metadata_values : (string * extension_value) list
-  ; allowed_tools : string option
   ; extensions : (string * extension_value) list
   ; body : string
   }
@@ -439,10 +438,10 @@ let decode ~directory_name contents =
                  | Ok value -> value, []
                  | Error diagnostic -> None, [ diagnostic ]
                in
-               let allowed_tools, allowed_tools_diagnostics =
+               let allowed_tools_diagnostics =
                  match optional_string fields Allowed_tools "allowed-tools" with
-                 | Ok value -> value, []
-                 | Error diagnostic -> None, [ diagnostic ]
+                 | Ok _ -> []
+                 | Error diagnostic -> [ diagnostic ]
                in
                let metadata, metadata_values, metadata_diagnostics = metadata fields in
                let extension_values = extensions fields in
@@ -483,7 +482,6 @@ let decode ~directory_name contents =
                  ; compatibility
                  ; metadata
                  ; metadata_values
-                 ; allowed_tools
                  ; extensions = extension_values
                  ; body
                  }

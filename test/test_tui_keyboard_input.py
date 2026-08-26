@@ -769,11 +769,14 @@ def keeper_metadata(name: str) -> dict[str, object]:
     return metadata
 
 
-def seed_workspace(base_path: str) -> None:
+def seed_workspace(
+    base_path: str,
+    keeper_names: tuple[str, ...] = ("alpha", "beta"),
+) -> None:
     masc_path = Path(base_path) / ".masc"
     keepers_path = masc_path / "keepers"
     keepers_path.mkdir(parents=True)
-    for name in ("alpha", "beta"):
+    for name in keeper_names:
         (keepers_path / f"{name}.json").write_text(
             json.dumps(keeper_metadata(name)), encoding="utf-8"
         )
@@ -1365,6 +1368,7 @@ def run_terminal_scenario(
     preload_input: bytes | None = None,
     extra_args: tuple[str, ...] = (),
     extra_env: dict[str, str] | None = None,
+    conflicting_env_base_path: bool = False,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -1382,6 +1386,11 @@ def run_terminal_scenario(
             ):
                 seed_workspace(base_path)
                 set_workspace_base_path(base_path)
+                env_base_path = base_path
+                if conflicting_env_base_path:
+                    inherited_base_path = str(Path(base_path, "inherited"))
+                    seed_workspace(inherited_base_path, ("env-only",))
+                    env_base_path = inherited_base_path
                 if prepare_workspace is not None:
                     prepare_workspace(base_path)
                 environment = os.environ.copy()
@@ -1401,8 +1410,8 @@ def run_terminal_scenario(
                     environment.update(extra_env)
                 environment.update(
                     {
-                        "MASC_BASE_PATH": base_path,
-                        "MASC_BASE_PATH_INPUT": base_path,
+                        "MASC_BASE_PATH": env_base_path,
+                        "MASC_BASE_PATH_INPUT": env_base_path,
                         "MASC_HOST": "127.0.0.1",
                         "MASC_TUI_SYNC": "off",
                         "TERM": "xterm-256color",
@@ -1693,6 +1702,7 @@ def wheel_scrolls_and_clicks_do_not(
     wait_for_output(
         process, master_fd, output, b"\x1b[?1006;1000h", start=0, timeout=3.0
     )
+    wait_for_output(process, master_fd, output, b"Awaiting you", start=0, timeout=3.0)
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     # An SGR wheel report moves the cursor exactly as the arrow key does.
     send_and_wait(
@@ -1734,6 +1744,7 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    os.write(master_fd, b"\x1b[200~hidden compact paste\x1b[201~")
     os.write(master_fd, b"x\r")
     wait_for_terminal_input_consumed(slave_fd)
     resize_and_wait(
@@ -1756,7 +1767,11 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25h",
     )
-    if b"q2Qx" in restored_message_patch or b"(sending " in restored_message_patch:
+    if (
+        b"hidden compact paste" in restored_message_patch
+        or b"q2Qx" in restored_message_patch
+        or b"(sending " in restored_message_patch
+    ):
         raise AssertionError(
             "compact viewport accepted hidden message input: "
             f"{restored_message_patch!r}"
@@ -1769,16 +1784,64 @@ def wheel_scrolls_and_clicks_do_not(
     wait_for_terminal_input_consumed(slave_fd)
     drain_until_quiet(process, master_fd, output)
     send_and_wait(process, master_fd, output, b"\r", b"Keepers \xe2\x96\xb8 \x1b[1mbeta")
+
+    # Wait until the process is back inside its input read, then resize and
+    # send one surface shortcut without waiting for the compact frame. The
+    # SIGWINCH lands after the loop's first resize poll; input must consume
+    # that pending resize before it can act on the old normal frame.
+    drain_until_quiet(process, master_fd, output)
+    os.killpg(process.pid, signal.SIGSTOP)
+    wait_for_stop(
+        process,
+        master_fd,
+        output,
+        timeout=2.0,
+        description="compact resize/input race control point",
+    )
+    read_available(master_fd, output)
+    compact_race_start = len(output)
+    fcntl.ioctl(
+        master_fd,
+        termios.TIOCSWINSZ,
+        struct.pack("HHHH", 14, 100, 0, 0),
+    )
+    os.write(master_fd, b"2")
+    os.killpg(process.pid, signal.SIGCONT)
+    wait_for_terminal_input_consumed(slave_fd)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"terminal too small",
+        start=compact_race_start,
+        timeout=3.0,
+    )
     resize_and_wait(
         process,
         master_fd,
         output,
-        rows=8,
+        rows=30,
+        columns=100,
+        needle=b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        # The agenda strip takes one of these fourteen rows. The renderer
+        # therefore shows a thirteen-row compact frame; the input gate must
+        # measure the same body rather than route this hidden `2`.
+        rows=14,
         columns=100,
         needle=b"terminal too small",
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    os.write(master_fd, b"2")
+    wait_for_terminal_input_consumed(slave_fd)
     resize_and_wait(
         process,
         master_fd,
@@ -1811,7 +1874,79 @@ def wheel_scrolls_and_clicks_do_not(
         controls=(b"\x1b[2J",),
         final_cursor=b"\x1b[?25l",
     )
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[D",
+        b"Keepers \xe2\x96\xb8 \x1b[1mbeta",
+    )
+    send_and_wait(process, master_fd, output, b"\x1b[D", b"MASC Keepers")
+    send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"\x1b[A",
+        keeper_row_selected(b"alpha"),
+    )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    os.write(master_fd, b"\x1b[B")
+    wait_for_terminal_input_consumed(slave_fd)
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=keeper_row_selected(b"alpha"),
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    send_and_wait(process, master_fd, output, b"/", b"/  j/k:move")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    # The fallback says q quits. A hidden search prompt must not reclaim it.
     os.write(master_fd, b"q")
+    wait_for_terminal_input_consumed(slave_fd)
+
+
+def compact_input_gate_http_fixtures() -> HttpFixtures:
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/keepers/tool-approvals"] = (
+        200,
+        {
+            "pending": [
+                {
+                    "keeper": "alpha",
+                    "tool_call_id": "tool-awaiting-compact-gate",
+                    "tool": "Execute",
+                    "args": "{}",
+                    "question": "Run the compact-gate probe?",
+                    "because": None,
+                    "asked_at": 1787766400.0,
+                    "timeout_sec": 300.0,
+                }
+            ]
+        },
+    )
+    return fixtures
 
 
 def select_keeper_row(
@@ -2070,6 +2205,28 @@ def keeper_selection_identity_interaction(
         failures.append("m opened Keepers \xe2\x96\xb8 alpha \xe2\x96\xb8 chat after beta disappeared")
     if failures:
         raise AssertionError("; ".join(failures))
+    os.write(master_fd, b"q")
+
+
+def cli_base_path_overrides_environment_interaction(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+    frame = send_and_wait(
+        process,
+        master_fd,
+        output,
+        b"2",
+        keeper_row_selected(b"alpha"),
+    )
+    if b"env-only" in frame:
+        raise AssertionError(
+            f"--base-path leaked Keeper metadata from MASC_BASE_PATH: {frame!r}"
+        )
     os.write(master_fd, b"q")
 
 
@@ -2783,6 +2940,11 @@ def approval_selection_identity_interaction(
         ):
             raise AssertionError(f"fixture did not select approval B: {selected!r}")
 
+        # An ask names what it is asking about, so the row under the cursor is
+        # followable. The kind is read from the typed target, not matched as
+        # text: this one targets keeper beta.
+        copy_reference(process, master_fd, output, b"masc://keepers/beta")
+
         fixtures[
             "/api/v1/operator?view=summary&include_messages=0&include_keepers=0"
         ] = approval_selection_snapshot([approval_new, *initial_items])
@@ -2992,6 +3154,108 @@ def planning_missing_detail_interaction(fixtures: HttpFixtures) -> Interaction:
             raise AssertionError(
                 f"recovered Planning list did not open D detail: {delta_detail!r}"
             )
+        os.write(master_fd, b"q")
+
+    return interact
+
+
+# A body says what it is about by writing the reference the TUI itself writes.
+# Two posts naming the same task are about the same thing; a post that merely
+# spells the id in prose is not, because nobody wrote that connection down.
+#
+# The last post carries an id whose percent escapes decode to real terminal
+# control bytes. Link.parse decodes, so that row is the one place a board post
+# could have driven the reader's terminal.
+BOARD_REFERENCE_TASK = "masc://overview/tasks/task-77"
+BOARD_REFERENCE_GOAL = "masc://planning/goal-9"
+
+
+def board_reference_http_fixtures() -> HttpFixtures:
+    # One body per post, in the list and in the detail. The related block reads
+    # the bodies the list carries, and board_post_dashboard_json sends p.body
+    # whole -- a list body that summarised would leave the block permanently
+    # empty while every unit test still passed.
+    bodies = {
+        "r1": ("Retry", f"we changed {BOARD_REFERENCE_TASK} for {BOARD_REFERENCE_GOAL}"),
+        "r2": ("Rollout", f"also about {BOARD_REFERENCE_TASK}"),
+        "r3": ("Prose", "task-77 and goal-9 in prose only"),
+        "r4": ("Hostile", "see masc://board/post%1b%5b2Jdanger"),
+    }
+    posts = [
+        board_selection_post(suffix, title, body)
+        for suffix, (title, body) in bodies.items()
+    ]
+    fixtures = overview_event_http_fixtures()
+    fixtures["/api/v1/board?sort_by=hot"] = (200, {"posts": posts})
+    for suffix, (title, body) in bodies.items():
+        fixtures[f"/api/v1/board/post-{suffix}?format=flat"] = (
+            200,
+            {"post": board_selection_post(suffix, title, body), "comments": []},
+        )
+    return fixtures
+
+
+def board_reference_interaction(fixtures: HttpFixtures) -> Interaction:
+    def interact(
+        process: subprocess.Popen[bytes],
+        master_fd: int,
+        _slave_fd: int,
+        output: bytearray,
+        _base_path: str,
+    ) -> None:
+        wait_for_output(process, master_fd, output, b"cluster-a", start=0, timeout=10.0)
+        cluster_end = output.find(b"cluster-a") + len(b"cluster-a")
+        wait_for_output(
+            process, master_fd, output, FRAME_END, start=cluster_end, timeout=3.0
+        )
+        tab_until(process, master_fd, output, b"MASC Keepers")
+        tab_until(process, master_fd, output, b"MASC Approvals")
+        tab_until(process, master_fd, output, screen_header(b"MASC Board", b" (4)"))
+        resize_and_wait(
+            process,
+            master_fd,
+            output,
+            rows=40,
+            columns=180,
+            needle=screen_header(b"MASC Board", b" (4)"),
+            final_cursor=b"\x1b[?25l",
+        )
+
+        opened = send_and_wait(process, master_fd, output, b"\r", b"POINTS AT")
+        plain = CSI_RE.sub(b"", frame_containing(opened, b"POINTS AT"))
+        for needle in (b"task", b"task-77", b"goal", b"goal-9"):
+            if needle not in plain:
+                raise AssertionError(
+                    f"POINTS AT dropped {needle!r}: {plain!r}"
+                )
+        if b"ALSO ABOUT THIS (1)" not in plain:
+            raise AssertionError(f"related posts miscounted: {plain!r}")
+        if b"post-r2" not in plain:
+            raise AssertionError(f"the post naming the same task is missing: {plain!r}")
+        if b"post-r3" in plain:
+            raise AssertionError(
+                f"an id spelled in prose became a link: {plain!r}"
+            )
+
+        # Down three rows to the hostile post, whose id decodes to control bytes.
+        back = send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+        del back
+        for row in (b"post-r2", b"post-r3", b"post-r4"):
+            send_and_wait(process, master_fd, output, b"j", selected_row(row))
+        hostile = send_and_wait(process, master_fd, output, b"\r", b"POINTS AT")
+        hostile_frame = frame_containing(hostile, b"POINTS AT")
+        if rb"\x1B[2Jdanger" not in CSI_RE.sub(b"", hostile_frame):
+            raise AssertionError(
+                f"the decoded id was not rendered as text: {hostile_frame!r}"
+            )
+        if b"\x1b[2Jdanger" in hostile_frame:
+            raise AssertionError(
+                "a board post drove the reader's terminal: "
+                f"{hostile_frame!r}"
+            )
+
+        send_and_wait(process, master_fd, output, b"\x1b", b"MASC Board")
+        # Arm the exit; the harness supplies the confirming press.
         os.write(master_fd, b"q")
 
     return interact
@@ -5608,6 +5872,10 @@ def keeper_lanes_interaction(
         send_and_wait(process, master_fd, output, b"alp", banded_alpha)
         send_and_wait(process, master_fd, output, b"\rk", banded_beta)
         send_and_wait(process, master_fd, output, b"n", banded_alpha)
+        # A lane names its keeper, so the row under the cursor is followable.
+        # This surface answered None before, which left Ctrl-] doing nothing on
+        # a screen that had the id in hand.
+        copy_reference(process, master_fd, output, b"masc://keepers/alpha")
         plain = CSI_RE.sub(b"", populated).decode("utf-8")
         for needle in (
             "MASC Lanes (2 keepers)",
@@ -7781,6 +8049,13 @@ def run_keyboard_regression(executable: str) -> None:
     )
     run_terminal_scenario(
         executable,
+        description="CLI base path overrides inherited environment",
+        interact=cli_base_path_overrides_environment_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        conflicting_env_base_path=True,
+    )
+    run_terminal_scenario(
+        executable,
         description="Keeper message unreliable roster",
         interact=keeper_message_unreliable_roster_interaction(
             unreliable_roster_requests
@@ -7825,6 +8100,13 @@ def run_keyboard_regression(executable: str) -> None:
         description="Planning missing detail recovery",
         interact=planning_missing_detail_interaction(planning_missing_fixtures),
         http_fixtures=planning_missing_fixtures,
+    )
+    board_reference_fixtures = board_reference_http_fixtures()
+    run_terminal_scenario(
+        executable,
+        description="Board references and related posts",
+        interact=board_reference_interaction(board_reference_fixtures),
+        http_fixtures=board_reference_fixtures,
     )
     run_terminal_scenario(
         executable,
@@ -7890,6 +8172,7 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="wheel scrolls, clicks do not",
         interact=wheel_scrolls_and_clicks_do_not,
+        http_fixtures=compact_input_gate_http_fixtures(),
     )
     run_terminal_scenario(
         executable,
@@ -7904,9 +8187,25 @@ def run_keyboard_regression(executable: str) -> None:
     )
 
 
+def run_cli_base_path_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="CLI base path overrides inherited environment",
+        interact=cli_base_path_overrides_environment_interaction,
+        http_fixtures=overview_event_http_fixtures(),
+        conflicting_env_base_path=True,
+    )
+
+
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[2] == "cli-base-path":
+        run_cli_base_path_regression(os.path.abspath(sys.argv[1]))
+        print("tui CLI base-path regression: PASS")
+        return
     if len(sys.argv) != 2:
-        raise SystemExit("usage: test_tui_keyboard_input.py <masc_tui.exe>")
+        raise SystemExit(
+            "usage: test_tui_keyboard_input.py <masc_tui.exe> [cli-base-path]"
+        )
     run_keyboard_regression(os.path.abspath(sys.argv[1]))
     print("tui keyboard PTY regression: PASS")
 

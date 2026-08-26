@@ -21,6 +21,7 @@
 type t =
   { pre_tool_use : Agent_core.Hooks.hook
   ; tool_approval : Agent_core.Hooks.tool_approval_callback
+  ; composition_plan_index : Keeper_tool_composition_plan_index.t
   }
 
 val create :
@@ -30,7 +31,9 @@ val create :
   keeper_name:string ->
   timeout_sec:float ->
   t
-(** A gate for one keeper's turn on one chat stream.
+(** A gate for one keeper's turn on one chat stream. Its composition plan
+    index has exactly the same lifetime, so another turn cannot overwrite the
+    plan this gate judges.
 
     [timeout_sec] bounds how long a call waits. It is required: a wait with no
     bound parks the turn for the life of the process when nobody is watching,

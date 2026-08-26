@@ -13,6 +13,7 @@ let contains ~needle text =
   needle_length > 0 && at 0
 
 let change_json ?(keeper = "alpha") ?(execution_id = Some "exec-edit-1")
+    ?(path = "lib/example.ml") ?(succeeded = true)
     ?(kind = `Edit ("let answer = 41", "let answer = 42", false)) () =
   let identity =
     match execution_id with
@@ -42,10 +43,10 @@ let change_json ?(keeper = "alpha") ?(execution_id = Some "exec-edit-1")
         , `Assoc
             [ "kind", `String "repo"
             ; "repo_id", `String "masc"
-            ; "path", `String "lib/example.ml"
+            ; "path", `String path
             ] )
       ; "change", change
-      ; "succeeded", `Bool true
+      ; "succeeded", `Bool succeeded
       ])
 
 let snapshot_json changes =
@@ -184,8 +185,8 @@ let test_full_projection_weaves_recorded_replacement () =
     (fun needle ->
       check bool ("body contains " ^ needle) true (contains ~needle body))
     [ "✓ Edit lib/example.ml · 12ms"
-    ; "↳ masc:lib/example.ml"
-    ; "recorded replacement · -1 +1"
+    ; "↳ masc:lib/example.ml (+1 -1)"
+    ; "recorded replacement"
     ; "```diff"
     ; "-let answer = 41"
     ; "+let answer = 42"
@@ -211,10 +212,28 @@ let test_write_states_unknown_previous_content () =
   let body = body rows in
   check bool "unknown before is explicit" true
     (contains ~needle:"previous content unavailable" body);
+  check bool "written row count stays with the path" true
+    (contains ~needle:"↳ masc:lib/example.ml (2 rows written)" body);
   check bool "write is not presented as an exact diff" false
     (contains ~needle:"```diff" body);
   check bool "recorded body remains visible" true
     (contains ~needle:"first\nsecond" body)
+;;
+
+let test_failed_write_is_labelled_as_an_attempt () =
+  let rows =
+    projected_rows Transcript.Full
+      (index
+         [ change_json ~succeeded:false ~kind:(`Write "first\nsecond") () ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let body = body rows in
+  check bool "failed write does not claim rows were written" false
+    (contains ~needle:"rows written" body);
+  check bool "failed write keeps its recorded body size" true
+    (contains ~needle:"↳ masc:lib/example.ml (2-row write attempt)" body);
+  check bool "failed attempt remains explicit" true
+    (contains ~needle:"failed attempt" body)
 ;;
 
 let test_replace_all_states_unknown_match_count () =
@@ -223,8 +242,48 @@ let test_replace_all_states_unknown_match_count () =
       (index [ change_json ~kind:(`Edit ("old", "new", true)) () ])
       [ activity ~execution_id:"exec-edit-1" () ]
   in
+  let body = body rows in
+  check bool "replace-all size stays per match" true
+    (contains ~needle:"↳ masc:lib/example.ml (+1 -1 per match)" body);
   check bool "replace-all count is not invented" true
-    (contains ~needle:"per match · match count unavailable" (body rows))
+    (contains ~needle:"match count unavailable" body)
+;;
+
+let test_long_path_keeps_the_change_size_visible () =
+  let rows =
+    projected_rows ~max_line_cells:40 Transcript.Full
+      (index
+         [ change_json
+             ~path:"lib/아주/긴/🙂/directory/that/keeps/going/example.ml"
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let heading = List.find (fun row -> String.starts_with ~prefix:"↳ " row) rows in
+  check bool "the path keeps both ends" true
+    (contains ~needle:"…" heading && contains ~needle:"example.ml" heading);
+  check bool "the typed size survives path clipping" true
+    (contains ~needle:"(+1 -1)" heading);
+  check bool "the heading fits its cell budget" true
+    (Masc_tui_message_layout.display_width heading <= 40)
+;;
+
+let test_narrow_unicode_path_keeps_the_change_size_visible () =
+  let rows =
+    projected_rows ~max_line_cells:24 Transcript.Full
+      (index
+         [ change_json
+             ~path:"lib/아주/긴/🙂/directory/that/keeps/going/example.ml"
+             ()
+         ])
+      [ activity ~execution_id:"exec-edit-1" () ]
+  in
+  let heading = List.find (fun row -> String.starts_with ~prefix:"↳ " row) rows in
+  check bool "the narrow path is middle-fitted" true (contains ~needle:"…" heading);
+  check bool "the narrow heading keeps the typed size" true
+    (contains ~needle:"(+1 -1)" heading);
+  check bool "the narrow heading fits its cell budget" true
+    (Masc_tui_message_layout.display_width heading <= 24)
 ;;
 
 let test_source_lines_are_cell_bounded () =
@@ -320,8 +379,14 @@ let () =
             test_compact_projection_is_byte_unchanged
         ; test_case "write states unknown before" `Quick
             test_write_states_unknown_previous_content
+        ; test_case "failed write is an attempt" `Quick
+            test_failed_write_is_labelled_as_an_attempt
         ; test_case "replace-all states unknown count" `Quick
             test_replace_all_states_unknown_match_count
+        ; test_case "long path keeps the change size" `Quick
+            test_long_path_keeps_the_change_size_visible
+        ; test_case "narrow Unicode path keeps the change size" `Quick
+            test_narrow_unicode_path_keeps_the_change_size_visible
         ; test_case "source rows are bounded" `Quick
             test_source_lines_are_cell_bounded
         ; test_case "source omission is exact" `Quick

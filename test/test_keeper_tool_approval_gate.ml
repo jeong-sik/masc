@@ -194,15 +194,11 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
      index; its because is the only place the node that caused the ask is
      named. This pins that the node name survives the gate — dropped here,
      an operator sees a plan name and a blind yes. *)
-  let module Index = Masc.Keeper_tool_composition_plan_index in
-  let index = Index.shared () in
-  Index.record index
-    ~composition:"keeper_compose_gate_fixture"
-    ~node_tools:[ "Read"; "Edit"; "Grep" ];
-  Fun.protect
-    ~finally:(fun () -> Index.forget_all index)
-    (fun () ->
-      with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
+  with_gate ~timeout_sec:1.0 (fun ~clock:_ ~registry:_ ~events:_ ~gate ->
+      Masc.Keeper_tool_composition_plan_index.record
+        gate.Gate.composition_plan_index
+        ~composition:"keeper_compose_gate_fixture"
+        ~node_tools:[ "Read"; "Edit"; "Grep" ];
           match gate.Gate.pre_tool_use (pre_tool_use_event
                  ~tool_name:"keeper_compose_gate_fixture"
                  ~input:(`Assoc [])) with
@@ -221,7 +217,7 @@ let test_a_synthetic_composition_asks_with_its_node_name () =
                 (has_affix "node Edit:" because)
           | other ->
               Alcotest.fail
-                ("composition should ask, got: " ^ decision_to_string other)))
+                ("composition should ask, got: " ^ decision_to_string other))
 
 let () =
   run "keeper_tool_approval_gate"

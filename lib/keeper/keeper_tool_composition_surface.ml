@@ -1180,6 +1180,7 @@ let make_instruction_skill_tool ~(config : Workspace.config) ~instruction_skills
 let make_tools
       ?(instruction_skills = [])
       ?(skill_composition_entries = [])
+      ?composition_plan_index
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -1212,13 +1213,17 @@ let make_tools
        policy asks. Declaring the plan's node tools here lets it judge the
        composition by what the composition runs. Written once per turn, at the
        one point that already holds the plan. *)
-    Keeper_tool_composition_plan_index.record
-      (Keeper_tool_composition_plan_index.shared ())
-      ~composition:tool_name
-      ~node_tools:
-        (List.map
-           (fun (node : Keeper_tool_plan.node) -> node.Keeper_tool_plan.tool_name)
-           (Keeper_tool_plan.nodes entry.plan));
+    Option.iter
+      (fun index ->
+        Keeper_tool_composition_plan_index.record
+          index
+          ~composition:tool_name
+          ~node_tools:
+            (List.map
+               (fun (node : Keeper_tool_plan.node) ->
+                  node.Keeper_tool_plan.tool_name)
+               (Keeper_tool_plan.nodes entry.plan)))
+      composition_plan_index;
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
       match entry.execution, completion with

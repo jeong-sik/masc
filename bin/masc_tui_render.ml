@@ -45,12 +45,36 @@ let frame_lines buf =
   | "" :: reversed -> List.rev reversed
   | reversed -> List.rev reversed
 
+(* Two already-drawn panes, side by side, one terminal row per line.
+
+   The left pane's own width pads the rows it ran out of. Without that a
+   short list lets the right pane's remaining lines slide to column zero,
+   which reads as the detail having changed panes. Five surfaces had copied
+   this loop; a sixth copy is how the padding rule drifts. *)
+let write_two_panes buf ~left_cols ~left ~right =
+  let blank_left = String.make left_cols ' ' in
+  let rec zip left right =
+    match left, right with
+    | [], [] -> []
+    | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
+    | [], r :: rt -> (blank_left ^ r) :: zip [] rt
+    | l :: lt, [] -> l :: zip lt []
+  in
+  List.iter
+    (fun line ->
+      Buffer.add_string buf line;
+      Buffer.add_char buf '\n')
+    (zip (frame_lines left) (frame_lines right))
+;;
+
 (* A frame, and what it had to clamp to build itself. The clamp travels beside
    the frame rather than being written into the state mid-draw; see
    [clamped_scroll]. Surfaces that clamp nothing pass nothing. *)
-let finish_frame ?clamped ~surface_key ~cursor ~rows ~cols buf :
+let finish_frame ?clamped ?(compact_frame = false) ~surface_key ~cursor ~rows
+    ~cols buf :
     Frame_presenter.frame * clamped_scroll option =
   ( { surface_key;
+      compact_frame;
       terminal_rows = rows;
       terminal_cols = cols;
       cursor;
@@ -238,6 +262,16 @@ let folded_thinking_summary body =
   in
   Printf.sprintf "Reasoning · %d line(s) folded · Ctrl-R or /thinking to expand"
     (List.length lines)
+
+(* What a page says when it holds nothing, in one place.
+
+   These were spelled at every surface that draws a page -- nine copies of the
+   failure line and nine of the unread one -- and the unread copies said only
+   that nothing had loaded. [r] is what loads it, and the reader was left to
+   find that out somewhere else. Two surfaces did name the key, which is how a
+   reader on the others learned there was nothing to learn. *)
+let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
+let page_failed_note = "  (load failed; nothing here is a reading)"
 
 let tool_projection_mode (state : state) =
   match state.msg_tool_visibility with
@@ -1898,8 +1932,14 @@ let board_read_pane (state : state) (list_post : board_post) ~rows ~cols buf =
       :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
       :: List.map
            (fun (kind, id) ->
+             (* [Link.parse] percent-decodes the id segment, so a body that
+                writes masc://board/%1b%5b2J hands this line real escape
+                bytes. The kind is a closed variant and needs no sanitizer;
+                the id is whatever the writer typed. *)
              Printf.sprintf "  %s%-10s %s%s" Ansi.reset
-               (Link.kind_label kind) id Ansi.reset)
+               (Link.kind_label kind)
+               (fit_width (Terminal_text.single_line id) (max 8 (cols - 16)))
+               Ansi.reset)
            referenced
   in
   let related_lines =
@@ -2065,19 +2105,8 @@ let render_board_read (state : state) (list_post : board_post) =
     let scroll =
       board_read_pane state list_post ~rows ~cols:right_cols right_buf
     in
-    let blank_left = String.make left_cols ' ' in
-    let rec zip left right =
-      match left, right with
-      | [], [] -> []
-      | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-      | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-      | l :: lt, [] -> l :: zip lt []
-    in
-    List.iter
-      (fun line ->
-        Buffer.add_string buf line;
-        Buffer.add_char buf '\n')
-      (zip (frame_lines left_buf) (frame_lines right_buf));
+    write_two_panes buf ~left_cols:left_cols ~left:left_buf
+      ~right:right_buf;
     Buffer.add_string buf footer;
     finish_surface state ~clamped:(Board_read scroll)
       ~surface_key:"board-read" ~rows:terminal_rows ~cols buf
@@ -2219,7 +2248,7 @@ let render_planning_list (state : state) =
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
        for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
@@ -2520,7 +2549,7 @@ let render_schedule_list (state : state) =
         | Some err ->
             box_line buf cols (data_unreliable_row ~cols err)
         | None ->
-            box_line buf cols (Ansi.dim ^ "  (not loaded yet)" ^ Ansi.reset));
+            box_line buf cols (Ansi.dim ^ page_unread_note ^ Ansi.reset));
        for _ = 1 to rows - boxed_surface_chrome_rows do
          box_empty buf cols
        done
@@ -3512,8 +3541,8 @@ let render_lanes (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.lanes ~error:state.lanes_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no keeper lane snapshots)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -3698,11 +3727,30 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
             ^ Ansi.reset ]
     | Some _ | None -> []
   in
+  (* What one attempt answered. Wrapped, because the message that matters
+     most here is the long one: a provider that registers no client says what
+     to make and where to put it, and a single truncated line is the half of
+     that sentence an operator cannot act on. *)
+  (* Built by the shared function and only coloured here: the key handler
+     counts these rows to know where the list starts, and two places wrapping
+     the same text at their own idea of the width would disagree. *)
+  let attempt =
+    Masc_tui_types.identity_notice ~cols
+      (Option.map Terminal_text.single_line state.identity_attempt_error)
+  in
+  let attempt =
+    List.mapi
+      (fun index line ->
+        if index = List.length attempt - 1
+        then Ansi.dim ^ line ^ Ansi.reset
+        else Theme.bad () ^ line ^ Ansi.reset)
+      attempt
+  in
   if numbered = [] && rejected = [] then
     [ Ansi.dim ^ "  Nothing is declared under config/identity/." ^ Ansi.reset ]
   else
     Masc_tui_types.identity_preamble
-      ~keeper:(Terminal_text.single_line k.k_name)
+      ~keeper:(Terminal_text.single_line k.k_name) ~notice:attempt
     @ numbered @ rejected @ started @ attached_tool_lines
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
@@ -4055,19 +4103,8 @@ let render_keeper_detail (state : state) =
       let scroll =
         keeper_detail_pane state k ~framed:true ~rows ~cols:right_cols right_buf
       in
-      let blank_left = String.make left_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines right_buf));
+      write_two_panes buf ~left_cols:left_cols ~left:left_buf
+        ~right:right_buf;
       Buffer.add_string buf (footer ^ "\n");
       finish_surface state ~clamped:(Keeper_detail scroll)
         ~surface_key:"keeper-detail" ~rows:terminal_rows ~cols buf
@@ -4989,19 +5026,8 @@ let render_keeper_message (state : state) =
       keeper_roster_pane
         ~focused:(state.keeper_message_focus = Left_pane)
         state ~rows ~cols:keeper_roster_pane_cols left_buf;
-      let blank_left = String.make keeper_roster_pane_cols ' ' in
-      let rec zip left right =
-        match left, right with
-        | [], [] -> []
-        | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-        | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-        | l :: lt, [] -> l :: zip lt []
-      in
-      List.iter
-        (fun line ->
-          Buffer.add_string buf line;
-          Buffer.add_char buf '\n')
-        (zip (frame_lines left_buf) (frame_lines chat_buf))
+      write_two_panes buf ~left_cols:keeper_roster_pane_cols ~left:left_buf
+        ~right:chat_buf
     end;
     finish_frame_with_strip state ~surface_key:"keeper-message"
       ~clamped:(Message_scroll scroll)
@@ -5088,7 +5114,7 @@ let render_system_logs (state : state) =
         empty_page_of ~snapshot:state.system_logs ~error:state.system_logs_error
       with
       | Page_failed -> "  (load failed; the count above is not a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no entries)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5186,8 +5212,8 @@ let render_verification_list (state : state) =
         empty_page_of ~snapshot:state.verification
           ~error:state.verification_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (nothing waiting on a verdict)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5446,8 +5472,8 @@ let render_harness_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no verdicts recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -5738,8 +5764,8 @@ let render_fusion_list (state : state) =
       match
         empty_page_of ~snapshot:state.fusion_runs ~error:state.fusion_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6037,8 +6063,8 @@ let render_repositories (state : state) =
         empty_page_of ~snapshot:state.repositories
           ~error:state.repositories_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no repositories registered)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6334,7 +6360,7 @@ let render_changes_list (state : state) =
   if shown = 0 then begin
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
+      | Page_failed -> page_failed_note
       | Page_unread -> "  (pick a keeper on the Keepers surface, then press r)"
       | Page_empty -> "  (this keeper wrote no files in the window)"
     in
@@ -6576,8 +6602,8 @@ let render_connectors (state : state) =
       match
         empty_page_of ~snapshot:state.connectors ~error:state.connectors_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no connectors registered)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -6814,8 +6840,8 @@ let render_runtime (state : state) =
         empty_page_of ~snapshot:state.runtime_surface
           ~error:state.runtime_surface_error
       with
-      | Page_failed -> "  (load failed; nothing here is a reading)"
-      | Page_unread -> "  (not loaded yet)"
+      | Page_failed -> page_failed_note
+      | Page_unread -> page_unread_note
       | Page_empty -> "  (no runtime lanes configured)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -7186,8 +7212,8 @@ let render_keeper_calls (state : state) =
   if shown = 0 then begin
     let empty =
       match (state.keeper_calls, state.keeper_calls_error) with
-      | _, Some _ -> "  (load failed; nothing here is a reading)"
-      | None, None -> "  (not loaded yet)"
+      | _, Some _ -> page_failed_note
+      | None, None -> page_unread_note
       | Some _, None -> "  (no calls recorded)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -8003,19 +8029,8 @@ let render_code (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.code_focus_file = Right_pane then content_pane buf cols
    else list_pane buf cols);
@@ -8151,19 +8166,8 @@ let render_resources (state : state) =
      let right_buf = Buffer.create 4096 in
      list_pane left_buf left_cols;
      content_pane right_buf right_cols;
-     let blank_left = String.make left_cols ' ' in
-     let rec zip left right =
-       match left, right with
-       | [], [] -> []
-       | l :: lt, r :: rt -> (l ^ r) :: zip lt rt
-       | [], r :: rt -> (blank_left ^ r) :: zip [] rt
-       | l :: lt, [] -> l :: zip lt []
-     in
-     List.iter
-       (fun line ->
-         Buffer.add_string buf line;
-         Buffer.add_char buf '\n')
-       (zip (frame_lines left_buf) (frame_lines right_buf))
+     write_two_panes buf ~left_cols:left_cols ~left:left_buf
+       ~right:right_buf
    end
    else if state.resource_focus = Right_pane then content_pane buf cols
    else list_pane buf cols);
@@ -9063,7 +9067,7 @@ let render_terminal_too_small ~rows ~cols =
           Render_schedule.Viewport.minimum_fixed_chrome_rows)
        cols);
   Buffer.add_char buf '\n';
-  finish_frame ~surface_key:"terminal-too-small"
+  finish_frame ~compact_frame:true ~surface_key:"terminal-too-small"
     ~cursor:Frame_presenter.Hidden ~rows ~cols buf
 
 (** Keep every high-chrome surface out of a viewport that cannot contain the

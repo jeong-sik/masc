@@ -102,92 +102,78 @@ let skill_catalog_config_error detail =
     (Agent_core.Error.InvalidConfig { field = "skills"; detail })
 ;;
 
-let skill_catalog_io_error ~op ~path exn =
-  Agent_core.Error.Io
-    (Agent_core.Error.FileOpFailed
-       { op; path; detail = Printexc.to_string exn })
-;;
-
-let skills_dir_of_base_path ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "skills"
-;;
-
-(* A directory under skills/ that carries no SKILL.md is not a skill and is
-   skipped: in the Agent Skills layout the file is the declaration, and a
-   half-installed directory should not take the whole tool surface down. A
-   SKILL.md that exists but fails to parse is a config error — the operator
-   declared a skill and masc cannot honour it. *)
-let load_skill_catalog ~base_path =
-  let skills_dir = skills_dir_of_base_path ~base_path in
-  match
-    try Ok (Fs_compat.exact_path_kind skills_dir) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (skill_catalog_io_error ~op:"inspect" ~path:skills_dir exn)
-  with
-  | Error _ as error -> error
-  | Ok Fs_compat.Exact_missing -> Ok Keeper_skill_catalog.empty
-  | Ok (Fs_compat.Exact_kind Unix.S_DIR) ->
+let refresh_skill_snapshot ~base_path =
+  match Skill_catalog_snapshot_service.workspace_of_base_path ~base_path with
+  | Error error ->
+    Error
+      (skill_catalog_config_error
+         (Config_dir_resolver.canonical_base_path_error_to_string error))
+  | Ok workspace ->
     (match
-       try Ok (List.sort String.compare (Fs_compat.read_dir skills_dir)) with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn ->
-         Error (skill_catalog_io_error ~op:"read_dir" ~path:skills_dir exn)
+       Skill_catalog_snapshot_service.refresh
+         ~workspace
+         ~user_home:Config_dir_resolver.initial_env_home
+         ~read_config:(fun () ->
+           match Runtime.load_config_text () with
+           | Ok (_path, text) -> Skill_catalog_snapshot_service.Config_text text
+           | Error detail -> Skill_catalog_snapshot_service.Config_unreadable detail)
      with
-     | Error _ as error -> error
-     | Ok entries ->
-       let rec collect documents = function
-         | [] -> Ok (List.rev documents)
-         | entry :: rest ->
-           let skill_md =
-             Filename.concat (Filename.concat skills_dir entry) "SKILL.md"
-           in
-           (match
-              try Ok (Fs_compat.exact_path_kind skill_md) with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn ->
-                Error (skill_catalog_io_error ~op:"inspect" ~path:skill_md exn)
-            with
-            | Error _ as error -> error
-            | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
-              (match
-                 try Ok (Fs_compat.load_file skill_md) with
-                 | Eio.Cancel.Cancelled _ as exn -> raise exn
-                 | exn ->
-                   Error (skill_catalog_io_error ~op:"read" ~path:skill_md exn)
-               with
-               | Error _ as error -> error
-               | Ok contents -> collect ((entry, contents) :: documents) rest)
-            | Ok
-                ( Fs_compat.Exact_missing
-                | Fs_compat.Exact_unknown
-                | Fs_compat.Exact_kind
-                    ( Unix.S_DIR
-                    | Unix.S_CHR
-                    | Unix.S_BLK
-                    | Unix.S_LNK
-                    | Unix.S_FIFO
-                    | Unix.S_SOCK ) ) -> collect documents rest)
+     | Skill_catalog_snapshot_service.Published snapshot
+     | Skill_catalog_snapshot_service.Unchanged snapshot -> Ok snapshot
+     | Skill_catalog_snapshot_service.Workspace_retired ->
+       Error (skill_catalog_config_error "skill snapshot workspace was retired"))
+;;
+
+let snapshot_rejections_json snapshot =
+  match Skill_catalog_snapshot.to_public_yojson snapshot with
+  | `Assoc fields -> Option.value ~default:(`List []) (List.assoc_opt "rejections" fields)
+  | _ -> `List []
+;;
+
+(* The published multi-source snapshot is the sole catalog authority. The old
+   loader rescanned only [<base>/.masc/skills] on every turn, while the API and
+   Dashboard projected the configured source set; one workspace therefore had
+   two different answers. Refreshing through the publisher preserves exact
+   source precedence and gives the turn the same immutable bytes the operator
+   sees. Rejected documents remain absent from the tool surface and visible in
+   the snapshot/API; they do not take unrelated Keeper turns down with them. *)
+let load_skill_catalog ~base_path =
+  match refresh_skill_snapshot ~base_path with
+  | Error _ as error -> error
+  | Ok snapshot ->
+    (match Skill_catalog_snapshot.config_state snapshot with
+     | Skill_catalog_snapshot.Config_rejected { diagnostics; _ } ->
+       Error
+         (skill_catalog_config_error
+            (String.concat
+               "; "
+               (List.map Skill_source_config.diagnostic_to_string diagnostics)))
+     | Skill_catalog_snapshot.Config_unreadable { detail } ->
+       Error (skill_catalog_config_error detail)
+     | Skill_catalog_snapshot.Configured _ ->
+       let snapshot_rejections = Skill_catalog_snapshot.rejections snapshot in
+       if snapshot_rejections <> []
+       then
+         Log.Keeper.warn
+           "Skill snapshot omitted %d rejected document(s): %s"
+           (List.length snapshot_rejections)
+           (Yojson.Safe.to_string (snapshot_rejections_json snapshot));
+       let documents =
+         Skill_catalog_snapshot.effective_entries snapshot
+         |> List.map (fun (entry : Skill_catalog_snapshot.entry) ->
+           entry.directory, entry.source_text)
        in
-       (match collect [] entries with
-        | Error _ as error -> error
-        | Ok documents ->
-          (match Keeper_skill_catalog.of_documents documents with
-           | Ok catalog -> Ok catalog
-           | Error error ->
-             Error
-               (skill_catalog_config_error
-                  (Keeper_skill_catalog.error_to_string error)))))
-  | Ok
-      (Fs_compat.Exact_kind
-        ( Unix.S_REG
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_LNK
-        | Unix.S_FIFO
-        | Unix.S_SOCK )) ->
-    Error (skill_catalog_config_error "skills path is not a directory")
-  | Ok Fs_compat.Exact_unknown ->
-    Error (skill_catalog_config_error "skills path kind is unavailable")
+       let catalog, keeper_rejections =
+         Keeper_skill_catalog.partition_documents documents
+       in
+       List.iter
+         (fun (rejected : Keeper_skill_catalog.rejected_document) ->
+            Log.Keeper.warn
+              "Skill %S is absent from the Keeper surface: %s"
+              rejected.directory
+              (Keeper_skill_catalog.error_to_string rejected.error))
+         keeper_rejections;
+       Ok catalog)
 ;;
 
 let expected_model_tool_names ~skill_catalog ~identity_tool_names
@@ -317,6 +303,7 @@ let prepare_agent_setup
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?hitl_resolution
+      ?composition_plan_index
       ()
   : (Keeper_run_tools_hooks.agent_setup, Agent_core.Error.t) result
   =
@@ -434,6 +421,7 @@ let prepare_agent_setup
       ?hitl_resolution
       ~skill_catalog
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
+      ?composition_plan_index
       ~turn_ctx_cell
       ()
   in

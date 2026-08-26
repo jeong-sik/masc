@@ -32,3 +32,10 @@ val toggle_hidden : hidden:bool -> cols:int -> bool option
 
 val content_cols : hidden:bool -> cols:int -> int
 (** What the surface beside the roster lays out against. *)
+
+val arrows_go_left : hidden:bool -> cols:int -> preferring_left:bool -> bool
+(** Whether a cursor keypress belongs to the pane beside the detail.
+
+    [preferring_left] is what the reader last asked for with h/l. It only
+    counts where the pane is actually drawn: a preference for a pane that is
+    not on screen is a keypress that moves something invisible. *)

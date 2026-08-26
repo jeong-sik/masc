@@ -7459,16 +7459,16 @@ let render_tools (state : state) =
   in
   let activation_lines =
     match state.tools_inventory with
-    | None -> [ Theme.warn, " Skill Activations — not loaded" ]
+    | None -> [ Theme.warn (), " Skill Activations — not loaded" ]
     | Some { Masc.Tui_decode.ts_skill_activations = None; _ } ->
-        [ Theme.warn, " Skill Activations — no Keeper selected" ]
+        [ Theme.warn (), " Skill Activations — no Keeper selected" ]
     | Some
         { Masc.Tui_decode.ts_skill_activations =
             Some
               (Masc.Tui_decode.Skill_activations_no_session
                  { sap_keeper_name });
           _ } ->
-        [ Theme.warn,
+        [ Theme.warn (),
           Printf.sprintf " Skill Activations — %s — no session"
             (Terminal_text.single_line sap_keeper_name) ]
     | Some
@@ -7477,11 +7477,11 @@ let render_tools (state : state) =
               (Masc.Tui_decode.Skill_activations_unavailable
                  { sap_keeper_name; sap_reason; sap_detail });
           _ } ->
-        [ Theme.bad,
+        [ Theme.bad (),
           Printf.sprintf " Skill Activations — %s — unavailable (%s)"
             (Terminal_text.single_line sap_keeper_name)
             (Terminal_text.single_line sap_reason);
-          Theme.bad, "   " ^ Terminal_text.single_line sap_detail ]
+          Theme.bad (), "   " ^ Terminal_text.single_line sap_detail ]
     | Some
         { Masc.Tui_decode.ts_skill_activations =
             Some

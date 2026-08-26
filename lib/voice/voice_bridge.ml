@@ -140,12 +140,12 @@ let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_d
 ;;
 
 let public_config_json () =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> Ok (Voice_config.public_json config)
-  | Error message ->
+  | Error error ->
     Error
       (Tool_args.error_assoc
-         [ "message", `String message
+         [ "message", `String (Voice_config.load_error_to_string error)
          ; "config_path", `String (Voice_config.config_path ())
          ])
 ;;
@@ -734,7 +734,7 @@ let agent_speak
 
 (** Get voice configuration for an agent *)
 let get_agent_voice ~agent_id =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config ->
     let voice = Voice_config.voice_for_agent config agent_id in
     Ok

@@ -46,23 +46,21 @@ let record_playback ~agent_id ~message =
 (** Default agent voices from the voice runtime overlay. *)
 let default_agent_voices () = Voice_runtime_overlay.default_agent_voices ()
 
-let load_voice_config () = Voice_config.load ()
-
 let request_timeout_seconds () = default_timeout_seconds
 
 let agent_voices () =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> config.tts.agent_voices
   | Error _ -> default_agent_voices ()
 
 let tuning_for_agent agent_id =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> Voice_config.tuning_for_agent config agent_id
   | Error _ ->
       { Voice_config.stability = 0.5; similarity_boost = 0.75; style = 0.0 }
 
 let local_playback_enabled_for_agent agent_id =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> Voice_config.local_playback_enabled_for_agent config agent_id
   | Error _ -> false
 
@@ -70,7 +68,7 @@ let default_voice_uri path =
   Uri.of_string (Voice_runtime_overlay.default_session_url ~path)
 
 let voice_mcp_uri () =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> (
       match Voice_runtime_overlay.session_endpoint_result config with
       | Ok endpoint -> (
@@ -220,10 +218,11 @@ let audio_duration_seconds ~audio_file =
     - [`Opened dur] if playback was handed off to macOS [open(1)].
     - [`Played dur] if playback succeeded with the given duration. *)
 let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Error e ->
-    Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id e;
-    `Failed ("voice config load failed: " ^ e)
+    let message = Voice_config.load_error_to_string e in
+    Log.Misc.warn "voice config load failed, skipping playback for %s: %s" agent_id message;
+    `Failed ("voice config load failed: " ^ message)
   | Ok config ->
     if not (Voice_config.local_playback_enabled_for_agent config agent_id) then
       `Skipped "local playback disabled for agent"
@@ -367,13 +366,13 @@ let run_local_playback ~sw:_ ~agent_id ~message ~audio_file () =
           end)
 
 
-(** Voice used when [load_voice_config ()] itself fails. This is the
+(** Voice used when [Voice_config.load_detailed ()] itself fails. This is the
     only remaining hardcoded fallback; the normal "agent not listed"
     path now reads [config.tts.default_voice] via {!default_voice}. *)
 let last_resort_voice = "Sarah"
 
 let default_voice () =
-  match load_voice_config () with
+  match Voice_config.load_detailed () with
   | Ok config -> config.tts.default_voice
   | Error _ -> last_resort_voice
 
@@ -390,7 +389,7 @@ let get_voice_for_agent agent_id =
     TTS Adapters
     ============================================ *)
 
-(* ElevenLabs direct TTS URLs require voice IDs. Voice_config.load ()
+(* ElevenLabs direct TTS URLs require voice IDs. [Voice_config.load_detailed]
    supplies configured per-agent values; Voice_runtime_overlay keeps a small
    premade-name compatibility map and rejects arbitrary names before the
    network call. *)

@@ -985,6 +985,15 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}
         />
+        ${sandboxOptions.length === 1 ? html`
+        <!-- One sandbox means nothing to choose between, but which one it is
+             still answers a question: a keeper configured for docker whose
+             calls all say local is the interesting case, and hiding the row
+             hides exactly that. -->
+        <span
+          class="text-xs font-mono px-2 py-1 text-[var(--color-fg-muted)]"
+          title="이 목록의 모든 호출이 이 샌드박스에서 돌았습니다"
+        >샌드박스: ${sandboxOptions[0]}</span>` : null}
         ${sandboxOptions.length > 1 ? html`
         <select
           aria-label="샌드박스 필터"

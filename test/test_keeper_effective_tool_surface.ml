@@ -145,15 +145,6 @@ let test_projection_names_equal_turn_surface_authority () =
          | None -> fail "keeper_skill omitted its required input schema"
        in
        let actual_names =
-         (* [input_schema] is an option: [None] means this tool ships no wire
-            schema and the provider derives one from [parameters]. That is the
-            failure this test is here to catch, so say it rather than reading
-            an absent schema as an empty enum. *)
-         let input_schema =
-           match tool.schema.input_schema with
-           | Some schema -> schema
-           | None -> failf "keeper_skill carries no input_schema"
-         in
          match
            input_schema
            |> Yojson.Safe.Util.member "properties"

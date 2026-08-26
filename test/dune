@@ -3191,6 +3191,7 @@
  (libraries
   alcotest
   masc
+  masc.prompt_registry
   masc.skill_config
   masc.skill_reference
   masc_types

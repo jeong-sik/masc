@@ -64,6 +64,23 @@ let contains ~needle haystack =
 
 let lines s = String.split_on_char '\n' s
 
+let rec project_root directory =
+  if Sys.file_exists (Filename.concat directory "dune-project")
+  then directory
+  else
+    let parent = Filename.dirname directory in
+    if String.equal parent directory
+    then fail "could not locate repository root"
+    else project_root parent
+;;
+
+let configure_prompt_registry () =
+  let prompt_dir = Filename.concat (project_root (Sys.getcwd ())) "config/prompts" in
+  Prompt_registry.clear ();
+  Prompt_registry.set_markdown_dir prompt_dir;
+  Prompt_registry.load_prompts_from_directory prompt_dir
+;;
+
 let test_no_skills_adds_nothing () =
   let rendered = KUP.format_current_task (task ~skills:[]) in
   check bool "no skill line" false (contains ~needle:"Skills selected" rendered)
@@ -134,6 +151,7 @@ let test_the_only_difference_is_that_one_line () =
 ;;
 
 let () =
+  configure_prompt_registry ();
   run
     "keeper_task_skill_block"
     [ ( "current task block"

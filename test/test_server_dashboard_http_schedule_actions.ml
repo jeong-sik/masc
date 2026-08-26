@@ -38,7 +38,6 @@ let actor id : Schedule_domain.actor =
 let payload =
   `Assoc
     [ "kind", `String "consumer.note"
-    ; "schema_version", `Int 1
     ; "body", `Assoc [ "text", `String "test" ]
     ]
 ;;

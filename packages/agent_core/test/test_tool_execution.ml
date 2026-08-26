@@ -884,7 +884,13 @@ let test_fused_typo_prefix_reject_suggests_closest_registered () =
   in
   check_unknown_validation "fused typo prefix" result;
   (* Same repair-boundary rule as the fused-name case: the fused argument
-     fragment is echoed up to the identifier boundary only. *)
+     fragment is echoed up to the identifier boundary only. This input has
+     no registered stem (Exceute is a typo), so the boundary here is the
+     identifier run — and the result name must agree with the message,
+     which pins the single-computation contract of [repair_display_name]
+     (adversarial review of #30927, finding F1). *)
+  check string "fused typo result name is trimmed to the identifier run"
+    "Exceute" result.tool_name;
   check
     string
     "fused typo reject pairs the shape note with the closest name"

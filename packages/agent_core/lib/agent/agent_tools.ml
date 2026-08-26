@@ -197,6 +197,23 @@ let closest_registered ~requested ~available =
   |> Option.map snd
 ;;
 
+(* The one repair-boundary computation: the longest registered name the
+   request extends, else the leading identifier run, else the raw request.
+   Every surface a reject reaches — the message text, the failure event's
+   tool_name, the result's tool_name — must derive its name from here and
+   nowhere else: computing it twice let the message trim a fused name
+   ([Exceute] + garbage) while the event/result still carried the raw wire
+   bytes, splitting the reject's fingerprint identity (adversarial review
+   of #30927, finding F1). *)
+let repair_display_name ~available requested =
+  match registered_prefix ~available requested with
+  | Some stem -> stem
+  | None ->
+    (match identifier_prefix requested with
+     | Some prefix -> prefix
+     | None -> requested)
+;;
+
 let unknown_tool_failure ~requested ~available =
   (* The catalog does not belong in the result the model reads back. Every
      request already carries the tool schemas, and the operator copy is logged
@@ -215,14 +232,7 @@ let unknown_tool_failure ~requested ~available =
      while the ToolUse channel was already filtered. The stem plus the
      "extra characters" hint is the whole repair material; a genuine unknown
      bare identifier has nothing to strip and stays byte-identical. *)
-  let exposed =
-    match registered_prefix ~available requested with
-    | Some stem -> stem
-    | None ->
-      (match identifier_prefix requested with
-       | Some prefix -> prefix
-       | None -> requested)
-  in
+  let exposed = repair_display_name ~available requested in
   let base =
     match available with
     | [] -> Printf.sprintf "Tool not found: %s. No tools are registered" exposed
@@ -732,11 +742,7 @@ let find_and_execute_tool_with_index
       let message, failure_kind =
         unknown_tool_failure ~requested:requested_name ~available
       in
-      let exposed_name =
-        match registered_prefix ~available requested_name with
-        | Some stem -> stem
-        | None -> requested_name
-      in
+      let exposed_name = repair_display_name ~available requested_name in
       Log.warn
         _log
         "tool not found"

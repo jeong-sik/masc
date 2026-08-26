@@ -1035,6 +1035,7 @@ let test_gemini_event_edge_branches () =
   (match max_tokens_events with
    | [ MessageStart { model = "gemini-test"; _ }
      ; MessageDelta { stop_reason = Some MaxTokens; usage = Some _ }
+     ; MessageStop
      ] -> ()
    | _ -> fail "expected gemini max-tokens finish");
   let unknown_events, _ =
@@ -1046,6 +1047,7 @@ let test_gemini_event_edge_branches () =
   match unknown_events with
   | [ MessageStart { model = "gemini-test"; _ }
     ; MessageDelta { stop_reason = Some Refusal; _ }
+    ; MessageStop
     ] -> ()
   | _ -> fail "expected gemini unknown finish"
 ;;
@@ -1160,7 +1162,7 @@ let test_ollama_event_edge_branches () =
       (ollama_chunk ~is_done:true ())
   in
   (match done_none_events with
-   | [ MessageDelta { stop_reason = None; _ } ] -> ()
+   | [ MessageDelta { stop_reason = None; _ }; MessageStop ] -> ()
    | _ -> fail "done without reason should remain absent");
   let done_length_events, _ =
     S.ollama_chunk_to_events
@@ -1168,7 +1170,7 @@ let test_ollama_event_edge_branches () =
       (ollama_chunk ~is_done:true ~done_reason:"length" ())
   in
   (match done_length_events with
-   | [ MessageDelta { stop_reason = Some MaxTokens; _ } ] -> ()
+   | [ MessageDelta { stop_reason = Some MaxTokens; _ }; MessageStop ] -> ()
    | _ -> fail "done length should be MaxTokens");
   let done_unknown_tool_events, _ =
     S.ollama_chunk_to_events
@@ -1176,7 +1178,10 @@ let test_ollama_event_edge_branches () =
       (ollama_chunk ~is_done:true ~done_reason:"future" ~tool_calls:[ tc_none ] ())
   in
   (match done_unknown_tool_events with
-   | [ ContentBlockStart _; MessageDelta { stop_reason = Some (Unknown "future"); _ } ] ->
+   | [ ContentBlockStart _
+     ; MessageDelta { stop_reason = Some (Unknown "future"); _ }
+     ; MessageStop
+     ] ->
      ()
    | _ -> fail "unknown done reason with tools should remain non-executable");
   let done_unknown_events, _ =
@@ -1185,7 +1190,7 @@ let test_ollama_event_edge_branches () =
       (ollama_chunk ~is_done:true ~done_reason:"content_filter" ())
   in
   match done_unknown_events with
-  | [ MessageDelta { stop_reason = Some ContentFilter; _ } ] -> ()
+  | [ MessageDelta { stop_reason = Some ContentFilter; _ }; MessageStop ] -> ()
   | _ -> fail "canonical content_filter reason should stay typed"
 ;;
 

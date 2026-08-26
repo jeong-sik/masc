@@ -25,7 +25,13 @@ type transcript_slot =
       { execution_id : Ids.Execution_id.t
       ; ordinal : int
       }
+  | Tool_delivery of { ordinal : int }
   | Terminal_assistant
+
+(** [Tool_call] identifies a row by the canonical execution committed by the
+    tool log. [Tool_delivery] is the store-owned ordinal used only when no
+    canonical execution exists. It deliberately carries no provider id: a
+    provider id may be absent or reused and is not execution authority. *)
 
 (** The persisted provenance pair. A durable row carries both halves or
     neither: a delivery key without its transcript slot cannot answer

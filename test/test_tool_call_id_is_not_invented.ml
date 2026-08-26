@@ -7,8 +7,8 @@
     stayed pending forever (#21894).
 
     The two are separate questions now. What the provider called it can be
-    unanswered; where the reply goes cannot. These pin that the record half
-    never invents, and that the delivery half is still total. *)
+    unanswered; where the reply goes cannot. The delivery address is a typed
+    ordinal, never a provider id disguised as an execution id. *)
 
 let module_path = "lib/keeper/keeper_chat_store.ml"
 
@@ -34,13 +34,39 @@ let test_the_record_half_never_uses_position () =
       "provider_tool_call_id must not synthesise an id; it formats %d time(s)" n
 ;;
 
-(* The delivery slot has to resolve — [Ids.Execution_id.of_string] takes a
-   string — so it keeps the positional fallback. Removing it would trade a
-   join failure for an unroutable reply. *)
+(* The delivery slot stays total without minting either identity. *)
 let test_the_delivery_half_is_total () =
-  let n = Ast_grep.count_value_bindings ~module_path ~name:"delivery_slot_id" in
+  let n = Ast_grep.count_value_bindings ~module_path ~name:"tool_transcript_slot" in
   if n <> 1 then
-    Alcotest.failf "delivery_slot_id must exist exactly once (found %d)" n
+    Alcotest.failf "tool_transcript_slot must exist exactly once (found %d)" n
+;;
+
+let test_the_old_string_delivery_slot_is_gone () =
+  let n = Ast_grep.count_value_bindings ~module_path ~name:"delivery_slot_id" in
+  if n <> 0 then
+    Alcotest.failf "delivery_slot_id must not exist (found %d binding(s))" n
+;;
+
+let test_no_delivery_id_is_cast_to_execution_id () =
+  let n =
+    Ast_grep.count_calls_in_value_binding ~module_path
+      ~binding_name:"tool_transcript_slot" ~callee:"Ids.Execution_id.of_string"
+  in
+  if n <> 0 then
+    Alcotest.failf
+      "tool_transcript_slot must not cast a delivery id to execution identity (%d call(s))"
+      n
+;;
+
+let test_append_once_uses_the_provider_record_boundary () =
+  let n =
+    Ast_grep.count_calls_in_value_binding ~module_path
+      ~binding_name:"tool_call_append_lines" ~callee:"provider_tool_call_id"
+  in
+  if n <> 1 then
+    Alcotest.failf
+      "tool_call_append_lines must use provider_tool_call_id exactly once (found %d)"
+      n
 ;;
 
 let () =
@@ -52,5 +78,11 @@ let () =
             test_the_record_half_never_uses_position
         ; Alcotest.test_case "the delivery half is total" `Quick
             test_the_delivery_half_is_total
+        ; Alcotest.test_case "the old string delivery slot is absent" `Quick
+            test_the_old_string_delivery_slot_is_gone
+        ; Alcotest.test_case "the delivery half never invents execution identity"
+            `Quick test_no_delivery_id_is_cast_to_execution_id
+        ; Alcotest.test_case "append-once uses the provider record boundary"
+            `Quick test_append_once_uses_the_provider_record_boundary
         ] )
     ]

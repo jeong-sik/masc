@@ -78,7 +78,8 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.ContentBlockStart _ when agent_core_stream_event_is_deliverable event ->
       Some "sse_tool_block_start"
   | Agent_core.Types.ContentBlockStart _ -> Some "sse_content_block_start"
-  | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.TextDelta _; _ }
+  | Agent_core.Types.ContentBlockDelta
+      { delta = Agent_core.Types.TextDelta _ | Agent_core.Types.TextSnapshot _; _ }
     when agent_core_stream_event_is_deliverable event ->
       Some "sse_text_delta"
   | Agent_core.Types.ContentBlockDelta

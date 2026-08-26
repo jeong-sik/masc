@@ -125,6 +125,18 @@ let usage_missing_of_usage = function
   | None -> true
   | Some usage -> not (usage_has_tokens usage)
 
+type tool_stream_observation =
+  | Runtime_attempt_started of
+      { runtime_id : string
+      ; lane_attempt_index : int
+      ; checkpoint_owner : Runtime_execution.checkpoint_owner
+      }
+  | Turn_collected of
+      { turn : int
+      ; tool_source_map : Agent_core.Hooks.admitted_tool_source_map
+      }
+  | Turn_closed_without_sources of { turn : int }
+
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
@@ -132,6 +144,7 @@ let make_hooks
     ~(trace_id : string)
     ~(keeper_turn_id : int)
     ~(on_after_turn_ordinal : int -> unit)
+    ?(on_tool_stream_observation : tool_stream_observation -> unit = fun _ -> ())
     ?(on_after_turn_response :
         response:Agent_core.Types.api_response -> unit =
         fun ~response:_ -> ())
@@ -140,6 +153,7 @@ let make_hooks
         success:bool -> duration_ms:float -> provider:string ->
         typed_outcome:Keeper_tool_outcome.t option -> unit =
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
+    ?tool_result_commit_required
     ?on_tool_result_ready
     ?(trajectory_acc : Trajectory.accumulator option)
     ()
@@ -148,6 +162,11 @@ let make_hooks
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
+  let tool_result_commit_required =
+    Option.value
+      ~default:(fun () -> Option.is_some on_tool_result_ready)
+      tool_result_commit_required
+  in
   let record_progress event_kind =
     Keeper_registry.record_turn_progress
       ~base_path:config.base_path
@@ -165,8 +184,14 @@ let make_hooks
 
     after_turn = Some (fun event ->
       match event with
-      | Agent_core.Hooks.AfterTurn { turn; response } ->
+      | Agent_core.Hooks.AfterTurn { turn; response; tool_source_map } ->
         on_after_turn_ordinal turn;
+        (match tool_source_map with
+         | Some tool_source_map ->
+           on_tool_stream_observation
+             (Turn_collected { turn; tool_source_map })
+         | None ->
+           on_tool_stream_observation (Turn_closed_without_sources { turn }));
         on_after_turn_response ~response;
         record_progress "agent_core_after_turn";
         let meta = !meta_ref in
@@ -553,6 +578,7 @@ let make_hooks
            row (insert happens-before publish happens-before drain). *)
         Keeper_execution_join.record ~invocation
           ~execution_id:(Ids.Execution_id.to_string execution_id);
+        let log_committed = ref false in
         (try
            Keeper_tool_call_log.log_call
              ~keeper_name:(!meta_ref).name
@@ -589,12 +615,22 @@ let make_hooks
              ~result_bytes ?truncated_to
              ?on_committed:
                (Option.map
-                  (fun notify () -> notify ~tool_call_id:tool_use_id)
+                  (fun notify () ->
+                    log_committed := true;
+                    notify ~tool_call_id:tool_use_id
+                      ~turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+                      ~planned_index:schedule.planned_index
+                      ~execution_id)
                   on_tool_result_ready)
              ()
          with
-         | Eio.Cancel.Cancelled _ as e -> raise e
+         | Eio.Cancel.Cancelled _ as e ->
+             if not !log_committed
+             then Keeper_execution_join.discard ~invocation;
+             raise e
          | exn ->
+             if not !log_committed
+             then Keeper_execution_join.discard ~invocation;
              (* P2 silent-failure fix (same pattern as the broadcast site
                 above at line ~1098): tool-call audit log write failures
                 were dropped without trace.  Loss of these rows leaves
@@ -607,7 +643,7 @@ let make_hooks
              Log.Keeper.warn ~keeper_name:(!meta_ref).name
                "tool=%s log_call write failed: %s"
                tool_name (Printexc.to_string exn);
-             if Option.is_some on_tool_result_ready then raise exn);
+             if tool_result_commit_required () then raise exn);
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -777,6 +813,18 @@ let make_hooks
              Keeper_tool_call_log_context.get_turn_context_record
                ~cell:turn_ctx_cell ()
            in
+           let tool_use_id =
+             Agent_core.Tool_contract.Invocation.tool_use_id invocation
+           in
+           let turn = Agent_core.Tool_contract.Invocation.turn invocation in
+           let schedule =
+             Agent_core.Tool_contract.Invocation.schedule invocation
+           in
+           let execution_id = Ids.Execution_id.generate () in
+           Keeper_execution_join.record
+             ~invocation
+             ~execution_id:(Ids.Execution_id.to_string execution_id);
+           let log_committed = ref false in
            (try
               Keeper_tool_call_log.log_call
                 ~keeper_name:meta.name
@@ -786,17 +834,36 @@ let make_hooks
                 ?agent_name:tctx.agent_name
                 ?turn_kind:tctx.turn_kind
                 ?lane:tctx.lane
-                ~execution_id:(Ids.Execution_id.generate ())
-                ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
-                ~turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+                ~execution_id
+                ~tool_use_id
+                ~planned_index:schedule.planned_index
+                ~batch_index:schedule.batch_index
+                ~batch_size:schedule.batch_size
+                ~execution_mode:schedule.execution_mode
+                ~turn
                 ?trace_id:tctx.trace_id ?session_id:tctx.session_id
                 ?keeper_turn_id:tctx.keeper_turn_id
                 ?task_id:tctx.task_id
                 ~result_bytes:(String.length error)
+                ?on_committed:
+                  (Option.map
+                     (fun notify () ->
+                        log_committed := true;
+                        notify
+                          ~tool_call_id:tool_use_id
+                          ~turn
+                          ~planned_index:schedule.planned_index
+                          ~execution_id)
+                     on_tool_result_ready)
                 ()
             with
-            | Eio.Cancel.Cancelled _ as e -> raise e
+            | Eio.Cancel.Cancelled _ as e ->
+              if not !log_committed
+              then Keeper_execution_join.discard ~invocation;
+              raise e
             | exn ->
+              if not !log_committed
+              then Keeper_execution_join.discard ~invocation;
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:
@@ -806,7 +873,8 @@ let make_hooks
                 ();
               Log.Keeper.warn ~keeper_name:meta.name
                 "tool=%s rejected-call log_call write failed: %s"
-                tool_name (Printexc.to_string exn)));
+                tool_name (Printexc.to_string exn);
+              if tool_result_commit_required () then raise exn));
         Agent_core.Hooks.Continue
       | _event -> Agent_core.Hooks.Continue);
   }

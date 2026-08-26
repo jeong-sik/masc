@@ -2476,6 +2476,110 @@ let test_complete_stream_transport_on_event_exception_is_nonfatal () =
   | Error _ -> fail "expected Ok"
 ;;
 
+let test_complete_stream_preserves_repeated_incremental_text () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, anthropic_sse_frame_content_block_start
+        ; 0.0, anthropic_sse_frame_delta "ha"
+        ; 0.0, anthropic_sse_frame_delta "ha"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let events = ref [] in
+    let on_event event = events := event :: !events in
+    match
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_config url)
+        ~messages
+        ~on_event
+        ()
+    with
+    | Ok response ->
+      check string "canonical response" "haha" (text_of_response response);
+      let text_deltas =
+        !events
+        |> List.rev
+        |> List.filter_map (function
+          | Types.ContentBlockDelta { delta = Types.TextDelta text; _ } -> Some text
+          | _ -> None)
+      in
+      check (list string) "canonical callbacks" [ "ha"; "ha" ] text_deltas;
+      Eio.Switch.fail sw Exit
+    | Error _ -> fail "canonical text stream did not complete"
+  with
+  | Exit -> ()
+;;
+
+let test_complete_stream_replaces_invalid_content_with_typed_failure () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let image_start =
+      "event: content_block_start\n\
+       data: \
+       {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"image\"}}\n\n"
+    in
+    let url =
+      start_raw_sse_server
+        ~sw
+        ~net:env#net
+        ~clock:env#clock
+        [ 0.0, anthropic_sse_frame_message_start
+        ; 0.0, image_start
+        ; 0.0, anthropic_sse_frame_delta "must-not-render"
+        ; 0.0, anthropic_sse_frame_stop
+        ]
+    in
+    let events = ref [] in
+    let on_event event = events := event :: !events in
+    (match
+       Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_config url)
+         ~messages
+         ~on_event
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> fail "cross-kind content stream completed successfully");
+    let events = List.rev !events in
+    check bool "invalid raw text was suppressed" false
+      (List.exists
+         (function
+           | Types.ContentBlockDelta { delta = Types.TextDelta "must-not-render"; _ } ->
+             true
+           | _ -> false)
+         events);
+    check int "one typed replacement failure" 1
+      (List.fold_left
+         (fun count -> function
+            | Types.SSEParseFailed
+                { reason =
+                    "content_block_delta_kind_mismatch:index:0:block:image:delta:text"
+                ; _
+                } -> count + 1
+            | _ -> count)
+         0
+         events);
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_complete_stream_active_chunks_can_exceed_idle_timeout_total () =
   Eio_main.run
   @@ fun env ->
@@ -3727,6 +3831,14 @@ let () =
             "transport on_event exceptions are nonfatal"
             `Quick
             test_complete_stream_transport_on_event_exception_is_nonfatal
+        ; test_case
+            "built-in stream preserves repeated incremental text"
+            `Quick
+            test_complete_stream_preserves_repeated_incremental_text
+        ; test_case
+            "built-in stream replaces invalid content with typed failure"
+            `Quick
+            test_complete_stream_replaces_invalid_content_with_typed_failure
         ; test_case
             "active chunks exceed idle total"
             `Quick

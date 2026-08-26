@@ -32,21 +32,46 @@ type args_fragment =
       (** Argument text that replaces it — some providers send a snapshot
           instead of, not in addition to, their deltas. *)
 
+type tool_occurrence =
+  { stream_scope : int
+  ; block_index : int
+  ; provider_message_id : string option
+  ; tool_call_id : string option
+  }
+(** Server-owned live row identity plus optional provider correlations. *)
+
 (** One thing that happened in the turn, as far as the live view is concerned. *)
 type delta =
   | Run_started
+  | Runtime_attempt_started
+      (** New resolved-runtime attempt: discard unfinished text/thinking from
+          the prior attempt while retaining tool evidence. *)
   | Text of string  (** Assistant text to append. *)
   | Thinking of string  (** Reasoning text to append. *)
   | Tool_started of
-      { call_id : string
+      { occurrence : tool_occurrence
       ; tool_name : string
       }
   | Tool_args of
-      { call_id : string
+      { occurrence : tool_occurrence
       ; fragment : args_fragment
       }
-  | Tool_ended of { call_id : string }
-  | Tool_result of { call_id : string }
+  | Tool_ended of { occurrence : tool_occurrence }
+  | Tool_result of
+      { occurrence : tool_occurrence
+      ; execution_id : string
+      }
+      (** Exact server occurrence plus the canonical execution identity after
+          the tool-call log commit. Provider ids remain optional correlation
+          data. Missing occurrence coordinates or canonical identity is an
+          {!Undecodable} event. *)
+  | Stream_protocol_error of
+      { quarantined_occurrence : tool_occurrence option
+      ; detail : string
+      }
+      (** Typed server diagnostic. Only [quarantined_occurrence] authorizes a
+          live tool row to enter the failed state; an absent occurrence remains
+          a turn-level diagnostic. *)
   | Approval_requested of
       { call_id : string
       ; tool_name : string

@@ -17,9 +17,14 @@
     turn that only called tools no longer reads as a blank line. A
     direct-conversation row's trace block is not read: its calls are already
     in the transcript as [role: "tool"] rows. A tool row's [content] is the
-    call's arguments, [tool_call_name] is the tool, and [tool_call_id] is its
-    stable identity. Those become the same typed activity the live view uses;
-    no rendered row is parsed to recover a fact.
+    call's arguments, [tool_call_name] is the tool, [tool_call_id] is the
+    provider stream identity, and [execution_id] is the canonical physical
+    execution after result persistence. Those become the same typed activity
+    the live view uses; no rendered row is parsed to recover a fact. An
+    current autonomous trace names [execution_id] explicitly and keeps
+    [tool_call_id] as optional provider correlation. A row without the
+    canonical field remains unknown; the reader does not reinterpret a legacy
+    provider-shaped field as execution authority.
 
     Consecutive tool rows are folded into one block, the way a live turn draws
     its calls, rather than becoming a row each.

@@ -542,6 +542,7 @@ let dispatch_keeper_msg_stream_admitted
       ~admission_token
       ?on_text_delta
       ?on_event
+      ?on_tool_stream_observation
       ?on_tool_result_ready
       ?approval_gate
       ?continuation_channel
@@ -557,6 +558,7 @@ let dispatch_keeper_msg_stream_admitted
           ~admission_token
           ?on_text_delta
           ?on_event
+          ?on_tool_stream_observation
           ?on_tool_result_ready
       ?approval_gate
           ?continuation_channel

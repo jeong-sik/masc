@@ -236,7 +236,9 @@ let test_dashboard_rich_blocks_roundtrip () =
               B.Trace_tool
                 {
                   name = "keeper_tasks_list";
-                  tool_call_id = Some "exec-1";
+                  tool_call_id = Some "provider-1";
+                  execution_id =
+                    Some (Ids.Execution_id.of_string "exec-1");
                   status = Some B.Trace_tool_ok;
                   dur = Some "2ms";
                   args = Some (`Assoc [ ("limit", `Int 5) ]);

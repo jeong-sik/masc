@@ -12,7 +12,6 @@ import {
 } from './keeper-delivery-provenance'
 import {
   nonBlankToolCallId,
-  toolEntryIdFromCallId,
 } from './tool-call-output-store'
 import type {
   KeeperConversationAttachment,
@@ -385,6 +384,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       kind: 'tool',
       name,
       toolCallId: asString(raw.toolCallId) ?? asString(raw.tool_call_id) ?? undefined,
+      executionId: asString(raw.executionId) ?? asString(raw.execution_id) ?? undefined,
       status: toolStatus,
       dur: asString(raw.dur) ?? undefined,
       args: normalizeTracePayload(raw.args),
@@ -878,6 +878,7 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
+  const executionId = asString(raw.execution_id)
   const deliveryProvenance = deliveryProvenanceFromRaw(raw)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
@@ -908,6 +909,7 @@ function normalizeHistoryEntry(
     timestamp,
     turnRef,
     deliveryProvenance: deliveryProvenance.value,
+    ...(executionId ? { executionId } : {}),
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1189,30 +1191,43 @@ function warnMissingToolTrace(
   op: string,
   keeperName: string,
   entryId: string,
-  toolCallId: string,
+  toolOccurrenceId: string,
 ): void {
-  console.warn('[keeper-trace] missing tool trace step', { op, keeperName, entryId, toolCallId })
+  console.warn('[keeper-trace] missing tool trace step', {
+    op,
+    keeperName,
+    entryId,
+    toolOccurrenceId,
+  })
 }
 
 export function appendAssistantToolTraceStep(
   name: string,
   entryId: string,
-  step: { toolCallId: string; name: string; ts?: string; agentCoreBlockIndex?: number },
+  step: {
+    toolCallId?: string
+    toolOccurrenceId: string
+    name: string
+    ts?: string
+    agentCoreBlockIndex?: number
+  },
 ): void {
-  const toolCallId = nonBlankToolCallId(step.toolCallId)
+  const toolCallId = nonBlankToolCallId(step.toolCallId) ?? undefined
+  const toolOccurrenceId = step.toolOccurrenceId.trim()
   const toolName = step.name.trim()
-  if (!toolCallId || !toolName) {
+  if (!toolOccurrenceId || !toolName) {
     console.warn('[keeper-trace] invalid tool trace step', { op: 'start', keeperName: name, entryId })
     return
   }
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const index = existing.findIndex(
-      trace => trace.kind === 'tool' && trace.toolCallId === toolCallId,
+      trace => trace.kind === 'tool' && trace.toolOccurrenceId === toolOccurrenceId,
     )
     const nextStep = withoutUndefined({
       kind: 'tool',
       toolCallId,
+      toolOccurrenceId,
       name: toolName,
       status: 'pending',
       ts: step.ts ?? new Date().toISOString(),
@@ -1226,7 +1241,8 @@ export function appendAssistantToolTraceStep(
               ? withoutUndefined({
                   ...trace,
                   name: trace.name || toolName,
-                  toolCallId,
+                  toolCallId: trace.toolCallId ?? toolCallId,
+                  toolOccurrenceId,
                   status: trace.status ?? 'pending',
                   ts: trace.ts ?? nextStep.ts,
                   agentCoreBlockIndex: trace.agentCoreBlockIndex ?? nextStep.agentCoreBlockIndex,
@@ -1245,16 +1261,16 @@ export function appendAssistantToolTraceStep(
 export function appendAssistantToolTraceArgsDelta(
   name: string,
   entryId: string,
-  toolCallId: string,
+  toolOccurrenceId: string,
   delta: string,
 ): void {
-  const id = nonBlankToolCallId(toolCallId)
+  const id = toolOccurrenceId.trim()
   if (!id || !delta) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const traceSteps = existing.map((trace) => {
-      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      if (trace.kind !== 'tool' || trace.toolOccurrenceId !== id) return trace
       found = true
       return {
         ...trace,
@@ -1272,16 +1288,16 @@ export function appendAssistantToolTraceArgsDelta(
 export function setAssistantToolTraceArgsSnapshot(
   name: string,
   entryId: string,
-  toolCallId: string,
+  toolOccurrenceId: string,
   snapshot: string,
 ): void {
-  const id = nonBlankToolCallId(toolCallId)
+  const id = toolOccurrenceId.trim()
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const traceSteps = existing.map((trace) => {
-      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      if (trace.kind !== 'tool' || trace.toolOccurrenceId !== id) return trace
       found = true
       return {
         ...trace,
@@ -1299,18 +1315,20 @@ export function setAssistantToolTraceArgsSnapshot(
 export function markAssistantToolTraceEnded(
   name: string,
   entryId: string,
-  toolCallId: string,
+  toolOccurrenceId: string,
+  executionId?: string,
 ): void {
-  const id = nonBlankToolCallId(toolCallId)
+  const id = toolOccurrenceId.trim()
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const traceSteps = existing.map((trace) => {
-      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      if (trace.kind !== 'tool' || trace.toolOccurrenceId !== id) return trace
       found = true
       return {
         ...trace,
+        executionId: executionId ?? trace.executionId,
         status: trace.status === 'err' ? ('err' as const) : ('ok' as const),
       }
     })
@@ -1325,15 +1343,15 @@ export function markAssistantToolTraceEnded(
 export function markAssistantToolTraceErrored(
   name: string,
   entryId: string,
-  toolCallId: string,
+  toolOccurrenceId: string,
 ): void {
-  const id = nonBlankToolCallId(toolCallId)
+  const id = toolOccurrenceId.trim()
   if (!id) return
   let found = false
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const traceSteps = existing.map((trace) => {
-      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      if (trace.kind !== 'tool' || trace.toolOccurrenceId !== id) return trace
       found = true
       return {
         ...trace,
@@ -1417,6 +1435,7 @@ function mergeLocalAssistantTraceSteps(
     : undefined
   if (localTraceSourceByProvenance?.traceSteps?.length) {
     consumed.add(localTraceSourceByProvenance.id)
+    if ((historyEntry.traceSteps?.length ?? 0) > 0) return historyEntry
     return {
       ...historyEntry,
       traceSteps: localTraceSourceByProvenance.traceSteps,
@@ -1436,6 +1455,7 @@ function mergeLocalAssistantTraceSteps(
     : undefined
   if (localTraceSourceByTurnRef?.traceSteps?.length) {
     consumed.add(localTraceSourceByTurnRef.id)
+    if ((historyEntry.traceSteps?.length ?? 0) > 0) return historyEntry
     return {
       ...historyEntry,
       traceSteps: localTraceSourceByTurnRef.traceSteps,
@@ -1519,6 +1539,7 @@ interface RestChatHistoryMessage {
   content: string | null
   ts: number
   tool_call_id?: string
+  execution_id?: string
   tool_call_name?: string
   source?: string
   // Raw wire payload — decoded once by normalizeSurfaceRef at each
@@ -1596,26 +1617,37 @@ function autonomousTurnEntry(
   }
 }
 
-/** Convert a persisted tool-call row into the same entry shape the live
- *  TOOL_CALL_* stream path produces (keeper-stream.ts): id `tool-<id>`,
- *  role 'tool', label = tool name, text = accumulated argument JSON.
- *  Matching the live convention means a reload re-renders the tool card
- *  and replaceThread dedups it against a still-mounted live entry. The
- *  raw content is used as-is — formatKeeperVisibleReply is for keeper
- *  reply text and would mangle argument JSON. */
+/** Convert a persisted tool-call row into the live tool-entry shape.
+ *  The server row id remains row identity; provider tool_call_id is optional
+ *  correlation data and canonical execution_id is the output/join identity.
+ *  Live/history convergence uses delivery provenance, never a reminted
+ *  provider-derived row id. */
 function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEntry | null {
   const toolCallId = nonBlankToolCallId(message.tool_call_id)
   const toolCallName = message.tool_call_name?.trim()
-  if (!toolCallId || !toolCallName || typeof message.content !== 'string') return null
+  if (!toolCallName || typeof message.content !== 'string') return null
+  if (message.delivery_provenance_status === 'invalid') return null
   const deliveryProvenance = message.delivery_provenance ?? null
+  const rawExecutionId = asString(message.execution_id)
+  const executionId = rawExecutionId?.trim() ? rawExecutionId : null
+  const slot = deliveryProvenance?.transcript_slot
+  if (
+    (slot?.kind === 'tool_call'
+      && (executionId === null || slot.execution_id !== executionId))
+    || (slot?.kind === 'tool_delivery' && executionId !== null)
+    || slot?.kind === 'accepted_user'
+    || slot?.kind === 'terminal_assistant'
+  ) return null
   return {
-    id: toolEntryIdFromCallId(toolCallId),
+    id: message.id,
     role: 'tool',
     source: 'tool_result',
     label: toolCallName,
     text: message.content,
     rawText: message.content,
     timestamp: toIsoTimestamp(message.ts),
+    toolCallId,
+    toolCallEnded: true,
     delivery: 'history',
     streamState: null,
     streamContract: normalizeStreamContract(message.stream_contract) ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
@@ -1632,6 +1664,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
     deliveryProvenance,
+    executionId,
   }
 }
 

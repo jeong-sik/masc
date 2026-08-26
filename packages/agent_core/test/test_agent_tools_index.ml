@@ -244,6 +244,31 @@ let test_admission_is_per_call () =
   check int "only the unroutable one dropped" 1 admission.rejected
 ;;
 
+let test_admission_preserves_original_tool_indices () =
+  let blocks =
+    [ Types.Text "before"
+    ; tool_use "t0" "Execute"
+    ; tool_use "dropped" "Unknown"
+    ; Types.Thinking { content = "between"; signature = None }
+    ; tool_use "t1" "Grep"
+    ]
+  in
+  let admission = admit [ "Execute"; "Grep" ] blocks in
+  let sources =
+    List.map
+      (fun (source : Hooks.admitted_tool_use_source) ->
+         source.planned_index, source.source_tool_use_ordinal)
+      admission.tool_source_map.admitted_tool_sources
+  in
+  check int "complete pre-admission ToolUse inventory" 3
+    admission.tool_source_map.source_tool_use_count;
+  check
+    (list (pair int int))
+    "admitted ordinals retain their pre-admission tool ordinal"
+    [ 0, 0; 1, 2 ]
+    sources
+;;
+
 let () =
   run
     "Agent_tools_index"
@@ -289,6 +314,10 @@ let () =
             test_admission_drops_degenerate_long_name
         ; test_case "non-tool blocks pass through" `Quick test_admission_keeps_non_tool_blocks
         ; test_case "admission is per call" `Quick test_admission_is_per_call
+        ; test_case
+            "admission retains original tool indices"
+            `Quick
+            test_admission_preserves_original_tool_indices
         ] )
     ; ( "suffix recovery"
       , [ test_case

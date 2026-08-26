@@ -20,6 +20,12 @@ val record :
   invocation:Agent_core.Tool_contract.Invocation.t -> execution_id:string -> unit
 (** Register the exact invocation/execution pair. *)
 
+val discard : invocation:Agent_core.Tool_contract.Invocation.t -> unit
+(** Remove the exact invocation without publishing its execution identity.
+    The hook calls this when the durable tool-call row did not commit, including
+    cancellation, so a later completion observer cannot stamp a phantom join.
+    A missing entry is ignored. *)
+
 val take : invocation:Agent_core.Tool_contract.Invocation.t -> string option
 (** Look up and remove the pair. [None] means the event does not belong
     to a keeper execution (or the entry was already consumed). *)

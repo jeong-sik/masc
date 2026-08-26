@@ -66,6 +66,12 @@ type named_run_result =
   ; lane_attempt_index : int
   }
 
+type runtime_attempt =
+  { runtime_id : string
+  ; lane_attempt_index : int
+  ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  }
+
 type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
@@ -581,6 +587,7 @@ let run_named
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
+    ?on_runtime_attempt
     ?on_runtime_retry_deferred
     ?on_runtime_attempt_error
     ?on_deferred_runtime_consumed
@@ -883,6 +890,15 @@ let run_named
         , None
         , Keeper_provider_attempt_effect.No_effect_observed )
       | Resolved_runtime runtime ->
+      Option.iter
+        (fun observe ->
+           observe
+             { runtime_id = attempt_runtime_id
+             ; lane_attempt_index = idx
+             ; checkpoint_owner =
+                 Runtime_execution.checkpoint_owner runtime.Runtime.execution
+             })
+        on_runtime_attempt;
       let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy

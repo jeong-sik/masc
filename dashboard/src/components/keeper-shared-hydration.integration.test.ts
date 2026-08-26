@@ -208,6 +208,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
         content: '{}',
         ts: 1_783_267_211,
         tool_call_id: 'tc-api-success',
+        execution_id: 'exec-api-success',
         tool_call_name: 'keeper_context_status',
         source: 'dashboard',
         turn_ref: 'trace-api-success#1',
@@ -237,6 +238,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
           success: true,
           duration_ms: 42,
           tool_use_id: 'tc-api-success',
+          execution_id: 'exec-api-success',
         },
       ],
     })
@@ -253,7 +255,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
     await waitFor(() => {
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('tool-tc-api-success')?.output).toBe(
+      expect(lookupToolCallOutput('exec-api-success')?.output).toBe(
         'context status joined from tool_calls_endpoint',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_211_000)
@@ -312,6 +314,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
             content: '{}',
             ts: 1_783_267_221,
             tool_call_id: 'tc-alpha-scope',
+            execution_id: 'exec-alpha-scope',
             tool_call_name: 'keeper_context_status',
             source: 'dashboard',
             turn_ref: 'trace-alpha-scope#1',
@@ -339,6 +342,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
             content: '{}',
             ts: 1_783_267_231,
             tool_call_id: 'tc-beta-scope',
+            execution_id: 'exec-beta-scope',
             tool_call_name: 'keeper_context_status',
             source: 'dashboard',
             turn_ref: 'trace-beta-scope#1',
@@ -373,6 +377,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
               success: true,
               duration_ms: 31,
               tool_use_id: 'tc-alpha-scope',
+              execution_id: 'exec-alpha-scope',
             },
           ],
         }
@@ -408,10 +413,10 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(toolCallOutputHydrationFailureReason('alpha')).toBeNull()
       expect(toolCallOutputHydrationStatus('beta')).toBe('failed')
       expect(toolCallOutputHydrationFailureReason('beta')).toBe('HTTP 503 beta')
-      expect(lookupToolCallOutput('tool-tc-alpha-scope')?.output).toBe(
+      expect(lookupToolCallOutput('exec-alpha-scope')?.output).toBe(
         'alpha output joined from tool_calls_endpoint',
       )
-      expect(lookupToolCallOutput('tool-tc-beta-scope')).toBeNull()
+      expect(lookupToolCallOutput('exec-beta-scope')).toBeNull()
     })
 
     const alphaPanel = container.querySelector('[data-testid="alpha-panel"]') as HTMLElement
@@ -483,6 +488,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
         content: '{}',
         ts: 1_783_267_241,
         tool_call_id: 'tc-refresh-recovery',
+        execution_id: 'exec-refresh-recovery',
         tool_call_name: 'keeper_context_status',
         source: 'dashboard',
         turn_ref: 'trace-refresh-recovery#1',
@@ -541,6 +547,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
           success: true,
           duration_ms: 37,
           tool_use_id: 'tc-refresh-recovery',
+          execution_id: 'exec-refresh-recovery',
         },
       ],
     })
@@ -552,7 +559,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('tool-tc-refresh-recovery')?.output).toBe(
+      expect(lookupToolCallOutput('exec-refresh-recovery')?.output).toBe(
         'recovered output joined from forced refresh',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_241_000)
@@ -602,6 +609,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
         content: '{}',
         ts: 1_783_267_251,
         tool_call_id: 'tc-reconnect-recovery',
+        execution_id: 'exec-reconnect-recovery',
         tool_call_name: 'keeper_context_status',
         source: 'dashboard',
         turn_ref: 'trace-reconnect-recovery#1',
@@ -661,6 +669,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
           success: true,
           duration_ms: 39,
           tool_use_id: 'tc-reconnect-recovery',
+          execution_id: 'exec-reconnect-recovery',
         },
       ],
     })
@@ -672,7 +681,7 @@ describe('KeeperConversationPanel hydration wiring', () => {
       expect(fetchKeeperToolCalls).toHaveBeenCalledTimes(2)
       expect(toolCallOutputHydrationStatus('sangsu')).toBe('hydrated')
       expect(toolCallOutputHydrationFailureReason('sangsu')).toBeNull()
-      expect(lookupToolCallOutput('tool-tc-reconnect-recovery')?.output).toBe(
+      expect(lookupToolCallOutput('exec-reconnect-recovery')?.output).toBe(
         'recovered output joined from active reconnect refresh',
       )
       expect(toolCallOutputsCoveredSinceMs('sangsu')).toBe(1_783_267_251_000)

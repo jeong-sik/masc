@@ -5,6 +5,12 @@ type stream_protocol_error_kind =
   | Tool_start_missing_identity
   | Tool_args_without_start
   | Tool_stop_without_start
+  | Tool_replay_mismatch
+  | Tool_delta_invalid_kind
+  | Tool_attempt_superseded
+  | Tool_message_start_conflict
+  | Stream_event_after_terminal
+  | Tool_occurrence_mapping_invalid
   | Media_delta_invalid_block
   | Media_source_unsupported
   | Media_decode_failed
@@ -19,8 +25,15 @@ type stream_protocol_error_kind =
   | Sse_unsupported_response
   | Sse_stream_incomplete
 
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
+  quarantined_occurrence : tool_stream_occurrence option;
   index : int option;
   tool_call_id : string option;
   event_type : string option;
@@ -51,6 +64,7 @@ type keeper_chat_event =
   | Reply_details of reply_details
   | Continuation_checkpoint of continuation_checkpoint
   | Agent_core_stream_connected
+  | Agent_core_runtime_attempt_started
   | Agent_core_stream_message_start of
       { provider_message_id : string
       ; model : string
@@ -82,10 +96,25 @@ type keeper_chat_event =
              actual payload, not a telemetry count. *)
       }
   | Agent_core_stream_protocol_error of stream_protocol_error
-  | Tool_call_start of { tool_call_id : string; tool_call_name : string }
-  | Tool_call_args of { tool_call_id : string; delta : string }
-  | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
-  | Tool_call_end of { tool_call_id : string }
+  | Tool_call_start of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; tool_call_name : string
+      }
+  | Tool_call_args of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; delta : string
+      }
+  | Tool_call_args_snapshot of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; snapshot : string
+      }
+  | Tool_call_end of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      }
   | Tool_approval_requested of
       { tool_call_id : string
       ; tool_call_name : string
@@ -97,7 +126,11 @@ type keeper_chat_event =
       { tool_call_id : string
       ; outcome : string
       }
-  | Tool_result_ready of { tool_call_id : string }
+  | Tool_result_ready of
+      { occurrence : tool_stream_occurrence
+      ; tool_call_id : string option
+      ; execution_id : Ids.Execution_id.t
+      }
   | Link_block of
       { url : string
       ; title : string
@@ -158,6 +191,12 @@ let stream_protocol_error_kind_to_string = function
   | Tool_start_missing_identity -> "tool_start_missing_identity"
   | Tool_args_without_start -> "tool_args_without_start"
   | Tool_stop_without_start -> "tool_stop_without_start"
+  | Tool_replay_mismatch -> "tool_replay_mismatch"
+  | Tool_delta_invalid_kind -> "tool_delta_invalid_kind"
+  | Tool_attempt_superseded -> "tool_attempt_superseded"
+  | Tool_message_start_conflict -> "tool_message_start_conflict"
+  | Stream_event_after_terminal -> "stream_event_after_terminal"
+  | Tool_occurrence_mapping_invalid -> "tool_occurrence_mapping_invalid"
   | Media_delta_invalid_block -> "media_delta_invalid_block"
   | Media_source_unsupported -> "media_source_unsupported"
   | Media_decode_failed -> "media_decode_failed"
@@ -172,10 +211,41 @@ let stream_protocol_error_kind_to_string = function
   | Sse_unsupported_response -> "sse_unsupported_response"
   | Sse_stream_incomplete -> "sse_stream_incomplete"
 
+let stream_protocol_error_kind_of_string = function
+  | "tool_start_duplicate_index" -> Some Tool_start_duplicate_index
+  | "tool_start_missing_identity" -> Some Tool_start_missing_identity
+  | "tool_args_without_start" -> Some Tool_args_without_start
+  | "tool_stop_without_start" -> Some Tool_stop_without_start
+  | "tool_replay_mismatch" -> Some Tool_replay_mismatch
+  | "tool_delta_invalid_kind" -> Some Tool_delta_invalid_kind
+  | "tool_attempt_superseded" -> Some Tool_attempt_superseded
+  | "tool_message_start_conflict" -> Some Tool_message_start_conflict
+  | "stream_event_after_terminal" -> Some Stream_event_after_terminal
+  | "tool_occurrence_mapping_invalid" -> Some Tool_occurrence_mapping_invalid
+  | "media_delta_invalid_block" -> Some Media_delta_invalid_block
+  | "media_source_unsupported" -> Some Media_source_unsupported
+  | "media_decode_failed" -> Some Media_decode_failed
+  | "media_payload_too_large" -> Some Media_payload_too_large
+  | "media_persist_failed" -> Some Media_persist_failed
+  | "sse_error" -> Some Sse_error
+  | "ndjson_error" -> Some Ndjson_error
+  | "sse_parse_failed" -> Some Sse_parse_failed
+  | "ndjson_parse_failed" -> Some Ndjson_parse_failed
+  | "sse_unknown_event_type" -> Some Sse_unknown_event_type
+  | "sse_unsupported_part" -> Some Sse_unsupported_part
+  | "sse_unsupported_response" -> Some Sse_unsupported_response
+  | "sse_stream_incomplete" -> Some Sse_stream_incomplete
+  | _ -> None
+
 let stream_protocol_error_summary error =
   let parts =
     [
       Some (stream_protocol_error_kind_to_string error.kind);
+      Option.map
+        (fun occurrence ->
+           Printf.sprintf "quarantined_occurrence=%d/%d"
+             occurrence.stream_scope occurrence.block_index)
+        error.quarantined_occurrence;
       Option.map (Printf.sprintf "index=%d") error.index;
       Option.map (Printf.sprintf "tool_call_id=%s") error.tool_call_id;
       Option.map (Printf.sprintf "event_type=%s") error.event_type;
@@ -187,11 +257,25 @@ let stream_protocol_error_summary error =
   String.concat " | " parts
 
 let stream_protocol_error_to_json error =
+  let quarantined_occurrence =
+    Option.map
+      (fun occurrence ->
+         `Assoc
+           ([ "toolStreamScope", `Int occurrence.stream_scope
+            ; "toolCallBlockIndex", `Int occurrence.block_index
+            ]
+            @ json_opt "providerMessageId"
+                (Option.map
+                   (fun value -> `String value)
+                   occurrence.provider_message_id)))
+      error.quarantined_occurrence
+  in
   let fields =
     [
       ( "kind",
         `String (stream_protocol_error_kind_to_string error.kind) );
     ]
+    @ json_opt "quarantined_occurrence" quarantined_occurrence
     @ json_opt "index" (Option.map (fun value -> `Int value) error.index)
     @ json_opt "tool_call_id"
         (Option.map (fun value -> `String value) error.tool_call_id)

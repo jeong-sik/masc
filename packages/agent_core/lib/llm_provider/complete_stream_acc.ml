@@ -4,9 +4,18 @@ type stream_acc = { state : Complete_stream_state.t ref }
 
 let create_stream_acc () = { state = ref Complete_stream_state.empty }
 let stream_failed acc = Complete_stream_state.has_failed !(acc.state)
+let failure acc = Complete_stream_state.failure !(acc.state)
+
+let resolve_event acc event =
+  let state, resolution =
+    Complete_stream_state.transition_with_resolution !(acc.state) event
+  in
+  acc.state := state;
+  resolution
+;;
 
 let accumulate_event acc event =
-  acc.state := Complete_stream_state.transition !(acc.state) event
+  ignore (resolve_event acc event)
 ;;
 
 let finalize_stream_acc acc =

@@ -3,33 +3,12 @@
 // The keeper chat stream never carries tool *results* — TOOL_CALL_END only
 // flips a row to "delivered" (keeper-stream.ts), and the persisted chat
 // history row holds the arguments only (keeper_chat_store). The output lives
-// on a separate surface, GET /api/v1/keepers/:name/tool-calls, keyed by the
-// provider-minted tool_use_id (RFC-0233 PR-2). That id is globally unique and
-// equals the chat tool row's tool_call_id for the same execution
-// (keeper_chat_store.provider_tool_call_id passes a non-empty call id through
-// verbatim, and records nothing for a call the provider did not name). The
-// join preserves that opaque identity exactly; whitespace is used only to
-// reject a blank id — an execution with no provider id has nothing to join on
-// here, and the server no longer invents one for it (#21894, #25034). A single global id→entry map lets the chat
-// ToolCallBubble derive its output by stripping the `tool-` prefix off its
-// entry id. No per-keeper scoping is needed because tool_use_ids do not
-// collide across keepers.
+// on a separate surface, GET /api/v1/keepers/:name/tool-calls. Both surfaces
+// carry MASC's canonical execution_id, which is the only cross-store join
+// authority. Provider tool_use_id remains opaque, optional correlation data:
+// it may be blank or reused and never identifies a dashboard row or output.
 import { signal } from '@preact/signals'
 import type { ToolCallEntry } from './api/dashboard'
-
-// Chat tool entries id their rows `tool-<tool_call_id>` on both the live
-// stream and history paths (keeper-stream.ts / keeper-state.ts).
-export const TOOL_ENTRY_ID_PREFIX = 'tool-'
-
-export function toolEntryIdFromCallId(toolCallId: string): string {
-  return `${TOOL_ENTRY_ID_PREFIX}${toolCallId}`
-}
-
-export function toolCallIdFromToolEntryId(entryId: string): string | null {
-  return entryId.startsWith(TOOL_ENTRY_ID_PREFIX)
-    ? entryId.slice(TOOL_ENTRY_ID_PREFIX.length)
-    : null
-}
 
 export function nonBlankToolCallId(
   toolCallId: string | null | undefined,
@@ -37,9 +16,13 @@ export function nonBlankToolCallId(
   return toolCallId?.trim() ? toolCallId : null
 }
 
-// Global join table: tool_use_id → the tool-call IO entry (input + output).
+function nonBlankExecutionId(executionId: string | null | undefined): string | null {
+  return executionId?.trim() ? executionId : null
+}
+
+// Global join table: canonical execution_id → tool-call IO entry.
 // Replaced (not mutated) on each merge so signal subscribers re-render.
-export const toolCallOutputsById = signal<Map<string, ToolCallEntry>>(new Map())
+export const toolCallOutputsByExecutionId = signal<Map<string, ToolCallEntry>>(new Map())
 
 interface ToolCallOutputHydrationState {
   inFlight: number
@@ -198,36 +181,30 @@ export function toolCallOutputHydrationContract(
   }
 }
 
-/** Merge tool-call entries into the store, keyed by exact tool_use_id.
- *  Entries without a non-blank tool_use_id are skipped — they have no stable
- *  join key to the chat transcript. A later fetch overwrites an earlier entry
- *  for the same id, so re-hydration stays idempotent. */
+/** Merge tool-call entries by exact canonical execution_id. */
 export function recordToolCallOutputs(entries: readonly ToolCallEntry[]): void {
   let changed = false
-  const next = new Map(toolCallOutputsById.value)
+  const next = new Map(toolCallOutputsByExecutionId.value)
   for (const entry of entries) {
-    const toolUseId = nonBlankToolCallId(entry.tool_use_id)
-    if (!toolUseId) continue
-    next.set(toolUseId, entry)
+    const executionId = nonBlankExecutionId(entry.execution_id)
+    if (!executionId) continue
+    next.set(executionId, entry)
     changed = true
   }
-  if (changed) toolCallOutputsById.value = next
+  if (changed) toolCallOutputsByExecutionId.value = next
 }
 
-/** Look up the tool-call IO entry for a chat tool row by its entry id
- *  (`tool-<tool_use_id>`). Returns null until the tool-call hydration lands,
- *  or for rows whose call carried no provider id. Reads the signal value, so
- *  a component calling this during render subscribes to store updates. */
-export function lookupToolCallOutput(toolEntryId: string): ToolCallEntry | null {
-  const toolUseId = nonBlankToolCallId(
-    toolCallIdFromToolEntryId(toolEntryId) ?? toolEntryId,
-  )
-  if (!toolUseId) return null
-  return toolCallOutputsById.value.get(toolUseId) ?? null
+/** Look up output by canonical execution_id. */
+export function lookupToolCallOutput(
+  executionId: string | null | undefined,
+): ToolCallEntry | null {
+  const id = nonBlankExecutionId(executionId)
+  if (!id) return null
+  return toolCallOutputsByExecutionId.value.get(id) ?? null
 }
 
 /** Test/teardown helper: drop all recorded outputs. */
 export function resetToolCallOutputs(): void {
-  toolCallOutputsById.value = new Map()
+  toolCallOutputsByExecutionId.value = new Map()
   toolCallOutputHydrationByKeeper.value = {}
 }

@@ -277,44 +277,326 @@ let test_lifecycle_identity_is_exact () =
   | Error error -> fail (Chat.stream_error_to_string error)
   | Ok _ -> fail "unknown custom event was accepted"
 
+let test_runtime_attempt_requires_null_payload () =
+  let malformed_runtime_attempt =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_RUNTIME_ATTEMPT_STARTED"
+      ; "value", `Assoc []
+      ]
+  in
+  match decode [ acceptance (); run_started; malformed_runtime_attempt ] with
+  | Error (Chat.Malformed_event detail) ->
+    check bool "the payload contract is named" true
+      (String_util.contains_substring detail "value must be null")
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "non-null runtime-attempt payload was accepted"
+
 let test_current_nonterminal_event_set () =
   let custom name =
+    let value =
+      if String.equal name "KEEPER_TOOL_RESULT_READY"
+      then
+        `Assoc
+          [ "toolStreamScope", `Int 0
+          ; "toolCallBlockIndex", `Int 0
+          ; "toolCallId", `String "tool-1"
+          ; "executionId", `String "exec-1"
+          ]
+      else if String.equal name "KEEPER_STREAM_PROTOCOL_ERROR" then
+        `Assoc [ "kind", `String "sse_error" ]
+      else if String.equal name "KEEPER_TOOL_APPROVAL_REQUESTED" then
+        `Assoc
+          [ "tool_call_id", `String "tool-1"
+          ; "tool_call_name", `String "Read"
+          ; "args", `String "{}"
+          ; "question", `String "Run Read?"
+          ]
+      else if String.equal name "KEEPER_TOOL_APPROVAL_SETTLED" then
+        `Assoc
+          [ "tool_call_id", `String "tool-1"
+          ; "outcome", `String "approved"
+          ]
+      else `Null
+    in
     event "CUSTOM"
-      [ "runId", `String run_id; "name", `String name; "value", `Null ]
+      [ "runId", `String run_id; "name", `String name; "value", value ]
   in
-  let custom_names =
-    [ "KEEPER_CONNECTED"; "KEEPER_STREAM_MESSAGE_START"
-    ; "KEEPER_STREAM_MESSAGE_DELTA"; "KEEPER_STREAM_MESSAGE_STOP"
-    ; "KEEPER_STREAM_PING"; "KEEPER_CONTENT_BLOCK_START"
-    ; "KEEPER_CONTENT_BLOCK_STOP"; "KEEPER_THINKING_DELTA"
-    ; "KEEPER_THINKING_SIGNATURE_DELTA"; "KEEPER_MEDIA_DELTA"
-    ; "KEEPER_STREAM_PROTOCOL_ERROR"; "KEEPER_CONTINUATION_CHECKPOINT"
-    ; "KEEPER_EXTERNAL_EFFECT_COMPLETED"; "KEEPER_TOOL_RESULT_READY"
-    ]
-  in
+  let custom_names = Chat.current_custom_names in
   let tool_events =
     [ event "TOOL_CALL_START"
-        [ "runId", `String run_id; "toolCallId", `String "tool-1"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
         ; "toolCallName", `String "read"
         ]
     ; event "TOOL_CALL_ARGS"
-        [ "runId", `String run_id; "toolCallId", `String "tool-1"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
         ; "delta", `String "{}"
         ]
     ; event "TOOL_CALL_END"
-        [ "runId", `String run_id; "toolCallId", `String "tool-1" ]
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ]
     ]
   in
   match
     decode
       ([ acceptance (); run_started; text_start ]
-       @ List.map custom custom_names
        @ tool_events
+       @ List.map custom custom_names
        @ [ reply_details (); text_end; run_finished ])
   with
   | Ok (Chat.Turn_completed _) -> ()
   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
   | Error error -> fail (Chat.stream_error_to_string error)
+
+let test_tool_result_ready_requires_exact_canonical_identity () =
+  let result_ready value =
+    event "CUSTOM"
+      [ "runId", `String run_id
+      ; "name", `String "KEEPER_TOOL_RESULT_READY"
+      ; "value", value
+      ]
+  in
+  let invalid_values =
+    [ `Null
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ]
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"; "executionId", `String ""
+        ]
+    ; `Assoc
+        [ "toolStreamScope", `Int 0; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "tool-1"
+        ; "executionId", `String "exec-1"
+        ; "provider_result", `String "not-part-of-the-contract"
+        ]
+    ]
+  in
+  List.iter
+    (fun value ->
+      match decode [ acceptance (); run_started; result_ready value ] with
+      | Error (Chat.Malformed_event _) -> ()
+      | Error error -> fail (Chat.stream_error_to_string error)
+      | Ok _ -> fail "malformed KEEPER_TOOL_RESULT_READY was accepted")
+    invalid_values
+
+let tool_start ?(scope = 0) ?(block_index = 0) ?provider_message_id ~call_id
+    ~name =
+  event "TOOL_CALL_START"
+    ([ "runId", `String run_id
+     ; "toolStreamScope", `Int scope
+     ; "toolCallBlockIndex", `Int block_index
+     ; "toolCallId", `String call_id
+     ; "toolCallName", `String name
+     ]
+     @ Option.to_list
+         (Option.map
+            (fun value -> "providerMessageId", `String value)
+            provider_message_id))
+;;
+
+let tool_result_ready ?(scope = 0) ?(block_index = 0) ?provider_message_id
+    ~call_id ~execution_id =
+  event "CUSTOM"
+    [ "runId", `String run_id
+    ; "name", `String "KEEPER_TOOL_RESULT_READY"
+    ; ( "value"
+      , `Assoc
+          ([ "toolStreamScope", `Int scope
+           ; "toolCallBlockIndex", `Int block_index
+           ; "toolCallId", `String call_id
+           ; "executionId", `String execution_id
+           ]
+           @ Option.to_list
+               (Option.map
+                  (fun value -> "providerMessageId", `String value)
+                  provider_message_id)) )
+    ]
+;;
+
+let completed_tail = [ text_start; reply_details (); text_end; run_finished ]
+
+let tool_quarantined ?(scope = 0) ?(block_index = 0) () =
+  event "CUSTOM"
+    [ "runId", `String run_id
+    ; "name", `String "KEEPER_STREAM_PROTOCOL_ERROR"
+    ; ( "value"
+      , `Assoc
+          [ "kind", `String "tool_replay_mismatch"
+          ; ( "quarantined_occurrence"
+            , `Assoc
+                [ "toolStreamScope", `Int scope
+                ; "toolCallBlockIndex", `Int block_index
+                ] )
+          ] )
+    ]
+;;
+
+let test_tool_result_identity_is_occurrence_scoped_and_write_once () =
+  let decode_completed middle =
+    decode ([ acceptance (); run_started ] @ middle @ completed_tail)
+  in
+  (match
+     decode_completed
+       [ tool_start ~block_index:0 ~call_id:"reused" ~name:"Read"
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first"
+       ; tool_start ~block_index:1 ~call_id:"reused" ~name:"Write"
+       ; tool_result_ready ~block_index:0 ~call_id:"reused" ~execution_id:"exec-first"
+       ; tool_result_ready ~block_index:1 ~call_id:"reused" ~execution_id:"exec-second"
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-once" ~name:"Read"
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-once" ~name:"Read"
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-one"
+       ; tool_result_ready ~call_id:"call-once" ~execution_id:"exec-two"
+       ]
+   with
+   | Error
+       (Chat.Conflicting_tool_result
+          { recorded_execution_id = "exec-one"
+          ; received_execution_id = "exec-two"
+          ; _
+          }) ->
+       ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "conflicting canonical identity was accepted");
+  (match
+     decode_completed
+       [ tool_start ~block_index:0 ~call_id:"first" ~name:"Read"
+       ; tool_start ~block_index:1 ~call_id:"second" ~name:"Write"
+       ; tool_result_ready ~block_index:0 ~call_id:"first"
+           ~execution_id:"exec-reused"
+       ; tool_result_ready ~block_index:1 ~call_id:"second"
+           ~execution_id:"exec-reused"
+       ]
+   with
+   | Error
+       (Chat.Reused_tool_execution_id
+          { execution_id = "exec-reused"
+          ; recorded_occurrence =
+              { stream_scope = 0; block_index = 0; provider_message_id = None }
+          ; received_occurrence =
+              { stream_scope = 0; block_index = 1; provider_message_id = None }
+          }) ->
+       ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "one canonical execution was accepted for two occurrences");
+  match
+    decode_completed
+      [ tool_start ~block_index:0 ~call_id:"duplicate" ~name:"Read"
+      ; tool_start ~block_index:1 ~call_id:"duplicate" ~name:"Write"
+      ; tool_result_ready ~block_index:1 ~call_id:"duplicate" ~execution_id:"exec-second"
+      ]
+  with
+  | Ok (Chat.Turn_completed _) -> ()
+  | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+  | Error error -> fail (Chat.stream_error_to_string error)
+;;
+
+let test_tool_metadata_and_quarantine_are_write_once () =
+  let decode_completed middle =
+    decode ([ acceptance (); run_started ] @ middle @ completed_tail)
+  in
+  let expect_protocol_error label events =
+    match decode_completed events with
+    | Error _ -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+  in
+  expect_protocol_error "changed tool name for one occurrence"
+    [ tool_start ~call_id:"call-1" ~name:"Read"
+    ; tool_start ~call_id:"call-1" ~name:"Write"
+    ];
+  expect_protocol_error "changed provider call id on an idempotent result"
+    [ tool_start ~call_id:"call-1" ~name:"Read"
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+    ; tool_result_ready ~call_id:"changed" ~execution_id:"exec-1"
+    ];
+  expect_protocol_error "changed provider message correlation"
+    [ tool_start ~provider_message_id:"message-a" ~call_id:"call-1"
+        ~name:"Read"
+    ; tool_result_ready ~provider_message_id:"message-b" ~call_id:"call-1"
+        ~execution_id:"exec-1"
+    ];
+  expect_protocol_error "arguments changed after canonical result"
+    [ tool_start ~call_id:"call-1" ~name:"Read"
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+    ; event "TOOL_CALL_ARGS"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0
+        ; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "call-1"
+        ; "delta", `String "{\"changed\":true}"
+        ]
+    ];
+  expect_protocol_error "result after quarantine"
+    [ tool_start ~call_id:"call-1" ~name:"Read"
+    ; tool_quarantined ()
+    ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+    ];
+  expect_protocol_error "arguments after quarantine"
+    [ tool_start ~call_id:"call-1" ~name:"Read"
+    ; tool_quarantined ()
+    ; event "TOOL_CALL_ARGS"
+        [ "runId", `String run_id
+        ; "toolStreamScope", `Int 0
+        ; "toolCallBlockIndex", `Int 0
+        ; "toolCallId", `String "call-1"
+        ; "delta", `String {|{"late":true}|}
+        ]
+    ];
+  (match
+     decode_completed
+       [ tool_start ~call_id:"call-1" ~name:"Read"
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+       ; tool_quarantined ()
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error ->
+     fail
+       ("quarantine after write-once result failed the whole stream: "
+        ^ Chat.stream_error_to_string error));
+  (match
+     decode_completed
+       [ tool_quarantined ()
+       ; tool_start ~call_id:"call-1" ~name:"Read"
+       ; tool_result_ready ~call_id:"call-1" ~execution_id:"exec-1"
+       ]
+   with
+   | Ok (Chat.Turn_completed _) -> ()
+   | Ok (Chat.Replayed_succeeded _) -> fail "live stream became replay"
+   | Error error -> fail (Chat.stream_error_to_string error));
+  expect_protocol_error "null protocol error payload"
+    [ event "CUSTOM"
+        [ "runId", `String run_id
+        ; "name", `String "KEEPER_STREAM_PROTOCOL_ERROR"
+        ; "value", `Null
+        ]
+    ]
+;;
 
 let test_finished_requires_text_end () =
   match
@@ -856,8 +1138,16 @@ let () =
         ; test_case "current wire only" `Quick test_current_wire_only
         ; test_case "exact lifecycle identities" `Quick
             test_lifecycle_identity_is_exact
+        ; test_case "runtime attempt requires null payload" `Quick
+            test_runtime_attempt_requires_null_payload
         ; test_case "current nonterminal event set" `Quick
             test_current_nonterminal_event_set
+        ; test_case "tool result requires exact canonical identity" `Quick
+            test_tool_result_ready_requires_exact_canonical_identity
+        ; test_case "tool result identity is scoped and write-once" `Quick
+            test_tool_result_identity_is_occurrence_scoped_and_write_once
+        ; test_case "tool metadata and quarantine are write-once" `Quick
+            test_tool_metadata_and_quarantine_are_write_once
         ; test_case "finished requires text end" `Quick
             test_finished_requires_text_end
         ; test_case "protocol errors preserve acceptance provenance" `Quick

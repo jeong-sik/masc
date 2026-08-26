@@ -200,12 +200,7 @@ let expected_model_tool_names ~skill_catalog ~model_visible_descriptors =
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
   let instruction_skill_names =
-    if
-      Keeper_skill_catalog.skills skill_catalog
-      |> List.exists (fun (skill : Keeper_skill_catalog.skill) ->
-        match skill.surface with
-        | Keeper_skill_catalog.Instruction -> true
-        | Keeper_skill_catalog.Composition _ -> false)
+    if Keeper_skill_catalog.has_instruction_skill skill_catalog
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in

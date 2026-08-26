@@ -88,6 +88,12 @@ let test_projection_names_equal_turn_surface_authority () =
       expected (names surface);
     check (list string) "instruction skill is explicit" [ "guide" ]
       surface.instruction_skills;
+    check bool "instruction reader provenance exists" true
+      (List.exists
+         (fun (tool : Keeper_effective_tool_surface.tool) ->
+            String.equal tool.name "keeper_skill"
+            && tool.origin = Keeper_effective_tool_surface.Instruction_skill)
+         surface.tools);
     check bool "composition provenance exists" true
       (List.exists
          (fun (tool : Keeper_effective_tool_surface.tool) ->

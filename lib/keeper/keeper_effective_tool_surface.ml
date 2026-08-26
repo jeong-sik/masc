@@ -1,5 +1,6 @@
 type tool_origin =
   | Descriptor of { group : string }
+  | Instruction_skill
   | Composition_skill of { source : string }
   | Composition_plan
   | Composition_control
@@ -64,7 +65,9 @@ let descriptor_rows descriptors =
 ;;
 
 let composition_origin name =
-  match Keeper_tool_composition_catalog.skill_source_of_tool_name name with
+  if String.equal name Keeper_tool_composition_catalog.skill_tool_name
+  then Instruction_skill
+  else match Keeper_tool_composition_catalog.skill_source_of_tool_name name with
   | Some source -> Composition_skill { source }
   | None when
       String.equal name Keeper_tool_composition_surface.plan_execute_tool_name ->
@@ -76,6 +79,8 @@ let composition_rows skill_catalog =
   Keeper_tool_composition_surface.schema_tools
     ~skill_composition_entries:
       (Keeper_skill_catalog.composition_entries skill_catalog)
+    ~include_instruction_skill:
+      (Keeper_skill_catalog.has_instruction_skill skill_catalog)
     ()
   |> List.map (fun (schema_tool : Agent_core.Tool.t) ->
     let name = schema_tool.schema.name in
@@ -275,6 +280,7 @@ let string_list values = `List (List.map (fun value -> `String value) values)
 let origin_to_yojson = function
   | Descriptor { group } ->
     `Assoc [ "kind", `String "descriptor"; "group", `String group ]
+  | Instruction_skill -> `Assoc [ "kind", `String "instruction_skill" ]
   | Composition_skill { source } ->
     `Assoc
       [ "kind", `String "composition_skill"; "skill_source", `String source ]

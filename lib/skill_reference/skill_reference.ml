@@ -142,6 +142,10 @@ let to_yojson reference =
     ]
 ;;
 
+let pp formatter reference =
+  Format.pp_print_string formatter (Yojson.Safe.to_string (to_yojson reference))
+;;
+
 let list_to_yojson references = `List (List.map to_yojson references)
 
 let object_fields ~field = function

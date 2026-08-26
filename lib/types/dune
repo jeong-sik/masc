@@ -19,7 +19,15 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4 -w +33 -w +37))
- (libraries yojson unix time_compat masc.time_codec masc_core base64 uuidm)
+ (libraries
+  yojson
+  unix
+  time_compat
+  masc.time_codec
+  masc_core
+  masc.skill_reference
+  base64
+  uuidm)
  (preprocess
   (pps
    ppx_deriving.show

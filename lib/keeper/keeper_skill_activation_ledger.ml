@@ -1674,11 +1674,11 @@ let of_yojson ~expected_workspace_root ~expected_trace_id json =
 
 let ledger_path session_dir = Filename.concat session_dir filename
 
-let read_locked ~ownership_root ~expected_trace_id session_dir =
+let read_existing_locked ~ownership_root ~expected_trace_id session_dir =
   let path = ledger_path session_dir in
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error -> Error (Read_failed error)
-  | Ok None -> Ok (empty ~workspace_root:ownership_root ~trace_id:expected_trace_id)
+  | Ok None -> Ok None
   | Ok (Some contents) ->
     (match Yojson.Safe.from_string contents with
      | json ->
@@ -1686,9 +1686,19 @@ let read_locked ~ownership_root ~expected_trace_id session_dir =
          ~expected_workspace_root:ownership_root
          ~expected_trace_id
          json
+       |> Result.map Option.some
        |> Result.map_error (fun error -> Decode_failed error)
      | exception Yojson.Json_error _ ->
        Error (Decode_failed (Expected_object { field = "ledger" })))
+;;
+
+let read_locked ~ownership_root ~expected_trace_id session_dir =
+  let* existing =
+    read_existing_locked ~ownership_root ~expected_trace_id session_dir
+  in
+  Ok
+    (Option.value existing
+       ~default:(empty ~workspace_root:ownership_root ~trace_id:expected_trace_id))
 ;;
 
 let with_lock ~config ~trace_id operation =
@@ -1707,6 +1717,11 @@ let with_lock ~config ~trace_id operation =
 let load ~config ~trace_id =
   with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
     read_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
+;;
+
+let load_existing ~config ~trace_id =
+  with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+    read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
 ;;
 
 let persist_locked

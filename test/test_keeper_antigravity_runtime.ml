@@ -99,8 +99,8 @@ called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"na
 assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
 printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":0,"state":"DONE","step_type":"system_message"}}\n' "$conversation"
-printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool"}}\n' "$conversation"
-printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
+printf '{"event":"step_update","step_update":{"conversation_id":"%%s","step_index":1,"state":"DONE","step_type":"tool","tool_name":"call_mcp_tool"}}\n' "$conversation"
 printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_KEEPER_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conversation" "$turns"
 |}
       (shell_quote
@@ -285,6 +285,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
       let observed_initial_prompt = ref None in
       let observed_resumed_prompt = ref None in
       let stream_events = ref [] in
+      let native_actions = ref [] in
       let cli_path = fixture_script ~base_path in
       let runtime_path = Filename.concat base_path "runtime.toml" in
       write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
@@ -376,6 +377,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
                       ~context:(Agent_core.Context.create ())
                       ~raw_trace
                       ~on_event:(fun event -> stream_events := event :: !stream_events)
+                      ~on_official_client_native_action:
+                        (fun ~runtime_id ~official_turn ~identity ~tool_name ->
+                           native_actions :=
+                             (runtime_id, official_turn, identity, tool_name)
+                             :: !native_actions)
                       ~sw
                       ~net:(Eio.Stdenv.net env)
                       ()
@@ -437,6 +443,11 @@ let test_keeper_projects_mcp_tool_and_settles () =
                           in
                           let mcp_count = count_of "tool_use" in
                           check int "native tool count" 1 native_count;
+                          check
+                            bool
+                            "MCP wrapper is not a second Skill action"
+                            true
+                            (List.is_empty !native_actions);
                           check int "MASC tool count" 1 mcp_count;
                           check
                             int
@@ -587,6 +598,27 @@ let test_keeper_projects_mcp_tool_and_settles () =
         "RAW trace contains tool output"
         true
         (String_util.contains_substring raw "MASC_TOOL_RESULT");
+      let native_starts =
+        Agent_core.Raw_trace.read_all ~path:raw_trace_path ()
+        |> Result.map_error (fun error -> fail (Agent_core.Error.to_string error))
+        |> Result.get_ok
+        |> List.filter (fun (record : Agent_core.Raw_trace.record) ->
+          record.record_type = Agent_core.Raw_trace.Native_tool_started)
+      in
+      check int "RAW trace keeps both provider wrapper steps" 2
+        (List.length native_starts);
+      check bool "RAW trace keeps exact provider step and typed wrapper origin" true
+        (List.for_all
+           (fun (record : Agent_core.Raw_trace.record) ->
+              record.native_tool_identity
+              = Some
+                  (Agent_core.Raw_trace.Provider_step
+                     { conversation_id = "conversation-antigravity-fixture"
+                     ; step_index = 1
+                     })
+              && record.native_tool_origin = Some Agent_core.Raw_trace.Mcp_wrapper
+              && record.tool_name = Some "call_mcp_tool")
+           native_starts);
       let session =
         Keeper_official_client_session_store.load
           ~base_path
@@ -1060,23 +1092,10 @@ let test_capacity_refuses_oversized_fixed_sections () =
   | Ok _ -> fail "oversized fixed prompt sections were admitted"
 ;;
 
-let test_native_action_observer_keeps_exact_provider_identity () =
-  let seen = ref [] in
-  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
-  Keeper_antigravity_runtime.For_testing.observe_stream_native_action ~turn_count:11 ~observe
-    (Runtime_antigravity.Native_tool_started
-       { Runtime_native_tools.call_id = Some "antigravity-call"; tool_name = Some "Bash" });
-  Keeper_antigravity_runtime.For_testing.observe_stream_native_action ~turn_count:12 ~observe
-    (Runtime_antigravity.Native_tool_started
-       { Runtime_native_tools.call_id = None; tool_name = None });
-  check (list (triple int string string)) "exact only" [ 11, "antigravity-call", "Bash" ] (List.rev !seen)
-;;
-
 let () =
   run
     "keeper_antigravity_runtime"
-    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
-    ; ( "lifecycle"
+    [ ( "lifecycle"
         , [ test_case
             "projects MCP tool and settles"
             `Quick

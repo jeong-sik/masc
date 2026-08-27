@@ -46,6 +46,8 @@ let make_record
   ; assistant_block
   ; tool_use_id
   ; tool_name
+  ; native_tool_identity = None
+  ; native_tool_origin = None
   ; tool_input
   ; tool_turn = None
   ; tool_planned_index = None

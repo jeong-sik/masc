@@ -233,6 +233,7 @@ type wire_event =
       ; step_index : int option
       ; state : step_state
       ; step_type : step_type
+      ; tool_name : string option
       }
   | Result of
       { (* [None] two ways: the CLI refuses a bad invocation with a single
@@ -369,7 +370,8 @@ let parse_step_update fields =
   let* state = parse_step_state stage state_string in
   let* step_type_string = required_string stage "step_type" step_fields in
   let* step_type = parse_step_type stage step_type_string in
-  Ok (Step_update { conversation_id; step_index; state; step_type })
+  let* tool_name = optional_string stage "tool_name" step_fields in
+  Ok (Step_update { conversation_id; step_index; state; step_type; tool_name })
 ;;
 
 let parse_result fields =
@@ -647,7 +649,13 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
              on_stream_event
              (Turn_started { conversation_id; model });
            Ok { state with init = Some (conversation_id, model, permission_mode) })
-  | Step_update { conversation_id; step_index; state = step_state; step_type } ->
+  | Step_update
+      { conversation_id
+      ; step_index
+      ; state = step_state
+      ; step_type
+      ; tool_name
+      } ->
     let stage = "step_update event" in
     (match state.init with
      | None -> protocol_error stage "received step_update before init"
@@ -660,7 +668,18 @@ let apply_event (config : config) ~conversation_mode ~on_conversation_ready
          if is_tool
          then (
            let observation : Runtime_native_tools.observation =
-             { call_id = Option.map string_of_int step_index; tool_name = None }
+             { identity =
+                 Option.map
+                   (fun step_index ->
+                      Runtime_native_tools.Provider_step
+                        { conversation_id = expected; step_index })
+                   step_index
+             ; tool_name
+             ; origin =
+                 (match tool_name with
+                  | Some "call_mcp_tool" -> Runtime_native_tools.Mcp_wrapper
+                  | Some _ | None -> Runtime_native_tools.Built_in)
+             }
            in
            match step_state with
            | Active ->

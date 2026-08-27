@@ -12,6 +12,19 @@ type record_type =
   | Run_finished
 [@@deriving yojson, show]
 
+type native_tool_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+[@@deriving yojson, show]
+
+type native_tool_origin =
+  | Built_in
+  | Mcp_wrapper
+[@@deriving yojson, show]
+
 type run_ref =
   { worker_run_id : string
   ; path : string
@@ -92,6 +105,8 @@ type record =
   ; assistant_block : Yojson.Safe.t option
   ; tool_use_id : string option
   ; tool_name : string option
+  ; native_tool_identity : native_tool_identity option
+  ; native_tool_origin : native_tool_origin option
   ; tool_input : Yojson.Safe.t option
   ; tool_turn : int option
   ; tool_planned_index : int option
@@ -131,10 +146,10 @@ type active_run =
 
 exception Trace_error of Error.t
 
-(* v3 is a privacy hard cut: assistant reasoning is metadata-only at every
-   nesting depth, including structured ToolResult content. v2 rows are not
-   migrated or rewritten and the exact-version decoder rejects them. *)
-let trace_version = 3
+(* v4 is a hard cut: assistant reasoning remains metadata-only at every
+   nesting depth, and native provider-step identity is now typed. Earlier rows
+   are not migrated or rewritten and the exact-version decoder rejects them. *)
+let trace_version = 4
 let json_parse_error = Util.json_parse_error
 
 let safe_name name =
@@ -225,6 +240,8 @@ let validate_record_fields json =
     ; "assistant_block"
     ; "tool_use_id"
     ; "tool_name"
+    ; "native_tool_identity"
+    ; "native_tool_origin"
     ; "tool_input"
     ; "tool_turn"
     ; "tool_planned_index"
@@ -281,8 +298,14 @@ let record_to_json (record : record) =
      @ option_int "block_index" record.block_index
      @ option_string "block_kind" record.block_kind
      @ option_json "assistant_block" record.assistant_block
-     @ option_string "tool_use_id" record.tool_use_id
-     @ option_string "tool_name" record.tool_name
+    @ option_string "tool_use_id" record.tool_use_id
+    @ option_string "tool_name" record.tool_name
+    @ option_json
+        "native_tool_identity"
+        (Option.map native_tool_identity_to_yojson record.native_tool_identity)
+    @ option_json
+        "native_tool_origin"
+        (Option.map native_tool_origin_to_yojson record.native_tool_origin)
      @ option_json "tool_input" record.tool_input
      @ option_int "tool_turn" record.tool_turn
      @ option_int "tool_planned_index" record.tool_planned_index
@@ -316,6 +339,25 @@ let record_of_json_unchecked json =
   let* record_type = json |> member "record_type" |> to_string |> record_type_of_string in
   let* tool_choice = tool_choice_of_json_opt json in
   let* tool_execution_mode = execution_mode_of_json_opt json in
+  let* native_tool_identity =
+    match json |> Yojson.Safe.Util.member "native_tool_identity" with
+    | `Null -> Ok None
+    | value ->
+      native_tool_identity_of_yojson value
+      |> Result.map Option.some
+      |> Result.map_error (fun detail ->
+        Error.Serialization (JsonParseError { detail }))
+  in
+  let* native_tool_origin =
+    match json |> Yojson.Safe.Util.member "native_tool_origin" with
+    | `Null -> Ok None
+    | value ->
+      native_tool_origin_of_yojson value
+      |> Result.map Option.some
+      |> Result.map_error (fun detail ->
+        Error.Serialization (JsonParseError { detail }))
+  in
+  let tool_use_id = json |> Yojson.Safe.Util.member "tool_use_id" |> Yojson.Safe.Util.to_string_option in
   let* () =
     match record_type, tool_execution_mode with
     | Tool_execution_started, Some _ -> Ok ()
@@ -345,6 +387,44 @@ let record_of_json_unchecked json =
            (JsonParseError
               { detail = "tool_execution_mode is valid only for tool_execution_started" }))
   in
+  let* () =
+    match record_type, native_tool_identity, native_tool_origin with
+    | (Native_tool_started | Native_tool_finished), identity, Some _ ->
+      (match tool_use_id, identity with
+       | Some _, _ ->
+         Error
+           (Error.Serialization
+              (JsonParseError
+                 { detail = "native tool record cannot also carry tool_use_id" }))
+       | None, None -> Ok ()
+       | None, Some (Call_id call_id) when String.trim call_id <> "" -> Ok ()
+       | None, Some (Provider_step { conversation_id; step_index })
+         when String.trim conversation_id <> "" && step_index >= 0 -> Ok ()
+       | None, Some _ ->
+         Error
+           (Error.Serialization
+              (JsonParseError { detail = "native tool identity is invalid" })))
+    | (Native_tool_started | Native_tool_finished), _, None ->
+      Error
+        (Error.Serialization
+           (JsonParseError { detail = "native tool record requires origin" }))
+    | ( Run_started
+      | Assistant_block
+      | Tool_execution_started
+      | Tool_execution_finished
+      | Hook_invoked
+      | Run_finished ), None, None -> Ok ()
+    | ( Run_started
+      | Assistant_block
+      | Tool_execution_started
+      | Tool_execution_finished
+      | Hook_invoked
+      | Run_finished ), _, _ ->
+      Error
+        (Error.Serialization
+           (JsonParseError
+              { detail = "native tool identity/origin are valid only for native tool records" }))
+  in
   Ok
     { trace_version = got_version
     ; worker_run_id = json |> member "worker_run_id" |> to_string
@@ -366,8 +446,10 @@ let record_of_json_unchecked json =
         (match json |> member "assistant_block" with
          | `Null -> None
          | value -> Some value)
-    ; tool_use_id = json |> member "tool_use_id" |> to_string_option
+    ; tool_use_id
     ; tool_name = json |> member "tool_name" |> to_string_option
+    ; native_tool_identity
+    ; native_tool_origin
     ; tool_input =
         (match json |> member "tool_input" with
          | `Null -> None
@@ -498,6 +580,8 @@ let append_record
       ?assistant_block
       ?tool_use_id
       ?tool_name
+      ?native_tool_identity
+      ?native_tool_origin
       ?tool_input
       ?tool_turn
       ?tool_planned_index
@@ -542,6 +626,8 @@ let append_record
       ; assistant_block = Option.map maybe_redact_json assistant_block
       ; tool_use_id
       ; tool_name
+      ; native_tool_identity
+      ; native_tool_origin
       ; tool_input = Option.map maybe_redact_json tool_input
       ; tool_turn
       ; tool_planned_index
@@ -751,21 +837,23 @@ let record_tool_execution_finished
   |> Result.map (fun _ -> ())
 ;;
 
-let record_native_tool_started active ~call_id ~tool_name =
+let record_native_tool_started active ~identity ~origin ~tool_name =
   append_record
     active
     ~record_type:Native_tool_started
-    ?tool_use_id:call_id
+    ?native_tool_identity:identity
+    ~native_tool_origin:origin
     ?tool_name
     ()
   |> Result.map (fun _ -> ())
 ;;
 
-let record_native_tool_finished active ~call_id ~tool_name =
+let record_native_tool_finished active ~identity ~origin ~tool_name =
   append_record
     active
     ~record_type:Native_tool_finished
-    ?tool_use_id:call_id
+    ?native_tool_identity:identity
+    ~native_tool_origin:origin
     ?tool_name
     ()
   |> Result.map (fun _ -> ())

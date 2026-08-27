@@ -14,6 +14,19 @@ type record_type =
   | Run_finished
 [@@deriving yojson, show]
 
+type native_tool_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+[@@deriving yojson, show]
+
+type native_tool_origin =
+  | Built_in
+  | Mcp_wrapper
+[@@deriving yojson, show]
+
 type run_ref =
   { worker_run_id : string
   ; path : string
@@ -94,6 +107,8 @@ type record =
   ; assistant_block : Yojson.Safe.t option
   ; tool_use_id : string option
   ; tool_name : string option
+  ; native_tool_identity : native_tool_identity option
+  ; native_tool_origin : native_tool_origin option
   ; tool_input : Yojson.Safe.t option
   ; tool_turn : int option
   ; tool_planned_index : int option
@@ -123,11 +138,10 @@ val record_of_json : Yojson.Safe.t -> (record, Error.t) result
 val record_to_yojson : record -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (record, string) result
 val trace_version : int
-(** Current writer/reader hard-cut version. Version 3 withholds assistant
+(** Current writer/reader hard-cut version. Version 4 withholds assistant
     reasoning recursively, including structured ToolResult content. Historical
-    v2 rows may contain reasoning bytes; they are retained as historical files
-    but rejected by the exact-version decoder and are never migrated or
-    rewritten into the v3 read model. *)
+    rows are retained as historical files but rejected by the exact-version
+    decoder and are never migrated or rewritten into the v4 read model. *)
 
 val create
   :  ?redact_secrets:bool
@@ -192,7 +206,8 @@ val record_tool_execution_finished
 
 val record_native_tool_started
   :  active_run
-  -> call_id:string option
+  -> identity:native_tool_identity option
+  -> origin:native_tool_origin
   -> tool_name:string option
   -> (unit, Error.t) result
 (** Record observation of an official client's built-in tool. This is not a
@@ -200,7 +215,8 @@ val record_native_tool_started
 
 val record_native_tool_finished
   :  active_run
-  -> call_id:string option
+  -> identity:native_tool_identity option
+  -> origin:native_tool_origin
   -> tool_name:string option
   -> (unit, Error.t) result
 

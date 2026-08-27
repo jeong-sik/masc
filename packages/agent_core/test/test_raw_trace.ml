@@ -599,6 +599,8 @@ let test_record_to_json_roundtrip () =
     ; assistant_block = None
     ; tool_use_id = None
     ; tool_name = None
+    ; native_tool_identity = None
+    ; native_tool_origin = None
     ; tool_input = None
     ; tool_turn = None
     ; tool_planned_index = None
@@ -632,6 +634,46 @@ let test_record_to_json_roundtrip () =
     Alcotest.(check (option bool)) "enable_thinking" (Some false) decoded.enable_thinking;
     Alcotest.(check (option int)) "thinking_budget" (Some 2048) decoded.thinking_budget
   | Error e -> Alcotest.fail (Error.to_string e)
+;;
+
+let test_native_provider_step_roundtrip () =
+  Eio_main.run @@ fun _env ->
+  with_temp_dir @@ fun root ->
+    let path = Filename.concat root "native.jsonl" in
+    let sink = unwrap (Raw_trace.create ~path ()) in
+    let active =
+      unwrap (Raw_trace.start_run sink ~agent_name:"antigravity" ~prompt:"tool" ())
+    in
+    unwrap
+      (Raw_trace.record_native_tool_started
+         active
+         ~identity:
+           (Some
+              (Raw_trace.Provider_step
+                 { conversation_id = "conversation-1"; step_index = 7 }))
+         ~origin:Raw_trace.Mcp_wrapper
+         ~tool_name:(Some "call_mcp_tool"));
+    match unwrap (Raw_trace.read_all ~path ()) with
+    | [ _run_started
+      ; ({ Raw_trace.record_type = Raw_trace.Native_tool_started
+        ; native_tool_identity =
+            Some
+              (Raw_trace.Provider_step
+                 { conversation_id = "conversation-1"; step_index = 7 })
+        ; native_tool_origin = Some Raw_trace.Mcp_wrapper
+        ; tool_name = Some "call_mcp_tool"
+        ; _
+        } as native) ] ->
+      let ambiguous =
+        match Raw_trace.record_to_json native with
+        | `Assoc fields -> `Assoc (("tool_use_id", `String "other-id") :: fields)
+        | _ -> assert false
+      in
+      Alcotest.(check bool)
+        "native row rejects a second tool_use_id authority"
+        true
+        (Result.is_error (Raw_trace.record_of_json ambiguous))
+    | _ -> Alcotest.fail "native provider step identity was not durable"
 ;;
 
 let test_record_of_json_rejects_invalid_tool_choice () =
@@ -767,6 +809,8 @@ let test_record_to_json_full () =
     ; assistant_block = Some (`String "block-data")
     ; tool_use_id = Some "tu-1"
     ; tool_name = Some "file_write"
+    ; native_tool_identity = None
+    ; native_tool_origin = None
     ; tool_input = Some (`Assoc [ "path", `String "/tmp/x" ])
     ; tool_turn = Some 2
     ; tool_planned_index = Some 0
@@ -1103,6 +1147,10 @@ let () =
             test_record_of_json_requires_started_execution_mode
         ; Alcotest.test_case "execution modes" `Quick test_record_of_json_execution_modes
         ; Alcotest.test_case "full roundtrip" `Quick test_record_to_json_full
+        ; Alcotest.test_case
+            "native provider step roundtrip"
+            `Quick
+            test_native_provider_step_roundtrip
         ] )
     ; ( "type_yojson"
       , [ Alcotest.test_case "run_ref" `Quick test_run_ref_yojson

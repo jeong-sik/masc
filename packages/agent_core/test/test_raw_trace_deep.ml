@@ -161,6 +161,8 @@ let mk_record
   ; assistant_block
   ; tool_use_id
   ; tool_name
+  ; native_tool_identity = None
+  ; native_tool_origin = None
   ; tool_input
   ; tool_turn
   ; tool_planned_index
@@ -302,6 +304,8 @@ let test_record_to_json_all_none_optionals () =
     ; assistant_block = None
     ; tool_use_id = None
     ; tool_name = None
+    ; native_tool_identity = None
+    ; native_tool_origin = None
     ; tool_input = None
     ; tool_turn = None
     ; tool_planned_index = None
@@ -433,6 +437,8 @@ let test_record_json_all_fields_populated () =
         Some (`Assoc [ "type", `String "thinking"; "thinking", `String "hmm" ])
     ; tool_use_id = Some "tu-999"
     ; tool_name = Some "complex_tool"
+    ; native_tool_identity = None
+    ; native_tool_origin = None
     ; tool_input = Some (`Assoc [ "x", `Int 42 ])
     ; tool_turn = Some 3
     ; tool_planned_index = Some 4

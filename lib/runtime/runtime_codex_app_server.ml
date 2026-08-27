@@ -555,8 +555,9 @@ let native_tool_observation_of_item ~stage item =
     let* call_id = required_string stage "id" fields in
     Ok
       (Some
-         { Runtime_native_tools.call_id = Some call_id
+         { Runtime_native_tools.identity = Some (Call_id call_id)
          ; tool_name = Some tool_name
+         ; origin = Runtime_native_tools.Built_in
          })
   | Some (`String _) -> Ok None
   | Some _ -> protocol_error stage "item type must be a string"

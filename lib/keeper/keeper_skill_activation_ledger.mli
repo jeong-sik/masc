@@ -35,8 +35,15 @@ type tool_result_receipt =
   ; content_sha256 : string
   }
 
+type action_identity = Runtime_native_tools.action_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+
 type action =
-  { tool_use_id : string
+  { identity : action_identity
   ; tool_name : string
   ; runtime_id : string
   ; agent_core_turn : int
@@ -84,7 +91,7 @@ type transition_rejection =
       { skill_tool_use_id : string
       ; activation_turn_ref : Ids.Turn_ref.t
       ; observed_turn_ref : Ids.Turn_ref.t
-      ; action_tool_use_id : string
+      ; action_identity : action_identity
       ; tool_name : string
       ; observed_agent_core_turn : int
       ; observed_at : string
@@ -180,14 +187,14 @@ type decode_error =
   | Invalid_delivery_agent_core_turn of int
   | Invalid_delivery_boundary_kind of string
   | Invalid_delivery_time of string
-  | Invalid_action_tool_use_id_field
+  | Invalid_action_identity_field
   | Invalid_action_tool_name_field of string
   | Invalid_action_agent_core_turn of int
   | Invalid_action_time of string
   | Invalid_transition_rejection_kind of string
   | Orphan_transition_rejection of string
   | Transition_rejection_activation_mismatch of string
-  | Duplicate_action_tool_use_id
+  | Duplicate_action_identity
   | Invalid_activated_at of string
   | Duplicate_skill_tool_use_id
   | Session_id_mismatch
@@ -200,6 +207,7 @@ type store_error =
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
   | Invocation_id_collision of string
+  | Action_identity_collision of action_identity
   | Invalid_delivery_order of
       { skill_tool_use_id : string
       ; activation_turn : int
@@ -207,7 +215,7 @@ type store_error =
       }
   | Conflicting_delivery of string
   | Action_before_delivery of string
-  | Invalid_action_tool_use_id
+  | Invalid_action_identity
   | Invalid_action_tool_name of string
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
@@ -290,7 +298,7 @@ val observe_action :
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
   active_skill_tool_use_ids:string list ->
-  action_tool_use_id:string ->
+  action_identity:action_identity ->
   tool_name:string ->
   runtime_id:string ->
   agent_core_turn:int ->
@@ -298,4 +306,4 @@ val observe_action :
   (t * int, store_error) result
 (** Attach one later model-selected tool invocation to every exact delivered
     Skill id in [active_skill_tool_use_ids]. The count is the number of Skill
-    activations updated; repeating the same action id is idempotent. *)
+    activations updated; repeating the same exact action identity is idempotent. *)

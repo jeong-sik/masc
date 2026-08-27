@@ -10,20 +10,39 @@ type posture =
   | Native_read  (** Built-in read tools allowed; effects stay MASC-owned. *)
   | Native_full  (** The full built-in surface, effects included. *)
 
+type action_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+
+type origin =
+  | Built_in
+  | Mcp_wrapper
+
 type observation =
-  { call_id : string option
+  { identity : action_identity option
   ; tool_name : string option
+  ; origin : origin
   }
 (** Bounded identity reported by an official CLI for one built-in tool step.
-    Missing fields stay [None]; adapters must not invent provider identities. *)
+    Missing fields stay [None]; adapters must not turn a provider step ordinal
+    into a call id. *)
 
-type exact_action = string * string
+type exact_action = action_identity * string
 val exact_action : observation -> exact_action option
-(** Admit only the exact non-empty pair emitted by the provider. *)
+(** Admit only an exact built-in provider identity with a non-empty tool name.
+    MCP wrapper steps are observed but their canonical MASC invocation is the
+    action authority. *)
 val observe_exact_action :
   official_turn:int ->
-  observe:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
+  observe:(official_turn:int -> identity:action_identity -> tool_name:string -> unit) ->
   observation -> unit
+
+val call_id : observation -> string option
+(** Return a literal provider call id when one exists. A provider step is not
+    flattened into this field. *)
 
 val stream_content_type : string
 (** Internal AGENT_CORE content-block discriminator used only to carry a typed

@@ -1708,7 +1708,7 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v4"
+          [ "schema", `String "masc.skill-activations/v5"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
@@ -1748,7 +1748,12 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
           ~actions:
             (`List
                [ `Assoc
-                   [ "tool_use_id", `String "call-action"
+                   [ ( "identity"
+                     , `Assoc
+                         [ "kind", `String "provider_step"
+                         ; "conversation_id", `String "conversation-antigravity"
+                         ; "step_index", `Int 7
+                         ] )
                    ; "tool_name", `String "keeper_time_now"
                    ; "runtime_id", `String "claude.runtime"
                    ; "agent_core_turn", `Int 0
@@ -1836,8 +1841,12 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
          Alcotest.(check string) "delivery runtime" "codex.runtime" runtime_id;
          Alcotest.(check int) "delivery bytes" 12 content_bytes;
          Alcotest.(check string) "action runtime" "claude.runtime"
-           action.runtime_id
-       | _ -> Alcotest.fail "v4 delivery/action provenance was not decoded")
+           action.runtime_id;
+         Alcotest.(check bool) "action provider step" true
+           (action.identity
+            = Runtime_native_tools.Provider_step
+                { conversation_id = "conversation-antigravity"; step_index = 7 })
+       | _ -> Alcotest.fail "v5 delivery/action provenance was not decoded")
   | Ok _ -> Alcotest.fail "expected two typed Skill activation receipts"
 
 let test_decode_skill_activations_keeps_no_session_distinct () =

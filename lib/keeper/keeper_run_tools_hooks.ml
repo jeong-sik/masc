@@ -47,7 +47,8 @@ type agent_setup =
       content:string ->
       unit
   ; observe_official_client_native_action :
-      runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string -> unit
+      runtime_id:string -> official_turn:int ->
+      identity:Runtime_native_tools.action_identity -> tool_name:string -> unit
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -149,10 +150,13 @@ module Skill_delivery_state = struct
 
   let create () = { pending = None; active_skill_tool_use_ids = [] }
 
-  let begin_turn state =
+  let clear state =
     state.pending <- None;
     state.active_skill_tool_use_ids <- []
   ;;
+
+  let begin_turn = clear
+  let begin_runtime_attempt = clear
 
   let stage state ~runtime_id ~agent_core_turn tool_results =
     state.pending <- Some { runtime_id; agent_core_turn; tool_results }
@@ -399,14 +403,14 @@ let assemble_hooks
         tool_results
     in
     let observe_official_client_native_action
-          ~runtime_id ~official_turn ~call_id ~tool_name =
+          ~runtime_id ~official_turn ~identity ~tool_name =
       let active_skill_tool_use_ids = Skill_delivery_state.active skill_delivery_state in
       if active_skill_tool_use_ids <> [] then
         try
           match
             Keeper_skill_activation_recorder.observe_native_action
               ~config ctx.skill_activation_context ~active_skill_tool_use_ids
-              ~runtime_id ~official_turn ~call_id ~tool_name
+              ~runtime_id ~official_turn ~identity ~tool_name
           with
           | Ok _ -> ()
           | Error error ->
@@ -418,6 +422,13 @@ let assemble_hooks
         | exn ->
           Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s tool=%s error=%s"
             meta.name runtime_id tool_name (Printexc.to_string exn)
+    in
+    let on_runtime_attempt attempt =
+      (* An official-client handoff belongs only to the runtime that produced
+         it. A failover candidate must receive the Skill result itself before
+         one of its actions can complete that activation's evidence. *)
+      Skill_delivery_state.begin_runtime_attempt skill_delivery_state;
+      ctx.on_runtime_attempt attempt
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
@@ -974,7 +985,7 @@ let assemble_hooks
       ; terminal_effect_state
       ; user_message
       ; hooks
-      ; on_runtime_attempt = ctx.on_runtime_attempt
+      ; on_runtime_attempt
       ; model_input_projection
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff

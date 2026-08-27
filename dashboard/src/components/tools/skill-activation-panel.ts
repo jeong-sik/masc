@@ -52,6 +52,12 @@ function servedLabel(activation: DashboardSkillActivation): string {
     : `resource ${served.relative_path} · ${served.bytes} bytes · ${served.sha256}`
 }
 
+function actionIdentityLabel(action: DashboardSkillActivation['actions'][number]): string {
+  return action.identity.kind === 'call_id'
+    ? `call ${action.identity.call_id}`
+    : `step ${action.identity.conversation_id}:${action.identity.step_index}`
+}
+
 function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface }) {
   if (surface.status === 'warming') {
     return html`<div class="text-xs text-[var(--color-fg-muted)]">Keeper surface warming</div>`
@@ -164,7 +170,7 @@ function ActivationReceipt({
               </code>
               ${activation.actions.map(action => html`
                 <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-                  action turn ${action.agent_core_turn} · runtime ${action.runtime_id} · ${action.tool_name} · id ${action.tool_use_id} · ${action.observed_at}
+                  action turn ${action.agent_core_turn} · runtime ${action.runtime_id} · ${action.tool_name} · ${actionIdentityLabel(action)} · ${action.observed_at}
                 </code>
               `)}
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">

@@ -19,14 +19,21 @@ let step
     ?(index = 1)
     ?(state = "DONE")
     ?(step_type = "agent_response")
+    ?tool_name
     ()
   =
+  let tool_name_field =
+    match tool_name with
+    | Some value -> Printf.sprintf ",\"tool_name\":%S" value
+    | None -> ""
+  in
   Printf.sprintf
-    {|{"event":"step_update","step_update":{"conversation_id":%S,"step_index":%d,"state":%S,"step_type":%S}}|}
+    {|{"event":"step_update","step_update":{"conversation_id":%S,"step_index":%d,"state":%S,"step_type":%S%s}}|}
     conversation_id
     index
     state
     step_type
+    tool_name_field
 ;;
 
 let result
@@ -267,12 +274,12 @@ let test_stream_events_preserve_available_wire_data () =
          | _ -> fail "Antigravity stream did not preserve available wire data")
 ;;
 
-let test_stream_events_preserve_anonymous_native_tool_steps () =
+let test_stream_events_preserve_exact_native_tool_steps () =
   let events = ref [] in
   with_fixture
     [ init ()
-    ; step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ()
-    ; step ~index:7 ~state:"DONE" ~step_type:"tool" ()
+    ; step ~index:7 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"run_command" ()
+    ; step ~index:7 ~state:"DONE" ~step_type:"tool" ~tool_name:"run_command" ()
     ; result ()
     ]
     (fun path ->
@@ -286,12 +293,26 @@ let test_stream_events_preserve_anonymous_native_tool_steps () =
          match List.rev !events with
          | [ Runtime_antigravity.Turn_started
                { conversation_id = "conversation-1"; model = "gemini-fixture" }
-           ; Native_tool_started { call_id = Some "7"; tool_name = None }
-           ; Native_tool_finished { call_id = Some "7"; tool_name = None }
+           ; Native_tool_started
+               { identity =
+                   Some
+                     (Runtime_native_tools.Provider_step
+                        { conversation_id = "conversation-1"; step_index = 7 })
+               ; tool_name = Some "run_command"
+               ; origin = Runtime_native_tools.Built_in
+               }
+           ; Native_tool_finished
+               { identity =
+                   Some
+                     (Runtime_native_tools.Provider_step
+                        { conversation_id = "conversation-1"; step_index = 7 })
+               ; tool_name = Some "run_command"
+               ; origin = Runtime_native_tools.Built_in
+               }
            ; Text_delta "MASC_ANTIGRAVITY_OK\n"
            ; Turn_finished { text = "MASC_ANTIGRAVITY_OK\n" }
            ] -> ()
-         | _ -> fail "Antigravity tool step was given an invented tool name")
+         | _ -> fail "Antigravity tool step lost its exact provider identity")
 ;;
 
 let test_successful_official_client_turn () =
@@ -811,9 +832,9 @@ let () =
             `Quick
             test_stream_events_preserve_available_wire_data
         ; test_case
-            "stream preserves anonymous native tool steps"
+            "stream preserves exact native tool steps"
             `Quick
-            test_stream_events_preserve_anonymous_native_tool_steps
+            test_stream_events_preserve_exact_native_tool_steps
         ; test_case
             "resume identity and argv"
             `Quick

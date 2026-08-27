@@ -299,13 +299,13 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
           let index = !next_tool_index in
           incr next_tool_index;
           Option.iter
-            (fun call_id -> Hashtbl.replace native_tool_indexes call_id index)
-            observation.call_id;
+            (fun identity -> Hashtbl.replace native_tool_indexes identity index)
+            observation.identity;
           emit
             (Agent_core.Types.ContentBlockStart
                { index
                ; content_type = Runtime_native_tools.stream_content_type
-               ; tool_id = observation.call_id
+               ; tool_id = Runtime_native_tools.call_id observation
                ; tool_name = observation.tool_name
                })
         | Runtime_codex_app_server.Native_tool_finished observation ->
@@ -315,13 +315,13 @@ let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_act
             ~phase:`Finished
             observation;
           Option.iter
-            (fun call_id ->
+            (fun identity ->
                Option.iter
                  (fun index ->
-                    Hashtbl.remove native_tool_indexes call_id;
+                    Hashtbl.remove native_tool_indexes identity;
                     emit (Agent_core.Types.ContentBlockStop { index }))
-                 (Hashtbl.find_opt native_tool_indexes call_id))
-            observation.call_id
+                 (Hashtbl.find_opt native_tool_indexes identity))
+            observation.identity
         | Runtime_codex_app_server.Turn_finished { text } ->
           let streamed = Buffer.contents streamed_text in
           if String.starts_with ~prefix:streamed text

@@ -907,6 +907,16 @@ let test_projection_decoder_reuses_all_ledger_invariants () =
   | Ok _ -> fail "invalid projection workspace was accepted"
 ;;
 
+(* The ledger write path is read-modify-write: one undecodable row fails
+   every later write for the session, so the human string must name the
+   decode shape that poisoned it (previously a bare "decode failed"). *)
+let test_store_error_decode_detail_is_kept () =
+  check string "decode category is part of the message"
+    "decode failed: missing_string"
+    (Ledger.store_error_to_string
+       (Ledger.Decode_failed (Ledger.Missing_string { field = "skill_name" })))
+;;
+
 let () =
   run
     "keeper skill activation ledger"
@@ -954,6 +964,8 @@ let () =
             test_revision_binds_workspace_and_trace
         ; test_case "projection decoder reuses all ledger invariants" `Quick
             test_projection_decoder_reuses_all_ledger_invariants
+        ; test_case "store error string keeps decode detail" `Quick
+            test_store_error_decode_detail_is_kept
         ] )
     ]
 ;;

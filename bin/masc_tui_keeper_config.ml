@@ -12,30 +12,53 @@ let member_path path json =
     (fun current key -> Option.bind current (member key))
     (Some json) path
 
+type editable_field =
+  | Direct of string * string list
+  | Skill_selection
+
 let editable_fields =
-  [ "runtime_id", [ "execution"; "selected_runtime_id" ]
-  ; "mention_targets", [ "workspace"; "mention_targets" ]
-  ; "autoboot_enabled", [ "autoboot_enabled" ]
-  ; "max_context_override", [ "max_context_override" ]
-  ; "autonomous_wake_prompt", [ "autonomous_wake_prompt" ]
-  ; "allowed_paths", [ "allowed_paths" ]
-  ; "sandbox_profile", [ "sandbox_profile" ]
-  ; "network_mode", [ "network_mode" ]
-  ; "instructions", [ "prompt"; "instructions" ]
-  ; "proactive_enabled", [ "proactive"; "enabled" ]
+  [ Direct ("runtime_id", [ "execution"; "selected_runtime_id" ])
+  ; Direct ("mention_targets", [ "workspace"; "mention_targets" ])
+  ; Direct ("autoboot_enabled", [ "autoboot_enabled" ])
+  ; Direct ("max_context_override", [ "max_context_override" ])
+  ; Direct ("autonomous_wake_prompt", [ "autonomous_wake_prompt" ])
+  ; Direct ("allowed_paths", [ "allowed_paths" ])
+  ; Direct ("sandbox_profile", [ "sandbox_profile" ])
+  ; Direct ("network_mode", [ "network_mode" ])
+  ; Direct ("instructions", [ "prompt"; "instructions" ])
+  ; Direct ("proactive_enabled", [ "proactive"; "enabled" ])
+  ; Skill_selection
   ]
+
+let editable_field_name = function
+  | Direct (name, _) -> name
+  | Skill_selection -> "skills"
+
+(* The read contract represents the default selection as [names: null], while
+   the write contract represents it as an empty [skills] object. Normalize at
+   this projection boundary so every value shown in the editor is also a valid
+   partial update. *)
+let editable_field_value json = function
+  | Direct (_, path) -> member_path path json
+  | Skill_selection -> (
+    match member_path [ "skills"; "names" ] json with
+    | Some `Null -> Some (`Assoc [])
+    | Some (`List names) -> Some (`Assoc [ "names", `List names ])
+    | Some _ | None -> None)
 
 let editable_snapshot json =
   `Assoc
     (List.filter_map
-       (fun (field, path) ->
-         Option.map (fun value -> field, value) (member_path path json))
+       (fun field ->
+         Option.map
+           (fun value -> editable_field_name field, value)
+           (editable_field_value json field))
        editable_fields)
 
 let editor_stem json =
   editable_snapshot json |> Yojson.Safe.pretty_to_string |> fun text -> text ^ "\n"
 
-let editable_field_names = List.map fst editable_fields
+let editable_field_names = List.map editable_field_name editable_fields
 
 let patch_of_edit ~before ~after =
   match after with
@@ -90,6 +113,12 @@ let int_override_value = function
   | Some (`Int value) -> Printf.sprintf "%d tokens" value
   | value -> string_value value
 
+let skill_selection_value = function
+  | Some `Null -> "all published Skills"
+  | Some (`List []) -> "none"
+  | Some (`List names) -> string_list_value (Some (`List names))
+  | value -> string_value value
+
 let row label value = Printf.sprintf "%-22s %s" label value
 
 let view_lines json =
@@ -110,6 +139,7 @@ let view_lines json =
   ; row "Effective paths" (string_list_value (at [ "effective_allowed_paths" ]))
   ; row "Mention targets"
       (string_list_value (at [ "workspace"; "mention_targets" ]))
+  ; row "Skills" (skill_selection_value (at [ "skills"; "names" ]))
   ; ""
   ; "# provenance"
   ; row "Live override" (bool_value (source [ "has_live_override" ]))
@@ -120,5 +150,6 @@ let view_lines json =
   ; ""
   ; "# editing"
   ; "Press e to edit the observed values. Only changed fields are sent."
+  ; "Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
   ; "Deleting a field means unchanged. null clears context/wake overrides."
   ]

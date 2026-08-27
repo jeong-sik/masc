@@ -418,7 +418,7 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
 
     def test_delivery_and_action_tamper_are_rejected(self):
         for field, value, error in (
-            ("delivery", None, "delivery differs"),
+            ("delivery", None, "proof identity.delivery is not an object"),
             ("actions", [], "no later model-selected action"),
         ):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
@@ -426,6 +426,60 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 bundle["proof"]["proof"][field] = value
                 with self.assertRaisesRegex(verifier.VerificationError, error):
                     verify(bundle)
+
+    def test_identity_field_absent_on_both_sides_is_rejected(self):
+        with self.subTest(field="keeper"), tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            receipt_path = bundle["join_root"] / "producer-receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            del receipt["keeper"]
+            receipt_raw = write_json(receipt_path, receipt)
+            bundle["join"]["inputs"]["producer_receipt_sha256"] = verifier.digest(
+                receipt_raw
+            )
+            bundle["join"]["artifacts"]["producer-receipt.json"] = file_identity(
+                receipt_raw
+            )
+            del bundle["join"]["producer"]["keeper"]
+            del bundle["proof"]["proof"]["keeper"]
+            del bundle["tui"]["proof"]["keeper"]
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "join producer.keeper is empty"
+            ):
+                verify(bundle)
+
+        with self.subTest(field="delivery"), tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            del bundle["join"]["result"]["matches"][0]["delivery"]
+            del bundle["proof"]["proof"]["delivery"]
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "join match.delivery is not an object"
+            ):
+                verify(bundle)
+
+        with (
+            self.subTest(field="ledger_revision"),
+            tempfile.TemporaryDirectory() as raw,
+        ):
+            bundle = make_bundle(Path(raw))
+            del bundle["proof"]["proof"]["ledger_revision"]
+            del bundle["tui"]["proof"]["ledger_revision"]
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "TUI proof.ledger_revision is empty"
+            ):
+                verify(bundle)
+
+    def test_dashboard_screenshot_name_collision_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            bundle["proof"]["dashboard"] = {
+                "path": "health.json",
+                **bundle["proof"]["artifacts"]["health.json"],
+            }
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "collides with a proof artifact"
+            ):
+                verify(bundle)
 
     def test_tui_manifest_proof_sha_tamper_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:

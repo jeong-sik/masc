@@ -79,6 +79,13 @@ val normalize_prompt_text : max_bytes:int -> string -> string
 
 (** Own-recent-board-posts self-awareness layer (see .ml): how many of the
     keeper's own latest posts the world observation carries per turn. *)
+val keeper_hitl_thinking_blocks : unit -> int
+(** Newest Keeper [thinking] blocks kept in the HITL judgment bundle.
+
+    [0] (the default) drops them all. Raising it trades bundle size -- and so
+    judgment latency -- for the self-imposed constraints a judge cites when it
+    denies. See {!Hitl_summary_worker} for what was measured on each side. *)
+
 val keeper_board_own_recent_max : unit -> int
 
 (** Fleet-message context layer (see .ml): how many projected keeper broadcasts

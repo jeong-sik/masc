@@ -396,6 +396,17 @@ durable 항목은 턴이 실어온 것을 그대로 보존하고 프롬프트만
 `thinking_blocks_omitted` 로 묶음에 함께 실어, 판정자가 얇은 맥락을 보고 "잘라낸
 것"과 "원래 사고가 없던 턴"을 구분할 수 있게 한다.
 
+**반대 방향의 증거도 있다.** 같은 날 판정 80건 중 거부 6건의 근거를 읽으면,
+판정자가 Keeper 의 자기 진술을 인용해 거부한다 — "the agent's own memory notes
+... explicitly state 'Do NOT retry task-366'". Keeper 가 스스로 세운 제약이
+`thinking` 안에 있고, 그것이 거부의 근거가 된다. 전부 빼면 그 근거도 사라진다.
+
+그래서 개수를 `keeper.hitl.thinking_blocks`
+(`MASC_KEEPER_HITL_THINKING_BLOCKS`) 로 조절한다. 기본값 `0` 은 전부 제거이며,
+올리면 **가장 최근** 블록부터 남는다 — 자기 제약은 방금 쓴 것이고, 용량의
+대부분은 이미 지나간 사고다. 두 설정을 같은 durable 큐에 대고 비교할 수 있으므로,
+어느 값이 맞는지는 측정으로 정한다.
+
 ---
 
 ## 9. Configuration

@@ -26,7 +26,9 @@ from typing import Any, Protocol, cast
 import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+import proof_http
 
 
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -272,7 +274,7 @@ def read_health(base_url: str, token: str, timeout: float) -> dict[str, Any]:
         headers={"Accept": "application/json", **auth_headers(token)},
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with proof_http.open_no_redirect(request, timeout=timeout) as response:
             return decode_json(response.read(), "full health response")
     except (HTTPError, URLError, OSError) as error:
         raise ProducerError(f"cannot read full health response: {error}") from error
@@ -370,7 +372,9 @@ class McpClient:
             headers["Mcp-Protocol-Version"] = self.protocol_version
         request = Request(self.endpoint, data=payload, headers=headers, method="POST")
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with proof_http.open_no_redirect(
+                request, timeout=self.timeout
+            ) as response:
                 body = response.read()
                 session_id = response.headers.get("Mcp-Session-Id")
                 if session_id is not None:
@@ -412,7 +416,9 @@ class McpClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout) as response:
+            with proof_http.open_no_redirect(
+                request, timeout=self.timeout
+            ) as response:
                 response.read()
         except (HTTPError, URLError, OSError) as error:
             raise ProducerError(

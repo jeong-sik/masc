@@ -2213,7 +2213,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/skill-activations" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let extra_headers = cors_headers (get_origin req) in
+         let extra_headers = public_read_cors_headers req in
          match Server_utils.query_param req "trace_id" |> Option.map String.trim with
          | None | Some "" ->
            Http.Response.json_value ~compress:true ~request:req

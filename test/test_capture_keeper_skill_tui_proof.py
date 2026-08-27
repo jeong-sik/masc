@@ -12,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = (
     REPO_ROOT / "scripts" / "harness" / "workload" / "capture_keeper_skill_tui_proof.py"
 )
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 
 
 def load_module():
@@ -123,7 +124,9 @@ class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
             )
             return Response()
 
-        with mock.patch.object(capture, "urlopen", side_effect=open_request):
+        with mock.patch.object(
+            capture.proof_http, "open_no_redirect", side_effect=open_request
+        ):
             value = capture.read_json_url(
                 "https://masc.invalid/strict", 4.0, token
             )

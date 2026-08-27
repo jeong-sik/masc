@@ -97,8 +97,21 @@ let write_catalog ~base_path ~keeper_name tools =
 
 let names offering =
   List.map
-    (fun (t : Agent_core.Tool.t) -> t.schema.name)
+    (fun (offered : Identity_tools.offered_tool) ->
+      offered.Identity_tools.schema.name)
     offering.Identity_tools.offered
+
+(* Executing an offered tool in a turn now goes through
+   {!Keeper_identity_gate}, which needs a turn's config and meta. What the
+   tests here pin is the layer under it — which credential is read and what
+   the model is told — and [run_call] plus [tool_result_of_call] is that
+   layer. *)
+let execute_offered ?post ~base_path (offered : Identity_tools.offered_tool)
+    arguments =
+  Identity_tools.tool_result_of_call
+    (Identity_tools.run_call ?post ~base_path ~keeper_name:"acme-daycare"
+       ~provider:offered.Identity_tools.provider
+       ~remote_name:offered.Identity_tools.remote_name ~arguments ())
 
 (* ── the catalog ─────────────────────────────────────────────────────── *)
 
@@ -235,8 +248,7 @@ let test_names_are_namespaced_by_provider () =
   with
   | Ok (Some catalog) ->
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
-          ~provider:(provider ()) catalog
+        Identity_tools.agent_tools ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "prefixed" [ "atlassian_search" ]
         (names offering)
@@ -257,8 +269,7 @@ let test_a_schema_that_cannot_be_projected_is_reported () =
   with
   | Ok (Some catalog) ->
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
-          ~provider:(provider ()) catalog
+        Identity_tools.agent_tools ~provider:(provider ()) catalog
       in
       check (Alcotest.list str) "the usable one is offered"
         [ "atlassian_fine" ] (names offering);
@@ -278,12 +289,11 @@ let test_a_keeper_with_no_token_gets_a_refusal_not_a_crash () =
   with
   | Ok (Some catalog) -> (
       let offering =
-        Identity_tools.agent_tools ~base_path ~keeper_name:"acme-daycare"
-          ~provider:(provider ()) catalog
+        Identity_tools.agent_tools ~provider:(provider ()) catalog
       in
       match offering.Identity_tools.offered with
-      | [ projected ] -> (
-          match Agent_core.Base.Tool.execute projected (`Assoc []) with
+      | [ offered ] -> (
+          match execute_offered ~base_path offered (`Assoc []) with
           | Error err ->
               check Alcotest.bool "and the model is not told to retry" false
                 err.Agent_core.Types.recoverable
@@ -319,18 +329,15 @@ let bearer sent =
   List.rev !sent
   |> List.find_map (fun (_, headers, _) -> List.assoc_opt "Authorization" headers)
 
-let single_tool ~base_path ~post =
+let single_offered ~base_path =
   match
     Identity_tools.load ~base_path ~keeper_name:"acme-daycare"
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) -> (
-      let offering =
-        Identity_tools.agent_tools ~post ~base_path ~keeper_name:"acme-daycare"
-          ~provider:(provider ()) catalog
-      in
+      let offering = Identity_tools.agent_tools ~provider:(provider ()) catalog in
       match offering.Identity_tools.offered with
-      | [ projected ] -> projected
+      | [ offered ] -> offered
       | _ -> Alcotest.fail "expected exactly one tool")
   | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
 
@@ -355,7 +362,7 @@ let test_this_process_env_is_not_a_keepers_credential () =
   Unix.putenv "ATLASSIAN_ACCESS_TOKEN" "this-process-token";
   write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool ~read_only:true "getJiraIssue" ];
   let post, sent = recording_transport () in
-  match Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []) with
+  match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
   | Ok _ ->
       Alcotest.fail
         "spent this process's environment as the Keeper's credential"
@@ -381,7 +388,7 @@ let test_the_projected_token_is_the_one_sent () =
   | Ok () -> ()
   | Error message -> Alcotest.failf "could not project a token: %s" message);
   let post, sent = recording_transport () in
-  match Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []) with
+  match execute_offered ~post ~base_path (single_offered ~base_path) (`Assoc []) with
   | Error err ->
       Alcotest.failf "the call did not go through: %s"
         err.Agent_core.Types.message
@@ -403,103 +410,13 @@ let offer ~base_path tools =
       ~provider_id:"atlassian"
   with
   | Ok (Some catalog) ->
-      Identity_tools.agent_tools ~base_path ~keeper_name:"attaching-fixture"
-        ~provider:(provider ()) catalog
+      Identity_tools.agent_tools ~provider:(provider ()) catalog
   | Ok None | Error _ -> Alcotest.fail "the catalog did not come back"
 
-(* The three shapes a service can declare, checked where it counts: whether
-   the request actually left this process. The policy tests below check the
-   verdict; these check the effect. *)
-let project_a_token ~base_path =
-  match
-    Projection.set_env_entry ~base_path ~keeper_name:"acme-daycare"
-      ~scope:Projection.Keeper_secret ~name:"ATLASSIAN_ACCESS_TOKEN"
-      ~value:"the-keepers-token"
-  with
-  | Ok () -> ()
-  | Error message -> Alcotest.failf "could not project a token: %s" message
-
-(* Without this the Gate has nowhere durable to put a pending approval and
-   answers [Unavailable] -- which also stops the call, so a test that only
-   checked "nothing was sent" would pass without the approval path ever
-   running. Installing it here is what makes the deferral real. *)
-let install_the_gate_store ~base_path =
-  match Masc.Keeper_approval_queue.install_persistence ~base_path with
-  | Ok _ -> ()
-  | Error err ->
-      Alcotest.failf "could not install the Gate store: %s"
-        (Masc.Keeper_approval_queue.install_error_to_string err)
-
-let executing_a_tool_declared ~read_only =
-  let base_path = temp_base () in
-  install_the_gate_store ~base_path;
-  write_catalog ~base_path ~keeper_name:"acme-daycare"
-    [ tool ?read_only "theTool" ];
-  project_a_token ~base_path;
-  let post, sent = recording_transport () in
-  (Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []), sent)
-
-let test_a_declared_read_reaches_the_service () =
-  let result, sent = executing_a_tool_declared ~read_only:(Some true) in
-  match result with
-  | Error err ->
-      Alcotest.failf "a read the service declared did not go through: %s"
-        err.Agent_core.Types.message
-  | Ok _ ->
-      check (Alcotest.option str) "the call was sent"
-        (Some "Bearer the-keepers-token") (bearer sent)
-
-let test_a_declared_write_does_not_reach_the_service () =
-  (* The one this exists for. Before the Gate was consulted here, this call
-     left the process with nobody having said yes -- which is how three Jira
-     tickets and two comments were written on 2026-08-27. *)
-  let result, sent = executing_a_tool_declared ~read_only:(Some false) in
-  match result with
-  | Ok _ -> Alcotest.fail "wrote to somebody else's Jira unasked"
-  | Error err ->
-      check (Alcotest.option str) "nothing left this process" None (bearer sent);
-      (* Which refusal, not just that there was one. "Nothing was sent" is
-         also true when the Gate could not record a decision at all, and a
-         test that accepted either would pass while the approval path was
-         broken. *)
-      (if
-         not
-           (Str.string_match (Str.regexp ".*waiting on approval ")
-              err.Agent_core.Types.message 0)
-       then
-         Alcotest.failf "not held for approval; refused with: %s"
-           err.Agent_core.Types.message);
-      check Alcotest.bool "and the Keeper may keep working" true
-        err.Agent_core.Types.recoverable
-
-let test_silence_does_not_reach_the_service () =
-  (* A service that annotated nothing has not given permission. Reading its
-     silence as a read is how a whole family of tools would arrive unasked. *)
-  let result, sent = executing_a_tool_declared ~read_only:None in
-  match result with
-  | Ok _ -> Alcotest.fail "read a service's silence as permission"
-  | Error _ ->
-      check (Alcotest.option str) "nothing left this process" None (bearer sent)
-
-let test_an_unapproved_write_does_not_read_the_credential () =
-  (* Ordering, not just outcome: the Gate is asked before the token is. A
-     call nobody approved should not be a reason to touch a credential. *)
-  let base_path = temp_base () in
-  install_the_gate_store ~base_path;
-  write_catalog ~base_path ~keeper_name:"acme-daycare"
-    [ tool ~read_only:false "theTool" ];
-  (* No token projected at all. If the Gate ran first, the refusal is about
-     approval; if the token were read first, it would be about the missing
-     credential. *)
-  let post, _ = recording_transport () in
-  match Agent_core.Base.Tool.execute (single_tool ~base_path ~post) (`Assoc []) with
-  | Ok _ -> Alcotest.fail "wrote to somebody else's Jira unasked"
-  | Error err ->
-      check Alcotest.bool "the refusal is about approval, not the credential"
-        false
-        (Str.string_match
-           (Str.regexp ".*has no ATLASSIAN_ACCESS_TOKEN")
-           err.Agent_core.Types.message 0)
+(* The effect-level cases — a declared read reaches the wire, a write and a
+   service's silence never do, and the Gate is asked before the credential is
+   read — live in test_keeper_identity_gate.ml, against the gated tool the
+   bundle actually places. This file keeps the wire and the catalog. *)
 
 let test_the_policy_can_place_an_attached_tool () =
   (* The bundle gate walks every tool a Keeper is handed through this. A tool
@@ -523,20 +440,30 @@ let test_a_read_only_tool_runs_unasked () =
   | Policy.Ask { because } ->
       Alcotest.failf "asked about a read the service declared: %s" because
 
-let test_a_writing_tool_is_asked_about () =
+let test_a_writing_tool_belongs_to_the_durable_gate () =
+  (* The stream policy no longer asks about identity writes: asking here too
+     would put two authorities in front of one call, and this stream-bound
+     one holds nothing on the lanes that cannot ask — where the 2026-08-27
+     incident ran. The tool itself defers to the durable Gate
+     ({!Keeper_identity_gate}); what this policy owes the call is passage. *)
   Index.forget_all (Index.shared ());
   let base_path = temp_base () in
   let _ = offer ~base_path [ tool ~read_only:false "editJiraIssue" ] in
   match
     Policy.verdict_for ~composition_plan_index:None ~tool_name:"atlassian_editJiraIssue" ~input:(`Assoc [])
   with
-  | Policy.Ask _ -> ()
   | Policy.Run { because } ->
-      Alcotest.failf "ran a write to somebody else's Jira unasked: %s" because
+      check Alcotest.bool "and the reason names the durable Gate" true
+        (Str.string_match (Str.regexp ".*durable Gate") because 0)
+  | Policy.Ask { because } ->
+      Alcotest.failf
+        "the stream policy asked about a call the durable Gate owns: %s"
+        because
 
 let test_silence_is_not_permission () =
-  (* A service that annotates nothing leaves the operator deciding. Worse
-     than deciding once, better than writing unasked. *)
+  (* Still true — enforced by the durable Gate now, which treats an
+     unannotated tool as a write and defers it. This policy's half is to
+     pass the call through to that Gate rather than answer first. *)
   Index.forget_all (Index.shared ());
   let base_path = temp_base () in
   let _ = offer ~base_path [ tool "somethingUnannotated" ] in
@@ -544,11 +471,13 @@ let test_silence_is_not_permission () =
     Policy.verdict_for ~composition_plan_index:None ~tool_name:"atlassian_somethingUnannotated"
       ~input:(`Assoc [])
   with
-  | Policy.Ask { because } ->
+  | Policy.Run { because } ->
       check Alcotest.bool "and the reason names the silence" true
         (Str.string_match (Str.regexp ".*did not say") because 0)
-  | Policy.Run { because } ->
-      Alcotest.failf "an unannotated tool ran unasked: %s" because
+  | Policy.Ask { because } ->
+      Alcotest.failf
+        "the stream policy asked about a call the durable Gate owns: %s"
+        because
 
 let test_a_name_from_no_service_stays_unknown () =
   (* The index answering "never recorded" must not read as "may write". A
@@ -698,20 +627,12 @@ let () =
             test_an_expiring_token_is_exchanged_and_stored;
         ] );
       ( "the approval policy",
-        [ Alcotest.test_case "a declared read reaches the service" `Quick
-            test_a_declared_read_reaches_the_service;
-          Alcotest.test_case "a declared write does not reach the service"
-            `Quick test_a_declared_write_does_not_reach_the_service;
-          Alcotest.test_case "silence does not reach the service" `Quick
-            test_silence_does_not_reach_the_service;
-          Alcotest.test_case "an unapproved write does not read the credential"
-            `Quick test_an_unapproved_write_does_not_read_the_credential;
-          Alcotest.test_case "the policy can place an attached tool" `Quick
+        [ Alcotest.test_case "the policy can place an attached tool" `Quick
             test_the_policy_can_place_an_attached_tool;
           Alcotest.test_case "a read-only tool runs unasked" `Quick
             test_a_read_only_tool_runs_unasked;
-          Alcotest.test_case "a writing tool is asked about" `Quick
-            test_a_writing_tool_is_asked_about;
+          Alcotest.test_case "a writing tool belongs to the durable Gate"
+            `Quick test_a_writing_tool_belongs_to_the_durable_gate;
           Alcotest.test_case "silence is not permission" `Quick
             test_silence_is_not_permission;
           Alcotest.test_case "a name from no service stays unknown" `Quick

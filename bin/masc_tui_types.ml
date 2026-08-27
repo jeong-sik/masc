@@ -1248,6 +1248,12 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* The durable Gate: approvals that survive nobody watching (external
+     service writes among them), plus both lane modes. Refreshed with the
+     same surface; answered through the dashboard resolve route. *)
+  mutable gate_pending: Tui_decode.gate_pending list;
+  mutable gate_modes: Tui_decode.gate_lane_modes option;
+  mutable gate_error: string option;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
@@ -1827,6 +1833,9 @@ let create_state
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  gate_pending = [];
+  gate_modes = None;
+  gate_error = None;
   keeper_yolo_names = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_detail_open = false;
@@ -2475,6 +2484,10 @@ let keeper_message_status_rows (state : state) =
    sum the key handler matches on rather than a shape it infers. *)
 type approval_row =
   | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Gate_row of Tui_decode.gate_pending
+      (** A durable Gate approval — an external-service write among them.
+          It keeps: nobody watching loses nothing. Answered through the
+          dashboard resolve route. *)
   | Operator_row of Masc_tui_operator_projection.approval_item
 
 let operator_approval_items (state : state) =
@@ -2484,6 +2497,7 @@ let operator_approval_items (state : state) =
 
 let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
 

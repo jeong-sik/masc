@@ -1313,6 +1313,14 @@ type async_msg =
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
+      (** The durable Gate beside the held calls: pending approvals that
+          survive nobody watching, and both lane modes. *)
+  | Gate_approval_resolved of string * bool * (unit, string) result
+      (** approval id, approve, and whether the resolve route took it. *)
+  | Gate_external_mode_set of string * (unit, string) result
+      (** The external-services lane the operator asked for, and whether the
+          server took it. *)
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
   | Keeper_tool_modes_loaded of
@@ -1596,6 +1604,70 @@ let launch_keeper_tool_approvals_load state ~mailbox =
   | None ->
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
+
+let launch_gate_snapshot_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_dashboard_gate ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_snapshot_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
+
+let launch_gate_resolve state ~mailbox ~approval_id ~approve =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
+          ~approve
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_approval_resolved (approval_id, approve, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_approval_resolved
+           (approval_id, approve, Error "Eio switch is unavailable"))
+
+let launch_gate_external_mode_set state ~mailbox ~mode =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_external_mode_set (mode, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_external_mode_set (mode, Error "Eio switch is unavailable"))
 
 let launch_keeper_tool_modes_load state ~mailbox =
   (* [reserve_refresh] declines while the operator's own press is still in
@@ -3039,7 +3111,9 @@ let goto_surface state ~mailbox (destination : surface) =
     state.lanes_action_error <- None;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
-   | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+   | Approvals ->
+       launch_keeper_tool_approvals_load state ~mailbox;
+       launch_gate_snapshot_load state ~mailbox
    | Schedules -> launch_schedules_load state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
@@ -3853,6 +3927,7 @@ let follow_target (kind : Link.kind) (id : string) =
 
 let approval_row_reference = function
   | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
   | Operator_row item ->
       Option.bind item.ap_target_id (fun target_id ->
           match
@@ -4843,8 +4918,12 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
-       there would be worse than none. The payload is a handful of rows. *)
+       there would be worse than none. The payload is a handful of rows. The
+       durable Gate rides with them for the same badge — its rows are the
+       ones that keep when nobody is watching, which is exactly when the
+       badge is how an operator finds out. The server caches the snapshot. *)
     launch_keeper_tool_approvals_load state ~mailbox;
+    launch_gate_snapshot_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -6619,6 +6698,48 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Gate_snapshot_loaded result ->
+      (match result with
+       | Ok snapshot ->
+           state.gate_pending <- snapshot.Tui_decode.gs_pending;
+           state.gate_modes <- snapshot.Tui_decode.gs_modes;
+           state.gate_error <- None;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1)
+       | Error detail -> state.gate_error <- Some detail)
+  | Gate_approval_resolved (approval_id, approve, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "Gate %s %s"
+                (if approve then "approved" else "rejected")
+                approval_id);
+           (* Durably resolved on the server; the row leaves now rather than
+              waiting out the next refresh, and the refresh confirms. *)
+           state.gate_pending <-
+             List.filter
+               (fun (pending : Tui_decode.gate_pending) ->
+                 not (String.equal pending.Tui_decode.gp_id approval_id))
+               state.gate_pending;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1);
+           launch_gate_snapshot_load state ~mailbox
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "Gate decision for %s failed: %s" approval_id
+                detail))
+  | Gate_external_mode_set (mode, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "External-services Gate lane set to %s" mode);
+           launch_gate_snapshot_load state ~mailbox
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "External-services Gate lane change failed: %s"
+                detail))
   | Keeper_tool_modes_loaded (result, generation) ->
       (* A listing from an older flow describes the stance before the press
          that superseded it. Dropping it is what keeps an armed gate armed
@@ -7494,6 +7615,10 @@ let main () =
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
+    | Some { Approval_authority.row = Gate_row pending; decision } ->
+        launch_gate_resolve state ~mailbox:async_messages
+          ~approval_id:pending.Tui_decode.gp_id
+          ~approve:(match decision with Confirm -> true | Deny -> false)
     | None ->
         add_event state "system"
           "Approval list changed; review the updated row before deciding"
@@ -11053,9 +11178,27 @@ and is loaded on demand through keeper_skill.
                 if state.config_pane = Config_prompts then handle_prompt_edit ()
                 else handle_runtime_config_edit ()
             | Tools -> handle_skill_edit ()
+            | Approvals ->
+                (* Cycle the external-services Gate lane: what happens to a
+                   Keeper's call into an attached outside service. Its own
+                   switch — the workspace lane never opens it. An unknown
+                   stored value cycles to manual, the fail-closed end. *)
+                (match state.gate_modes with
+                 | None ->
+                     add_event state "system"
+                       "Gate lanes are not loaded yet; wait for the refresh"
+                 | Some modes ->
+                     let next =
+                       match modes.Tui_decode.glm_external with
+                       | "manual" -> "auto_judge"
+                       | "auto_judge" -> "always_allow"
+                       | _ -> "manual"
+                     in
+                     launch_gate_external_mode_set state
+                       ~mailbox:async_messages ~mode:next)
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Board | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->

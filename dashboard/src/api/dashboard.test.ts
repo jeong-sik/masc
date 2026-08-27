@@ -1882,6 +1882,7 @@ describe('fetchDashboardMemory', () => {
 describe('fetchDashboardGate', () => {
   const gateHitl = {
     gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+    external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
     judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
   } as const
 
@@ -2525,6 +2526,7 @@ describe('fetchDashboardGate', () => {
       keeper_judges_state: { state: 'ready' },
       hitl: {
         gate_mode: { mode: 'auto_judge', configured: false, state: 'ready' },
+        external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
         judge_lane: judgeLane,
       },
     }), {

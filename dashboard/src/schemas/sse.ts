@@ -89,6 +89,8 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   'gate_mode_changed',
+  // The external-services lane's twin of gate_mode_changed. Same fields.
+  'gate_external_mode_changed',
   // Task claim notifications (#18839). Emitted by
   // lib/task/tool_task_handlers.ml. Routed by the 'masc/task_' PREFIX_ROUTES
   // entry in sse-store.ts.

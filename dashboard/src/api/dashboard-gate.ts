@@ -230,11 +230,11 @@ function hasExactKeys(raw: Record<string, unknown>, expected: string[]): boolean
     && keys.every((key, index) => key === sortedExpected[index])
 }
 
-function normalizeGateMode(raw: unknown): GateModeStatus {
-  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.gate_mode is not an object')
+function normalizeGateMode(label: string, raw: unknown): GateModeStatus {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift(`${label} is not an object`)
   const mode = normalizeGateModeValue(raw.mode)
   if (!mode || typeof raw.configured !== 'boolean') {
-    return gateSnapshotProtocolDrift('hitl.gate_mode has an invalid mode or configured flag')
+    return gateSnapshotProtocolDrift(`${label} has an invalid mode or configured flag`)
   }
   if (raw.state === 'ready' && hasExactKeys(raw, ['mode', 'configured', 'state'])) {
     return { mode, configured: raw.configured, state: 'ready' }
@@ -258,7 +258,7 @@ function normalizeGateMode(raw: unknown): GateModeStatus {
   ) {
     return { mode, configured: true, state: 'invalid', read_error: raw.read_error }
   }
-  return gateSnapshotProtocolDrift('hitl.gate_mode is not a current closed variant')
+  return gateSnapshotProtocolDrift(`${label} is not a current closed variant`)
 }
 
 function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
@@ -286,11 +286,18 @@ function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
 }
 
 function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['gate_mode', 'judge_lane'])) {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['gate_mode', 'external_gate_mode', 'judge_lane'])
+  ) {
     return gateSnapshotProtocolDrift('hitl is not the current exact object')
   }
   return {
-    gate_mode: normalizeGateMode(raw.gate_mode),
+    gate_mode: normalizeGateMode('hitl.gate_mode', raw.gate_mode),
+    external_gate_mode: normalizeGateMode(
+      'hitl.external_gate_mode',
+      raw.external_gate_mode,
+    ),
     judge_lane: normalizeGateJudgeLane(raw.judge_lane),
   }
 }
@@ -870,5 +877,13 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
 
 export async function setGateMode(mode: GateMode): Promise<SetGateModeResponse> {
   const raw = await post<unknown>('/api/v1/dashboard/gate/mode', { mode })
+  return decodeSetGateModeResponse(raw, mode)
+}
+
+/** The external-services lane. Same request and response contract as
+ *  `setGateMode`; a different switch on the server, so opening the workspace
+ *  lane never opens writes into an attached outside service. */
+export async function setExternalGateMode(mode: GateMode): Promise<SetGateModeResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/external-mode', { mode })
   return decodeSetGateModeResponse(raw, mode)
 }

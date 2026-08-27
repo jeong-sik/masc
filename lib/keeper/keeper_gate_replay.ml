@@ -170,6 +170,8 @@ let memory_write_operation =
   Keeper_tool_memory_runtime.memory_write_gate_operation
 ;;
 
+let identity_operation = Keeper_identity_gate.gate_operation
+
 (* The producer owns both the argument schema and the effect encoding, so it
    owns the inversion; replay only decides whether to spend the grant. *)
 let write_args_of_gate_input =
@@ -191,6 +193,8 @@ let memory_write_args_of_gate_input =
   Keeper_tool_memory_runtime.replay_memory_write_args_of_gate_input
 ;;
 
+let identity_of_gate_input = Keeper_identity_gate.replay_of_gate_input
+
 (* Which approved operations this module can spend without the Keeper
    re-emitting the call. Separated from the replay body so the set is
    assertable: a decode function that exists but is never dispatched to looks
@@ -201,6 +205,7 @@ type replayable =
   | Replay_network_read
   | Replay_connector_post
   | Replay_memory_write
+  | Replay_identity
 
 let replayable_of_operation operation =
   if String.equal operation write_operation
@@ -213,6 +218,8 @@ let replayable_of_operation operation =
   then Some Replay_connector_post
   else if String.equal operation memory_write_operation
   then Some Replay_memory_write
+  else if String.equal operation identity_operation
+  then Some Replay_identity
   else None
 ;;
 
@@ -792,6 +799,7 @@ let terminal_effect_receipt_of_durable_replay request replay_outcome =
       | Some Replay_execute
       | Some Replay_network_read
       | Some Replay_memory_write
+      | Some Replay_identity
       | None )
     , _ )
   | Some Replay_connector_post,
@@ -1034,7 +1042,16 @@ let replay_approved_effect_with_receipt
            ?gate_context
            ~gate_grant:grant
            ~args
-           ()))
+           ())
+     | Some Replay_identity ->
+       replay identity_operation identity_of_gate_input (fun call ->
+         Keeper_identity_gate.replay_call_with_outcome
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context
+           ~gate_grant:grant
+           call))
 ;;
 
 let replay_approved_effect

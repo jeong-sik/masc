@@ -46,6 +46,8 @@ export type SSEEventType =
   // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
   // Emitted by server_routes_http_routes_dashboard.ml.
   | 'gate_mode_changed'
+  // External-services Gate lane transitions (identity-service calls).
+  | 'gate_external_mode_changed'
   // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
   | 'masc/task_claimed'
   // Agent Core bridge events (relayed from Event_bus via agent_core_sse_bridge)

@@ -991,7 +991,16 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
   with Yojson.Json_error message -> refuse message
 ;;
 
-let handle_gate_mode_body state operator_name request reqd body_str =
+
+let handle_gate_mode_body_for_lane
+      ~set_mode
+      ~sse_type
+      state
+      operator_name
+      request
+      reqd
+      body_str
+  =
   try
     let args = Yojson.Safe.from_string body_str in
     let mode_json =
@@ -1031,19 +1040,19 @@ let handle_gate_mode_body state operator_name request reqd body_str =
               reqd
               (operator_error_json ("Auto Judge unavailable: " ^ detail))
           | Ok () ->
-         (match Keeper_gate_mode.set config ~actor:operator_name mode with
+         (match set_mode config ~actor:operator_name mode with
           | Error message ->
             respond_json_value_with_cors
               ~status:`Bad_request
               request
               reqd
               (operator_error_json message)
-          | Ok change ->
+          | Ok (change : Keeper_gate_mode.change) ->
             Dashboard_cache.invalidate_prefix
               (Printf.sprintf "gate:%s;" config.base_path);
             Sse.broadcast
               (`Assoc
-                 [ "type", `String "gate_mode_changed"
+                 [ "type", `String sse_type
                  ; "mode", `String (Keeper_gate_mode.to_string mode)
                  ; ( "previous_mode"
                    , match change.previous with
@@ -1089,6 +1098,28 @@ let handle_gate_mode_body state operator_name request reqd body_str =
       request
       reqd
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
+let handle_gate_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set
+    ~sse_type:"gate_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
+;;
+
+let handle_gate_external_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set_external
+    ~sse_type:"gate_external_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
 ;;
 
 let handle_gate_resolve_body state operator_name request reqd body_str =
@@ -2137,6 +2168,12 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_keeper_judge_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/external-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_external_mode_body state operator_name request reqd))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->

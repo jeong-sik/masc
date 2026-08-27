@@ -40,6 +40,9 @@ let judge_lane_json () =
 let hitl_status_json ~base_path =
   `Assoc
     [ "gate_mode", Keeper_gate_mode.status_json ~base_path
+    ; (* Calls that leave for an attached outside service ride their own
+         lane; opening the workspace lane does not open this one. *)
+      "external_gate_mode", Keeper_gate_mode.status_json_external ~base_path
     ; "judge_lane", judge_lane_json ()
     ]
 ;;

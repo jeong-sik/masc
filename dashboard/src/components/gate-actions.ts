@@ -3,6 +3,7 @@ import {
   deleteGateApprovalRule,
   resolveGateApproval,
   retryGateAutoJudge,
+  setExternalGateMode,
   setGateMode,
 } from '../api/dashboard-gate'
 import type { SetGateModeResponse } from '../api/dashboard-gate'
@@ -144,12 +145,16 @@ function showGateModeSaved(result: SetGateModeResponse): void {
   }
 }
 
-export async function setKeeperGateMode(mode: GateMode) {
-  gateApprovalActing.value = GATE_MODE_ACTING_KEY
+async function setGateModeForLane(
+  actingKey: string,
+  save: (mode: GateMode) => Promise<SetGateModeResponse>,
+  mode: GateMode,
+) {
+  gateApprovalActing.value = actingKey
   try {
     let result: SetGateModeResponse
     try {
-      result = await setGateMode(mode)
+      result = await save(mode)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Gate 모드를 저장하지 못했습니다'
       gateError.value = message
@@ -169,4 +174,17 @@ export async function setKeeperGateMode(mode: GateMode) {
   } finally {
     gateApprovalActing.value = null
   }
+}
+
+export async function setKeeperGateMode(mode: GateMode) {
+  await setGateModeForLane(GATE_MODE_ACTING_KEY, setGateMode, mode)
+}
+
+export const EXTERNAL_GATE_MODE_ACTING_KEY = 'gate-external-mode'
+
+/** The external-services lane: what happens to a Keeper's call into an
+ *  attached outside service (Jira, Slack, GitHub). Its own switch — the
+ *  workspace lane above never opens this one. */
+export async function setKeeperExternalGateMode(mode: GateMode) {
+  await setGateModeForLane(EXTERNAL_GATE_MODE_ACTING_KEY, setExternalGateMode, mode)
 }

@@ -8943,6 +8943,23 @@ and is loaded on demand through keeper_skill.
                 in
                 state.agenda_scroll <- move ~count ~height state.agenda_scroll
             | _ -> ())
+       (* Modal like the agenda sheet: a panel answering "who is mid-turn"
+          should not have a surface binding fire underneath it. *)
+       | Some k when state.answering_open ->
+           (match k with
+            | "@" | "esc" ->
+                state.answering_open <- false;
+                state.answering_scroll <- 0
+            | "j" | "down" | "k" | "up" ->
+                let count, height = Masc_tui_render.answering_viewport state in
+                let move =
+                  match k with
+                  | "j" | "down" -> Masc_tui_scroll.down
+                  | _ -> Masc_tui_scroll.up
+                in
+                state.answering_scroll <-
+                  move ~count ~height state.answering_scroll
+            | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
           build the query, arrows move the cursor, Enter runs the highlighted
           jump through the exact goto/chat paths the bound keys use. *)
@@ -9551,6 +9568,9 @@ and is loaded on demand through keeper_skill.
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0
+       | Some "@" ->
+           state.answering_open <- true;
+           state.answering_scroll <- 0
        | Some ":" ->
            state.palette_open <- true;
            state.palette_query <- "";

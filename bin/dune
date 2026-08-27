@@ -320,6 +320,12 @@
  (libraries masc masc.time_codec masc_tui_message_layout unix))
 
 (library
+ (name masc_tui_answering)
+ (wrapped false)
+ (modules masc_tui_answering)
+ (libraries masc))
+
+(library
  (name masc_tui_keys)
  (wrapped false)
  (modules masc_tui_keys)
@@ -715,6 +721,7 @@
  (package masc)
  (libraries
   masc_tui_agenda
+  masc_tui_answering
   masc_tui_ask_projection
   masc_tui_frame
   masc_tui_attachment

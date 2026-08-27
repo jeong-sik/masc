@@ -1053,6 +1053,12 @@ type state = {
      the scroll survives only while it is open. *)
   mutable agenda_open: bool;
   mutable agenda_scroll: int;
+  (* The [@] answering overlay: the footer badge says that keepers are
+     mid-turn, and this says which ones, on which lane, for how long. Modal
+     like the agenda sheet, and like it the scroll survives only while it
+     is open. *)
+  mutable answering_open: bool;
+  mutable answering_scroll: int;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -1758,6 +1764,8 @@ let create_state
   help_open = false;
   agenda_open = false;
   agenda_scroll = 0;
+  answering_open = false;
+  answering_scroll = 0;
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;

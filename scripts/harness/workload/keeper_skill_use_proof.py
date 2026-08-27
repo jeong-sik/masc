@@ -26,6 +26,7 @@ import proof_http
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 LEDGER_SCHEMA = "masc.skill-activations/v5"
+DASHBOARD_SKILL_RECEIPTS_ROUTE = "#lab?section=tools"
 
 
 class ProofError(RuntimeError):
@@ -642,6 +643,81 @@ def validate_proof(
     }
 
 
+def capture_dashboard_page(
+    *,
+    page: Any,
+    dashboard_url: str,
+    keeper: str,
+    skill_tool_use_id: str,
+    ledger_revision: str,
+    screenshot: Path,
+) -> None:
+    page.goto(dashboard_url, wait_until="networkidle", timeout=60_000)
+    keeper_select = page.get_by_role("combobox", name="Keeper", exact=True)
+    require(
+        keeper_select.count() == 1,
+        "Dashboard does not contain exactly one Keeper selector",
+    )
+    keeper_select.select_option(value=keeper)
+    require(
+        keeper_select.input_value() == keeper,
+        "Dashboard did not select the exact Keeper value",
+    )
+    panel = page.locator('[data-testid="skill-activation-ledger"]')
+    panel.wait_for(state="visible", timeout=30_000)
+    require(
+        panel.get_attribute("data-ledger-revision") == ledger_revision,
+        "Dashboard advanced to another ledger revision during capture",
+    )
+    rows = panel.locator('[data-testid="skill-activation-row"]')
+    row_ids = rows.evaluate_all(
+        "rows => rows.map(row => row.getAttribute('data-skill-tool-use-id'))"
+    )
+    require(
+        row_ids.count(skill_tool_use_id) == 1,
+        "Dashboard does not contain exactly one exact Skill invocation row",
+    )
+    matching_rows = [
+        row
+        for row in rows.element_handles()
+        if row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id
+    ]
+    require(
+        len(matching_rows) == 1,
+        "Dashboard exact Skill invocation row became ambiguous",
+    )
+    exact_row = matching_rows[0]
+    exact_row.scroll_into_view_if_needed()
+    require(
+        exact_row.is_visible(),
+        "Dashboard exact Skill invocation row is not visible for capture",
+    )
+    require(
+        panel.get_attribute("data-ledger-revision") == ledger_revision,
+        "Dashboard ledger revision changed before taking the screenshot",
+    )
+    require(
+        exact_row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id,
+        "Dashboard exact Skill invocation row changed before capture",
+    )
+    panel.screenshot(path=str(screenshot))
+    require(
+        panel.get_attribute("data-ledger-revision") == ledger_revision,
+        "Dashboard ledger revision changed while taking the screenshot",
+    )
+    require(
+        exact_row.get_attribute("data-skill-tool-use-id") == skill_tool_use_id,
+        "Dashboard exact Skill invocation row changed while taking the screenshot",
+    )
+    after_row_ids = rows.evaluate_all(
+        "rows => rows.map(row => row.getAttribute('data-skill-tool-use-id'))"
+    )
+    require(
+        after_row_ids == row_ids,
+        "Dashboard activation rows changed while taking the screenshot",
+    )
+
+
 def capture_dashboard(
     *,
     base_url: str,
@@ -669,38 +745,15 @@ def capture_dashboard(
                 ),
             )
             page = context.new_page()
-            page.goto(
-                f"{base_url}/dashboard/#lab?section=tools",
-                wait_until="networkidle",
-                timeout=60_000,
-            )
-            page.get_by_label("Keeper", exact=True).select_option(label=keeper)
-            panel = page.locator('[data-testid="skill-activation-ledger"]')
-            panel.wait_for(state="visible", timeout=30_000)
-            require(
-                panel.get_attribute("data-ledger-revision") == ledger_revision,
-                "Dashboard advanced to another ledger revision during capture",
-            )
-            row_ids = page.locator('[data-testid="skill-activation-row"]').evaluate_all(
-                "rows => rows.map(row => row.getAttribute('data-skill-tool-use-id'))"
-            )
-            require(
-                row_ids.count(skill_tool_use_id) == 1,
-                "Dashboard does not contain exactly one exact Skill invocation row",
-            )
-            page.screenshot(path=str(screenshot), full_page=True)
-            require(
-                panel.get_attribute("data-ledger-revision") == ledger_revision,
-                "Dashboard ledger revision changed while taking the screenshot",
-            )
-            after_row_ids = page.locator(
-                '[data-testid="skill-activation-row"]'
-            ).evaluate_all(
-                "rows => rows.map(row => row.getAttribute('data-skill-tool-use-id'))"
-            )
-            require(
-                after_row_ids == row_ids,
-                "Dashboard activation rows changed while taking the screenshot",
+            capture_dashboard_page(
+                page=page,
+                dashboard_url=(
+                    f"{base_url}/dashboard/{DASHBOARD_SKILL_RECEIPTS_ROUTE}"
+                ),
+                keeper=keeper,
+                skill_tool_use_id=skill_tool_use_id,
+                ledger_revision=ledger_revision,
+                screenshot=screenshot,
             )
         finally:
             if context is not None:
@@ -711,7 +764,7 @@ def capture_dashboard(
         "path": screenshot.name,
         "bytes": len(payload),
         "sha256": digest_bytes(payload),
-        "route": "#lab?section=tools",
+        "route": DASHBOARD_SKILL_RECEIPTS_ROUTE,
         "keeper": keeper,
         "ledger_revision": ledger_revision,
         "exact_row": skill_tool_use_id,

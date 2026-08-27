@@ -160,6 +160,129 @@ def refresh_projection(dashboard, ledger):
 
 
 class KeeperSkillUseProofTest(unittest.TestCase):
+    def test_dashboard_capture_uses_exact_keeper_and_ledger_scoped_rows(self):
+        calls = []
+
+        class Rows:
+            def evaluate_all(self, expression):
+                calls.append(("evaluate_all", expression))
+                return ["another-call", "call-skill-1"]
+
+            def element_handles(self):
+                return [Row("another-call"), Row("call-skill-1")]
+
+        class Row:
+            def __init__(self, skill_tool_use_id):
+                self.skill_tool_use_id = skill_tool_use_id
+
+            def get_attribute(self, name):
+                calls.append(("row_attribute", self.skill_tool_use_id, name))
+                return self.skill_tool_use_id
+
+            def scroll_into_view_if_needed(self):
+                calls.append(("scroll_row", self.skill_tool_use_id))
+
+            def is_visible(self):
+                calls.append(("row_visible", self.skill_tool_use_id))
+                return True
+
+        class Panel:
+            def wait_for(self, *, state, timeout):
+                calls.append(("wait_for", state, timeout))
+
+            def get_attribute(self, name):
+                calls.append(("panel_attribute", name))
+                return "ledger-revision"
+
+            def locator(self, selector):
+                calls.append(("panel_locator", selector))
+                return Rows()
+
+            def screenshot(self, *, path):
+                calls.append(("panel_screenshot", Path(path).name))
+
+        class KeeperSelect:
+            selected = ""
+
+            def count(self):
+                return 1
+
+            def select_option(self, *, value):
+                self.selected = value
+                calls.append(("select_option", value))
+
+            def input_value(self):
+                return self.selected
+
+        class Page:
+            def __init__(self):
+                self.keeper_select = KeeperSelect()
+
+            def goto(self, url, *, wait_until, timeout):
+                calls.append(("goto", url, wait_until, timeout))
+
+            def get_by_role(self, role, *, name, exact):
+                calls.append(("get_by_role", role, name, exact))
+                return self.keeper_select
+
+            def locator(self, selector):
+                calls.append(("page_locator", selector))
+                return Panel()
+
+        with tempfile.TemporaryDirectory() as raw:
+            proof.capture_dashboard_page(
+                page=Page(),
+                dashboard_url=(
+                    "http://127.0.0.1:9934/dashboard/"
+                    f"{proof.DASHBOARD_SKILL_RECEIPTS_ROUTE}"
+                ),
+                keeper="keeper-one",
+                skill_tool_use_id="call-skill-1",
+                ledger_revision="ledger-revision",
+                screenshot=Path(raw) / "dashboard-skill-use.png",
+            )
+
+        self.assertIn(
+            (
+                "goto",
+                "http://127.0.0.1:9934/dashboard/#lab?section=tools",
+                "networkidle",
+                60_000,
+            ),
+            calls,
+        )
+        self.assertIn(("get_by_role", "combobox", "Keeper", True), calls)
+        self.assertIn(("select_option", "keeper-one"), calls)
+        self.assertIn(("panel_locator", '[data-testid="skill-activation-row"]'), calls)
+        self.assertIn(("scroll_row", "call-skill-1"), calls)
+        self.assertIn(("row_visible", "call-skill-1"), calls)
+        self.assertIn(("panel_screenshot", "dashboard-skill-use.png"), calls)
+        self.assertNotIn(
+            ("page_locator", '[data-testid="skill-activation-row"]'), calls
+        )
+        screenshot_index = calls.index(
+            ("panel_screenshot", "dashboard-skill-use.png")
+        )
+        row_identity_checks = [
+            index
+            for index, call in enumerate(calls)
+            if call
+            == (
+                "row_attribute",
+                "call-skill-1",
+                "data-skill-tool-use-id",
+            )
+        ]
+        self.assertTrue(any(index < screenshot_index for index in row_identity_checks))
+        self.assertTrue(any(index > screenshot_index for index in row_identity_checks))
+        revision_checks = [
+            index
+            for index, call in enumerate(calls)
+            if call == ("panel_attribute", "data-ledger-revision")
+        ]
+        self.assertTrue(any(index < screenshot_index for index in revision_checks))
+        self.assertTrue(any(index > screenshot_index for index in revision_checks))
+
     def test_strict_http_reads_send_bearer_without_serializing_it(self):
         token = "strict-proof-token"
 

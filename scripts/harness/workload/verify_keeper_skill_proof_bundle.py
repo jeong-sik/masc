@@ -614,7 +614,8 @@ def verify_bundle(
         "join source Git identity is invalid",
     )
     require(
-        join_producer.get("keeper") == receipt.get("keeper"),
+        string_field(join_producer, "keeper", "join producer")
+        == string_field(receipt, "keeper", "producer receipt"),
         "receipt and join Keeper differ",
     )
     require(
@@ -699,10 +700,15 @@ def verify_bundle(
     }
     require(identity == expected_identity, "join and proof Skill identities differ")
     require(
-        proof_identity.get("keeper") == join_producer.get("keeper"),
+        string_field(proof_identity, "keeper", "proof identity")
+        == string_field(join_producer, "keeper", "join producer"),
         "join and proof Keeper differ",
     )
-    require(match.get("delivery") == proof_identity.get("delivery"), "delivery differs")
+    require(
+        object_field(match, "delivery", "join match")
+        == object_field(proof_identity, "delivery", "proof identity"),
+        "delivery differs",
+    )
     proof_actions = list_field(proof_identity, "actions", "proof identity")
     require(proof_actions != [], "proof has no later model-selected action")
     require(match.get("actions") == proof_actions, "join and proof actions differ")
@@ -813,10 +819,12 @@ def verify_bundle(
         tui_proof.get("manifest_sha256") == digest(proof_raw), "TUI proof SHA differs"
     )
     require(
-        tui_proof.get("keeper") == proof_identity.get("keeper")
-        and tui_proof.get("session_id") == proof_identity.get("session_id")
-        and tui_proof.get("ledger_revision") == proof_identity.get("ledger_revision")
-        and tui_proof.get("skill_tool_use_id") == selected_id,
+        string_field(tui_proof, "keeper", "TUI proof") == proof_identity.get("keeper")
+        and string_field(tui_proof, "session_id", "TUI proof")
+        == proof_identity.get("session_id")
+        and string_field(tui_proof, "ledger_revision", "TUI proof")
+        == string_field(proof_identity, "ledger_revision", "proof identity")
+        and string_field(tui_proof, "skill_tool_use_id", "TUI proof") == selected_id,
         "TUI repeated proof identity differs",
     )
     expected_markers = action_markers(proof_actions)

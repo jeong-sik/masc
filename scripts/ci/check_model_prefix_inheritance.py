@@ -1,100 +1,140 @@
 #!/usr/bin/env python3
-"""Every runtime model resolves to its own capability row, or to none.
+"""Ratchet exact provider/model catalog coverage for runtime bindings.
 
-`Model_catalog.lookup` is a longest-prefix match, so a model id that no row
-names exactly still lands on a shorter row and inherits its capabilities. The
-subscription models already guard this by asserting the resolved id_prefix
-(packages/agent_core/test/test_model_catalog_default.ml). The overlay rows
-masc declares had no equivalent.
+`Model_catalog.lookup_for_provider` is exact-only. A miss falls through to the
+provider base before MASC projects runtime capabilities, so it is never a
+harmless "no catalog row" case. Compare runtime bindings with the merged
+embedded-plus-deployment catalog and make every temporary base fallback named.
 
-Inheriting is not automatically wrong — it is how a new tag picks up its
-family. What is wrong is inheriting silently: a model that lands on a
-shorter row keeps only three of its runtime.toml capability fields
-(runtime_adapter.ml:317-360), the rest come from the row it landed on. A
-model with no match at all keeps all of them. So the quiet case is the one
-that loses its own declaration.
-
-This lists every inheritance so it is a decision rather than a discovery.
-Add the pair to ACCEPTED_INHERITANCE with why, or give the model its own row.
+The filename is retained because CI already invokes it; this check no longer
+models the provider-independent longest-prefix lookup.
 """
 
 from __future__ import annotations
 
 import pathlib
-import re
 import sys
+import tomllib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+EMBEDDED = REPO / "packages" / "agent_core" / "models.toml"
 OVERLAY = REPO / "config" / "agent-core-models-overlay.toml"
 RUNTIME = REPO / "config" / "runtime.toml"
 
-# model id -> the shorter row it lands on, with the reason it is safe.
-ACCEPTED_INHERITANCE = {
-    "deepseek-v4-flash:0731": (
-        "deepseek-v4-flash",
-        "same declared thinking_control_format and context window; the tag is "
-        "a pinned build of the same model",
-    ),
-}
+Model = tuple[str, str]
+KNOWN_PROVIDER_BASE_FALLBACKS: dict[Model, str] = {}
 
 
-def declared_prefixes() -> set[str]:
-    if not OVERLAY.exists():
-        sys.exit(f"FAIL: {OVERLAY.relative_to(REPO)} is missing")
-    text = OVERLAY.read_text(encoding="utf-8", errors="replace")
-    return {m.lower() for m in re.findall(r'id_prefix\s*=\s*"([^"]+)"', text)}
+def read_toml(path: pathlib.Path) -> dict[str, object]:
+    if not path.exists():
+        raise ValueError(f"{path.relative_to(REPO)} is missing")
+    return tomllib.loads(path.read_text(encoding="utf-8"))
 
 
-def runtime_models() -> set[str]:
-    if not RUNTIME.exists():
-        sys.exit(f"FAIL: {RUNTIME.relative_to(REPO)} is missing")
-    text = RUNTIME.read_text(encoding="utf-8", errors="replace")
-    return {m.lower() for m in re.findall(r'api-name\s*=\s*"([^"]+)"', text)}
+def catalog_identities() -> set[Model]:
+    identities: set[Model] = set()
+    for path in (EMBEDDED, OVERLAY):
+        rows = read_toml(path).get("models")
+        if not isinstance(rows, list):
+            raise ValueError(f"{path.relative_to(REPO)} requires [[models]] rows")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError(f"{path.relative_to(REPO)} model row is malformed")
+            provider = row.get("provider_name")
+            model = row.get("id_prefix")
+            if provider is None:
+                continue
+            if not isinstance(provider, str) or not isinstance(model, str):
+                raise ValueError(
+                    f"{path.relative_to(REPO)} scoped row requires string identity"
+                )
+            identities.add((provider.strip().lower(), model.strip().lower()))
+    return identities
+
+
+def runtime_api_name(model_key: str, row: dict[object, object]) -> str:
+    for field in ("api-name", "model-name"):
+        value = row.get(field)
+        if value is not None:
+            if not isinstance(value, str):
+                raise ValueError(f"runtime model {model_key!r} has non-string {field}")
+            return value
+    return model_key
+
+
+def runtime_models() -> set[Model]:
+    data = read_toml(RUNTIME)
+    model_rows = data.get("models")
+    provider_rows = data.get("providers")
+    if not isinstance(model_rows, dict) or not isinstance(provider_rows, dict):
+        raise ValueError("runtime requires [models] and [providers] tables")
+    models: set[Model] = set()
+    for provider in provider_rows:
+        if not isinstance(provider, str):
+            raise ValueError("runtime provider id must be a string")
+        bindings = data.get(provider)
+        if bindings is None:
+            continue
+        if not isinstance(bindings, dict):
+            raise ValueError(f"runtime provider table {provider!r} is malformed")
+        for model_key in bindings:
+            if not isinstance(model_key, str):
+                raise ValueError("runtime model binding key must be a string")
+            row = model_rows.get(model_key)
+            if not isinstance(row, dict):
+                continue
+            api_name = runtime_api_name(model_key, row)
+            models.add((provider.strip().lower(), api_name.strip().lower()))
+    return models
+
+
+def self_test() -> None:
+    catalog = {("right", "family"), ("wrong", "family:tag")}
+    assert ("right", "family:tag") not in catalog
+    assert runtime_api_name("fallback", {}) == "fallback"
+    assert runtime_api_name("key", {"model-name": "legacy"}) == "legacy"
+    assert runtime_api_name("key", {"api-name": "wire"}) == "wire"
 
 
 def main() -> int:
-    print("=== model prefix inheritance ===")
-    prefixes = declared_prefixes()
-    models = runtime_models()
-    if not prefixes or not models:
-        print("FAIL: no rows found; the scan lost its subject")
+    print("=== runtime exact catalog identities ===")
+    try:
+        self_test()
+        catalog = catalog_identities()
+        models = runtime_models()
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as error:
+        print(f"FAIL: {error}")
+        return 2
+    if not catalog or not models:
+        print("FAIL: no identities found; the scan lost its subject")
+        return 2
+
+    missing = models - catalog
+    known = set(KNOWN_PROVIDER_BASE_FALLBACKS)
+    unrecorded = missing - known
+    stale = known - missing
+    if unrecorded or stale:
+        print()
+        if unrecorded:
+            print("FAIL: runtime identities falling through to provider base:")
+            for provider, model in sorted(unrecorded):
+                print(f"  {provider}/{model}")
+        if stale:
+            print("FAIL: exact rows exist; remove stale fallback debt entries:")
+            for provider, model in sorted(stale):
+                print(f"  {provider}/{model}")
         return 1
 
-    undeclared: list[tuple[str, str]] = []
-    for model in sorted(models):
-        landed = sorted(
-            (p for p in prefixes if model.startswith(p)), key=len, reverse=True
+    for identity in sorted(missing):
+        print(
+            f"  DEBT {identity[0]}/{identity[1]} — "
+            f"{KNOWN_PROVIDER_BASE_FALLBACKS[identity]}"
         )
-        if not landed:
-            continue
-        row = landed[0]
-        if row == model:
-            continue
-        accepted = ACCEPTED_INHERITANCE.get(model)
-        if accepted and accepted[0] == row:
-            print(f"  {model:<40s} inherits {row}  — {accepted[1]}")
-        else:
-            undeclared.append((model, row))
-
-    if undeclared:
-        print()
-        print("FAIL: these models keep only three of their runtime.toml")
-        print("      capability fields; the rest come from a row they never named:")
-        for model, row in undeclared:
-            print(f"        {model} -> {row}")
-        print()
-        print("      Give the model its own row in")
-        print("      config/agent-core-models-overlay.toml, or record the pair")
-        print("      in ACCEPTED_INHERITANCE in this script with why it is safe.")
-        return 1
-
-    exact = sum(1 for m in models if m in prefixes)
     print()
     print(
-        f"PASS: {len(models)} runtime models; {exact} on their own row, "
-        f"{len(ACCEPTED_INHERITANCE)} declared inheritance, "
-        f"{len(models) - exact - len(ACCEPTED_INHERITANCE)} with no catalog row "
-        f"(these keep every declared field)."
+        f"PASS: {len(models)} runtime provider/model identities; "
+        f"{len(models) - len(missing)} exact catalog rows; "
+        f"{len(missing)} recorded provider-base fallback."
     )
     return 0
 

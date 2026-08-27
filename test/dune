@@ -3517,6 +3517,8 @@
 
 (include stanzas/test_keeper_identity_tools.inc)
 
+(include stanzas/test_keeper_identity_gate.inc)
+
 (include stanzas/test_masc_ask_tool_surface.inc)
 
 (include stanzas/test_tui_ask_projection.inc)

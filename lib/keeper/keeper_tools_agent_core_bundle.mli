@@ -19,12 +19,16 @@ val make_tool_bundle
            Composition skills materialize as [keeper_compose_<name>] tools;
            instruction skills share [keeper_skill]. An absent or empty catalog
            adds nothing. *)
-  -> ?identity_tools:Agent_core.Tool.t list
+  -> ?identity_tools:Keeper_identity_tools.offered_tool list
        (** What the work services this Keeper is attached to offer, from
            {!Keeper_identity_tools.for_turn}. Passed in rather than read
            here: the caller is the part that also has to tell the tool-name
            projection about them, and computing them in two places is how
-           the two would come to disagree. Absent or empty adds nothing. *)
+           the two would come to disagree. Absent or empty adds nothing.
+           Placed behind the durable Gate by this bundle
+           ({!Keeper_identity_gate.agent_tool}): a row the provider marked
+           read-only runs unasked, everything else defers to the approvals
+           queue on the external-services lane. *)
   -> ?composition_plan_index:Keeper_tool_composition_plan_index.t
        (** Turn-local approval state. Composition plans are recorded here
            while their tools are materialized. *)

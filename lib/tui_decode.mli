@@ -774,10 +774,53 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+val decode_keeper_gate_settings :
+  Yojson.Safe.t -> ((string * string) list * (string * string) list, string) result
+(** [(keeper, mode) list, (keeper, slot_id) list] from
+    [/api/v1/dashboard/gate/keeper-settings].
+
+    Distinct from {!decode_tool_approval_mode_overrides}: that one is the
+    in-memory YOLO stance a restart clears, this is what the Gate decides an
+    external effect under. Two per-Keeper settings with similar names, and an
+    operator reading one for the other is the reason both are named in
+    full. *)
+
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
     [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+
+type gate_pending = {
+  gp_id : string;
+  gp_keeper : string;
+  gp_operation : string;
+      (** The closed operation identity the Gate stored, e.g.
+          [identity_call]. *)
+  gp_display_tool : string;
+      (** What a human decides on: for an identity call, the provider and
+          the remote tool name read out of the stored input; otherwise the
+          operation itself. *)
+  gp_input_preview : string option;
+  gp_waiting_s : float option;
+}
+
+type gate_lane_modes = {
+  glm_workspace : string;
+  glm_external : string;
+      (** The external-services lane. A separate switch from the workspace
+          lane: opening one does not open the other. *)
+}
+
+type gate_snapshot = {
+  gs_pending : gate_pending list;
+  gs_modes : gate_lane_modes option;
+}
+
+val decode_gate_snapshot : Yojson.Safe.t -> (gate_snapshot, string) result
+(** Decode [GET /api/v1/dashboard/gate] down to what the Approvals surface
+    draws: the durable pending queue and the two Gate lanes. A [null] queue
+    (store unavailable) is an empty list beside whatever the lanes say, the
+    same face the dashboard shows. *)
 
 val decode_keeper_tool_approvals :
   Yojson.Safe.t -> (keeper_tool_approval list, string) result

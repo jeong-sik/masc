@@ -745,6 +745,20 @@ let load_keeper_tool_approvals ~(host : string) ~(port : int) :
   | Error err -> Error ("tool approvals load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_tool_approvals json
 
+(** Load the durable Gate: pending approvals and both lane modes. *)
+let load_dashboard_gate ~(host : string) ~(port : int) :
+    (Tui_decode.gate_snapshot, string) result =
+  match fetch_dashboard_gate ~host ~port with
+  | Error err -> Error ("gate load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_gate_snapshot json
+
+(** Load the durable per-keeper Gate settings. *)
+let load_keeper_gate_settings ~(host : string) ~(port : int) :
+    ((string * string) list * (string * string) list, string) result =
+  match fetch_keeper_gate_settings ~host ~port with
+  | Error err -> Error ("keeper Gate settings load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_gate_settings json
+
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     ((string * string) list, string) result =
@@ -1115,9 +1129,16 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                       names
                   | Some _ | None -> []
                 in
+                let idp_enabled =
+                  match field "enabled" with
+                  | Some (`Bool value) -> Some value
+                  | Some _ | None -> None
+                in
+                let idp_switch_problem = string_field "switch_problem" in
                 Some
                   (Masc_tui_types.Identity_declared
-                     { idp_id; idp_label; idp_tools; idp_also_on })
+                     { idp_id; idp_label; idp_tools; idp_also_on
+                     ; idp_enabled; idp_switch_problem })
               | None, _ -> None)
             rows))
 

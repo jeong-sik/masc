@@ -372,6 +372,41 @@ let test_structural_failures_are_unloadable () =
     cases
 ;;
 
+(* An editor-added UTF-8 BOM used to reject the whole document as
+   frontmatter-less with a message that never named the mark. The mark is
+   parsing noise, not content: the document loads as runtime-compatible with a
+   diagnostic that says exactly what to remove. *)
+let test_byte_order_mark_is_stripped_and_named () =
+  let decoded =
+    Skill_document.decode
+      ~directory_name:"bom-guide"
+      "\xEF\xBB\xBF---\nname: bom-guide\ndescription: Loads despite the byte-order mark.\n---\nBody.\n"
+  in
+  let document = document_exn decoded in
+  Alcotest.(check string) "name" "bom-guide" document.name;
+  Alcotest.(check string) "body stays byte-exact" "Body.\n" document.body;
+  (match Skill_document.diagnostics decoded with
+   | [ Skill_document.Byte_order_mark ] -> ()
+   | diagnostics ->
+     Alcotest.failf
+       "expected exactly the byte-order-mark diagnostic, got %d: %s"
+       (List.length diagnostics)
+       (String.concat "; "
+          (List.map Skill_document.diagnostic_to_string diagnostics)));
+  match
+    Skill_document.decode ~directory_name:"bom-broken" "\xEF\xBB\xBFnot frontmatter"
+  with
+  | Skill_document.Unloadable
+      [ Skill_document.Byte_order_mark; Skill_document.Missing_frontmatter ] -> ()
+  | Skill_document.Unloadable diagnostics ->
+    Alcotest.failf
+      "expected the mark beside the structural rejection, got: %s"
+      (String.concat "; "
+         (List.map Skill_document.diagnostic_to_string diagnostics))
+  | Skill_document.Loaded _ ->
+    Alcotest.fail "a frontmatter-less document must stay unloadable"
+;;
+
 let () =
   Alcotest.run
     "skill_document"
@@ -416,5 +451,9 @@ let () =
             "structural failures"
             `Quick
             test_structural_failures_are_unloadable
+        ; Alcotest.test_case
+            "byte-order mark is stripped and named"
+            `Quick
+            test_byte_order_mark_is_stripped_and_named
         ] ) ]
 ;;

@@ -210,8 +210,15 @@ let refresh ?post ~base_path ~keeper_name ~(provider : Provider.t) ~now () =
   Ok catalog
 ;;
 
+type offered_tool = {
+  schema : Agent_core.Types.tool_schema;
+  read_only : bool option;
+  provider : Provider.t;
+  remote_name : string;
+}
+
 type offering = {
-  offered : Agent_core.Tool.t list;
+  offered : offered_tool list;
   unusable : (string * string) list;
 }
 
@@ -219,11 +226,22 @@ let model_tool_name ~(provider : Provider.t) ~remote_name =
   Printf.sprintf "%s_%s" provider.Provider.id remote_name
 ;;
 
+type call_phase =
+  | Before_send
+  | After_send
+
+type call_error =
+  | Precondition of string
+  | Mcp of {
+      phase : call_phase;
+      error : Mcp_client.error;
+    }
+
 let failed ~recoverable ~error_class message =
   Error { Agent_core.Types.message; recoverable; error_class }
 ;;
 
-let result_of_call answer =
+let tool_result_of_call answer =
   match answer with
   | Ok (result : Mcp_client.tool_result) ->
     if result.Mcp_client.is_error
@@ -233,15 +251,24 @@ let result_of_call answer =
       failed ~recoverable:true ~error_class:(Some Agent_core.Types.Unknown)
         result.Mcp_client.text
     else Ok { Agent_core.Types.content = result.Mcp_client.text; _meta = None }
-  | Error (Mcp_client.Unauthorized _) ->
+  | Error (Precondition message) ->
+    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
+      message
+  | Error (Mcp { error = Mcp_client.Unauthorized _; _ }) ->
     (* Not something the model can fix by trying again. Whoever attached
        this Keeper has to attach it again. *)
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       "this keeper's credential for that service is no longer accepted; attach \
        it again"
-  | Error (Mcp_client.Transport detail) ->
+  | Error (Mcp { error = Mcp_client.Transport detail; _ }) ->
     failed ~recoverable:true ~error_class:(Some Agent_core.Types.Transient) detail
-  | Error ((Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _) as err) ->
+  | Error
+      (Mcp
+         { error =
+             (Mcp_client.Rpc _ | Mcp_client.Http _ | Mcp_client.Malformed _) as
+             err
+         ; _
+         }) ->
     failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
       (Mcp_client.error_to_string err)
 ;;
@@ -350,83 +377,13 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
       Ok tokens.Keeper_oauth_flow.access_token)
 ;;
 
-(* What the Gate is told this call is. The Gate never parses it -- it takes
-   an opaque identity and the caller is what composes one -- so the provider
-   is named here rather than left for a reader of the queue to guess. An
-   operator deciding on a pending request needs to know it is Jira and not
-   Slack, and the input alone does not say. *)
-let gate_operation ~(provider : Provider.t) =
-  Printf.sprintf "service_write:%s" provider.Provider.id
-;;
-
-(* A call that only reads runs without asking. Everything else goes to the
-   Gate, including a service that said nothing about this tool: silence is
-   not permission, and writing to somebody else's Jira unasked is the outcome
-   that has to stay unreachable.
-
-   The Gate rather than the PreToolUse approval hook, which can also read
-   [read_only] but asks over the open chat stream and is therefore only
-   installed on the one turn path that has one. This runs wherever the turn
-   came from, and a deferral survives a Keeper nobody is watching. *)
-let gate_verdict ~base_path ~keeper_name ~(provider : Provider.t) ~read_only
-      ~arguments =
-  match read_only with
-  | Some true -> Ok ()
-  | Some false | None -> (
-    match
-      Keeper_gate.decide ~keeper_always_allow:false
-        { Keeper_gate.keeper_name
-        ; operation = gate_operation ~provider
-        ; input = arguments
-        ; base_path
-          (* The turn's own evidence is not reachable from here: this handler
-             is closed over at catalog projection and holds no turn. The Gate
-             stores what it is given and does not require these, so a call
-             arrives without them rather than not arriving. *)
-        ; causal_context = None
-        ; task_id = None
-        ; continuation_channel = None
-        }
-    with
-    | Keeper_gate.Allow _ -> Ok ()
-    | Keeper_gate.Deferred { approval_id; _ } ->
-      (* Decision B: masc does not replay the call. The approval is durable,
-         so the Keeper reaching this again after it is granted is what runs
-         the effect -- and choosing whether to reach it again is the
-         Keeper's, not a queue's. *)
-      Error
-        (Printf.sprintf
-           "This call writes to %s and is waiting on approval %s. Nothing was \
-            sent. Do other work; call again once an operator has granted it."
-           provider.Provider.label approval_id)
-    | Keeper_gate.Unavailable reason ->
-      Error
-        (Printf.sprintf
-           "This call writes to %s and was not sent: the Gate could not \
-            durably record a decision about it (%s). This Keeper remains \
-            active and may continue other work."
-           provider.Provider.label
-           (Keeper_gate.unavailable_reason_to_string reason)))
-;;
-
-let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~read_only
-      ~remote_name arguments =
-  let refuse message =
-    failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
-      message
-  in
-  match gate_verdict ~base_path ~keeper_name ~provider ~read_only ~arguments with
-  (* Recoverable: the same input succeeds once the approval is granted, so
-     this is not the shape that should retire the tool for the turn. *)
-  | Error message ->
-    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
-      message
-  | Ok () ->
+let run_call ?post ~base_path ~keeper_name ~(provider : Provider.t)
+      ~remote_name ~arguments () =
   match
     projected_env_value ~base_path ~keeper_name
       ~name:provider.Provider.access_token_env
   with
-  | Error message -> refuse message
+  | Error message -> Error (Precondition message)
   | Ok stored_token -> (
     match
       renew_if_needed ~base_path ~keeper_name ~provider
@@ -436,18 +393,22 @@ let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~read_only
            it. *)
         ~now:(Time_compat.now ()) ~access_token:stored_token ()
     with
-    | Error message -> refuse message
+    | Error message -> Error (Precondition message)
     | Ok access_token -> (
       match
         Mcp_client.connect ?post ~url:provider.Provider.mcp_url ~access_token ()
       with
-      | Error err -> result_of_call (Error err)
-      | Ok client ->
-        result_of_call
-          (Mcp_client.call_tool ?post client ~name:remote_name ~arguments)))
+      (* A session that never came up carries proof the call was not sent;
+         an error after [call_tool] does not, and the two must stay apart
+         because replay reads the phase as the effect's disposition. *)
+      | Error error -> Error (Mcp { phase = Before_send; error })
+      | Ok client -> (
+        match Mcp_client.call_tool ?post client ~name:remote_name ~arguments with
+        | Error error -> Error (Mcp { phase = After_send; error })
+        | Ok result -> Ok result)))
 ;;
 
-let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
+let agent_tools ~(provider : Provider.t) catalog =
   List.fold_left
     (fun acc (tool : Mcp_client.tool) ->
       let name = model_tool_name ~provider ~remote_name:tool.Mcp_client.name in
@@ -467,14 +428,14 @@ let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
         Keeper_identity_tool_index.record
           (Keeper_identity_tool_index.shared ())
           ~tool_name:name ~read_only:tool.Mcp_client.read_only;
-        let projected =
-          Agent_core.Base.Tool.of_schema schema
-            (Agent_core.Base.Tool.ignoring_execution_env
-               (handler ?post ~base_path ~keeper_name ~provider
-                  ~read_only:tool.Mcp_client.read_only
-                  ~remote_name:tool.Mcp_client.name))
+        let offered_tool =
+          { schema
+          ; read_only = tool.Mcp_client.read_only
+          ; provider
+          ; remote_name = tool.Mcp_client.name
+          }
         in
-        { acc with offered = projected :: acc.offered })
+        { acc with offered = offered_tool :: acc.offered })
     { offered = []; unusable = [] }
     catalog.tools
   |> fun acc ->
@@ -482,6 +443,13 @@ let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
 ;;
 
 let for_turn ~base_path ~keeper_name =
+  (* Read once for the turn, not once per provider. An unreadable switch
+     store marks every declared provider unusable rather than offering
+     tools an operator may have turned off — the same reading the store
+     itself gives an unreadable file. *)
+  let switched_off =
+    Keeper_identity_switch.disabled_providers_for_keeper ~base_path ~keeper_name
+  in
   List.fold_left
     (fun acc declaration ->
       match declaration with
@@ -491,18 +459,30 @@ let for_turn ~base_path ~keeper_name =
       | Keeper_oauth_declarations.Unreadable { id; problem } ->
         { acc with unusable = (id, problem) :: acc.unusable }
       | Keeper_oauth_declarations.Declared provider ->
-        (match
-           load ~base_path ~keeper_name ~provider_id:provider.Provider.id
-         with
-         (* Never attached. Nothing to offer and nothing wrong. *)
-         | Ok None -> acc
+        (match switched_off with
          | Error problem ->
            { acc with unusable = (provider.Provider.id, problem) :: acc.unusable }
-         | Ok (Some catalog) ->
-           let offering = agent_tools ~base_path ~keeper_name ~provider catalog in
-           { offered = acc.offered @ offering.offered
-           ; unusable = List.rev_append offering.unusable acc.unusable
-           }))
+         | Ok off when List.mem provider.Provider.id off ->
+           (* Switched off by an operator. Not [unusable]: nothing is
+              broken, and the identity screen says off while the audit log
+              says who and when. Reporting it every turn would be noise
+              about a choice. *)
+           acc
+         | Ok _ ->
+           (match
+              load ~base_path ~keeper_name ~provider_id:provider.Provider.id
+            with
+            (* Never attached. Nothing to offer and nothing wrong. *)
+            | Ok None -> acc
+            | Error problem ->
+              { acc with
+                unusable = (provider.Provider.id, problem) :: acc.unusable
+              }
+            | Ok (Some catalog) ->
+              let offering = agent_tools ~provider catalog in
+              { offered = acc.offered @ offering.offered
+              ; unusable = List.rev_append offering.unusable acc.unusable
+              })))
     { offered = []; unusable = [] }
     (Keeper_oauth_declarations.all ())
   |> fun acc -> { acc with unusable = List.rev acc.unusable }

@@ -261,6 +261,46 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
+# Provider-scoped model lookup is exact, so the tagged runtime model cannot
+# inherit the untagged row above (#31062). Ollama's official registry config for
+# deepseek-v4-flash:0731 reports context_length=1048576 and tools/thinking.
+# The ollama_cloud_v1 provider base remains the wire-specific control authority.
+[[models]]
+id_prefix = "deepseek-v4-flash:0731"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 1048576
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+reasoning_streaming_format = "delta:reasoning"
+reasoning_replay = "drop_without_tool_preserve_with_tool"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+# Ollama's official rnj-1 page lists the 8B tag as a 32K text model with tool
+# calling. The runtime seed declares the same boundary and no reasoning or
+# image input; keep those unsupported surfaces fail-closed (#31066).
+[[models]]
+id_prefix = "rnj-1:8b"
+provider_name = "ollama_cloud"
+base = "ollama_cloud"
+max_context_tokens = 32768
+supports_tools = true
+supports_tool_choice = false
+supports_reasoning = false
+supports_extended_thinking = false
+supports_reasoning_budget = false
+thinking_control_format = "none"
+supports_multimodal_inputs = false
+supports_image_input = false
+supports_native_streaming = true
+
 # Exact-only copies bind target admission to the exact provider credential above.
 [[models]]
 id_prefix = "GLM-5-Turbo"

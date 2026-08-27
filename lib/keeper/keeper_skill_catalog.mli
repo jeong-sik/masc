@@ -54,8 +54,6 @@ type composition = private
 
 type t
 
-type named_skill_error = Missing_named_skill of { name : string }
-
 type error =
   | Definition_rejected of
       { directory : string
@@ -78,6 +76,14 @@ type error =
       { skill : string
       ; declared : string
       }
+  | Composition_info_near_miss of
+      { skill : string
+      ; info : string
+      }
+      (** Advisory: a fence info string that normalizes to the composition
+          contract (case, tabs, doubled spaces) but does not match it exactly.
+          The entry stays a projected instruction skill; the diagnostic tells
+          the author why no composition tool appeared. *)
   | Removed_invocation_policy of
       { skill : string
       ; field : string
@@ -149,7 +155,9 @@ val of_snapshot :
     composition projection failure keeps the frozen document as an instruction
     Skill and returns a diagnostic. Removed invocation-policy fields still omit
     that entry; neither failure rejects the snapshot or an unrelated Keeper
-    turn. *)
+    turn. An instruction skill whose body carries a fence info near-miss also
+    returns an advisory {!Composition_info_near_miss} diagnostic while staying
+    projected. *)
 
 val all_entries_of_snapshot :
   Skill_catalog_snapshot.t -> t * projection_diagnostic list
@@ -191,11 +199,6 @@ val instruction_entries : t -> (string * string * string) list
 (** Instruction skills as [(name, description, body)] in catalog order. This
     is the single input used to build both executable and schema-only
     [keeper_skill] tools. *)
-
-val instruction_names_for :
-  t -> string list -> (string list, named_skill_error) result
-(** Resolve task-declared names and return only instruction skill names in
-    declaration order. Composition names are valid but omitted. *)
 
 val compositions : t -> composition list
 (** Composition entries with their exact snapshot provenance. Catalogs built

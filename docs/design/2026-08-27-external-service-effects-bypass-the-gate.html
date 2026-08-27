@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>바깥 서비스로 나가는 일은 Gate 를 지나지 않는다</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a30; --line:#2b385d; --text:#e8edf8; --muted:#9aa8c7; --cyan:#62d6e8; --green:#72e0a0; --amber:#ffc866; --red:#ff7b86; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(circle at 15% 0,#18284c 0,transparent 34%),var(--bg); color:var(--text); font:15px/1.6 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { max-width:1180px; margin:auto; padding:48px 28px 80px; }
+    h1 { margin:0 0 8px; font-size:clamp(30px,4.4vw,54px); line-height:1.06; letter-spacing:-.04em; }
+    h2 { margin:54px 0 18px; font-size:25px; }
+    h3 { margin:26px 0 8px; font-size:18px; }
+    p { color:var(--muted); max-width:900px; }
+    code { color:#b9f4ff; background:#08101f; padding:.12em .35em; border-radius:5px; font-size:.92em; }
+    pre { background:#08101f; border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow-x:auto; color:#cfe6ff; font-size:13px; line-height:1.55; }
+    pre code { background:none; padding:0; }
+    .eyebrow { color:var(--cyan); font-weight:700; letter-spacing:.13em; text-transform:uppercase; font-size:12px; }
+    .lede { max-width:880px; font-size:19px; color:#c8d3e9; }
+    .meta { display:flex; flex-wrap:wrap; gap:10px; margin:22px 0 0; padding:0; list-style:none; }
+    .meta li { border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:5px 13px; font-size:12.5px; color:var(--muted); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin:16px 0; }
+    .panel h3 { margin-top:0; }
+    table { width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; display:block; overflow-x:auto; }
+    th,td { border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top; }
+    th { background:#16203c; color:var(--text); font-weight:600; white-space:nowrap; }
+    td { color:var(--muted); }
+    td strong { color:var(--text); }
+    .bad { color:var(--red); font-weight:600; }
+    .ok { color:var(--green); font-weight:600; }
+    .warn { color:var(--amber); font-weight:600; }
+    .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }
+    figure { margin:20px 0; }
+    figcaption { color:var(--muted); font-size:13px; margin-top:8px; }
+    svg { max-width:100%; height:auto; }
+    .quote { border-left:3px solid var(--cyan); padding:4px 0 4px 16px; margin:16px 0; color:#c8d3e9; }
+    .quote cite { display:block; margin-top:6px; font-size:12.5px; color:var(--muted); font-style:normal; }
+    ul,ol { color:var(--muted); max-width:900px; }
+    li { margin:5px 0; }
+    li strong { color:var(--text); }
+    hr { border:0; border-top:1px solid var(--line); margin:44px 0; }
+    .foot { color:var(--muted); font-size:13px; }
+  </style>
+</head>
+<body>
+<main>
+
+  <p class="eyebrow">MASC 설계 문서 · 2026-08-27</p>
+  <h1>바깥 서비스로 나가는 일은<br>Gate 를 지나지 않는다</h1>
+  <p class="lede">
+    Keeper 가 회사 Jira 에 티켓 3개를 만들고 코멘트를 달았다. 아무도 승인하지 않았다.
+    Gate 모드는 정상이었고, 승인 정책도 이 상황을 막으라고 쓰여 있었다.
+    그런데 그 호출은 Gate 에 <strong>도달하지 않았다</strong>.
+  </p>
+  <ul class="meta">
+    <li>상태 · 초안</li>
+    <li>계기 · kidsnote keeper, 2026-08-27 05:03 KST</li>
+    <li>영향 · 바깥 서비스에 쓰는 모든 호출</li>
+    <li>선행 · 없음</li>
+  </ul>
+
+  <h2>1. 무슨 일이 있었나</h2>
+
+  <p>
+    kidsnote keeper 가 Slack 스레드를 읽고 Jira 에서 상위 티켓을 조회했다.
+    <code>subtasks</code> 필드가 빈 배열이길래 "이 일들은 티켓이 없다"고 판단하고
+    <strong>티켓 3개를 새로 만들었다</strong>(PK-38859 / 38860 / 38861).
+    나중에 <code>parent =</code> 로 다시 조회하니 자식 티켓 42개가 이미 있었고 전부 완료 상태였다.
+    필드 하나만 보고 내린 판단이 틀렸다.
+  </p>
+
+  <p>
+    판단이 틀린 것 자체는 이 문서의 주제가 아니다. 문제는 <strong>그 판단이 곧바로 회사 Jira 에
+    반영됐다는 것</strong>이다. 사람이 중간에 낄 자리가 없었다.
+  </p>
+
+  <div class="panel">
+    <h3>실제로 나간 호출 (agent timeline, task-551)</h3>
+    <pre><code>05:03:00  atlassian_searchJiraIssuesUsingJql   ok
+05:03:26  masc_board_comment                   ok
+05:03:30  atlassian_addCommentToJiraIssue      ok   ← 회사 Jira 에 쓰기
+05:07:54  atlassian_addCommentToJiraIssue      ok   ← 회사 Jira 에 쓰기
+          (그 전 턴에 티켓 3건 생성)</code></pre>
+    <p style="margin-bottom:0">
+      티켓 3건은 사람이 직접 지웠다. 코멘트는 남아 있다.
+    </p>
+  </div>
+
+  <h2>2. 승인 체계가 두 개다</h2>
+
+  <p>
+    masc 에는 Keeper 의 행동을 사람에게 물어보는 장치가 두 개 있다. 서로 다른 층에서
+    태어났고, 서로를 모른다.
+  </p>
+
+  <figure>
+    <svg viewBox="0 0 940 340" role="img" aria-label="두 승인 체계와 각자가 덮는 범위">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#62d6e8"/>
+        </marker>
+        <marker id="arRed" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 z" fill="#ff7b86"/>
+        </marker>
+      </defs>
+
+      <rect x="20" y="18" width="200" height="60" rx="10" fill="#121a30" stroke="#2b385d"/>
+      <text x="120" y="43" text-anchor="middle" fill="#e8edf8" font-size="14" font-weight="600">Keeper 턴</text>
+      <text x="120" y="62" text-anchor="middle" fill="#9aa8c7" font-size="11.5">도구를 부른다</text>
+
+      <rect x="330" y="18" width="270" height="86" rx="10" fill="#121a30" stroke="#2b385d"/>
+      <text x="465" y="42" text-anchor="middle" fill="#e8edf8" font-size="14" font-weight="600">Keeper_tool_approval_gate</text>
+      <text x="465" y="61" text-anchor="middle" fill="#9aa8c7" font-size="11.5">Agent_core PreToolUse 훅</text>
+      <text x="465" y="78" text-anchor="middle" fill="#9aa8c7" font-size="11.5">readOnlyHint 로 판단 · 스트림으로 물음</text>
+      <text x="465" y="95" text-anchor="middle" fill="#ff7b86" font-size="11.5" font-weight="600">한 경로에만 붙는다</text>
+
+      <rect x="330" y="150" width="270" height="86" rx="10" fill="#121a30" stroke="#2b385d"/>
+      <text x="465" y="174" text-anchor="middle" fill="#e8edf8" font-size="14" font-weight="600">Keeper_gate</text>
+      <text x="465" y="193" text-anchor="middle" fill="#9aa8c7" font-size="11.5">durable 승인 큐 · 대시보드 Gate 모드</text>
+      <text x="465" y="210" text-anchor="middle" fill="#9aa8c7" font-size="11.5">사람이 안 봐도 요청이 남는다</text>
+      <text x="465" y="227" text-anchor="middle" fill="#ff7b86" font-size="11.5" font-weight="600">내장 도구 3종만 받는다</text>
+
+      <rect x="690" y="18" width="230" height="60" rx="10" fill="#121a30" stroke="#2b385d"/>
+      <text x="805" y="42" text-anchor="middle" fill="#e8edf8" font-size="14" font-weight="600">바깥 서비스 도구</text>
+      <text x="805" y="61" text-anchor="middle" fill="#9aa8c7" font-size="11.5">Jira · Slack · GitHub</text>
+
+      <rect x="690" y="150" width="230" height="86" rx="10" fill="#121a30" stroke="#2b385d"/>
+      <text x="805" y="174" text-anchor="middle" fill="#e8edf8" font-size="14" font-weight="600">내장 도구</text>
+      <text x="805" y="193" text-anchor="middle" fill="#72e0a0" font-size="11.5">tool_execute · 315건</text>
+      <text x="805" y="210" text-anchor="middle" fill="#72e0a0" font-size="11.5">memory_write · 50건</text>
+      <text x="805" y="227" text-anchor="middle" fill="#72e0a0" font-size="11.5">network_read · 9건</text>
+
+      <line x1="220" y1="48" x2="322" y2="55" stroke="#62d6e8" stroke-width="1.6" marker-end="url(#ar)"/>
+      <line x1="220" y1="60" x2="322" y2="180" stroke="#62d6e8" stroke-width="1.6" marker-end="url(#ar)"/>
+      <line x1="600" y1="193" x2="682" y2="193" stroke="#62d6e8" stroke-width="1.6" marker-end="url(#ar)"/>
+
+      <line x1="240" y1="30" x2="682" y2="40" stroke="#ff7b86" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#arRed)"/>
+      <text x="455" y="24" text-anchor="middle" fill="#ff7b86" font-size="12" font-weight="700">아무 데도 안 들른다</text>
+
+      <text x="20" y="300" fill="#9aa8c7" font-size="12.5">오늘 Gate 가 받은 operation 은 세 가지뿐이다. 바깥 서비스 이름은 한 건도 없다.</text>
+      <text x="20" y="322" fill="#9aa8c7" font-size="12.5">막힌 것이 아니라, 애초에 오지 않았다.</text>
+    </svg>
+    <figcaption>두 체계가 각자 반쪽을 덮고, 바깥 서비스로 나가는 쓰기는 그 사이로 빠진다.</figcaption>
+  </figure>
+
+  <h2>3. 왜 둘 다 못 막았나</h2>
+
+  <h3>Keeper_gate — 바깥 서비스 도구가 들어오지 않는다</h3>
+
+  <p>
+    <code>Keeper_gate.decide</code> 를 부르는 곳은 세 군데다. 전부 masc 가 직접 들고 있는 도구다.
+  </p>
+
+  <pre><code>lib/keeper/keeper_tool_in_process_runtime.ml:42    → network_read
+lib/keeper/keeper_tool_execute_runtime.ml:478     → tool_execute
+lib/keeper/keeper_tool_filesystem_runtime.ml:1440 → (파일)</code></pre>
+
+  <p>
+    Keeper 가 identity 로 붙인 서비스의 도구는 이 목록에 없다. Gate 의 계약서 첫 줄이
+    "이미 정규화된 불투명한 operation 을 받는다"고 선언하는데, 바깥 서비스 도구를
+    그 형태로 바꿔 넣어주는 코드가 없다.
+  </p>
+
+  <p>오늘 하루 승인 감사 기록을 세면 그대로 드러난다.</p>
+
+  <pre><code>$ rg -o '"tool":"[^"]*"' .masc/audit-approvals/2026-08/27.jsonl | sort | uniq -c
+ 315 "tool":"tool_execute"
+  50 "tool":"memory_write"
+   9 "tool":"network_read"</code></pre>
+
+  <h3>Keeper_tool_approval_gate — 판단은 할 줄 아는데 한 경로에만 붙는다</h3>
+
+  <p>
+    이쪽은 바깥 서비스 도구를 판단하도록 만들어져 있다. 서비스가 스스로 밝힌
+    <code>annotations.readOnlyHint</code> 를 보고, 읽기만 하는 호출은 통과시키고 나머지는 물어본다.
+    주석에 의도가 분명히 적혀 있다.
+  </p>
+
+  <div class="quote">
+    A service that said nothing leaves the call asked about — silence is not permission,
+    and writing to somebody else's Jira unasked is the outcome that has to stay unreachable.
+    <cite>lib/keeper/keeper_tool_approval_policy.mli</cite>
+  </div>
+
+  <p>
+    쓰인 대로만 보면 이번 사고는 일어날 수 없다. 그런데 이 판단을 태우는 훅이
+    <strong>턴 경로 하나에만 붙는다</strong>. 게이트를 넘기는 인자가 선택 사항이라,
+    안 넘겨도 컴파일이 지나가고 안 넘기면 조용히 게이트 없이 돈다.
+  </p>
+
+  <pre><code>(* keeper_turn_driver_try_provider.ml:823 *)
+match ctx.approval_gate with
+| None -&gt; ctx.hooks          (* 게이트가 아예 안 붙는다 *)
+| Some gate -&gt; (* 훅 합성 *)</code></pre>
+
+  <pre><code>$ rg -n "~approval_gate" lib/ bin/
+lib/server/server_routes_http_keeper_stream.ml:1759   ← 여기 한 곳뿐</code></pre>
+
+  <p>
+    kidsnote 는 대시보드에서 턴을 돌렸다. 그 경로에는 게이트가 없었으므로,
+    Gate 모드가 <code>Human</code> 이든 <code>Auto Judge</code> 든 결과가 같았다.
+  </p>
+
+  <h3>그리고 이건 실수가 아니다</h3>
+
+  <p>
+    게이트를 만드는 자리에 이유가 적혀 있다.
+  </p>
+
+  <div class="quote">
+    autonomous cycle gets none — nobody is watching it, so every call it made would
+    wait out the timeout and then be denied.
+    <cite>lib/server/server_routes_http_keeper_stream.ml:1638</cite>
+  </div>
+
+  <p>
+    까닭은 <code>publish</code> 인자에 있다. 이 게이트는 승인 요청을
+    <strong>지금 열려 있는 채팅 스트림</strong>으로 밀어낸다. 사람이 그 화면을 보고 있어야 전달된다.
+    자율 사이클에는 그 스트림이 없으니 물어볼 방법이 없고, 그래서 <strong>막는 대신 통과시키기로</strong> 한 것이다.
+  </p>
+
+  <pre><code>~publish:(fun event -&gt; push_worker_event (Stream_chat_event event))</code></pre>
+
+  <p>
+    선택지가 "전부 거부" 아니면 "전부 통과" 둘뿐이었고 후자를 골랐다.
+    그 판단 자체는 이해할 수 있다. 다만 <strong>그 선택이 바깥 서비스 쓰기에까지 적용된다는 것</strong>은
+    아무 데도 적혀 있지 않았다.
+  </p>
+
+  <h2>4. 이번에 확인한 사실</h2>
+
+  <table>
+    <thead>
+      <tr><th>확인한 것</th><th>결과</th><th>근거</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Gate 모드가 느슨했나</td>
+        <td class="ok">아니다</td>
+        <td><code>gate/mode.json</code> = <code>auto_judge</code>, 정상 운영 값</td>
+      </tr>
+      <tr>
+        <td>Yolo 로 열어둔 keeper 가 있었나</td>
+        <td class="ok">없다</td>
+        <td><code>/api/v1/keepers/tool-approval-mode</code> → <code>overrides: []</code></td>
+      </tr>
+      <tr>
+        <td>always-allow 규칙이 열어줬나</td>
+        <td class="ok">아니다</td>
+        <td>6개 전부 <code>analyst</code> 의 <code>network_read</code>. Jira 관련 규칙 없음</td>
+      </tr>
+      <tr>
+        <td>Gate 가 판단하고 허용했나</td>
+        <td class="bad">판단 자체가 없었다</td>
+        <td>사고 시각(<code>T05:0*</code>)에 승인 감사 기록 0건</td>
+      </tr>
+      <tr>
+        <td>Gate 가 살아는 있나</td>
+        <td class="ok">있다</td>
+        <td>같은 날 14:10 <code>gate_allowed</code> 기록 존재 (<code>network_read</code>)</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    다섯 줄이 한 방향을 가리킨다. <strong>고장난 것이 없다.</strong>
+    각 부품은 설계대로 움직였고, 바깥 서비스로 쓰는 길만 어느 부품의 관할도 아니었다.
+  </p>
+
+  <h2>5. 무엇을 바꾸나</h2>
+
+  <p>
+    바깥 서비스 도구를 <code>Keeper_gate</code> 에 태운다. 스트림에 매인 쪽이 아니라
+    durable 큐를 쓰는 쪽이다. 사람이 보고 있지 않아도 요청이 남고, 나중에 대시보드에서 처리된다.
+  </p>
+
+  <div class="grid2">
+    <div class="panel">
+      <h3>판단 기준</h3>
+      <ul>
+        <li><code>readOnlyHint = Some true</code> → 그대로 실행</li>
+        <li><code>Some false</code> 또는 <strong>말이 없으면</strong> → Gate 로</li>
+      </ul>
+      <p style="margin-bottom:0">
+        읽기까지 승인을 받게 하면 아무도 아무것도 안 읽는다.
+        침묵을 허가로 읽지 않는 원칙은 기존 정책 주석 그대로 가져온다.
+      </p>
+    </div>
+    <div class="panel">
+      <h3>통과 방식</h3>
+      <p style="margin-bottom:0">
+        내장 도구 세 종이 이미 쓰는 형태를 그대로 따른다.
+        Gate 가 <code>Deferred</code> 를 내면 도구는 "승인 대기" 오류를 돌려주고 Keeper 는 계속 산다.
+        새 구조를 만들지 않는다.
+      </p>
+    </div>
+  </div>
+
+  <pre><code>match Keeper_gate.decide { keeper_name; operation; input; ... } with
+| Deferred { approval_id; reason; audit_receipts } -&gt; Error (Gate_deferred ...)
+| Unavailable reason                               -&gt; Error (Gate_unavailable ...)
+| Allow authorization                              -&gt; (* 실행 *)</code></pre>
+
+  <p>
+    이렇게 되면 Jira · Slack · GitHub 쓰기가 대시보드의 Gate 모드를 그대로 탄다.
+    keeper 별 always-allow 규칙도 이미 있는 것을 쓴다.
+  </p>
+
+  <h3>건드릴 것 / 안 건드릴 것</h3>
+
+  <table>
+    <thead><tr><th>파일</th><th>무엇을</th></tr></thead>
+    <tbody>
+      <tr><td><code>lib/keeper/keeper_identity_tools.ml</code></td><td>바깥 서비스 도구의 실행 함수를 Gate 로 감싼다</td></tr>
+      <tr><td><code>lib/keeper/keeper_identity_tools.mli</code></td><td>계약 갱신</td></tr>
+      <tr><td><code>test/</code></td><td>읽기는 통과 · 쓰기는 대기 · 말 없으면 대기, 세 경우</td></tr>
+      <tr><td class="foot">기존 런타임 세 종</td><td class="foot">안 건드린다</td></tr>
+      <tr><td class="foot"><code>Keeper_tool_approval_gate</code></td><td class="foot">이번 변경 범위 밖. 6절 참고</td></tr>
+    </tbody>
+  </table>
+
+  <h2>6. 정해야 할 것</h2>
+
+  <h3>결정 1 · 승인 뒤에 누가 다시 부르나</h3>
+
+  <table>
+    <thead><tr><th></th><th>동작</th><th>대가</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>A. 대신 실행</strong></td>
+        <td>승인되면 masc 가 그 호출을 재실행</td>
+        <td>기존 <code>network_read</code> 와 같은 모양. 대신 승인된 입력에서 호출을 복원하는 코드가 도구마다 필요하다</td>
+      </tr>
+      <tr>
+        <td><strong>B. 다시 부르게 둔다</strong> <span class="warn">(제안)</span></td>
+        <td>승인되면 Keeper 가 다음 턴에 스스로 다시 부름</td>
+        <td>코드가 훨씬 적고 <code>projects.md</code> 의 "다음 행동은 Keeper 가 선택한다"에 맞는다. 대신 Keeper 가 안 부르면 그 일은 안 된다</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    이번 사고는 "승인 없이 나갔다"는 문제다. B 로도 그것은 막힌다.
+    재실행은 필요해지는 시점에 따로 붙여도 늦지 않다.
+  </p>
+
+  <h3>결정 2 · 스트림에 매인 게이트를 어떻게 할 것인가</h3>
+
+  <p>
+    이 변경이 끝나면 <code>Keeper_tool_approval_gate</code> 는 자기 판단을 Gate 와 겹치게 한다.
+    같은 질문에 두 곳이 서로 다른 답을 낼 수 있는 상태를 남겨두면 안 된다.
+    다만 이번 PR 범위 밖이고, 별도로 다룬다.
+  </p>
+
+  <h2>7. 어떻게 확인하나</h2>
+
+  <ol>
+    <li>테스트 — <code>readOnlyHint</code> 세 경우(참 · 거짓 · 없음)에 각각 실행 · 대기 · 대기가 나오는지</li>
+    <li>실물 — keeper 하나를 붙여 Jira 쓰기를 시키고, 대시보드 승인 목록에 뜨는지</li>
+    <li>감사 — <code>audit-approvals</code> 에 그 operation 이름이 실제로 찍히는지.
+        오늘처럼 세 가지만 나오면 배선이 안 된 것이다</li>
+    <li>읽기 회귀 — 조회 도구가 여전히 안 물어보고 도는지</li>
+  </ol>
+
+  <p>
+    3번이 이번 문서의 핵심 지표다. 감사 기록에 이름이 없으면 그 호출은 Gate 를 지나지 않은 것이고,
+    그것이 이번 사고의 전부였다.
+  </p>
+
+  <hr>
+
+  <h2>남은 것</h2>
+
+  <p>
+    이 문서와 별개로, 같은 조사에서 나온 두 가지를 적어둔다.
+  </p>
+
+  <ul>
+    <li>
+      <strong>Gate 모드와 판정 모델이 workspace 전역이다.</strong>
+      <code>gate/mode.json</code> 에도 <code>hitl_auto_judge</code> lane 에도 keeper 를 가릴 자리가 없다.
+      always-allow 규칙만 keeper 별이다. 이 변경 위에 얹는 것이 순서다.
+    </li>
+    <li>
+      <strong>always-allow 규칙을 볼 화면이 없다.</strong>
+      6개 전부 승인 화면에서 "항상 허용"을 고를 때 생긴 것인데(<code>source_approval_id</code> 가 달려 있다),
+      나중에 목록을 보거나 지우는 자리가 TUI 에도 대시보드에도 없다. 만들 수만 있고 걷을 수는 없다.
+    </li>
+  </ul>
+
+  <p class="foot" style="margin-top:38px">
+    조사 근거는 전부 2026-08-27 라이브 런타임에서 읽은 값이다.
+    감사 기록 · Gate 상태 파일 · agent timeline · 소스 트리 위치를 본문에 함께 적었다.
+  </p>
+
+</main>
+</body>
+</html>

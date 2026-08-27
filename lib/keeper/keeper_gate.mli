@@ -112,6 +112,19 @@ val decide :
   request ->
   decision
 
+(** {!decide} for an effect that leaves the workspace for an attached outside
+    service. Identical evaluation — one-shot grants, the Keeper profile
+    switch, and exact Always Allow rules all apply — except the mode comes
+    from {!Keeper_gate_mode.read_external} instead of the workspace lane, so
+    opening the workspace ([Always_allow]) does not open outside writes. A
+    separate entry point rather than an optional lane argument: the last hole
+    in this area was an optional gate parameter that compiled when omitted. *)
+val decide_external_service :
+  ?cycle_grant:cycle_grant ->
+  keeper_always_allow:bool ->
+  request ->
+  decision
+
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
     [(base_path, keeper_name)] owner activates at most one entry: the oldest
     one that still carries Auto Judge work. An oldest entry that is failed,

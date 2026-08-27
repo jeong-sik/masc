@@ -3305,6 +3305,138 @@ let test_decode_secret_projection_rejects_a_wrong_env_name_type () =
   | Ok _ -> Alcotest.fail "a non-string env name was accepted"
   | Error _ -> ()
 
+(* ── the durable Gate snapshot ──────────────────────────────────────── *)
+
+let gate_snapshot_json ?(queue = `List []) ?(hitl = `Null) () =
+  `Assoc [ ("approval_queue", queue); ("hitl", hitl) ]
+
+let test_decode_gate_identity_row_reads_its_target () =
+  (* The row a human decides on: an identity_call names its provider and
+     remote tool from the stored input, and the closed operation stays
+     readable beside it. *)
+  let row =
+    `Assoc
+      [ ("id", `String "appr-1");
+        ("keeper_name", `String "kidsnote");
+        ("tool_name", `String "identity_call");
+        ("input_preview", `String "{\"provider_id\":\"atlassian\"}");
+        ("waiting_s", `Int 42);
+        ( "input",
+          `Assoc
+            [ ("provider_id", `String "atlassian");
+              ("remote_name", `String "addCommentToJiraIssue");
+              ("arguments", `Assoc []);
+            ] );
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      match snapshot.Tui_decode.gs_pending with
+      | [ pending ] ->
+          Alcotest.check Alcotest.string "operation" "identity_call"
+            pending.Tui_decode.gp_operation;
+          Alcotest.check Alcotest.string "display"
+            "atlassian \xc2\xb7 addCommentToJiraIssue"
+            pending.Tui_decode.gp_display_tool;
+          Alcotest.check
+            Alcotest.(option (float 0.01))
+            "waiting" (Some 42.) pending.Tui_decode.gp_waiting_s
+      | rows ->
+          Alcotest.failf "expected one pending row, got %d" (List.length rows))
+
+let test_decode_gate_null_queue_is_empty_with_modes () =
+  (* The server sends [null] when the queue store is unavailable; the lanes
+     still say what they say, and the pane must show that rather than fail. *)
+  let hitl =
+    `Assoc
+      [ ("gate_mode", `Assoc [ ("mode", `String "always_allow") ]);
+        ("external_gate_mode", `Assoc [ ("mode", `String "manual") ]);
+      ]
+  in
+  match Tui_decode.decode_gate_snapshot (gate_snapshot_json ~queue:`Null ~hitl ()) with
+  | Error message -> Alcotest.failf "the snapshot did not decode: %s" message
+  | Ok snapshot -> (
+      Alcotest.check Alcotest.int "no rows" 0
+        (List.length snapshot.Tui_decode.gs_pending);
+      match snapshot.Tui_decode.gs_modes with
+      | Some modes ->
+          Alcotest.check Alcotest.string "workspace lane" "always_allow"
+            modes.Tui_decode.glm_workspace;
+          Alcotest.check Alcotest.string "external lane" "manual"
+            modes.Tui_decode.glm_external
+      | None -> Alcotest.fail "the lanes went missing")
+
+let test_decode_gate_row_missing_id_is_an_error () =
+  let row =
+    `Assoc
+      [ ("keeper_name", `String "kidsnote");
+        ("tool_name", `String "identity_call");
+      ]
+  in
+  match
+    Tui_decode.decode_gate_snapshot
+      (gate_snapshot_json ~queue:(`List [ row ]) ())
+  with
+  | Ok _ -> Alcotest.fail "a row with no id decoded"
+  | Error _ -> ()
+
+let keeper_gate_settings_json =
+  `Assoc
+    [ ( "modes"
+      , `List
+          [ `Assoc [ ("keeper_name", `String "kidsnote"); ("mode", `String "manual") ] ] )
+    ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+    ; ( "judges"
+      , `List
+          [ `Assoc
+              [ ("keeper_name", `String "kidsnote")
+              ; ("slot_id", `String "glm-coding.glm-5-turbo")
+              ] ] )
+    ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+    ]
+
+let test_decode_keeper_gate_settings_reads_both_lists () =
+  match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok (modes, judges) ->
+    Alcotest.(check (list (pair string string)))
+      "modes" [ ("kidsnote", "manual") ] modes;
+    Alcotest.(check (list (pair string string)))
+      "judges" [ ("kidsnote", "glm-coding.glm-5-turbo") ] judges
+
+let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
+  (* Nobody singled out is a working configuration, not a missing answer. *)
+  let json =
+    `Assoc
+      [ ("modes", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("judges", `List [])
+      ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Ok ([], []) -> ()
+  | Ok _ -> Alcotest.fail "invented a setting nobody made"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+
+let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
+  (* A row that names no Keeper cannot be shown against one, and dropping it
+     silently would leave a setting in force that no detail pane mentions. *)
+  let json =
+    `Assoc
+      [ ("modes", `List [ `Assoc [ ("mode", `String "manual") ] ])
+      ; ("judges", `List [])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
+
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -3599,6 +3731,15 @@ let () =
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
       ] );
+    ( "keeper_gate_settings",
+      [
+        Alcotest.test_case "reads both lists" `Quick
+          test_decode_keeper_gate_settings_reads_both_lists;
+        Alcotest.test_case "takes an empty workspace" `Quick
+          test_decode_keeper_gate_settings_takes_an_empty_workspace;
+        Alcotest.test_case "rejects a row without a keeper" `Quick
+          test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
+      ] );
     ( "keeper_secret_projection",
       [
         Alcotest.test_case "reads names, never values" `Quick
@@ -3609,5 +3750,14 @@ let () =
           test_decode_secret_projection_keeps_an_unknown_status;
         Alcotest.test_case "rejects a wrong env name type" `Quick
           test_decode_secret_projection_rejects_a_wrong_env_name_type;
+      ] );
+    ( "gate_snapshot",
+      [
+        Alcotest.test_case "an identity row reads its target" `Quick
+          test_decode_gate_identity_row_reads_its_target;
+        Alcotest.test_case "a null queue is empty with modes" `Quick
+          test_decode_gate_null_queue_is_empty_with_modes;
+        Alcotest.test_case "a row missing its id is an error" `Quick
+          test_decode_gate_row_missing_id_is_an_error;
       ] );
   ]

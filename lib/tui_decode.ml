@@ -3257,6 +3257,131 @@ let decode_tool_approval_mode_overrides json =
   in
   loop [] items
 
+type gate_pending = {
+  gp_id : string;
+  gp_keeper : string;
+  gp_operation : string;
+  gp_display_tool : string;
+  gp_input_preview : string option;
+  gp_waiting_s : float option;
+}
+
+type gate_lane_modes = {
+  glm_workspace : string;
+  glm_external : string;
+}
+
+type gate_snapshot = {
+  gs_pending : gate_pending list;
+  gs_modes : gate_lane_modes option;
+}
+
+(* What a human decides on. An identity_call row carries the real target
+   inside its input; the closed operation name alone would make every
+   outside-service row read the same. The literal comes from the producer so
+   the two cannot drift. *)
+let gate_display_tool ~operation input =
+  if not (String.equal operation Keeper_identity_gate.gate_operation) then
+    operation
+  else
+    match input with
+    | Some input -> (
+        let provider =
+          match optional_string_field input "provider_id" with
+          | Ok (Some value) when String.trim value <> "" -> Some value
+          | Ok _ | Error _ -> None
+        in
+        let remote =
+          match optional_string_field input "remote_name" with
+          | Ok (Some value) when String.trim value <> "" -> Some value
+          | Ok _ | Error _ -> None
+        in
+        match provider, remote with
+        | Some provider, Some remote -> provider ^ " \xc2\xb7 " ^ remote
+        | None, Some remote -> remote
+        | Some _, None | None, None -> operation)
+    | None -> operation
+
+let decode_gate_pending json =
+  let* gp_id = required_string_field json "id" in
+  let* gp_keeper = required_string_field json "keeper_name" in
+  let* gp_operation = required_string_field json "tool_name" in
+  let* gp_input_preview = optional_string_field json "input_preview" in
+  let gp_waiting_s =
+    match member "waiting_s" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let input =
+    match member "input" json with
+    | `Assoc _ as input -> Some input
+    | _ -> None
+  in
+  Ok
+    {
+      gp_id;
+      gp_keeper;
+      gp_operation;
+      gp_display_tool = gate_display_tool ~operation:gp_operation input;
+      gp_input_preview;
+      gp_waiting_s;
+    }
+
+let decode_gate_lane_modes json =
+  let* workspace = required_object_field json "gate_mode" in
+  let* glm_workspace = required_string_field workspace "mode" in
+  let* external_lane = required_object_field json "external_gate_mode" in
+  let* glm_external = required_string_field external_lane "mode" in
+  Ok { glm_workspace; glm_external }
+
+let decode_gate_snapshot json =
+  let* gs_pending =
+    match member "approval_queue" json with
+    (* The server sends [null] when the queue store is unavailable; the
+       snapshot still carries the lanes, so this is empty-with-modes rather
+       than a decode failure. The dashboard shows the same face. *)
+    | `Null -> Ok []
+    | `List items ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+              let* decoded = decode_gate_pending item in
+              loop (decoded :: acc) rest
+        in
+        loop [] items
+    | _ -> Error "approval_queue is neither a list nor null"
+  in
+  let* gs_modes =
+    match member "hitl" json with
+    | `Null -> Ok None
+    | hitl ->
+        let* modes = decode_gate_lane_modes hitl in
+        Ok (Some modes)
+  in
+  Ok { gs_pending; gs_modes }
+
+(* The durable per-Keeper Gate settings, which are a different thing from the
+   in-memory YOLO stance above: this is what the Gate decides an external
+   effect under, and it survives a restart. Both lists carry only Keepers
+   somebody singled out, so an empty one means everybody follows the
+   workspace. *)
+let decode_keeper_gate_settings json =
+  let pairs field value_key =
+    let* items = required_list_field json field in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* keeper = required_string_field item "keeper_name" in
+        let* value = required_string_field item value_key in
+        loop ((keeper, value) :: acc) rest
+    in
+    loop [] items
+  in
+  let* modes = pairs "modes" "mode" in
+  let* judges = pairs "judges" "slot_id" in
+  Ok (modes, judges)
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function

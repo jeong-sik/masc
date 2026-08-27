@@ -31,8 +31,6 @@ type composition =
 
 type t = skill list
 
-type named_skill_error = Missing_named_skill of { name : string }
-
 type error =
   | Definition_rejected of
       { directory : string
@@ -54,6 +52,10 @@ type error =
   | Composition_name_mismatch of
       { skill : string
       ; declared : string
+      }
+  | Composition_info_near_miss of
+      { skill : string
+      ; info : string
       }
   | Removed_invocation_policy of
       { skill : string
@@ -106,14 +108,15 @@ type exact_surface =
   ; availability : exact_surface_availability
   }
 
-let composition_fence_open = "```toml composition"
+let composition_fence_info = "toml composition"
+let composition_fence_open = "```" ^ composition_fence_info
 
 let composition_blocks body =
   Keeper_skill_body_ast.parse body
   |> Keeper_skill_body_ast.fenced_code_blocks
   |> List.filter
        (fun (block : Keeper_skill_body_ast.fenced_code_block) ->
-          String.equal block.info "toml composition")
+          String.equal block.info composition_fence_info)
   |> fun blocks ->
   match
     List.find_opt
@@ -123,6 +126,34 @@ let composition_blocks body =
   with
   | Some _ -> Error `Unterminated
   | None -> Ok blocks
+;;
+
+(* The fence info string is an exact contract, so an info string that only
+   normalizes to it — case, tabs, doubled spaces — currently yields a silent
+   instruction skill and no composition tool. Surface that near-miss as an
+   advisory diagnostic without touching the projection. Normalization is a
+   closed rewrite (ASCII lowercase + whitespace collapse), not a fuzzy
+   classifier: a genuinely different info string stays an ordinary code block
+   with no diagnostic. *)
+let composition_info_near_misses body =
+  Keeper_skill_body_ast.parse body
+  |> Keeper_skill_body_ast.fenced_code_blocks
+  |> List.filter_map (fun (block : Keeper_skill_body_ast.fenced_code_block) ->
+       if String.equal block.info composition_fence_info
+       then None
+       else (
+         let normalized =
+           String.lowercase_ascii block.info
+           |> String.map (function
+                | '\t' -> ' '
+                | ch -> ch)
+           |> String.split_on_char ' '
+           |> List.filter (fun segment -> not (String.equal segment ""))
+           |> String.concat " "
+         in
+         if String.equal normalized composition_fence_info
+         then Some block.info
+         else None))
 ;;
 
 let composition_of_block ~skill block =
@@ -277,6 +308,7 @@ let composition_projection_failed = function
   | Composition_name_mismatch _ ->
     true
   | Definition_rejected _
+  | Composition_info_near_miss _
   | Removed_invocation_policy _
   | Duplicate_skill _ ->
     false
@@ -306,6 +338,23 @@ let project_entries snapshot entries =
        (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
           match project_entry_or_fallback snapshot entry with
           | Projected skill ->
+            let diagnostics =
+              match skill.surface with
+              | Composition _ -> diagnostics
+              | Instruction ->
+                (* Advisory only: the entry stays a projected instruction
+                   skill; the diagnostic tells the author why no composition
+                   tool appeared. *)
+                List.fold_left
+                  (fun diagnostics info ->
+                     { identity = entry.identity
+                     ; error =
+                         Composition_info_near_miss { skill = skill.name; info }
+                     }
+                     :: diagnostics)
+                  diagnostics
+                  (composition_info_near_misses skill.body)
+            in
             skill :: catalog, diagnostics
           | Frozen_instruction { skill; diagnostic } ->
             skill :: catalog, { identity = entry.identity; error = diagnostic } :: diagnostics
@@ -463,20 +512,6 @@ let instruction_entries catalog =
     catalog
 ;;
 
-let instruction_names_for catalog names =
-  let rec resolve instruction_names = function
-    | [] -> Ok (List.rev instruction_names)
-    | name :: rest ->
-      (match find catalog name with
-       | None -> Error (Missing_named_skill { name })
-       | Some skill ->
-         (match skill.surface with
-          | Instruction -> resolve (name :: instruction_names) rest
-          | Composition _ -> resolve instruction_names rest))
-  in
-  resolve [] names
-;;
-
 let compositions catalog =
   List.filter_map
     (fun skill ->
@@ -522,6 +557,7 @@ let error_code = function
   | Composition_rejected _ -> "composition_rejected"
   | Not_exactly_one_composition _ -> "not_exactly_one_composition"
   | Composition_name_mismatch _ -> "composition_name_mismatch"
+  | Composition_info_near_miss _ -> "composition_info_near_miss"
   | Removed_invocation_policy _ -> "removed_invocation_policy"
   | Duplicate_skill _ -> "duplicate_skill"
 ;;
@@ -560,6 +596,15 @@ let error_to_string = function
       "skill %S: composition name %S must equal the skill name"
       skill
       declared
+  | Composition_info_near_miss { skill; info } ->
+    Printf.sprintf
+      "skill %S: fence info %S reads like %S but does not match it exactly, so \
+       the block stayed an ordinary code block and the skill an instruction; \
+       write the info string exactly as %S to declare a composition"
+      skill
+      info
+      composition_fence_info
+      composition_fence_info
   | Removed_invocation_policy { skill; field } ->
     Printf.sprintf
       "skill %S: %s is unsupported; the composition fence alone determines the surface"

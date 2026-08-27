@@ -3,10 +3,21 @@ let dir ~base_path =
 ;;
 
 let mode ~base_path = Filename.concat (dir ~base_path) "mode.json"
+
+let external_mode ~base_path =
+  Filename.concat (dir ~base_path) "external-mode.json"
+;;
 let pending ~base_path = Filename.concat (dir ~base_path) "pending.json"
 let replay_results ~base_path =
   Filename.concat (dir ~base_path) "replay-results.json"
 ;;
 
 let always_allowed ~base_path = Filename.concat (dir ~base_path) "always-allowed.json"
+;;
+
+let keeper_modes ~base_path = Filename.concat (dir ~base_path) "keeper-modes.json"
+;;
+
+let keeper_judge_slots ~base_path =
+  Filename.concat (dir ~base_path) "keeper-judge-slots.json"
 ;;

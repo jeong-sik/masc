@@ -103,18 +103,30 @@ let batch_text = function
   | Some (index, size) -> Printf.sprintf " [%d/%d]" (index + 1) size
   | None -> ""
 
+(* Mirrors Keeper_tool_composition_catalog.{skill_tool_name,tool_name_prefix}.
+   Those tool names are a stable wire contract (RFC skills-as-tools keeps
+   them identical across migrations); this projection library deliberately
+   depends only on the observer, so it names them instead of linking the
+   keeper catalog. Display tagging only — never a dispatch decision. *)
+let skill_read_tool_name = "keeper_skill"
+let composition_tool_name_prefix = "keeper_compose_"
+
+let is_skill_tool tool =
+  String.equal tool skill_read_tool_name
+  || String.starts_with ~prefix:composition_tool_name_prefix tool
+
 let agent_core_row ~at ~duration_ms (e : Observer.agent_core) =
   let tool = Option.value ~default:"?" e.Observer.tool in
   let glyph, label, detail =
     match e.Observer.kind with
     | Observer.Tool_called ->
         ( Call_started
-        , "call"
+        , (if is_skill_tool tool then "skill call" else "call")
         , Printf.sprintf "%s%s \xc2\xb7 %s" tool (batch_text e.Observer.batch)
             (turn_text e.Observer.turn) )
     | Observer.Tool_completed ->
         ( Call_returned
-        , "returned"
+        , (if is_skill_tool tool then "skill returned" else "returned")
         , Printf.sprintf "%s%s%s" tool
             (match duration_ms with
              | Some ms -> " \xc2\xb7 " ^ elapsed_text ms
@@ -185,13 +197,15 @@ let row_of_event ~at ~duration_ms (event : Observer.event) =
            | (Some true | Some false | None), (Some _ | None) -> phase)
       }
   | Observer.Keeper_tool_call c ->
+      let skill = is_skill_tool c.Observer.kt_tool in
       { at
       ; keeper = c.Observer.kt_keeper
       ; glyph = Call_returned
       ; label =
           (match c.Observer.kt_disposition with
-           | Some disposition -> disposition
-           | None -> "tool call")
+           | Some disposition ->
+               if skill then "skill \xc2\xb7 " ^ disposition else disposition
+           | None -> if skill then "skill call" else "tool call")
       ; detail =
           (match c.Observer.kt_duration_ms with
            | Some ms -> c.Observer.kt_tool ^ " \xc2\xb7 " ^ elapsed_text ms

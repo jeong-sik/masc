@@ -932,6 +932,75 @@ let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
 
+(** POST /api/v1/keepers/<name>/identity-switch — turn one attached service
+    on or off for this keeper without touching the consent. *)
+let post_identity_switch ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(provider_id : string) ~(enabled : bool) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("provider", `String provider_id); ("enabled", `Bool enabled) ])
+  in
+  match
+    post_json ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/keepers/%s/identity-switch" keeper_name)
+      ~body
+  with
+  | Error detail -> Error detail
+  | Ok json -> (
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "ok" fields with
+          | Some (`Bool true) -> Ok ()
+          | Some _ | None -> Error "identity switch response does not say ok")
+      | _ -> Error "identity switch response was not a JSON object")
+
+(** GET /api/v1/dashboard/gate — the durable Gate: pending approvals that
+    survive nobody watching, plus both lane modes. *)
+let fetch_dashboard_gate ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/gate"
+
+let expect_ok_true ~(what : string) json =
+  match json with
+  | `Assoc fields -> (
+      match List.assoc_opt "ok" fields with
+      | Some (`Bool true) -> Ok ()
+      | Some _ | None -> Error (what ^ " response does not say ok"))
+  | _ -> Error (what ^ " response was not a JSON object")
+
+(** POST /api/v1/dashboard/gate/resolve — decide one durable Gate approval. *)
+let post_dashboard_gate_resolve ~(host : string) ~(port : int)
+    ~(approval_id : string) ~(approve : bool) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("id", `String approval_id)
+         ; ("decision", `String (if approve then "approve" else "reject"))
+         ])
+  in
+  match post_json ~host ~port ~path:"/api/v1/dashboard/gate/resolve" ~body with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate resolve" json
+
+(** POST /api/v1/dashboard/gate/external-mode — set the external-services
+    lane. Its own switch: the workspace lane never opens this one. *)
+let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
+    ~(mode : string) : (unit, string) result =
+  let body = Yojson.Safe.to_string (`Assoc [ ("mode", `String mode) ]) in
+  match
+    post_json ~host ~port ~path:"/api/v1/dashboard/gate/external-mode" ~body
+  with
+  | Error detail -> Error detail
+  | Ok json -> expect_ok_true ~what:"gate external mode" json
+
+(** GET /api/v1/dashboard/gate/keeper-settings — durable per-keeper Gate
+    settings: which Keepers were held stricter than the workspace, and which
+    judge each is put to first. *)
+let fetch_keeper_gate_settings ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/gate/keeper-settings"
+
 (** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
 let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

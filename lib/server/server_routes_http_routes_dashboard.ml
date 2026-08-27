@@ -879,7 +879,128 @@ module For_testing = struct
   let fusion_run_list_response = fusion_run_list_response
 end
 
-let handle_gate_mode_body state operator_name request reqd body_str =
+(* One keeper held to a higher bar than the workspace. Its own handler
+   rather than a field on the workspace one: the two answer different
+   questions, and a body that omitted [keeper_name] would otherwise move
+   every keeper at once. *)
+(* Which of the lane's admitted judges this Keeper is put to first. Naming a
+   slot the lane does not offer is refused here rather than at the next
+   judgment, so an operator finds out while they are still looking at the
+   screen they set it on. *)
+let handle_gate_keeper_judge_body state operator_name request reqd body_str =
+  let refuse message =
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (operator_error_json message)
+  in
+  try
+    let fields =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> fields
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        []
+    in
+    match List.assoc_opt "keeper_name" fields with
+    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+      match
+        match List.assoc_opt "slot_id" fields with
+        | None | Some `Null -> Ok None
+        | Some (`String slot_id) when String.trim slot_id <> "" ->
+          Ok (Some (String.trim slot_id))
+        | Some _ -> Error "slot_id must be a non-empty string or null"
+      with
+      | Error message -> refuse message
+      | Ok slot_id -> (
+        let config = Mcp_server.workspace_config state in
+        match
+          Keeper_gate_judge_slot.set config ~actor:operator_name ~keeper_name
+            slot_id
+        with
+        | Error message -> refuse message
+        | Ok current ->
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "gate:%s;" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "gate_keeper_judge_changed"
+               ; "keeper_name", `String keeper_name
+               ; ( "slot_id"
+                 , match slot_id with
+                   | Some slot_id -> `String slot_id
+                   | None -> `Null )
+               ]);
+          respond_json_value_with_cors request reqd
+            (`Assoc
+               [ "ok", `Bool true
+               ; "keeper_name", `String keeper_name
+               ; ( "slot_id"
+                 , match current with
+                   | Some current -> `String current.Keeper_gate_judge_slot.slot_id
+                   | None -> `Null )
+               ])))
+    | Some _ | None -> refuse "keeper_name is required"
+  with Yojson.Json_error message -> refuse message
+;;
+
+let handle_gate_keeper_mode_body state operator_name request reqd body_str =
+  let refuse message =
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (operator_error_json message)
+  in
+  try
+    let fields =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> fields
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        []
+    in
+    match List.assoc_opt "keeper_name" fields with
+    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+      (* An absent mode clears the override; a present one has to parse.
+         Absent and unreadable are different answers and only one of them is
+         a request to stop singling this keeper out. *)
+      match
+        match List.assoc_opt "mode" fields with
+        | None | Some `Null -> Ok None
+        | Some mode_json ->
+          Result.map Option.some (Keeper_gate_mode.parse_json mode_json)
+      with
+      | Error message -> refuse message
+      | Ok mode -> (
+        let config = Mcp_server.workspace_config state in
+        match
+          Keeper_gate_mode.set_for_keeper config ~actor:operator_name
+            ~keeper_name mode
+        with
+        | Error message -> refuse message
+        | Ok change ->
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "gate:%s;" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "gate_keeper_mode_changed"
+               ; "keeper_name", `String keeper_name
+               ; ( "mode"
+                 , match mode with
+                   | Some mode -> `String (Keeper_gate_mode.to_string mode)
+                   | None -> `Null )
+               ]);
+          respond_json_value_with_cors request reqd
+            (match Keeper_gate_mode.keeper_change_json change with
+             | `Assoc fields -> `Assoc fields)))
+    | Some _ | None -> refuse "keeper_name is required"
+  with Yojson.Json_error message -> refuse message
+;;
+
+
+let handle_gate_mode_body_for_lane
+      ~set_mode
+      ~sse_type
+      state
+      operator_name
+      request
+      reqd
+      body_str
+  =
   try
     let args = Yojson.Safe.from_string body_str in
     let mode_json =
@@ -919,19 +1040,19 @@ let handle_gate_mode_body state operator_name request reqd body_str =
               reqd
               (operator_error_json ("Auto Judge unavailable: " ^ detail))
           | Ok () ->
-         (match Keeper_gate_mode.set config ~actor:operator_name mode with
+         (match set_mode config ~actor:operator_name mode with
           | Error message ->
             respond_json_value_with_cors
               ~status:`Bad_request
               request
               reqd
               (operator_error_json message)
-          | Ok change ->
+          | Ok (change : Keeper_gate_mode.change) ->
             Dashboard_cache.invalidate_prefix
               (Printf.sprintf "gate:%s;" config.base_path);
             Sse.broadcast
               (`Assoc
-                 [ "type", `String "gate_mode_changed"
+                 [ "type", `String sse_type
                  ; "mode", `String (Keeper_gate_mode.to_string mode)
                  ; ( "previous_mode"
                    , match change.previous with
@@ -977,6 +1098,28 @@ let handle_gate_mode_body state operator_name request reqd body_str =
       request
       reqd
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
+let handle_gate_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set
+    ~sse_type:"gate_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
+;;
+
+let handle_gate_external_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set_external
+    ~sse_type:"gate_external_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
 ;;
 
 let handle_gate_resolve_body state operator_name request reqd body_str =
@@ -2014,6 +2157,71 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
          request reqd)
+  (* The same two lists the Gate projection carries, on their own so a surface
+     that only wants them does not pay for the approval queue and the resolved
+     history to find out which Keepers were singled out. *)
+  |> Http.Router.get "/api/v1/dashboard/gate/keeper-settings" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let modes, modes_state =
+           match Keeper_gate_mode.keeper_overrides ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_mode.keeper_override) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "mode", `String (Keeper_gate_mode.to_string row.mode)
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         let judges, judges_state =
+           match Keeper_gate_judge_slot.all ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_judge_slot.t) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "slot_id", `String row.slot_id
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         Http.Response.json_value ~compress:true ~request:req
+           (`Assoc
+              [ "modes", modes
+              ; "modes_state", modes_state
+              ; "judges", judges
+              ; "judges_state", judges_state
+              ])
+           reqd)
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/keeper-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_keeper_mode_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/keeper-judge" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_keeper_judge_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/external-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_external_mode_body state operator_name request reqd))
+         request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
@@ -2625,6 +2833,17 @@ let add_routes ~sw ~clock router =
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_identity_refresh_post state req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_identity_switch ->
+           (* Decides whether this keeper's turns are handed that provider's
+              tools at all, so it carries the same authority as the attach
+              that produced them. The operator name feeds the audit row. *)
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_identity_switch_post state
+                   ~actor:agent_name req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_oauth_login ->

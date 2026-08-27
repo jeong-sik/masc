@@ -30,6 +30,16 @@ let keeper keeper_name tool_call_id =
       kta_timeout_sec = 30.;
     }
 
+let gate approval_id =
+  Gate_row
+    { Tui_decode.gp_id = approval_id;
+      gp_keeper = "gate-fixture";
+      gp_operation = "identity_call";
+      gp_display_tool = "atlassian \xc2\xb7 addCommentToJiraIssue";
+      gp_input_preview = Some "{\"provider_id\":\"atlassian\"}";
+      gp_waiting_s = Some 12.;
+    }
+
 let effect_row = function
   | Some resolved -> resolved.Authority.row
   | None -> fail "expected a resolved approval effect"
@@ -52,7 +62,8 @@ let test_reordered_presented_row_keeps_exact_identity () =
   | Keeper_tool_row held ->
       check string "keeper" "keeper-a" held.kta_keeper;
       check string "call" "call-a" held.kta_tool_call_id
-  | Operator_row _ -> fail "Keeper receipt resolved to an operator row"
+  | Operator_row _ | Gate_row _ ->
+      fail "Keeper receipt resolved to another row kind"
 
 let test_operator_token_is_the_identity () =
   let shown = operator "token-a" in
@@ -64,7 +75,30 @@ let test_operator_token_is_the_identity () =
   in
   match row with
   | Operator_row approval -> check string "token" "token-a" approval.ap_token
-  | Keeper_tool_row _ -> fail "operator receipt resolved to a Keeper row"
+  | Keeper_tool_row _ | Gate_row _ ->
+      fail "operator receipt resolved to another row kind"
+
+let test_gate_approval_id_is_the_identity () =
+  (* A durable Gate row is the same ask across refreshes exactly when its
+     approval id matches; a fresh listing must not turn a decision onto a
+     different pending approval. *)
+  let shown = gate "appr-a" in
+  let row =
+    Authority.resolve ~presented:(Some shown)
+      ~current:[ gate "appr-b"; gate "appr-a" ]
+      Confirm
+    |> effect_row
+  in
+  (match row with
+  | Gate_row pending -> check string "approval" "appr-a" pending.Tui_decode.gp_id
+  | Keeper_tool_row _ | Operator_row _ ->
+      fail "gate receipt resolved to another row kind");
+  check bool "a different approval is a different authority" true
+    (Authority.authority_changed ~presented:(Some (gate "appr-a"))
+       ~candidate:(Some (gate "appr-b")));
+  check bool "a gate row is never an operator row" true
+    (Authority.authority_changed ~presented:(Some (gate "appr-a"))
+       ~candidate:(Some (operator "appr-a")))
 
 let test_authority_change_is_typed () =
   let operator_a = operator "token-a" in
@@ -90,6 +124,8 @@ let () =
             test_reordered_presented_row_keeps_exact_identity;
           test_case "operator token is identity" `Quick
             test_operator_token_is_the_identity;
+          test_case "gate approval id is identity" `Quick
+            test_gate_approval_id_is_the_identity;
           test_case "authority change is typed" `Quick
             test_authority_change_is_typed;
         ] );

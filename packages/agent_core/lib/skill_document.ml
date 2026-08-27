@@ -28,6 +28,7 @@ type name_violation =
 
 type diagnostic =
   | Missing_frontmatter
+  | Byte_order_mark
   | Unterminated_frontmatter
   | Malformed_yaml of string
   | Frontmatter_not_mapping
@@ -416,7 +417,9 @@ let runtime_name ~directory_name declared =
      | violations -> Error [ Missing_name; invalid_name directory_name violations ])
 ;;
 
-let decode ~directory_name contents =
+let utf8_byte_order_mark = "\xEF\xBB\xBF"
+
+let decode_stripped ~directory_name contents =
   match split_frontmatter contents with
   | Error diagnostic -> Unloadable [ diagnostic ]
   | Ok (yaml, body) ->
@@ -502,6 +505,39 @@ let decode ~directory_name contents =
      | Ok _ -> Unloadable [ Frontmatter_not_mapping ])
 ;;
 
+(* A UTF-8 byte-order mark hides the opening "---" from the line reader and
+   used to reject the whole document as frontmatter-less with a message that
+   never named the mark. It carries no content: parse without it and keep the
+   deviation observable as a diagnostic. Content revisions elsewhere still
+   hash the raw bytes, mark included. *)
+let decode ~directory_name contents =
+  let bom_stripped =
+    String.length contents >= String.length utf8_byte_order_mark
+    && String.equal
+         (String.sub contents 0 (String.length utf8_byte_order_mark))
+         utf8_byte_order_mark
+  in
+  let contents =
+    if bom_stripped
+    then
+      String.sub
+        contents
+        (String.length utf8_byte_order_mark)
+        (String.length contents - String.length utf8_byte_order_mark)
+    else contents
+  in
+  match decode_stripped ~directory_name contents, bom_stripped with
+  | result, false -> result
+  | Unloadable diagnostics, true -> Unloadable (Byte_order_mark :: diagnostics)
+  | Loaded { document; conformance = Conformant }, true ->
+    Loaded { document; conformance = Runtime_compatible [ Byte_order_mark ] }
+  | Loaded { document; conformance = Runtime_compatible diagnostics }, true ->
+    Loaded
+      { document
+      ; conformance = Runtime_compatible (Byte_order_mark :: diagnostics)
+      }
+;;
+
 let conformance_diagnostics = function
   | Conformant -> []
   | Runtime_compatible diagnostics -> diagnostics
@@ -545,6 +581,9 @@ let name_violation_to_string = function
 
 let diagnostic_to_string = function
   | Missing_frontmatter -> "SKILL.md must start with YAML frontmatter"
+  | Byte_order_mark ->
+    "SKILL.md starts with a UTF-8 byte-order mark; it was ignored, and \
+     removing it makes the file conformant"
   | Unterminated_frontmatter -> "SKILL.md frontmatter has no closing delimiter"
   | Malformed_yaml detail -> "SKILL.md frontmatter is invalid YAML: " ^ detail
   | Frontmatter_not_mapping -> "SKILL.md frontmatter must be a YAML mapping"

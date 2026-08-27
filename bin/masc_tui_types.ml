@@ -592,6 +592,12 @@ type identity_provider =
             the one question a single Keeper's tab cannot answer for itself,
             and answering it by opening each Keeper in turn is how an
             operator loses track of which account went where. *)
+      ; idp_enabled: bool option
+        (** The on/off switch on an attached row. [None] when the row is not
+            attached or the switch store could not be read; the render must
+            not show a guess for either. *)
+      ; idp_switch_problem: string option
+        (** Why the switch state is unknown, when it is. *)
       }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
@@ -718,7 +724,7 @@ let identity_filter_rows ~providers filter =
    the hint. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with the arrows and press enter to connect " ^ keeper
-   ^ ", R to ask again what tools exist.")
+   ^ ", R to ask again what tools exist, T to switch the row off or on.")
   :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.
@@ -1248,10 +1254,22 @@ type state = {
      surface. *)
   mutable keeper_tool_approvals: Tui_decode.keeper_tool_approval list;
   mutable keeper_tool_approvals_error: string option;
+  (* The durable Gate: approvals that survive nobody watching (external
+     service writes among them), plus both lane modes. Refreshed with the
+     same surface; answered through the dashboard resolve route. *)
+  mutable gate_pending: Tui_decode.gate_pending list;
+  mutable gate_modes: Tui_decode.gate_lane_modes option;
+  mutable gate_error: string option;
   (* Keepers whose approval gate runs every call unasked. Names only: the
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
+  (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
+     somebody singled out are here, so absence means "follows the workspace"
+     rather than "unknown". Distinct from [keeper_yolo_names], which is the
+     in-memory stance a restart clears. *)
+  mutable keeper_gate_modes: (string * string) list;
+  mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* The list draws each ask on one row; this opens the selected one whole.
      Keyed on the cursor rather than a token so an ask that resolves while it
@@ -1827,7 +1845,12 @@ let create_state
   ask_submit_inflight = false;
   keeper_tool_approvals = [];
   keeper_tool_approvals_error = None;
+  gate_pending = [];
+  gate_modes = None;
+  gate_error = None;
   keeper_yolo_names = [];
+  keeper_gate_modes = [];
+  keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;
@@ -2475,6 +2498,10 @@ let keeper_message_status_rows (state : state) =
    sum the key handler matches on rather than a shape it infers. *)
 type approval_row =
   | Keeper_tool_row of Tui_decode.keeper_tool_approval
+  | Gate_row of Tui_decode.gate_pending
+      (** A durable Gate approval — an external-service write among them.
+          It keeps: nobody watching loses nothing. Answered through the
+          dashboard resolve route. *)
   | Operator_row of Masc_tui_operator_projection.approval_item
 
 let operator_approval_items (state : state) =
@@ -2484,6 +2511,7 @@ let operator_approval_items (state : state) =
 
 let approval_items (state : state) =
   List.map (fun held -> Keeper_tool_row held) state.keeper_tool_approvals
+  @ List.map (fun pending -> Gate_row pending) state.gate_pending
   @ List.map (fun item -> Operator_row item) (operator_approval_items state)
 
 

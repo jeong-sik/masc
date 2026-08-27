@@ -298,11 +298,11 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
             durable_ledger_after=copy.deepcopy(durable),
         )
 
-        self.assertEqual(joined["result"]["kind"], "historical_projection_unavailable")
-        self.assertEqual(joined["result"]["producer_trace_id"], "trace-one")
-        self.assertEqual(joined["result"]["dashboard_session_id"], "trace-new")
+        self.assertEqual(joined["result"]["kind"], "exact_skill_invocation")
+        self.assertEqual(joined["result"]["match_count"], 1)
         self.assertEqual(
-            joined["result"]["durable_result"]["kind"], "exact_skill_invocation"
+            joined["ledger"]["dashboard_projection_kind"],
+            "current_session_differs_historical_exact",
         )
 
     def test_one_exact_turn_match_selects_exact_identity(self):

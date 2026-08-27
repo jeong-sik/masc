@@ -122,6 +122,22 @@ let test_local_profile_defaults_allowed_with_hatch () =
       | Error err -> Alcotest.fail ("hatch must allow local: " ^ err))
 ;;
 
+(* No profile source at all: the resolution falls back to the meta's own
+   [sandbox_profile], which for any durable keeper JSON is the decoder's
+   placeholder [Local] -- the gate rejects that fallback just the same. *)
+let test_no_profile_source_fallback_rejected_when_gate_off () =
+  with_hatch "" (fun () ->
+      match
+        Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
+          Masc.Keeper_types_profile.empty_keeper_profile_defaults
+          (gate_meta ())
+      with
+      | Error msg ->
+        Alcotest.(check bool) "error names disabled" true (contains "disabled" msg)
+      | Ok _ ->
+        Alcotest.fail "no-source fallback to Local must be rejected when the gate is off")
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_sandbox_profile_gate"
@@ -148,6 +164,10 @@ let () =
             "local profile defaults allowed with the hatch set"
             `Quick
             test_local_profile_defaults_allowed_with_hatch
+        ; Alcotest.test_case
+            "no-profile-source fallback to local rejected when the gate is off"
+            `Quick
+            test_no_profile_source_fallback_rejected_when_gate_off
         ] )
     ]
 ;;

@@ -59,6 +59,10 @@ let sandbox_target_label = function
    path so the two cannot drift apart into an unsupported-replay repair. *)
 let gate_operation = "tool_execute"
 
+(* Warn-once latch for the local-playground escape hatch: when the hatch is
+   on we log a single warning per process rather than per dispatch. *)
+let local_hatch_warned = ref false
+
 let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
@@ -331,7 +335,20 @@ let handle_tool_execute_typed
         in
         let dispatch_sandbox =
           match sandbox_profile with
-          | Local -> local_dispatch_sandbox ()
+          | Local ->
+            if Env_config_sandbox.Gate.allow_local_playground ()
+            then (
+              if not !local_hatch_warned
+              then (
+                local_hatch_warned := true;
+                Log.Keeper.warn
+                  "local playground enabled via MASC_EXEC_ALLOW_LOCAL_PLAYGROUND (dev/test only)");
+              local_dispatch_sandbox ())
+            else
+              Error
+                (Keeper_sandbox_shell_ir_target.target_error
+                   ("local_playground_disabled: "
+                    ^ Env_config_sandbox.Gate.disabled_message))
           | Docker ->
             if typed_input_has_env input
             then

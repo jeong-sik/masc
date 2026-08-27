@@ -286,7 +286,10 @@ val effective_meta_result :
     {!effective_meta_result} loads the profile and applies it in one step,
     which is right for a one-shot status read. A turn that overlays more than
     once must not re-read the profile between them, or two reads of the same
-    turn can disagree; it loads once and applies with this. *)
+    turn can disagree; it loads once and applies with this.
+
+    Rejects a resolved [Local] profile unless the local-playground hatch
+    ([MASC_EXEC_ALLOW_LOCAL_PLAYGROUND]) is set. *)
 val effective_meta_of_profile_defaults :
      Keeper_types_profile.keeper_profile_defaults
   -> keeper_meta

@@ -301,13 +301,11 @@
   test_exec_core
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
-  test_keeper_tool_execute_stream_close
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
-  test_keeper_sandbox_docker_route
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
@@ -645,13 +643,11 @@
   test_exec_core
   test_exec_dispatch
   test_keeper_tool_execute_typed_input
-  test_keeper_tool_execute_stream_close
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
   test_keeper_tool_search_files_containment
-  test_keeper_sandbox_docker_route
   test_keeper_efficiency_protocol
   test_keeper_tool_search_files_via_field
   test_orphan_surfacer
@@ -748,6 +744,37 @@
   test_filesystem_tool_toml_parity
   test_task_tool_toml_parity
   test_operator_surface_toml_parity)
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the fixtures run the typed
+; dispatch on a keeper meta whose sandbox_profile resolves to Local (the
+; profile is incidental — the suite measures stream finalization on rejected
+; dispatches), and dispatch now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_tool_execute_stream_close)
+ (modules test_keeper_tool_execute_stream_close)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
+
+; Extracted from the big (tests ...) group above: a handful of typed-dispatch
+; cases run on a keeper meta whose sandbox_profile resolves to Local (the
+; profile is incidental — the suite measures routing/finalization, not sandbox
+; isolation), and dispatch now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_sandbox_docker_route)
+ (modules test_keeper_sandbox_docker_route)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
  (libraries
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn

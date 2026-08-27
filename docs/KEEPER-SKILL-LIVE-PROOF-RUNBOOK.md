@@ -161,6 +161,30 @@ python3 "$REPO/scripts/harness/workload/capture_keeper_skill_tui_proof.py" \
   --timeout 60
 ```
 
+Verify the complete bundle offline. This step performs no HTTP, browser, TUI,
+or executable call. It checks the out-of-band manifest hashes, every stored
+artifact, the seven-part Skill identity, source/server process identity,
+delivery and later actions, and both screenshots before emitting the numeric
+completion matrix.
+
+```sh
+JOIN_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/join/join.json" | awk '{print $1}')
+TUI_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/tui/tui-evidence.json" | awk '{print $1}')
+
+python3 "$REPO/scripts/harness/workload/verify_keeper_skill_proof_bundle.py" \
+  --join "$EVIDENCE_ROOT/join/join.json" \
+  --expected-join-sha256 "$JOIN_SHA" \
+  --proof "$EVIDENCE_ROOT/proof/evidence.json" \
+  --expected-proof-sha256 "$PROOF_SHA" \
+  --tui "$EVIDENCE_ROOT/tui/tui-evidence.json" \
+  --expected-tui-sha256 "$TUI_SHA" \
+  --out "$EVIDENCE_ROOT/verified"
+```
+
+Only `verified/verification.json` with schema
+`masc.keeper-skill-proof-verification/v1`, `status = passed`, and no sibling
+`INCOMPLETE` marker is the completed bundle index.
+
 ## Three execution paths
 
 The same identity and evidence contract applies to three independently useful

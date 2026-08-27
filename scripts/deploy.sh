@@ -5,8 +5,7 @@
 # Usage: ./scripts/deploy.sh [--skip-build] [--restart-tunnel]
 #
 # Ports:
-#   8935  the single instance the Cloudflare tunnel routes to; see
-#         docs/REDEPLOY-8935-RUNBOOK.md, which owns that plane
+#   8935  the single instance the Cloudflare tunnel routes to
 #   8945  this script's plane, reached only from the host
 #
 # The tunnel config lives outside this repo (~/.cloudflared/config.yml) and

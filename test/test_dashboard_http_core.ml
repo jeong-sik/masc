@@ -3391,6 +3391,15 @@ let test_config_post_round_trips_typed_skills_patch () =
   let name = "config-sync-skills" in
   prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
+  let initial_content =
+    In_channel.with_open_bin toml_path In_channel.input_all
+    ^ "\n[keeper.skills]\n"
+    ^ "names = [\"initial-skill\"]\n"
+    ^ "\n[keeper.tools]\n"
+    ^ "groups = [\"core\"]\n"
+    ^ "native = \"read\"\n"
+  in
+  write_file toml_path initial_content;
   let parse_toml label =
     match
       Keeper_toml_loader.parse_toml
@@ -3407,9 +3416,6 @@ let test_config_post_round_trips_typed_skills_patch () =
            name))
     (fun () ->
        let open Yojson.Safe.Util in
-       let _, before = Dashboard_http_keeper_snapshot.keeper_config_json config name in
-       check bool "absent selection reads as all" true
-         (before |> member "skills" |> member "names" = `Null);
        let exact_raw, exact_json =
          post_config
            ~sw
@@ -3461,7 +3467,48 @@ let test_config_post_round_trips_typed_skills_patch () =
        check (list string) "empty selection persisted" []
          (Keeper_toml_loader.toml_string_list
             none_doc
-            "keeper.skills.names"))
+            "keeper.skills.names");
+       check (list string) "nested tool groups survive exact and none"
+         [ "core" ]
+         (Keeper_toml_loader.toml_string_list
+            none_doc
+            "keeper.tools.groups");
+       check (option string) "nested native posture survives exact and none"
+         (Some "read")
+         (Keeper_toml_loader.toml_string_opt
+            none_doc
+            "keeper.tools.native");
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
+       let all_raw, all_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{}}|}
+       in
+       check bool "all selection HTTP 200" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" all_raw);
+       check bool "all selection reads back as null" true
+         (all_json |> member "skills" |> member "names" = `Null);
+       let all_doc = parse_toml "parse all selection TOML" in
+       check bool "nested Skill key removed" true
+         (List.assoc_opt "keeper.skills.names" all_doc = None);
+       check (list string) "nested tool groups survive key removal"
+         [ "core" ]
+         (Keeper_toml_loader.toml_string_list
+            all_doc
+            "keeper.tools.groups");
+       check (option string) "nested native posture survives key removal"
+         (Some "read")
+         (Keeper_toml_loader.toml_string_opt
+            all_doc
+            "keeper.tools.native"))
 ;;
 
 (* #10710 regression: [keepers_dashboard_json] must aggregate every persisted

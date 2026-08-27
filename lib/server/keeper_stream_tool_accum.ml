@@ -65,6 +65,7 @@ type t = {
     (string * string * Agent_core.Types.api_usage option) option;
   mutable message_open : bool;
   mutable message_seen : bool;
+  mutable current_scope_progress_seen : bool;
   mutable stream_phase : stream_phase;
   mutable invalid_scopes : int list;
   mutable runtime_attempt_seen : bool;
@@ -88,6 +89,7 @@ let create () =
   ; current_message_start = None
   ; message_open = false
   ; message_seen = false
+  ; current_scope_progress_seen = false
   ; stream_phase = Accepting_content
   ; invalid_scopes = []
   ; runtime_attempt_seen = false
@@ -135,6 +137,7 @@ let advance_to_empty_scope t =
   t.current_message_start <- None;
   t.message_open <- false;
   t.message_seen <- false;
+  t.current_scope_progress_seen <- false;
   t.stream_phase <- Accepting_content;
   t.invalid_indices <- []
 ;;
@@ -207,6 +210,41 @@ let message_start_equal
   String.equal left_id right_id
   && String.equal left_model right_model
   && Option.equal ( = ) left_usage right_usage
+;;
+
+let current_scope_has_tool_occurrence t =
+  List.exists
+    (fun (_, (block : open_block)) ->
+       block.stream_scope = t.current_stream_scope)
+    t.blocks
+  || List.exists
+       (fun (_, (block : finalized_block)) ->
+          block.stream_scope = t.current_stream_scope)
+       t.finalized
+;;
+
+let prepare_message_start t ~id ~model ~usage =
+  let incoming_start = id, model, usage in
+  let exact_open_replay =
+    t.stream_phase = Accepting_content
+    && Option.equal message_start_equal
+         (Some incoming_start) t.current_message_start
+  in
+  if
+    t.message_seen
+    && t.stream_phase = Accepting_content
+    && not t.current_scope_progress_seen
+    && not exact_open_replay
+    && not (current_scope_is_invalid t)
+    && not (current_scope_has_tool_occurrence t)
+  then
+    (* Official clients may reject an oversized input after emitting only the
+       provider turn prelude, then retry with a smaller history inside the same
+       runtime candidate. That retry has no outer Runtime_attempt_started
+       observation. A different MessageStart is therefore the first exact
+       boundary available here. It is safe to advance only while the abandoned
+       scope has no tool occurrence; post-tool retries stay fail-closed. *)
+    advance_to_empty_scope t
 ;;
 
 let start_message_scope t ~id ~model ~usage =
@@ -718,6 +756,16 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
 
 let on_event t (evt : Agent_core.Types.sse_event) =
   if scope_is_sealed t t.current_stream_scope then advance_to_empty_scope t;
+  (match evt with
+   | Agent_core.Types.MessageStart { id; model; usage } ->
+     prepare_message_start t ~id ~model ~usage
+   | _ -> ());
+  (match evt with
+   | Agent_core.Types.MessageStart _
+   | Agent_core.Types.Connected
+   | Agent_core.Types.Ping
+   | Agent_core.Types.Timeout _ -> ()
+   | _ -> t.current_scope_progress_seen <- true);
   if not (content_event_allowed t evt)
   then invalidate_current_scope t
   else if current_scope_is_invalid t

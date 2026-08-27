@@ -1185,7 +1185,15 @@ let replay_connector_post_with_outcome
               (Surface_ref.Discord
                  { guild_id = None
                  ; channel_id
-                 ; channel_name = None
+                   (* Recalled, not fetched: the inbound path already asked
+                      and wrote the answer down. Without this the pane reads
+                      [#일반] on the message that arrived and an id on our own
+                      reply to it -- the same room, named twice over. *)
+                 ; channel_name =
+                     Connector_names.recall
+                       ~base_dir:config.Workspace.base_path
+                       ~connector:Channel_gate_discord_state.channel
+                       ~scope:Connector_names.Channel ~id:channel_id
                  ; parent_channel_id = None
                  ; thread_id = None
                  })
@@ -1242,7 +1250,15 @@ let replay_connector_post_with_outcome
                ~content
                ~surface:
                  (Surface_ref.Slack
-                    { team_id = None; channel_id; channel_name = None; thread_ts })
+                    { team_id = None
+                    ; channel_id
+                    ; channel_name =
+                        Connector_names.recall
+                          ~base_dir:config.Workspace.base_path
+                          ~connector:Channel_gate_slack_state.channel
+                          ~scope:Connector_names.Channel ~id:channel_id
+                    ; thread_ts
+                    })
                ()
            with
            | Error detail ->

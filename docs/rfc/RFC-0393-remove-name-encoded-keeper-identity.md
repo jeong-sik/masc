@@ -8,7 +8,7 @@ author: claude
 supersedes: []
 superseded_by: null
 related: ["0392"]
-implementation_prs: []
+implementation_prs: ["31198"]
 ---
 
 # RFC: 이름 안에 인코딩된 keeper 신원을 제거한다

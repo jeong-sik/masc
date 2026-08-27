@@ -9397,6 +9397,23 @@ and is loaded on demand through keeper_skill.
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Config && state.config_pane = Config_themes ->
+           (* Applying is the whole action: the palette's generation bumps and
+              every cached colour rebuilds, which is the same road a theme
+              switch reported by the terminal takes. A name no bundled scheme
+              answers to leaves the screen alone rather than quietly dropping
+              to colours nobody picked.
+
+              All three spellings, because a terminal sends CR, a Kitty-
+              protocol one sends the name, and a footer that says "Enter" has
+              to mean whichever one arrived. *)
+           let entries = Masc_tui_theme_choice.entries () in
+           (match List.nth_opt entries state.theme_cursor with
+            | None -> ()
+            | Some entry ->
+              if Masc_tui_theme_choice.apply entry.Masc_tui_theme_choice.name
+              then state.theme_choice <- Some entry.Masc_tui_theme_choice.name)
        | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
        | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
        | Some (("n" | "N") as direction)
@@ -9810,22 +9827,11 @@ and is loaded on demand through keeper_skill.
            let page = surface_page_rows state in
            let direction = if key = Some "pagedown" then 1 else -1 in
            (match state.view with
-            | Config when state.config_pane = Config_themes ->
-                (* Applying is the whole action: the palette's generation
-                   bumps and every cached colour rebuilds, which is the same
-                   road a theme switch reported by the terminal takes. A name
-                   no bundled scheme answers to leaves the screen alone rather
-                   than quietly dropping to colours nobody picked. *)
-                let entries = Masc_tui_theme_choice.entries () in
-                (match List.nth_opt entries state.theme_cursor with
-                 | None -> ()
-                 | Some entry ->
-                   if
-                     Masc_tui_theme_choice.apply
-                       entry.Masc_tui_theme_choice.name
-                   then
-                     state.theme_choice <-
-                       Some entry.Masc_tui_theme_choice.name)
+            (* Themes take no page key. Applying a scheme used to live here,
+               where the footer never said it was and where PageDown is a
+               scroll everywhere else. It answers to Enter now, which is what
+               the footer has been advertising. *)
+            | Config when state.config_pane = Config_themes -> ()
             | Code -> ()
             | Board ->
                 (match state.board_mode with

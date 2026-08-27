@@ -97,6 +97,20 @@ let status_color_violation_to_string (location, path, segment) =
     segment path
 ;;
 
+(* Two sites apply a theme, and they answer different questions: boot reads
+   the name runtime.toml carries, and the Config surface applies the one under
+   the cursor. Anything beyond those two is a third way to change the palette,
+   which is how the surface came to apply on pageup/pagedown -- a key the
+   footer never advertised, while it said "Enter: use theme" the whole time.
+
+   This counts; it does not prove Enter reaches the second one. The key press
+   itself is not automated. *)
+let test_theme_apply_is_boot_and_the_surface () =
+  check int "one at boot, one on the Config surface" 2
+    (Ast_grep.count_calls ~module_path:"bin/masc_tui.ml"
+       ~callee:"Masc_tui_theme_choice.apply")
+;;
+
 let test_tui_status_colors_use_theme_tokens () =
   let violations =
     Ast_grep.parse_implementation_or_fail "bin/masc_tui_render.ml"
@@ -2056,6 +2070,8 @@ let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
       [
+        test_case "theme apply is boot and the surface" `Quick
+          test_theme_apply_is_boot_and_the_surface;
         test_case
           "TUI status colors use semantic Theme tokens"
           `Quick

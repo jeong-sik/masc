@@ -289,6 +289,95 @@ let test_invalid_judgment_fails_loud () =
       (Astring.String.is_infix ~affix:"maybe" reason)
 ;;
 
+(* The live shape, 2026-08-27: request_context.initial.history_messages[] with
+   content_blocks[] carrying a Keeper's own reasoning beside what it did. *)
+let context_with_thinking =
+  `Assoc
+    [ ( "initial"
+      , `Assoc
+          [ ( "history_messages"
+            , `List
+                [ `Assoc
+                    [ "role", `String "assistant"
+                    ; ( "content_blocks"
+                      , `List
+                          [ `Assoc
+                              [ "type", `String "thinking"
+                              ; "thinking", `String "I MUST STOP this immediately"
+                              ]
+                          ; `Assoc
+                              [ "type", `String "text"; "text", `String "posting" ]
+                          ] )
+                    ]
+                ; `Assoc
+                    [ "role", `String "tool"
+                    ; ( "content_blocks"
+                      , `List
+                          [ `Assoc
+                              [ "type", `String "tool_result"
+                              ; "content", `String "ok"
+                              ]
+                          ] )
+                    ]
+                ] )
+          ; "user_message", `String "go"
+          ] )
+    ; "completed_tool_calls", `List []
+    ]
+
+let block_types bundle =
+  let open Yojson.Safe.Util in
+  bundle
+  |> member "request_context"
+  |> member "initial"
+  |> member "history_messages"
+  |> to_list
+  |> List.concat_map (fun message ->
+       match message |> member "content_blocks" with
+       | `List blocks ->
+         List.map (fun block -> block |> member "type" |> to_string) blocks
+       | _ -> [])
+
+let test_the_judge_is_not_shown_the_keepers_reasoning () =
+  with_temp_dir "hitl-thinking" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let bundle =
+    Worker.For_testing.build_context_bundle
+      ~entry:{ entry with request_context = Some context_with_thinking }
+  in
+  let open Yojson.Safe.Util in
+  check (list string) "what the Keeper did survives; what it told itself does not"
+    [ "text"; "tool_result" ] (block_types bundle);
+  (* Reported, so a judge reading a thin bundle can tell trimming from a turn
+     that never reasoned. *)
+  check yojson "and the judge is told how much was cut" (`Int 1)
+    (bundle |> member "thinking_blocks_omitted")
+
+let test_a_turn_without_reasoning_reports_nothing_cut () =
+  with_temp_dir "hitl-no-thinking" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let bundle = Worker.For_testing.build_context_bundle ~entry in
+  let open Yojson.Safe.Util in
+  check yojson "nothing was cut" (`Int 0)
+    (bundle |> member "thinking_blocks_omitted")
+
+let test_a_context_of_another_shape_is_carried_through () =
+  (* Guessing at the shape is how a field nobody meant to touch gets
+     rewritten. A context without the one path this knows is left alone. *)
+  with_temp_dir "hitl-other-shape" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let foreign = `Assoc [ "something_else", `List [ `String "kept" ] ] in
+  let bundle =
+    Worker.For_testing.build_context_bundle
+      ~entry:{ entry with request_context = Some foreign }
+  in
+  let open Yojson.Safe.Util in
+  check yojson "carried through unchanged" foreign
+    (bundle |> member "request_context")
+
 let test_context_bundle_is_exact () =
   with_temp_dir "hitl-context" @@ fun base_path ->
   install_queue base_path;
@@ -1878,6 +1967,12 @@ let () =
       , [ test_case "typed judgments" `Quick test_parse_typed_judgments
         ; test_case "invalid judgment fails loud" `Quick test_invalid_judgment_fails_loud
         ; test_case "exact context bundle" `Quick test_context_bundle_is_exact
+        ; test_case "the judge is not shown the Keeper's reasoning" `Quick
+            test_the_judge_is_not_shown_the_keepers_reasoning
+        ; test_case "a turn without reasoning reports nothing cut" `Quick
+            test_a_turn_without_reasoning_reports_nothing_cut
+        ; test_case "a context of another shape is carried through" `Quick
+            test_a_context_of_another_shape_is_carried_through
         ; test_case
             "missing context is reported as partial"
             `Quick

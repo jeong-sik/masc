@@ -10,6 +10,7 @@ type standard_field =
   | License
   | Compatibility
   | Metadata
+  | Allowed_tools
 
 type field =
   | Standard of standard_field

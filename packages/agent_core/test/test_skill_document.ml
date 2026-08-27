@@ -257,6 +257,46 @@ let test_invalid_optional_values_are_diagnostic () =
        (Skill_document.diagnostics null_compatibility))
 ;;
 
+let test_allowed_tools_is_validated_but_not_retained () =
+  let valid =
+    Skill_document.decode
+      ~directory_name:"allowed-tools"
+      "---\nname: allowed-tools\ndescription: Validate the official optional field.\nallowed-tools: Bash(git:*) Read\n---\nBody"
+  in
+  check_conformance "conformant" valid;
+  Alcotest.(check (list (pair string string)))
+    "not retained as metadata"
+    []
+    (document_exn valid).metadata;
+  Alcotest.(check int)
+    "not retained as an extension"
+    0
+    (List.length (document_exn valid).extensions);
+  List.iter
+    (fun (label, value) ->
+       let decoded =
+         Skill_document.decode
+           ~directory_name:"allowed-tools"
+           (Printf.sprintf
+              "---\nname: allowed-tools\ndescription: Reject a non-string official field.\nallowed-tools: %s\n---\nBody"
+              value)
+       in
+       check_conformance "runtime_compatible" decoded;
+       Alcotest.(check bool)
+         label
+         true
+         (List.exists
+            (function
+              | Skill_document.Invalid_field_type
+                  { field = Skill_document.Standard Skill_document.Allowed_tools
+                  ; expected = Skill_document.String_value
+                  } ->
+                true
+              | _ -> false)
+            (Skill_document.diagnostics decoded)))
+    [ "null allowed-tools", "null"; "sequence allowed-tools", "[Read]" ]
+;;
+
 let test_foreign_and_duplicate_metadata_is_preserved_without_ambiguity () =
   let decoded =
     Skill_document.decode
@@ -364,6 +404,10 @@ let () =
             "invalid optional values"
             `Quick
             test_invalid_optional_values_are_diagnostic
+        ; Alcotest.test_case
+            "allowed-tools optional string"
+            `Quick
+            test_allowed_tools_is_validated_but_not_retained
         ; Alcotest.test_case
             "foreign and duplicate metadata"
             `Quick

@@ -442,6 +442,21 @@ let test_row_without_a_typed_outcome_omits_the_field () =
 
 let test_composition_action_context_persisted () =
   with_tmp_log (fun () ->
+    let source_id =
+      Skill_source_config.source_id_of_string "workspace" |> Result.get_ok
+    in
+    let package_id = Skill_reference.package_id_of_directory "research" |> Result.get_ok in
+    let skill_reference =
+      Skill_reference.make
+        ~identity:
+          (Skill_reference.make_identity
+             ~source_id
+             ~package_id
+             ~name:"research")
+        ~content_revision:
+          (Skill_reference.content_revision_of_string (String.make 64 'a')
+           |> Result.get_ok)
+    in
     let typed_result =
       Tool_result.Completed
         { Tool_result.tool_name = "keeper_fs_read"
@@ -459,6 +474,7 @@ let test_composition_action_context_persisted () =
       ~duration_ms:12.5
       ~typed_result
       ~composition_tool:"keeper_research_pipeline"
+      ~skill_reference
       ~composition_run_id:"run-42"
       ~composition_node_id:"fetch_sources"
       ~composition_execution:Keeper_tool_composition_catalog.Async
@@ -479,6 +495,12 @@ let test_composition_action_context_persisted () =
         ; "composition execution", "composition_execution", "async"
         ; "outer provider call", "parent_tool_use_id", "outer-7"
         ]
+      ; Alcotest.(check string)
+          "exact Skill reference"
+          (Skill_reference.to_yojson skill_reference |> Yojson.Safe.to_string)
+          (match Safe_ops.json_member_opt "skill_reference" entry with
+           | Some json -> Yojson.Safe.to_string json
+           | None -> "missing")
     | _ -> Alcotest.fail "expected exactly one composition action entry")
 
 (* One keeper, one trace: a submitted turn and the keeper's own autonomous

@@ -206,6 +206,7 @@ val log_call :
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
   ?composition_tool:string ->
+  ?skill_reference:Skill_reference.t ->
   ?composition_run_id:string ->
   ?composition_node_id:string ->
   ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
@@ -229,7 +230,9 @@ val log_call :
 (** [log_call ...] persists a single tool call record with full I/O.
     [record_kind] defaults to [Tool_call]; [Composition_run] is the explicit
     terminal aggregate for a composition and must not be interpreted as a
-    second physical invocation.
+    second physical invocation. [skill_reference], when present, is the exact
+    published Skill revision that produced the run; clients must not infer it
+    from the mutable composition tool name.
     [execution_id] is the RFC-0233 canonical join key minted once at the
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the

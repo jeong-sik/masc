@@ -27,6 +27,18 @@ type save_outcome =
       ; reason : string
       }
 
+type writable_source = { source_id : Skill_source_config.source_id }
+
+type create_outcome =
+  | Created_and_published of
+      { preview : preview
+      ; snapshot_revision : Skill_catalog_snapshot.snapshot_revision
+      }
+  | Created_but_unpublished of
+      { preview : preview
+      ; reason : string
+      }
+
 type error =
   | Invalid_workspace
   | Snapshot_not_registered
@@ -36,6 +48,8 @@ type error =
   | Source_file_missing
   | Source_read_failed
   | Source_read_only
+  | Package_already_exists
+  | Invalid_package_id of string
   | Revision_conflict of { actual : Skill_reference.content_revision }
   | Source_too_large of { bytes : int; max_bytes : int }
   | Validation_failed of string
@@ -65,6 +79,8 @@ let error_code = function
   | Source_file_missing -> "source_file_missing"
   | Source_read_failed -> "source_read_failed"
   | Source_read_only -> "source_read_only"
+  | Package_already_exists -> "package_already_exists"
+  | Invalid_package_id _ -> "invalid_package_id"
   | Revision_conflict _ -> "revision_conflict"
   | Source_too_large _ -> "source_too_large"
   | Validation_failed _ -> "validation_failed"
@@ -80,6 +96,8 @@ let error_to_string = function
   | Source_file_missing -> "SKILL.md is missing"
   | Source_read_failed -> "SKILL.md could not be read safely"
   | Source_read_only -> "Skill source is read-only"
+  | Package_already_exists -> "Skill package already exists"
+  | Invalid_package_id detail -> "Invalid Skill package id: " ^ detail
   | Revision_conflict { actual } ->
     "SKILL.md changed after this editor loaded it; current revision is "
     ^ Skill_reference.content_revision_to_string actual
@@ -265,6 +283,140 @@ let save ~base_path ~reference ~source_text ~refresh =
                           })))))
 ;;
 
+let ready_source_root source_scan =
+  match source_scan.Skill_catalog_snapshot.observation with
+  | Skill_catalog_snapshot.Source_ready { resolved_path; _ } -> Ok resolved_path
+  | Source_missing _
+  | Source_not_directory _
+  | Source_unavailable _
+  | Source_unresolved _ ->
+    Error Source_not_ready
+;;
+
+let writable_sources ~base_path =
+  let* snapshot = current_snapshot ~base_path in
+  Ok
+    (snapshot
+     |> Skill_catalog_snapshot.sources
+     |> List.filter_map (fun (source_scan : Skill_catalog_snapshot.source_scan) ->
+       match source_scan.source.source.access, ready_source_root source_scan with
+       | Skill_source_config.Read_write, Ok _ ->
+         Some { source_id = source_scan.source.source.id }
+       | Read_only, _ | _, Error _ -> None))
+;;
+
+let find_writable_source snapshot source_id =
+  let source_id_text = Skill_source_config.source_id_to_string source_id in
+  snapshot
+  |> Skill_catalog_snapshot.sources
+  |> List.find_opt (fun (source_scan : Skill_catalog_snapshot.source_scan) ->
+    String.equal
+      (Skill_source_config.source_id_to_string source_scan.source.source.id)
+      source_id_text)
+  |> function
+  | None -> Error Source_not_ready
+  | Some source_scan ->
+    (match source_scan.source.source.access with
+     | Skill_source_config.Read_only -> Error Source_read_only
+     | Read_write ->
+       let* source_root = ready_source_root source_scan in
+       Ok source_root)
+;;
+
+let package_id_error_to_string = function
+  | Skill_reference.Empty_package_id -> "must not be empty"
+  | Current_directory_package_id -> "must not be ."
+  | Parent_directory_package_id -> "must not be .."
+  | Package_id_contains_separator -> "must be one directory name"
+  | Package_id_contains_nul -> "must not contain NUL"
+;;
+
+let preview_new ~source_id ~package_id source_text =
+  if String.length source_text > max_source_bytes
+  then
+    Error
+      (Source_too_large
+         { bytes = String.length source_text; max_bytes = max_source_bytes })
+  else
+    let* parsed_package_id =
+      Skill_reference.package_id_of_directory package_id
+      |> Result.map_error (fun error ->
+        Invalid_package_id (package_id_error_to_string error))
+    in
+    match Keeper_skill_catalog.parse_skill ~directory:package_id source_text with
+    | Error error -> Error (Validation_failed (Keeper_skill_catalog.error_to_string error))
+    | Ok skill ->
+      let identity =
+        Skill_reference.make_identity
+          ~source_id
+          ~package_id:parsed_package_id
+          ~name:skill.name
+      in
+      let reference =
+        Skill_reference.make
+          ~identity
+          ~content_revision:(Skill_reference.content_revision_of_source_text source_text)
+      in
+      Ok
+        { reference
+        ; profile = Keeper_skill_observability.of_skill_with_reference reference skill
+        ; diagnostics = diagnostics_of_conformance skill.conformance
+        }
+;;
+
+let create ~base_path ~source_id ~package_id ~source_text ~refresh =
+  let* snapshot = current_snapshot ~base_path in
+  let* source_root = find_writable_source snapshot source_id in
+  let* preview = preview_new ~source_id ~package_id source_text in
+  let package_dir = Filename.concat source_root package_id in
+  let path = Filename.concat package_dir "SKILL.md" in
+  with_path_lock path (fun () ->
+    let* latest = current_snapshot ~base_path in
+    let* latest_root = find_writable_source latest source_id in
+    if not (String.equal source_root latest_root)
+    then Error Source_not_ready
+    else
+      let* () =
+        try
+          Unix.mkdir package_dir 0o755;
+          Keeper_fs_durable_directory.fsync_directory source_root;
+          Ok ()
+        with
+        | Unix.Unix_error (Unix.EEXIST, _, _) -> Error Package_already_exists
+        | exn -> Error (Write_failed (Printexc.to_string exn))
+      in
+      match
+        Keeper_fs.save_bytes_durable_atomic
+          ~ownership_root:source_root
+          path
+          source_text
+      with
+      | Error error ->
+        (try Unix.rmdir package_dir with _ -> ());
+        Error (Write_failed (Keeper_fs.durable_write_error_to_string error))
+      | Ok () ->
+        (match refresh () with
+         | Error reason -> Ok (Created_but_unpublished { preview; reason })
+         | Ok publication ->
+           (match published_snapshot publication with
+            | Error reason -> Ok (Created_but_unpublished { preview; reason })
+            | Ok published ->
+              (match Skill_catalog_snapshot.resolve_reference published preview.reference with
+               | Ok _ ->
+                 Ok
+                   (Created_and_published
+                      { preview
+                      ; snapshot_revision =
+                          Skill_catalog_snapshot.snapshot_revision published
+                      })
+               | Error _ ->
+                 Ok
+                   (Created_but_unpublished
+                      { preview
+                      ; reason = "candidate revision was not present after publication"
+                      })))))
+;;
+
 let preview_to_yojson (preview : preview) =
   `Assoc
     [ "reference", Skill_reference.to_yojson preview.reference
@@ -303,6 +455,27 @@ let save_outcome_to_yojson = function
   | Saved_but_unpublished { preview; reason } ->
     `Assoc
       [ "status", `String "saved_but_unpublished"
+      ; "preview", preview_to_yojson preview
+      ; "reason", `String reason
+      ]
+;;
+
+let writable_source_to_yojson source =
+  `Assoc
+    [ "source_id", `String (Skill_source_config.source_id_to_string source.source_id) ]
+;;
+
+let create_outcome_to_yojson = function
+  | Created_and_published { preview; snapshot_revision } ->
+    `Assoc
+      [ "status", `String "created_and_published"
+      ; "preview", preview_to_yojson preview
+      ; ( "snapshot_revision"
+        , `String (Skill_catalog_snapshot.snapshot_revision_to_string snapshot_revision) )
+      ]
+  | Created_but_unpublished { preview; reason } ->
+    `Assoc
+      [ "status", `String "created_but_unpublished"
       ; "preview", preview_to_yojson preview
       ; "reason", `String reason
       ]

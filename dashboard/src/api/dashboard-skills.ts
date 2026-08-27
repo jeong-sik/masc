@@ -5,7 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
-import { get, type GetOptions } from './core'
+import { get, post, type GetOptions } from './core'
 
 export interface SkillIdentity {
   source_id: string
@@ -55,6 +55,32 @@ export interface SkillUsage {
   last_used_at: string
 }
 
+export interface SkillFlowDependency {
+  node_id: string
+  kind: 'data' | 'order' | 'data_and_order'
+}
+
+export interface SkillFlowNode {
+  id: string
+  tool_name: string
+  dependencies: readonly SkillFlowDependency[]
+  batch_index: number
+  batch_size: number
+  execution_mode: string
+  statically_read_only: boolean | null
+}
+
+export interface SkillFlowBatch {
+  index: number
+  execution_mode: string
+  node_ids: readonly string[]
+}
+
+export interface SkillFlow {
+  nodes: readonly SkillFlowNode[]
+  batches: readonly SkillFlowBatch[]
+}
+
 export interface SkillProfile {
   reference: SkillReference
   kind: string
@@ -82,7 +108,20 @@ export interface SkillProfile {
     statically_read_only: boolean | null
   }
   declaration: { start_line: number; end_line: number } | null
+  flow: SkillFlow | null
 }
+
+export type SkillRunResponse =
+  | { status: 'never_observed'; reference: SkillReference; scan_limit: number }
+  | {
+      status: 'observed'
+      reference: SkillReference
+      scan_limit: number
+      run: Record<string, unknown>
+      nodes: readonly Record<string, unknown>[]
+    }
+
+export interface WritableSkillSource { source_id: string }
 
 interface SkillSurfaceBase {
   reference: SkillReference
@@ -172,6 +211,26 @@ const SkillUsageSchema = Schema.Struct({
   last_used_at: Schema.String,
 })
 
+const SkillFlowSchema = Schema.Struct({
+  nodes: Schema.Array(Schema.Struct({
+    id: Schema.NonEmptyString,
+    tool_name: Schema.NonEmptyString,
+    dependencies: Schema.Array(Schema.Struct({
+      node_id: Schema.NonEmptyString,
+      kind: Schema.Literal('data', 'order', 'data_and_order'),
+    })),
+    batch_index: NonNegativeSafeIntegerSchema,
+    batch_size: PositiveSafeIntegerSchema,
+    execution_mode: Schema.NonEmptyString,
+    statically_read_only: Schema.NullOr(Schema.Boolean),
+  })),
+  batches: Schema.Array(Schema.Struct({
+    index: NonNegativeSafeIntegerSchema,
+    execution_mode: Schema.NonEmptyString,
+    node_ids: Schema.Array(Schema.NonEmptyString),
+  })),
+})
+
 const SkillProfileSchema = Schema.Struct({
   reference: SkillReferenceSchema,
   kind: Schema.NonEmptyString,
@@ -202,6 +261,7 @@ const SkillProfileSchema = Schema.Struct({
     start_line: PositiveSafeIntegerSchema,
     end_line: PositiveSafeIntegerSchema,
   })),
+  flow: Schema.NullOr(SkillFlowSchema),
 })
 
 const OptionalProfileSchema = Schema.optional(Schema.NullOr(SkillProfileSchema))
@@ -389,4 +449,23 @@ export function decodeSkillsResponse(raw: unknown): SkillsResponse {
 export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse> {
   const raw = await get<unknown>('/api/v1/skills', opts)
   return decodeSkillsResponse(raw)
+}
+
+export async function fetchSkillRun(reference: SkillReference): Promise<SkillRunResponse> {
+  return post('/api/v1/skills/runs', { reference })
+}
+
+export async function fetchWritableSkillSources(): Promise<readonly WritableSkillSource[]> {
+  const response = await get<{ status: string; sources: readonly WritableSkillSource[] }>(
+    '/api/v1/skills/editor/sources',
+  )
+  return response.sources
+}
+
+export async function createSkill(input: {
+  source_id: string
+  package_id: string
+  source_text: string
+}): Promise<Record<string, unknown>> {
+  return post('/api/v1/skills/editor/create', input)
 }

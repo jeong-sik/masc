@@ -1536,6 +1536,27 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                       ; "batch_count", `Int 2
                       ; "max_parallelism", `Int 3
                       ] )
+                ; ( "flow"
+                  , `Assoc
+                      [ ( "nodes"
+                        , `List
+                            [ `Assoc
+                                [ "id", `String "clock"
+                                ; "tool_name", `String "keeper_time_now"
+                                ; "dependencies", `List []
+                                ; "batch_index", `Int 0
+                                ; "batch_size", `Int 1
+                                ; "execution_mode", `String "concurrent"
+                                ; "statically_read_only", `Bool true
+                                ] ] )
+                      ; ( "batches"
+                        , `List
+                            [ `Assoc
+                                [ "index", `Int 0
+                                ; "execution_mode", `String "concurrent"
+                                ; "node_ids", `List [ `String "clock" ]
+                                ] ] )
+                      ] )
                 ] ] )
       ; "tool_surface_bytes", `Int 79984
       ; "skill_tool_surface_bytes", `Int 2360
@@ -1593,6 +1614,11 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       Alcotest.(check string) "profile execution" "async" profile.esp_execution;
       Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
       Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;
+      (match profile.esp_flow with
+       | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
+         Alcotest.(check string) "flow node tool" "keeper_time_now" node.sfn_tool_name;
+         Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
+       | _ -> Alcotest.fail "expected one decoded flow node and batch");
       Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
       Alcotest.(check int) "Skill surface bytes" 2360 ets_skill_tool_surface_bytes;
       Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;

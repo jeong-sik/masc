@@ -10120,6 +10120,53 @@ let agenda_viewport (state : state) =
    Tone rather than a colour per row: the headings carry the structure, a
    held call is the one thing that needs answering now, and the wakes recede
    the same way they do on the strip. *)
+let answering_lines (state : state) =
+  Masc_tui_answering.overlay
+    ~now:(Unix.gettimeofday ())
+    ~chat_target:state.msg_target_keeper_name
+    ~error:state.keeper_turns_error
+    state.keeper_turns
+
+let answering_viewport (state : state) =
+  let terminal_rows, _cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  (List.length (answering_lines state), framed_content_height ~rows)
+
+let render_answering (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 2048 in
+  framed_top buf cols;
+  framed_line
+    buf
+    cols
+    (screen_title " Answering" ^ "  " ^ Ansi.dim ^ "Esc or @ to close"
+   ^ Ansi.reset);
+  framed_divider buf cols;
+  let lines = answering_lines state in
+  let content_height = framed_content_height ~rows in
+  let scroll =
+    Masc_tui_scroll.normalize
+      ~count:(List.length lines)
+      ~height:content_height
+      state.answering_scroll
+  in
+  let paint (line : Masc_tui_answering.line) =
+    match line.Masc_tui_answering.tone with
+    | Masc_tui_answering.Heading -> Ansi.bold ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Running -> Ansi.cyan ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Unknown -> (Theme.warn ()) ^ line.Masc_tui_answering.text ^ Ansi.reset
+    | Masc_tui_answering.Quiet -> Ansi.dim ^ line.Masc_tui_answering.text ^ Ansi.reset
+  in
+  lines
+  |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
+  |> List.iter (fun line -> framed_line buf cols (paint line));
+  framed_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols ~hints:"j/k:scroll  Esc:close");
+  finish_surface state ~surface_key:"answering" ~rows:terminal_rows ~cols buf
+;;
+
 let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -10194,6 +10241,9 @@ let render (state : state) =
     (frame, clamped, None)
   else if state.agenda_open then
     let frame, clamped = render_agenda state in
+    (frame, clamped, None)
+  else if state.answering_open then
+    let frame, clamped = render_answering state in
     (frame, clamped, None)
   else
     let frame, clamped = render_surface state in

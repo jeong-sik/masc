@@ -486,6 +486,14 @@ describe('Tools', () => {
     expect(container.textContent).toContain('action runtimes anthropic.claude:1')
     expect(container.textContent).toContain('provider delivered turn 1 · runtime anthropic.claude')
     expect(container.textContent).toContain('action turn 1 · runtime anthropic.claude')
+    expect(
+      container.querySelector('[data-testid="skill-activation-ledger"]')
+        ?.getAttribute('data-ledger-revision'),
+    ).toBe('c'.repeat(64))
+    expect(
+      Array.from(container.querySelectorAll('[data-testid="skill-activation-row"]'))
+        .map(row => row.getAttribute('data-skill-tool-use-id')),
+    ).toEqual(['call-skill-1'])
   })
 
   it('shows an official-client handoff without a later action as incomplete proof', async () => {

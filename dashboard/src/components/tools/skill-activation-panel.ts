@@ -118,7 +118,11 @@ function ActivationReceipt({
   }
   const summary = projection.summary
   return html`
-    <div class="grid gap-2" data-testid="skill-activation-ledger">
+    <div
+      class="grid gap-2"
+      data-testid="skill-activation-ledger"
+      data-ledger-revision=${projection.ledger.revision}
+    >
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="skill-use-summary">
         <span class="text-xs">session totals</span>
         <span class="text-xs">invoked ${summary.instruction_invocations}</span>
@@ -154,7 +158,12 @@ function ActivationReceipt({
       ${projection.ledger.activations.length === 0
         ? html`<span class="text-xs text-[var(--color-fg-muted)]">No activations recorded</span>`
         : projection.ledger.activations.map(activation => html`
-            <div key=${activation.skill_tool_use_id} class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1">
+            <div
+              key=${activation.skill_tool_use_id}
+              class="rounded-[var(--r-1)] border border-[var(--color-border-subtle)] p-2 grid gap-1"
+              data-testid="skill-activation-row"
+              data-skill-tool-use-id=${activation.skill_tool_use_id}
+            >
               <code class="text-3xs break-all">${activationReferenceLabel(activation)}</code>
               <span class="text-3xs">${originLabel(activation.invocation)}</span>
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">

@@ -322,6 +322,9 @@ export type RuntimeDraft = {
   proactive_enabled: boolean
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   autonomous_wake_prompt: string
+  skill_selection:
+    | { mode: 'all' }
+    | { mode: 'names'; names_text: string }
 }
 
 export type KeeperConfigBooleanProjection =
@@ -479,6 +482,9 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: proactiveConfigValue(c),
     autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
+    skill_selection: c.skills.names === null
+      ? { mode: 'all' }
+      : { mode: 'names', names_text: c.skills.names.join('\n') },
   }
 }
 
@@ -734,6 +740,16 @@ export function keeperConfigControlInventory(
             'prompt.unified_user_message_preview',
           ],
         ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-skills',
+          'Keeper Skills',
+          `${configApiSource} skills.names`,
+          'PATCH /api/v1/keepers/:name/config skills',
+          'skills.names',
+          ['skills.names'],
+        ),
       ]
     case 'access':
       return [
@@ -908,6 +924,14 @@ export function buildRuntimePayloadResult(
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
+  if (draft.skill_selection.mode === 'all') {
+    if (orig.skills.names !== null) payload.skills = {}
+  } else {
+    const names = listTextToStrings(draft.skill_selection.names_text)
+    if (orig.skills.names === null || !sameStringArray(names, orig.skills.names)) {
+      payload.skills = { names }
+    }
+  }
   return { ok: true, payload }
 }
 
@@ -928,6 +952,31 @@ function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number |
     next.network_mode = 'inherit'
   }
   runtimeDraft.value = next
+}
+
+function updateSkillSelectionMode(mode: 'all' | 'names') {
+  const draft = runtimeDraft.value
+  if (!draft) return
+  runtimeDraft.value = {
+    ...draft,
+    skill_selection: mode === 'all'
+      ? { mode: 'all' }
+      : {
+          mode: 'names',
+          names_text: draft.skill_selection.mode === 'names'
+            ? draft.skill_selection.names_text
+            : '',
+        },
+  }
+}
+
+function updateSkillNames(namesText: string) {
+  const draft = runtimeDraft.value
+  if (!draft || draft.skill_selection.mode !== 'names') return
+  runtimeDraft.value = {
+    ...draft,
+    skill_selection: { mode: 'names', names_text: namesText },
+  }
 }
 
 function sameStringArray(a: readonly string[], b: readonly string[]): boolean {
@@ -956,6 +1005,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
+    skills: 'skills' in payload,
   }
 }
 
@@ -1598,7 +1648,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       const updated = await patchKeeperConfig(keeperName, payload)
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      showToast('런타임 설정 저장 완료', 'success')
+      showToast('Keeper 설정 저장 완료', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
@@ -1917,6 +1967,50 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}
 
+    <${KcfSec} title="Keeper Skills" desc="Keeper TOML의 [keeper.skills] 선택을 그대로 편집합니다. 이름 비교는 정확히 일치하며, 현재 카탈로그에 없는 이름도 저장 후 관측 화면에 남습니다.">
+      ${rd && runtimeCanEdit ? html`
+        <div class="kcf-field ${dirtyFlags.skills ? 'border-l-4 border-l-[var(--color-accent-fg)] pl-3' : ''}">
+          <div class="kcf-tf-h">
+            <label>Skill 선택</label>
+            <span class="kcf-tf-hint">전체 또는 정확한 이름 목록</span>
+          </div>
+          <select
+            class="kcf-input"
+            aria-label="Skill 선택 방식"
+            value=${rd.skill_selection.mode}
+            onChange=${(event: Event) => updateSkillSelectionMode(
+              (event.target as HTMLSelectElement).value === 'all' ? 'all' : 'names',
+            )}
+          >
+            <option value="all">모든 공개 Skill</option>
+            <option value="names">이름으로 선택</option>
+          </select>
+          ${rd.skill_selection.mode === 'names' ? html`
+            <textarea
+              class="kcf-text mono mt-2"
+              aria-label="Skill 이름"
+              rows=${4}
+              value=${rd.skill_selection.names_text}
+              placeholder="ocaml-coding"
+              onInput=${(event: Event) => updateSkillNames(
+                (event.target as HTMLTextAreaElement).value,
+              )}
+            ></textarea>
+            <span class="kcf-tf-hint">한 줄에 하나 · 빈 목록은 어떤 Skill도 선택하지 않음</span>
+          ` : null}
+        </div>
+      ` : html`
+        <${ConfigRow}
+          label="Skill 선택"
+          value=${c.skills.names === null
+            ? '모든 공개 Skill'
+            : c.skills.names.length === 0
+              ? '선택하지 않음'
+              : c.skills.names.join(', ')}
+        />
+      `}
+    </${KcfSec}>
+
   `
 
   // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
@@ -2205,18 +2299,18 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <div class="kcf-foot-spacer"></div>
           ${runtimeHasChanges ? html`
             <span class="text-xs font-semibold ${runtimeValidationError ? 'text-[var(--color-status-err)]' : 'text-accent-fg'} mr-1">
-              ${runtimeValidationError ?? '변경된 런타임 설정'}
+              ${runtimeValidationError ?? '변경된 Keeper 설정'}
             </span>
             <button type="button"
               class="kcf-btn ghost v2-monitoring-action"
-              title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
+              title="초기화: 변경한 Keeper 설정을 서버 값으로 되돌립니다"
               onClick=${resetRuntimeDraft}
             >초기화하기</button>
             <button type="button"
               class="kcf-btn save v2-monitoring-action"
               onClick=${saveRuntimeConfig}
               disabled=${runtimeSaving.value || runtimeValidationError !== null}
-            >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
+            >${runtimeSaving.value ? '저장 중...' : 'Keeper 설정 저장'}</button>
           ` : null}
           ${onClose ? html`
             <button type="button" class="kcf-btn ghost v2-monitoring-action" onClick=${onClose}>닫기</button>

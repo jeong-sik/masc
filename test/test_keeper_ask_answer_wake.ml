@@ -188,6 +188,24 @@ let test_the_row_is_one_the_turn_renders () =
   check bool "rendered" true (Keeper_world_observation.is_board_activity_event row)
 ;;
 
+(* No Board post stands behind this row. Marked as a human's post, the Keeper
+   read it as one it could fetch and burned a masc_board_post_get on
+   "Invalid post_id: keeper-ask" — seen four times in one live run before this
+   was corrected. *)
+let test_the_row_is_not_a_board_post () =
+  let ask =
+    ask_with
+      [ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ]
+  in
+  let row =
+    Keeper_world_observation.pending_board_event_of_ask_answer ~meta ~ask
+      ~answers:(answers_for ask [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ])
+      ~responder ~answered_at:200.
+  in
+  check bool "nothing to fetch" true
+    (row.Keeper_world_observation.post_kind = Board.System_post)
+;;
+
 (* Storing the answer and telling the Keeper are one act. The handler has to
    make the call; a wake nothing emits is the state this started in. *)
 let test_the_answer_route_emits_the_wake () =
@@ -220,6 +238,8 @@ let () =
             test_written_and_skipped_answers_are_readable
         ; test_case "the row is one the turn renders" `Quick
             test_the_row_is_one_the_turn_renders
+        ; test_case "the row is not a Board post" `Quick
+            test_the_row_is_not_a_board_post
         ] )
     ]
 ;;

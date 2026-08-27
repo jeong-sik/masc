@@ -816,7 +816,12 @@ let pending_board_event_of_ask_answer
         (Surface_ref.lane_label responder.Keeper_ask.surface)
   ; preview = short_preview ~max_len:fusion_result_preview_max_len body
   ; hearth = None
-  ; post_kind = Board.Human_post
+    (* Not a Board post: masc wrote this row, nobody posted it. Marked
+       [Human_post] the Keeper read it as a post it could fetch and spent a
+       masc_board_post_get on "Invalid post_id: keeper-ask" — the same waste
+       the reply-content fields above were added to stop. The four sibling
+       rows with no Board post behind them all say [System_post]. *)
+  ; post_kind = Board.System_post
   ; updated_at = answered_at
   ; explicit_mention = true
   ; matched_targets = [ meta.name ]

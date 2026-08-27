@@ -892,6 +892,14 @@ let load_keeper_lanes ~(host : string) ~(port : int) :
         | Error err -> Error err
         | Ok projections -> Ok (lanes, projections)))
 
+(** Load the standalone lane matrix independently from Keeper lane rows so a
+    failure on either observation does not erase the last good other one. *)
+let load_standalone_lanes ~(host : string) ~(port : int) :
+    (Tui_decode.standalone_lanes_snapshot, string) result =
+  match fetch_standalone_lanes ~host ~port with
+  | Error err -> Error ("standalone lanes load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_standalone_lanes_snapshot json
+
 (** Load the repository list from /api/v1/repositories *)
 let load_repositories ~(host : string) ~(port : int) :
     (Tui_decode.repository_snapshot, string) result =

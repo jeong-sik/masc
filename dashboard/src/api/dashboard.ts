@@ -83,6 +83,16 @@ export {
   type ExactLaneRunInput,
   type ExactLaneRunStatus,
 } from './dashboard-exact-lane-runs'
+export {
+  fetchStandaloneLanes,
+  parseStandaloneLanesSnapshot,
+  type StandaloneLaneConfigurationState,
+  type StandaloneLaneId,
+  type StandaloneLaneSlotCount,
+  type StandaloneLaneSnapshotRow,
+  type StandaloneLaneStatus,
+  type StandaloneLanesSnapshot,
+} from './dashboard-standalone-lanes'
 
 // --- Dashboard projections ---
 

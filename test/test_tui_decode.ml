@@ -2230,6 +2230,66 @@ let test_decode_keeper_lanes_requires_the_table_fields () =
       Alcotest.(check bool) "error names the missing field" true
         (String.starts_with ~prefix:"snapshots[0]: missing required field 'idle_seconds'" detail)
 
+let standalone_lane_json ?(status = "idle") ?(retained = 3)
+    ?(running = 0) ?(selected_slots = []) lane_id label =
+  `Assoc
+    [ "lane_id", `String lane_id
+    ; "label", `String label
+    ; "required", `Bool true
+    ; "observation_only", `Bool true
+    ; "configured", `Bool true
+    ; "configuration_state", `String "ready"
+    ; "admitted_slots", `List [ `String "qwen-primary" ]
+    ; "admission_error", `Null
+    ; "status", `String status
+    ; "retained_run_count", `Int retained
+    ; "running_count", `Int running
+    ; "succeeded_count", `Int retained
+    ; "failed_count", `Int 0
+    ; "cancelled_count", `Int 0
+    ; "last_started_at", (if retained = 0 then `Null else `Float 10.)
+    ; "last_terminal_at", (if retained = 0 then `Null else `Float 11.)
+    ; "last_outcome", (if retained = 0 then `Null else `String "succeeded")
+    ; "p50_elapsed_s", (if retained = 0 then `Null else `Float 1.)
+    ; "selected_slots", `List selected_slots
+    ]
+
+let test_decode_standalone_lanes_keeps_running_and_no_retained_observation () =
+  let lanes =
+    [ standalone_lane_json ~status:"running" ~running:1
+        "board_attention_exact" "Board Attention"
+    ; standalone_lane_json "hitl_auto_judge" "HITL Auto Judge"
+    ; standalone_lane_json
+        ~selected_slots:
+          [ `Assoc [ "slot_id", `String "qwen-primary"; "count", `Int 3 ] ]
+        "librarian_exact" "Librarian"
+    ; standalone_lane_json ~status:"no_retained_observation" ~retained:0
+        "compaction_exact" "Compaction"
+    ; standalone_lane_json "verifier_exact" "Verifier"
+    ]
+  in
+  let json =
+    `Assoc
+      [ "schema", `String "masc.standalone_llm_lanes.v1"
+      ; "generated_at", `String "2026-08-27T00:00:00Z"
+      ; "observed_at_unix", `Float 20.
+      ; "observation_only", `Bool true
+      ; "lanes", `List lanes
+      ]
+  in
+  match Tui_decode.decode_standalone_lanes_snapshot json with
+  | Error detail -> Alcotest.failf "decode failed: %s" detail
+  | Ok snapshot ->
+      Alcotest.(check int) "all five lanes" 5 (List.length snapshot.sls_lanes);
+      let first = List.hd snapshot.sls_lanes in
+      Alcotest.(check string) "running status" "running"
+        (Tui_decode.standalone_lane_status_to_string first.sl_status);
+      let compaction = List.nth snapshot.sls_lanes 3 in
+      Alcotest.(check string)
+        "no retained observation"
+        "no retained observation"
+        (Tui_decode.standalone_lane_status_to_string compaction.sl_status)
+
 let fusion_run_json ?(status = "completed") ?(topology = "simple")
     ?(failure_fields = []) run_id =
   `Assoc
@@ -3521,6 +3581,11 @@ let () =
           test_decode_keeper_lanes_reads_current_shape_and_keeps_unknown_values;
         Alcotest.test_case "requires the table fields" `Quick
           test_decode_keeper_lanes_requires_the_table_fields;
+      ] );
+    ( "decode_standalone_lanes",
+      [
+        Alcotest.test_case "keeps running and never-observed states" `Quick
+          test_decode_standalone_lanes_keeps_running_and_no_retained_observation;
       ] );
     ( "decode_fusion",
       [

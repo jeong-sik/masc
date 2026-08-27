@@ -126,6 +126,42 @@ type keeper_lanes_snapshot = {
   kls_lanes : keeper_lane list;
 }
 
+type standalone_lane_status =
+  | Standalone_running
+  | Standalone_idle
+  | Standalone_degraded
+  | Standalone_no_retained_observation
+  | Standalone_unavailable
+
+type standalone_lane_slot_count = {
+  slsc_slot_id : string;
+  slsc_count : int;
+}
+
+type standalone_lane = {
+  sl_lane_id : string;
+  sl_label : string;
+  sl_required : bool;
+  sl_status : standalone_lane_status;
+  sl_configuration_state : string;
+  sl_admitted_slots : string list;
+  sl_admission_error : string option;
+  sl_retained_run_count : int;
+  sl_running_count : int;
+  sl_succeeded_count : int;
+  sl_failed_count : int;
+  sl_cancelled_count : int;
+  sl_last_terminal_at : float option;
+  sl_last_outcome : string option;
+  sl_p50_elapsed_s : float option;
+  sl_selected_slots : standalone_lane_slot_count list;
+}
+
+type standalone_lanes_snapshot = {
+  sls_observed_at_unix : float;
+  sls_lanes : standalone_lane list;
+}
+
 type keeper_secret_status =
   | Secret_ready
   | Secret_empty
@@ -2985,6 +3021,99 @@ let decode_keeper_lanes_snapshot json =
   let* items = required_list_field json "snapshots" in
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
+
+let standalone_lane_status_of_string = function
+  | "running" -> Ok Standalone_running
+  | "idle" -> Ok Standalone_idle
+  | "degraded" -> Ok Standalone_degraded
+  | "no_retained_observation" -> Ok Standalone_no_retained_observation
+  | "unavailable" -> Ok Standalone_unavailable
+  | other -> Error ("standalone lane status: unknown value " ^ other)
+
+let standalone_lane_status_to_string = function
+  | Standalone_running -> "running"
+  | Standalone_idle -> "idle"
+  | Standalone_degraded -> "degraded"
+  | Standalone_no_retained_observation -> "no retained observation"
+  | Standalone_unavailable -> "unavailable"
+
+let decode_standalone_lane_slot_count json =
+  let* slsc_slot_id = required_string_field json "slot_id" in
+  let* slsc_count = required_int_field json "count" in
+  Ok { slsc_slot_id; slsc_count }
+
+let decode_standalone_lane json =
+  let* sl_lane_id = required_string_field json "lane_id" in
+  let* sl_label = required_string_field json "label" in
+  let* sl_required = required_bool_field json "required" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "standalone lane row is not observation-only"
+  in
+  let* _configured = required_nullable_bool_field json "configured" in
+  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* admitted_slots = required_list_field json "admitted_slots" in
+  let* sl_admitted_slots =
+    decode_list
+      "admitted_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "admitted_slots: expected a string")
+      admitted_slots
+  in
+  let* sl_admission_error = required_nullable_string_field json "admission_error" in
+  let* status = required_string_field json "status" in
+  let* sl_status = standalone_lane_status_of_string status in
+  let* sl_retained_run_count = required_int_field json "retained_run_count" in
+  let* sl_running_count = required_int_field json "running_count" in
+  let* sl_succeeded_count = required_int_field json "succeeded_count" in
+  let* sl_failed_count = required_int_field json "failed_count" in
+  let* sl_cancelled_count = required_int_field json "cancelled_count" in
+  let* _last_started_at = required_nullable_float_field json "last_started_at" in
+  let* sl_last_terminal_at = required_nullable_float_field json "last_terminal_at" in
+  let* sl_last_outcome = required_nullable_string_field json "last_outcome" in
+  let* sl_p50_elapsed_s = required_nullable_float_field json "p50_elapsed_s" in
+  let* selected_slots = required_list_field json "selected_slots" in
+  let* sl_selected_slots =
+    decode_list "selected_slots" decode_standalone_lane_slot_count selected_slots
+  in
+  Ok
+    { sl_lane_id
+    ; sl_label
+    ; sl_required
+    ; sl_status
+    ; sl_configuration_state
+    ; sl_admitted_slots
+    ; sl_admission_error
+    ; sl_retained_run_count
+    ; sl_running_count
+    ; sl_succeeded_count
+    ; sl_failed_count
+    ; sl_cancelled_count
+    ; sl_last_terminal_at
+    ; sl_last_outcome
+    ; sl_p50_elapsed_s
+    ; sl_selected_slots
+    }
+
+let decode_standalone_lanes_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.standalone_llm_lanes.v1" then Ok ()
+    else Error ("standalone lanes: unsupported schema " ^ schema)
+  in
+  let* _generated_at = required_string_field json "generated_at" in
+  let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "standalone lanes snapshot is not observation-only"
+  in
+  let* items = required_list_field json "lanes" in
+  let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
+  if List.length sls_lanes = 5 then Ok { sls_observed_at_unix; sls_lanes }
+  else Error "standalone lanes: expected exactly five lanes"
 
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready

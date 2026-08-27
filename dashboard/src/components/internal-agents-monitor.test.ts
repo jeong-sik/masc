@@ -7,6 +7,7 @@ const api = vi.hoisted(() => ({
   fetchExactLaneRuns: vi.fn(),
   fetchVerificationRuns: vi.fn(),
   fetchFusionRuns: vi.fn(),
+  fetchStandaloneLanes: vi.fn(),
 }))
 const memoryApi = vi.hoisted(() => ({ fetchKeeperMemoryJournal: vi.fn() }))
 const rawApi = vi.hoisted(() => ({
@@ -67,6 +68,63 @@ describe('Librarian prompt evidence', () => {
 describe('InternalAgentsMonitor', () => {
   beforeEach(() => {
     rawApi.fetchKeeperRawTraces.mockResolvedValue([])
+    api.fetchStandaloneLanes.mockResolvedValue({
+      schema: 'masc.standalone_llm_lanes.v1',
+      generatedAt: 'now',
+      observedAtUnix: 1,
+      observationOnly: true,
+      lanes: [],
+    })
+  })
+
+  it('shows configured, running, and never-observed standalone lanes without controlling them', async () => {
+    api.fetchExactLaneRuns.mockResolvedValue({ runs: [], count: 0, total: 0, hasMore: false, generatedAt: 'now' })
+    api.fetchFusionRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    api.fetchVerificationRuns.mockResolvedValue({ runs: [], count: 0, generatedAt: 'now' })
+    const lane = (overrides: Record<string, unknown>) => ({
+      laneId: 'board_attention_exact',
+      label: 'Board Attention',
+      required: true,
+      observationOnly: true,
+      configured: true,
+      configurationState: 'ready',
+      admittedSlots: ['qwen3-5-cloud'],
+      admissionError: null,
+      status: 'idle',
+      retainedRunCount: 4,
+      runningCount: 0,
+      succeededCount: 4,
+      failedCount: 0,
+      cancelledCount: 0,
+      lastStartedAt: 10,
+      lastTerminalAt: 12,
+      lastOutcome: 'succeeded',
+      p50ElapsedSeconds: 2,
+      selectedSlots: [{ slotId: 'qwen3-5-cloud', count: 4 }],
+      ...overrides,
+    })
+    api.fetchStandaloneLanes.mockResolvedValue({
+      schema: 'masc.standalone_llm_lanes.v1',
+      generatedAt: 'now',
+      observedAtUnix: 20,
+      observationOnly: true,
+      lanes: [
+        lane({ status: 'running', runningCount: 1 }),
+        lane({ laneId: 'hitl_auto_judge', label: 'HITL Auto Judge' }),
+        lane({ laneId: 'librarian_exact', label: 'Librarian' }),
+        lane({ laneId: 'compaction_exact', label: 'Compaction', required: false, status: 'no_retained_observation', retainedRunCount: 0, lastStartedAt: null, lastTerminalAt: null, lastOutcome: null, p50ElapsedSeconds: null, selectedSlots: [] }),
+        lane({ laneId: 'verifier_exact', label: 'Verifier', required: false }),
+      ],
+    })
+
+    const { container } = render(html`<${InternalAgentsMonitor} />`)
+
+    expect(await screen.findByText('READ-ONLY OBSERVATION')).toBeTruthy()
+    const matrix = await screen.findByTestId('standalone-lane-matrix')
+    expect(within(matrix).getAllByText('Running')).toHaveLength(2)
+    expect(within(matrix).getByText('No retained observation')).toBeTruthy()
+    expect(container.textContent).toContain('qwen3-5-cloud ×4')
+    expect(container.textContent).toContain('관측 기록 없음')
   })
 
   it('keeps paused keepers with zero observed runs in the owner matrix', async () => {

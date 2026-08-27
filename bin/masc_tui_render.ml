@@ -3737,6 +3737,44 @@ let keeper_lane_row (columns : keeper_lane_columns)
 (** Render one current composite row per Keeper. This is a read-only operator
     view: the endpoint owns the phase diagnosis and this surface only makes
     the six facts scannable together. *)
+let standalone_lane_status_style = function
+  | Tui_decode.Standalone_running -> Ansi.yellow
+  | Tui_decode.Standalone_idle -> Ansi.green
+  | Tui_decode.Standalone_degraded
+  | Tui_decode.Standalone_unavailable -> Ansi.red
+  | Tui_decode.Standalone_no_retained_observation -> Ansi.gray
+
+let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
+  let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
+  let slots =
+    match lane.sl_admitted_slots with
+    | [] -> "no admitted slot"
+    | slots -> String.concat "," slots
+  in
+  let observed_slots =
+    match lane.sl_selected_slots with
+    | [] -> "none"
+    | slots ->
+        slots
+        |> List.map (fun slot ->
+          Printf.sprintf "%s×%d" slot.slsc_slot_id slot.slsc_count)
+        |> String.concat ","
+  in
+  let p50 =
+    match lane.sl_p50_elapsed_s with
+    | None -> "—"
+    | Some seconds -> Printf.sprintf "%.1fs" seconds
+  in
+  let prefix = standalone_lane_status_style lane.sl_status in
+  let line =
+    Printf.sprintf
+      "  %s● %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
+      prefix lane.sl_label status Ansi.reset slots lane.sl_running_count
+      lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count
+      lane.sl_cancelled_count p50 observed_slots
+  in
+  fit_width line width
+
 let render_lanes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -3769,6 +3807,22 @@ let render_lanes (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  box_line_styled buf cols ~style:(Ansi.bold ^ Ansi.cyan)
+    "  Standalone LLM lanes · READ-ONLY OBSERVATION";
+  let standalone_rows =
+    match state.standalone_lanes with
+    | Some snapshot ->
+        List.map (standalone_lane_row inner) snapshot.Tui_decode.sls_lanes
+    | None ->
+        [ (match state.standalone_lanes_error with
+           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
+           | Some detail ->
+               Ansi.red ^ "  standalone lane observation unavailable: "
+               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+        ]
+  in
+  List.iter (box_line buf cols) standalone_rows;
+  box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);
   box_divider buf cols;
   (match state.lanes_error with
@@ -3789,6 +3843,7 @@ let render_lanes (state : state) =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row
+    |> fun height -> max 1 (height - 2 - List.length standalone_rows)
   in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in

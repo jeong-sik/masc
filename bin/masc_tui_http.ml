@@ -1226,6 +1226,11 @@ let fetch_keeper_lanes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/composite"
 
+(** Fetch the read-only five-lane admission and observation matrix. *)
+let fetch_standalone_lanes ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/standalone-lanes"
+
 (** Fetch /api/v1/repositories. *)
 let fetch_repositories ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

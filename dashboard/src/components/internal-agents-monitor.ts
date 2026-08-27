@@ -4,10 +4,12 @@ import {
   fetchExactLaneRun,
   fetchExactLaneRuns,
   fetchFusionRuns,
+  fetchStandaloneLanes,
   fetchVerificationRuns,
   type ExactLaneRunRecord,
   type ExactLaneRunSummary,
   type FusionRunRecord,
+  type StandaloneLanesSnapshot,
   type VerificationRunRecord,
 } from '../api/dashboard'
 import {
@@ -540,6 +542,7 @@ function resolvedOwner(row: Row, roster: readonly KeeperIdentity[]): string {
 
 export function InternalAgentsMonitor() {
   const [rows, setRows] = useState<Row[]>([])
+  const [laneMatrix, setLaneMatrix] = useState<StandaloneLanesSnapshot | null>(null)
   const [filter, setFilter] = useState<Filter>('all')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -549,10 +552,11 @@ export function InternalAgentsMonitor() {
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current
     setLoading(true)
-    const [exact, verification, fusion] = await Promise.allSettled([
+    const [exact, verification, fusion, standalone] = await Promise.allSettled([
       fetchExactLaneRuns(),
       fetchVerificationRuns(),
       fetchFusionRuns(),
+      fetchStandaloneLanes(),
     ])
     const next: Row[] = []
     const failures: string[] = []
@@ -567,6 +571,14 @@ export function InternalAgentsMonitor() {
     if (fusion.status === 'fulfilled') {
       next.push(...fusion.value.runs.map(run => ({ source: 'fusion' as const, id: `fusion:${run.runId}`, run })))
     } else failures.push(`Fusion: ${String(fusion.reason)}`)
+    if (standalone.status === 'fulfilled') {
+      setLaneMatrix(standalone.value)
+    } else {
+      setLaneMatrix(null)
+      failures.push(isForbidden(standalone.reason)
+        ? 'Standalone lane matrix: Admin 권한 필요.'
+        : `Standalone lane matrix: ${String(standalone.reason)}`)
+    }
     if (version !== refreshVersion.current) return
     next.sort((a, b) => startedAt(b) - startedAt(a))
     setRows(next)
@@ -628,6 +640,49 @@ export function InternalAgentsMonitor() {
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="typed" /> schema-typed registry 값 · 권한/retention 계약에 따라 실제값 포함</span>
         <span class="flex items-center gap-2"><${EvidenceBadge} kind="excerpt" /> 원문 전체가 아닌 제한된 출력</span>
       </div>
+
+      <section class="grid gap-2" aria-labelledby="standalone-lane-matrix-title">
+        <div class="flex flex-wrap items-end gap-2">
+          <h3 id="standalone-lane-matrix-title" class="text-sm font-semibold text-[var(--color-fg-primary)]">Standalone LLM lane matrix</h3>
+          <span class="rounded border border-[var(--color-accent)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-accent)]">READ-ONLY OBSERVATION</span>
+          <span class="text-3xs text-[var(--color-fg-muted)]">설정됐지만 현재 retained 관측이 없는 lane도 표시합니다.</span>
+        </div>
+        ${laneMatrix === null
+          ? html`<div class="ia-empty">Standalone lane 관측 정보를 읽는 중이거나 사용할 수 없습니다.</div>`
+          : html`
+            <div class="ai-tablewrap">
+              <table class="ai-table" data-testid="standalone-lane-matrix">
+                <thead>
+                  <tr><th>Lane</th><th>State</th><th>Admitted slots</th><th class="r">Running</th><th class="r">Retained</th><th class="r">Last terminal</th><th class="r">p50</th><th>Observed slots</th></tr>
+                </thead>
+                <tbody>
+                  ${laneMatrix.lanes.map(lane => {
+                    const statusLabel = lane.status === 'no_retained_observation'
+                      ? 'No retained observation'
+                      : lane.status.charAt(0).toUpperCase() + lane.status.slice(1)
+                    const statusClass = lane.status === 'degraded' || lane.status === 'unavailable'
+                      ? 'text-[var(--color-danger)]'
+                      : lane.status === 'running'
+                        ? 'text-[var(--status-warn)]'
+                        : 'text-[var(--color-fg-primary)]'
+                    return html`
+                      <tr key=${lane.laneId}>
+                        <td><strong>${lane.label}</strong>${lane.required ? html` <span class="dim">required</span>` : null}<br /><code class="mono dim">${lane.laneId}</code></td>
+                        <td class=${statusClass}><strong>${statusLabel}</strong>${lane.admissionError ? html`<br /><span class="text-3xs">${lane.admissionError}</span>` : null}</td>
+                        <td class="mono">${lane.admittedSlots.length === 0 ? '—' : lane.admittedSlots.join(', ')}</td>
+                        <td class="r mono">${lane.runningCount}</td>
+                        <td class="r mono">${lane.retainedRunCount}</td>
+                        <td class="r mono">${lane.lastTerminalAt === null ? '관측 기록 없음' : `${lane.lastOutcome ?? 'terminal'} · ${formatDateTimeKo(lane.lastTerminalAt)}`}</td>
+                        <td class="r mono">${formatElapsed(lane.p50ElapsedSeconds ?? undefined)}</td>
+                        <td class="mono">${lane.selectedSlots.length === 0 ? '—' : lane.selectedSlots.map(slot => `${slot.slotId} ×${slot.count}`).join(', ')}</td>
+                      </tr>
+                    `
+                  })}
+                </tbody>
+              </table>
+            </div>
+          `}
+      </section>
 
       <section class="grid gap-2" aria-labelledby="internal-agent-inventory-title">
         <div class="flex items-end gap-2">

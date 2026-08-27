@@ -1,6 +1,11 @@
 ; Test Environment Configuration
 
 (test
+ (name test_server_standalone_lane_projection)
+ (modules test_server_standalone_lane_projection)
+ (libraries alcotest masc masc.runtime masc.server yojson))
+
+(test
  (name test_keeper_effective_tool_surface)
  (modules test_keeper_effective_tool_surface)
  (libraries

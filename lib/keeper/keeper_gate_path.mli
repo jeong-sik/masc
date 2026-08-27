@@ -12,3 +12,9 @@ val replay_results : base_path:string -> string
     and its write failure does not make the pending Gate store unavailable. *)
 
 val always_allowed : base_path:string -> string
+
+val keeper_modes : base_path:string -> string
+(** Per-Keeper mode overrides, beside the workspace mode rather than inside
+    it: one keeper's stance changing must not rewrite the file every other
+    keeper's decision is read from. Holds only keepers an operator has
+    actually moved, so the file is also the list of them. *)

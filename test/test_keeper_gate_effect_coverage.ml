@@ -192,6 +192,99 @@ let test_second_tool_snapshot_contains_first_tool_result () =
   | _ -> failf "expected one completed call, got %d" (List.length calls)
 ;;
 
+(* Per-keeper overrides. The point is which way they move: a keeper an
+   operator singled out is one they want held to a higher bar, and an
+   override asking for less than the workspace has to stay ineffective. *)
+let with_workspace f =
+  let base_path = temp_dir "keeper-gate-mode" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  f (base_path, Workspace.default_config base_path)
+
+let select_workspace config mode =
+  match Keeper_gate_mode.set config ~actor:"test" mode with
+  | Ok _ -> ()
+  | Error error -> fail ("failed to select workspace Gate mode: " ^ error)
+
+let single_out config ~keeper_name mode =
+  match Keeper_gate_mode.set_for_keeper config ~actor:"test" ~keeper_name mode with
+  | Ok change -> change
+  | Error error -> fail ("failed to set a keeper Gate mode: " ^ error)
+
+let resolved ~base_path ~keeper_name =
+  match Keeper_gate_mode.resolve ~base_path ~keeper_name with
+  | Ok mode -> Keeper_gate_mode.to_string mode
+  | Error error -> fail ("failed to resolve a Gate mode: " ^ error)
+
+let test_a_keeper_with_no_override_follows_the_workspace () =
+  with_workspace @@ fun (base_path, config) ->
+  select_workspace config Keeper_gate_mode.Auto_judge;
+  check string "the workspace answer" "auto_judge"
+    (resolved ~base_path ~keeper_name:"unmentioned")
+
+let test_an_override_can_hold_one_keeper_higher () =
+  (* The reason this exists: one keeper attached to somebody else's Jira
+     while the rest of the workspace is not. *)
+  with_workspace @@ fun (base_path, config) ->
+  select_workspace config Keeper_gate_mode.Auto_judge;
+  ignore (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Manual));
+  check string "the singled-out keeper asks a person" "manual"
+    (resolved ~base_path ~keeper_name:"kidsnote");
+  check string "and nobody else moved" "auto_judge"
+    (resolved ~base_path ~keeper_name:"rondo")
+
+let test_an_override_cannot_lower_one_keeper () =
+  (* Turning the workspace stricter must not be undoable one keeper at a
+     time by an older row nobody remembers writing. *)
+  with_workspace @@ fun (base_path, config) ->
+  select_workspace config Keeper_gate_mode.Manual;
+  ignore
+    (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Always_allow));
+  check string "the workspace still decides" "manual"
+    (resolved ~base_path ~keeper_name:"kidsnote")
+
+let test_a_lower_override_waits_rather_than_being_lost () =
+  (* Kept on disk, ignored on read. An operator who set one and then
+     tightened the workspace should find it again when they loosen back,
+     rather than silently having lost it. *)
+  with_workspace @@ fun (base_path, config) ->
+  select_workspace config Keeper_gate_mode.Manual;
+  ignore
+    (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Auto_judge));
+  (match Keeper_gate_mode.keeper_override ~base_path ~keeper_name:"kidsnote" with
+   | Ok (Some o) ->
+     check string "what was asked for is still recorded" "auto_judge"
+       (Keeper_gate_mode.to_string o.Keeper_gate_mode.mode)
+   | Ok None -> fail "the override was dropped instead of kept"
+   | Error error -> fail ("failed to read the override: " ^ error))
+
+let test_clearing_an_override_removes_it () =
+  with_workspace @@ fun (base_path, config) ->
+  select_workspace config Keeper_gate_mode.Auto_judge;
+  ignore (single_out config ~keeper_name:"kidsnote" (Some Keeper_gate_mode.Manual));
+  ignore (single_out config ~keeper_name:"kidsnote" None);
+  (match Keeper_gate_mode.keeper_overrides ~base_path with
+   | Ok [] -> ()
+   | Ok rows ->
+     failf "clearing left %d override(s) behind" (List.length rows)
+   | Error error -> fail ("failed to read the overrides: " ^ error));
+  check string "and the keeper is back on the workspace answer" "auto_judge"
+    (resolved ~base_path ~keeper_name:"kidsnote")
+
+let test_an_unreadable_override_file_is_not_an_empty_list () =
+  (* An empty list answers with the workspace mode, which is the looser one.
+     A file that cannot be read must not be the quiet way back to it. *)
+  with_workspace @@ fun (base_path, _config) ->
+  let file = Keeper_gate_path.keeper_modes ~base_path in
+  Fs_compat.mkdir_p (Keeper_gate_path.dir ~base_path);
+  (match Fs_compat.save_file_atomic file "{ not a list" with
+   | Ok () -> ()
+   | Error detail -> fail ("could not write the fixture: " ^ detail));
+  match Keeper_gate_mode.resolve ~base_path ~keeper_name:"kidsnote" with
+  | Error _ -> ()
+  | Ok mode ->
+    failf "an unreadable override file resolved to %s"
+      (Keeper_gate_mode.to_string mode)
+
 let test_keeper_effects_defer_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
   let base_path = temp_dir "keeper-gate-deferred" in
@@ -457,7 +550,21 @@ let test_voice_effect_defers_without_gating_local_reads () =
 let () =
   run
     "keeper_gate_effect_coverage"
-    [ ( "causal_context"
+    [ ( "per-keeper mode"
+      , [ test_case "no override follows the workspace" `Quick
+            test_a_keeper_with_no_override_follows_the_workspace
+        ; test_case "an override can hold one keeper higher" `Quick
+            test_an_override_can_hold_one_keeper_higher
+        ; test_case "an override cannot lower one keeper" `Quick
+            test_an_override_cannot_lower_one_keeper
+        ; test_case "a lower override waits rather than being lost" `Quick
+            test_a_lower_override_waits_rather_than_being_lost
+        ; test_case "clearing an override removes it" `Quick
+            test_clearing_an_override_removes_it
+        ; test_case "an unreadable override file is not an empty list" `Quick
+            test_an_unreadable_override_file_is_not_an_empty_list
+        ] )
+    ; ( "causal_context"
       , [ test_case
             "second tool snapshot contains first tool result"
             `Quick

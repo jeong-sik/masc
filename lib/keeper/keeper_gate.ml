@@ -1063,7 +1063,7 @@ and drain_auto_judge_owner
       ~keeper_name
       ()
   =
-  match Keeper_gate_mode.read ~base_path with
+  match Keeper_gate_mode.resolve ~base_path ~keeper_name with
   | Ok Keeper_gate_mode.Auto_judge ->
     drain_auto_judge_owner_queue
       ?reserved_id
@@ -1633,7 +1633,10 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     in
     allow request source [ audit_receipt ])
   else
-    let mode = Keeper_gate_mode.read ~base_path:request.base_path in
+    let mode =
+      Keeper_gate_mode.resolve ~base_path:request.base_path
+        ~keeper_name:request.keeper_name
+    in
     (match mode with
      | Ok Keeper_gate_mode.Always_allow ->
        let source = Workspace_always_allow in

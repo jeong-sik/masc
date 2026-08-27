@@ -94,6 +94,16 @@ let the_ask_status_schema_loads () =
   Alcotest.(check bool) "description is not empty" true
     (String.trim schema.Masc_domain.description <> "")
 
+(* A question stays open "until a human answers it or the asking Keeper
+   withdraws it". The store has had [withdraw] since it was written and nothing
+   outside its own tests ever called it, so the second half of that sentence
+   was not true. *)
+let the_withdraw_schema_loads () =
+  let schema = Tool_schemas_operator_surface.ask_withdraw in
+  Alcotest.(check string) "tool name" "masc_ask_withdraw" schema.Masc_domain.name;
+  Alcotest.(check bool) "description is not empty" true
+    (String.trim schema.Masc_domain.description <> "")
+
 let both_ask_tools_are_dispatched () =
   List.iter
     (fun name ->
@@ -102,7 +112,7 @@ let both_ask_tools_are_dispatched () =
       | Some operation ->
           Alcotest.(check string) ("canonical name for " ^ name) name
             (Tool_schemas_misc.mcp_runtime_tool_name operation))
-    [ "masc_ask"; "masc_ask_status" ]
+    [ "masc_ask"; "masc_ask_status"; "masc_ask_withdraw" ]
 
 let () =
   Alcotest.run "masc_ask tool surface"
@@ -110,6 +120,8 @@ let () =
       ( "the declaration",
         [
           Alcotest.test_case "the ask schema loads" `Quick the_ask_schema_loads;
+          Alcotest.test_case "the withdraw schema loads" `Quick
+            the_withdraw_schema_loads;
           Alcotest.test_case "modes match the boundary" `Quick
             the_schema_offers_only_modes_the_boundary_parses;
           Alcotest.test_case "the ask_status schema loads" `Quick

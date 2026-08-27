@@ -375,6 +375,27 @@ schema가 없는 descriptor에만 허용된다. transport alias는 자신을 대
 Gate가 Always Allowed, LLM Auto Judge, 비차단 HITL 중 하나로 결정한다. 외부
 dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반환한다.
 
+#### 8.x HITL 판정 맥락에서 thinking 을 뺀다
+
+Auto Judge 와 HITL 이 읽는 맥락 묶음(`Hitl_summary_worker.build_context_bundle`)
+에서 Keeper 의 `thinking` 블록을 제거한다. `text`·`tool_use`·`tool_result` 는
+그대로 남는다 — 판정자는 Keeper 가 **무엇을 했는지**를 보고, 그렇게 하기로
+스스로를 설득한 과정은 보지 않는다.
+
+두 가지 이유가 있다.
+
+크기: 2026-08-27 라이브 큐 실측에서 `thinking` 이 메시지 블록의 51%(rondo 기준
+85.6 kB 중 23.2 kB)였고, 정작 판정 대상인 호출은 2.5 kB였다. 승인마다 자기
+사본을 들고 있어 같은 Keeper 의 5건이 같은 이력을 5번 보냈다.
+
+독립성: `thinking` 은 Keeper 가 하려는 일을 스스로에게 변호하는 자리다. 같은
+샘플에 `"I MUST STOP this immediately"` 같은 자기 지시가 그대로 들어 있었고, 그걸
+읽은 판정자는 요청이 아니라 Keeper 의 자기 서사를 저울에 올리게 된다.
+
+durable 항목은 턴이 실어온 것을 그대로 보존하고 프롬프트만 좁힌다. 제거 개수는
+`thinking_blocks_omitted` 로 묶음에 함께 실어, 판정자가 얇은 맥락을 보고 "잘라낸
+것"과 "원래 사고가 없던 턴"을 구분할 수 있게 한다.
+
 ---
 
 ## 9. Configuration

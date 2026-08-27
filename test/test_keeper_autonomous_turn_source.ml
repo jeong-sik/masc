@@ -240,8 +240,37 @@ let replace_raw_field_at ~index ~field ~value records =
     records
 ;;
 
-let test_mismatched_raw_trace_runtime_identity_is_skipped () =
+(* The trace format is a hard cut: a run written with an older
+   trace_version can never become readable, so the reader caches the
+   rejection per (path, run). The proof is behavioral — after the first
+   rejection, overwriting the file with a current-version trace must NOT
+   resurrect the run, because the reader never opens the file again. *)
+let test_version_rejected_run_is_not_reread () =
   with_workspace @@ fun config ->
+  let path = trace_path config "old-version" in
+  let records =
+    run_lines ~worker_run_id:"run-old" ~start_seq:1 ~base_ts:5000.
+      ~prompt:"ignored" ~final_text:"stale"
+    |> replace_raw_field_at ~index:0 ~field:"trace_version" ~value:(`Int 3)
+  in
+  write_lines path records;
+  let turn_count () =
+    List.length (Keeper_autonomous_turn_source.load_recent ~config ~keeper_name ())
+  in
+  write_turn_record config ~absolute_turn:47
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"run-old" ~start_seq:1));
+  Alcotest.(check int) "old trace_version run is rejected" 0 (turn_count ());
+  (* Same path and run id, now with a current-version trace: the cached
+     rejection must suppress the re-read. *)
+  write_lines path
+    (run_lines ~worker_run_id:"run-old" ~start_seq:1 ~base_ts:5000.
+       ~prompt:Keeper_unified_prompt.autonomous_wake_marker
+       ~final_text:"resurrected");
+  Alcotest.(check int) "rejected run is not re-read after rewrite" 0 (turn_count ())
+;;
+
+let test_mismatched_raw_trace_runtime_identity_is_skipped () =  with_workspace @@ fun config ->
   let path = trace_path config "runtime-identity-mismatch" in
   let records =
     run_lines ~worker_run_id:"run-mismatch" ~start_seq:1 ~base_ts:4500.
@@ -530,6 +559,8 @@ let () =
             test_missing_or_outside_trace_is_skipped
         ; Alcotest.test_case "rejects mismatched raw runtime identity" `Quick
             test_mismatched_raw_trace_runtime_identity_is_skipped
+        ; Alcotest.test_case "version-rejected run is not re-read" `Quick
+            test_version_rejected_run_is_not_reread
         ; Alcotest.test_case "rejects mismatched raw session identity" `Quick
             test_mismatched_raw_trace_session_identity_is_skipped
         ; Alcotest.test_case "since and limit use current records" `Quick

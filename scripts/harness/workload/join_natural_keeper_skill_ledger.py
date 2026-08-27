@@ -687,16 +687,9 @@ def validate_join(
             keeper=producer["keeper"],
         )
         require(after_ledger == before_ledger, "Dashboard ledger changed during join")
-        durable_result = exact_turn_join(ledger=ledger, turn_ref=producer["turn_ref"])
-        result = {
-            "kind": "historical_projection_unavailable",
-            "match_count": durable_result["match_count"],
-            "producer_trace_id": producer["trace_id"],
-            "dashboard_session_id": projected_session,
-            "durable_result": durable_result,
-        }
+        result = exact_turn_join(ledger=ledger, turn_ref=producer["turn_ref"])
         dashboard_equals_durable = False
-        dashboard_projection_kind = "current_session_differs"
+        dashboard_projection_kind = "current_session_differs_historical_exact"
     return {
         "producer": producer,
         "server": before_identity,

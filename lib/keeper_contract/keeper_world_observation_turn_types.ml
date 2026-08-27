@@ -34,6 +34,7 @@ type event_queue_trigger =
           recorded as Keeper_external_attention. Edge-triggered (dequeued once),
           carries an event_id pointer (not content). Dormant until a producer
           enqueues it (P3). *)
+  | Ask_answered_stimulus
   | Hitl_resolved_stimulus
       (** RFC-0320 W3b: an operator resolved a gated-tool approval this keeper
           was waiting on. When the original turn already ended (the approval
@@ -62,6 +63,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
+  | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
@@ -93,6 +95,7 @@ let turn_reason_to_string = function
   | Scope_message_pending -> "scope_message_pending"
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
   | Connector_attention_pending -> "connector_attention_pending"
+  | Ask_answered_pending -> "ask_answered_pending"
   | Hitl_resolved_pending -> "hitl_resolved_pending"
   | Completion_authority_rejection_pending ->
     "completion_authority_rejection_pending"
@@ -109,6 +112,7 @@ let turn_reason_of_event_queue_trigger = function
   | Bootstrap_stimulus -> Bootstrap_stimulus_pending
   | Scheduled_automation_stimulus -> Scheduled_automation_due
   | Connector_attention_stimulus -> Connector_attention_pending
+  | Ask_answered_stimulus -> Ask_answered_pending
   | Hitl_resolved_stimulus -> Hitl_resolved_pending
   | Completion_authority_rejection_stimulus ->
     Completion_authority_rejection_pending

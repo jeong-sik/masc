@@ -11,6 +11,7 @@ type event_queue_trigger =
       (** RFC-connector-ambient-attention-wake P1: ambient connector message
           recorded as external attention; edge-triggered, carries an event_id
           pointer. Dormant until a producer enqueues it (P3). *)
+  | Ask_answered_stimulus
   | Hitl_resolved_stimulus
       (** RFC-0320 W3b: an operator resolved a gated-tool approval this keeper
           waited on; when the original turn already ended, the wake has no live
@@ -34,6 +35,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
+  | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending

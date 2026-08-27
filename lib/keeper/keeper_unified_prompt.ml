@@ -351,6 +351,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Delegate_completed -> "keeper_delegate_completed"
   | Keeper_world_observation.Composition_completed ->
     "keeper_composition_completed"
+  | Keeper_world_observation.Ask_answered_row -> "ask_answered"
 ;;
 
 let quote_prompt_field value =
@@ -494,6 +495,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Completion_authority_rejected _
   | Keeper_world_observation.Task_cancelled _
   | Keeper_world_observation.Delegate_completed
+  (* The answer is the row's title and preview; there is no side fact to add. *)
+  | Keeper_world_observation.Ask_answered_row
   | Keeper_world_observation.Composition_completed -> []
 ;;
 
@@ -656,6 +659,7 @@ let group_scheduled_wake_events events =
     | Keeper_world_observation.Completion_authority_rejected _
     | Keeper_world_observation.Task_cancelled _
     | Keeper_world_observation.Delegate_completed
+    | Keeper_world_observation.Ask_answered_row
     | Keeper_world_observation.Composition_completed -> groups
   in
   List.fold_left add_event [] events
@@ -784,6 +788,7 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Task_cancelled _
          | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Ask_answered_row
          | Keeper_world_observation.Composition_completed -> None)
       events
   in
@@ -837,6 +842,7 @@ let format_task_cancellation_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Completion_authority_rejected _
          | Keeper_world_observation.Delegate_completed
+         | Keeper_world_observation.Ask_answered_row
          | Keeper_world_observation.Composition_completed -> None)
       events
   in

@@ -71,6 +71,7 @@ type stimulus_payload =
          content). Dormant — no producer emits it yet (handle_ambient enqueuer
          lands in P3). *)
   | Hitl_resolved of hitl_resolution
+  | Ask_answered of ask_answered
       (* A nonblocking HITL approval this keeper enqueued was resolved. Wakes
          the keeper so it re-evaluates and proceeds on its next independent
          cycle instead of waiting for unrelated stimulus, no-progress recovery,
@@ -163,6 +164,17 @@ and composition_terminal =
   | Composition_failed of string
   | Composition_cancelled of string
 
+and ask_answered = {
+  ask_id : string;
+  (* The answered question. Only the pointer travels: the answer text lives in
+     [Keeper_ask_store] and the woken keeper reads it there, the same choice
+     [Connector_attention] makes about ambient message content. *)
+  channel : Keeper_continuation_channel.t;
+  (* Where the question was asked from, captured when the keeper asked and
+     carried through so a woken keeper answers into that conversation rather
+     than its own state. [Unrouted] when the ask named no channel. *)
+}
+
 and hitl_resolution_decision =
   | Hitl_approved
   | Hitl_rejected of string
@@ -230,6 +242,8 @@ let composition_completion_post_id (cc : composition_completion) =
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
+let ask_answered_post_id (a : ask_answered) = "keeper-ask:" ^ a.ask_id
+
 let manual_compaction_post_id = "manual-compaction-request"
 
 let completion_authority_rejection_post_id
@@ -283,6 +297,7 @@ let identity_payload = function
     Task_cancelled { cancellation with tc_reason = None }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+    | Ask_answered _
     | Manual_compaction_requested
     | Completion_authority_rejected _ | Workspace_message _
     | Delegate_completed _ | Composition_completed _
@@ -383,6 +398,7 @@ let payload_kind_label = function
   | Schedule_due _ -> "schedule_due"
   | Connector_attention _ -> "connector_attention"
   | Hitl_resolved _ -> "hitl_resolved"
+  | Ask_answered _ -> "ask_answered"
   | Manual_compaction_requested -> "manual_compaction_requested"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
@@ -394,6 +410,7 @@ let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
   | Bootstrap | Fusion_completed _
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
+  | Ask_answered _
   | Manual_compaction_requested
   | Completion_authority_rejected _
   | Task_cancelled _ | Workspace_message _ | Delegate_completed _
@@ -406,6 +423,11 @@ let is_board_signal = function
    compile time whether it carries a conversation channel. *)
 let connector_attention_channel = function
   | Connector_attention { channel; _ } -> Some channel
+  (* [Ask_answered] carries a channel but answers [None] here on purpose. This
+     predicate holds a stimulus back when another conversation has already
+     claimed the batch; an answer to a question this keeper asked is not
+     ambient conversation traffic and must not wait behind one. *)
+  | Ask_answered _
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
@@ -620,6 +642,12 @@ let payload_to_yojson = function
         , match sw.result_delivery with
           | None -> `Null
           | Some channel -> Keeper_continuation_channel.to_yojson channel )
+      ]
+  | Ask_answered a ->
+    `Assoc
+      [ "kind", `String "ask_answered"
+      ; "ask_id", `String a.ask_id
+      ; "channel", Keeper_continuation_channel.to_yojson a.channel
       ]
   | Connector_attention ca ->
     `Assoc
@@ -886,6 +914,10 @@ let payload_of_yojson json =
     let* event_id = string_field ~context "event_id" fields in
     let* channel = continuation_channel_field fields in
     Ok (Connector_attention { event_id; channel })
+  | "ask_answered" ->
+    let* ask_id = string_field ~context "ask_id" fields in
+    let* channel = continuation_channel_field fields in
+    Ok (Ask_answered { ask_id; channel })
   | "hitl_resolved" ->
     let* approval_id = string_field ~context "approval_id" fields in
     let* decision_s = string_field ~context "decision" fields in
@@ -1126,6 +1158,9 @@ let continuation_channel_of_payload = function
   | Fusion_completed completion -> Some completion.channel
   | Hitl_resolved resolution -> Some resolution.channel
   | Connector_attention attention -> Some attention.channel
+  (* Where the question was asked. A keeper woken by an answer replies there
+     rather than wherever its own state last left it. *)
+  | Ask_answered answered -> Some answered.channel
   | Schedule_due wake -> wake.result_delivery
   | Board_signal _
   | Board_attention _

@@ -1,6 +1,12 @@
 val editable_snapshot : Yojson.Safe.t -> Yojson.Safe.t
 val editor_stem : Yojson.Safe.t -> string
 
+val expected_runtime_assignment_revision :
+  Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
+val decode_unchanged_runtime_assignment_response :
+  Yojson.Safe.t -> (Yojson.Safe.t, string) result
+
 val patch_of_edit :
   before:Yojson.Safe.t ->
   after:Yojson.Safe.t ->

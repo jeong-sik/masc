@@ -26,6 +26,7 @@ type conflict =
 
 type warning =
   | Manifest_parent_sync_unconfirmed of string
+  | Runtime_config_parent_sync_unconfirmed of string
   | Lock_release_unconfirmed of string
   | Runtime_config_lock_release_unconfirmed of string
 
@@ -66,6 +67,7 @@ type error =
 
 type 'a publication =
   | Commit of 'a
+  | Commit_with_warnings of 'a * warning list
   | Rollback of 'a
 
 val revision_to_yojson : revision -> Yojson.Safe.t
@@ -79,6 +81,9 @@ val config_revision_of_yojson : Yojson.Safe.t -> (config_revision, string) resul
 val error_to_string : error -> string
 
 val warning_to_yojson : warning -> Yojson.Safe.t
+
+val warnings_of_runtime_assignment_write :
+  Runtime.keeper_assignment_write -> warning list
 
 val current_config_revision :
   config:Workspace.config -> keeper_name:string -> (config_revision, string) result
@@ -132,4 +137,18 @@ module For_testing : sig
     meta:Keeper_meta_contract.keeper_meta ->
     unit ->
     (outcome receipt, error) result
+
+  val persist_with_runtime_restore_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    expected_revision:config_revision ->
+    config:Workspace.config ->
+    parsed:Keeper_turn_up_args.parsed_args ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    publish:
+      (Runtime.keeper_assignment_transaction -> outcome -> 'a publication) ->
+    unit ->
+    ('a receipt, error) result
 end

@@ -896,14 +896,14 @@ let config_write_receipt result =
   | Some (`Assoc fields) -> List.assoc_opt "keeper_config_write" fields
   | Some _ | None -> None
 
-let respond_manifest_reconciliation ~request reqd ~name ~error =
+let respond_config_reconciliation ~request reqd ~name ~error =
   Http.Response.json_value
     ~status:`Service_unavailable
     ~request
     (`Assoc
        [ "ok", `Bool false
        ; "keeper", `String name
-       ; "config_applied", `Null
+       ; "config_application", `Assoc [ "state", `String "indeterminate" ]
        ; "runtime_sync", `Bool false
        ; "error", error
        ; "authoritative_reload_required", `Bool true
@@ -1051,7 +1051,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                               .config_reconciliation_required_of_result result
                             with
                             | Some error ->
-                              respond_manifest_reconciliation
+                              respond_config_reconciliation
                                 ~request:req
                                 reqd
                                 ~name
@@ -1375,6 +1375,7 @@ let parse_bulk_directive_json json =
 module For_testing = struct
   let github_login_stream_headers = github_login_stream_headers
   let github_login_stream_send_with = github_login_stream_send_with
+  let respond_config_reconciliation = respond_config_reconciliation
 
   let parse_resume_request json =
     match parse_keeper_directive_json json with

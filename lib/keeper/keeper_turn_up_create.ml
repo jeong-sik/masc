@@ -24,13 +24,13 @@ let write_initial_meta ~intake_token config meta =
   | Ok None -> Error "Keeper owner removed metadata during create"
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 
-let with_manifest_warnings warnings result =
+let with_config_warnings warnings result =
   match warnings with
   | [] -> result
   | warnings ->
     Tool_result.with_metadata
       (`Assoc
-         [ ( "keeper_manifest_warnings"
+         [ ( "keeper_config_warnings"
            , `List
                (List.map
                   Keeper_turn_up_config_persistence.warning_to_yojson
@@ -263,9 +263,15 @@ let create_keeper ~expected_config_revision (ctx : _ context)
                 | Error error ->
                   Keeper_turn_up_config_persistence.Rollback
                     (Error (`Runtime_assignment error))
-                | Ok _ ->
+                | Ok runtime_write ->
+                  let runtime_warnings =
+                    Keeper_turn_up_config_persistence
+                    .warnings_of_runtime_assignment_write runtime_write
+                  in
                   (match write_initial_meta ~intake_token ctx.config meta with
-                   | Ok () -> Keeper_turn_up_config_persistence.Commit (Ok ())
+                   | Ok () ->
+                     Keeper_turn_up_config_persistence.Commit_with_warnings
+                       (Ok (), runtime_warnings)
                    | Error error ->
                      Keeper_turn_up_config_persistence.Rollback
                        (Error (`Metadata error)))))
@@ -301,7 +307,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
          tool_result_error
            ~class_:Tool_result.Runtime_failure
            (Printf.sprintf "initial checkpoint save failed: %s" detail)
-         |> with_manifest_warnings warnings
+         |> with_config_warnings warnings
        | Ok { value = Error (`Metadata e); warnings } ->
          Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
@@ -311,7 +317,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            e;
          Progress.stop_tracking task_id;
          tool_result_error ~class_:Tool_result.Runtime_failure e
-         |> with_manifest_warnings warnings
+         |> with_config_warnings warnings
        | Ok { value = Error (`Runtime_assignment e); warnings } ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -319,7 +325,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
            ();
          Progress.stop_tracking task_id;
          tool_result_error ~class_:Tool_result.Runtime_failure e
-         |> with_manifest_warnings warnings
+         |> with_config_warnings warnings
        | Ok { value = Ok (); warnings } ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
@@ -353,7 +359,7 @@ let create_keeper ~expected_config_revision (ctx : _ context)
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected)))
-        |> with_manifest_warnings warnings))
+        |> with_config_warnings warnings))
                    with
                    | result, None -> result
                    | result, Some operation_id ->

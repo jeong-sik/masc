@@ -23,6 +23,7 @@ type conflict =
 
 type warning =
   | Manifest_parent_sync_unconfirmed of string
+  | Runtime_config_parent_sync_unconfirmed of string
   | Lock_release_unconfirmed of string
   | Runtime_config_lock_release_unconfirmed of string
 
@@ -63,6 +64,7 @@ type error =
 
 type 'a publication =
   | Commit of 'a
+  | Commit_with_warnings of 'a * warning list
   | Rollback of 'a
 
 let revision_to_yojson = function
@@ -169,6 +171,11 @@ let warning_to_yojson = function
       [ "code", `String "keeper_manifest_parent_sync_unconfirmed"
       ; "detail", `String detail
       ]
+  | Runtime_config_parent_sync_unconfirmed detail ->
+    `Assoc
+      [ "code", `String "runtime_config_parent_sync_unconfirmed"
+      ; "detail", `String detail
+      ]
   | Lock_release_unconfirmed detail ->
     `Assoc
       [ "code", `String "keeper_manifest_lock_release_unconfirmed"
@@ -179,6 +186,14 @@ let warning_to_yojson = function
       [ "code", `String "runtime_config_lock_release_unconfirmed"
       ; "detail", `String detail
       ]
+
+let warnings_of_runtime_assignment_write = function
+  | Runtime.Assignment_unchanged _ -> []
+  | Runtime.Assignment_committed { receipt; _ } ->
+    (match receipt.Runtime.durability with
+     | Runtime.Durable -> []
+     | Runtime.Durability_unconfirmed { detail } ->
+       [ Runtime_config_parent_sync_unconfirmed detail ])
 
 type manifest_snapshot =
   | Absent
@@ -446,7 +461,8 @@ let strict_write_result = function
           (Fs_compat.atomic_replace_failure_to_string failure)
       ]
 
-let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
+let persist_with_publication_using ~with_lock ~restore_snapshot ~restore_runtime
+    ~read_revision
     ~expected_revision ~(config : Workspace.config)
     ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
   let path = manifest_path ~config ~keeper_name:meta.name in
@@ -498,7 +514,15 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
       let restore_publication_state () =
         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
         let runtime_restore =
-          Runtime.restore_keeper_assignment_transaction runtime_transaction
+          match restore_runtime runtime_transaction with
+          | Ok
+              (Runtime.Assignment_committed
+                { receipt = { durability = Runtime.Durability_unconfirmed { detail }; _ }
+                ; _
+                }) ->
+            Error ("runtime assignment restore durability unconfirmed: " ^ detail)
+          | Ok _ -> Ok ()
+          | Error detail -> Error detail
         in
         let manifest_restore = restore_snapshot path snapshot in
         match manifest_restore, runtime_restore with
@@ -571,6 +595,12 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
           | Ok (Commit value) ->
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
             Ok { value; warnings = write_warnings }
+          | Ok (Commit_with_warnings (value, publication_warnings)) ->
+            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+            Ok
+              { value
+              ; warnings = write_warnings @ publication_warnings
+              }
           | Ok (Rollback value) ->
             let* () = restore_publication_state () in
             Ok { value; warnings = [] })))
@@ -599,6 +629,7 @@ let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish (
   persist_with_publication_using
     ~with_lock:with_manifest_lock
     ~restore_snapshot:restore_snapshot_unlocked
+    ~restore_runtime:Runtime.restore_keeper_assignment_transaction
     ~read_revision:revision_of_path_unlocked
     ~expected_revision
     ~config
@@ -626,6 +657,7 @@ module For_testing = struct
     persist_with_publication_using
       ~with_lock
       ~restore_snapshot:restore_snapshot_unlocked
+      ~restore_runtime:Runtime.restore_keeper_assignment_transaction
       ~read_revision:revision_of_path_unlocked
       ~expected_revision
       ~config
@@ -656,6 +688,7 @@ module For_testing = struct
     persist_with_publication_using
       ~with_lock:with_manifest_lock
       ~restore_snapshot
+      ~restore_runtime:Runtime.restore_keeper_assignment_transaction
       ~read_revision:revision_of_path_unlocked
       ~expected_revision
       ~config
@@ -670,12 +703,29 @@ module For_testing = struct
     persist_with_publication_using
       ~with_lock:with_manifest_lock
       ~restore_snapshot:restore_snapshot_unlocked
+      ~restore_runtime:Runtime.restore_keeper_assignment_transaction
       ~read_revision:(fun _ -> Error "injected post-write revision read failure")
       ~expected_revision
       ~config
       ~parsed
       ~meta
       ~publish:(fun _runtime_transaction outcome -> Commit outcome)
+      ()
+  ;;
+
+  let persist_with_runtime_restore_replace_file ~replace_file
+      ~expected_revision ~config ~parsed ~meta ~publish () =
+    persist_with_publication_using
+      ~with_lock:with_manifest_lock
+      ~restore_snapshot:restore_snapshot_unlocked
+      ~restore_runtime:
+        (Runtime.Assignment_for_testing.restore_with_replace_file ~replace_file)
+      ~read_revision:revision_of_path_unlocked
+      ~expected_revision
+      ~config
+      ~parsed
+      ~meta
+      ~publish
       ()
   ;;
 end

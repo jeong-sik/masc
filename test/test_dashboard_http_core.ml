@@ -3233,6 +3233,88 @@ let expect_http_status label status raw =
   if not (String.starts_with ~prefix raw)
   then failf "%s: expected %s, got %s" label prefix raw
 
+let config_reconciliation_response ~name error =
+  let output = Buffer.create 512 in
+  let connection =
+    Httpun.Server_connection.create (fun reqd ->
+      Keeper_config_post.For_testing.respond_config_reconciliation
+        ~request:(Httpun.Reqd.request reqd) reqd ~name ~error)
+  in
+  let request = "POST /api/v1/keepers/test/config HTTP/1.1\r\nHost: x\r\n\r\n" in
+  let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
+  ignore
+    (Httpun.Server_connection.read_eof connection input ~off:0
+       ~len:(Bigstringaf.length input));
+  let rec drain () =
+    match Httpun.Server_connection.next_write_operation connection with
+    | `Write iovecs ->
+      let bytes =
+        List.fold_left
+          (fun total (iov : Bigstringaf.t Httpun.IOVec.t) ->
+            Buffer.add_string output
+              (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len);
+            total + iov.len)
+          0 iovecs
+      in
+      Httpun.Server_connection.report_write_result connection (`Ok bytes);
+      drain ()
+    | `Yield | `Close _ -> ()
+  in
+  drain ();
+  let raw = Buffer.contents output in
+  let body =
+    match List.rev (String.split_on_char '\n' raw) with
+    | body :: _ -> String.trim body
+    | [] -> fail "HTTP response has no body"
+  in
+  raw, Yojson.Safe.from_string body
+
+let test_composite_reconciliation_response_preserves_both_authorities () =
+  let manifest : Masc.Keeper_turn_up_config_persistence.reconciliation =
+    { path = "/workspace/.masc/config/keepers/alpha.toml"
+    ; detail = "manifest restore failed"
+    ; observed =
+        Masc.Keeper_turn_up_config_persistence.Observed_revision
+          Masc.Keeper_turn_up_config_persistence.Missing
+    }
+  in
+  let runtime_assignment :
+      Masc.Keeper_turn_up_config_persistence.runtime_reconciliation =
+    { path = Some "/workspace/.masc/config/runtime.toml"
+    ; detail = "runtime restore durability unconfirmed"
+    }
+  in
+  let error =
+    Masc.Keeper_turn_up_update.For_testing.composite_reconciliation_required_data
+      { manifest = Some manifest; runtime_assignment = Some runtime_assignment }
+  in
+  let result =
+    Masc.Keeper_types_profile.tool_result_error_data
+      ~class_:Tool_result.Runtime_failure error
+  in
+  let projected =
+    match Masc.Keeper_turn_up_update.config_reconciliation_required_of_result result with
+    | Some projected -> projected
+    | None -> fail "composite reconciliation was not classified"
+  in
+  let raw, json = config_reconciliation_response ~name:"alpha" projected in
+  expect_http_status "composite reconciliation" 503 raw;
+  let open Yojson.Safe.Util in
+  check string "typed composite reconciliation code"
+    "keeper_config_composite_reconciliation_required"
+    (json |> member "error" |> member "code" |> to_string);
+  check string "config application is closed indeterminate state" "indeterminate"
+    (json |> member "config_application" |> member "state" |> to_string);
+  check bool "old config_applied boolean is absent" true
+    (json |> member "config_applied" = `Null);
+  check string "manifest authority detail survives"
+    "manifest restore failed"
+    (json |> member "error" |> member "manifest" |> member "detail" |> to_string);
+  check string "runtime authority detail survives"
+    "runtime restore durability unconfirmed"
+    (json |> member "error" |> member "runtime_assignment"
+     |> member "detail" |> to_string)
+
 let test_config_post_requires_expected_revision () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-revision-required" in
@@ -3459,36 +3541,44 @@ let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
   prepare_config_sync_keeper ~sw config name;
-  let toml_path = write_config_sync_toml config name in
-  let _, response =
-    post_config ~sw ~clock:(Eio.Stdenv.clock env)
-       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-       ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
-  in
-  check string "readback carries manifest SHA-256 revision" "sha256"
-    Yojson.Safe.Util.
-      (response |> member "config_revision" |> member "manifest"
-       |> member "state" |> to_string);
-  check bool "write receipt says config applied" true
-    Yojson.Safe.Util.(response |> member "manifest_write" |> member "applied" |> to_bool);
-  check string "write receipt carries exact revision" "sha256"
-    Yojson.Safe.Util.(response |> member "manifest_write" |> member "revision" |> member "state" |> to_string);
-  let parsed =
-    Keeper_toml_loader.parse_toml
-      (In_channel.with_open_bin toml_path In_channel.input_all)
-  in
-  (match parsed with
-   | Error error -> fail error
-   | Ok doc ->
-     check (option bool) "autoboot committed" (Some true)
-       (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
-     check (option bool) "proactive committed" (Some true)
-       (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
-  check bool "running projection converged" true
-    (match Masc.Keeper_registry.get ~base_path:config.base_path name with
-     | Some entry -> entry.meta.proactive.enabled
-     | None -> false);
-  ignore (Masc.Keeper_keepalive.stop_keepalive_and_await ~base_path:config.base_path name)
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path name))
+    (fun () ->
+      let toml_path = write_config_sync_toml config name in
+      let _, response =
+        post_config ~sw ~clock:(Eio.Stdenv.clock env)
+           ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+           ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
+      in
+      check string "readback carries manifest SHA-256 revision" "sha256"
+        Yojson.Safe.Util.
+          (response |> member "config_revision" |> member "manifest"
+           |> member "state" |> to_string);
+      check bool "write receipt says config applied" true
+        Yojson.Safe.Util.
+          (response |> member "config_write" |> member "applied" |> to_bool);
+      check string "write receipt carries exact revision" "sha256"
+        Yojson.Safe.Util.
+          (response |> member "config_write" |> member "revision"
+           |> member "manifest" |> member "state" |> to_string);
+      let parsed =
+        Keeper_toml_loader.parse_toml
+          (In_channel.with_open_bin toml_path In_channel.input_all)
+      in
+      (match parsed with
+       | Error error -> fail error
+       | Ok doc ->
+         check (option bool) "autoboot committed" (Some true)
+           (Keeper_toml_loader.toml_bool_opt doc "keeper.autoboot_enabled");
+         check (option bool) "proactive committed" (Some true)
+           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"));
+      check bool "running projection converged" true
+        (match Masc.Keeper_registry.get ~base_path:config.base_path name with
+         | Some entry -> entry.meta.proactive.enabled
+         | None -> false))
 
 let test_config_post_materializes_missing_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
@@ -3527,12 +3617,16 @@ let test_config_post_materializes_missing_toml () =
         check (option bool) "materialized proactive config" (Some true)
           (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled"))
 
-let test_config_post_reports_runtime_sync_failure () =
+let test_config_post_rolls_back_missing_runtime_assignment () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-partial" in
   prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
-  Sys.remove (Filename.concat config.base_path "runtime.toml");
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:config.base_path
+  in
+  Sys.remove runtime_path;
   let raw, json =
     post_config ~sw ~clock:(Eio.Stdenv.clock env)
       ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
@@ -3540,12 +3634,12 @@ let test_config_post_reports_runtime_sync_failure () =
   in
   check bool "HTTP 503" true (String.starts_with ~prefix:"HTTP/1.1 503" raw);
   let open Yojson.Safe.Util in
-  check bool "TOML committed" true (json |> member "config_applied" |> to_bool);
+  check bool "TOML rolled back" false (json |> member "config_applied" |> to_bool);
   check bool "runtime not synced" false (json |> member "runtime_sync" |> to_bool);
-  check string "typed failure" "keeper_runtime_sync_failed"
+  check string "typed failure" "keeper_config_publication_rolled_back"
     (json |> member "error" |> member "code" |> to_string);
-  check bool "runtime failure preserves applied write receipt" true
-    (json |> member "manifest_write" |> member "applied" |> to_bool);
+  check bool "runtime failure preserves rolled-back write receipt" false
+    (json |> member "config_write" |> member "applied" |> to_bool);
   let doc =
     match
       Keeper_toml_loader.parse_toml
@@ -3554,7 +3648,7 @@ let test_config_post_reports_runtime_sync_failure () =
     | Ok doc -> doc
     | Error error -> fail error
   in
-  check (option bool) "committed TOML is not rolled back" (Some true)
+  check (option bool) "TOML is rolled back" (Some false)
     (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled")
 
 let test_config_post_prevalidates_mixed_request () =
@@ -4122,8 +4216,10 @@ let () =
             test_direct_assignment_intervening_write_fences_keeper_config_post;
           test_case "direct assignment response preserves lock warning" `Quick
             test_direct_assignment_route_surfaces_runtime_lock_release_warning;
-          test_case "runtime sync failure preserves commit" `Quick
-            test_config_post_reports_runtime_sync_failure;
+          test_case "composite reconciliation preserves both authorities" `Quick
+            test_composite_reconciliation_response_preserves_both_authorities;
+          test_case "missing runtime assignment rolls config back" `Quick
+            test_config_post_rolls_back_missing_runtime_assignment;
           test_case "mixed invalid request commits nothing" `Quick
             test_config_post_prevalidates_mixed_request;
           test_case "typed tools patch round-trips and previews admission" `Quick

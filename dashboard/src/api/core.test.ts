@@ -372,7 +372,7 @@ describe('typed API errors', () => {
 
   it('preserves reconciliation state and authoritative reload instruction', async () => {
     const payload = {
-      config_applied: null,
+      config_application: { state: 'indeterminate' },
       runtime_sync: false,
       authoritative_reload_required: true,
       error: {
@@ -388,7 +388,8 @@ describe('typed API errors', () => {
     )
 
     expect(error.errorCode).toBe('keeper_manifest_reconciliation_required')
-    expect(error.configApplied).toBeNull()
+    expect(error.configApplied).toBeUndefined()
+    expect(error.configApplicationState).toBe('indeterminate')
     expect(error.runtimeSync).toBe(false)
     expect(error.authoritativeReloadRequired).toBe(true)
     expect(error.responseData).toEqual(payload)

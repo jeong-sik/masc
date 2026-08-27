@@ -1000,7 +1000,9 @@ let post_runtime_assignment ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok (`Assoc fields as json) ->
     (match List.assoc_opt "applied" fields with
-     | Some (`Bool false) -> Ok Runtime_assignment_unchanged
+     | Some (`Bool false) ->
+       Masc_tui_keeper_config.decode_unchanged_runtime_assignment_response json
+       |> Result.map (fun _revision -> Runtime_assignment_unchanged)
      | Some _ | None ->
        decode_runtime_config_commit_receipt json
        |> Result.map (fun receipt -> Runtime_assignment_committed receipt))
@@ -1303,7 +1305,7 @@ let keeper_config_post_error_to_string = function
   | Keeper_config_revision_conflict _ ->
     "keeper config revision conflict; authoritative reload required"
   | Keeper_config_reconciliation_required _ ->
-    "keeper manifest reconciliation required; authoritative reload required"
+    "keeper config reconciliation required; authoritative reload required"
   | Keeper_config_runtime_sync_failed _ ->
     "keeper config applied but runtime sync failed; authoritative reload required"
   | Keeper_config_http_error { status; body } ->
@@ -1339,18 +1341,30 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
          | None -> None)
       | None -> None
     in
+    let config_application_indeterminate =
+      match parsed with
+      | Some json ->
+        Json_util.assoc_member_opt "config_application" json
+        = Some (`Assoc [ "state", `String "indeterminate" ])
+      | None -> false
+    in
     (match status, code, parsed with
      | 409, Some "keeper_config_revision_conflict", Some json ->
        Error (Keeper_config_revision_conflict json)
-     | 503, Some "keeper_manifest_reconciliation_required", Some json ->
+     | ( 503
+       , Some
+           ( "keeper_manifest_reconciliation_required"
+           | "keeper_config_composite_reconciliation_required" )
+       , Some json )
+       when config_application_indeterminate ->
        Error (Keeper_config_reconciliation_required json)
      | 503, Some "keeper_runtime_sync_failed", Some json
        when Json_util.assoc_member_opt "config_applied" json = Some (`Bool true) ->
        Error (Keeper_config_runtime_sync_failed json)
      | _ -> Error (Keeper_config_http_error { status; body }))
 
-let keeper_config_manifest_warning_count json =
-  match Json_util.assoc_member_opt "manifest_write" json with
+let keeper_config_warning_count json =
+  match Json_util.assoc_member_opt "config_write" json with
   | Some write ->
     (match Json_util.assoc_member_opt "warnings" write with
      | Some (`List warnings) -> List.length warnings

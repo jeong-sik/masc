@@ -669,6 +669,80 @@ let test_publication_rollback_restores_manifest_and_runtime_bytes () =
     manifest_before (Fs_compat.load_file manifest_path);
   check string "Rollback restores exact runtime.toml bytes"
     runtime_before (Fs_compat.load_file runtime_path)
+  ;
+  let replace_file_with_parent_sync_failure path content =
+    Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ~sync_parent:(fun _ -> raise (Failure "injected runtime parent sync"))
+      path content
+  in
+  let commit_revision = current_revision_exn ctx.config name in
+  let uncertain_commit =
+    Keeper_turn_up_config_persistence.persist_with_publication
+      ~expected_revision:commit_revision
+      ~config:ctx.config
+      ~parsed:(parse "uncertain runtime commit")
+      ~meta:{ meta with instructions = "uncertain runtime commit" }
+      ~publish:(fun runtime_transaction _ ->
+        match
+          Runtime.Assignment_for_testing.commit_with_replace_file
+            ~replace_file:replace_file_with_parent_sync_failure
+            runtime_transaction
+            ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
+        with
+        | Error detail -> fail detail
+        | Ok runtime_write ->
+          Keeper_turn_up_config_persistence.Commit_with_warnings
+            ( (),
+              Keeper_turn_up_config_persistence
+              .warnings_of_runtime_assignment_write runtime_write ))
+      ()
+  in
+  (match uncertain_commit with
+   | Error error ->
+     fail
+       ("uncertain runtime commit was not preserved: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok { warnings; _ } ->
+     check bool "runtime commit durability warning is visible" true
+       (List.exists
+          (function
+            | Keeper_turn_up_config_persistence
+              .Runtime_config_parent_sync_unconfirmed _ -> true
+            | _ -> false)
+          warnings));
+  let manifest_before_uncertain_restore = Fs_compat.load_file manifest_path in
+  let runtime_before_uncertain_restore = Fs_compat.load_file runtime_path in
+  let restore_revision = current_revision_exn ctx.config name in
+  (match
+     Keeper_turn_up_config_persistence.For_testing
+     .persist_with_runtime_restore_replace_file
+       ~replace_file:replace_file_with_parent_sync_failure
+       ~expected_revision:restore_revision
+       ~config:ctx.config
+       ~parsed:(parse "uncertain runtime restore")
+       ~meta:{ meta with instructions = "uncertain runtime restore" }
+       ~publish:(fun runtime_transaction _ ->
+         match
+           Runtime.commit_keeper_assignment runtime_transaction ~runtime_id:None
+         with
+         | Error detail -> fail detail
+         | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Error
+       (Keeper_turn_up_config_persistence.Composite_reconciliation_required
+         { manifest = None; runtime_assignment = Some state }) ->
+     check bool "runtime restore uncertainty is explicit" true
+       (String.length state.detail > 0)
+   | Error error ->
+     fail
+       ("unexpected uncertain restore result: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "uncertain runtime restore was reported as exact");
+  check string "uncertain restore still restores visible manifest bytes"
+    manifest_before_uncertain_restore (Fs_compat.load_file manifest_path);
+  check string "uncertain restore still restores visible runtime bytes"
+    runtime_before_uncertain_restore (Fs_compat.load_file runtime_path)
 ;;
 
 let run_cas_child base name expected_hex instructions ready_path start_path =

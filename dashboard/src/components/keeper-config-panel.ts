@@ -538,6 +538,7 @@ export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): 
   return error instanceof ApiRequestError
     && (
       error.errorCode === 'keeper_manifest_reconciliation_required'
+      || error.errorCode === 'keeper_config_composite_reconciliation_required'
       || error.authoritativeReloadRequired
       || (error.configApplied === true && error.runtimeSync === false)
     )

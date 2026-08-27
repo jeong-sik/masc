@@ -40,7 +40,15 @@ describe('keeper config save failure authority', () => {
       path: '/api/v1/keepers/keeper-sangsu/config',
       status: 503,
       errorCode: 'keeper_manifest_reconciliation_required',
-      configApplied: null,
+      configApplicationState: 'indeterminate',
+      authoritativeReloadRequired: true,
+    }))).toBe(true)
+    expect(keeperConfigFailureRequiresAuthoritativeReload(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/keeper-sangsu/config',
+      status: 503,
+      errorCode: 'keeper_config_composite_reconciliation_required',
+      configApplicationState: 'indeterminate',
       authoritativeReloadRequired: true,
     }))).toBe(true)
   })

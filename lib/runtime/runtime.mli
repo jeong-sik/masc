@@ -127,6 +127,23 @@ val set_keeper_assignment_if_revision :
     carries the exact observed revision. *)
 
 module Assignment_for_testing : sig
+  val commit_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    runtime_id:string option ->
+    (keeper_assignment_write, string) result
+
+  val restore_with_replace_file :
+    replace_file:
+      (string ->
+       string ->
+       (unit, Fs_compat.atomic_replace_failure) result) ->
+    keeper_assignment_transaction ->
+    (keeper_assignment_write, string) result
+
   val set_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
     runtime_config_path:string ->

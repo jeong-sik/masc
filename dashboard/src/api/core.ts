@@ -237,7 +237,8 @@ export class ApiRequestError extends Error {
   errorCode?: string
   authErrorCode?: string
   responseData?: unknown
-  configApplied?: boolean | null
+  configApplied?: boolean
+  configApplicationState?: 'indeterminate'
   runtimeSync?: boolean
   authoritativeReloadRequired: boolean
 
@@ -252,7 +253,8 @@ export class ApiRequestError extends Error {
     errorCode?: string
     authErrorCode?: string
     responseData?: unknown
-    configApplied?: boolean | null
+    configApplied?: boolean
+    configApplicationState?: 'indeterminate'
     runtimeSync?: boolean
     authoritativeReloadRequired?: boolean
   }) {
@@ -276,6 +278,7 @@ export class ApiRequestError extends Error {
     this.authErrorCode = opts.authErrorCode?.trim() || undefined
     this.responseData = opts.responseData
     this.configApplied = opts.configApplied
+    this.configApplicationState = opts.configApplicationState
     this.runtimeSync = opts.runtimeSync
     this.authoritativeReloadRequired = opts.authoritativeReloadRequired === true
   }
@@ -482,7 +485,8 @@ interface ErrorResponseInfo {
   errorCode?: string
   authErrorCode?: string
   responseData?: unknown
-  configApplied?: boolean | null
+  configApplied?: boolean
+  configApplicationState?: 'indeterminate'
   runtimeSync?: boolean
   authoritativeReloadRequired?: boolean
 }
@@ -527,6 +531,11 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcError.message.trim()
         : ''
       const message = topLevelMessage || jsonRpcMessage || structuredErrorDetail
+      const configApplicationState = isRecord(parsed.config_application)
+        && parsed.config_application.state === 'indeterminate'
+        && Object.keys(parsed.config_application).length === 1
+        ? 'indeterminate' as const
+        : undefined
       if (message || errorDetail || errorCode) {
         return {
           detail: message || errorDetail || errorCode || undefined,
@@ -534,9 +543,10 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
           authErrorCode: authErrorCode || undefined,
           responseData: parsed,
           configApplied:
-            typeof parsed.config_applied === 'boolean' || parsed.config_applied === null
+            typeof parsed.config_applied === 'boolean'
               ? parsed.config_applied
               : undefined,
+          configApplicationState,
           runtimeSync: typeof parsed.runtime_sync === 'boolean'
             ? parsed.runtime_sync
             : undefined,
@@ -567,6 +577,7 @@ export async function apiRequestErrorFromResponse(
     authErrorCode: info.authErrorCode,
     responseData: info.responseData,
     configApplied: info.configApplied,
+    configApplicationState: info.configApplicationState,
     runtimeSync: info.runtimeSync,
     authoritativeReloadRequired: info.authoritativeReloadRequired,
   })

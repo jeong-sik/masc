@@ -195,7 +195,7 @@ let with_config_receipt ~revision ~warnings ~applied result =
     result
 ;;
 
-let reconciliation_required_data
+let reconciliation_authority_fields
       ({ path; detail; observed } :
         Keeper_turn_up_config_persistence.reconciliation)
   =
@@ -209,11 +209,47 @@ let reconciliation_required_data
     | Keeper_turn_up_config_persistence.Unreadable_manifest error ->
       `Assoc [ "state", `String "unreadable"; "detail", `String error ]
   in
+  [ "path", `String path
+  ; "detail", `String detail
+  ; "observed", observed
+  ]
+;;
+
+let reconciliation_required_data state =
   `Assoc
-    [ "code", `String "keeper_manifest_reconciliation_required"
-    ; "path", `String path
-    ; "detail", `String detail
-    ; "observed", observed
+    (("code", `String "keeper_manifest_reconciliation_required")
+     :: reconciliation_authority_fields state)
+;;
+
+let reconciliation_authority_data state =
+  `Assoc (reconciliation_authority_fields state)
+;;
+
+let composite_reconciliation_required_data
+      ({ manifest; runtime_assignment } :
+        Keeper_turn_up_config_persistence.composite_reconciliation)
+  =
+  let manifest =
+    match manifest with
+    | None -> `Null
+    | Some state -> reconciliation_authority_data state
+  in
+  let runtime_assignment =
+    match runtime_assignment with
+    | None -> `Null
+    | Some state ->
+      `Assoc
+        [ ( "path"
+          , match state.path with
+            | None -> `Null
+            | Some path -> `String path )
+        ; "detail", `String state.detail
+        ]
+  in
+  `Assoc
+    [ "code", `String "keeper_config_composite_reconciliation_required"
+    ; "manifest", manifest
+    ; "runtime_assignment", runtime_assignment
     ]
 ;;
 
@@ -240,7 +276,10 @@ let config_reconciliation_required_of_result result =
   match Tool_result.data result with
   | `Assoc fields ->
     (match List.assoc_opt "code" fields with
-     | Some (`String "keeper_manifest_reconciliation_required") ->
+     | Some
+         (`String
+           ( "keeper_manifest_reconciliation_required"
+           | "keeper_config_composite_reconciliation_required" )) ->
        Some (`Assoc fields)
      | Some _ | None -> None)
   | _ -> None
@@ -497,6 +536,10 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                 in
                 (match runtime_assignment_result with
                     | Ok runtime_write ->
+                      let runtime_warnings =
+                        Keeper_turn_up_config_persistence
+                        .warnings_of_runtime_assignment_write runtime_write
+                      in
                       let runtime_assignment =
                         match runtime_write with
                         | Runtime.Assignment_unchanged revision -> revision
@@ -510,13 +553,15 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                       in
                       (match resume_operator_pause ctx published_meta with
                        | Error message ->
-                         Keeper_turn_up_config_persistence.Commit
-                           (Publication_applied_with_runtime_failure
-                              (outcome, config_revision, message))
+                         Keeper_turn_up_config_persistence.Commit_with_warnings
+                           ( Publication_applied_with_runtime_failure
+                               (outcome, config_revision, message)
+                           , runtime_warnings )
                        | Ok resumed_meta ->
-                         Keeper_turn_up_config_persistence.Commit
-                           (Publication_applied
-                              (outcome, resumed_meta, config_revision)))
+                         Keeper_turn_up_config_persistence.Commit_with_warnings
+                           ( Publication_applied
+                               (outcome, resumed_meta, config_revision)
+                           , runtime_warnings ))
                     | Error err ->
                       Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string TurnUpUpdateFailures)
@@ -586,14 +631,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                     state) ->
                tool_result_error_data
                  ~class_:Tool_result.Runtime_failure
-                 (`Assoc
-                    [ "code", `String "keeper_config_composite_reconciliation_required"
-                    ; ( "detail"
-                      , `String
-                          (Keeper_turn_up_config_persistence.error_to_string
-                             (Keeper_turn_up_config_persistence.Composite_reconciliation_required
-                                state)) )
-                    ])
+                 (composite_reconciliation_required_data state)
              | Error
                  (Keeper_turn_up_config_persistence.Publication_exception
                     { detail; _ }) ->
@@ -642,5 +680,8 @@ let update_keeper ?preserve_prompt_defaults ~expected_config_revision ctx p old 
 ;;
 
 module For_testing = struct
+  let composite_reconciliation_required_data =
+    composite_reconciliation_required_data
+
   let update_keeper_with_apply_profile = update_keeper_with
 end

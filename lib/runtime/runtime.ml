@@ -2336,7 +2336,7 @@ let normalized_assignment = function
     else Ok (Assignment_present runtime_id)
 ;;
 
-let commit_keeper_assignment transaction ~runtime_id =
+let commit_keeper_assignment_using ~commit_text transaction ~runtime_id =
   let* requested = normalized_assignment runtime_id in
   match transaction with
   | Missing_runtime_config _ ->
@@ -2361,7 +2361,7 @@ let commit_keeper_assignment transaction ~runtime_id =
         update_runtime_assignment_text transaction.source_text
           ~keeper_name:transaction.keeper_name ~runtime_id
     in
-    let* receipt = commit_runtime_config_text ~path:transaction.path next in
+    let* receipt = commit_text ~path:transaction.path next in
     Ok
       (Assignment_committed
          { receipt
@@ -2373,7 +2373,13 @@ let commit_keeper_assignment transaction ~runtime_id =
          })
 ;;
 
-let restore_keeper_assignment_transaction transaction =
+let commit_keeper_assignment transaction ~runtime_id =
+  commit_keeper_assignment_using
+    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
+    transaction ~runtime_id
+;;
+
+let restore_keeper_assignment_transaction_using ~commit_text transaction =
   match transaction with
   | Missing_runtime_config _ -> Ok (Assignment_unchanged Runtime_config_missing)
   | Present_runtime_config transaction ->
@@ -2382,13 +2388,19 @@ let restore_keeper_assignment_transaction transaction =
   then Ok (Assignment_unchanged transaction.revision)
   else
     let* receipt =
-      commit_runtime_config_text ~path:transaction.path transaction.source_text
+      commit_text ~path:transaction.path transaction.source_text
     in
     Ok
       (Assignment_committed
          { receipt
          ; revision = transaction.revision
          })
+;;
+
+let restore_keeper_assignment_transaction transaction =
+  restore_keeper_assignment_transaction_using
+    ~commit_text:(fun ~path content -> commit_runtime_config_text ~path content)
+    transaction
 ;;
 
 let observe_keeper_assignment ?runtime_config_path ~keeper_name () =
@@ -2431,6 +2443,18 @@ let set_keeper_assignment_if_revision ?runtime_config_path ~keeper_name ~runtime
 ;;
 
 module Assignment_for_testing = struct
+  let commit_with_replace_file ~replace_file transaction ~runtime_id =
+    commit_keeper_assignment_using
+      ~commit_text:(commit_runtime_config_text ~replace_file)
+      transaction ~runtime_id
+  ;;
+
+  let restore_with_replace_file ~replace_file transaction =
+    restore_keeper_assignment_transaction_using
+      ~commit_text:(commit_runtime_config_text ~replace_file)
+      transaction
+  ;;
+
   let set_with_release_failure ~release_failure ~runtime_config_path ~keeper_name
       ~runtime_id ~expected () =
     let with_lock path f =

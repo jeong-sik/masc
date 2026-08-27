@@ -28,6 +28,10 @@ val config_reconciliation_required_of_result :
   Keeper_types_profile.tool_result -> Yojson.Safe.t option
 
 module For_testing : sig
+  val composite_reconciliation_required_data :
+    Keeper_turn_up_config_persistence.composite_reconciliation ->
+    Yojson.Safe.t
+
   val update_keeper_with_apply_profile :
     apply_profile:
       (base_path:string ->

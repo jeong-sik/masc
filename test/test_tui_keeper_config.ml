@@ -199,7 +199,8 @@ let test_every_row_says_whether_e_reaches_it () =
     ; "Allowed paths", `Editable
     ; "Mention targets", `Editable
     ; "Skills", `Editable
-      (* the one row inside the settings block that [e] does not reach *)
+      (* the rows inside the settings block that [e] does not reach *)
+    ; "Config revision", `Read_only
     ; "Effective paths", `Read_only
     ; "Live override", `Read_only
     ; "Override fields", `Read_only
@@ -275,6 +276,125 @@ let test_wrong_typed_scalar_is_sanitized_at_the_row_boundary () =
     true
     (contains rendered "before<esc>]8;;https://example.invalid")
 
+let with_config_revision revision =
+  match observed with
+  | `Assoc fields ->
+    `Assoc (("config_revision", revision) :: List.remove_assoc "config_revision" fields)
+  | _ -> Alcotest.fail "observed fixture must be an object"
+
+let changed_proactive =
+  `Assoc [ "proactive_enabled", `Bool false ]
+
+let check_revision_rejected label revision =
+  let before = with_config_revision revision in
+  match patch_of_edit ~before ~after:changed_proactive with
+  | Error _ -> ()
+  | Ok patch ->
+    Alcotest.failf "%s accepted malformed revision: %s" label
+      (Yojson.Safe.to_string patch)
+
+let test_strict_config_revision_decoder () =
+  check_revision_rejected "missing runtime authority"
+    (`Assoc
+       [ ( "manifest"
+         , `Assoc
+             [ "state", `String "sha256"
+             ; "value", `String (String.make 64 'a')
+             ] )
+       ]);
+  check_revision_rejected "arbitrary nested runtime object"
+    (`Assoc
+       [ "manifest", `Assoc [ "state", `String "missing" ]
+       ; ( "runtime_assignment"
+         , `Assoc
+             [ "state", `String "runtime_config_present"
+             ; "source_revision", `String (String.make 64 'b')
+             ] )
+       ]);
+  check_revision_rejected "uppercase source revision"
+    (`Assoc
+       [ "manifest", `Assoc [ "state", `String "missing" ]
+       ; ( "runtime_assignment"
+         , `Assoc
+             [ "state", `String "runtime_config_present"
+             ; "source_revision", `String (String.make 64 'B')
+             ; "assignment", `Assoc [ "state", `String "missing" ]
+             ] )
+       ])
+
+let test_runtime_picker_revision_decoder () =
+  let missing_runtime =
+    with_config_revision
+      (`Assoc
+         [ "manifest", `Assoc [ "state", `String "missing" ]
+         ; ( "runtime_assignment"
+           , `Assoc [ "state", `String "runtime_config_missing" ] )
+         ])
+  in
+  (match expected_runtime_assignment_revision missing_runtime with
+   | Ok (`Assoc [ ("state", `String "runtime_config_missing") ]) -> ()
+   | Ok revision ->
+     Alcotest.failf "unexpected runtime revision: %s"
+       (Yojson.Safe.to_string revision)
+   | Error detail -> Alcotest.fail detail);
+  let malformed =
+    with_config_revision
+      (`Assoc
+         [ "manifest", `Assoc [ "state", `String "missing" ]
+         ; "runtime_assignment", `Assoc [ "state", `String "assigned" ]
+         ])
+  in
+  match expected_runtime_assignment_revision malformed with
+  | Error _ -> ()
+  | Ok revision ->
+    Alcotest.failf "runtime picker accepted malformed revision: %s"
+      (Yojson.Safe.to_string revision)
+
+let test_unchanged_runtime_assignment_response_decoder () =
+  let valid =
+    `Assoc
+      [ "ok", `Bool true
+      ; "applied", `Bool false
+      ; ( "assignment_revision"
+        , `Assoc [ "state", `String "runtime_config_missing" ] )
+      ; "warnings", `List []
+      ]
+  in
+  (match decode_unchanged_runtime_assignment_response valid with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  List.iter
+    (fun malformed ->
+      match decode_unchanged_runtime_assignment_response malformed with
+      | Error _ -> ()
+      | Ok revision ->
+        Alcotest.failf "accepted malformed unchanged revision: %s"
+          (Yojson.Safe.to_string revision))
+    [ `Assoc [ "ok", `Bool true; "applied", `Bool false ]
+    ; `Assoc
+        [ "ok", `Bool true
+        ; "applied", `Bool false
+        ; ( "assignment_revision"
+          , `Assoc [ "state", `String "runtime_config_present" ] )
+        ; "warnings", `List []
+        ]
+    ; `Assoc
+        [ "ok", `Bool true
+        ; "applied", `Bool false
+        ; ( "assignment_revision"
+          , `Assoc [ "state", `String "runtime_config_missing" ] )
+        ; "warnings", `List [ `Assoc [ "code", `String "missing-detail" ] ]
+        ]
+    ; `Assoc
+        [ "ok", `Bool true
+        ; "applied", `Bool false
+        ; ( "assignment_revision"
+          , `Assoc [ "state", `String "runtime_config_missing" ] )
+        ; "warnings", `List []
+        ; "extra", `Bool true
+        ]
+    ]
+
 let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
@@ -302,5 +422,11 @@ let () =
             test_fetched_text_is_sanitized_but_the_frame_is_not
         ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick
             test_wrong_typed_scalar_is_sanitized_at_the_row_boundary
+        ; Alcotest.test_case "strict composite revision" `Quick
+            test_strict_config_revision_decoder
+        ; Alcotest.test_case "strict runtime picker revision" `Quick
+            test_runtime_picker_revision_decoder
+        ; Alcotest.test_case "strict unchanged assignment revision" `Quick
+            test_unchanged_runtime_assignment_response_decoder
         ] )
     ]

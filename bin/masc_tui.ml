@@ -3672,14 +3672,13 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
         with
         | Error detail -> Error detail
         | Ok json ->
-          (match Json_util.assoc_member_opt "config_revision" json with
-           | Some config_revision ->
-             (match Json_util.assoc_member_opt "runtime_assignment" config_revision with
-              | Some expected_assignment_revision ->
-                Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
-                  ~runtime_id ~expected_assignment_revision
-              | None -> Error "Keeper config has no runtime assignment revision")
-           | None -> Error "Keeper config has no composite revision")
+          (match
+             Masc_tui_keeper_config.expected_runtime_assignment_revision json
+           with
+           | Ok expected_assignment_revision ->
+             Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+               ~runtime_id ~expected_assignment_revision
+           | Error detail -> Error detail)
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -8748,7 +8747,7 @@ and is loaded on demand through keeper_skill.
                     (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok response ->
                     let warning_count =
-                      Masc_tui_http.keeper_config_manifest_warning_count response
+                      Masc_tui_http.keeper_config_warning_count response
                     in
                     add_event state
                       (if warning_count = 0 then "system" else "error")

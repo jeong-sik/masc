@@ -56,19 +56,41 @@ def acceptance():
     }
 
 
+MESSAGE = "Please investigate this naturally.\n"
+
+
+def operation_source(submitted_by="proof-operator"):
+    return {
+        "schema": "masc.keeper_chat_operation.source.v1",
+        "submitted_by": submitted_by,
+        "thread_id": "keeper:keeper-one",
+        "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": "keeper:keeper-one",
+        },
+        "surface": {"kind": "agent"},
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": None,
+        "external_message_id": None,
+        "workspace_id": None,
+        "extra_mentions": [],
+        "user_row_origin": "needs_append",
+    }
+
+
 def operation(state, **fields):
+    operation_input = producer.direct_message_input(MESSAGE)
     value = {
         "schema": "masc.keeper_chat_operation.v1",
         "operation_id": "kmsg-exact-one",
         "sequence": "7",
         "created_at": 1.0,
-        "execution_digest": "c" * 64,
-        "source": {"schema": "masc.keeper_chat_operation.source.v1"},
-        "input": (
-            {"schema": "masc.keeper_chat_operation.input.v1"}
-            if state in ("Queued", "Running")
-            else None
-        ),
+        "execution_digest": producer.canonical_json_digest(operation_input),
+        "source": operation_source(),
+        "input": operation_input if state in ("Queued", "Running") else None,
         "state": state,
     }
     value.update(fields)
@@ -76,9 +98,16 @@ def operation(state, **fields):
 
 
 class FakeTransport:
-    def __init__(self, operations, *, producer_error=None):
+    def __init__(
+        self,
+        operations,
+        *,
+        producer_error=None,
+        caller_agent_id: str | None = "proof-operator",
+    ):
         self.operations = list(operations)
         self.producer_error = producer_error
+        self.caller_agent_id = caller_agent_id
         self.calls = []
 
     def call_tool(self, name, arguments):
@@ -101,8 +130,8 @@ def run(transport, **overrides):
         "transport": transport,
         "keeper": "keeper-one",
         "runtime_id": "runtime-one",
-        "message": "Please investigate this naturally.\n",
-        "message_raw": b"Please investigate this naturally.\n",
+        "message": MESSAGE,
+        "message_raw": MESSAGE.encode(),
         "source_before": source(),
         "source_snapshot_fn": source,
         "observation_timeout": 10.0,
@@ -134,6 +163,23 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
 
         notify.assert_called_once_with("notifications/initialized", {})
 
+    def test_mcp_tool_result_binds_caller_agent_identity(self):
+        client = producer.McpClient(
+            "http://127.0.0.1:8935/mcp", "secret", 1.0, "test-version"
+        )
+        response = {
+            "result": {
+                "isError": False,
+                "_meta": {"agent_id": "proof-operator"},
+                "structuredContent": {"name": "keeper-one"},
+            }
+        }
+        with mock.patch.object(client, "request", return_value=response):
+            self.assertEqual(
+                client.call_tool("masc_keeper_status", {}), {"name": "keeper-one"}
+            )
+        self.assertEqual(client.caller_agent_id, "proof-operator")
+
     def test_expected_source_sha_is_explicit(self):
         producer.validate_expected_source(source(), HEAD)
         with self.assertRaisesRegex(producer.ProducerError, "differs from expected"):
@@ -142,6 +188,7 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
     def test_server_restart_during_production_is_rejected(self):
         before = {
             "binary_commit": HEAD,
+            "runtime_instance_id": "instance-one",
             "started_at": "2026-08-27T00:00:00Z",
             "effective_base_path": "/workspace",
             "effective_masc_root": "/workspace/.masc",
@@ -149,6 +196,9 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
         after = {**before, "started_at": "2026-08-27T00:01:00Z"}
         with self.assertRaisesRegex(producer.ProducerError, "server identity changed"):
             producer.require_same_server(before, after)
+        same_second_restart = {**before, "runtime_instance_id": "instance-two"}
+        with self.assertRaisesRegex(producer.ProducerError, "server identity changed"):
+            producer.require_same_server(before, same_second_restart)
 
     def test_success_submits_exactly_once_and_preserves_exact_turn_reference(self):
         transport = FakeTransport(
@@ -169,13 +219,18 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
             producer_calls[0][1],
             {
                 "name": "keeper-one",
-                "message": "Please investigate this naturally.\n",
+                "message": MESSAGE,
             },
         )
         self.assertEqual(receipt["operation"]["turn_ref"], "trace-one#9")
+        self.assertEqual(
+            receipt["operation"]["expected_operation_input_digest"],
+            producer.canonical_json_digest(producer.direct_message_input(MESSAGE)),
+        )
         self.assertIsNone(receipt["skill_tool_use_id"])
         self.assertIsNone(receipt["actual_invocation_runtime_id"])
         self.assertEqual(receipt["producer_calls"], {"masc_keeper_msg": 1})
+        self.assertEqual(receipt["submitted_by"], "proof-operator")
 
     def test_transport_ambiguity_does_not_resubmit_producer_call(self):
         transport = FakeTransport(
@@ -260,6 +315,15 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
             0,
         )
 
+    def test_missing_mcp_caller_identity_is_rejected_before_producer_call(self):
+        transport = FakeTransport([], caller_agent_id=None)
+        with self.assertRaisesRegex(producer.ProducerError, "submitting agent"):
+            run(transport)
+        self.assertEqual(
+            len([call for call in transport.calls if call[0] == "masc_keeper_msg"]),
+            0,
+        )
+
     def test_rejects_url_credentials(self):
         with self.assertRaisesRegex(
             producer.ProducerError, "must not contain credentials"
@@ -277,6 +341,27 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
 
         with self.assertRaisesRegex(producer.ProducerError, "fields differ"):
             run(transport)
+
+    def test_foreign_operation_owner_is_rejected(self):
+        terminal = operation("Succeeded", completed_at=3.0, outcome_ref="trace-one#9")
+        terminal["source"] = operation_source("foreign-owner")
+        with self.assertRaisesRegex(producer.ProducerError, "direct-message source"):
+            run(FakeTransport([terminal]))
+
+    def test_operation_execution_digest_must_match_message(self):
+        terminal = operation("Succeeded", completed_at=3.0, outcome_ref="trace-one#9")
+        terminal["execution_digest"] = "0" * 64
+        with self.assertRaisesRegex(producer.ProducerError, "execution digest differs"):
+            run(FakeTransport([terminal]))
+
+    def test_success_turn_ref_must_be_canonical(self):
+        terminal = operation(
+            "Succeeded", completed_at=3.0, outcome_ref="not-a-turn-ref"
+        )
+        with self.assertRaisesRegex(
+            producer.ProducerError, "turn_ref is not canonical"
+        ):
+            run(FakeTransport([terminal]))
 
     def test_failed_run_leaves_incomplete_marker_and_no_receipt(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -317,6 +402,7 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
                     "validate_health",
                     return_value={
                         "binary_commit": HEAD,
+                        "runtime_instance_id": "instance-one",
                         "started_at": "now",
                         "effective_base_path": str(base_path),
                         "effective_masc_root": str(base_path / ".masc"),

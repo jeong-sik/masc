@@ -21,6 +21,27 @@ let source identity =
 
 let input text = `Assoc [ "text", `String text ]
 
+let test_direct_message_digest_matches_proof_collector () =
+  let input =
+    `Assoc
+      [ "schema", `String "masc.keeper_chat_operation.input.v1"
+      ; "message", `String "자연스럽게 조사해 주세요.\n"
+      ; "user_blocks", `List []
+      ; "turn_instructions", `Null
+      ; "surface_context", `Null
+      ; "attachments", `List []
+      ]
+  in
+  match Operation.execution_digest input with
+  | Error detail -> fail detail
+  | Ok digest ->
+    check
+      string
+      "Python and OCaml canonical direct-message digest"
+      "594b51dec1da445b2d33f746e66b75b914104f1c102d1eaa9e70fd8c007eceb4"
+      digest
+;;
+
 let with_store name f =
   let directory = Filename.temp_dir ("keeper-chat-operations-" ^ name) "" in
   let path = Filename.concat directory Store.For_testing.database_file in
@@ -400,6 +421,8 @@ let () =
     "keeper-chat-operation-store"
     [ ( "store"
       , [ test_case "schema identity and budget" `Quick test_schema_identity_and_budget
+        ; test_case "direct message digest matches proof collector" `Quick
+            test_direct_message_digest_matches_proof_collector
         ; test_case "close is idempotent and refuses later operations" `Quick
             test_close_is_idempotent_and_refuses_later_operations
         ; test_case "exact idempotency and terminal dedupe" `Quick

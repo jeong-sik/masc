@@ -617,7 +617,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson))
+ (libraries yojson masc_tui_theme))
 
 (library
  (name masc_tui_csi)

@@ -1025,41 +1025,13 @@ let load_keeper_config_view ~(host : string) ~(port : int)
   with
   | Error err -> Error ("keeper config load failed: " ^ err)
   | Ok json ->
-    let member key =
-      match json with
-      | `Assoc fields -> List.assoc_opt key fields
-      | _ -> None
-    in
-    let prompt_fields =
-      match member "prompt" with
-      | Some (`Assoc fields) -> fields
-      | Some _ | None -> []
-    in
-    let instructions_lines =
-      match List.assoc_opt "instructions" prompt_fields with
-      | Some (`String text) when String.trim text <> "" ->
-        String.split_on_char '\n' text
-      | Some _ | None -> [ "(no instructions declared)" ]
-    in
-    let effective_lines =
-      match List.assoc_opt "effective_system_prompt" prompt_fields with
-      | Some (`String text) when String.trim text <> "" ->
-        String.split_on_char '\n' text
-      | Some _ | None -> [ "(no effective system prompt)" ]
-    in
-    let sources_lines =
-      match member "sources" with
-      | Some value -> json_block_lines value
-      | None -> []
-    in
+    (* The pane is formatted in one place. Sanitizing happens per fetched
+       value there rather than per finished line here: the frame carries the
+       styling that says which rows [e] reaches, and a line-level sanitizer
+       would escape it along with the data. *)
     Ok
-      (sanitize_view_lines
-         (Masc_tui_keeper_config.view_lines json
-          @ ("" :: "# instructions" :: instructions_lines)
-          @ ("" :: "# effective system prompt" :: effective_lines)
-          @ (match sources_lines with
-             | [] -> []
-             | lines -> "" :: "# sources" :: lines)))
+      (Masc_tui_keeper_config.view_lines
+         ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
 
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =

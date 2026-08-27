@@ -2835,6 +2835,17 @@ let add_routes ~sw ~clock router =
                  Keeper_api.handle_keeper_identity_refresh_post state req reqd body_str
                )
              ) request reqd
+       | Keeper_api.Keeper_post_identity_switch ->
+           (* Decides whether this keeper's turns are handed that provider's
+              tools at all, so it carries the same authority as the attach
+              that produced them. The operator name feeds the audit row. *)
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_identity_switch_post state
+                   ~actor:agent_name req reqd body_str
+               )
+             ) request reqd
        | Keeper_api.Keeper_post_oauth_login ->
            (* Same authority as writing a secret by hand: what this begins
               ends with credentials in that keeper's scope. *)

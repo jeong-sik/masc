@@ -1380,6 +1380,10 @@ type async_msg =
   | Github_identity_view_loaded of string * (string list, string) result
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
+  | Identity_switch_set of
+      string * string * bool * (unit, string) result
+      (** keeper, provider, the state the operator asked for, and whether
+          the server took it. *)
   | Identity_login_started of
       string * (string * string * string, string) result
       (** keeper, then (provider id, label, url) *)
@@ -2505,6 +2509,33 @@ let launch_identity_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Identity_providers_loaded (keeper_name, Error "Eio switch is unavailable"))
+
+(* Throw or clear one attached service's switch. Off keeps the token and
+   catalog; the keeper's turns stop being handed that provider's tools. *)
+let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
+          ~provider_id ~enabled
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Identity_switch_set (keeper_name, provider_id, enabled, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_switch_set
+           (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
 
 (* Begin a login. The answer is a URL the operator has to open; nothing is
    written to the keeper until the browser comes back to the server. *)
@@ -6483,6 +6514,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.github_identity_view <- Some (keeper_name, lines);
             state.github_identity_view_error <- None
         | Error detail -> state.github_identity_view_error <- Some detail)
+  | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "%s: %s switched %s" keeper_name provider_id
+                (if enabled then "on" else "off"));
+           (* Re-read rather than patch what is on screen: the switch the
+              server just wrote is the answer. *)
+           launch_identity_view state ~mailbox keeper_name
+       | Error detail ->
+           state.identity_attempt_error <-
+             Some
+               ( Masc_tui_types.Notice_bad
+               , Printf.sprintf "switch %s: %s" provider_id detail ))
   | Identity_providers_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -8968,6 +9013,51 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
+       | Some "T"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 Masc_tui_types.identity_cursor_provider
+                   ~query:(identity_query state) ~providers
+                   state.identity_cursor
+               with
+               | Some (provider_id, _) -> (
+                   let row =
+                     List.find_map
+                       (function
+                         | Masc_tui_types.Identity_declared
+                             { idp_id
+                             ; idp_tools
+                             ; idp_enabled
+                             ; idp_switch_problem
+                             ; _
+                             }
+                           when String.equal idp_id provider_id ->
+                             Some (idp_tools, idp_enabled, idp_switch_problem)
+                         | Masc_tui_types.Identity_declared _
+                         | Masc_tui_types.Identity_unreadable _ -> None)
+                       providers
+                   in
+                   match row with
+                   | Some (Some _, enabled, None) ->
+                       state.identity_attempt_error <- None;
+                       launch_identity_switch state ~mailbox:async_messages
+                         ~keeper_name:keeper.k_name ~provider_id
+                         ~enabled:(enabled = Some false)
+                   | Some (Some _, _, Some problem) ->
+                       state.identity_attempt_error <-
+                         Some
+                           ( Masc_tui_types.Notice_bad
+                           , "switch store unreadable: " ^ problem )
+                   | Some (None, _, _) | None ->
+                       add_event state "system"
+                         "connect it first; the switch is for an attached service")
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "A"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity

@@ -113,6 +113,105 @@ let execute_offered ?post ~base_path (offered : Identity_tools.offered_tool)
        ~provider:offered.Identity_tools.provider
        ~remote_name:offered.Identity_tools.remote_name ~arguments ())
 
+(* ── the on/off switch ───────────────────────────────────────────────── *)
+
+module Switch = Masc.Keeper_identity_switch
+
+let switch_config base_path = Masc.Workspace.default_config base_path
+
+let names_offered_for_turn ~base_path ~keeper_name =
+  (Identity_tools.for_turn ~base_path ~keeper_name).Identity_tools.offered
+  |> List.map (fun (offered : Identity_tools.offered_tool) ->
+         offered.Identity_tools.schema.name)
+
+let test_no_switch_file_means_everything_on () =
+  let base_path = temp_base () in
+  (match Switch.disabled_rows ~base_path with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "switches appeared that nobody threw"
+  | Error message -> Alcotest.failf "an absent store read as broken: %s" message);
+  match
+    Switch.is_disabled ~base_path ~keeper_name:"acme-daycare"
+      ~provider_id:"atlassian"
+  with
+  | Ok false -> ()
+  | Ok true -> Alcotest.fail "an absent store switched a service off"
+  | Error message -> Alcotest.failf "an absent store read as broken: %s" message
+
+let test_a_thrown_switch_takes_the_tools_out_of_the_turn () =
+  let base_path = temp_base () in
+  write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "getJiraIssue" ];
+  check (Alcotest.list str) "on: the turn is handed the tool"
+    [ "atlassian_getJiraIssue" ]
+    (names_offered_for_turn ~base_path ~keeper_name:"acme-daycare");
+  (match
+     Switch.set (switch_config base_path) ~actor:"switch-test"
+       ~keeper_name:"acme-daycare" ~provider_id:"atlassian" ~enabled:false
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not throw the switch: %s" message);
+  let off = Identity_tools.for_turn ~base_path ~keeper_name:"acme-daycare" in
+  check (Alcotest.list str) "off: the turn is handed nothing" []
+    (List.map
+       (fun (offered : Identity_tools.offered_tool) ->
+         offered.Identity_tools.schema.name)
+       off.Identity_tools.offered);
+  check Alcotest.bool "and off is a choice, not a problem" true
+    (not
+       (List.exists
+          (fun (id, _) -> String.equal id "atlassian")
+          off.Identity_tools.unusable));
+  (* Another keeper's turn is untouched: the switch is per keeper. *)
+  write_catalog ~base_path ~keeper_name:"other-fixture" [ tool "getJiraIssue" ];
+  check (Alcotest.list str) "another keeper keeps its tools"
+    [ "atlassian_getJiraIssue" ]
+    (names_offered_for_turn ~base_path ~keeper_name:"other-fixture");
+  (match
+     Switch.set (switch_config base_path) ~actor:"switch-test"
+       ~keeper_name:"acme-daycare" ~provider_id:"atlassian" ~enabled:true
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "could not clear the switch: %s" message);
+  check (Alcotest.list str) "back on: the tool returns"
+    [ "atlassian_getJiraIssue" ]
+    (names_offered_for_turn ~base_path ~keeper_name:"acme-daycare")
+
+let test_setting_the_state_it_already_has_writes_nothing () =
+  let base_path = temp_base () in
+  (match
+     Switch.set (switch_config base_path) ~actor:"switch-test"
+       ~keeper_name:"acme-daycare" ~provider_id:"atlassian" ~enabled:true
+   with
+  | Ok () -> ()
+  | Error message -> Alcotest.failf "an on/on no-op failed: %s" message);
+  check Alcotest.bool "no store file appears for a no-op" false
+    (Sys.file_exists (Switch.path ~base_path))
+
+let test_an_unreadable_switch_store_offers_nothing () =
+  (* Handing out tools an operator may have turned off is the one wrong
+     answer. The turn gets nothing, loudly, until the store is repaired. *)
+  let base_path = temp_base () in
+  write_catalog ~base_path ~keeper_name:"acme-daycare" [ tool "getJiraIssue" ];
+  let file = Switch.path ~base_path in
+  let rec ensure path =
+    if not (Sys.file_exists path) then (
+      ensure (Filename.dirname path);
+      try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  ensure (Filename.dirname file);
+  Out_channel.with_open_bin file (fun oc ->
+      Out_channel.output_string oc "{ not a list");
+  let off = Identity_tools.for_turn ~base_path ~keeper_name:"acme-daycare" in
+  check (Alcotest.list str) "nothing is offered" []
+    (List.map
+       (fun (offered : Identity_tools.offered_tool) ->
+         offered.Identity_tools.schema.name)
+       off.Identity_tools.offered);
+  check Alcotest.bool "and the reason is loud, not silent" true
+    (List.exists
+       (fun (id, _) -> String.equal id "atlassian")
+       off.Identity_tools.unusable)
+
 (* ── the catalog ─────────────────────────────────────────────────────── *)
 
 let test_never_attached_is_not_an_error () =
@@ -606,7 +705,17 @@ let test_an_expiring_token_is_exchanged_and_stored () =
 
 let () =
   Alcotest.run "keeper_identity_tools"
-    [ ( "the written catalog",
+    [ ( "the on/off switch",
+        [ Alcotest.test_case "no switch file means everything on" `Quick
+            test_no_switch_file_means_everything_on;
+          Alcotest.test_case "a thrown switch takes the tools out of the turn"
+            `Quick test_a_thrown_switch_takes_the_tools_out_of_the_turn;
+          Alcotest.test_case "setting the state it already has writes nothing"
+            `Quick test_setting_the_state_it_already_has_writes_nothing;
+          Alcotest.test_case "an unreadable switch store offers nothing" `Quick
+            test_an_unreadable_switch_store_offers_nothing;
+        ] );
+      ( "the written catalog",
         [ Alcotest.test_case "never attached is not an error" `Quick
             test_never_attached_is_not_an_error;
           Alcotest.test_case "an unreadable catalog is not no tools" `Quick

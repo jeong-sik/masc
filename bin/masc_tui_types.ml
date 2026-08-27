@@ -592,6 +592,12 @@ type identity_provider =
             the one question a single Keeper's tab cannot answer for itself,
             and answering it by opening each Keeper in turn is how an
             operator loses track of which account went where. *)
+      ; idp_enabled: bool option
+        (** The on/off switch on an attached row. [None] when the row is not
+            attached or the switch store could not be read; the render must
+            not show a guess for either. *)
+      ; idp_switch_problem: string option
+        (** Why the switch state is unknown, when it is. *)
       }
   | Identity_unreadable of { idp_id: string; idp_problem: string }
 
@@ -718,7 +724,7 @@ let identity_filter_rows ~providers filter =
    the hint. *)
 let identity_preamble ~keeper ~notice =
   ("  Move with the arrows and press enter to connect " ^ keeper
-   ^ ", R to ask again what tools exist.")
+   ^ ", R to ask again what tools exist, T to switch the row off or on.")
   :: "" :: notice
 
 (** Which pane line the provider at [index] is drawn on.

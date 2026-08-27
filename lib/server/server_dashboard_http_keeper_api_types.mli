@@ -20,6 +20,7 @@ val keeper_suffix_github_login : string
 val keeper_suffix_oauth_login : string
 
 val keeper_suffix_identity_refresh : string
+val keeper_suffix_identity_switch : string
 (** Ask an attached service again what tools it has. An operator action
     rather than a timer: a stale catalog is visible and fixable, while a
     timer is a network call nobody asked for. *)
@@ -76,6 +77,7 @@ type keeper_post_route_kind =
   | Keeper_post_github_login
   | Keeper_post_oauth_login
   | Keeper_post_identity_refresh
+  | Keeper_post_identity_switch
   | Keeper_post_boot
   | Keeper_post_up
   | Keeper_post_shutdown

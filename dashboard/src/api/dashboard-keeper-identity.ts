@@ -3,9 +3,19 @@ import { ensureDevToken } from './dev-token'
 
 /** A declared service and what it currently offers one Keeper. `tools`
  *  absent means never attached; an empty array means attached and offering
- *  nothing, which is a different thing to tell an operator. */
+ *  nothing, which is a different thing to tell an operator. On an attached
+ *  row, `enabled` is the on/off switch (off keeps token and catalog but
+ *  hands the keeper's turns nothing); `switch_problem` replaces it when the
+ *  switch store cannot be read — the toggle must not render a guess. */
 export type AttachedProvider =
-  | { provider: string; provider_label: string; attached: boolean; tools?: string[] }
+  | {
+      provider: string
+      provider_label: string
+      attached: boolean
+      tools?: string[]
+      enabled?: boolean
+      switch_problem?: string
+    }
   | { provider: string; problem: string }
 
 export function isAttachable(
@@ -48,6 +58,21 @@ export async function refreshIdentityTools(
   await post(
     `/api/v1/keepers/${encodeURIComponent(keeperName)}/identity-refresh`,
     { provider: providerId },
+  )
+}
+
+/** Turn one attached service on or off for this keeper without touching the
+ *  consent. Off keeps the token and catalog; the keeper's turns simply stop
+ *  being handed that provider's tools, and on hands them back next turn. */
+export async function setIdentitySwitch(
+  keeperName: string,
+  providerId: string,
+  enabled: boolean,
+): Promise<void> {
+  await ensureDevToken()
+  await post(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/identity-switch`,
+    { provider: providerId, enabled },
   )
 }
 

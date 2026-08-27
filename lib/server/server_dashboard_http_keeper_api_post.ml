@@ -164,6 +164,66 @@ let handle_keeper_identity_refresh_post state req reqd body_str =
                Http.Response.json_value ~compress:true ~request:req payload reqd)))
 ;;
 
+(* Turn one attached service on or off for this keeper without touching the
+   consent: the token and catalog stay, the keeper's turns stop being handed
+   that provider's tools. The actor comes from the authenticated operator so
+   the audit row says who threw the switch. *)
+let handle_keeper_identity_switch_post state ~actor req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name =
+    extract_keeper_name_for_suffix req_path keeper_suffix_identity_switch
+  in
+  let config = Mcp_server.workspace_config state in
+  if name = "" then respond_error reqd "keeper name is required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    match Keeper_meta_store.read_meta config name with
+    | Error message -> respond_error ~status:`Internal_server_error reqd message
+    | Ok None ->
+      respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
+    | Ok (Some _) ->
+      (match Yojson.Safe.from_string body_str with
+       | exception Yojson.Json_error detail -> respond_error reqd detail
+       | args ->
+         (match declared_provider_id args with
+          | Error message -> respond_error reqd message
+          | Ok provider_id ->
+            let enabled =
+              match args with
+              | `Assoc fields ->
+                (match List.assoc_opt "enabled" fields with
+                 | Some (`Bool value) -> Ok value
+                 | Some _ -> Error "enabled must be a boolean"
+                 | None -> Error "enabled is required")
+              | _ -> Error "body must be a JSON object"
+            in
+            (match enabled with
+             | Error message -> respond_error reqd message
+             | Ok enabled ->
+               (match
+                  Keeper_identity_switch.set
+                    config
+                    ~actor
+                    ~keeper_name:name
+                    ~provider_id
+                    ~enabled
+                with
+                | Error message ->
+                  respond_error ~status:`Internal_server_error reqd message
+                | Ok () ->
+                  Http.Response.json_value
+                    ~compress:true
+                    ~request:req
+                    (`Assoc
+                       [ "ok", `Bool true
+                       ; "keeper", `String name
+                       ; "provider", `String provider_id
+                       ; "enabled", `Bool enabled
+                       ])
+                    reqd))))
+;;
+
 let parse_fusion_result text =
   try Yojson.Safe.from_string text with
   | Yojson.Json_error _ -> `Assoc [ "ok", `Bool false; "error", `String text ]

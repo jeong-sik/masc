@@ -3,6 +3,7 @@ import {
   fetchAttachedProviders,
   isAttachable,
   refreshIdentityTools,
+  setIdentitySwitch,
   startIdentityLogin,
   type AttachedProvider,
 } from './dashboard-keeper-identity'
@@ -96,6 +97,21 @@ describe('refreshIdentityTools', () => {
     const [path, init] = call!
     expect(path).toBe('/api/v1/keepers/sangsu/identity-refresh')
     expect(JSON.parse(String(init.body))).toEqual({ provider: 'atlassian' })
+  })
+})
+
+describe('setIdentitySwitch', () => {
+  it('names the keeper in the path and carries provider and enabled', async () => {
+    const fetchMock = vi.fn(async (_path: string, _init: RequestInit) =>
+      jsonResponse({ ok: true, keeper: 'sangsu', provider: 'atlassian', enabled: false }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    await setIdentitySwitch('sangsu', 'atlassian', false)
+    const call = fetchMock.mock.calls[0]
+    expect(call).toBeDefined()
+    const [path, init] = call!
+    expect(path).toBe('/api/v1/keepers/sangsu/identity-switch')
+    expect(JSON.parse(String(init.body))).toEqual({ provider: 'atlassian', enabled: false })
   })
 })
 

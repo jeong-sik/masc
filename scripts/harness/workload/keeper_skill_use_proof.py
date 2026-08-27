@@ -723,6 +723,10 @@ def capture_dashboard_page(
         "Dashboard exact Skill invocation row is not visible for capture",
     )
     require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel changed Keeper before taking the screenshot",
+    )
+    require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard ledger revision changed before taking the screenshot",
     )
@@ -731,6 +735,10 @@ def capture_dashboard_page(
         "Dashboard exact Skill invocation row changed before capture",
     )
     panel.screenshot(path=str(screenshot))
+    require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel changed Keeper while taking the screenshot",
+    )
     require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard ledger revision changed while taking the screenshot",

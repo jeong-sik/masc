@@ -189,8 +189,10 @@ class KeeperSkillUseProofTest(unittest.TestCase):
                 return True
 
         class Panel:
-            keeper_name = "previous-keeper"
-            ledger_revision = "previous-revision"
+            def __init__(self, keeper_after_screenshot=None):
+                self.keeper_name = "previous-keeper"
+                self.ledger_revision = "previous-revision"
+                self.keeper_after_screenshot = keeper_after_screenshot
 
             def wait_for(self, *, state, timeout):
                 calls.append(("wait_for", state, timeout))
@@ -208,6 +210,8 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
             def screenshot(self, *, path):
                 calls.append(("panel_screenshot", Path(path).name))
+                if self.keeper_after_screenshot is not None:
+                    self.keeper_name = self.keeper_after_screenshot
 
         class KeeperSelect:
             selected = ""
@@ -223,9 +227,9 @@ class KeeperSkillUseProofTest(unittest.TestCase):
                 return self.selected
 
         class Page:
-            def __init__(self):
+            def __init__(self, keeper_after_screenshot=None):
                 self.keeper_select = KeeperSelect()
-                self.panel = Panel()
+                self.panel = Panel(keeper_after_screenshot)
 
             def goto(self, url, *, wait_until, timeout):
                 calls.append(("goto", url, wait_until, timeout))
@@ -306,6 +310,29 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         ]
         self.assertTrue(any(index < screenshot_index for index in revision_checks))
         self.assertTrue(any(index > screenshot_index for index in revision_checks))
+        keeper_checks = [
+            index
+            for index, call in enumerate(calls)
+            if call == ("panel_attribute", "data-keeper-name")
+        ]
+        self.assertTrue(any(index < screenshot_index for index in keeper_checks))
+        self.assertTrue(any(index > screenshot_index for index in keeper_checks))
+
+        with tempfile.TemporaryDirectory() as raw:
+            with self.assertRaisesRegex(
+                proof.ProofError, "changed Keeper while taking the screenshot"
+            ):
+                proof.capture_dashboard_page(
+                    page=Page(keeper_after_screenshot="keeper-two"),
+                    dashboard_url=(
+                        "http://127.0.0.1:9934/dashboard/"
+                        f"{proof.DASHBOARD_SKILL_RECEIPTS_ROUTE}"
+                    ),
+                    keeper="keeper-one",
+                    skill_tool_use_id="call-skill-1",
+                    ledger_revision="ledger-revision",
+                    screenshot=Path(raw) / "dashboard-skill-use.png",
+                )
 
     def test_strict_http_reads_send_bearer_without_serializing_it(self):
         token = "strict-proof-token"

@@ -396,9 +396,23 @@ let test_zero_param_instantiation_revalidates_turn_surface () =
   in
   match Catalog.instantiate ~descriptors ~args:(`Assoc []) entry with
   | Error
-      (Catalog.Instantiated_plan_rejected
-        (Plan.Unknown_tool { tool_name = "keeper_memory_search"; _ })) ->
-    ()
+      ((Catalog.Instantiated_plan_rejected
+          (Plan.Unknown_tool { tool_name = "keeper_memory_search"; _ })) as
+        error) ->
+    let projection = Catalog.instantiation_error_to_json error in
+    let open Yojson.Safe.Util in
+    check string
+      "instantiation error kind"
+      "instantiated_plan_rejected"
+      (projection |> member "kind" |> to_string);
+    check string
+      "typed plan error survives"
+      "unknown_tool"
+      (projection |> member "error" |> member "kind" |> to_string);
+    check string
+      "typed tool identity survives"
+      "keeper_memory_search"
+      (projection |> member "error" |> member "tool_name" |> to_string)
   | Ok _ -> fail "zero-param composition recovered the global Tool catalog"
   | Error error ->
     fail

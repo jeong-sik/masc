@@ -5260,7 +5260,12 @@ let test_composition_and_plan_share_closed_turn_descriptor_set () =
          "bundle resolves supplied descriptor to canonical authority"
          clock_descriptor.description
          clock.schema.description;
-       let assert_deterministic_refusal tools name input =
+       let assert_deterministic_refusal
+             ~expected_error_kind
+             tools
+             name
+             input
+         =
          let tool =
            match find_tool_by_name tools name with
            | Some tool -> tool
@@ -5283,17 +5288,37 @@ let test_composition_and_plan_share_closed_turn_descriptor_set () =
              (Option.map
                 (fun error_class ->
                    error_class = Agent_core.Types.Deterministic)
-                error.Agent_core.Types.error_class)
+                error.Agent_core.Types.error_class);
+           let payload =
+             parse_json error.Agent_core.Types.message
+             |> Yojson.Safe.Util.member "masc.payload"
+           in
+           check string
+             (name ^ " preserves exact outer identity")
+             name
+             Yojson.Safe.Util.(payload |> member "composition_tool" |> to_string);
+           let typed_error = Yojson.Safe.Util.member "error" payload in
+           check string
+             (name ^ " preserves typed rejection kind")
+             expected_error_kind
+             Yojson.Safe.Util.(typed_error |> member "kind" |> to_string);
+           check string
+             (name ^ " preserves typed plan cause")
+             "unknown_tool"
+             Yojson.Safe.Util.(typed_error |> member "error" |> member "kind" |> to_string)
        in
        assert_deterministic_refusal
+         ~expected_error_kind:"instantiated_plan_rejected"
          inline_tools
          "keeper_compose_off-surface-memory"
          (`Assoc []);
        assert_deterministic_refusal
+         ~expected_error_kind:"instantiated_plan_rejected"
          async_tools
          "keeper_compose_off-surface-memory-async"
          (`Assoc []);
        assert_deterministic_refusal
+         ~expected_error_kind:"plan_rejected"
          inline_tools
          Masc.Keeper_tool_composition_surface.plan_execute_tool_name
          (`Assoc

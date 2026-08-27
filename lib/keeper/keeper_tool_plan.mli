@@ -42,6 +42,8 @@ module Json_pointer : sig
   val root : t
   val of_string : string -> (t, syntax_error) result
   val segments : t -> string list
+  val to_string : t -> string
+  (** Canonical RFC 6901 spelling. *)
   val resolve : t -> Yojson.Safe.t -> (Yojson.Safe.t, resolution_error) result
   val resolve_schema : t -> Yojson.Safe.t -> (Yojson.Safe.t, schema_error) result
 end
@@ -254,6 +256,8 @@ type error =
   | Dependency_cycle of Node_id.t list
 
 val error_to_string : error -> string
+val error_to_json : error -> Yojson.Safe.t
+(** Exhaustive typed projection for operator and client surfaces. *)
 
 type t
 

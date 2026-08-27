@@ -739,6 +739,16 @@ let instantiation_error_to_string = function
     "instantiated plan rejected: " ^ Plan.error_to_string error
 ;;
 
+let instantiation_error_to_json = function
+  | Missing_argument param ->
+    `Assoc [ "kind", `String "missing_argument"; "argument", `String param ]
+  | Instantiated_plan_rejected error ->
+    `Assoc
+      [ "kind", `String "instantiated_plan_rejected"
+      ; "error", Plan.error_to_json error
+      ]
+;;
+
 (* Bind one invocation's arguments into the entry's plan. The declared plan
    keeps its [Param] leaves for the catalog's lifetime; execution takes the
    param-free copy built here, revalidated by the same [Plan.create] that

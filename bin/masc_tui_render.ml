@@ -9211,10 +9211,58 @@ let config_pane_strip (state : state) =
   in
   String.concat (Ansi.dim ^ " |" ^ Ansi.reset)
     [ name Config_runtime "runtime.toml"
+    ; name Config_params "params"
     ; name Config_prompts "prompts"
     ; name Config_themes "themes"
     ]
   ^ Ansi.dim ^ "  p:next" ^ Ansi.reset
+
+(* The Runtime_params registry. A view, not a second place values live:
+   overrides are written by the server to .masc/runtime_params.json, and this
+   shows what is there beside what it would be without them.
+
+   runtime.toml sits in the pane next door and answers a different question --
+   which runtimes and lanes exist. One value claimed by two files is how "I set
+   it and it did not take" happens, so these stay two panes over one store. *)
+let render_runtime_params (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let buf = Buffer.create 4096 in
+  box_top buf cols;
+  box_line buf cols
+    (Printf.sprintf "%s  %s  %s"
+       (screen_title " MASC Config")
+       (config_pane_strip state)
+       (connection_badge state));
+  (match state.runtime_params_error with
+   | Some detail ->
+     (* Not an empty list. Empty means nothing is registered, which is a
+        working state, and a failed read must not be able to look like one. *)
+     box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
+                        ^ Terminal_text.single_line detail)
+   | None ->
+     if state.runtime_params = []
+     then box_line buf cols (Ansi.dim ^ "등록된 설정 없음" ^ Ansi.reset)
+     else
+       List.iteri
+         (fun i (key, current, default, overridden) ->
+           if i < rows - boxed_surface_chrome_rows
+           then
+             box_line buf cols
+               (Printf.sprintf "  %-44s %s%s%s%s"
+                  (Terminal_text.single_line key)
+                  (if overridden then Ansi.cyan else Ansi.dim)
+                  (Terminal_text.single_line current)
+                  Ansi.reset
+                  (if overridden
+                   then
+                     Printf.sprintf "%s  (기본 %s)%s" Ansi.dim
+                       (Terminal_text.single_line default) Ansi.reset
+                   else "")))
+         state.runtime_params);
+  box_bottom buf cols;
+  finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
+;;
 
 let render_prompts (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -9538,7 +9586,8 @@ let render_surface (state : state) =
     match state.config_pane with
     | Config_prompts -> render_prompts state
     | Config_themes -> render_themes state
-    | Config_runtime -> render_config state)
+    | Config_runtime -> render_config state
+    | Config_params -> render_runtime_params state)
   | Resources -> render_resources state
   | Code -> render_code state
   | Tools -> render_tools state

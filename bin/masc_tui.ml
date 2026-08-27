@@ -1361,6 +1361,8 @@ type async_msg =
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
+  | Runtime_params_loaded of
+      ((string * string * string * bool) list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of ((string * string) list, string) result
@@ -2404,6 +2406,26 @@ let launch_runtime_config_load state ~mailbox =
       enqueue_async mailbox
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
+let launch_runtime_params_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_runtime_params ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Runtime_params_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Runtime_params_loaded (Error "Eio switch is unavailable"))
+
 let launch_prompts_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
@@ -3206,9 +3228,14 @@ let goto_surface state ~mailbox (destination : surface) =
    | Connectors -> launch_connectors_load state ~mailbox
    | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
    | Tools -> launch_tools_load state ~mailbox
-   | Config ->
-       if state.config_pane = Config_prompts then launch_prompts_load state ~mailbox
-       else launch_runtime_config_load state ~mailbox
+   | Config -> (
+       (* Each pane loads its own source. Named rather than left to an
+          if/else chain: a pane added later should have to say where its data
+          comes from instead of quietly inheriting runtime.toml's. *)
+       match state.config_pane with
+       | Config_prompts -> launch_prompts_load state ~mailbox
+       | Config_params -> launch_runtime_params_load state ~mailbox
+       | Config_runtime | Config_themes -> launch_runtime_config_load state ~mailbox)
    | Resources -> launch_resources_list state ~mailbox
    | Code -> launch_code_entries_load state ~mailbox
    | Overview | Acting | Keepers _ | Board | Planning | System_logs -> ());
@@ -6298,6 +6325,15 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.prompts_librarian_input <- None;
             state.prompts_librarian_input_error <- Some detail
       end
+  | Runtime_params_loaded result -> (
+      match result with
+      | Ok rows ->
+          state.runtime_params <- rows;
+          state.runtime_params_error <- None
+      | Error detail ->
+          (* Reported, not swallowed into an empty list: empty means nothing is
+             registered, which is a working state. *)
+          state.runtime_params_error <- Some detail)
   | Runtime_config_view_loaded result -> (
       match result with
       | Ok (path, lines) ->
@@ -11222,7 +11258,8 @@ and is loaded on demand through keeper_skill.
               reader's own colours, which no server has an opinion about. *)
            state.config_pane <-
              (match state.config_pane with
-              | Config_runtime -> Config_prompts
+              | Config_runtime -> Config_params
+              | Config_params -> Config_prompts
               | Config_prompts -> Config_themes
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
@@ -11230,8 +11267,15 @@ and is loaded on demand through keeper_skill.
            state.prompts_librarian_input <- None;
            state.prompts_librarian_input_error <- None;
            state.prompts_librarian_input_loading <- false;
-           if state.config_pane = Config_prompts && state.prompts_snapshot = None
-           then launch_prompts_load state ~mailbox:async_messages
+           (* Cycling into a pane is entering it. Without this the params pane
+              draws whatever the last load left, which for a first visit is an
+              empty list -- and empty reads as "nothing registered". *)
+           (match state.config_pane with
+            | Config_prompts ->
+              if state.prompts_snapshot = None
+              then launch_prompts_load state ~mailbox:async_messages
+            | Config_params -> launch_runtime_params_load state ~mailbox:async_messages
+            | Config_runtime | Config_themes -> ())
        | Some "p" | Some "P" ->
            (* The toggle: whichever of pause / resume / boot this reading
               offers first. One key for "stop" and "play" because which one

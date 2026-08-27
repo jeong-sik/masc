@@ -3550,6 +3550,33 @@ let decode_keeper_gate_settings json =
   let* judges = pairs "judges" "slot_id" in
   Ok (modes, judges)
 
+(* Values are rendered, not computed on, so they are flattened to text here.
+   The registry holds ints, floats, bools and strings; a surface that only
+   shows them has no reason to carry four cases into the renderer. *)
+let decode_runtime_params json =
+  let* items = required_list_field json "parameters" in
+  let text = function
+    | `String s -> s
+    | other -> Yojson.Safe.to_string other
+  in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest ->
+      let* key = required_string_field item "key" in
+      let field name =
+        match item with
+        | `Assoc fields -> List.assoc_opt name fields
+        | _ -> None
+      in
+      let current = match field "current" with Some v -> text v | None -> "-" in
+      let default = match field "default" with Some v -> text v | None -> "-" in
+      let overridden =
+        match field "has_override" with Some (`Bool b) -> b | Some _ | None -> false
+      in
+      loop ((key, current, default, overridden) :: acc) rest
+  in
+  loop [] items
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function

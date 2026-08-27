@@ -31,6 +31,7 @@ import { CollapsibleSection } from './common/collapsible'
 import { AgentCoreHealthChip } from './agent-core-health-chip'
 import { RuntimeHealthSnapshot } from './runtime-health-snapshot'
 import { RuntimeMonitor } from './runtime-monitor'
+import { RuntimeParamsPanel } from './runtime-params-panel'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { RuntimeObservablesPanel } from './runtime-observables-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
@@ -165,7 +166,10 @@ export function RuntimePanel() {
             <${RuntimeMonitor} />
           `
         : view === 'config'
-          ? html`<${RuntimeTomlEditor} />`
+          ? html`
+            <${RuntimeTomlEditor} />
+            <${RuntimeParamsPanel} />
+          `
         : isTelemetryView(view)
           ? html`<${TelemetryPanel} view=${view} />`
         : view === 'verification'

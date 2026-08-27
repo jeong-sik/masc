@@ -830,6 +830,14 @@ val decode_keeper_gate_settings :
     operator reading one for the other is the reason both are named in
     full. *)
 
+val decode_runtime_params :
+  Yojson.Safe.t -> ((string * string * string * bool) list, string) result
+(** [(key, current, default, has_override)] from [/api/v1/runtime/params].
+
+    Values arrive as whatever type the parameter registered and leave as text:
+    this feeds a surface that shows them, and carrying four cases further would
+    only push the same rendering decision downstream. *)
+
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s

@@ -2,7 +2,7 @@
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, post, type AbortableRequestOptions } from './core'
+import { ApiRequestError, get, post, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
@@ -2192,4 +2192,89 @@ export async function patchRuntimeAssignment(
     keeper_name: keeperName,
     runtime_id: runtimeId,
   }).then(decodeCommittedRuntimeTomlConfig)
+}
+
+/**
+ * The Runtime_params registry: every knob this build registered, what it is
+ * set to now, and what it would be with nobody overriding it.
+ *
+ * Distinct from {@link DashboardRuntimeParameterPolicy}, which is a provider's
+ * sampling-parameter policy. Same word, different subject -- this one is the
+ * workspace's own settings store, written to .masc/runtime_params.json.
+ */
+export interface RuntimeParamMeta {
+  description: string
+  value_type: string
+  min_value?: number
+  max_value?: number
+}
+
+export interface RuntimeParam {
+  key: string
+  /** What the workspace runs on right now. */
+  current: unknown
+  /** What it would be with no override -- the env-backed default. */
+  default: unknown
+  has_override: boolean
+  meta: RuntimeParamMeta | null
+}
+
+function runtimeParamsDrift(detail: string): never {
+  throw new ApiRequestError({
+    method: 'GET',
+    path: '/api/v1/runtime/params',
+    detail: `invalid runtime params response: ${detail}`,
+    errorCode: 'protocol_drift',
+  })
+}
+
+function decodeRuntimeParamMeta(raw: unknown): RuntimeParamMeta | null {
+  if (raw === null || raw === undefined) return null
+  if (!isRecord(raw)) return runtimeParamsDrift('meta is not an object')
+  if (typeof raw.description !== 'string' || typeof raw.value_type !== 'string') {
+    return runtimeParamsDrift('meta is missing description or value_type')
+  }
+  return {
+    description: raw.description,
+    value_type: raw.value_type,
+    ...(typeof raw.min_value === 'number' ? { min_value: raw.min_value } : {}),
+    ...(typeof raw.max_value === 'number' ? { max_value: raw.max_value } : {}),
+  }
+}
+
+function decodeRuntimeParam(raw: unknown): RuntimeParam {
+  if (!isRecord(raw)) return runtimeParamsDrift('parameter is not an object')
+  if (typeof raw.key !== 'string' || raw.key.trim() === '') {
+    return runtimeParamsDrift('parameter has no key')
+  }
+  if (typeof raw.has_override !== 'boolean') {
+    return runtimeParamsDrift(`${raw.key} has no has_override`)
+  }
+  // current and default stay unknown: the registry holds ints, floats, bools
+  // and strings, and narrowing here would decide for the renderer which of
+  // them it is allowed to show.
+  return {
+    key: raw.key,
+    current: raw.current,
+    default: raw.default,
+    has_override: raw.has_override,
+    meta: decodeRuntimeParamMeta(raw.meta),
+  }
+}
+
+export async function fetchRuntimeParams(): Promise<RuntimeParam[]> {
+  const raw = await get<unknown>('/api/v1/runtime/params')
+  if (!isRecord(raw)) return runtimeParamsDrift('expected an object')
+  if (!Array.isArray(raw.parameters)) return runtimeParamsDrift('parameters must be an array')
+  return raw.parameters.map(decodeRuntimeParam)
+}
+
+/** Override one knob. The server validates against the registered bounds. */
+export async function setRuntimeParam(key: string, value: unknown): Promise<void> {
+  await post<unknown>('/api/v1/runtime/params/set', { key, value })
+}
+
+/** Drop the override, so the knob goes back to its env-backed default. */
+export async function clearRuntimeParam(key: string): Promise<void> {
+  await post<unknown>('/api/v1/runtime/params/clear', { key })
 }

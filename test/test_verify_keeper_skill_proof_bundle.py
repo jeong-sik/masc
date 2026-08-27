@@ -394,6 +394,7 @@ def make_bundle(root: Path):
         },
         "dashboard": {
             "path": "dashboard-skill-use.png",
+            "exact_row": SKILL_ID,
             **file_identity(dashboard_png),
         },
         "artifacts": {
@@ -707,6 +708,33 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
             with self.assertRaisesRegex(verifier.VerificationError, "is not a PNG"):
                 verify(bundle)
+
+    def test_ihdr_only_png_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = png()[:33]
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(verifier.VerificationError, "no terminal IEND"):
+                verify(bundle)
+
+    def test_dashboard_exact_row_is_required_and_bound(self):
+        for exact_row in (None, "call-other"):
+            with (
+                self.subTest(exact_row=exact_row),
+                tempfile.TemporaryDirectory() as raw,
+            ):
+                bundle = make_bundle(Path(raw))
+                if exact_row is None:
+                    bundle["proof"]["dashboard"].pop("exact_row")
+                else:
+                    bundle["proof"]["dashboard"]["exact_row"] = exact_row
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "Dashboard exact row differs"
+                ):
+                    verify(bundle)
 
     def test_png_zero_dimension_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:

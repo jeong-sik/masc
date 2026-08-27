@@ -185,19 +185,64 @@ def verify_artifact_set(
 
 def validate_png(payload: bytes, context: str) -> tuple[int, int]:
     require(payload.startswith(PNG_SIGNATURE), f"{context} is not a PNG")
-    require(len(payload) >= 33, f"{context} has no complete IHDR")
-    ihdr_length = struct.unpack(">I", payload[8:12])[0]
+    offset = len(PNG_SIGNATURE)
+    chunk_index = 0
+    width = 0
+    height = 0
+    idat_parts: list[bytes] = []
+    idat_closed = False
+    saw_iend = False
+    while offset < len(payload):
+        require(len(payload) - offset >= 12, f"{context} has a truncated PNG chunk")
+        chunk_length = struct.unpack(">I", payload[offset : offset + 4])[0]
+        chunk_type = payload[offset + 4 : offset + 8]
+        data_start = offset + 8
+        data_end = data_start + chunk_length
+        chunk_end = data_end + 4
+        require(chunk_end <= len(payload), f"{context} has a truncated PNG chunk")
+        chunk_data = payload[data_start:data_end]
+        expected_crc = struct.unpack(">I", payload[data_end:chunk_end])[0]
+        require(
+            zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF == expected_crc,
+            f"{context} {chunk_type!r} checksum differs",
+        )
+        if chunk_index == 0:
+            require(
+                chunk_type == b"IHDR" and chunk_length == 13,
+                f"{context} first chunk is not IHDR",
+            )
+            width, height = struct.unpack(">II", chunk_data[:8])
+            require(width > 0 and height > 0, f"{context} dimensions are invalid")
+        else:
+            require(chunk_type != b"IHDR", f"{context} repeats IHDR")
+        if chunk_type == b"IDAT":
+            require(not idat_closed, f"{context} has nonconsecutive IDAT chunks")
+            idat_parts.append(chunk_data)
+        elif idat_parts and chunk_type != b"IEND":
+            idat_closed = True
+        if chunk_type == b"IEND":
+            require(chunk_length == 0, f"{context} IEND is not empty")
+            require(idat_parts != [], f"{context} has no IDAT chunk")
+            require(chunk_end == len(payload), f"{context} has bytes after IEND")
+            saw_iend = True
+            offset = chunk_end
+            break
+        offset = chunk_end
+        chunk_index += 1
+    require(saw_iend and offset == len(payload), f"{context} has no terminal IEND")
+    compressed = b"".join(idat_parts)
+    try:
+        decompressor = zlib.decompressobj()
+        decoded = decompressor.decompress(compressed) + decompressor.flush()
+    except zlib.error as error:
+        raise VerificationError(f"{context} IDAT stream is invalid: {error}") from error
     require(
-        ihdr_length == 13 and payload[12:16] == b"IHDR",
-        f"{context} first chunk is not IHDR",
+        decompressor.eof
+        and decompressor.unused_data == b""
+        and decompressor.unconsumed_tail == b""
+        and decoded != b"",
+        f"{context} IDAT stream is incomplete",
     )
-    expected_crc = struct.unpack(">I", payload[29:33])[0]
-    require(
-        zlib.crc32(payload[12:29]) & 0xFFFFFFFF == expected_crc,
-        f"{context} IHDR checksum differs",
-    )
-    width, height = struct.unpack(">II", payload[16:24])
-    require(width > 0 and height > 0, f"{context} dimensions are invalid")
     return width, height
 
 
@@ -607,6 +652,10 @@ def verify_bundle(
         dashboard_name == "dashboard-skill-use.png"
         and dashboard_name not in PROOF_ARTIFACTS,
         "Dashboard screenshot path is not the exact producer artifact",
+    )
+    require(
+        dashboard.get("exact_row") == selected_id,
+        "Dashboard exact row differs from the selected Skill invocation",
     )
     dashboard_identity, dashboard_payload = verify_file(
         root=proof_root,

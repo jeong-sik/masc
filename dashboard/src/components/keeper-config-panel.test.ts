@@ -1742,6 +1742,63 @@ describe('KeeperConfigPanel', () => {
     expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
       .toBe('keeper-b-skill')
   })
+
+  it('fences a stale save when the same Keeper panel is closed and reopened', async () => {
+    let resolveOldSave: ((value: KeeperConfig) => void) | undefined
+    let resolveNewSave: ((value: KeeperConfig) => void) | undefined
+    const oldSave = new Promise<KeeperConfig>(resolve => {
+      resolveOldSave = resolve
+    })
+    const newSave = new Promise<KeeperConfig>(resolve => {
+      resolveNewSave = resolve
+    })
+    const config = makeKeeperConfig({ skills: { names: null } })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(config)
+    mocks.patchKeeperConfig
+      .mockReturnValueOnce(oldSave)
+      .mockReturnValueOnce(newSave)
+
+    const beginSkillSave = async (name: string) => {
+      selectKcfTab(container, '실행 정책')
+      await flush()
+      const mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
+      mode.value = 'names'
+      mode.dispatchEvent(new Event('change', { bubbles: true }))
+      await flush()
+      const names = container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+      names.value = name
+      names.dispatchEvent(new Event('input', { bubbles: true }))
+      await flush()
+      const save = Array.from(container.querySelectorAll('button')).find(button =>
+        button.textContent?.includes('Keeper 설정 저장'),
+      )
+      save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await flush()
+    }
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    await beginSkillSave('old-skill')
+
+    render(null, container)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    await beginSkillSave('new-skill')
+
+    resolveOldSave?.(makeKeeperConfig({ skills: { names: ['old-skill'] } }))
+    await flush()
+    await flush()
+    expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
+      .toBe('new-skill')
+    expect(container.textContent).toContain('저장 중...')
+
+    resolveNewSave?.(makeKeeperConfig({ skills: { names: ['new-skill'] } }))
+    await flush()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledTimes(2)
+  })
 })
 
 // keeper-v2 design vocabulary (prototypes/keeper-v2/keeper-config.jsx +

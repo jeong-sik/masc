@@ -3,7 +3,7 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   patchKeeperConfig,
@@ -425,9 +425,20 @@ type KeeperRuntimeDraftState = {
   draft: RuntimeDraft
 }
 
+type KeeperConfigPanelOwner = {
+  keeperName: string
+  epoch: symbol
+}
+
+type KeeperConfigSaveRequest = {
+  owner: KeeperConfigPanelOwner
+  request: symbol
+}
+
 const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
-const activeKeeperConfigName = signal<string | null>(null)
+const activeKeeperConfigOwner = signal<KeeperConfigPanelOwner | null>(null)
 const runtimeSaving = signal(false)
+const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
@@ -436,8 +447,9 @@ function resetKeeperConfigPanelDrafts(): void {
   lastSavedAt.value = null
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
-  activeKeeperConfigName.value = null
+  activeKeeperConfigOwner.value = null
   runtimeSaving.value = false
+  runtimeSaveRequest.value = null
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
@@ -445,7 +457,7 @@ function resetKeeperConfigPanelDrafts(): void {
 }
 
 function syncRuntimeDraftFromConfig(name: string, updated: KeeperConfig): void {
-  if (activeKeeperConfigName.value !== name) return
+  if (activeKeeperConfigOwner.value?.keeperName !== name) return
   runtimeDraft.value = {
     keeperName: name,
     draft: initRuntimeDraftFromConfig(updated),
@@ -1561,7 +1573,12 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
-  activeKeeperConfigName.value = keeperName
+  const panelEpoch = useRef(Symbol('keeper-config-panel'))
+  const panelOwner: KeeperConfigPanelOwner = {
+    keeperName,
+    epoch: panelEpoch.current,
+  }
+  activeKeeperConfigOwner.value = panelOwner
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
@@ -1672,10 +1689,19 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     }
     const payload = result.payload
     if (Object.keys(payload).length === 0) return
+    const saveRequest: KeeperConfigSaveRequest = {
+      owner: panelOwner,
+      request: Symbol('keeper-config-save'),
+    }
+    runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      if (activeKeeperConfigName.value !== keeperName) return
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
       showToast('Keeper 설정 저장 완료', 'success')
@@ -1683,7 +1709,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
-      runtimeSaving.value = false
+      if (runtimeSaveRequest.value?.request === saveRequest.request) {
+        runtimeSaveRequest.value = null
+        runtimeSaving.value = false
+      }
     }
   }
 
@@ -1743,7 +1772,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     saveError.value = null
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      if (activeKeeperConfigName.value !== keeperName) return
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== panelOwner.keeperName
+        || activeOwner.epoch !== panelOwner.epoch
+      ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
       editMode.value = false

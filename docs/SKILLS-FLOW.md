@@ -132,15 +132,18 @@ config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read
   소유에서 reconcile되고 이미 current가 있으면 유지되므로, 두 번째 task를 claim해도
   그 스킬이 current 블록에 안 실린다. 그래서 별도 블록으로 뽑는다.
 
-두 블록 모두 canonical exact reference를 싣는다(본문 X). Keeper는 그 객체를 그대로
-`keeper_skill`에 전달한다. 이름-only fallback은 없다. 본문은 매 턴 prompt에 넣지 않고
+두 블록 모두 canonical exact reference와 그 turn의 typed surface를 싣는다(본문 X).
+instruction은 그 객체를 그대로 `keeper_skill`에 전달하고, composition은 투영된 exact
+composition tool을 호출한다. 같은 tool name 충돌 등으로 실행 불가능한 reference는
+unavailable로 표시한다. 이름-only fallback은 없다. 본문은 매 턴 prompt에 넣지 않고
 필요할 때 읽는다.
 
 ### 2c. 대시보드 — GET /api/v1/skills
 
 `lib/server/server_routes_http_routes_activity.ml`. 발행된 워크스페이스 스냅샷
-(`masc.skill-snapshot/v1`, `lib/skill_snapshot`)과 `Keeper_skill_catalog.of_snapshot`의
-exact surface를 함께 투영한다. join key는 source/package/name/content revision 전체이며,
+(`masc.skill-snapshot/v1`, `lib/skill_snapshot`)과 snapshot의 모든 entry를 대상으로 한
+exact surface를 함께 투영한다. shadow entry도 빠지지 않는다. join key는
+source/package/name/content revision 전체이며,
 instruction/composition/unavailable과 typed projection diagnostics를 표시한다. 사용 증거는
 별도 session activation ledger의 exact activation/delivery/action 기록에서 읽는다. 이름,
 tool prefix, 최근 로그 행 수로 사용 횟수를 재구성하지 않는다.

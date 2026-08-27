@@ -20,7 +20,7 @@ One use is identified by the tuple below. No name-only or body-text matching is
 allowed.
 
 ```text
-(workspace_key, session_id, snapshot_revision, turn_ref, runtime_id,
+(workspace_key, session_id, snapshot_revision, turn_ref, invocation_runtime_id,
  skill_reference, skill_tool_use_id)
 ```
 
@@ -42,11 +42,19 @@ Offered
 - `Content_served` is stored only after the exact-reference handler has built a
   provider-inline result. Body and resource record byte count and digest;
   composition invocation is a distinct constructor, never an empty body.
-- `Content_delivered` is stored only when a later provider request contains the
-  matching `ToolResult.tool_use_id`.
+- `Content_delivered` has two typed boundaries. Agent Core first stages an exact
+  `(tool_use_id, content bytes, content SHA-256)` receipt from the final
+  provider projection and commits it only after that request returns a model
+  response. Official clients commit the same receipt when the common dynamic
+  tool host hands the result back to the client. A pre-projection message,
+  serializer attempt, or provider failure is not delivery.
 - `Action_observed` records each later model-selected tool invocation in the
   same Keeper turn. It proves ordering and context availability, not an LLM's
   private causal reasoning.
+
+Invocation, delivery, and action each retain their observed runtime identity.
+A failover may therefore invoke on runtime A and deliver or act on runtime B;
+operator projections must not relabel those later facts as runtime A.
 
 Failures remain explicit. Served content without a matching later request stays
 served; it is never projected as delivered. Rejected delivery/action transitions
@@ -96,7 +104,8 @@ show the same config-application receipt and Skill snapshot revision.
 ## Quantitative completion criteria
 
 One exact-head Keeper run passes only when all counts below come from the same
-workspace, session, Keeper turn, runtime, and Skill reference:
+workspace, session, Keeper turn, and Skill reference. Invocation, delivery,
+and action runtime identities are compared as separate dimensions:
 
 | Measurement | Required |
 |---|---:|
@@ -117,5 +126,6 @@ The proof is repeated in three ways:
    provider failover.
 
 Session totals are operational context, not a proof row. Browser and TUI captures
-must group proof counts by the same snapshot revision, turn reference, runtime id,
-and exact Skill reference, and also display source commit and session id.
+must group proof counts by the same snapshot revision, turn reference,
+invocation runtime, and exact Skill reference; they must also display delivery
+and action runtime counts, source commit, and session id.

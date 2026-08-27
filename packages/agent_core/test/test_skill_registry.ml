@@ -62,7 +62,7 @@ let test_json_projection () =
     match
       Skill_document.decode
         ~directory_name:"inspect"
-        "---\nname: inspect\ndescription: Inspect state\nlicense: MIT\nmetadata:\n  owner: masc\n---\nInspect exactly."
+        "---\nname: inspect\ndescription: Inspect state\nlicense: MIT\nallowed-tools: DoNotProject(private:*)\nmetadata:\n  owner: masc\n---\nInspect exactly."
     with
     | Loaded { document; _ } -> document
     | Unloadable diagnostics ->
@@ -70,6 +70,10 @@ let test_json_projection () =
         (String.concat "; " (List.map Skill_document.diagnostic_to_string diagnostics))
   in
   Skill_registry.register registry skill;
+  Alcotest.(check (option string))
+    "document retains observation-only allowed-tools"
+    (Some "DoNotProject(private:*)")
+    skill.allowed_tools;
   let open Yojson.Safe.Util in
   let json = Skill_registry.to_json registry in
   Alcotest.(check int) "count" 1 (json |> member "count" |> to_int);
@@ -86,7 +90,20 @@ let test_json_projection () =
   Alcotest.(check string)
     "metadata"
     "masc"
-    (projected |> member "metadata" |> member "owner" |> to_string)
+    (projected |> member "metadata" |> member "owner" |> to_string);
+  let projected_fields = projected |> to_assoc |> List.map fst in
+  Alcotest.(check bool)
+    "allowed-tools is absent from the public registry projection"
+    true
+    (not
+       (List.mem "allowed-tools" projected_fields
+        || List.mem "allowed_tools" projected_fields));
+  Alcotest.(check bool)
+    "allowed-tools value is absent from the public registry payload"
+    false
+    (Util.string_contains
+       ~needle:"DoNotProject(private:*)"
+       (Yojson.Safe.to_string json))
 ;;
 
 let () =

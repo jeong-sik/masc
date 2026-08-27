@@ -28,6 +28,10 @@ module Terminal_write_repair = Masc_tui_terminal_write_repair
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
 
+let json_assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L
@@ -995,6 +999,18 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
+  (* Moving back and asking for what is behind it are the same act. They were
+     three separate copies of the same four lines and [pageup] was missing its
+     copy, so a page-at-a-time reader stopped at whatever the first load
+     happened to bring in (#31089). Going back through here means the request
+     cannot be forgotten again. *)
+  let scroll_back rows =
+    set_msg_scroll state (state.msg_scroll + rows);
+    match state.msg_older_cursor with
+    | Some before when state.msg_older_exist && not state.msg_older_loading ->
+        load_older ~before
+    | Some _ | None -> ()
+  in
   let live_is_on_screen live =
     (* [msg_live] survives leaving the chat, so a prompt for keeper A must
        not be answered (or interrupted) from keeper B's screen. *)
@@ -1034,11 +1050,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
     Buffer.add_char state.msg_input '\n';
     true
   | "up" when state.msg_scroll > 0 ->
-    set_msg_scroll state (state.msg_scroll + 1);
-    (match state.msg_older_cursor with
-     | Some before when state.msg_older_exist && not state.msg_older_loading ->
-         load_older ~before
-     | Some _ | None -> ());
+    scroll_back 1;
     true
   | "down" when state.msg_scroll > 0 ->
     set_msg_scroll state (state.msg_scroll - 1);
@@ -1055,11 +1067,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
        hundreds of rows -- took hundreds of notches. Three is what a terminal
        reports per detent, so a notch here covers what a notch covers
        everywhere else. *)
-    set_msg_scroll state (state.msg_scroll + wheel_notch_rows);
-    (match state.msg_older_cursor with
-     | Some before when state.msg_older_exist && not state.msg_older_loading ->
-         load_older ~before
-     | Some _ | None -> ());
+    scroll_back wheel_notch_rows;
     true
   | "wheel-down" ->
     set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
@@ -1067,7 +1075,7 @@ let handle_message_key (state : state) ~(submit_message : string -> unit)
   | "pageup" ->
     (* A keeper's turn is many rows, so one row per press walks back through a
        single message. A page is the unit the reader actually moves in. *)
-    set_msg_scroll state (state.msg_scroll + keeper_message_page_rows state);
+    scroll_back (keeper_message_page_rows state);
     true
   | "pagedown" ->
     set_msg_scroll state (state.msg_scroll - keeper_message_page_rows state);
@@ -1709,6 +1717,38 @@ let launch_tools_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
+let tools_skill_profiles state =
+  match state.tools_inventory with
+  | Some
+      { Masc.Tui_decode.ts_effective =
+          Some
+            (Masc.Tui_decode.Effective_surface_available
+               { ets_skill_profiles; _ });
+        _ } ->
+    ets_skill_profiles
+  | Some _ | None -> []
+;;
+
+let normalize_tools_skill_cursor state =
+  let count = List.length (tools_skill_profiles state) in
+  if count = 0
+  then state.tools_skill_cursor <- 0
+  else if state.tools_skill_cursor >= count
+  then state.tools_skill_cursor <- count - 1
+  else if state.tools_skill_cursor < 0
+  then state.tools_skill_cursor <- 0
+;;
+
+let selected_tools_skill_profile state =
+  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+;;
+
+let move_tools_skill_cursor state delta =
+  let count = List.length (tools_skill_profiles state) in
+  if count > 0
+  then state.tools_skill_cursor <- (state.tools_skill_cursor + delta + count) mod count
+;;
+
 let cycle_tools_keeper state ~mailbox ~delta =
   let count = List.length state.keepers in
   if count > 0 then begin
@@ -1717,6 +1757,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.tools_inventory <- None;
     state.tools_error <- None;
     state.tools_scroll <- 0;
+    state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
   end
 ;;
@@ -6729,23 +6770,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
           | Ok { Keeper_chat_history.rows; dropped } ->
              state.msg_loaded_error <- None;
              state.msg_loaded_dropped <- dropped;
-             (* Where reading further back starts. The oldest row this load
-                carried is the cursor; if it carried none there is nothing to
-                page back from. Whether older rows exist is only learned by
-                asking, so the pane assumes they might and finds out on the
-                first page. *)
-             state.msg_older_cursor <-
-               List.fold_left
-                 (fun oldest (row : Keeper_chat_history.row) ->
-                   match oldest with
-                   | None -> Some row.Keeper_chat_history.at
-                   | Some at ->
-                       Some (Float.min at row.Keeper_chat_history.at))
-                 None rows;
-             state.msg_older_exist <- Option.is_some state.msg_older_cursor;
+             let fresh = List.map (msg_entry_of_history_row keeper_name) rows in
+             let kept = merge_paged_history ~paged:prior_history ~fresh in
+             let cursor = oldest_at kept in
+             (* Where reading further back starts: the oldest row now held. A
+                refresh that reaches no further back than before has learned
+                nothing new about what is behind it, so a "nothing older"
+                answer already given is kept rather than asked again on every
+                tick. *)
+             if state.msg_older_cursor <> cursor then
+               state.msg_older_exist <- Option.is_some cursor;
+             state.msg_older_cursor <- cursor;
              state.msg_older_error <- None;
              forget_session_rows_the_transcript_holds state keeper_name rows;
-             List.map (msg_entry_of_history_row keeper_name) rows
+             kept
           | Error detail ->
              (* The transcript is left as it was and the session rows stay: a
                 failed load must not be the reason the pane goes blank. *)
@@ -6768,7 +6806,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       match result with
       | Ok snapshot ->
           state.tools_inventory <- Some snapshot;
-          state.tools_error <- None
+          state.tools_error <- None;
+          normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
@@ -7795,6 +7834,203 @@ let main () =
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in
+  let skill_template ~composition =
+    if composition
+    then
+      {|---
+name: new-skill
+description: Describe the repeatable job this Skill performs.
+---
+
+# New composition Skill
+
+This preset runs one no-argument tool. Add nodes and dependencies after the
+first preview succeeds. Change execution to "async" for durable background work.
+
+```toml composition
+[[compositions]]
+name = "new-skill"
+description = "Describe the repeatable job this Skill performs."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+```
+|}
+    else
+      {|---
+name: new-skill
+description: Describe when an agent should use this Skill.
+---
+
+# New instruction Skill
+
+Write the durable procedure here. The body stays out of the eager tool context
+and is loaded on demand through keeper_skill.
+|}
+  in
+  let skill_name_from_source source_text =
+    source_text
+    |> String.split_on_char '\n'
+    |> List.find_map (fun line ->
+      let prefix = "name:" in
+      if String.starts_with ~prefix line
+      then
+        let value =
+          String.sub line (String.length prefix) (String.length line - String.length prefix)
+          |> String.trim
+        in
+        if String.equal value "" then None else Some value
+      else None)
+  in
+  let handle_skill_create ~composition () =
+    let host = server_peer_host in
+    let port = state.port in
+    match Masc_tui_http.fetch_skill_editor_sources ~host ~port with
+    | Error detail -> add_event state "error" ("Skill sources failed: " ^ detail)
+    | Ok [] -> add_event state "error" "no ready read-write Skill source"
+    | Ok (source_id :: _) ->
+      (match Masc_tui_editor.editor_command () with
+       | None -> add_event state "error" "no $EDITOR set; export EDITOR to create Skills"
+       | Some _ ->
+         (match
+            Masc_tui_editor.roundtrip
+              ~restore:restore_terminal
+              ~reenter:reenter_terminal
+              ~suffix:".md"
+              (skill_template ~composition)
+          with
+          | None -> add_event state "system" "Skill creation cancelled"
+          | Some source_text ->
+            (match skill_name_from_source source_text with
+             | None -> add_event state "error" "Skill template has no name frontmatter"
+             | Some "new-skill" ->
+               add_event state "error" "change new-skill to a real unique name before creating"
+             | Some package_id ->
+               (match
+                  Masc_tui_http.post_skill_editor_create
+                    ~host
+                    ~port
+                    ~source_id
+                    ~package_id
+                    ~source_text
+                with
+                | Error detail -> add_event state "error" ("Skill create failed: " ^ detail)
+                | Ok json ->
+                  let status =
+                    match json_assoc_member_opt "status" json with
+                    | Some (`String value) -> value
+                    | _ -> "created"
+                  in
+                  add_event
+                    state
+                    "system"
+                    (Printf.sprintf "%s · %s/%s" status source_id package_id);
+                  launch_tools_load state ~mailbox:async_messages))))
+  in
+  let handle_skill_run () =
+    match selected_tools_skill_profile state with
+    | None -> add_event state "error" "no published Skill selected"
+    | Some profile when String.equal profile.esp_kind "instruction" ->
+      add_event
+        state
+        "system"
+        "instruction Skill results belong to the Keeper turn; inspect Skill Activations or Keeper calls"
+    | Some profile ->
+      let key =
+        Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
+      in
+      (match
+         Masc_tui_http.post_skill_run
+           ~host:server_peer_host
+           ~port:state.port
+           profile.esp_reference
+       with
+       | Error detail -> add_event state "error" ("Skill run lookup failed: " ^ detail)
+       | Ok json -> state.tools_skill_run <- Some (key, json))
+  in
+  let handle_skill_edit () =
+    match selected_tools_skill_profile state with
+    | None -> add_event state "error" "no published Skill selected"
+    | Some profile ->
+      let name = profile.Masc.Tui_decode.esp_name in
+      let host = server_peer_host in
+      let port = state.port in
+      (match
+         Masc_tui_http.post_skill_editor_read
+           ~host
+           ~port
+           profile.esp_reference
+       with
+       | Error detail -> add_event state "error" ("Skill read failed: " ^ detail)
+       | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
+         add_event state "error" (name ^ " belongs to a read-only Skill source")
+       | Ok loaded ->
+         (match Masc_tui_editor.editor_command () with
+          | None ->
+            add_event state "error" "no $EDITOR set; export EDITOR to edit Skills"
+          | Some _ ->
+            (match
+               Masc_tui_editor.roundtrip
+                 ~restore:restore_terminal
+                 ~reenter:reenter_terminal
+                 ~suffix:".md"
+                 loaded.sel_source_text
+             with
+             | None -> add_event state "system" (name ^ " edit cancelled")
+             | Some edited when String.equal edited loaded.sel_source_text ->
+               add_event state "system" (name ^ " unchanged")
+             | Some edited ->
+               (match
+                  Masc_tui_http.post_skill_editor_preview
+                    ~host
+                    ~port
+                    ~reference:loaded.sel_reference
+                    ~source_text:edited
+                with
+                | Error detail ->
+                  add_event state "error" ("Skill preview rejected: " ^ detail)
+                | Ok _ ->
+                  (match
+                     Masc_tui_http.post_skill_editor_save
+                       ~host
+                       ~port
+                       ~reference:loaded.sel_reference
+                       ~source_text:edited
+                   with
+                   | Error detail ->
+                     add_event state "error" ("Skill save failed: " ^ detail)
+                   | Ok receipt ->
+                     (match receipt.ses_status with
+                      | Masc_tui_http.Skill_unchanged ->
+                        add_event state "system" (name ^ " unchanged")
+                      | Skill_saved_and_published ->
+                        let revision =
+                          Skill_reference.content_revision_to_string
+                            receipt.ses_reference.content_revision
+                        in
+                        let revision_short =
+                          String.sub revision 0 (min 12 (String.length revision))
+                        in
+                        add_event state "system"
+                          (Printf.sprintf
+                             "%s saved + published · %s%s"
+                             name
+                             revision_short
+                             (match receipt.ses_snapshot_revision with
+                              | None -> ""
+                              | Some snapshot ->
+                                " · snapshot "
+                                ^ String.sub snapshot 0 (min 12 (String.length snapshot))));
+                        launch_tools_load state ~mailbox:async_messages
+                      | Skill_saved_but_unpublished reason ->
+                        add_event state "error"
+                          (name ^ " was saved but NOT published: " ^ reason)))))))
+  in
   (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
      actually gets, and the server persists what comes back. The effective
      text is the stem rather than the file's, because an overridden prompt is
@@ -8788,6 +9024,11 @@ let main () =
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
+       | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
+       | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
+       | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
+       | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->
@@ -10823,10 +11064,11 @@ let main () =
             | Config ->
                 if state.config_pane = Config_prompts then handle_prompt_edit ()
                 else handle_runtime_config_edit ()
+            | Tools -> handle_skill_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()

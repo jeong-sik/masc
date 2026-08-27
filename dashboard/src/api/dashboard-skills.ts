@@ -5,7 +5,7 @@
 // parser-derived surface of each effective Skill.
 
 import { Either, ParseResult, Schema } from 'effect'
-import { get, type GetOptions } from './core'
+import { get, post, type GetOptions } from './core'
 
 export interface SkillIdentity {
   source_id: string
@@ -47,9 +47,87 @@ export interface SkillReference {
   content_revision: string
 }
 
+export interface SkillUsage {
+  keeper: string
+  invocations: number
+  deliveries: number
+  actions: number
+  last_used_at: string
+}
+
+export interface SkillFlowDependency {
+  node_id: string
+  kind: 'data' | 'order' | 'data_and_order'
+}
+
+export interface SkillFlowNode {
+  id: string
+  tool_name: string
+  dependencies: readonly SkillFlowDependency[]
+  batch_index: number
+  batch_size: number
+  execution_mode: string
+  statically_read_only: boolean | null
+}
+
+export interface SkillFlowBatch {
+  index: number
+  execution_mode: string
+  node_ids: readonly string[]
+}
+
+export interface SkillFlow {
+  nodes: readonly SkillFlowNode[]
+  batches: readonly SkillFlowBatch[]
+}
+
+export interface SkillProfile {
+  reference: SkillReference
+  kind: string
+  activation_tool: string
+  execution: string
+  capabilities: {
+    as_skill: boolean
+    as_tool: boolean
+    batch: boolean
+    parallel: boolean
+    async: boolean
+    tool_scope: string
+  }
+  context: {
+    body_bytes: number
+    eager_body_bytes: number
+    discovery_bytes: number
+    tool_schema_bytes: number | null
+  }
+  plan: {
+    node_count: number
+    batch_count: number
+    parallel_batch_count: number
+    max_parallelism: number
+    statically_read_only: boolean | null
+  }
+  declaration: { start_line: number; end_line: number } | null
+  flow: SkillFlow | null
+}
+
+export type SkillRunResponse =
+  | { status: 'never_observed'; reference: SkillReference; scan_limit: number }
+  | {
+      status: 'observed'
+      reference: SkillReference
+      scan_limit: number
+      run: Record<string, unknown>
+      nodes: readonly Record<string, unknown>[]
+    }
+
+export interface WritableSkillSource { source_id: string }
+
 interface SkillSurfaceBase {
   reference: SkillReference
   diagnostics?: readonly string[]
+  profile?: SkillProfile | null
+  usage?: readonly SkillUsage[]
 }
 
 export type SkillSurface =
@@ -67,6 +145,10 @@ export type SkillsResponse =
       state: 'ready'
       snapshot: SkillSnapshot
       surfaces: readonly SkillSurface[]
+      usage_coverage?: {
+        ledgers_loaded: number
+        unavailable: readonly string[]
+      }
     }
   | { schema: string; state: 'not_registered' | 'uninitialized' }
   | {
@@ -105,6 +187,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 const PositiveSafeIntegerSchema = Schema.Int.pipe(
   Schema.between(1, Number.MAX_SAFE_INTEGER),
 )
+const NonNegativeSafeIntegerSchema = Schema.Int.pipe(
+  Schema.between(0, Number.MAX_SAFE_INTEGER),
+)
 const OptionalDiagnosticsSchema = Schema.optional(Schema.Array(Schema.String))
 
 const SkillIdentitySchema = Schema.Struct({
@@ -118,11 +203,77 @@ const SkillReferenceSchema = Schema.Struct({
   content_revision: Schema.NonEmptyString,
 })
 
+const SkillUsageSchema = Schema.Struct({
+  keeper: Schema.NonEmptyString,
+  invocations: NonNegativeSafeIntegerSchema,
+  deliveries: NonNegativeSafeIntegerSchema,
+  actions: NonNegativeSafeIntegerSchema,
+  last_used_at: Schema.String,
+})
+
+const SkillFlowSchema = Schema.Struct({
+  nodes: Schema.Array(Schema.Struct({
+    id: Schema.NonEmptyString,
+    tool_name: Schema.NonEmptyString,
+    dependencies: Schema.Array(Schema.Struct({
+      node_id: Schema.NonEmptyString,
+      kind: Schema.Literal('data', 'order', 'data_and_order'),
+    })),
+    batch_index: NonNegativeSafeIntegerSchema,
+    batch_size: PositiveSafeIntegerSchema,
+    execution_mode: Schema.NonEmptyString,
+    statically_read_only: Schema.NullOr(Schema.Boolean),
+  })),
+  batches: Schema.Array(Schema.Struct({
+    index: NonNegativeSafeIntegerSchema,
+    execution_mode: Schema.NonEmptyString,
+    node_ids: Schema.Array(Schema.NonEmptyString),
+  })),
+})
+
+const SkillProfileSchema = Schema.Struct({
+  reference: SkillReferenceSchema,
+  kind: Schema.NonEmptyString,
+  activation_tool: Schema.NonEmptyString,
+  execution: Schema.NonEmptyString,
+  capabilities: Schema.Struct({
+    as_skill: Schema.Boolean,
+    as_tool: Schema.Boolean,
+    batch: Schema.Boolean,
+    parallel: Schema.Boolean,
+    async: Schema.Boolean,
+    tool_scope: Schema.NonEmptyString,
+  }),
+  context: Schema.Struct({
+    body_bytes: NonNegativeSafeIntegerSchema,
+    eager_body_bytes: NonNegativeSafeIntegerSchema,
+    discovery_bytes: NonNegativeSafeIntegerSchema,
+    tool_schema_bytes: Schema.NullOr(NonNegativeSafeIntegerSchema),
+  }),
+  plan: Schema.Struct({
+    node_count: NonNegativeSafeIntegerSchema,
+    batch_count: NonNegativeSafeIntegerSchema,
+    parallel_batch_count: NonNegativeSafeIntegerSchema,
+    max_parallelism: NonNegativeSafeIntegerSchema,
+    statically_read_only: Schema.NullOr(Schema.Boolean),
+  }),
+  declaration: Schema.NullOr(Schema.Struct({
+    start_line: PositiveSafeIntegerSchema,
+    end_line: PositiveSafeIntegerSchema,
+  })),
+  flow: Schema.NullOr(SkillFlowSchema),
+})
+
+const OptionalProfileSchema = Schema.optional(Schema.NullOr(SkillProfileSchema))
+const OptionalUsageSchema = Schema.optional(Schema.Array(SkillUsageSchema))
+
 const SkillSurfaceSchema = Schema.Union(
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('instruction'),
     diagnostics: OptionalDiagnosticsSchema,
+    profile: OptionalProfileSchema,
+    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
@@ -130,12 +281,16 @@ const SkillSurfaceSchema = Schema.Union(
     tool_name: Schema.NonEmptyString,
     execution: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
+    profile: OptionalProfileSchema,
+    usage: OptionalUsageSchema,
   }),
   Schema.Struct({
     reference: SkillReferenceSchema,
     kind: Schema.Literal('unavailable'),
     error: Schema.NonEmptyString,
     diagnostics: OptionalDiagnosticsSchema,
+    profile: OptionalProfileSchema,
+    usage: OptionalUsageSchema,
   }),
 )
 
@@ -178,6 +333,10 @@ const ReadySkillsResponseSchema = Schema.Struct({
   state: Schema.Literal('ready'),
   snapshot: SkillSnapshotSchema,
   surfaces: Schema.Array(SkillSurfaceSchema),
+  usage_coverage: Schema.optional(Schema.Struct({
+    ledgers_loaded: NonNegativeSafeIntegerSchema,
+    unavailable: Schema.Array(Schema.String),
+  })),
 })
 
 const UnreadySkillsResponseSchema = Schema.Union(
@@ -290,4 +449,23 @@ export function decodeSkillsResponse(raw: unknown): SkillsResponse {
 export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse> {
   const raw = await get<unknown>('/api/v1/skills', opts)
   return decodeSkillsResponse(raw)
+}
+
+export async function fetchSkillRun(reference: SkillReference): Promise<SkillRunResponse> {
+  return post('/api/v1/skills/runs', { reference })
+}
+
+export async function fetchWritableSkillSources(): Promise<readonly WritableSkillSource[]> {
+  const response = await get<{ status: string; sources: readonly WritableSkillSource[] }>(
+    '/api/v1/skills/editor/sources',
+  )
+  return response.sources
+}
+
+export async function createSkill(input: {
+  source_id: string
+  package_id: string
+  source_text: string
+}): Promise<Record<string, unknown>> {
+  return post('/api/v1/skills/editor/create', input)
 }

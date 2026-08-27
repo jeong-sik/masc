@@ -148,6 +148,29 @@ instruction/composition/unavailable과 typed projection diagnostics를 표시한
 별도 session activation ledger의 exact activation/delivery/action 기록에서 읽는다. 이름,
 tool prefix, 최근 로그 행 수로 사용 횟수를 재구성하지 않는다.
 
+같은 projection은 각 Skill의 실행 유도 방식, 실제 plan schedule의 node/batch/최대 병렬
+폭, async 여부, 정적 read-only 판정, 본문/discovery/tool-schema 바이트를 `profile`로
+내보낸다. `eager_body_bytes=0`은 본문 전체가 매 턴 prompt에 실리지 않았다는 계약이다.
+Keeper별 effective tool surface에는 전체 schema 바이트와 그중 Skill 때문에 추가된
+바이트를 따로 내보내므로, 점진 공개의 이득과 도구 표면 비용을 함께 확인할 수 있다.
+
+### 2d. TUI 편집 — Tools › Skills
+
+Tools 화면에서 `J/K`로 published Skill을 고르고 `e`를 누르면 `$EDITOR`에 원문을
+넘긴다. 파일 경로는 클라이언트에 노출하지 않는다. TUI는 exact reference로
+`/api/v1/skills/editor/read` → `/preview` → `/save`를 호출하고 서버가 다음을 순서대로
+강제한다.
+
+1. CanAdmin 인증과 source의 `read-write` 선언
+2. published content revision과 현재 디스크 bytes의 CAS 일치
+3. Agent Skills 문서 및 composition plan 검증
+4. ownership-root 아래 durable atomic write
+5. 전체 workspace snapshot 재발행 및 candidate revision readback
+
+외부 편집이 먼저 들어갔으면 `revision_conflict`로 저장하지 않는다. write 뒤 재발행만
+실패한 드문 경우는 `saved_but_unpublished`로 분리해 파일이 바뀐 사실을 숨기지 않는다.
+현재 TUI 편집은 기존 published Skill만 대상으로 하며 생성·삭제는 별도 기능이다.
+
 ## 3. 실행과 관측
 
 ```mermaid

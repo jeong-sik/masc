@@ -1519,6 +1519,48 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
       ; "skill_snapshot_revision", `String (String.make 64 'c')
       ; "instruction_skills", `List [ exact_reference "ocaml-coding" 'a' ]
       ; "composition_skills", `List [ exact_reference "mission-snapshot" 'b' ]
+      ; ( "skill_profiles"
+        , `List
+            [ `Assoc
+                [ "reference", exact_reference "mission-snapshot" 'b'
+                ; "kind", `String "composition"
+                ; "execution", `String "async"
+                ; ( "context"
+                  , `Assoc
+                      [ "body_bytes", `Int 1242
+                      ; "discovery_bytes", `Int 369
+                      ] )
+                ; ( "plan"
+                  , `Assoc
+                      [ "node_count", `Int 4
+                      ; "batch_count", `Int 2
+                      ; "max_parallelism", `Int 3
+                      ] )
+                ; ( "flow"
+                  , `Assoc
+                      [ ( "nodes"
+                        , `List
+                            [ `Assoc
+                                [ "id", `String "clock"
+                                ; "tool_name", `String "keeper_time_now"
+                                ; "dependencies", `List []
+                                ; "batch_index", `Int 0
+                                ; "batch_size", `Int 1
+                                ; "execution_mode", `String "concurrent"
+                                ; "statically_read_only", `Bool true
+                                ] ] )
+                      ; ( "batches"
+                        , `List
+                            [ `Assoc
+                                [ "index", `Int 0
+                                ; "execution_mode", `String "concurrent"
+                                ; "node_ids", `List [ `String "clock" ]
+                                ] ] )
+                      ] )
+                ] ] )
+      ; "tool_surface_bytes", `Int 79984
+      ; "skill_tool_surface_bytes", `Int 2360
+      ; "skill_body_bytes", `Int 4981
       ; "skills_left_out", `List []
       ; "skill_resource_read_max_bytes", `Int 65536
       ; "count", `Int 1
@@ -1546,6 +1588,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
                  ets_native_posture = Some native;
                  ets_skill_resource_read_max_bytes = Some resource_bound;
                  ets_instruction_skills;
+                 ets_skill_profiles = [ profile ];
+                 ets_tool_surface_bytes;
+                 ets_skill_tool_surface_bytes;
+                 ets_skill_body_bytes;
                  ets_tools = [ tool ];
                  ets_tool_surface_sha256 = Some digest;
                  _
@@ -1560,6 +1606,22 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         (Skill_reference.list_to_yojson ets_instruction_skills
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
+      Alcotest.(check string) "profile name" "mission-snapshot" profile.esp_name;
+      Alcotest.(check string)
+        "profile keeps the exact editable reference"
+        (Yojson.Safe.to_string (exact_reference "mission-snapshot" 'b'))
+        (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string);
+      Alcotest.(check string) "profile execution" "async" profile.esp_execution;
+      Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
+      Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;
+      (match profile.esp_flow with
+       | Some { sf_nodes = [ node ]; sf_batches = [ batch ] } ->
+         Alcotest.(check string) "flow node tool" "keeper_time_now" node.sfn_tool_name;
+         Alcotest.(check string) "flow batch mode" "concurrent" batch.sfb_execution_mode
+       | _ -> Alcotest.fail "expected one decoded flow node and batch");
+      Alcotest.(check int) "whole surface bytes" 79984 ets_tool_surface_bytes;
+      Alcotest.(check int) "Skill surface bytes" 2360 ets_skill_tool_surface_bytes;
+      Alcotest.(check int) "Skill body bytes" 4981 ets_skill_body_bytes;
       Alcotest.(check (option string)) "SKILL.md source"
         (Some "skills/mission-snapshot/SKILL.md") tool.et_skill_source;
       Alcotest.(check int) "digest length" 64 (String.length digest)
@@ -1640,6 +1702,10 @@ let test_decode_effective_keeper_surface_keeps_tool_suppression () =
             (Tui_decode.Effective_surface_available
                { ets_tool_delivery =
                    Tui_decode.Effective_tools_suppressed_runtime_unsupported;
+                 ets_skill_profiles = [];
+                 ets_tool_surface_bytes = 0;
+                 ets_skill_tool_surface_bytes = 0;
+                 ets_skill_body_bytes = 0;
                  ets_tools = [];
                  _
                });

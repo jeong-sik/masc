@@ -315,6 +315,7 @@ let slack_message ?(user_name = Some "operator") ~ts () =
     ; ts
     ; mentions_bot = true
     ; bot_id = None
+    ; files = []
     }
 ;;
 

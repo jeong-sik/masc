@@ -67,6 +67,9 @@ let continuation_binding_of_source source =
   | Keeper_event_queue.Fusion_completed completion -> Routed completion.channel
   | Keeper_event_queue.Connector_attention attention -> Routed attention.channel
   | Keeper_event_queue.Hitl_resolved resolution -> Routed resolution.channel
+  (* The conversation the question was asked in, so a paused keeper's answer
+     goes back where the human is waiting. *)
+  | Keeper_event_queue.Ask_answered answered -> Routed answered.channel
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap

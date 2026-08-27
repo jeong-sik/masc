@@ -422,6 +422,8 @@ let source_terminal_receipt_of_stimulus source =
      Keeper. A delegation answer belongs to the Keeper that asked; moving it
      would deliver an answer to someone who never asked. *)
   | Keeper_event_queue.Delegate_completed _
+  (* Same reason: an answer belongs to the Keeper that asked the question. *)
+  | Keeper_event_queue.Ask_answered _
   (* Same reason: an async composition's result belongs to the Keeper that
      submitted it. *)
   | Keeper_event_queue.Composition_completed _ ->

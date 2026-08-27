@@ -288,7 +288,10 @@ let for_surface = function
       @ listing_meta
   | Tools ->
       [ b Navigate "j/k" "scroll"
+      ; b Navigate "J/K" "Skill" ~help:"select a published Skill"
       ; b Navigate "[/]" "Keeper" ~help:"change the effective Keeper surface"
+      ; b Act "e" "edit Skill"
+          ~help:"open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish"
       ; b Act "Esc" "overview"
       ]
       @ listing_meta

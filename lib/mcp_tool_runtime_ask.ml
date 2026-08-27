@@ -291,3 +291,49 @@ let handle_ask_status ~tool_name ~start_time (ctx : context) : Tool_result.resul
               ("returned", `Int (List.length selected));
               ("asks", `List (List.map row_json selected));
             ])))
+
+(* masc_ask_withdraw: taking back a question that stopped mattering.
+
+   [Keeper_ask_store.withdraw] has been here since the store was written, and
+   nothing outside its own tests ever called it. The tool description says a
+   question stays open "until a human answers it or the asking Keeper
+   withdraws it" — this is the half that made the second clause true.
+
+   A question left standing costs an operator the attention of reading it and
+   deciding, for a choice that no longer changes anything. *)
+
+let handle_ask_withdraw ~tool_name ~start_time (ctx : context) : Tool_result.result option =
+  let base_path = ctx.config.base_path in
+  let keeper_name = asking_keeper_name ctx.agent_name in
+  let reject detail =
+    Log.Keeper.info "keeper_ask_withdraw: keeper=%s refused=%s" keeper_name detail;
+    Some
+      (Tool_result.error ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time
+         detail)
+  in
+  match (string_field "ask_id" ctx.arguments, string_field "reason" ctx.arguments) with
+  | Error detail, _ | _, Error detail -> reject detail
+  | Ok ask_id, Ok reason -> (
+      (* Blank is not a reason. An operator who watched the question appear and
+         then vanish has nothing else to read. *)
+      if String.trim reason = "" then reject "reason must say why it no longer needs answering"
+      else
+        match
+          Keeper_ask_store.withdraw ~base_path ~keeper_name ~ask_id ~reason
+            ~now:(Time_compat.now ())
+        with
+        | Error failure ->
+            reject (Keeper_ask_store.withdraw_failure_to_string failure)
+        | Ok () ->
+            Log.Keeper.info "keeper_ask_withdraw: keeper=%s ask_id=%s" keeper_name ask_id;
+            Some
+              (Tool_result.ok ~tool_name ~start_time
+                 (Yojson.Safe.to_string
+                    (`Assoc
+                      [
+                        ("withdrawn", `Bool true);
+                        ("ask_id", `String ask_id);
+                        ( "open_remaining",
+                          `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
+                        );
+                      ]))))

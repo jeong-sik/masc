@@ -28,6 +28,11 @@ type pending_board_event_kind =
           (the parent post for a comment vote). *)
   | Fusion_completed
   | Delegate_completed
+  | Ask_answered_row
+      (** A human answered a question this Keeper asked. Like
+          {!Composition_completed} the row carries the answer itself: the
+          asker has nowhere else to read it mid-cycle, and a wake with no
+          content is a wake it cannot act on. *)
   | Composition_completed
       (** A turn this Keeper asked another Keeper to run has ended. Like
           {!Fusion_completed} the row carries the answer itself, because the
@@ -216,6 +221,7 @@ type event_queue_trigger =
   | Bootstrap_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
@@ -230,6 +236,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
+  | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
@@ -331,6 +338,17 @@ val pending_board_event_of_scheduled_wake :
 (** Build the actionable observation for a connector-recorded external
     attention item. Mention state and connector coordinates remain context
     fields; they do not grant instruction authority. *)
+val pending_board_event_of_ask_answer :
+  meta:Keeper_meta_contract.keeper_meta ->
+  ask:Keeper_ask.ask ->
+  answers:Keeper_ask.answer list ->
+  responder:Keeper_ask.responder ->
+  answered_at:float ->
+  pending_board_event
+(** The answer to a question this Keeper asked, as a row the turn can act on.
+    Choice ids are resolved to their labels, so the Keeper reads what the
+    human picked rather than an opaque identity. *)
+
 val pending_board_event_of_external_attention :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_external_attention.item ->

@@ -444,7 +444,10 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
   match ev with
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
-      ; bot_id } -> (
+      ; bot_id; files } -> (
+    (* Files posted with no message arrive with [text] empty; the files are
+       then the whole message. Both lanes compose the same body. *)
+    let text = Gw.text_with_files ~text ~files in
     match bot_id with
     | Some _ ->
       (* Bot/app author — skip to avoid connector loops (a bot replying to a
@@ -459,7 +462,8 @@ let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
       accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
         ~channel_id ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot
         ~is_app_mention:false)
-  | Gw.App_mention { channel_id; thread_ts; user_id; text; ts } ->
+  | Gw.App_mention { channel_id; thread_ts; user_id; text; ts; files } ->
+    let text = Gw.text_with_files ~text ~files in
     Slack_observability.record_gateway_event ~route:Slack_observability.Triggered
       Slack_observability.App_mention;
     accept_inbound ~resolved_binding ~dispatch_for_delivery ~base_dir ~team_id
@@ -730,7 +734,9 @@ let on_ambient ?resolved_keeper_name ?team_id ~base_dir (ev : Gw.slack_event) =
   | Gw.Message_create
       { channel_id; thread_ts; user_id; user_name; text; ts; mentions_bot
       ; bot_id = None
+      ; files
       } ->
+    let text = Gw.text_with_files ~text ~files in
     handle_ambient ?resolved_keeper_name ~base_dir ~team_id ~channel_id
       ~thread_ts ~user_id ~user_name ~text ~ts ~mentions_bot ()
   | Gw.Message_create { bot_id = Some _; _ } | Gw.App_mention _ ->

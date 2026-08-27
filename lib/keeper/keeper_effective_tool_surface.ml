@@ -27,6 +27,10 @@ type t =
   ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
   ; composition_skills : Skill_reference.t list
+  ; skill_profiles : Keeper_skill_observability.profile list
+  ; tool_surface_bytes : int
+  ; skill_tool_surface_bytes : int
+  ; skill_body_bytes : int
         (* Documents the catalog could not read, by the directory they were
            found in. They are here because this is the surface that answers
            "what can this Keeper call": a skill that was left out is absent
@@ -189,16 +193,50 @@ let project
         in
         [ { name = schema_tool.schema.name; origin = Instruction_skill }, schema_tool ]
     in
+    let composition_rows = composition_rows skill_catalog in
     let rows =
-      descriptor_rows descriptors
-      @ instruction_rows
-      @ composition_rows skill_catalog
+      descriptor_rows descriptors @ instruction_rows @ composition_rows
     in
     let instruction_skills, composition_skills, tools, schema_tools =
       match tool_delivery with
       | Tools_delivered ->
         instruction_skills, composition_skills, List.map fst rows, List.map snd rows
       | Tools_suppressed_runtime_unsupported -> [], [], [], []
+    in
+    let skill_profiles =
+      match tool_delivery with
+      | Tools_delivered -> Keeper_skill_observability.of_catalog skill_catalog
+      | Tools_suppressed_runtime_unsupported -> []
+    in
+    let tool_surface_bytes =
+      List.fold_left
+        (fun total tool ->
+           total + Keeper_skill_observability.tool_component_bytes tool)
+        0
+        schema_tools
+    in
+    let skill_tool_surface_bytes =
+      let is_skill_row = function
+        | { origin = (Instruction_skill | Composition_skill _ | Composition_control); _ }, _ ->
+          true
+        | { origin = (Descriptor _ | Composition_plan); _ }, _ -> false
+      in
+      match tool_delivery with
+      | Tools_suppressed_runtime_unsupported -> 0
+      | Tools_delivered ->
+        instruction_rows @ composition_rows
+        |> List.filter is_skill_row
+        |> List.fold_left
+             (fun total (_, tool) ->
+                total + Keeper_skill_observability.tool_component_bytes tool)
+             0
+    in
+    let skill_body_bytes =
+      List.fold_left
+        (fun total (profile : Keeper_skill_observability.profile) ->
+           total + profile.body_bytes)
+        0
+        skill_profiles
     in
     let tool_surface_sha256 =
       Option.map
@@ -221,6 +259,13 @@ let project
       ; skill_resource_read_max_bytes
       ; instruction_skills
       ; composition_skills
+      ; skill_profiles
+      ; tool_surface_bytes
+      ; skill_tool_surface_bytes
+      ; skill_body_bytes
+        (* Both sides of the train meet here: main (#31092) added the four
+           profile fields above, and this branch widens skills_left_out with
+           the turn projection's typed unavailable rows. *)
       ; skills_left_out =
           skills_left_out
           @ List.map
@@ -453,6 +498,12 @@ let to_yojson = function
           | None -> `Null )
       ; "instruction_skills", reference_list surface.instruction_skills
       ; "composition_skills", reference_list surface.composition_skills
+      ; ( "skill_profiles"
+        , `List
+            (List.map Keeper_skill_observability.to_yojson surface.skill_profiles) )
+      ; "tool_surface_bytes", `Int surface.tool_surface_bytes
+      ; "skill_tool_surface_bytes", `Int surface.skill_tool_surface_bytes
+      ; "skill_body_bytes", `Int surface.skill_body_bytes
       ; "skills_left_out", string_list surface.skills_left_out
       ; "count", `Int (List.length surface.tools)
       ; ( "tools"

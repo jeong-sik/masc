@@ -29,6 +29,7 @@ type wake_producer =
   | Fusion_sink
   | Connector_attention_hook
   | Hitl_resolution_hook
+  | Keeper_ask_answer
   | External_attention_store
   | Schedule_store
   | Schedule_runner

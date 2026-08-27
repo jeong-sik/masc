@@ -168,6 +168,7 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
   | Keeper_event_queue.Workspace_message _
@@ -257,6 +258,9 @@ let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
          | Keeper_event_queue.Fusion_completed _
          | Keeper_event_queue.Schedule_due _
          | Keeper_event_queue.Connector_attention _
+         (* A held HITL approval is what this looks for; an answered question
+            is not one, and resumes through its own wake. *)
+         | Keeper_event_queue.Ask_answered _
          | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _

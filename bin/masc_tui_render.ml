@@ -31,6 +31,10 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 
+let json_assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
 (* Every surface lays out against a viewport one row shorter than the
    terminal: the top row belongs to the surface strip, prepended when a frame
    is finished. Shadowing the probe here (and, via open order, in masc_tui.ml)
@@ -7411,6 +7415,10 @@ let render_tools (state : state) =
                    ets_instruction_skills;
                    ets_skills_left_out;
                    ets_composition_skills;
+                   ets_skill_profiles;
+                   ets_tool_surface_bytes;
+                   ets_skill_tool_surface_bytes;
+                   ets_skill_body_bytes;
                    ets_tools;
                    ets_tool_surface_sha256;
                  });
@@ -7462,6 +7470,121 @@ let render_tools (state : state) =
                  (Terminal_text.single_line source))
             ets_tools
         in
+        let skill_profile_lines =
+          List.mapi
+            (fun index (profile : Masc.Tui_decode.effective_skill_profile) ->
+               let execution =
+                 if String.equal profile.esp_kind "instruction"
+                 then "on-demand"
+                 else profile.esp_execution
+               in
+               (if index = state.tools_skill_cursor then Theme.selection else Ansi.dim),
+               Printf.sprintf
+                 " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
+                 (if index = state.tools_skill_cursor then "▸" else " ")
+                 (Terminal_text.single_line profile.esp_name)
+                 (Terminal_text.single_line execution)
+                 profile.esp_node_count
+                 profile.esp_batch_count
+                 profile.esp_max_parallelism
+                 profile.esp_discovery_bytes
+                 profile.esp_body_bytes)
+            ets_skill_profiles
+        in
+        let selected_skill_flow_lines =
+          match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
+          | None -> []
+          | Some { Masc.Tui_decode.esp_flow = None; _ } ->
+            [ Ansi.dim, "     Flow: instruction body loads on demand; the model orchestrates tools" ]
+          | Some { Masc.Tui_decode.esp_flow = Some flow; _ } ->
+            let batch_line =
+              flow.sf_batches
+              |> List.map (fun batch ->
+                Printf.sprintf
+                  "[%d %s: %s]"
+                  batch.sfb_index
+                  batch.sfb_execution_mode
+                  (String.concat " | " batch.sfb_node_ids))
+              |> String.concat "  →  "
+            in
+            let node_lines =
+              flow.sf_nodes
+              |> List.map (fun node ->
+                let dependencies =
+                  match node.sfn_dependencies with
+                  | [] -> "root"
+                  | values ->
+                    values
+                    |> List.map (fun dependency ->
+                      dependency.sfd_node_id ^ ":" ^ dependency.sfd_kind)
+                    |> String.concat ", "
+                in
+                Ansi.dim,
+                Printf.sprintf
+                  "       %s ─ %-30s batch=%d · depends %s"
+                  (Terminal_text.single_line node.sfn_id)
+                  (Terminal_text.single_line node.sfn_tool_name)
+                  node.sfn_batch_index
+                  (Terminal_text.single_line dependencies))
+            in
+            (Ansi.bold, "     Flow  " ^ batch_line) :: node_lines
+        in
+        let selected_skill_run_lines =
+          match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
+          | None -> []
+          | Some profile when String.equal profile.esp_kind "instruction" ->
+            [ Ansi.dim,
+              "     Result: model-owned Keeper turn · inspect Skill Activations / Keeper calls"
+            ]
+          | Some profile ->
+            let key =
+              Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string
+            in
+            (match state.tools_skill_run with
+             | Some (observed_key, json) when String.equal key observed_key ->
+               (match json_assoc_member_opt "status" json with
+                | Some (`String "never_observed") ->
+                  [ Theme.warn (), "     Latest result: no exact-revision run in the recent log window" ]
+                | Some (`String "observed") ->
+                  (match json_assoc_member_opt "run" json with
+                   | Some run ->
+                     let string_field name fallback =
+                       match json_assoc_member_opt name run with
+                       | Some (`String value) -> value
+                       | _ -> fallback
+                     in
+                     let duration =
+                       match json_assoc_member_opt "duration_ms" run with
+                       | Some (`Float value) -> Printf.sprintf "%.0fms" value
+                       | Some (`Int value) -> Printf.sprintf "%dms" value
+                       | _ -> "?ms"
+                     in
+                     let success =
+                       match json_assoc_member_opt "success" run with
+                       | Some (`Bool true) -> "✓ completed"
+                       | Some (`Bool false) -> "✗ failed"
+                       | _ -> "unknown"
+                     in
+                     let output =
+                       match json_assoc_member_opt "output" run with
+                       | Some (`String value) -> value
+                       | Some value -> Yojson.Safe.to_string value
+                       | None -> "no output"
+                     in
+                     [ Ansi.bold,
+                       Printf.sprintf
+                         "     Latest result: %s · %s · keeper=%s · run=%s"
+                         success
+                         duration
+                         (Terminal_text.single_line (string_field "keeper" "?"))
+                         (Terminal_text.single_line (string_field "composition_run_id" "?"))
+                     ; Ansi.dim, "       " ^ Terminal_text.single_line output
+                     ]
+                   | None -> [ Theme.bad (), "     Latest result: malformed run response" ])
+                | _ -> [ Theme.bad (), "     Latest result: malformed response" ])
+             | Some _ | None ->
+               [ Ansi.dim, "     Latest result: Enter to load this exact revision" ])
+        in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
             (Terminal_text.single_line ets_keeper_name)
@@ -7481,7 +7604,16 @@ let render_tools (state : state) =
           ^ Terminal_text.single_line ets_skill_snapshot_revision;
           Ansi.dim,
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
+          Ansi.bold,
+          Printf.sprintf
+            "   Skill footprint: %dB/%dB tool context · %dB catalog bodies · eager body 0B"
+            ets_skill_tool_surface_bytes ets_tool_surface_bytes ets_skill_body_bytes;
+          Ansi.bold,
+          "   Skills — J/K select · Enter result · e edit · c new instruction · C new composition";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+        @ skill_profile_lines
+        @ selected_skill_flow_lines
+        @ selected_skill_run_lines
         (* Said on this surface because this is the one that answers "what can
            this Keeper call". A document the catalog could not read is absent
            from that answer, and absence with nothing beside it reads as a

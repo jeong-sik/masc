@@ -23,6 +23,20 @@ type envelope_kind =
   | Reconnect_env
   | Ignored_env of string
 
+type file_access =
+  | Visible
+  | Check_file_info
+  | Unknown_access of string
+
+type inbound_file =
+  { if_id : string
+  ; if_name : string option
+  ; if_mimetype : string option
+  ; if_size : int option
+  ; if_permalink : string option
+  ; if_access : file_access option
+  }
+
 type slack_event =
   | Message_create of
       { channel_id : string
@@ -33,6 +47,7 @@ type slack_event =
       ; ts : string
       ; mentions_bot : bool
       ; bot_id : string option
+      ; files : inbound_file list
       }
   | App_mention of
       { channel_id : string
@@ -40,6 +55,7 @@ type slack_event =
       ; user_id : string
       ; text : string
       ; ts : string
+      ; files : inbound_file list
       }
   | Reaction_added of
       { channel_id : string
@@ -273,6 +289,77 @@ let object_field key json =
   | None -> Error (key ^ " missing")
 ;;
 
+let file_access_of_string = function
+  | "visible" -> Visible
+  | "check_file_info" -> Check_file_info
+  | other -> Unknown_access other
+;;
+
+(* Slack guarantees only [id] on a file object: [name] may be null for unnamed
+   files, and [url_private] needs the files:read scope, which this app does not
+   hold. So a file is described with whatever came, never dropped for missing
+   fields the way a Discord attachment is — here missing is the normal case. *)
+let decode_inbound_files payload =
+  match assoc "files" payload with
+  | Some (`List items) ->
+    List.filter_map
+      (fun item ->
+        match string_field_opt "id" item with
+        | None -> None
+        | Some if_id ->
+          Some
+            { if_id
+            ; if_name =
+                (match string_field_opt "name" item with
+                 | Some "" | None -> None
+                 | Some n -> Some n)
+            ; if_mimetype = string_field_opt "mimetype" item
+            ; if_size =
+                (match assoc "size" item with
+                 | Some (`Int n) -> Some n
+                 | Some _ | None -> None)
+            ; if_permalink = string_field_opt "permalink" item
+            ; if_access =
+                Option.map file_access_of_string
+                  (string_field_opt "file_access" item)
+            })
+      items
+  | Some _ | None -> []
+;;
+
+let file_lines files =
+  List.map
+    (fun f ->
+      let name =
+        match f.if_name with
+        | Some n -> n
+        | None -> "(unnamed file " ^ f.if_id ^ ")"
+      in
+      let detail part = match part with None -> "" | Some s -> " \xc2\xb7 " ^ s in
+      let size =
+        detail (Option.map (fun n -> Printf.sprintf "%d bytes" n) f.if_size)
+      in
+      let mime = detail f.if_mimetype in
+      let where =
+        match f.if_access with
+        (* Slack Connect withholds metadata until the app asks for it; saying
+           so is more use to a reader than a blank. *)
+        | Some Check_file_info -> " \xc2\xb7 details withheld (Slack Connect)"
+        | Some Visible | Some (Unknown_access _) | None ->
+          (match f.if_permalink with None -> "" | Some url -> " " ^ url)
+      in
+      Printf.sprintf "[file] %s%s%s%s" name size mime where)
+    files
+;;
+
+let text_with_files ~text ~files =
+  match file_lines files with
+  | [] -> text
+  | lines ->
+    let body = String.trim text in
+    String.concat "\n" (if body = "" then lines else body :: lines)
+;;
+
 let text_mentions_bot ~bot_user_id text =
   match bot_user_id with
   | None -> false
@@ -298,6 +385,7 @@ let decode_event ~bot_user_id ~event_type ~payload =
     let thread_ts = string_field_opt "thread_ts" payload in
     let bot_id = string_field_opt "bot_id" payload in
     let user_name = string_field_opt "username" payload in
+    let files = decode_inbound_files payload in
     let mentions_bot = text_mentions_bot ~bot_user_id text in
     if String.equal channel_id "" || String.equal ts "" then
       Error "message event missing channel/ts"
@@ -312,6 +400,7 @@ let decode_event ~bot_user_id ~event_type ~payload =
            ; ts
            ; mentions_bot
            ; bot_id
+           ; files
            })
   | "app_mention" ->
     let channel_id = string_field "channel" payload in
@@ -321,7 +410,16 @@ let decode_event ~bot_user_id ~event_type ~payload =
     let thread_ts = string_field_opt "thread_ts" payload in
     if String.equal channel_id "" || String.equal ts "" then
       Error "app_mention event missing channel/ts"
-    else Ok (App_mention { channel_id; thread_ts; user_id; text; ts })
+    else
+      Ok
+        (App_mention
+           { channel_id
+           ; thread_ts
+           ; user_id
+           ; text
+           ; ts
+           ; files = decode_inbound_files payload
+           })
   | "reaction_added" ->
     let user_id = string_field "user" payload in
     let reaction = string_field "reaction" payload in

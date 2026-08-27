@@ -26,11 +26,11 @@ let run_editor editor path =
 (** [roundtrip ~restore ~reenter content] hands [content] to $EDITOR and
     returns [Some edited] when the editor exited 0, [None] when it did not
     (or no editor is configured) — in which case the settings are untouched. *)
-let roundtrip ~restore ~reenter (content : string) : string option =
+let roundtrip ~restore ~reenter ?(suffix = ".json") (content : string) : string option =
   match editor_command () with
   | None -> None
   | Some editor ->
-    let path = Filename.temp_file "masc-keeper-settings" ".json" in
+    let path = Filename.temp_file "masc-editor" suffix in
     let finally () = (try Sys.remove path with _ -> ()) in
     let outcome =
       try

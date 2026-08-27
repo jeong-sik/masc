@@ -57,6 +57,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Mcp_tool_runtime_ask.handle_ask ~tool_name:name ~start_time:start ctx
   | Some Tool_schemas_misc.Ask_status ->
       Mcp_tool_runtime_ask.handle_ask_status ~tool_name:name ~start_time:start ctx
+  | Some Tool_schemas_misc.Ask_withdraw ->
+      Mcp_tool_runtime_ask.handle_ask_withdraw ~tool_name:name ~start_time:start ctx
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->
@@ -76,7 +78,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
      and deciding visibility semantics for MCP exposure. *)
 
 let runtime_tool_policy = function
-  | Tool_schemas_misc.Start | Tool_schemas_misc.Broadcast | Tool_schemas_misc.Ask ->
+  | Tool_schemas_misc.Start
+  | Tool_schemas_misc.Broadcast
+  | Tool_schemas_misc.Ask
+  (* Taking a question back writes to the same durable log. *)
+  | Tool_schemas_misc.Ask_withdraw ->
     (* Recording a question writes; the operator surface reads it back. *)
     false, true
   | Tool_schemas_misc.Messages | Tool_schemas_misc.Ask_status ->

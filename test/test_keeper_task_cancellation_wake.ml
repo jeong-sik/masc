@@ -104,6 +104,7 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Schedule_due _
     | Event_queue.Connector_attention _
     | Event_queue.Hitl_resolved _
+    | Event_queue.Ask_answered _
     | Event_queue.Manual_compaction_requested
     | Event_queue.Completion_authority_rejected _
     | Event_queue.Workspace_message _

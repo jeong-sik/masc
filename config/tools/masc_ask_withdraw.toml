@@ -1,0 +1,31 @@
+name = "masc_ask_withdraw"
+description = """
+Take back a question you asked and no longer need answered.
+
+Use this the moment the answer stops mattering: the work moved on, you found \
+the answer yourself, the task was dropped. A question left standing costs an \
+operator the attention of reading it and deciding, for a choice that no \
+longer changes anything.
+
+Only you can withdraw your own question. Nothing withdraws one on your behalf \
+after some interval -- a question you asked stays open until you answer it \
+yourself this way or a human answers it.
+
+Withdrawing is final and it is not an answer. A question already answered \
+cannot be withdrawn: the operator already spent the attention, and the answer \
+stands whether or not you still want it. Read it with masc_ask_status."""
+additional_properties = false
+
+[[params]]
+name = "ask_id"
+type = "string"
+required = true
+description = "The question to take back, as returned by masc_ask."
+
+[[params]]
+name = "reason"
+type = "string"
+required = true
+description = """
+Why it no longer needs answering, in your own words. An operator who saw the \
+question appear and then vanish has no other way to know what happened to it."""

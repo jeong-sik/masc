@@ -578,6 +578,7 @@ let log_call
       ?disposition
       ?file_change_evidence
       ?composition_tool
+      ?skill_reference
       ?composition_run_id
       ?composition_node_id
       ?composition_execution
@@ -753,6 +754,11 @@ let log_call
         |> List.filter_map (fun (key, value) ->
           Option.map (fun value -> key, `String value) value)
       in
+      let skill_reference_field =
+        match skill_reference with
+        | Some reference -> [ "skill_reference", Skill_reference.to_yojson reference ]
+        | None -> []
+      in
       let composition_execution_field =
         match composition_execution with
         | Some value ->
@@ -869,6 +875,7 @@ let log_call
            @ typed_result_fields
            @ file_change_evidence_field
            @ composition_fields
+           @ skill_reference_field
            @ composition_execution_field
            @ composition_tool_kind_field
            @ trace_id_field

@@ -25,6 +25,11 @@ type pending_board_event_kind =
   | Board_vote_cast of Board_dispatch.board_vote_change
   | Fusion_completed
   | Delegate_completed
+  | Ask_answered_row
+      (** A human answered a question this Keeper asked. Like
+          {!Composition_completed} the row carries the answer itself: the
+          asker has nowhere else to read it mid-cycle, and a wake with no
+          content is a wake it cannot act on. *)
   | Composition_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
   | External_attention of Keeper_counterpart_observation.t
@@ -65,6 +70,9 @@ let is_board_activity_event (event : pending_board_event) =
      that renders the row, so leaving it out would wake the Keeper with an
      empty pending-events list. *)
   | Composition_completed
+  (* Same again: this block renders the row's title and preview, and the
+     answer is the whole point of the wake. *)
+  | Ask_answered_row
   | External_attention _ -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
@@ -81,6 +89,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed
   | Composition_completed
+  | Ask_answered_row
   | External_attention _
   | Completion_authority_rejected _
   | Task_cancelled _ -> false
@@ -96,6 +105,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Fusion_completed
   | Delegate_completed
   | Composition_completed
+  | Ask_answered_row
   | Schedule_due _
   | External_attention _
   | Task_cancelled _ -> false
@@ -109,6 +119,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Task_cancelled _ -> true
   | Delegate_completed
   | Composition_completed
+  | Ask_answered_row
   | Board_post_created
   | Board_comment_added
   | Board_reaction_changed _
@@ -174,6 +185,7 @@ type event_queue_trigger =
   | Bootstrap_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
+  | Ask_answered_stimulus
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
@@ -186,6 +198,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | Connector_attention_pending
+  | Ask_answered_pending
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
@@ -734,6 +747,91 @@ let pending_board_event_of_external_attention
   }
 ;;
 
+(* A human answered a question this Keeper asked. The row carries the answer
+   itself for the same reason [Composition_completed] does: the asker has
+   nowhere else to read it mid-cycle, and a wake with no content is a wake it
+   cannot act on. Choice ids are resolved to labels here — the id is the
+   durable identity, the label is what a reader understands. *)
+let ask_answer_line (ask : Keeper_ask.ask) (answer : Keeper_ask.answer) =
+  let question =
+    List.find_opt
+      (fun (q : Keeper_ask.question) ->
+        String.equal q.Keeper_ask.question_id answer.Keeper_ask.question_id)
+      ask.Keeper_ask.questions
+  in
+  let header =
+    match question with
+    | Some q -> q.Keeper_ask.header
+    | None -> answer.Keeper_ask.question_id
+  in
+  let said =
+    match answer.Keeper_ask.response with
+    | Keeper_ask.Wrote text -> text
+    | Keeper_ask.Skipped -> "(skipped)"
+    | Keeper_ask.Chose { choice_ids } ->
+      let label choice_id =
+        match question with
+        | None -> choice_id
+        | Some q ->
+          (match
+             List.find_opt
+               (fun (c : Keeper_ask.choice) ->
+                 String.equal c.Keeper_ask.choice_id choice_id)
+               q.Keeper_ask.choices
+           with
+           | Some c -> c.Keeper_ask.label
+           (* A choice the question no longer offers. Naming the id beats
+              dropping the answer: the Keeper can still see one was made. *)
+           | None -> choice_id)
+      in
+      String.concat ", " (List.map label choice_ids)
+  in
+  header ^ ": " ^ said
+;;
+
+let pending_board_event_of_ask_answer
+      ~(meta : keeper_meta)
+      ~(ask : Keeper_ask.ask)
+      ~(answers : Keeper_ask.answer list)
+      ~(responder : Keeper_ask.responder)
+      ~(answered_at : float)
+  : pending_board_event
+  =
+  let who =
+    match responder.Keeper_ask.display_name with
+    | Some name -> name
+    | None ->
+      (match responder.Keeper_ask.actor_id with
+       | Some id -> id
+       | None -> Surface_ref.lane_label responder.Keeper_ask.surface)
+  in
+  let body = String.concat " · " (List.map (ask_answer_line ask) answers) in
+  { event_kind = Ask_answered_row
+  ; post_id = "keeper-ask:" ^ ask.Keeper_ask.ask_id
+  ; author = who
+  ; title =
+      Printf.sprintf
+        "Answer to your question (%s, from %s)"
+        ask.Keeper_ask.ask_id
+        (Surface_ref.lane_label responder.Keeper_ask.surface)
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len body
+  ; hearth = None
+    (* Not a Board post: masc wrote this row, nobody posted it. Marked
+       [Human_post] the Keeper read it as a post it could fetch and spent a
+       masc_board_post_get on "Invalid post_id: keeper-ask" — the same waste
+       the reply-content fields above were added to stop. The four sibling
+       rows with no Board post behind them all say [System_post]. *)
+  ; post_kind = Board.System_post
+  ; updated_at = answered_at
+  ; explicit_mention = true
+  ; matched_targets = [ meta.name ]
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some who
+  ; latest_external_preview = Some (short_preview ~max_len:80 body)
+  }
+;;
+
 let pending_board_event_of_completion_authority_rejection
       ~(arrived_at : float)
       (rejection : Keeper_event_queue.completion_authority_rejection)
@@ -866,6 +964,11 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
+  (* Same as [Hitl_resolved]: the wake and its turn reason are what steer the
+     keeper back to the question. The answer itself stays in
+     [Keeper_ask_store], which the keeper reads with masc_ask_status, so
+     nothing is injected here and the text lives in one place. *)
+  | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
@@ -1400,6 +1503,7 @@ let keeper_cycle_decision
       | Scope_message_pending
       | Bootstrap_stimulus_pending
       | Connector_attention_pending
+      | Ask_answered_pending
       | Hitl_resolved_pending
       | Completion_authority_rejection_pending
       | Task_cancellation_pending
@@ -1435,6 +1539,7 @@ let keeper_cycle_decision
                  | Scope_message_pending
                  | Bootstrap_stimulus_pending
                  | Connector_attention_pending
+                 | Ask_answered_pending
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
                  | Manual_compaction_pending

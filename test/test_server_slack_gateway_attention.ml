@@ -152,6 +152,7 @@ let test_resolve_event_identity_maps_names_and_mentions () =
       ; ts = "1786524720.554309"
       ; mentions_bot = true
       ; bot_id = None
+      ; files = []
       }
   in
   (match G.For_testing.resolve_event_identity ~user_directory:directory event with

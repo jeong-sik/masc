@@ -20,6 +20,13 @@ tool = "keeper_time_now"
 [compositions.nodes.input]
 kind = "literal"
 value = {}
+
+[[compositions.nodes]]
+id = "board"
+tool = "masc_board_stats"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
 ```
 |}
     name name execution
@@ -212,6 +219,28 @@ let test_projection_names_equal_turn_surface_authority () =
          surface.tools);
     check bool "official client digest exists" true
       (Option.is_some surface.tool_surface_sha256);
+    check bool "whole tool surface bytes are measured" true
+      (surface.tool_surface_bytes > 0);
+    check bool "Skill tool bytes are a strict subset" true
+      (surface.skill_tool_surface_bytes > 0
+       && surface.skill_tool_surface_bytes < surface.tool_surface_bytes);
+    check bool "Skill bodies are measured but never eager" true
+      (surface.skill_body_bytes > 0);
+    (match surface.skill_profiles with
+     | [ instruction; composition ] ->
+       check string "instruction activation" "on_demand" instruction.execution;
+       check int "instruction eager bytes" 0 instruction.eager_body_bytes;
+       check (option int) "shared instruction schema is not double-counted" None
+         instruction.tool_schema_bytes;
+       check string "composition execution" "async" composition.execution;
+       check int "composition nodes" 2 composition.node_count;
+       check int "one concurrent batch" 1 composition.batch_count;
+       check int "actual parallel width" 2 composition.max_parallelism;
+       check (option bool) "async plan is statically read-only" (Some true)
+         composition.statically_read_only;
+       check bool "composition schema bytes are exact and positive" true
+         (Option.value ~default:0 composition.tool_schema_bytes > 0)
+     | profiles -> failf "expected two Skill profiles, got %d" (List.length profiles));
     check (option int) "resource bound follows frozen snapshot" (Some 65536)
       surface.skill_resource_read_max_bytes;
     check string

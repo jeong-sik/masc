@@ -204,6 +204,43 @@ type effective_tool_delivery =
   | Effective_tools_delivered
   | Effective_tools_suppressed_runtime_unsupported
 
+type skill_flow_dependency = {
+  sfd_node_id : string;
+  sfd_kind : string;
+}
+
+type skill_flow_node = {
+  sfn_id : string;
+  sfn_tool_name : string;
+  sfn_dependencies : skill_flow_dependency list;
+  sfn_batch_index : int;
+  sfn_execution_mode : string;
+}
+
+type skill_flow_batch = {
+  sfb_index : int;
+  sfb_execution_mode : string;
+  sfb_node_ids : string list;
+}
+
+type skill_flow = {
+  sf_nodes : skill_flow_node list;
+  sf_batches : skill_flow_batch list;
+}
+
+type effective_skill_profile = {
+  esp_reference : Skill_reference.t;
+  esp_name : string;
+  esp_kind : string;
+  esp_execution : string;
+  esp_body_bytes : int;
+  esp_discovery_bytes : int;
+  esp_node_count : int;
+  esp_batch_count : int;
+  esp_max_parallelism : int;
+  esp_flow : skill_flow option;
+}
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -221,6 +258,10 @@ type effective_tool_surface =
          wrote. *)
       ets_skills_left_out : string list;
       ets_composition_skills : Skill_reference.t list;
+      ets_skill_profiles : effective_skill_profile list;
+      ets_tool_surface_bytes : int;
+      ets_skill_tool_surface_bytes : int;
+      ets_skill_body_bytes : int;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }

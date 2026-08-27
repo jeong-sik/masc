@@ -7,8 +7,13 @@ val editor_command : unit -> string option
     editor is configured rather than guessing one. *)
 
 val roundtrip :
-  restore:(unit -> unit) -> reenter:(unit -> unit) -> string -> string option
-(** [roundtrip ~restore ~reenter content] hands [content] to the editor and
+  restore:(unit -> unit) ->
+  reenter:(unit -> unit) ->
+  ?suffix:string ->
+  string ->
+  string option
+(** [roundtrip ~restore ~reenter ?suffix content] hands [content] to the editor and
     returns [Some edited] on exit code 0, [None] otherwise. [restore] runs
     before the child (leave raw mode), [reenter] after it (raw mode back,
-    full repaint requested). *)
+    full repaint requested). [suffix] defaults to [.json] so existing settings
+    forms keep editor syntax detection; Skill sources pass [.md]. *)

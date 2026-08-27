@@ -14,7 +14,8 @@ type stimulus_kind =
   | Schedule_due  (** Scheduled automation due wake for a specific keeper *)
   | Connector_attention
       (** RFC-connector-ambient-attention-wake: ambient connector message wake *)
-  | Hitl_resolved  (** HITL resolution delivered as an ordinary Keeper wake. *)
+  | Hitl_resolved
+  | Ask_answered  (** HITL resolution delivered as an ordinary Keeper wake. *)
   | Manual_compaction
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)

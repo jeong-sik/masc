@@ -100,6 +100,12 @@ type stimulus_payload =
           Edge-triggered: dequeued once, re-armed only by a new ambient
           message. Dormant until [handle_ambient] enqueues it (P3). *)
   | Hitl_resolved of hitl_resolution
+  | Ask_answered of ask_answered
+      (** A question this keeper asked a human has been answered. Carries the
+          [ask_id] pointer only; the answer text stays in [Keeper_ask_store]
+          and the woken keeper reads it there. Without this wake the answer is
+          written where only a screen reads it and the asking keeper has to
+          remember to go and look — which is why no keeper had asked. *)
       (** A nonblocking HITL approval this keeper enqueued was resolved. Wakes
           the keeper so it re-evaluates immediately instead of waiting for an
           unrelated stimulus, no-progress recovery, or the 30-minute approval
@@ -221,6 +227,15 @@ and hitl_resolution = {
   decision : hitl_resolution_decision;
   channel : Keeper_continuation_channel.t;
 }
+(** Payload for [Ask_answered]: [ask_id] is the correlation identity, and
+    [channel] is where the question was asked so a woken keeper answers into
+    that conversation rather than its own state. Only the pointer travels; the
+    answer lives in [Keeper_ask_store]. *)
+and ask_answered = {
+  ask_id : string;
+  channel : Keeper_continuation_channel.t;
+}
+
 (** Payload for [Hitl_resolved]: [approval_id] is the correlation identity.
     The durable Gate journal remains the SSOT for an approved exact request.
     Rejection rationale and edited input are resolution output, not
@@ -302,6 +317,10 @@ val composition_completion_post_id : composition_completion -> post_id
 (** Dedup/correlation id for [Composition_completed]:
     ["keeper-composition:<request_id>"]. One async request settles once, so
     the request id alone is a complete key. *)
+
+val ask_answered_post_id : ask_answered -> post_id
+(** Dedup/correlation id for [Ask_answered]: ["keeper-ask:<ask_id>"]. One
+    answer per question, so the ask id alone is a complete key. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].

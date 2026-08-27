@@ -11,6 +11,20 @@
   masc.skill_snapshot
   masc_test_deps))
 
+(test
+ (name test_server_skill_editor)
+ (modules test_server_skill_editor)
+ (libraries
+  alcotest
+  masc_server
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.skill_snapshot_service
+  eio_main
+  fs_compat
+  unix))
+
 (env
  (_
   (env-vars
@@ -3488,6 +3502,8 @@
 (include stanzas/test_keeper_ask.inc)
 
 (include stanzas/test_keeper_ask_store.inc)
+
+(include stanzas/test_keeper_ask_answer_wake.inc)
 
 (include stanzas/test_server_keeper_oauth_client.inc)
 (include stanzas/test_keeper_identity_declarations.inc)

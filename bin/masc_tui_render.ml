@@ -4095,6 +4095,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
        else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
+    (* Gate section. Two settings with similar names decide different things,
+       so both are named rather than merged: YOLO is the in-memory stance that
+       stops this chat asking and a restart clears, while the Gate mode is
+       durable and is what an external effect -- a write to a service this
+       Keeper is attached to -- is actually decided under. An operator reading
+       one for the other is how a call gets made that nobody meant to allow. *)
+    add_section "Gate";
+    add_row "Chat asks (YOLO):"
+      (if List.mem k.k_name state.keeper_yolo_names then
+         (Theme.bad ()) ^ "skipped" ^ Ansi.reset
+       else Ansi.dim ^ "asked" ^ Ansi.reset);
+    add_row "Effects (Gate mode):"
+      (match List.assoc_opt k.k_name state.keeper_gate_modes with
+       | Some mode -> Ansi.cyan ^ Terminal_text.single_line mode ^ Ansi.reset
+       | None -> Ansi.dim ^ "workspace" ^ Ansi.reset);
+    add_row "Judge first:"
+      (match List.assoc_opt k.k_name state.keeper_gate_judges with
+       | Some slot -> Ansi.cyan ^ Terminal_text.single_line slot ^ Ansi.reset
+       | None -> Ansi.dim ^ "lane order" ^ Ansi.reset);
+    add_empty ();
+
     (* Current work section *)
     add_section "Current Work";
     add_row "Task:"

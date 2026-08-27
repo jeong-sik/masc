@@ -3361,6 +3361,27 @@ let decode_gate_snapshot json =
   in
   Ok { gs_pending; gs_modes }
 
+(* The durable per-Keeper Gate settings, which are a different thing from the
+   in-memory YOLO stance above: this is what the Gate decides an external
+   effect under, and it survives a restart. Both lists carry only Keepers
+   somebody singled out, so an empty one means everybody follows the
+   workspace. *)
+let decode_keeper_gate_settings json =
+  let pairs field value_key =
+    let* items = required_list_field json field in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* keeper = required_string_field item "keeper_name" in
+        let* value = required_string_field item value_key in
+        loop ((keeper, value) :: acc) rest
+    in
+    loop [] items
+  in
+  let* modes = pairs "modes" "mode" in
+  let* judges = pairs "judges" "slot_id" in
+  Ok (modes, judges)
+
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in
   let rec loop acc = function

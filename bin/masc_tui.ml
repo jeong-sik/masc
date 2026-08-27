@@ -1323,6 +1323,10 @@ type async_msg =
           server took it. *)
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
+  (* Its own message rather than a field on the stance one: the two come from
+     different endpoints and one failing must not blank the other. *)
+  | Keeper_gate_settings_loaded of
+      (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * string) list, string) result * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
@@ -1685,7 +1689,17 @@ let launch_keeper_tool_modes_load state ~mailbox =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation))
+        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation));
+        (* Same trip, because both answer "what did somebody set about this
+           Keeper" and a detail pane showing one fresh and one stale would be
+           two different moments beside each other. No generation guard: this
+           listing has no operator press to be superseded by. *)
+        let settings =
+          try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Keeper_gate_settings_loaded settings)
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
@@ -6740,6 +6754,16 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            add_event state "error"
              (Printf.sprintf "External-services Gate lane change failed: %s"
                 detail))
+  | Keeper_gate_settings_loaded result ->
+      (match result with
+       | Ok (modes, judges) ->
+           state.keeper_gate_modes <- modes;
+           state.keeper_gate_judges <- judges
+       | Error _ ->
+           (* Keep the last known settings rather than showing every Keeper as
+              following the workspace, which is the looser reading and the one
+              an operator would act on. *)
+           ())
   | Keeper_tool_modes_loaded (result, generation) ->
       (* A listing from an older flow describes the stance before the press
          that superseded it. Dropping it is what keeps an armed gate armed

@@ -774,6 +774,17 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+val decode_keeper_gate_settings :
+  Yojson.Safe.t -> ((string * string) list * (string * string) list, string) result
+(** [(keeper, mode) list, (keeper, slot_id) list] from
+    [/api/v1/dashboard/gate/keeper-settings].
+
+    Distinct from {!decode_tool_approval_mode_overrides}: that one is the
+    in-memory YOLO stance a restart clears, this is what the Gate decides an
+    external effect under. Two per-Keeper settings with similar names, and an
+    operator reading one for the other is the reason both are named in
+    full. *)
+
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s

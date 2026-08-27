@@ -124,7 +124,9 @@ val run_named :
     (runtime_id:string ->
      invocation:Agent_core.Tool_contract.Invocation.t ->
      content:string ->
-     unit) ->
+       unit) ->
+  ?on_official_client_native_action:
+    (runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string -> unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation

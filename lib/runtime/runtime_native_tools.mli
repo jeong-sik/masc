@@ -17,6 +17,14 @@ type observation =
 (** Bounded identity reported by an official CLI for one built-in tool step.
     Missing fields stay [None]; adapters must not invent provider identities. *)
 
+type exact_action = string * string
+val exact_action : observation -> exact_action option
+(** Admit only the exact non-empty pair emitted by the provider. *)
+val observe_exact_action :
+  official_turn:int ->
+  observe:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
+  observation -> unit
+
 val stream_content_type : string
 (** Internal AGENT_CORE content-block discriminator used only to carry a typed
     native observation through the Keeper stream bridge. *)

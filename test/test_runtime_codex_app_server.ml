@@ -3490,9 +3490,22 @@ let test_official_client_host_text_projection_is_hard_cut () =
   | Ok _ -> fail "non-text official-client projection was silently admitted"
 ;;
 
+let test_native_action_observer_keeps_exact_provider_identity () =
+  let seen = ref [] in
+  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
+  Keeper_codex_runtime.For_testing.observe_stream_native_action ~turn_count:7 ~observe
+    (Runtime_codex_app_server.Native_tool_started
+       { Runtime_native_tools.call_id = Some "codex-call"; tool_name = Some "Read" });
+  Keeper_codex_runtime.For_testing.observe_stream_native_action ~turn_count:8 ~observe
+    (Runtime_codex_app_server.Native_tool_started
+       { Runtime_native_tools.call_id = None; tool_name = Some "Read" });
+  check (list (triple int string string)) "exact only" [ 7, "codex-call", "Read" ] (List.rev !seen)
+;;
+
 let () =
   run "runtime codex app-server"
-    [ ( "images"
+    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "images"
       , [ test_case "image reaches the turn input" `Quick
             test_image_reaches_the_turn_input
         ; test_case "unsupported media type is rejected" `Quick

@@ -271,7 +271,7 @@ type stream_projection =
   ; on_tool_finished : call_id:string -> unit
   }
 
-let stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event =
+let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let tool_indexes = Hashtbl.create 8 in
@@ -298,6 +298,9 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event =
               (Agent_core.Types.ContentBlockDelta
                  { index = 0; delta = Agent_core.Types.TextDelta text })
           | Runtime_antigravity.Native_tool_started observation ->
+            Option.iter
+              (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+              on_native_action;
             Host.record_raw_native_tool
               ~keeper_name
               ~raw_trace_run
@@ -369,7 +372,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
-    ~on_official_client_result_handoff
+    ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -682,7 +685,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
     let started_at = Time_compat.now () in
       let stream =
-        stream_projection ~keeper_name ~raw_trace_run ~turn_count on_event
+        stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
       in
     let settle_host_stop stop =
       match (!session_state).Session_store.phase with
@@ -1030,6 +1033,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1055,7 +1059,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_effect_state
-        ~on_official_client_result_handoff
+        ~on_official_client_result_handoff ~on_native_action
         ~event_bus
         ~raw_trace
         ~on_event
@@ -1066,6 +1070,17 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
+  let observe_stream_native_action ~turn_count ~observe event =
+    let stream =
+      stream_projection
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count
+        ~on_native_action:(Some observe)
+        None
+    in
+    stream.on_runtime_event event
+  ;;
   let capacity_bounded_model_input_projection =
     capacity_bounded_model_input_projection
   ;;

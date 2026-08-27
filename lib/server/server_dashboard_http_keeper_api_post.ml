@@ -605,6 +605,7 @@ let dashboard_config_string_list_fields =
    (#25062/#25268) — a silent shrink converts a settings edit into a next-turn
    overflow. *)
 let confirm_context_shrink_field = "confirm_context_shrink"
+let expected_manifest_revision_field = "expected_manifest_revision"
 
 let dashboard_config_patch_allowed_fields =
   [ "name"
@@ -613,6 +614,7 @@ let dashboard_config_patch_allowed_fields =
   ; "max_context_override"
   ; "autonomous_wake_prompt"
   ; confirm_context_shrink_field
+  ; expected_manifest_revision_field
   ]
   @
   dashboard_config_string_fields
@@ -777,6 +779,8 @@ let validate_dashboard_config_field key value =
     (match value with
      | `Bool _ -> Ok ()
      | other -> dashboard_field_type_error key "a boolean" other)
+  else if key = expected_manifest_revision_field then
+    Keeper_turn_up_config_persistence.revision_of_yojson value |> Result.map ignore
   else if List.mem key dashboard_config_string_fields then
     match value with
     | `String _ -> Ok ()
@@ -834,37 +838,6 @@ let context_shrink_of_patch ~(meta : Keeper_meta_contract.keeper_meta) fields =
      | Some _ -> None)
   | _ -> None
 
-type activation_write_error = { code : string; detail : string }
-
-let activation_bool_fields fields =
-  [ "autoboot_enabled"; "proactive_enabled" ]
-  |> List.filter_map (fun key ->
-       match List.assoc_opt key fields with
-       | Some (`Bool value) -> Some (key, value)
-       | Some _ | None -> None)
-
-let persist_activation_fields ~(config : Workspace.config) ~name fields =
-  match activation_bool_fields fields with
-  | [] -> Ok ()
-  | bool_fields ->
-    (match
-       Keeper_types_profile.keeper_toml_path_opt_for_base_path
-         ~base_path:config.base_path
-         name
-     with
-     | None ->
-       (* [update_keeper] now materializes the complete declarative TOML from
-          effective metadata before applying the runtime update. *)
-       Ok ()
-     | Some path ->
-       (match Keeper_toml_loader.update_keeper_toml_bool_fields ~path bool_fields with
-        | Ok () -> Ok ()
-        | Error detail ->
-          Error
-            { code = "keeper_toml_write_failed"
-            ; detail = Printf.sprintf "%s: %s" path detail
-            }))
-
 let prevalidate_config_update
       (config : Workspace.config)
       (old : Keeper_meta_contract.keeper_meta)
@@ -912,6 +885,26 @@ let respond_config_sync_error
       ])
     reqd
 
+let respond_manifest_revision_conflict ~request reqd ~name
+      ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
+  =
+  Http.Response.json_value
+    ~status:`Conflict
+    ~request
+    (`Assoc
+      [ "ok", `Bool false
+      ; "keeper", `String name
+      ; "config_applied", `Bool false
+      ; "runtime_sync", `Bool false
+      ; ( "error"
+        , `Assoc
+            [ "code", `String "keeper_manifest_revision_conflict"
+            ; "expected", Keeper_turn_up_config_persistence.revision_to_yojson expected
+            ; "observed", Keeper_turn_up_config_persistence.revision_to_yojson observed
+            ] )
+      ])
+    reqd
+
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
@@ -936,6 +929,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
            in
            match fields_opt with
            | Some fields ->
+               let expected_manifest_revision =
+                 match List.assoc_opt expected_manifest_revision_field fields with
+                 | None -> Error "expected_manifest_revision is required"
+                 | Some value ->
+                   Keeper_turn_up_config_persistence.revision_of_yojson value
+               in
+               (match expected_manifest_revision with
+                | Error detail -> respond_error reqd detail
+                | Ok expected_manifest_revision ->
                let body_name =
                  match List.assoc_opt "name" fields with
                  | Some (`String value) ->
@@ -963,6 +965,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                       (* Control field: consumed here, never persisted. *)
                       let fields =
                         List.remove_assoc confirm_context_shrink_field fields
+                        |> List.remove_assoc expected_manifest_revision_field
                       in
                       (match context_shrink_of_patch ~meta:meta0 fields with
                        | Some (previous, new_v) when not confirm_context_shrink ->
@@ -999,31 +1002,55 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                            (match prevalidate_config_update config meta0 parsed with
                             | Error detail -> respond_error reqd detail
                             | Ok () ->
-                           (match persist_activation_fields ~config ~name fields with
-                            | Error { code; detail } ->
-                              Log.Keeper.error
-                                "dashboard keeper activation config rejected keeper=%s: %s"
-                                name
-                                detail;
-                              respond_config_sync_error
-                                ~request:req
-                                reqd
-                                ~status:`Conflict
-                                ~name
-                                ~config_applied:false
-                                ~code
-                                ~detail
-                                ()
-                            | Ok () ->
                            (* Dashboard edits commit a closed Owner profile
                               command, so they cannot overwrite runtime counters.
                               [preserve_prompt_defaults] keeps existing prompt
                               fields when the request omits them. *)
                            let result =
                              Keeper_turn_up_update.update_keeper
-                               ~preserve_prompt_defaults:true keeper_ctx parsed
+                               ~preserve_prompt_defaults:true
+                               ~expected_manifest_revision
+                               keeper_ctx parsed
                                meta0
                            in
+                           (match
+                              Keeper_turn_up_update
+                              .manifest_revision_conflict_of_result result
+                            with
+                            | Some conflict ->
+                              respond_manifest_revision_conflict
+                                ~request:req reqd ~name conflict
+                            | None ->
+                           (match
+                              Keeper_turn_up_update
+                              .config_reconciliation_required_of_result result
+                            with
+                            | Some detail ->
+                              respond_config_sync_error
+                                ~request:req
+                                reqd
+                                ~status:`Service_unavailable
+                                ~name
+                                ~config_applied:false
+                                ~code:"keeper_manifest_reconciliation_required"
+                                ~detail
+                                ()
+                            | None ->
+                           (match
+                              Keeper_turn_up_update
+                              .config_publication_rollback_of_result result
+                            with
+                            | Some detail ->
+                              respond_config_sync_error
+                                ~request:req
+                                reqd
+                                ~status:`Service_unavailable
+                                ~name
+                                ~config_applied:false
+                                ~code:"keeper_config_publication_rolled_back"
+                                ~detail
+                                ()
+                            | None ->
                            if not
                                 (Keeper_types_profile.tool_result_success result)
                            then (
@@ -1057,7 +1084,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                  name
                              in
                              Http.Response.json_value ~compress:true
-                               ~request:req json reqd))))))
+                               ~request:req json reqd)))))))))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

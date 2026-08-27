@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
+import { ApiRequestError } from '../api/core'
 import {
   AUTONOMOUS_WAKE_PROMPT_MAX_BYTES,
   buildRuntimePayload,
@@ -34,6 +35,7 @@ function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
 function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
+    manifest_revision: { state: 'sha256', value: 'a'.repeat(64) },
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -402,6 +404,7 @@ describe('keeperConfigControlInventory', () => {
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
+    manifest_revision: { state: 'missing' },
     autoboot_enabled: true,
     max_context_override: null,
     autonomous_wake_prompt: null,
@@ -1258,6 +1261,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
       expect.objectContaining({ instructions: 'Ship refreshed keeper surfaces' }),
+      makeKeeperConfig().manifest_revision,
     )
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
@@ -1299,6 +1303,7 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         runtime_id: 'tier.resilient_breaker',
       }),
+      makeKeeperConfig().manifest_revision,
     )
     expect(container.textContent).toContain('runtime_id')
     expect(container.textContent).toContain('tier-group.keeper_unified')
@@ -1349,6 +1354,7 @@ describe('KeeperConfigPanel', () => {
         sandbox_profile: 'docker',
         network_mode: 'none',
       }),
+      makeKeeperConfig().manifest_revision,
     )
   })
 
@@ -1387,6 +1393,7 @@ describe('KeeperConfigPanel', () => {
       {
         mention_targets: ['alpha', 'beta'],
       },
+      makeKeeperConfig().manifest_revision,
     )
   })
 
@@ -1430,6 +1437,7 @@ describe('KeeperConfigPanel', () => {
         autoboot_enabled: false,
         max_context_override: 64000,
       }),
+      makeKeeperConfig().manifest_revision,
     )
   })
 
@@ -1477,6 +1485,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
       { skills: { names: ['ocaml-coding', 'proof-harness'] } },
+      makeKeeperConfig().manifest_revision,
     )
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
   })
@@ -1510,6 +1519,7 @@ describe('KeeperConfigPanel', () => {
       1,
       'keeper-sangsu',
       { skills: { names: [] } },
+      selected.manifest_revision,
     )
 
     const mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
@@ -1526,6 +1536,7 @@ describe('KeeperConfigPanel', () => {
       2,
       'keeper-sangsu',
       { skills: {} },
+      makeKeeperConfig({ skills: { names: [] } }).manifest_revision,
     )
   })
 
@@ -1582,6 +1593,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
       { proactive_enabled: true },
+      drifted.manifest_revision,
     )
   })
 
@@ -1744,16 +1756,18 @@ describe('KeeperConfigPanel', () => {
   })
 
   it('fences a stale save when the same Keeper panel is closed and reopened', async () => {
-    let resolveOldSave: ((value: KeeperConfig) => void) | undefined
+    let rejectOldSave: ((reason: unknown) => void) | undefined
     let resolveNewSave: ((value: KeeperConfig) => void) | undefined
-    const oldSave = new Promise<KeeperConfig>(resolve => {
-      resolveOldSave = resolve
+    const oldSave = new Promise<KeeperConfig>((_resolve, reject) => {
+      rejectOldSave = reject
     })
     const newSave = new Promise<KeeperConfig>(resolve => {
       resolveNewSave = resolve
     })
     const config = makeKeeperConfig({ skills: { names: null } })
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(config)
+    mocks.fetchKeeperConfig
+      .mockResolvedValueOnce(config)
+      .mockResolvedValueOnce(config)
     mocks.patchKeeperConfig
       .mockReturnValueOnce(oldSave)
       .mockReturnValueOnce(newSave)
@@ -1787,17 +1801,39 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await beginSkillSave('new-skill')
 
-    resolveOldSave?.(makeKeeperConfig({ skills: { names: ['old-skill'] } }))
+    resolveNewSave?.(makeKeeperConfig({
+      manifest_revision: { state: 'sha256', value: 'b'.repeat(64) },
+      skills: { names: ['new-skill'] },
+    }))
+    await flush()
+    await flush()
+    rejectOldSave?.(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/keeper-sangsu/config',
+      status: 409,
+      errorCode: 'keeper_manifest_revision_conflict',
+    }))
     await flush()
     await flush()
     expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
       .toBe('new-skill')
-    expect(container.textContent).toContain('저장 중...')
-
-    resolveNewSave?.(makeKeeperConfig({ skills: { names: ['new-skill'] } }))
-    await flush()
-    await flush()
     expect(mocks.patchKeeperConfig).toHaveBeenCalledTimes(2)
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      1,
+      'keeper-sangsu',
+      { skills: { names: ['old-skill'] } },
+      config.manifest_revision,
+    )
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      2,
+      'keeper-sangsu',
+      { skills: { names: ['new-skill'] } },
+      config.manifest_revision,
+    )
+    expect(mocks.showToast).not.toHaveBeenCalledWith(
+      expect.stringContaining('다른 화면에서 변경'),
+      'warning',
+    )
   })
 })
 

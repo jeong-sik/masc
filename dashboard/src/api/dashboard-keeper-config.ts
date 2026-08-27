@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -47,6 +47,27 @@ function decodeSkillNames(value: unknown): string[] | null {
   throw new Error(
     'Invalid keeper config response: skills.names must be an array of strings or null',
   )
+}
+
+function decodeManifestRevision(value: unknown): KeeperManifestRevision {
+  if (!isRecord(value)) {
+    throw new Error('Invalid keeper config response: manifest_revision must be an object')
+  }
+  if (value.state === 'missing' && Object.keys(value).length === 1) {
+    return { state: 'missing' }
+  }
+  if (
+    value.state === 'sha256'
+    && typeof value.value === 'string'
+    && /^[0-9a-f]{64}$/.test(value.value)
+    && Object.keys(value).length === 2
+  ) {
+    return { state: 'sha256', value: value.value }
+  }
+  const detail = value.state === 'unavailable' && typeof value.detail === 'string'
+    ? `: ${value.detail}`
+    : ''
+  throw new Error(`Invalid keeper config response: manifest_revision is unavailable or malformed${detail}`)
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -209,6 +230,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
+    manifest_revision: decodeManifestRevision(data.manifest_revision),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
@@ -328,10 +350,14 @@ export type KeeperConfigUpdatePayload = {
 export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
+  expectedManifestRevision: KeeperManifestRevision,
 ): Promise<KeeperConfig> {
   await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
-    payload,
+    {
+      ...payload,
+      expected_manifest_revision: expectedManifestRevision,
+    },
   ).then(raw => normalizeKeeperConfig(raw, name))
 }

@@ -3,6 +3,7 @@ open Masc_tui_keeper_config
 let observed =
   Yojson.Safe.from_string
     {|{
+      "manifest_revision": {"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
       "autoboot_enabled": true,
       "max_context_override": null,
       "autonomous_wake_prompt": null,
@@ -66,7 +67,7 @@ let test_patch_contains_only_changed_fields () =
   | Error detail -> Alcotest.fail detail
   | Ok patch ->
       Alcotest.(check string) "one changed field"
-        {|{"proactive_enabled":false}|}
+        {|{"expected_manifest_revision":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"proactive_enabled":false}|}
         (Yojson.Safe.to_string patch)
 
 let test_deleted_field_means_unchanged () =
@@ -103,15 +104,15 @@ let with_observed_skill_names names =
 let test_skill_selection_patch_modes () =
   check_skill_patch ~label:"none" ~before:observed
     ~skills:(`Assoc [ "names", `List [] ])
-    ~expected:{|{"skills":{"names":[]}}|};
+    ~expected:{|{"expected_manifest_revision":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"skills":{"names":[]}}|};
   check_skill_patch ~label:"exact names" ~before:observed
     ~skills:(`Assoc [ "names", `List [ `String "review"; `String "research" ] ])
-    ~expected:{|{"skills":{"names":["review","research"]}}|};
+    ~expected:{|{"expected_manifest_revision":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"skills":{"names":["review","research"]}}|};
   let exact_before =
     with_observed_skill_names (`List [ `String "review" ])
   in
   check_skill_patch ~label:"all" ~before:exact_before ~skills:(`Assoc [])
-    ~expected:{|{"skills":{}}|}
+    ~expected:{|{"expected_manifest_revision":{"state":"sha256","value":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"skills":{}}|}
 
 let rendered_of json = view_lines ~sanitize:Fun.id json |> String.concat "\n"
 

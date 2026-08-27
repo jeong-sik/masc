@@ -4,7 +4,198 @@ open Keeper_types_profile
 type outcome =
   { path : string
   ; created : bool
+  ; revision : revision
   }
+
+and revision =
+  | Missing
+  | Sha256 of string
+
+type conflict =
+  { expected : revision
+  ; observed : revision
+  }
+
+type warning =
+  | Manifest_parent_sync_unconfirmed of string
+  | Lock_release_unconfirmed of string
+
+type 'a receipt =
+  { value : 'a
+  ; warnings : warning list
+  }
+
+type reconciliation_observation =
+  | Observed_revision of revision
+  | Unreadable_manifest of string
+
+type reconciliation =
+  { path : string
+  ; detail : string
+  ; observed : reconciliation_observation
+  }
+
+type error =
+  | Io_error of string
+  | Revision_conflict of conflict
+  | Reconciliation_required of reconciliation
+
+type 'a publication =
+  | Commit of 'a
+  | Rollback of 'a
+
+let revision_to_yojson = function
+  | Missing -> `Assoc [ "state", `String "missing" ]
+  | Sha256 value ->
+    `Assoc [ "state", `String "sha256"; "value", `String value ]
+
+let revision_of_yojson = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok Missing
+  | `Assoc
+      ([ ("state", `String "sha256"); ("value", `String value) ]
+      | [ ("value", `String value); ("state", `String "sha256") ])
+    when String.length value = 64
+         && String.equal value (String.lowercase_ascii value) ->
+    (match Digestif.SHA256.of_hex_opt value with
+     | Some _ -> Ok (Sha256 value)
+     | None -> Error "expected_manifest_revision.value must be lowercase SHA-256 hex")
+  | `Assoc fields ->
+    (match List.assoc_opt "state" fields with
+     | Some (`String "missing") ->
+       Error "expected_manifest_revision missing state has unexpected fields"
+     | Some (`String "sha256") ->
+       Error "expected_manifest_revision sha256 state requires only a lowercase SHA-256 value"
+     | Some (`String state) ->
+       Error (Printf.sprintf "unsupported expected_manifest_revision.state: %S" state)
+     | Some _ -> Error "expected_manifest_revision.state must be a string"
+     | None -> Error "expected_manifest_revision.state is required")
+  | _ -> Error "expected_manifest_revision must be an object"
+
+let revision_display = function
+  | Missing -> "missing"
+  | Sha256 value -> "sha256:" ^ value
+
+let error_to_string = function
+  | Io_error detail -> detail
+  | Revision_conflict { expected; observed } ->
+    Printf.sprintf
+      "keeper manifest revision conflict (expected %s, observed %s)"
+      (revision_display expected)
+      (revision_display observed)
+  | Reconciliation_required { path; detail; observed } ->
+    let observed =
+      match observed with
+      | Observed_revision revision -> revision_display revision
+      | Unreadable_manifest error -> "unreadable:" ^ error
+    in
+    Printf.sprintf
+      "keeper manifest requires reconciliation (path %s, observed %s): %s"
+      path
+      observed
+      detail
+
+let warning_to_yojson = function
+  | Manifest_parent_sync_unconfirmed detail ->
+    `Assoc
+      [ "code", `String "keeper_manifest_parent_sync_unconfirmed"
+      ; "detail", `String detail
+      ]
+  | Lock_release_unconfirmed detail ->
+    `Assoc
+      [ "code", `String "keeper_manifest_lock_release_unconfirmed"
+      ; "detail", `String detail
+      ]
+
+type manifest_snapshot =
+  | Absent
+  | Present of string
+
+let read_snapshot_unlocked path =
+  if not (Fs_compat.file_exists path)
+  then Ok Absent
+  else Safe_ops.read_file_safe path |> Result.map (fun bytes -> Present bytes)
+
+let revision_of_snapshot = function
+  | Absent -> Missing
+  | Present bytes ->
+    Sha256 Digestif.SHA256.(digest_string bytes |> to_hex)
+
+let revision_of_path_unlocked path =
+  read_snapshot_unlocked path |> Result.map revision_of_snapshot
+
+let observed_revision_after_failure path =
+  match revision_of_path_unlocked path with
+  | Ok revision -> Observed_revision revision
+  | Error detail -> Unreadable_manifest detail
+
+let reconciliation_required path detail =
+  Reconciliation_required
+    { path; detail; observed = observed_revision_after_failure path }
+
+let restore_snapshot_unlocked path = function
+  | Present bytes ->
+    (match Fs_compat.save_file_atomic_strict_staged path bytes with
+     | Ok () -> Ok ()
+     | Error failure ->
+       Error
+         (reconciliation_required
+            path
+            (Fs_compat.atomic_replace_failure_to_string failure)))
+  | Absent ->
+    if not (Fs_compat.file_exists path)
+    then Ok ()
+    else
+      (try
+         Sys.remove path;
+         Keeper_fs_durable_directory.fsync_directory (Filename.dirname path);
+         Ok ()
+       with exn ->
+         Error
+           (reconciliation_required
+              path
+              (Printf.sprintf
+                 "cannot durably roll back created keeper manifest: %s"
+                 (Printexc.to_string exn))))
+
+let manifest_path ~(config : Workspace.config) ~keeper_name =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  Filename.concat keepers_dir (keeper_name ^ ".toml")
+
+let with_manifest_lock_using observe path f =
+  Fs_compat.mkdir_p (Filename.dirname path);
+  let lock_path = path ^ ".lock" in
+  match observe ~lock_path f with
+  | File_lock_eio.Lock_not_acquired error ->
+    Error (File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error = None } ->
+    Ok { value; warnings = [] }
+  | File_lock_eio.Body_completed { value; release_error = Some error } ->
+    Ok
+      { value
+      ; warnings =
+          [ Lock_release_unconfirmed
+              (File_lock_eio.durable_lock_error_to_string error)
+          ]
+      }
+
+let with_manifest_lock path f =
+  with_manifest_lock_using File_lock_eio.with_durable_lock_observed path f
+
+let with_current_revision ~config ~keeper_name project =
+  let path = manifest_path ~config ~keeper_name in
+  match
+    with_manifest_lock path (fun () ->
+      revision_of_path_unlocked path |> Result.map project)
+  with
+  | Error _ as error -> error
+  | Ok { value = Error detail; _ } -> Error detail
+  | Ok { value = Ok value; warnings } -> Ok { value; warnings }
+
+let current_revision ~config ~keeper_name =
+  with_current_revision ~config ~keeper_name Fun.id
+  |> Result.map (fun receipt -> receipt.value)
 
 let set_string value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
@@ -142,34 +333,140 @@ let explicit_edits
       | None -> Keeper_toml_loader.Remove )
     :: fields
 
-let persist ~(config : Workspace.config)
-    ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) =
-  let keepers_dir =
-    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
-  in
-  let path = Filename.concat keepers_dir (meta.name ^ ".toml") in
+let strict_write_result = function
+  | Ok () -> Ok []
+  | Error
+      (({ stage = Fs_compat.Before_rename; _ } :
+          Fs_compat.atomic_replace_failure) as failure) ->
+    Error (Io_error (Fs_compat.atomic_replace_failure_to_string failure))
+  | Error
+      (({ stage = Fs_compat.After_rename; _ } :
+          Fs_compat.atomic_replace_failure) as failure) ->
+    Ok
+      [ Manifest_parent_sync_unconfirmed
+          (Fs_compat.atomic_replace_failure_to_string failure)
+      ]
+
+let persist_with_publication_using ~with_lock ~restore_snapshot ~expected_revision
+    ~(config : Workspace.config)
+    ~(parsed : Keeper_turn_up_args.parsed_args) ~(meta : keeper_meta) ~publish () =
+  let path = manifest_path ~config ~keeper_name:meta.name in
   let instructions_result =
     if String.trim meta.instructions = ""
     then Error "keeper instructions are required"
     else Ok ()
   in
-  let result = Result.bind instructions_result (fun () ->
-    if Fs_compat.file_exists path
-    then
-      let edits = explicit_edits parsed in
-      if edits = []
-      then Ok { path; created = false }
-      else
-        Keeper_toml_loader.edit_keeper_toml_fields ~path edits
-        |> Result.map (fun () -> { path; created = false })
-    else
-      Keeper_toml_loader.create_keeper_toml_file
-        ~path
-        (full_fields parsed meta)
-      |> Result.map (fun () -> { path; created = true }))
-  in
-  Result.map
-    (fun outcome ->
-      Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-      outcome)
-    result
+  match with_lock path (fun () ->
+      let ( let* ) = Result.bind in
+      let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
+      let* snapshot =
+        read_snapshot_unlocked path |> Result.map_error (fun error -> Io_error error)
+      in
+      let observed = revision_of_snapshot snapshot in
+      let* () =
+        if expected_revision <> observed
+        then Error (Revision_conflict { expected = expected_revision; observed })
+        else Ok ()
+      in
+      let created = observed = Missing in
+      let* write_warnings =
+        (if created
+         then
+           Keeper_toml_loader.create_keeper_toml_file_strict_staged
+             ~path
+             (full_fields parsed meta)
+         else
+           let edits = explicit_edits parsed in
+           if edits = []
+           then Ok ()
+           else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
+        |> strict_write_result
+      in
+      let* revision =
+        revision_of_path_unlocked path |> Result.map_error (fun error -> Io_error error)
+      in
+      let outcome = { path; created; revision } in
+      (match publish outcome with
+       | Commit value ->
+         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+         Ok { value; warnings = write_warnings }
+       | Rollback value ->
+         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+         let* () = restore_snapshot path snapshot in
+         Ok { value; warnings = [] }))
+  with
+  | Error error -> Error (Io_error error)
+  | Ok { value = Error error; _ } -> Error error
+  | Ok
+      { value = Ok { value; warnings = write_warnings }
+      ; warnings = lock_warnings
+      } ->
+    Ok { value; warnings = write_warnings @ lock_warnings }
+
+let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish () =
+  persist_with_publication_using
+    ~with_lock:with_manifest_lock
+    ~restore_snapshot:restore_snapshot_unlocked
+    ~expected_revision
+    ~config
+    ~parsed
+    ~meta
+    ~publish
+    ()
+
+let persist ~expected_revision ~config ~parsed ~meta () =
+  persist_with_publication ~expected_revision ~config ~parsed ~meta
+    ~publish:(fun outcome -> Commit outcome) ()
+
+module For_testing = struct
+  let persist_with_release_failure ~release_failure ~expected_revision ~config
+      ~parsed ~meta () =
+    let with_lock path f =
+      let observe ~lock_path body =
+        File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+          ~release_failure
+          ~lock_path
+          body
+      in
+      with_manifest_lock_using observe path f
+    in
+    persist_with_publication_using
+      ~with_lock
+      ~restore_snapshot:restore_snapshot_unlocked
+      ~expected_revision
+      ~config
+      ~parsed
+      ~meta
+      ~publish:(fun outcome -> Commit outcome)
+      ()
+  ;;
+
+  let persist_with_rollback_parent_sync_failure ~expected_revision ~config
+      ~parsed ~meta () =
+    let restore_snapshot path = function
+      | Absent -> restore_snapshot_unlocked path Absent
+      | Present bytes ->
+        (match
+           Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+             ~sync_parent:(fun _ -> raise (Failure "injected rollback parent sync"))
+             path
+             bytes
+         with
+         | Ok () -> failwith "rollback parent sync injection was not observed"
+         | Error failure ->
+           Error
+             (reconciliation_required
+                path
+                (Fs_compat.atomic_replace_failure_to_string failure)))
+    in
+    persist_with_publication_using
+      ~with_lock:with_manifest_lock
+      ~restore_snapshot
+      ~expected_revision
+      ~config
+      ~parsed
+      ~meta
+      ~publish:(fun _ -> Rollback ())
+      ()
+  ;;
+end

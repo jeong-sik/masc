@@ -3123,7 +3123,27 @@ let write_config_sync_toml config name =
        name);
   path
 
-let post_config ~sw ~clock ~state ~name body =
+let post_config ?(inject_revision = true) ~sw ~clock ~state ~name body =
+  let body =
+    match Yojson.Safe.from_string body with
+    | `Assoc fields
+      when inject_revision
+           && not (List.mem_assoc "expected_manifest_revision" fields) ->
+      let config = Lib.Mcp_server.workspace_config state in
+      let revision =
+        match
+          Masc.Keeper_turn_up_config_persistence.current_revision
+            ~config
+            ~keeper_name:name
+        with
+        | Ok revision ->
+          Masc.Keeper_turn_up_config_persistence.revision_to_yojson revision
+        | Error detail -> failf "read manifest revision: %s" detail
+      in
+      Yojson.Safe.to_string
+        (`Assoc (("expected_manifest_revision", revision) :: fields))
+    | json -> Yojson.Safe.to_string json
+  in
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
@@ -3159,15 +3179,101 @@ let post_config ~sw ~clock ~state ~name body =
   in
   raw, Yojson.Safe.from_string body
 
+let test_config_post_requires_expected_revision () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-revision-required" in
+  prepare_config_sync_keeper ~sw config name;
+  ignore (write_config_sync_toml config name);
+  let raw, _ =
+    post_config ~inject_revision:false ~sw ~clock:(Eio.Stdenv.clock env)
+      ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
+      ~name {|{"proactive_enabled":true}|}
+  in
+  check bool "missing revision HTTP 400" true
+    (String.starts_with ~prefix:"HTTP/1.1 400" raw);
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
+let test_config_post_rejects_second_writer_with_same_revision () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-cas" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let initial_revision =
+    match
+      Masc.Keeper_turn_up_config_persistence.current_revision
+        ~config
+        ~keeper_name:name
+    with
+    | Ok revision -> revision
+    | Error detail -> failf "initial revision: %s" detail
+  in
+  let body proactive_enabled =
+    `Assoc
+      [ ( "expected_manifest_revision"
+        , Masc.Keeper_turn_up_config_persistence.revision_to_yojson
+            initial_revision )
+      ; "proactive_enabled", `Bool proactive_enabled
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let state =
+    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
+  in
+  let winner_raw, _ =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body true)
+  in
+  check bool "winner HTTP 200" true
+    (String.starts_with ~prefix:"HTTP/1.1 200" winner_raw);
+  let loser_raw, loser_json =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env) ~state ~name (body false)
+  in
+  check bool "loser HTTP 409" true
+    (String.starts_with ~prefix:"HTTP/1.1 409" loser_raw);
+  let open Yojson.Safe.Util in
+  check string "typed conflict code" "keeper_manifest_revision_conflict"
+    (loser_json |> member "error" |> member "code" |> to_string);
+  check string "typed expected revision state" "sha256"
+    (loser_json
+     |> member "error"
+     |> member "expected"
+     |> member "state"
+     |> to_string);
+  check string "typed observed revision state" "sha256"
+    (loser_json
+     |> member "error"
+     |> member "observed"
+     |> member "state"
+     |> to_string);
+  check bool "loser did not apply config" false
+    (loser_json |> member "config_applied" |> to_bool);
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option bool) "winner remains durable" (Some true)
+    (Keeper_toml_loader.toml_bool_opt doc "keeper.proactive_enabled");
+  ignore
+    (Masc.Keeper_keepalive.stop_keepalive_and_await
+       ~base_path:config.base_path name)
+
 let test_config_post_restarts_from_atomic_toml () =
   with_test_env @@ fun ~env ~sw ~config ->
   let name = "config-sync-success" in
   prepare_config_sync_keeper ~sw config name;
   let toml_path = write_config_sync_toml config name in
-  ignore
-    (post_config ~sw ~clock:(Eio.Stdenv.clock env)
+  let _, response =
+    post_config ~sw ~clock:(Eio.Stdenv.clock env)
        ~state:(Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path)
-       ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|});
+       ~name {|{"autoboot_enabled":true,"proactive_enabled":true}|}
+  in
+  check string "readback carries manifest SHA-256 revision" "sha256"
+    Yojson.Safe.Util.(response |> member "manifest_revision" |> member "state" |> to_string);
   let parsed =
     Keeper_toml_loader.parse_toml
       (In_channel.with_open_bin toml_path In_channel.input_all)
@@ -3805,6 +3911,10 @@ let () =
             test_config_patch_accepts_typed_skills;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
+          test_case "config POST requires expected revision" `Quick
+            test_config_post_requires_expected_revision;
+          test_case "stale config POST loses with typed 409" `Quick
+            test_config_post_rejects_second_writer_with_same_revision;
           test_case "runtime sync failure preserves commit" `Quick
             test_config_post_reports_runtime_sync_failure;
           test_case "mixed invalid request commits nothing" `Quick

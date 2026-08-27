@@ -36,6 +36,7 @@ module Approval_queue = Masc.Keeper_approval_queue
 module Approval_types = Keeper_approval_queue_rules_types
 module Turn_up_args = Masc.Keeper_turn_up_args
 module Turn_up_update = Masc.Keeper_turn_up_update
+module Turn_up_config_persistence = Masc.Keeper_turn_up_config_persistence
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_store = Masc.Keeper_meta_store
@@ -80,6 +81,12 @@ let create_owner_meta_exn config meta =
   | Ok (Some _) -> ()
   | Ok None -> fail "owner metadata creation removed its snapshot"
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let manifest_revision_exn config keeper_name =
+  match Turn_up_config_persistence.current_revision ~config ~keeper_name with
+  | Ok revision -> revision
+  | Error error -> fail error
 ;;
 
 let ensure_owner_meta_exn config meta =
@@ -1721,6 +1728,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "new operator intent"
@@ -1743,7 +1752,13 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
             Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
-      let result = Turn_up_update.update_keeper ctx parsed live_meta in
+      let result =
+        Turn_up_update.update_keeper
+          ~expected_manifest_revision:(manifest_revision_exn config live_name)
+          ctx
+          parsed
+          live_meta
+      in
       check bool
         "keeper_up restarts despite the stale blocked admission"
         true
@@ -1787,7 +1802,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         }
       in
       let stopped_result =
-        Turn_up_update.update_keeper ctx stopped_parsed stopped_meta
+        Turn_up_update.update_keeper
+          ~expected_manifest_revision:(manifest_revision_exn config stopped_name)
+          ctx
+          stopped_parsed
+          stopped_meta
       in
       check bool
         "explicit keeper_up resumes an operator-stopped keeper"
@@ -1852,6 +1871,8 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "rejected mid-turn intent"
@@ -1881,7 +1902,12 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
          Keeper_owner_registry.run_maintenance_if_idle
            ~base_path:config.base_path
            ~keeper_name:name
-           (fun () -> Turn_up_update.update_keeper ctx parsed meta)
+           (fun () ->
+             Turn_up_update.update_keeper
+               ~expected_manifest_revision:(manifest_revision_exn config name)
+               ctx
+               parsed
+               meta)
        with
        | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
        | Ok (`Busy _) -> fail "Owner unexpectedly busy before the test turn"
@@ -1916,7 +1942,13 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
            (owner_turn_in_flight_exn
               ~base_path:config.base_path
               ~keeper_name:name));
-      let retry = Turn_up_update.update_keeper ctx parsed after in
+      let retry =
+        Turn_up_update.update_keeper
+          ~expected_manifest_revision:(manifest_revision_exn config name)
+          ctx
+          parsed
+          after
+      in
       check bool "idle update restarts the lane" true
         (Keeper_types_profile.tool_result_success retry);
       ignore
@@ -2009,6 +2041,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; network_mode_opt = None
         ; tool_groups_opt = None
         ; tool_groups_present = false
+        ; skill_names_opt = None
+        ; skill_names_present = false
         ; native_tool_posture_opt = None
         ; native_tool_posture_present = false
         ; instructions_arg = Some "durable cancelled update"
@@ -2027,7 +2061,12 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
           try
             Eio.Switch.run @@ fun update_sw ->
             Eio.Promise.resolve resolve_update_switch update_sw;
-            ignore (Turn_up_update.update_keeper ctx parsed meta);
+            ignore
+              (Turn_up_update.update_keeper
+                 ~expected_manifest_revision:(manifest_revision_exn config name)
+                 ctx
+                 parsed
+                 meta);
             `Returned
           with
           | Cancel_keeper_up_after_metadata -> `Cancelled

@@ -144,7 +144,177 @@ let swap_keepalive_lane_fenced (ctx : _ context) (updated : keeper_meta)
     Ok (swap (), start_keepalive ctx updated)
 ;;
 
-let update_keeper ?(preserve_prompt_defaults = false)
+let manifest_revision_conflict_data
+      ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
+  =
+  `Assoc
+    [ "code", `String "keeper_manifest_revision_conflict"
+    ; "expected", Keeper_turn_up_config_persistence.revision_to_yojson expected
+    ; "observed", Keeper_turn_up_config_persistence.revision_to_yojson observed
+    ]
+;;
+
+let manifest_revision_conflict_of_result result =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "code" fields with
+     | Some (`String "keeper_manifest_revision_conflict") ->
+       (match
+          List.assoc_opt "expected" fields,
+          List.assoc_opt "observed" fields
+        with
+        | Some expected_json, Some observed_json ->
+          (match
+             Keeper_turn_up_config_persistence.revision_of_yojson expected_json,
+             Keeper_turn_up_config_persistence.revision_of_yojson observed_json
+           with
+           | Ok expected, Ok observed ->
+             Some
+               ({ expected; observed } :
+                 Keeper_turn_up_config_persistence.conflict)
+           | Error _, _ | _, Error _ -> None)
+        | _ -> None)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let with_manifest_warnings warnings result =
+  match warnings with
+  | [] -> result
+  | warnings ->
+    Tool_result.with_metadata
+      (`Assoc
+         [ ( "keeper_manifest_warnings"
+           , `List
+               (List.map
+                  Keeper_turn_up_config_persistence.warning_to_yojson
+                  warnings) )
+         ])
+      result
+;;
+
+let reconciliation_required_data
+      ({ path; detail; observed } :
+        Keeper_turn_up_config_persistence.reconciliation)
+  =
+  let observed =
+    match observed with
+    | Keeper_turn_up_config_persistence.Observed_revision revision ->
+      `Assoc
+        [ "state", `String "revision"
+        ; "revision", Keeper_turn_up_config_persistence.revision_to_yojson revision
+        ]
+    | Keeper_turn_up_config_persistence.Unreadable_manifest error ->
+      `Assoc [ "state", `String "unreadable"; "detail", `String error ]
+  in
+  `Assoc
+    [ "code", `String "keeper_manifest_reconciliation_required"
+    ; "path", `String path
+    ; "detail", `String detail
+    ; "observed", observed
+    ]
+;;
+
+let config_publication_rollback_result detail =
+  tool_result_error_data
+    ~class_:Tool_result.Runtime_failure
+    (`Assoc
+      [ "code", `String "keeper_config_publication_rolled_back"
+      ; "detail", `String detail
+      ])
+;;
+
+let config_publication_rollback_of_result result =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "code" fields, List.assoc_opt "detail" fields with
+     | Some (`String "keeper_config_publication_rolled_back"), Some (`String detail) ->
+       Some detail
+     | _ -> None)
+  | _ -> None
+;;
+
+let config_reconciliation_required_of_result result =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "code" fields with
+     | Some (`String "keeper_manifest_reconciliation_required") ->
+       Some (Yojson.Safe.to_string (`Assoc fields))
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+type manifest_publication =
+  | Publication_rolled_back of tool_result
+  | Publication_applied of keeper_meta
+  | Publication_applied_with_runtime_failure of string
+
+let finish_published_update ~supersession ctx updated =
+  (* Metadata is already durable. A cancelled HTTP/MCP caller must not
+     interrupt the matching shutdown supersession, temporary admission-fence
+     rollback, or lane restart. *)
+  Eio.Cancel.protect (fun () ->
+    match
+      Keeper_shutdown_supersession.commit_after_metadata_update
+        ~config:ctx.config
+        supersession
+    with
+    | Error error ->
+      tool_result_error ~class_:Tool_result.Runtime_failure
+        (Keeper_shutdown_supersession.error_to_string error)
+    | Ok
+        ( Keeper_shutdown_supersession.No_shutdown_admission
+        | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+      (match swap_keepalive_lane_fenced ctx updated with
+       | Error rejection -> rejection
+       | Ok (stop_outcome, launch_outcome) ->
+         (match launch_outcome with
+          | Keepalive_started _ ->
+            tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
+          | Keepalive_already_registered entry ->
+            let stop_detail =
+              match stop_outcome with
+              | Keeper_not_registered ->
+                "keeper was not registered before restart"
+              | Keeper_joined _ -> "previous keeper lane joined"
+            in
+            tool_result_error ~class_:Tool_result.Workflow_rejection
+              (Printf.sprintf
+                 "keeper update launch conflicted after %s: %s"
+                 stop_detail
+                 (start_keepalive_outcome_to_string
+                    (Keepalive_already_registered entry)))
+          | ( Keepalive_lifecycle_denied _
+            | Keepalive_identity_unrepairable
+            | Keepalive_registration_rejected _
+            | Keepalive_fiber_start_rejected _
+            | Keepalive_memory_lane_not_ready _
+            | Keepalive_launch_callback_failed _
+            | Keepalive_lane_ownership_lost
+            | Keepalive_fork_rejected _ ) as rejected ->
+            tool_result_error ~class_:Tool_result.Runtime_failure
+              (Printf.sprintf
+                 "keeper metadata was updated but lane restart failed: %s"
+                 (start_keepalive_outcome_to_string rejected)))))
+;;
+
+let finish_publication_after_runtime_failure ~supersession ctx detail =
+  Eio.Cancel.protect (fun () ->
+    match
+      Keeper_shutdown_supersession.commit_after_metadata_update
+        ~config:ctx.config
+        supersession
+    with
+    | Error error ->
+      tool_result_error ~class_:Tool_result.Runtime_failure
+        (Keeper_shutdown_supersession.error_to_string error)
+    | Ok
+        ( Keeper_shutdown_supersession.No_shutdown_admission
+        | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
+      tool_result_error ~class_:Tool_result.Runtime_failure detail)
+;;
+
+let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revision
     (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
     =
   match resume_operator_pause ctx old with
@@ -249,51 +419,103 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.name err;
       tool_result_error ~class_:Tool_result.Policy_rejection err
   | Ok () ->
-         let runtime_assignment_result =
-           match p.runtime_id_opt with
-           | None -> Ok ()
-           | Some runtime_id ->
-             Runtime.set_runtime_id_for_keeper
-               ~keeper_name:p.name
-               ~runtime_id
-               ()
-             (* See [Runtime.set_runtime_id_for_keeper]: the persisted receipt is the effect. *)
-             |> Result.map ignore
-         in
-         (match runtime_assignment_result with
-          | Error err ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string TurnUpUpdateFailures)
-              ~labels:
-                [ ( "keeper", p.name )
-                ; ( "site"
-                  , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
-                  )
-                ]
-              ();
-            Log.Keeper.warn
-              "update_keeper failed runtime assignment for %s: %s"
-              p.name
-              err;
-            tool_result_error ~class_:Tool_result.Runtime_failure err
-          | Ok () ->
-            (match
-               Keeper_shutdown_supersession.preflight
-                 ~config:ctx.config
-                 ~keeper_name:updated.name
-                 ~actor:ctx.agent_name
-             with
-             | Error error ->
-               tool_result_error ~class_:Tool_result.Runtime_failure
-                 (Keeper_shutdown_supersession.error_to_string error)
-             | Ok supersession ->
-             (match
-                Keeper_turn_up_config_persistence.persist
-                  ~config:ctx.config
-                  ~parsed:p
-                  ~meta:updated
+         (match
+            Keeper_shutdown_supersession.preflight
+              ~config:ctx.config
+              ~keeper_name:updated.name
+              ~actor:ctx.agent_name
+          with
+          | Error error ->
+            tool_result_error ~class_:Tool_result.Runtime_failure
+              (Keeper_shutdown_supersession.error_to_string error)
+          | Ok supersession ->
+            let publish _outcome =
+              match
+                Keeper_owner_registry.apply_meta
+                     ~base_path:ctx.config.base_path
+                     ~keeper_name:updated.name
+                     (Keeper_owner_reducer.Update_profile
+                        { instructions = updated.instructions
+                        ; autonomous_instructions = updated.autonomous_instructions
+                        ; sandbox_profile = updated.sandbox_profile
+                        ; sandbox_image = updated.sandbox_image
+                        ; network_mode = updated.network_mode
+                        ; allowed_paths = updated.allowed_paths
+                        ; mention_targets = updated.mention_targets
+                        ; proactive_enabled = updated.proactive.enabled
+                        ; max_context_override = updated.max_context_override
+                        ; autoboot_enabled = updated.autoboot_enabled
+                        ; telemetry_feedback_enabled = updated.telemetry_feedback_enabled
+                        ; telemetry_feedback_window_hours =
+                            updated.telemetry_feedback_window_hours
+                        ; always_allow = updated.always_allow
+                        ; agent_core_env = updated.agent_core_env
+                        ; tool_groups = updated.tool_groups
+                        ; updated_at = updated.updated_at
+                        })
               with
-              | Error e ->
+              | Error error ->
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string WriteMetaFailures)
+                     ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
+                     ();
+                Keeper_turn_up_config_persistence.Rollback
+                  (Publication_rolled_back
+                     (config_publication_rollback_result
+                        (Keeper_owner_registry.command_error_to_string error)))
+              | Ok None ->
+                Keeper_turn_up_config_persistence.Rollback
+                  (Publication_rolled_back
+                     (config_publication_rollback_result
+                        "Keeper owner metadata disappeared during update"))
+              | Ok (Some published_meta) ->
+                let runtime_assignment_result =
+                  match p.runtime_id_opt with
+                  | None -> Ok ()
+                  | Some runtime_id ->
+                    Runtime.set_runtime_id_for_keeper
+                      ~keeper_name:p.name
+                      ~runtime_id
+                      ()
+                    |> Result.map ignore
+                in
+                (match runtime_assignment_result with
+                 | Ok () ->
+                   Keeper_turn_up_config_persistence.Commit
+                     (Publication_applied published_meta)
+                 | Error err ->
+                   Otel_metric_store.inc_counter
+                     Keeper_metrics.(to_string TurnUpUpdateFailures)
+                     ~labels:
+                       [ ( "keeper", p.name )
+                       ; ( "site"
+                         , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
+                         )
+                       ]
+                     ();
+                   Log.Keeper.warn
+                     "update_keeper failed runtime assignment for %s: %s"
+                     p.name
+                     err;
+                   Keeper_turn_up_config_persistence.Commit
+                     (Publication_applied_with_runtime_failure
+                        err))
+            in
+            (match
+               Keeper_turn_up_config_persistence.persist_with_publication
+                 ~expected_revision:expected_manifest_revision
+                 ~config:ctx.config
+                 ~parsed:p
+                 ~meta:updated
+                 ~publish
+                 ()
+             with
+             | Error
+                 (Keeper_turn_up_config_persistence.Revision_conflict conflict) ->
+               tool_result_error_data
+                 ~class_:Tool_result.Workflow_rejection
+                 (manifest_revision_conflict_data conflict)
+             | Error (Keeper_turn_up_config_persistence.Io_error detail) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string TurnUpUpdateFailures)
                  ~labels:
@@ -304,86 +526,21 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    ]
                  ();
                tool_result_error ~class_:Tool_result.Runtime_failure
-                 (Printf.sprintf "declarative keeper config write failed: %s" e)
-              | Ok _ ->
-            (match
-               Keeper_owner_registry.apply_meta
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:updated.name
-                 (Keeper_owner_reducer.Update_profile
-                    { instructions = updated.instructions
-                    ; autonomous_instructions = updated.autonomous_instructions
-                    ; sandbox_profile = updated.sandbox_profile
-                    ; sandbox_image = updated.sandbox_image
-                    ; network_mode = updated.network_mode
-                    ; allowed_paths = updated.allowed_paths
-                    ; mention_targets = updated.mention_targets
-                    ; proactive_enabled = updated.proactive.enabled
-                    ; max_context_override = updated.max_context_override
-                    ; autoboot_enabled = updated.autoboot_enabled
-                    ; telemetry_feedback_enabled = updated.telemetry_feedback_enabled
-                    ; telemetry_feedback_window_hours =
-                        updated.telemetry_feedback_window_hours
-                    ; always_allow = updated.always_allow
-                    ; agent_core_env = updated.agent_core_env
-                    ; tool_groups = updated.tool_groups
-                    ; updated_at = updated.updated_at
-                    })
-             with
-             | Error error ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string WriteMetaFailures)
-                 ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-                 ();
-               tool_result_error ~class_:Tool_result.Runtime_failure
-                 (Keeper_owner_registry.command_error_to_string error)
-             | Ok None ->
-               tool_result_error ~class_:Tool_result.Runtime_failure "Keeper owner metadata disappeared during update"
-             | Ok (Some updated) ->
-               (* Metadata is already durable.  A cancelled HTTP/MCP caller
-                  must not interrupt the matching shutdown supersession,
-                  temporary admission-fence rollback, or lane restart.  The
-                  protected region still re-delivers cancellation after the
-                  lifecycle transaction has reached a consistent boundary. *)
-               Eio.Cancel.protect (fun () ->
-                 match
-                   Keeper_shutdown_supersession.commit_after_metadata_update
-                     ~config:ctx.config
-                     supersession
-                 with
-                 | Error error ->
-                   tool_result_error ~class_:Tool_result.Runtime_failure
-                     (Keeper_shutdown_supersession.error_to_string error)
-                 | Ok
-                     ( Keeper_shutdown_supersession.No_shutdown_admission
-                     | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
-                   (match swap_keepalive_lane_fenced ctx updated with
-                    | Error rejection -> rejection
-                    | Ok (stop_outcome, launch_outcome) ->
-                      (match launch_outcome with
-                       | Keepalive_started _ ->
-                         tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
-                       | Keepalive_already_registered entry ->
-                         let stop_detail =
-                           match stop_outcome with
-                           | Keeper_not_registered ->
-                             "keeper was not registered before restart"
-                           | Keeper_joined _ -> "previous keeper lane joined"
-                         in
-                         tool_result_error ~class_:Tool_result.Workflow_rejection
-                           (Printf.sprintf
-                              "keeper update launch conflicted after %s: %s"
-                              stop_detail
-                              (start_keepalive_outcome_to_string
-                                 (Keepalive_already_registered entry)))
-                       | ( Keepalive_lifecycle_denied _
-                         | Keepalive_registration_rejected _
-                         | Keepalive_fiber_start_rejected _
-                         | Keepalive_memory_lane_not_ready _
-                         | Keepalive_launch_callback_failed _
-                         | Keepalive_lane_ownership_lost
-                         | Keepalive_fork_rejected _ ) as rejected ->
-                         tool_result_error ~class_:Tool_result.Runtime_failure
-                           (Printf.sprintf
-                              "keeper metadata was updated but lane restart failed: %s"
-                              (start_keepalive_outcome_to_string rejected)))))))))
+                 (Printf.sprintf "declarative keeper config write failed: %s" detail)
+             | Error
+                 (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
+               tool_result_error_data
+                 ~class_:Tool_result.Runtime_failure
+                 (reconciliation_required_data state)
+             | Ok { value = Publication_rolled_back result; warnings } ->
+               with_manifest_warnings warnings result
+             | Ok { value = Publication_applied updated; warnings } ->
+               finish_published_update ~supersession ctx updated
+               |> with_manifest_warnings warnings
+             | Ok
+                 { value = Publication_applied_with_runtime_failure detail
+                 ; warnings
+                 } ->
+               finish_publication_after_runtime_failure
+                 ~supersession ctx detail
+               |> with_manifest_warnings warnings))

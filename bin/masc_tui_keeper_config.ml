@@ -60,6 +60,11 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
+let expected_manifest_revision before =
+  match member "manifest_revision" before with
+  | Some (`Assoc _ as revision) -> Ok revision
+  | Some _ | None -> Error "keeper manifest revision was not observed"
+
 let patch_of_edit ~before ~after =
   match after with
   | `Assoc edited_fields ->
@@ -83,7 +88,13 @@ let patch_of_edit ~before ~after =
                  | Some old_value -> not (Yojson.Safe.equal value old_value)
                  | None -> true)
         in
-        Ok (`Assoc changed)
+        if changed = []
+        then Ok (`Assoc [])
+        else
+          Result.map
+            (fun revision ->
+              `Assoc (("expected_manifest_revision", revision) :: changed))
+            (expected_manifest_revision before)
   | _ -> Error "keeper settings must remain a JSON object"
 
 (* Marker column. The glyph carries the editable/read-only split on its own,
@@ -185,6 +196,11 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
+let manifest_revision_value = function
+  | Some (`Assoc [ ("state", `String "missing") ]) -> "missing"
+  | Some (`Assoc fields) -> string_value (List.assoc_opt "value" fields)
+  | value -> string_value value
+
 (* One document, but the reader has to be able to answer "will [e] change
    this?" without counting rows against the editor stem. The glyph answers it
    on every line, and the field count in the heading is taken from the same
@@ -235,6 +251,8 @@ let view_lines ~sanitize json =
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
   ; section "derived" "read-only"
+  ; read_only_value_row "Manifest revision"
+      (fun () -> manifest_revision_value (at [ "manifest_revision" ]))
   ; read_only_value_row "Effective paths"
       (fun () -> string_list_value (at [ "effective_allowed_paths" ]))
   ; ""

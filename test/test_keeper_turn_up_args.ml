@@ -189,6 +189,13 @@ let with_persisting_context f =
       in
       f ctx)
 
+let current_revision_exn config keeper_name =
+  match
+    Keeper_turn_up_config_persistence.current_revision ~config ~keeper_name
+  with
+  | Ok revision -> revision
+  | Error error -> failf "current revision: %s" error
+
 (* End-to-end for the settable surface behind the dashboard PATCH and
    masc_keeper_up: parse -> TOML persist -> profile-defaults read-back, then
    an explicit null clears the key instead of writing an empty one. *)
@@ -215,10 +222,17 @@ let test_persist_round_trips_wake_prompt () =
   in
   let persist_or_fail parsed =
     match
-      Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config meta.name)
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
     with
-    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
-    | Error error -> failf "persist: %s" error
+    | Ok { value = (_ : Keeper_turn_up_config_persistence.outcome); _ } -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
   in
   let read_back () =
     match
@@ -271,12 +285,19 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
     | Error result ->
       failf "parse: %s" (Keeper_types_profile.tool_result_body result)
   in
-  let persist parsed meta =
+  let persist parsed (meta : Keeper_meta_contract.keeper_meta) =
     match
-      Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config meta.name)
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
     with
-    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
-    | Error error -> failf "persist: %s" error
+    | Ok { value = (_ : Keeper_turn_up_config_persistence.outcome); _ } -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
   in
   let read_back () =
     match
@@ -357,9 +378,18 @@ let test_skills_names_patch_round_trips_three_states () =
     | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
   in
   let persist parsed =
-    match Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta with
-    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
-    | Error error -> failf "persist: %s" error
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:(current_revision_exn ctx.config meta.name)
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok { value = (_ : Keeper_turn_up_config_persistence.outcome); _ } -> ()
+    | Error error ->
+      failf "persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
   in
   let read_back () =
     match
@@ -389,6 +419,466 @@ let test_skills_names_patch_round_trips_three_states () =
     (parse_or_fail
        (`Assoc [ "name", `String name; "skills", `Assoc [] ]));
   check (option (list string)) "empty skills patch clears to absent" None (read_back ())
+;;
+
+let test_manifest_revision_allows_only_one_stale_writer () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-cas-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse instructions =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String instructions
+          ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta
+        ()
+    with
+    | Ok { value = outcome; _ } -> outcome.revision
+    | Error error ->
+      failf "initial persist: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let first =
+    Keeper_turn_up_config_persistence.persist
+      ~expected_revision:initial
+      ~config:ctx.config
+      ~parsed:(parse "first writer")
+      ~meta:{ meta with instructions = "first writer" }
+      ()
+  in
+  let first_revision =
+    match first with
+    | Ok { value = outcome; _ } -> outcome.revision
+    | Error error ->
+      failf "first writer: %s"
+        (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:first_revision
+       ~config:ctx.config
+       ~parsed:(parse "publication rejected")
+       ~meta:{ meta with instructions = "publication rejected" }
+       ~publish:(fun _ -> Keeper_turn_up_config_persistence.Rollback `Rejected)
+       ()
+   with
+   | Ok { value = `Rejected; _ } -> ()
+   | Ok _ -> fail "unexpected publication result"
+   | Error error ->
+     failf "publication rollback: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error));
+  let after_rollback =
+    match
+      Keeper_turn_up_config_persistence.current_revision
+        ~config:ctx.config
+        ~keeper_name:name
+    with
+    | Ok revision -> revision
+    | Error error -> failf "revision after rollback: %s" error
+  in
+  check bool "publication rejection restores exact authority bytes" true
+    (after_rollback = first_revision);
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed:(parse "stale writer")
+       ~meta:{ meta with instructions = "stale writer" }
+       ()
+   with
+   | Error
+       (Keeper_turn_up_config_persistence.Revision_conflict
+          { expected; observed }) ->
+     check bool "loser carries expected revision" true (expected = initial);
+     check bool "loser observes winner revision" true (observed = first_revision)
+   | Error error ->
+     failf "unexpected loser error: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "stale writer overwrote the winner");
+  let path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml")
+  in
+  let doc =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> fail error
+  in
+  check (option string) "winner bytes remain authoritative"
+    (Some "first writer")
+    (Keeper_toml_loader.toml_string_opt doc "keeper.instructions")
+;;
+
+let test_rejected_create_publication_removes_manifest () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-create-rollback-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ])
+    with
+    | Ok parsed -> parsed
+    | Error result ->
+      failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~config:ctx.config
+       ~parsed
+       ~meta
+       ~publish:(fun _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Ok { value = (); _ } -> ()
+   | Error error ->
+     failf "create rollback: %s"
+       (Keeper_turn_up_config_persistence.error_to_string error));
+  match
+    Keeper_turn_up_config_persistence.current_revision
+      ~config:ctx.config
+      ~keeper_name:name
+  with
+  | Ok Keeper_turn_up_config_persistence.Missing -> ()
+  | Ok (Keeper_turn_up_config_persistence.Sha256 _) ->
+    fail "rejected create left a manifest behind"
+  | Error error -> failf "revision after create rollback: %s" error
+;;
+
+let run_cas_child base name expected_hex instructions =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let ctx : _ Keeper_types_profile.context =
+    { config = Workspace.default_config base
+    ; agent_name = "cas-child"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error _ -> exit 3
+  in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok meta -> meta
+    | Error _ -> exit 3
+  in
+  match
+    Keeper_turn_up_config_persistence.persist
+      ~expected_revision:(Keeper_turn_up_config_persistence.Sha256 expected_hex)
+      ~config:ctx.config
+      ~parsed
+      ~meta
+      ()
+  with
+  | Ok _ -> exit 0
+  | Error (Keeper_turn_up_config_persistence.Revision_conflict _) -> exit 2
+  | Error _ -> exit 3
+;;
+
+let test_two_processes_same_revision_have_one_winner () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-two-process-cas-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let expected =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~config:ctx.config
+        ~parsed
+        ~meta
+        ()
+    with
+    | Ok
+        { value =
+            { revision = Keeper_turn_up_config_persistence.Sha256 value; _ }
+        ; _
+        } -> value
+    | Ok _ -> fail "initial manifest did not produce a sha256 revision"
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let spawn instructions =
+    Unix.create_process
+      Sys.executable_name
+      [| Sys.executable_name
+       ; "--keeper-manifest-cas-child"
+       ; ctx.config.base_path
+       ; name
+       ; expected
+       ; instructions
+      |]
+      Unix.stdin
+      Unix.stdout
+      Unix.stderr
+  in
+  let first = spawn "first process" in
+  let second = spawn "second process" in
+  let rec status pid =
+    match Unix.waitpid [] pid with
+    | _, status -> status
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> status pid
+  in
+  let statuses = [ status first; status second ] in
+  check int "one process commits" 1
+    (List.length (List.filter (( = ) (Unix.WEXITED 0)) statuses));
+  check int "one stale process conflicts" 1
+    (List.length (List.filter (( = ) (Unix.WEXITED 2)) statuses))
+;;
+
+let test_revision_projection_holds_manifest_lock () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-projection-lock-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta
+        ()
+    with
+    | Ok { value = { revision; _ }; _ } -> revision
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  let writer_started, resolve_writer_started = Eio.Promise.create () in
+  let writer_done, resolve_writer_done = Eio.Promise.create () in
+  let projected =
+    Keeper_turn_up_config_persistence.with_current_revision
+      ~config:ctx.config
+      ~keeper_name:name
+      (fun revision ->
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve resolve_writer_started ();
+          let result =
+            Keeper_turn_up_config_persistence.persist
+              ~expected_revision:revision
+              ~config:ctx.config
+              ~parsed:(parse "writer")
+              ~meta:{ meta with instructions = "writer" }
+              ()
+          in
+          Eio.Promise.resolve resolve_writer_done result);
+        Eio.Promise.await writer_started;
+        Eio.Fiber.yield ();
+        check bool "writer is fenced during projection" true
+          (Option.is_none (Eio.Promise.peek writer_done));
+        revision)
+  in
+  (match projected with
+   | Ok { value; _ } ->
+     check bool "projection observed initial revision" true (value = initial)
+   | Error error -> fail error);
+  (match Eio.Promise.await writer_done with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error))
+;;
+
+let test_release_failure_preserves_committed_receipt () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-release-receipt-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "committed" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parsed =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc
+           [ "name", `String name; "instructions", `String "committed" ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let lock_path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.Workspace.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml.lock")
+  in
+  let release_failure =
+    { File_lock_eio.lock_path
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_release_after_commit"
+        ; argument = lock_path
+        }
+    ; cleanup_failure = None
+    }
+  in
+  match
+    Keeper_turn_up_config_persistence.For_testing.persist_with_release_failure
+      ~release_failure
+      ~expected_revision:Keeper_turn_up_config_persistence.Missing
+      ~config:ctx.config
+      ~parsed
+      ~meta
+      ()
+  with
+  | Error error ->
+    fail (Keeper_turn_up_config_persistence.error_to_string error)
+  | Ok
+      { value =
+          { revision = Keeper_turn_up_config_persistence.Sha256 _; _ }
+      ; warnings
+      } ->
+    check int "commit returns one typed release warning" 1 (List.length warnings);
+    check bool "warning is lock release uncertainty" true
+      (match warnings with
+       | [ Keeper_turn_up_config_persistence.Lock_release_unconfirmed _ ] -> true
+       | _ -> false)
+  | Ok _ -> fail "commit receipt did not carry a sha256 revision"
+;;
+
+let test_rollback_after_rename_failure_requires_reconciliation () =
+  with_persisting_context @@ fun ctx ->
+  let name = "manifest-rollback-reconciliation-fixture" in
+  let meta instructions =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial =
+    match
+      Keeper_turn_up_config_persistence.persist
+        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~config:ctx.config
+        ~parsed:(parse "initial")
+        ~meta:(meta "initial")
+        ()
+    with
+    | Ok { value = { revision; _ }; _ } -> revision
+    | Error error ->
+      fail (Keeper_turn_up_config_persistence.error_to_string error)
+  in
+  (match
+     Keeper_turn_up_config_persistence.For_testing.persist_with_rollback_parent_sync_failure
+       ~expected_revision:initial
+       ~config:ctx.config
+       ~parsed:(parse "rejected")
+       ~meta:(meta "rejected")
+       ()
+   with
+   | Error (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
+     check bool "observed authority is the restored snapshot" true
+       (state.observed
+        = Keeper_turn_up_config_persistence.Observed_revision initial)
+   | Error error ->
+     fail
+       ("unexpected rollback error: "
+        ^ Keeper_turn_up_config_persistence.error_to_string error)
+   | Ok _ -> fail "after-rename rollback failure was reported as committed");
+  check bool "cache-invalidated read sees restored bytes" true
+    (current_revision_exn ctx.config name = initial)
 ;;
 
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
@@ -478,6 +968,10 @@ let test_validate_allows_local_with_hatch () =
       | Error err -> fail ("hatch must allow local: " ^ err))
 
 let () =
+  match Array.to_list Sys.argv with
+  | [ _; "--keeper-manifest-cas-child"; base; name; expected; instructions ] ->
+    run_cas_child base name expected instructions
+  | _ ->
   run
     "keeper_turn_up_args"
     [ ( "mention_targets"
@@ -538,6 +1032,30 @@ let () =
             "names round-trip absent, empty, and exact values"
             `Quick
             test_skills_names_patch_round_trips_three_states
+        ; test_case
+            "one expected revision commits exactly one writer"
+            `Quick
+            test_manifest_revision_allows_only_one_stale_writer
+        ; test_case
+            "rejected create publication leaves manifest missing"
+            `Quick
+            test_rejected_create_publication_removes_manifest
+        ; test_case
+            "two processes with one revision produce one winner"
+            `Quick
+            test_two_processes_same_revision_have_one_winner
+        ; test_case
+            "revision projection and meta read share the manifest lock"
+            `Quick
+            test_revision_projection_holds_manifest_lock
+        ; test_case
+            "release failure preserves committed receipt"
+            `Quick
+            test_release_failure_preserves_committed_receipt
+        ; test_case
+            "rollback after rename failure requires reconciliation"
+            `Quick
+            test_rollback_after_rename_failure_requires_reconciliation
         ] )
     ; ( "keeper_name"
       , [ test_case

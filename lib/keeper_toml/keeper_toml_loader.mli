@@ -49,10 +49,6 @@ val toml_string_list : toml_doc -> string -> string list
 val update_field_in_content :
   table:string -> key:string -> value:string -> string -> (string, string) result
 
-(** Atomically update boolean fields under [\[keeper\]]. *)
-val update_keeper_toml_bool_fields :
-  path:string -> (string * bool) list -> (unit, string) result
-
 type toml_edit =
   | Set of toml_value
   | Remove
@@ -62,7 +58,17 @@ type toml_edit =
 val edit_keeper_toml_fields :
   path:string -> (string * toml_edit) list -> (unit, string) result
 
+val edit_keeper_toml_fields_strict_staged :
+  path:string ->
+  (string * toml_edit) list ->
+  (unit, Fs_compat.atomic_replace_failure) result
+
 (** Create a new declarative keeper TOML. Refuses to overwrite an existing
     path. *)
 val create_keeper_toml_file :
   path:string -> (string * toml_value) list -> (unit, string) result
+
+val create_keeper_toml_file_strict_staged :
+  path:string ->
+  (string * toml_value) list ->
+  (unit, Fs_compat.atomic_replace_failure) result

@@ -8,6 +8,7 @@ import { signal } from '@preact/signals'
 import {
   patchKeeperConfig,
 } from '../api/dashboard'
+import { ApiRequestError } from '../api/core'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
@@ -439,6 +440,7 @@ const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
 const activeKeeperConfigOwner = signal<KeeperConfigPanelOwner | null>(null)
 const runtimeSaving = signal(false)
 const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
+const promptSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
@@ -450,6 +452,7 @@ function resetKeeperConfigPanelDrafts(): void {
   activeKeeperConfigOwner.value = null
   runtimeSaving.value = false
   runtimeSaveRequest.value = null
+  promptSaveRequest.value = null
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
@@ -1696,7 +1699,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.manifest_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== saveRequest.owner.keeperName
@@ -1706,6 +1709,20 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       void refreshKeeperSurfacesAfterConfigSave()
       showToast('Keeper 설정 저장 완료', 'success')
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_manifest_revision_conflict'
+      ) {
+        runtimeDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        return
+      }
       const msg = err instanceof Error ? err.message : '저장 실패'
       showToast(msg, 'error')
     } finally {
@@ -1768,10 +1785,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       cancelEdit()
       return
     }
+    const saveRequest: KeeperConfigSaveRequest = {
+      owner: panelOwner,
+      request: Symbol('keeper-prompt-config-save'),
+    }
+    promptSaveRequest.value = saveRequest
     saving.value = true
     saveError.value = null
     try {
-      const updated = await patchKeeperConfig(keeperName, payload)
+      const updated = await patchKeeperConfig(keeperName, payload, c.manifest_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== panelOwner.keeperName
@@ -1784,9 +1806,27 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       lastSavedAt.value = new Date().toISOString()
       showToast('프롬프트 저장 완료', 'success')
     } catch (err) {
+      const activeOwner = activeKeeperConfigOwner.value
+      if (
+        activeOwner?.keeperName !== saveRequest.owner.keeperName
+        || activeOwner.epoch !== saveRequest.owner.epoch
+      ) return
+      if (
+        err instanceof ApiRequestError
+        && err.errorCode === 'keeper_manifest_revision_conflict'
+      ) {
+        editMode.value = false
+        editDraft.value = null
+        await loadKeeperConfig(keeperName, { force: true })
+        showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
+        return
+      }
       saveError.value = err instanceof Error ? err.message : '저장 실패'
     } finally {
-      saving.value = false
+      if (promptSaveRequest.value?.request === saveRequest.request) {
+        promptSaveRequest.value = null
+        saving.value = false
+      }
     }
   }
 

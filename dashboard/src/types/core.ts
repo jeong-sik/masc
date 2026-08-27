@@ -1386,6 +1386,10 @@ export interface KeeperConfigSkills {
   names: string[] | null
 }
 
+export type KeeperManifestRevision =
+  | { state: 'missing' }
+  | { state: 'sha256'; value: string }
+
 export interface RuntimeRef {
   group: string
   item: string | null
@@ -1480,6 +1484,7 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
+  manifest_revision: KeeperManifestRevision
   autoboot_enabled: boolean
   max_context_override: number | null
   /** Keeper-level autonomous wake prompt override; null inherits the fleet

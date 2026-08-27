@@ -353,6 +353,23 @@ describe('post', () => {
 })
 
 describe('typed API errors', () => {
+  it('reads a typed code from a structured REST error object', async () => {
+    const error = await apiRequestErrorFromResponse(
+      'POST',
+      '/api/v1/keepers/alpha/config',
+      new Response(JSON.stringify({
+        error: {
+          code: 'keeper_manifest_revision_conflict',
+          expected: { state: 'missing' },
+          observed: { state: 'sha256', value: 'a'.repeat(64) },
+        },
+      }), { status: 409 }),
+    )
+
+    expect(error.errorCode).toBe('keeper_manifest_revision_conflict')
+    expect(error.status).toBe(409)
+  })
+
   it('uses auth_error_code as authority and keeps error prose as detail', async () => {
     const error = await apiRequestErrorFromResponse(
       'POST',

@@ -487,6 +487,12 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
         ? jsonRpcError.data
         : null
       const errorDetail = typeof parsed.error === 'string' ? parsed.error.trim() : ''
+      const structuredErrorCode = typeof jsonRpcError?.code === 'string'
+        ? jsonRpcError.code.trim()
+        : ''
+      const structuredErrorDetail = typeof jsonRpcError?.detail === 'string'
+        ? jsonRpcError.detail.trim()
+        : ''
       const topLevelAuthErrorCode = typeof parsed.auth_error_code === 'string'
         ? parsed.auth_error_code.trim()
         : ''
@@ -497,13 +503,14 @@ async function errorResponseInfoFromResponse(res: Response): Promise<ErrorRespon
       const errorCode =
         authErrorCode
         || (typeof parsed.error_code === 'string' ? parsed.error_code.trim() : '')
+        || structuredErrorCode
         || (typeof parsed.status === 'string' ? parsed.status.trim() : '')
         || errorDetail
       const topLevelMessage = typeof parsed.message === 'string' ? parsed.message.trim() : ''
       const jsonRpcMessage = typeof jsonRpcError?.message === 'string'
         ? jsonRpcError.message.trim()
         : ''
-      const message = topLevelMessage || jsonRpcMessage
+      const message = topLevelMessage || jsonRpcMessage || structuredErrorDetail
       if (message || errorDetail || errorCode) {
         return {
           detail: message || errorDetail || errorCode || undefined,

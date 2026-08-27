@@ -3090,9 +3090,12 @@ describe('dashboard goals decoding', () => {
 })
 
 describe('fetchKeeperConfig', () => {
+  const manifestRevision = { state: 'sha256', value: 'a'.repeat(64) } as const
+
   it('normalizes singleton and boolean string fields with a canonical context override', async () => {
     const rawResponse = {
       name: 'keeper-sangsu',
+      manifest_revision: manifestRevision,
       autoboot_enabled: 'false',
       max_context_override: 64_000,
       autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
@@ -3225,7 +3228,7 @@ describe('fetchKeeperConfig', () => {
   ])('rejects a non-canonical max_context_override wire value: %s', async (_label, wireValue) => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
-        `{"name":"keeper-sangsu","max_context_override":${wireValue}}`,
+        `{"name":"keeper-sangsu","manifest_revision":{"state":"missing"},"max_context_override":${wireValue}}`,
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
@@ -3241,7 +3244,7 @@ describe('fetchKeeperConfig', () => {
 
   it('rejects a missing max_context_override wire field', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu"}', {
+      new Response('{"name":"keeper-sangsu","manifest_revision":{"state":"missing"}}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3253,9 +3256,36 @@ describe('fetchKeeperConfig', () => {
     )
   })
 
+  it('rejects a missing or unavailable manifest revision authority', async () => {
+    for (const manifestRevision of [
+      undefined,
+      { state: 'unavailable', detail: 'permission denied' },
+    ]) {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          name: 'keeper-sangsu',
+          ...(manifestRevision === undefined
+            ? {}
+            : { manifest_revision: manifestRevision }),
+          max_context_override: null,
+          skills: { names: null },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+        /manifest_revision/,
+      )
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","max_context_override":null,"skills":{"names":null}}', {
+      new Response('{"name":"keeper-sangsu","manifest_revision":{"state":"missing"},"max_context_override":null,"skills":{"names":null}}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3268,7 +3298,7 @@ describe('fetchKeeperConfig', () => {
 
   it('rejects a response that omits the Skill selection authority', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+      new Response('{"name":"keeper-sangsu","manifest_revision":{"state":"missing"},"max_context_override":null}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3285,6 +3315,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          manifest_revision: manifestRevision,
           max_context_override: null,
           skills: { names: null },
           prompt: {
@@ -3314,6 +3345,7 @@ describe('fetchKeeperConfig', () => {
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
+          manifest_revision: manifestRevision,
           max_context_override: null,
           skills: { names: null },
           field_presence: {
@@ -3355,6 +3387,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            manifest_revision: manifestRevision,
             max_context_override: null,
             skills: { names: null },
             metrics,
@@ -3391,6 +3424,7 @@ describe('fetchKeeperConfig', () => {
         new Response(
           JSON.stringify({
             name: 'keeper-sangsu',
+            manifest_revision: manifestRevision,
             max_context_override: null,
             skills: { names: null },
             runtime: {
@@ -3415,10 +3449,13 @@ describe('fetchKeeperConfig', () => {
 })
 
 describe('keeper config mutation API', () => {
+  const manifestRevision = { state: 'sha256', value: 'b'.repeat(64) } as const
+
   it('ensures dashboard auth before posting runtime_id changes', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        manifest_revision: manifestRevision,
         max_context_override: null,
         skills: { names: null },
         execution: {
@@ -3437,7 +3474,11 @@ describe('keeper config mutation API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchKeeperConfig('keeper-sangsu', { runtime_id: 'b.two' })
+    const result = await patchKeeperConfig(
+      'keeper-sangsu',
+      { runtime_id: 'b.two' },
+      manifestRevision,
+    )
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     expect(devTokenMock.ensureDevToken.mock.invocationCallOrder[0]).toBeLessThan(
@@ -3447,7 +3488,10 @@ describe('keeper config mutation API', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/keepers/keeper-sangsu/config')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'b.two' })
+    expect(JSON.parse(init.body as string)).toEqual({
+      runtime_id: 'b.two',
+      expected_manifest_revision: manifestRevision,
+    })
     expect(result.execution.selected_runtime_id).toBe('b.two')
   })
 
@@ -3455,6 +3499,7 @@ describe('keeper config mutation API', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
+        manifest_revision: manifestRevision,
         max_context_override: null,
         skills: { names: ['ocaml-coding'] },
       }), {
@@ -3466,11 +3511,12 @@ describe('keeper config mutation API', () => {
 
     const result = await patchKeeperConfig('keeper-sangsu', {
       skills: { names: ['ocaml-coding'] },
-    })
+    }, manifestRevision)
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(init.body as string)).toEqual({
       skills: { names: ['ocaml-coding'] },
+      expected_manifest_revision: manifestRevision,
     })
     expect(result.skills.names).toEqual(['ocaml-coding'])
   })

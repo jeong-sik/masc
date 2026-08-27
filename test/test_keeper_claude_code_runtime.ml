@@ -1573,10 +1573,23 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     true
 ;;
 
+let test_native_action_observer_keeps_exact_provider_identity () =
+  let seen = ref [] in
+  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
+  Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:9 ~observe
+    (Runtime_claude_code.Native_tool_started
+       { Runtime_native_tools.call_id = Some "claude-call"; tool_name = Some "Edit" });
+  Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:10 ~observe
+    (Runtime_claude_code.Native_tool_started
+       { Runtime_native_tools.call_id = Some "claude-call-2"; tool_name = None });
+  check (list (triple int string string)) "exact only" [ 9, "claude-call", "Edit" ] (List.rev !seen)
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
-    [ ( "lifecycle"
+    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "lifecycle"
       , [ test_case "settles and resumes" `Quick test_keeper_settles_and_resumes
         ; test_case
             "Agent Core checkpoint starts official-client turn"

@@ -34,6 +34,7 @@ val run :
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?on_official_client_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
+  ?on_native_action:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
@@ -45,6 +46,10 @@ val run :
     window and no input composition, which is what [/context] reads. *)
 
 module For_testing : sig
+  val observe_stream_native_action :
+    turn_count:int ->
+    observe:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
+    Runtime_codex_app_server.stream_event -> unit
   (** What the developer instructions say about the built-in write path.
 
       Codex cannot be told to drop its built-in tools, so under

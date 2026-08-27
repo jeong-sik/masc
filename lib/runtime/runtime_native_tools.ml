@@ -8,6 +8,24 @@ type observation =
   ; tool_name : string option
   }
 
+type exact_action = string * string
+
+let exact_action (observation : observation) =
+  match observation with
+  | { call_id = Some call_id; tool_name = Some tool_name }
+    when String.trim call_id <> "" && String.trim tool_name <> "" ->
+    Some (call_id, tool_name)
+  | { call_id = None; _ }
+  | { tool_name = None; _ }
+  | { call_id = Some _; tool_name = Some _ } -> None
+;;
+
+let observe_exact_action ~official_turn ~observe observation =
+  Option.iter
+    (fun (call_id, tool_name) -> observe ~official_turn ~call_id ~tool_name)
+    (exact_action observation)
+;;
+
 let stream_content_type = "native_tool_use"
 
 let to_string = function

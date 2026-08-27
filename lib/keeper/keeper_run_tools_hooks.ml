@@ -46,6 +46,8 @@ type agent_setup =
       invocation:Agent_core.Tool_contract.Invocation.t ->
       content:string ->
       unit
+  ; observe_official_client_native_action :
+      runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string -> unit
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list
@@ -395,6 +397,27 @@ let assemble_hooks
           (Keeper_skill_activation_ledger.Official_client_result_handoff
              { agent_core_turn })
         tool_results
+    in
+    let observe_official_client_native_action
+          ~runtime_id ~official_turn ~call_id ~tool_name =
+      let active_skill_tool_use_ids = Skill_delivery_state.active skill_delivery_state in
+      if active_skill_tool_use_ids <> [] then
+        try
+          match
+            Keeper_skill_activation_recorder.observe_native_action
+              ~config ctx.skill_activation_context ~active_skill_tool_use_ids
+              ~runtime_id ~official_turn ~call_id ~tool_name
+          with
+          | Ok _ -> ()
+          | Error error ->
+            Log.Keeper.warn "Official native Skill action observation failed keeper=%s runtime=%s tool=%s error=%s"
+              meta.name runtime_id tool_name
+              (Keeper_skill_activation_recorder.error_to_string error)
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s tool=%s error=%s"
+            meta.name runtime_id tool_name (Printexc.to_string exn)
     in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
@@ -955,6 +978,7 @@ let assemble_hooks
       ; model_input_projection
       ; stage_skill_delivery_on_wire
       ; observe_official_client_result_handoff
+      ; observe_official_client_native_action
       ; gate_replay_evidence
       ; acc
       ; all_tool_names

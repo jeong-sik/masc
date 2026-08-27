@@ -155,9 +155,9 @@ let model_input_projection_for_capacity
   | Some project -> project windowed
 ;;
 
-let claude_stream_callback ~keeper_name ~raw_trace_run on_event =
-  match on_event, raw_trace_run with
-  | None, None -> None
+let claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+  match on_event, raw_trace_run, on_native_action with
+  | None, None, None -> None
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -199,6 +199,9 @@ let claude_stream_callback ~keeper_name ~raw_trace_run on_event =
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_claude_code.Native_tool_started observation ->
+          Option.iter
+            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+            on_native_action;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -347,6 +350,18 @@ let recovery_failure_of_client_error = function
 ;;
 
 module For_testing = struct
+  let observe_stream_native_action ~turn_count ~observe event =
+    match
+      claude_stream_callback
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count
+        ~on_native_action:(Some observe)
+        None
+    with
+    | Some callback -> callback event
+    | None -> invalid_arg "native observer did not install Claude stream callback"
+  ;;
   let bounded_probe_config = bounded_probe_config
   let host_stop_turn_identity = host_stop_turn_identity
   let recovery_failure_of_client_error = recovery_failure_of_client_error
@@ -398,7 +413,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
-    ~on_official_client_result_handoff
+    ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.claude_code) =
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -803,7 +818,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     in
     let turn_result =
       let on_stream_event =
-        claude_stream_callback ~keeper_name ~raw_trace_run on_event
+        claude_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
       in
       try
         let client_result =
@@ -1037,6 +1052,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1127,7 +1143,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
             ~on_event
             ~effect_disposition
             ~context_overflow_retry_safe
-            ~on_official_client_result_handoff
+        ~on_official_client_result_handoff ~on_native_action
             ~config)
         ())
   in

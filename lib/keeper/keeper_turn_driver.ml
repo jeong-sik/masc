@@ -584,6 +584,7 @@ let run_named
     ?on_runtime_observation
     ?on_request_wire_observation
     ?on_official_client_result_handoff
+    ?on_official_client_native_action
     ?on_model_input_window_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
@@ -939,6 +940,11 @@ let run_named
                    (fun observe ->
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
+            ~on_native_action:
+              (fun ~official_turn ~call_id ~tool_name ->
+                 Option.iter
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   on_official_client_native_action)
             ~event_bus
             ~raw_trace
             ~on_event
@@ -1052,6 +1058,11 @@ let run_named
                    (fun observe ->
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
+            ~on_native_action:
+              (fun ~official_turn ~call_id ~tool_name ->
+                 Option.iter
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   on_official_client_native_action)
             ~event_bus
             ~raw_trace
             ~on_event
@@ -1148,6 +1159,11 @@ let run_named
                    (fun observe ->
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
+            ~on_native_action:
+              (fun ~official_turn ~call_id ~tool_name ->
+                 Option.iter
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   on_official_client_native_action)
             ~event_bus
             ~raw_trace
             ~on_event

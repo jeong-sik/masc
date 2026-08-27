@@ -447,8 +447,10 @@ let truncate_summary text =
   |> String_util.to_string
 ;;
 
+let keeper_wake_keeper_name body = assoc_string "keeper_name" body
+
 let keeper_wake_target body =
-  match assoc_string "keeper_name" body with
+  match keeper_wake_keeper_name body with
   | Some keeper_name -> Some ("keeper:" ^ keeper_name)
   | None -> None
 ;;
@@ -475,6 +477,23 @@ let target_summary request =
   | Error msg ->
     log_projection_error request ~surface:"target_summary" msg;
     None, None
+;;
+
+let wake_keeper_name_result (request : Schedule_domain.schedule_request) =
+  match payload_view request with
+  | Error msg -> Error msg
+  | Ok view ->
+    (match classify_kind view.raw_kind with
+     | Some Keeper_wake -> Ok (keeper_wake_keeper_name view.body)
+     | None -> Ok None)
+;;
+
+let wake_keeper_name request =
+  match wake_keeper_name_result request with
+  | Ok name -> name
+  | Error msg ->
+    log_projection_error request ~surface:"wake_keeper_name" msg;
+    None
 ;;
 
 let result_delivery request =

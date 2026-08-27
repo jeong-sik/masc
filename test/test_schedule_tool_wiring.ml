@@ -682,7 +682,11 @@ let test_due_signal_and_dashboard_projection () =
   check string "stored status is the dashboard SSOT" "due"
     (row |> member "status" |> to_string);
   check string "payload support" "supported"
-    (row |> member "payload_support" |> to_string)
+    (row |> member "payload_support" |> to_string);
+  check string "display target keeps its keeper: prefix" "keeper:schedule-keeper"
+    (row |> member "payload_target" |> to_string);
+  check string "bare keeper name rides its own field" "schedule-keeper"
+    (row |> member "payload_keeper_name" |> to_string)
 ;;
 
 let test_schedule_store_error_is_explicit () =

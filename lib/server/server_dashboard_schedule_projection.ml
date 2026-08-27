@@ -654,6 +654,9 @@ let schedule_request_dashboard_json
   let payload_target, payload_summary =
     Schedule_payload_projection.target_summary request
   in
+  let payload_keeper_name =
+    Schedule_payload_projection.wake_keeper_name request
+  in
   `Assoc
     [ "schedule_instance_id", `String request.schedule_instance_id
     ; "schedule_id", `String request.schedule_id
@@ -695,6 +698,10 @@ let schedule_request_dashboard_json
       , match payload_target with
         | None -> `Null
         | Some target -> `String target )
+    ; ( "payload_keeper_name"
+      , match payload_keeper_name with
+        | None -> `Null
+        | Some keeper_name -> `String keeper_name )
     ; ( "payload_summary"
       , match payload_summary with
         | None -> `Null

@@ -123,6 +123,8 @@
 .v2-app .sch-drawer .turn-hd h3 { white-space: nowrap; flex: none; }
 .sch-drawer .turn-hd .tid { white-space: nowrap; }
 .sch-d-summary { font-size: 13.5px; line-height: 1.55; color: var(--text-primary); margin: 0 0 10px; text-wrap: pretty; }
+.sch-keeper-jump { display: inline-block; margin-top: 8px; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--volt-strong); text-decoration: none; border: 1px solid color-mix(in oklab, var(--volt-strong) 32%, transparent); padding: 2px 8px; border-radius: var(--radius-xs); }
+.sch-keeper-jump:hover { text-decoration: underline; }
 .sch-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .sch-src { font-size: 10.5px; color: var(--text-dim); border: 1px solid var(--border-main); padding: 1px 7px; border-radius: var(--radius-pill); }
 .sch-kvs { display: flex; flex-direction: column; gap: 6px; }

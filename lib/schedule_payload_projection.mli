@@ -77,6 +77,14 @@ val dispatch_tool_for_request_result
 
 val dispatch_tool_for_request : Schedule_domain.schedule_request -> string option
 val target_summary : Schedule_domain.schedule_request -> string option * string option
+
+(** [wake_keeper_name request] is the bare keeper name a [masc.keeper_wake]
+    payload targets, without the ["keeper:"] display prefix that
+    [target_summary] carries. [None] for every other payload kind and for a
+    malformed payload (logged, same policy as [target_summary]). Consumers
+    that need the keeper identity read this instead of parsing the prefixed
+    display string. *)
+val wake_keeper_name : Schedule_domain.schedule_request -> string option
 val result_delivery :
   Schedule_domain.schedule_request ->
   (Keeper_continuation_channel.t option, string) result

@@ -237,6 +237,9 @@ export interface DashboardScheduledAutomationRequest {
   payload_kind?: string | null
   payload_support?: 'supported' | 'unsupported' | 'unknown'
   payload_target?: string | null
+  /** Bare keeper name of a keeper_wake payload (no `keeper:` display prefix);
+   *  null/absent for every other payload kind. */
+  payload_keeper_name?: string | null
   payload_summary?: string | null
   recurrence_summary?: string | null
   last_wake?: DashboardScheduledAutomationWakeReceipt | null

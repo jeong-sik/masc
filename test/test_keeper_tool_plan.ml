@@ -51,7 +51,12 @@ let test_node_id_rejects_empty () =
 
 let test_json_pointer_is_exact_rfc6901_navigation () =
   let source = `Assoc [ "a/b", `Assoc [ "~key", `Int 7 ] ] in
-  (match Plan.Json_pointer.resolve (pointer "/a~1b/~0key") source with
+  let escaped = pointer "/a~1b/~0key" in
+  check string
+    "canonical pointer spelling"
+    "/a~1b/~0key"
+    (Plan.Json_pointer.to_string escaped);
+  (match Plan.Json_pointer.resolve escaped source with
    | Ok (`Int 7) -> ()
    | Ok value -> failf "unexpected resolved value: %s" (Yojson.Safe.to_string value)
    | Error _ -> fail "escaped JSON pointer did not resolve");
@@ -966,7 +971,74 @@ let test_plan_error_json_covers_closed_sum () =
            "off-surface reason"
            expected
            (json |> member "reason" |> member "kind" |> to_string))
-    rows
+    rows;
+  let pointer_errors =
+    [ Plan.Json_pointer.Missing_properties "value", "missing_properties"
+    ; Plan.Json_pointer.Missing_property_schema "value", "missing_property_schema"
+    ; ( Plan.Json_pointer.Ambiguous_property_schema "value"
+      , "ambiguous_property_schema" )
+    ; Plan.Json_pointer.Missing_items_schema "0", "missing_items_schema"
+    ; Plan.Json_pointer.Expected_schema_container "value", "expected_schema_container"
+    ]
+  in
+  check int "closed pointer schema error rows" 5 (List.length pointer_errors);
+  List.iter
+    (fun (error, expected_kind) ->
+       let json =
+         Plan.error_to_json
+           (Plan.Invalid_output_pointer
+              { node_id = b
+              ; source_node_id = a
+              ; pointer = pointer "/a~1b/~0key"
+              ; error
+              })
+       in
+       let open Yojson.Safe.Util in
+       check string
+         "canonical pointer wire"
+         "/a~1b/~0key"
+         (json |> member "pointer" |> to_string);
+       check
+         (list string)
+         "decoded pointer segments"
+         [ "a/b"; "~key" ]
+         (json |> member "pointer_segments" |> to_list |> List.map to_string);
+       check string
+         "pointer schema error kind"
+         expected_kind
+         (json |> member "error" |> member "kind" |> to_string))
+    pointer_errors;
+  let schema_errors =
+    [ Plan.Expected_schema_object { path = []; schema = `Null }, "expected_schema_object"
+    ; ( Plan.Duplicate_schema_keyword { path = []; keyword = "type" }
+      , "duplicate_schema_keyword" )
+    ; Plan.Missing_schema_type { path = [] }, "missing_schema_type"
+    ; ( Plan.Unsupported_contract_type { path = []; value = `String "tuple" }
+      , "unsupported_contract_type" )
+    ; ( Plan.Unsupported_schema_keyword { path = []; keyword = "oneOf" }
+      , "unsupported_schema_keyword" )
+    ; ( Plan.Invalid_schema_keyword_value
+          { path = []; keyword = "required"; value = `Null }
+      , "invalid_schema_keyword_value" )
+    ; ( Plan.Duplicate_required_field { path = []; field = "value" }
+      , "duplicate_required_field" )
+    ; ( Plan.Unknown_required_property { path = []; field = "value" }
+      , "unknown_required_property" )
+    ]
+  in
+  check int "closed schema contract error rows" 8 (List.length schema_errors);
+  List.iter
+    (fun (error, expected_kind) ->
+       let json =
+         Plan.error_to_json
+           (Plan.Invalid_output_schema
+              { node_id = a; tool_name = "tool"; error })
+       in
+       check string
+         "schema contract error kind"
+         expected_kind
+         Yojson.Safe.Util.(json |> member "error" |> member "kind" |> to_string))
+    schema_errors
 ;;
 
 let () =

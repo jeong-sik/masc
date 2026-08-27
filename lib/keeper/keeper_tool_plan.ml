@@ -83,6 +83,22 @@ module Json_pointer = struct
 
   let segments pointer = pointer
 
+  let encode_segment segment =
+    let buffer = Buffer.create (String.length segment) in
+    String.iter
+      (function
+        | '~' -> Buffer.add_string buffer "~0"
+        | '/' -> Buffer.add_string buffer "~1"
+        | character -> Buffer.add_char buffer character)
+      segment;
+    Buffer.contents buffer
+  ;;
+
+  let to_string = function
+    | [] -> ""
+    | segments -> "/" ^ String.concat "/" (List.map encode_segment segments)
+  ;;
+
   let unique_object_field name fields =
     match
       List.filter_map
@@ -842,7 +858,8 @@ let error_to_json error =
       "invalid_output_pointer"
       [ "node_id", node_id_to_json node_id
       ; "source_node_id", node_id_to_json source_node_id
-      ; "pointer", json_strings (Json_pointer.segments pointer)
+      ; "pointer", `String (Json_pointer.to_string pointer)
+      ; "pointer_segments", json_strings (Json_pointer.segments pointer)
       ; "error", pointer_schema_error_to_json error
       ]
   | Invalid_output_schema { node_id; tool_name; error } ->

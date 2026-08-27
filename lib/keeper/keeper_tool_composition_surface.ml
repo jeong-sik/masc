@@ -1552,16 +1552,19 @@ let make_tools
                      | Catalog.Instantiated_plan_rejected _ ->
                        Tool_result.Policy_rejection
                    in
+                   let data =
+                     `Assoc
+                       [ "composition_tool", `String tool_name
+                       ; tool_kind_field (Catalog.tool_kind entry)
+                       ; "error", Catalog.instantiation_error_to_json error
+                       ]
+                   in
                    Tool_result.make_err
                      ~tool_name
                      ~class_
                      ~start_time
-                     ~data:
-                       (`Assoc
-                           [ "composition_tool", `String tool_name
-                           ; tool_kind_field (Catalog.tool_kind entry)
-                           ; "error", Catalog.instantiation_error_to_json error
-                           ])
+                     ~data
+                     ~metadata:data
                      message
                  | Ok plan ->
                    (match record_composition_activation with
@@ -1623,16 +1626,19 @@ let make_tools
                      | Catalog.Instantiated_plan_rejected _ ->
                        Tool_result.Policy_rejection
                    in
+                   let data =
+                     `Assoc
+                       [ "composition_tool", `String tool_name
+                       ; tool_kind_field (Catalog.tool_kind entry)
+                       ; "error", Catalog.instantiation_error_to_json error
+                       ]
+                   in
                    Tool_result.make_err
                      ~tool_name
                      ~class_
                      ~start_time
-                     ~data:
-                       (`Assoc
-                           [ "composition_tool", `String tool_name
-                           ; tool_kind_field (Catalog.tool_kind entry)
-                           ; "error", Catalog.instantiation_error_to_json error
-                           ])
+                     ~data
+                     ~metadata:data
                      message
                  | Ok plan ->
              let activation =
@@ -1821,6 +1827,7 @@ let make_tools
                   ~class_:Tool_result.Policy_rejection
                   ~start_time
                   ~data
+                  ~metadata:data
                   (Keeper_tool_plan_request.error_message error)
               | Ok plan ->
                 (match Executor.outer_completion plan with

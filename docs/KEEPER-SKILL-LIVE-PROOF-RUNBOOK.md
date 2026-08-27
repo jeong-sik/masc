@@ -134,6 +134,7 @@ TUI_BUILD_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/tui-build/build-evidence.json" | a
 
 python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.py" \
   --base-url "$BASE_URL" \
+  --token-file "$TOKEN_FILE" \
   --keeper "$KEEPER" \
   --expected-source-sha "$SOURCE_SHA" \
   --tui-build-evidence "$EVIDENCE_ROOT/tui-build/build-evidence.json" \
@@ -151,6 +152,7 @@ PROOF_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/proof/evidence.json" | awk '{print $1}
 python3 "$REPO/scripts/harness/workload/capture_keeper_skill_tui_proof.py" \
   --proof "$EVIDENCE_ROOT/proof/evidence.json" \
   --expected-proof-sha256 "$PROOF_SHA" \
+  --token-file "$TOKEN_FILE" \
   --out "$EVIDENCE_ROOT/tui" \
   --cols 180 \
   --rows 42 \

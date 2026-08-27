@@ -103,6 +103,51 @@ def fixture(action_identity=None):
 
 
 class CaptureKeeperSkillTuiProofTest(unittest.TestCase):
+    def test_strict_http_and_tui_child_share_explicit_bearer(self):
+        token = "strict-tui-token"
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"ok":true}'
+
+        def open_request(request, timeout):
+            self.assertEqual(timeout, 4.0)
+            self.assertEqual(
+                request.get_header("Authorization"), f"Bearer {token}"
+            )
+            return Response()
+
+        with mock.patch.object(capture, "urlopen", side_effect=open_request):
+            value = capture.read_json_url(
+                "https://masc.invalid/strict", 4.0, token
+            )
+
+        self.assertEqual(value, {"ok": True})
+        environment = capture.safe_environment("/workspace", "127.0.0.1", token)
+        self.assertEqual(environment["MASC_TOKEN"], token)
+
+    def test_token_file_is_one_regular_non_symlink_line(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            token_file = root / "token"
+            token_file.write_text("exact-token\n", encoding="utf-8")
+            self.assertEqual(capture.read_token(token_file), "exact-token")
+            token_file.write_text("first\nsecond\n", encoding="utf-8")
+            with self.assertRaisesRegex(capture.CaptureError, "multiple lines"):
+                capture.read_token(token_file)
+            target = root / "target"
+            target.write_text("secret", encoding="utf-8")
+            link = root / "link"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(capture.CaptureError, "symlink"):
+                capture.read_token(link)
+
     def test_requires_out_of_band_producer_proof_sha(self):
         payload = b"exact producer proof\n"
         capture.require_expected_digest(

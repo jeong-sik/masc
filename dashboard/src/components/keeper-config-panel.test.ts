@@ -642,7 +642,7 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       skills: { names: ['ocaml-coding'] },
     })
     expect(buildRuntimePayload(draftFrom(selected, {
-      skill_selection: { mode: 'all' },
+      skill_selection: { mode: 'all', prior_names_text: 'ocaml-coding' },
     }), selected).skills).toEqual({})
     expect(buildRuntimePayload(draftFrom(selected), selected).skills).toBeUndefined()
   })
@@ -1456,6 +1456,16 @@ describe('KeeperConfigPanel', () => {
     names!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
 
+    mode!.value = 'all'
+    mode!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    expect(container.querySelector('textarea[aria-label="Skill 이름"]')).toBeNull()
+    mode!.value = 'names'
+    mode!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
+      .toBe('ocaml-coding\n proof-harness \nocaml-coding')
+
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('Keeper 설정 저장'),
     )
@@ -1469,6 +1479,54 @@ describe('KeeperConfigPanel', () => {
       { skills: { names: ['ocaml-coding', 'proof-harness'] } },
     )
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
+  })
+
+  it('saves explicit none and then clears back to all Skills', async () => {
+    const selected = makeKeeperConfig({
+      skills: { names: ['ocaml-coding', 'future-skill'] },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(selected)
+    mocks.patchKeeperConfig
+      .mockResolvedValueOnce(makeKeeperConfig({ skills: { names: [] } }))
+      .mockResolvedValueOnce(makeKeeperConfig({ skills: { names: null } }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
+    const names = container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+    names.value = ''
+    names.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    let saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    )
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      1,
+      'keeper-sangsu',
+      { skills: { names: [] } },
+    )
+
+    const mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
+    mode.value = 'all'
+    mode.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    )
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.patchKeeperConfig).toHaveBeenNthCalledWith(
+      2,
+      'keeper-sangsu',
+      { skills: {} },
+    )
   })
 
   it('edits proactive policy from TOML truth when live meta has drifted', async () => {
@@ -1628,6 +1686,61 @@ describe('KeeperConfigPanel', () => {
     if (saveButton) {
       expect(saveButton.disabled).toBe(true)
     }
+  })
+
+  it('does not let a late Keeper A save overwrite Keeper B Skill edits', async () => {
+    let resolveKeeperA: ((value: KeeperConfig) => void) | undefined
+    const keeperASave = new Promise<KeeperConfig>(resolve => {
+      resolveKeeperA = resolve
+    })
+    const configA = makeKeeperConfig({ name: 'keeper-a', skills: { names: null } })
+    const configB = makeKeeperConfig({ name: 'keeper-b', skills: { names: null } })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configA)
+    mocks.patchKeeperConfig.mockReturnValueOnce(keeperASave)
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-a" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    let mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
+    mode.value = 'names'
+    mode.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    let names = container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+    names.value = 'keeper-a-skill'
+    names.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    const saveA = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('Keeper 설정 저장'),
+    )
+    saveA!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(configB)
+    render(html`<${KeeperConfigPanel} keeperName="keeper-b" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    mode = container.querySelector('select[aria-label="Skill 선택 방식"]') as HTMLSelectElement
+    mode.value = 'names'
+    mode.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+    names = container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement
+    names.value = 'keeper-b-skill'
+    names.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    resolveKeeperA?.(makeKeeperConfig({
+      name: 'keeper-a',
+      skills: { names: ['keeper-a-skill'] },
+    }))
+    await flush()
+    await flush()
+
+    expect((container.querySelector('textarea[aria-label="Skill 이름"]') as HTMLTextAreaElement).value)
+      .toBe('keeper-b-skill')
   })
 })
 

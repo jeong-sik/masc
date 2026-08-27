@@ -323,7 +323,7 @@ export type RuntimeDraft = {
   // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
   autonomous_wake_prompt: string
   skill_selection:
-    | { mode: 'all' }
+    | { mode: 'all'; prior_names_text: string }
     | { mode: 'names'; names_text: string }
 }
 
@@ -420,7 +420,13 @@ export function parseAutonomousWakePromptDraft(raw: string): AutonomousWakePromp
   return { ok: true, value: trimmed }
 }
 
-const runtimeDraft = signal<RuntimeDraft | null>(null)
+type KeeperRuntimeDraftState = {
+  keeperName: string
+  draft: RuntimeDraft
+}
+
+const runtimeDraft = signal<KeeperRuntimeDraftState | null>(null)
+const activeKeeperConfigName = signal<string | null>(null)
 const runtimeSaving = signal(false)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
@@ -430,6 +436,7 @@ function resetKeeperConfigPanelDrafts(): void {
   lastSavedAt.value = null
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
+  activeKeeperConfigName.value = null
   runtimeSaving.value = false
   runtimeDirectiveSaving.value = null
   hookFilterQuery.value = ''
@@ -437,8 +444,12 @@ function resetKeeperConfigPanelDrafts(): void {
   kcfTab.value = 'identity'
 }
 
-function syncRuntimeDraftFromConfig(_name: string, updated: KeeperConfig): void {
-  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
+function syncRuntimeDraftFromConfig(name: string, updated: KeeperConfig): void {
+  if (activeKeeperConfigName.value !== name) return
+  runtimeDraft.value = {
+    keeperName: name,
+    draft: initRuntimeDraftFromConfig(updated),
+  }
 }
 
 let panelSubscriptionRefs = 0
@@ -483,7 +494,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     proactive_enabled: proactiveConfigValue(c),
     autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
     skill_selection: c.skills.names === null
-      ? { mode: 'all' }
+      ? { mode: 'all', prior_names_text: '' }
       : { mode: 'names', names_text: c.skills.names.join('\n') },
   }
 }
@@ -942,40 +953,52 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
 }
 
 function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number | string) {
-  const d = runtimeDraft.value
-  if (!d) return
-  const next = { ...d, [field]: value } as RuntimeDraft
+  const state = runtimeDraft.value
+  if (!state) return
+  const next = { ...state.draft, [field]: value } as RuntimeDraft
   if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
   if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
     next.network_mode = 'inherit'
   }
-  runtimeDraft.value = next
+  runtimeDraft.value = { ...state, draft: next }
 }
 
 function updateSkillSelectionMode(mode: 'all' | 'names') {
-  const draft = runtimeDraft.value
-  if (!draft) return
+  const state = runtimeDraft.value
+  if (!state) return
+  const selection = state.draft.skill_selection
   runtimeDraft.value = {
-    ...draft,
-    skill_selection: mode === 'all'
-      ? { mode: 'all' }
-      : {
-          mode: 'names',
-          names_text: draft.skill_selection.mode === 'names'
-            ? draft.skill_selection.names_text
-            : '',
-        },
+    ...state,
+    draft: {
+      ...state.draft,
+      skill_selection: mode === 'all'
+        ? {
+            mode: 'all',
+            prior_names_text: selection.mode === 'names'
+              ? selection.names_text
+              : selection.prior_names_text,
+          }
+        : {
+            mode: 'names',
+            names_text: selection.mode === 'names'
+              ? selection.names_text
+              : selection.prior_names_text,
+          },
+    },
   }
 }
 
 function updateSkillNames(namesText: string) {
-  const draft = runtimeDraft.value
-  if (!draft || draft.skill_selection.mode !== 'names') return
+  const state = runtimeDraft.value
+  if (!state || state.draft.skill_selection.mode !== 'names') return
   runtimeDraft.value = {
-    ...draft,
-    skill_selection: { mode: 'names', names_text: namesText },
+    ...state,
+    draft: {
+      ...state.draft,
+      skill_selection: { mode: 'names', names_text: namesText },
+    },
   }
 }
 
@@ -1538,6 +1561,7 @@ function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
+  activeKeeperConfigName.value = keeperName
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
@@ -1597,10 +1621,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const runtimeCanEdit = runtimeWriteUnsupportedReason === null
 
   // Initialize runtime draft if not yet set
-  if (!runtimeDraft.value && c.name === keeperName) {
-    runtimeDraft.value = initRuntimeDraftFromConfig(c)
+  if (runtimeDraft.value?.keeperName !== keeperName && c.name === keeperName) {
+    runtimeDraft.value = {
+      keeperName,
+      draft: initRuntimeDraftFromConfig(c),
+    }
   }
-  const rd = runtimeDraft.value
+  const rd = runtimeDraft.value?.keeperName === keeperName
+    ? runtimeDraft.value.draft
+    : null
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
   const runtimePayloadResult = rd ? buildRuntimePayloadResult(rd, c) : null
   const runtimeValidationError = runtimePayloadResult && !runtimePayloadResult.ok
@@ -1646,6 +1675,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaving.value = true
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
+      if (activeKeeperConfigName.value !== keeperName) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
       showToast('Keeper 설정 저장 완료', 'success')
@@ -1682,7 +1712,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
 
   function resetRuntimeDraft() {
-    runtimeDraft.value = initRuntimeDraftFromConfig(c)
+    runtimeDraft.value = {
+      keeperName,
+      draft: initRuntimeDraftFromConfig(c),
+    }
   }
 
   function enterEditMode() {
@@ -1710,6 +1743,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     saveError.value = null
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
+      if (activeKeeperConfigName.value !== keeperName) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
       editMode.value = false

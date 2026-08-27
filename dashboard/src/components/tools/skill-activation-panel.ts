@@ -70,6 +70,17 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
     `
   }
   const references = [...surface.instruction_skills, ...surface.composition_skills]
+  const skillSelection = surface.skill_selection.mode === 'all'
+    ? html`<span>All published Skills</span>`
+    : surface.skill_selection.names.length === 0
+      ? html`<span>No Skills selected</span>`
+      : html`
+          <div class="grid gap-1">
+            ${surface.skill_selection.names.map(name => html`
+              <code key=${name} class="text-3xs break-all">${name}</code>
+            `)}
+          </div>
+        `
   return html`
     <div class="grid gap-2" data-testid="skill-effective-surface">
       <div class="text-xs text-[var(--color-fg-muted)]">
@@ -85,6 +96,24 @@ function SurfaceReceipt({ surface }: { surface: DashboardEffectiveKeeperSurface 
         : html`<div class="text-xs text-[var(--color-status-good)]">
             Tool delivery active
           </div>`}
+      <div class="grid gap-1" data-testid="skill-selection">
+        <span class="text-xs text-[var(--color-fg-muted)]">Skill selection</span>
+        ${skillSelection}
+      </div>
+      ${surface.unavailable_skill_names.length === 0
+        ? null
+        : html`
+            <div class="grid gap-1" data-testid="unavailable-skill-names">
+              <span class="text-xs text-[var(--color-status-warn)]">Unavailable Skills</span>
+              ${surface.unavailable_skill_names.map(entry => html`
+                <code
+                  key=${entry.name}
+                  class="text-3xs break-all text-[var(--color-status-warn)]"
+                  data-testid="unavailable-skill-name"
+                >${entry.name} · ${entry.reason}</code>
+              `)}
+            </div>
+          `}
       <div class="grid gap-1">
         ${references.length === 0
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">No readable Skills</span>`

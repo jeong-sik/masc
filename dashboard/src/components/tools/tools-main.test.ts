@@ -460,7 +460,19 @@ describe('Tools', () => {
       },
       keeper_waiting_inventory: waitingInventoryFixture(),
     }
-    mocks.fetchDashboardTools.mockResolvedValue(keeperReceiptFixture('sangsu'))
+    const receipt = keeperReceiptFixture('sangsu')
+    if (receipt.effective_keeper_surface?.status !== 'available') {
+      throw new Error('fixture effective surface is not available')
+    }
+    receipt.effective_keeper_surface.skill_selection = {
+      mode: 'names',
+      names: ['ocaml-coding', 'proof-harness'],
+    }
+    receipt.effective_keeper_surface.unavailable_skill_names = [{
+      name: 'proof-harness',
+      reason: 'not_in_turn_skill_catalog',
+    }]
+    mocks.fetchDashboardTools.mockResolvedValue(receipt)
 
     render(html`<${Tools} />`, container)
     await flush()
@@ -473,6 +485,14 @@ describe('Tools', () => {
     expect(container.textContent).toContain('project-masc/ocaml-coding:ocaml-coding@')
     expect(container.textContent).toContain('Task instruction · task-001, task-held')
     expect(container.textContent).toContain(`snapshot ${'d'.repeat(64)}`)
+    expect(container.querySelector('[data-testid="skill-selection"]')?.textContent)
+      .toContain('ocaml-coding')
+    expect(container.querySelector('[data-testid="skill-selection"]')?.textContent)
+      .toContain('proof-harness')
+    expect(container.querySelectorAll('[data-testid="unavailable-skill-name"]'))
+      .toHaveLength(1)
+    expect(container.querySelector('[data-testid="unavailable-skill-names"]')?.textContent)
+      .toContain('proof-harness · not_in_turn_skill_catalog')
     expect(container.textContent).toContain('session totals')
     expect(container.textContent).toContain('proof project-masc/ocaml-coding:ocaml-coding')
     expect(container.textContent).toContain('invoked 1')
@@ -496,6 +516,42 @@ describe('Tools', () => {
       Array.from(container.querySelectorAll('[data-testid="skill-activation-row"]'))
         .map(row => row.getAttribute('data-skill-tool-use-id')),
     ).toEqual(['call-skill-1'])
+  })
+
+  it('distinguishes inherited all Skills from an explicit empty selection', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const allReceipt = keeperReceiptFixture('sangsu')
+    mocks.fetchDashboardTools.mockResolvedValueOnce(allReceipt)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.querySelector('[data-testid="skill-selection"]')?.textContent)
+      .toContain('All published Skills')
+
+    const noneReceipt = keeperReceiptFixture('sangsu')
+    if (noneReceipt.effective_keeper_surface?.status !== 'available') {
+      throw new Error('fixture effective surface is not available')
+    }
+    noneReceipt.effective_keeper_surface.skill_selection = { mode: 'names', names: [] }
+    mocks.fetchDashboardTools.mockResolvedValueOnce(noneReceipt)
+    selectKeeper(container, '')
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.querySelector('[data-testid="skill-selection"]')?.textContent)
+      .toContain('No Skills selected')
   })
 
   it('shows an official-client handoff without a later action as incomplete proof', async () => {

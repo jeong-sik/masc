@@ -42,6 +42,57 @@ access = "read-write"
   | Error _ -> fail "Skill snapshot fixture was rejected"
 ;;
 
+let shadowed_snapshot () =
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+resource-read-max-bytes = 65536
+[[skills.sources]]
+id = "first"
+anchor = "base-path"
+path = "first-skills"
+access = "read-write"
+[[skills.sources]]
+id = "second"
+anchor = "base-path"
+path = "second-skills"
+access = "read-write"
+|}
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "two-source Skill fixture config was rejected"
+  in
+  let documents =
+    [ "---\nname: review\ndescription: First source.\n---\nfirst body"
+    ; "---\nname: review\ndescription: Second source.\n---\nsecond body"
+    ]
+  in
+  let scans =
+    List.map2
+      (fun source source_text ->
+         let resolved =
+           Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+         in
+         let resolved_path =
+           match resolved.Skill_source_config.resolution with
+           | Resolved path -> path
+           | _ -> fail "two-source Skill fixture did not resolve"
+         in
+         { Snapshot.source = resolved
+         ; observation = Snapshot.Source_ready { resolved_path; candidates = 1 }
+         ; candidates = [ Snapshot.Candidate_document { directory = "review"; source_text } ]
+         })
+      config.Skill_source_config.sources
+      documents
+  in
+  match Snapshot.configured ~config scans with
+  | Ok snapshot -> snapshot
+  | Error _ -> fail "two-source Skill snapshot fixture was rejected"
+;;
+
 let instruction_document =
   {|---
 name: release-checklist
@@ -451,6 +502,25 @@ let test_malformed_composition_is_diagnostic_only () =
     failf "expected one projection diagnostic, got %d" (List.length diagnostics)
 ;;
 
+let test_operator_projection_keeps_shadowed_exact_entries () =
+  let snapshot = shadowed_snapshot () in
+  let effective, effective_diagnostics = Skill_catalog.of_snapshot snapshot in
+  let all, all_diagnostics = Skill_catalog.all_entries_of_snapshot snapshot in
+  check int "runtime catalog keeps one effective Skill" 1
+    (List.length (Skill_catalog.skills effective));
+  check int "operator surface keeps both exact Skills" 2
+    (List.length (Skill_catalog.skills all));
+  check int "effective projection diagnostics" 0 (List.length effective_diagnostics);
+  check int "all-entry projection diagnostics" 0 (List.length all_diagnostics);
+  match
+    Skill_catalog.skills all
+    |> List.filter_map (fun (skill : Skill_catalog.skill) -> skill.reference)
+  with
+  | [ first; second ] ->
+    check bool "shadow references are distinct" false (Skill_reference.equal first second)
+  | references -> failf "expected two exact references, got %d" (List.length references)
+;;
+
 let test_composition_name_must_match_skill () =
   let document =
     String.concat
@@ -695,6 +765,10 @@ let () =
             "malformed snapshot composition is diagnostic-only"
             `Quick
             test_malformed_composition_is_diagnostic_only
+        ; test_case
+            "operator projection keeps shadowed exact entries"
+            `Quick
+            test_operator_projection_keeps_shadowed_exact_entries
         ; test_case
             "composition name must equal the skill name"
             `Quick

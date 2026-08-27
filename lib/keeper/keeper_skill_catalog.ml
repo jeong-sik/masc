@@ -256,8 +256,8 @@ let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     })
 ;;
 
-let of_snapshot snapshot =
-  Skill_catalog_snapshot.effective_entries snapshot
+let project_entries snapshot entries =
+  entries
   |> List.fold_left
        (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
           match project_entry snapshot entry with
@@ -270,6 +270,14 @@ let of_snapshot snapshot =
             catalog, { identity = entry.identity; error } :: diagnostics)
        ([], [])
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
+;;
+
+let of_snapshot snapshot =
+  project_entries snapshot (Skill_catalog_snapshot.effective_entries snapshot)
+;;
+
+let all_entries_of_snapshot snapshot =
+  project_entries snapshot (Skill_catalog_snapshot.entries snapshot)
 ;;
 
 let find catalog name =

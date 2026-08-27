@@ -1316,6 +1316,19 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  (* One bounded, read-only join of lane admission and retained observations.
+     Unlike the paged run endpoint below this always names all five standalone
+     lanes, including configured lanes with no currently retained run. *)
+  |> Http.Router.get "/api/v1/dashboard/standalone-lanes" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+            Http.Response.json_value
+              ~compress:true
+              ~request:req
+              (Server_standalone_lane_projection.snapshot_json ())
+              reqd)
+         request
+         reqd)
   (* Paged, and without either exact payload. Serving every retained run with
      its payloads made this one response 246 MB for 5,908 runs — the whole
      rendered prompt of every lane run, to draw a table of timestamps — and the

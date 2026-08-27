@@ -1272,6 +1272,8 @@ type async_msg =
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
+  | Standalone_lanes_loaded of
+      (Masc.Tui_decode.standalone_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -2991,12 +2993,18 @@ let launch_lanes_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   let run () =
-    let result =
+    let keeper_result =
       try Masc_tui_loader.load_keeper_lanes ~host ~port with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lanes_loaded result)
+    enqueue_async mailbox (Lanes_loaded keeper_result);
+    let standalone_result =
+      try Masc_tui_loader.load_standalone_lanes ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Standalone_lanes_loaded standalone_result)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -7169,6 +7177,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              stale; clearing them would turn a failed refresh into an empty
              reading. *)
           state.lanes_error <- Some detail)
+  | Standalone_lanes_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.standalone_lanes <- Some snapshot;
+          state.standalone_lanes_error <- None
+      | Error detail -> state.standalone_lanes_error <- Some detail)
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->

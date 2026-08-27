@@ -381,14 +381,18 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     ~actor:prepared.candidate.keeper_name
     ~started_at
     ~input:(Exact_lane_run_registry.Exact_input prepared.candidate.judgment_request);
+  let bound = ref None in
   let complete outcome output =
+    let selected_slot =
+      Option.map (fun (provenance : attempt_provenance) -> provenance.slot_id) !bound
+    in
     match
       Exact_lane_run_registry.mark_completed
         registry
         ~run_id
         ~outcome
         ~elapsed_s:(Time_compat.now () -. started_at)
-        ~selected_slot:None
+        ~selected_slot
         ~output
     with
     | Ok () -> ()
@@ -399,7 +403,6 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
         run_id
         (Exact_lane_run_registry.completion_error_to_string error)
   in
-  let bound = ref None in
   let agent_core_before_dispatch receipt =
     let current = attempt_provenance receipt in
     let* () =

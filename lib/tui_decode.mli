@@ -630,6 +630,48 @@ val decode_keeper_lanes_snapshot :
     the reading; additional producer fields are outside this light
     projection and do not. *)
 
+(** Read-only standalone LLM lane observation. These rows describe existing
+    admission and run registries; they never carry a control action. *)
+type standalone_lane_status =
+  | Standalone_running
+  | Standalone_idle
+  | Standalone_degraded
+  | Standalone_no_retained_observation
+  | Standalone_unavailable
+
+type standalone_lane_slot_count = {
+  slsc_slot_id : string;
+  slsc_count : int;
+}
+
+type standalone_lane = {
+  sl_lane_id : string;
+  sl_label : string;
+  sl_required : bool;
+  sl_status : standalone_lane_status;
+  sl_configuration_state : string;
+  sl_admitted_slots : string list;
+  sl_admission_error : string option;
+  sl_retained_run_count : int;
+  sl_running_count : int;
+  sl_succeeded_count : int;
+  sl_failed_count : int;
+  sl_cancelled_count : int;
+  sl_last_terminal_at : float option;
+  sl_last_outcome : string option;
+  sl_p50_elapsed_s : float option;
+  sl_selected_slots : standalone_lane_slot_count list;
+}
+
+type standalone_lanes_snapshot = {
+  sls_observed_at_unix : float;
+  sls_lanes : standalone_lane list;
+}
+
+val standalone_lane_status_to_string : standalone_lane_status -> string
+val decode_standalone_lanes_snapshot :
+  Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
+
 (** What the secret projection reports for one Keeper. The producer computes
     this from the directory: [Secret_absent] when no root is configured,
     [Secret_empty] when a configured root holds nothing, [Secret_ready] when

@@ -1333,6 +1333,8 @@ type state = {
   mutable schedule_cancel_armed: string option;
   mutable schedule_cancel_error: string option;
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
+  mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
+  mutable standalone_lanes_error: string option;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -1886,6 +1888,8 @@ let create_state
   schedule_cancel_armed = None;
   schedule_cancel_error = None;
   lanes = None;
+  standalone_lanes = None;
+  standalone_lanes_error = None;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;

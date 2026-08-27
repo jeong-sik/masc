@@ -3601,13 +3601,17 @@ let keeper_lane_header (columns : keeper_lane_columns) =
 let keeper_lane_row (columns : keeper_lane_columns)
     (lane : Tui_decode.keeper_lane) =
   let phase_color, phase_glyph = keeper_lane_phase_style lane.kl_phase in
+  (* Colour points at the lifecycle mark; the producer-owned word beside it
+     already names the exact state. Keeping the colour open across both made a
+     healthy fleet turn most of the table green and left no stronger signal
+     for the rows that need attention. The glyph retains the semantic colour
+     and the word remains readable in the terminal's default foreground. *)
   let phase =
-    phase_color ^ phase_glyph ^ " "
+    phase_color ^ phase_glyph ^ Ansi.reset ^ " "
     ^ fit_width
         (Terminal_text.single_line
            (Tui_decode.keeper_lane_phase_to_string lane.kl_phase))
         (max 1 (columns.lane_phase_width - 2))
-    ^ Ansi.reset
   in
   let turn =
     keeper_lane_turn_style lane.kl_turn_phase

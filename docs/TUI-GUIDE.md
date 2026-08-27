@@ -281,6 +281,10 @@ OUTCOME` keeps the latest runtime state and model when one exists.
 `DIAGNOSIS` is the condition the producer says determined the lifecycle
 phase. A phase or turn value this TUI does not know is shown verbatim with a
 `?`; it is never changed into a familiar state.
+The lifecycle glyph alone carries its semantic colour. The exact phase word
+uses the terminal foreground, so a healthy fleet does not turn the table green
+and an attention glyph remains easy to find. Under `NO_COLOR`, the same glyph
+shape and phase word remain.
 
 Before the first response the page says `(not loaded yet)`. A successful empty
 response says `(no keeper lane snapshots)`. A failed refresh leaves the prior

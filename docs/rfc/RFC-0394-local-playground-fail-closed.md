@@ -29,10 +29,10 @@ related: ["0213", "0208", "0001"]
 ## Behavior changes
 
 - Keeper create/update without an explicit `sandbox_profile` is now rejected
-  instead of silently defaulting to `local`. The tool schema's
-  `"default": "local"` string is descriptive only and is never injected
-  (`lib/keeper/keeper_tool_definition_toml.ml` treats schema defaults as
-  comments).
+  instead of silently defaulting to `local`. The published tool schema
+  default is `"docker"`; schema defaults are descriptive only and never
+  injected (`lib/tool_surface/tool_definition_toml.ml` treats them as
+  comments), so callers must pass the field explicitly.
 - Existing keepers whose TOML pins `sandbox_profile = "local"` fail their next
   config load or update unless migrated to `"docker"` (or run under the
   hatch). The last bundled offender (`config/keepers/issue_king.toml`) moved

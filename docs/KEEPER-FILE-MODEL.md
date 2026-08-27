@@ -31,7 +31,7 @@ canonical Keeper name; `[keeper].name` is optional.
 [keeper]
 autoboot_enabled = true
 proactive_enabled = true
-sandbox_profile = "local"
+sandbox_profile = "docker"
 mention_targets = ["operator"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 ```
@@ -113,7 +113,7 @@ update, `instructions`. Persistence writes operational values to
 masc_keeper_up(
   name: "reviewer",
   instructions: "Review the current change and report concrete evidence.",
-  sandbox_profile: "local",
+  sandbox_profile: "docker",
   autoboot_enabled: true
 )
 ```

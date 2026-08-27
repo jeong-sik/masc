@@ -29,7 +29,7 @@ Exact direct-mention tokens that can wake the keeper in workspace traffic \
 name = "sandbox_profile"
 type = "string"
 enum = ["local", "docker"]
-default = "local"
+default = "docker"
 description = """
 Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
 execution. \"local\" is fail-closed and only resolves when the dev/test \

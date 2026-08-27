@@ -112,8 +112,8 @@ Touch points (all verified):
 5. `lib/config/env_config_sandbox.ml` — new gate reader, e.g.
    `module Gate : sig val allow_local_playground : unit -> bool end`,
    env `MASC_EXEC_ALLOW_LOCAL_PLAYGROUND`, **default `false`**, registered in
-   `lib/config/feature_flag_registry.ml`. When the escape hatch is set, log a
-   loud startup warning.
+   `lib/config/feature_flag_registry.ml`. When the hatch lifts the gate, the
+   first local dispatch in the process logs a warning naming the keeper.
 6. Tests that assume local (`test_keeper_local_profile_docker_playground.ml`,
    `test_keeper_sandbox_root_by_profile.ml`, etc.) set the escape hatch
    explicitly — the test suite documents the gate rather than bypassing it.

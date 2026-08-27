@@ -952,10 +952,10 @@ let test_bundled_profiles_reject_local_sandbox () =
   |> Array.to_list
   |> List.filter (fun file -> Filename.check_suffix file ".toml")
   |> List.iter (fun file ->
+       let contents = read_text_file (Filename.concat keepers_dir file) in
+       let squeezed = String.concat "" (String.split_on_char ' ' contents) in
        check bool (file ^ " must not pin the local playground") false
-         (String_util.contains_substring
-            (read_text_file (Filename.concat keepers_dir file))
-            "sandbox_profile = \"local\""))
+         (String_util.contains_substring squeezed "sandbox_profile=\"local\""))
 
 let concrete_keeper_inventory_path repo =
   Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"

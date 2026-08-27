@@ -7,12 +7,18 @@ import argparse
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
 import stat
+import struct
 import sys
 from typing import Any, cast
 import uuid
+import zlib
+
+import join_natural_keeper_skill_ledger as ledger_join
+import keeper_skill_use_proof as proof_collector
 
 
 SCHEMA = "masc.keeper-skill-proof-verification/v1"
@@ -42,6 +48,8 @@ PROOF_ARTIFACTS = {
     "tui-build-evidence.json",
     "masc_tui.exe",
 }
+EXPECTED_VERIFIED_ARTIFACTS = 18
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 class VerificationError(RuntimeError):
@@ -75,7 +83,7 @@ def decode_object(payload: bytes, context: str) -> dict[str, Any]:
 
     try:
         value = json.loads(payload, object_pairs_hook=reject_duplicates)
-    except json.JSONDecodeError as error:
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise VerificationError(f"invalid JSON in {context}: {error}") from error
     require(isinstance(value, dict), f"{context} is not an object")
     return cast(dict[str, Any], value)
@@ -125,13 +133,15 @@ def regular_file_bytes(path: Path, context: str) -> bytes:
 def load_manifest(
     path: Path, *, expected_sha256: str, expected_schema: str, context: str
 ) -> tuple[dict[str, Any], bytes, Path]:
-    require(SHA256_RE.fullmatch(expected_sha256) is not None, f"{context} SHA is invalid")
+    require(
+        SHA256_RE.fullmatch(expected_sha256) is not None, f"{context} SHA is invalid"
+    )
     payload = regular_file_bytes(path, context)
     require(digest(payload) == expected_sha256, f"{context} SHA differs")
     value = decode_object(payload, context)
     require(value.get("schema") == expected_schema, f"{context} schema is unsupported")
     root = path.parent.resolve(strict=True)
-    require(not (root / "INCOMPLETE").exists(), f"{context} root is incomplete")
+    require(not os.path.lexists(root / "INCOMPLETE"), f"{context} root is incomplete")
     return value, payload, root
 
 
@@ -163,11 +173,41 @@ def verify_artifact_set(
     for name in sorted(expected_names):
         expected = object_field(declared, name, f"{context}.artifacts")
         identity, payload = verify_file(
-            root=root, name=name, expected=expected, context=f"{context} artifact {name}"
+            root=root,
+            name=name,
+            expected=expected,
+            context=f"{context} artifact {name}",
         )
         verified[name] = identity
         payloads[name] = payload
     return verified, payloads
+
+
+def validate_png(payload: bytes, context: str) -> tuple[int, int]:
+    require(payload.startswith(PNG_SIGNATURE), f"{context} is not a PNG")
+    require(len(payload) >= 33, f"{context} has no complete IHDR")
+    ihdr_length = struct.unpack(">I", payload[8:12])[0]
+    require(
+        ihdr_length == 13 and payload[12:16] == b"IHDR",
+        f"{context} first chunk is not IHDR",
+    )
+    expected_crc = struct.unpack(">I", payload[29:33])[0]
+    require(
+        zlib.crc32(payload[12:29]) & 0xFFFFFFFF == expected_crc,
+        f"{context} IHDR checksum differs",
+    )
+    width, height = struct.unpack(">II", payload[16:24])
+    require(width > 0 and height > 0, f"{context} dimensions are invalid")
+    return width, height
+
+
+def decode_artifacts(
+    payloads: dict[str, bytes], names: set[str], context: str
+) -> dict[str, dict[str, Any]]:
+    return {
+        name: decode_object(payloads[name], f"{context} artifact {name}")
+        for name in names
+    }
 
 
 def normalized_join_reference(match: dict[str, Any]) -> dict[str, str]:
@@ -194,12 +234,16 @@ def proof_reference(proof: dict[str, Any]) -> dict[str, str]:
 def action_markers(actions: list[Any]) -> list[str]:
     markers: list[str] = []
     for index, action_value in enumerate(actions):
-        require(isinstance(action_value, dict), f"proof action {index} is not an object")
+        require(
+            isinstance(action_value, dict), f"proof action {index} is not an object"
+        )
         action = cast(dict[str, Any], action_value)
         identity = object_field(action, "identity", f"proof action {index}")
         kind = identity.get("kind")
         if kind == "call_id":
-            markers.append("call=" + string_field(identity, "call_id", "action identity"))
+            markers.append(
+                "call=" + string_field(identity, "call_id", "action identity")
+            )
         elif kind == "provider_step":
             conversation_id = string_field(
                 identity, "conversation_id", "action identity"
@@ -271,6 +315,81 @@ def parse_turn_ref(value: str) -> tuple[str, int]:
     return trace_id, turn
 
 
+def validate_join_authorities(
+    join: dict[str, Any], payloads: dict[str, bytes]
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
+    decoded = decode_artifacts(payloads, JOIN_ARTIFACTS, "join")
+    inputs = object_field(join, "inputs", "join")
+    receipt_raw = payloads["producer-receipt.json"]
+    try:
+        recomputed = ledger_join.validate_join(
+            receipt=decoded["producer-receipt.json"],
+            receipt_raw=receipt_raw,
+            expected_receipt_sha256=string_field(
+                inputs, "producer_receipt_sha256", "join inputs"
+            ),
+            source_before=decoded["source-before.json"],
+            source_after=decoded["source-after.json"],
+            health_before=decoded["health-before.json"],
+            health_after=decoded["health-after.json"],
+            dashboard_before=decoded["dashboard-tools-before.json"],
+            dashboard_after=decoded["dashboard-tools-after.json"],
+            historical_before=decoded["historical-skill-activations-before.json"],
+            historical_after=decoded["historical-skill-activations-after.json"],
+            durable_ledger=decoded["durable-skill-activations-before.json"],
+            durable_ledger_after=decoded["durable-skill-activations-after.json"],
+        )
+    except ledger_join.JoinError as error:
+        raise VerificationError(f"join raw authority is invalid: {error}") from error
+    for field in ("producer", "server", "ledger", "result"):
+        require(
+            join.get(field) == recomputed[field],
+            f"join manifest {field} differs from raw authority",
+        )
+    return recomputed, decoded
+
+
+def validate_proof_authorities(
+    *,
+    proof: dict[str, Any],
+    payloads: dict[str, bytes],
+    keeper: str,
+    skill_tool_use_id: str,
+    expected_source_sha: str,
+    join_server: dict[str, str],
+    joined_ledger: dict[str, Any],
+) -> dict[str, Any]:
+    decoded = decode_artifacts(
+        payloads,
+        {"health.json", "dashboard-tools.json", "skill-activations.json"},
+        "proof",
+    )
+    try:
+        recomputed = proof_collector.validate_proof(
+            health=decoded["health.json"],
+            dashboard=decoded["dashboard-tools.json"],
+            durable_ledger=decoded["skill-activations.json"],
+            keeper=keeper,
+            expected_source_sha=expected_source_sha,
+            skill_tool_use_id=skill_tool_use_id,
+        )
+        raw_server = ledger_join.health_identity(
+            decoded["health.json"], expected_source_head=expected_source_sha
+        )
+    except (proof_collector.ProofError, ledger_join.JoinError) as error:
+        raise VerificationError(f"proof raw authority is invalid: {error}") from error
+    require(
+        object_field(proof, "proof", "proof") == recomputed,
+        "proof manifest identity differs from raw authority",
+    )
+    require(raw_server == join_server, "proof raw server differs from join")
+    require(
+        decoded["skill-activations.json"] == joined_ledger,
+        "proof durable ledger differs from join raw authority",
+    )
+    return recomputed
+
+
 def verify_bundle(
     *,
     join: dict[str, Any],
@@ -291,8 +410,9 @@ def verify_bundle(
         proof, root=proof_root, expected_names=PROOF_ARTIFACTS, context="proof"
     )
 
+    _, join_decoded = validate_join_authorities(join, join_payloads)
     receipt_raw = join_payloads["producer-receipt.json"]
-    receipt = decode_object(receipt_raw, "producer receipt")
+    receipt = join_decoded["producer-receipt.json"]
     inputs = object_field(join, "inputs", "join")
     require(
         inputs.get("producer_receipt_sha256") == digest(receipt_raw),
@@ -309,9 +429,7 @@ def verify_bundle(
     matches = list_field(join_result, "matches", "join result")
     require(len(matches) == 1 and isinstance(matches[0], dict), "join match is missing")
     match = cast(dict[str, Any], matches[0])
-    selected_id = string_field(
-        join_result, "selected_skill_tool_use_id", "join result"
-    )
+    selected_id = string_field(join_result, "selected_skill_tool_use_id", "join result")
     require(
         string_field(match, "skill_tool_use_id", "join match") == selected_id,
         "join selected id differs from exact match",
@@ -362,7 +480,15 @@ def verify_bundle(
     )
     require(server_from_proof(proof) == join_server, "proof server differs from join")
 
-    proof_identity = object_field(proof, "proof", "proof")
+    proof_identity = validate_proof_authorities(
+        proof=proof,
+        payloads=proof_payloads,
+        keeper=string_field(join_producer, "keeper", "join producer"),
+        skill_tool_use_id=selected_id,
+        expected_source_sha=string_field(join_source, "head", "join source"),
+        join_server=join_server,
+        joined_ledger=join_decoded["durable-skill-activations-after.json"],
+    )
     join_ledger = object_field(join, "ledger", "join")
     identity = {
         "workspace_key": require_sha256(
@@ -467,8 +593,7 @@ def verify_bundle(
     require(
         build_artifact.get("path") == "masc_tui.exe"
         and build_artifact.get("bytes") == proof_artifacts["masc_tui.exe"]["bytes"]
-        and build_artifact.get("sha256")
-        == proof_artifacts["masc_tui.exe"]["sha256"]
+        and build_artifact.get("sha256") == proof_artifacts["masc_tui.exe"]["sha256"]
         and proof_build.get("executable_bytes")
         == proof_artifacts["masc_tui.exe"]["bytes"]
         and proof_build.get("executable_sha256")
@@ -478,12 +603,18 @@ def verify_bundle(
 
     dashboard = object_field(proof, "dashboard", "proof")
     dashboard_name = string_field(dashboard, "path", "proof Dashboard")
-    dashboard_identity, _ = verify_file(
+    require(
+        dashboard_name == "dashboard-skill-use.png"
+        and dashboard_name not in PROOF_ARTIFACTS,
+        "Dashboard screenshot path is not the exact producer artifact",
+    )
+    dashboard_identity, dashboard_payload = verify_file(
         root=proof_root,
         name=dashboard_name,
         expected=dashboard,
         context="Dashboard screenshot",
     )
+    validate_png(dashboard_payload, "Dashboard screenshot")
     proof_artifacts_with_dashboard = {
         **proof_artifacts,
         dashboard_name: dashboard_identity,
@@ -512,7 +643,9 @@ def verify_bundle(
         "TUI server differs",
     )
     tui_proof = object_field(tui, "proof", "TUI proof")
-    require(tui_proof.get("manifest_sha256") == digest(proof_raw), "TUI proof SHA differs")
+    require(
+        tui_proof.get("manifest_sha256") == digest(proof_raw), "TUI proof SHA differs"
+    )
     require(
         tui_proof.get("keeper") == proof_identity.get("keeper")
         and tui_proof.get("session_id") == proof_identity.get("session_id")
@@ -536,16 +669,47 @@ def verify_bundle(
         tui.get("visible_text_sha256") == digest(visible_text.encode()),
         "TUI visible text SHA differs",
     )
+    required_visible_markers = [
+        f"Skill Use — {proof_identity['keeper']}",
+        f"session={proof_identity['session_id']}  ledger={proof_identity['ledger_revision']}",
+        f"id={selected_id}",
+        "invalid=0",
+        expected_markers[0],
+    ]
+    require(
+        all(marker in visible_text for marker in required_visible_markers),
+        "TUI visible text does not contain the exact Skill receipt markers",
+    )
     screenshot = object_field(tui, "screenshot", "TUI proof")
     tui_screenshot_name = string_field(screenshot, "path", "TUI screenshot")
-    tui_screenshot_identity, _ = verify_file(
+    require(
+        tui_screenshot_name == "tui-skill-use.png",
+        "TUI screenshot path is not the exact capture artifact",
+    )
+    tui_screenshot_identity, tui_screenshot_payload = verify_file(
         root=tui_root,
         name=tui_screenshot_name,
         expected=screenshot,
         context="TUI screenshot",
     )
+    validate_png(tui_screenshot_payload, "TUI screenshot")
 
     verified_count = len(join_artifacts) + len(proof_artifacts_with_dashboard) + 1
+    artifact_paths = [
+        *(join_root / name for name in JOIN_ARTIFACTS),
+        *(proof_root / name for name in PROOF_ARTIFACTS),
+        proof_root / dashboard_name,
+        tui_root / tui_screenshot_name,
+    ]
+    require(
+        len({path.resolve(strict=True) for path in artifact_paths})
+        == EXPECTED_VERIFIED_ARTIFACTS,
+        "verified artifact paths are not distinct",
+    )
+    require(
+        verified_count == EXPECTED_VERIFIED_ARTIFACTS,
+        "verified artifact count is not exactly 18",
+    )
     matrix = {
         "natural_keeper_messages": 1,
         "terminal_keeper_operations_succeeded": 1,

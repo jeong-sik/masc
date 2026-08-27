@@ -53,6 +53,25 @@ description: Walk the release checklist before shipping.
 
 ## 2. 스킬의 두 종류 — 본문이 결정한다
 
+Keeper별 Skill 표면은 Keeper profile의 `[keeper.skills]`가 정한다.
+
+```toml
+[keeper.skills]
+names = ["release-checklist", "memory-probe"]
+```
+
+- `[keeper.skills]`가 없으면 발행된 모든 Skill을 쓴다.
+- `names = []`면 Skill을 하나도 싣지 않는다.
+- 이름은 canonical Skill 이름과 정확히 같아야 한다. 부분 문자열, 대소문자 보정, 별칭은 없다.
+- 같은 선택을 전역 Skill과 Task가 지명한 Skill에 모두 적용하므로 Task가 Keeper profile을
+  우회하지 않는다.
+- 설정에만 있고 발행된 turn catalog에는 없는 이름은 effective surface의
+  `unavailable_skill_names`에 typed reason과 함께 남는다. 함께 지정한 알려진 이름은 계속
+  동작한다.
+
+`masc_keeper_up`의 `skills.names`도 같은 Keeper TOML 필드를 편집한다. `skills={}`는
+선언을 지워서 all로 되돌리고 빈 배열은 none을 유지한다.
+
 선언 필드가 아니라 **본문에 ` ```toml composition ` fence 가 있는지**가 종류를 정한다.
 
 | fence 개수 | 종류 | 표면 |

@@ -145,6 +145,8 @@ function keeperReceiptFixture(
       tool_delivery: { status: 'delivered' },
       native_posture: 'read',
       tool_groups: [],
+      skill_selection: { mode: 'all' },
+      unavailable_skill_names: [],
       current_task_id: 'task-001',
       skill_snapshot_revision: 'd'.repeat(64),
       skill_resource_read_max_bytes: 65_536,

@@ -3,6 +3,7 @@ open Alcotest
 module Reference = Skill_reference
 module Snapshot = Skill_catalog_snapshot
 module Selection = Masc.Keeper_task_skill_turn
+module Inputs = Masc.Keeper_world_observation_inputs
 
 let source_row ~id ~path =
   Printf.sprintf
@@ -110,6 +111,131 @@ let instruction_skill reference (skill : Masc.Keeper_skill_catalog.skill) =
     ()
 ;;
 
+let parsed_skill name =
+  match
+    Masc.Keeper_skill_catalog.parse_skill
+      ~directory:name
+      (document ~name ~description:(name ^ " description") (name ^ " body"))
+  with
+  | Ok skill -> skill
+  | Error error -> fail (Masc.Keeper_skill_catalog.error_to_string error)
+;;
+
+let test_keeper_name_selection_filters_global_and_task_exactly () =
+  let global, rejected =
+    Masc.Keeper_skill_catalog.partition_documents
+      [ "guide", document ~name:"guide" ~description:"guide" "GUIDE"
+      ; "review", document ~name:"review" ~description:"review" "REVIEW"
+      ]
+  in
+  check int "global fixture has no rejection" 0 (List.length rejected);
+  let task = [ parsed_skill "task-only" ] in
+  let names projection =
+    Masc.Keeper_skill_catalog.skills projection.Masc.Keeper_skill_catalog.catalog
+    |> List.map (fun (skill : Masc.Keeper_skill_catalog.skill) -> skill.name)
+  in
+  let selected =
+    Masc.Keeper_skill_catalog.project_turn
+      ~names:(Some [ "guide"; "missing" ])
+      ~global
+      ~task
+  in
+  check (list string) "exact global selection" [ "guide" ] (names selected);
+  check bool "Task cannot bypass Keeper selection" false (List.mem "task-only" (names selected));
+  (match Masc.Keeper_skill_catalog.configured_names_unavailable selected with
+   | [ unavailable ] ->
+     let json = Masc.Keeper_skill_catalog.configured_name_unavailable_to_yojson unavailable in
+     check string "unknown name" "missing" Yojson.Safe.Util.(member "name" json |> to_string);
+     check string
+       "typed reason"
+       "not_in_turn_skill_catalog"
+       Yojson.Safe.Util.(member "reason" json |> to_string)
+   | unavailable -> failf "expected one unavailable name, got %d" (List.length unavailable));
+  let task_selected =
+    Masc.Keeper_skill_catalog.project_turn ~names:(Some [ "task-only" ]) ~global ~task
+  in
+  check (list string) "Task Skill selected by the same name rule" [ "task-only" ] (names task_selected);
+  let none = Masc.Keeper_skill_catalog.project_turn ~names:(Some []) ~global ~task in
+  check (list string) "explicit empty selects none" [] (names none);
+  let all = Masc.Keeper_skill_catalog.project_turn ~names:None ~global ~task in
+  check (list string) "absent selection keeps Task-first all" [ "task-only"; "guide"; "review" ] (names all)
+;;
+
+let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let skill_snapshot =
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"guide" "GUIDE"
+        ; ( "task-only"
+          , document ~name:"task-only" ~description:"task-only" "TASK" )
+        ]
+      ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let task_reference =
+    exact_reference
+      skill_snapshot
+      ~source_id
+      ~package_id:"task-only"
+      ~name:"task-only"
+  in
+  let selection =
+    match
+      Selection.resolve_for_task
+        ~snapshot:skill_snapshot
+        ~task_id:"task-held"
+        [ task_reference ]
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let global, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
+  let projection =
+    Masc.Keeper_skill_catalog.project_turn
+      ~names:(Some [ "guide" ])
+      ~global
+      ~task:(Selection.skills selection)
+  in
+  let executable = Selection.executable_selection ~projection selection in
+  check int
+    "activation provenance excludes the filtered Task Skill"
+    0
+    (List.length executable.selected);
+  match
+    Selection.exact_task_surfaces
+      ~snapshot:skill_snapshot
+      ~skill_names:(Some [ "guide" ])
+      ~selection
+      ~current_task:Inputs.No_current_task
+      ~held_task_skills:
+        [ { Inputs.held_task_id = "task-held"
+          ; held_skills = [ task_reference ]
+          }
+        ]
+  with
+  | [ ( "task-held"
+      , [ { Masc.Keeper_skill_catalog.availability =
+              Masc.Keeper_skill_catalog.Exact_unavailable _
+          ; _
+          }
+        ] ) ] ->
+    ()
+  | surfaces ->
+    failf
+      "filtered prompt surface diverged: %s"
+      (Yojson.Safe.to_string
+         (`List
+            (List.concat_map
+               (fun (_, entries) ->
+                  List.map Masc.Keeper_skill_catalog.exact_surface_to_yojson entries)
+               surfaces)))
+;;
+
 let test_shadow_reference_selects_shadow_not_effective_winner () =
   let config =
     config
@@ -179,6 +305,7 @@ let test_held_shadow_composition_wins_with_exact_collision_evidence () =
   let global, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
   let projected =
     Masc.Keeper_skill_catalog.project_turn
+      ~names:None
       ~global
       ~task:(Selection.skills task_selection)
   in
@@ -244,6 +371,7 @@ let test_held_shadow_composition_wins_with_exact_collision_evidence () =
   let merged = Selection.merge [ current; held ] in
   let collision_projection =
     Masc.Keeper_skill_catalog.project_turn
+      ~names:None
       ~global
       ~task:(Selection.skills merged)
   in
@@ -643,6 +771,10 @@ let () =
     [ ( "selection"
       , [ test_case "shadow exact ref selects shadow" `Quick
             test_shadow_reference_selects_shadow_not_effective_winner
+        ; test_case "Keeper names filter global and Task Skills" `Quick
+            test_keeper_name_selection_filters_global_and_task_exactly
+        ; test_case "Keeper names filter prompt and activation Task views" `Quick
+            test_keeper_name_selection_filters_prompt_and_activation_task_views
         ; test_case "held shadow composition collision is exact" `Quick
             test_held_shadow_composition_wins_with_exact_collision_evidence
         ; test_case "malformed exact composition falls back" `Quick

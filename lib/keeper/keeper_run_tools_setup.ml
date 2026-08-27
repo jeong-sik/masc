@@ -167,6 +167,7 @@ let prepare_agent_setup
       ~(config_root : string)
       ~(runtime_config_path : string option)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
+      ~(skill_names : string list option)
       ~(task_skill_selection :
           (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result)
       ~(trajectory_acc : Trajectory.accumulator option)
@@ -225,20 +226,6 @@ let prepare_agent_setup
   let* task_skill_selection =
     Result.map_error Keeper_task_skill_turn.core_error task_skill_selection
   in
-  let* skill_activation_context =
-    Keeper_skill_activation_recorder.make
-      ~trace_id:meta.runtime.trace_id
-      ~runtime_id:(fun () -> Atomic.get active_runtime_id)
-      ~turn_ref:
-        (Ids.Turn_ref.make
-           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~absolute_turn:keeper_turn_id)
-      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
-      ~task_selection:task_skill_selection
-    |> Result.map_error (fun error ->
-         Agent_core.Error.Internal
-           (Keeper_skill_activation_recorder.error_to_string error))
-  in
   let ctx_snapshot = ctx_work in
   let gate_history, gate_history_omitted = gate_history_slice history_messages in
   let gate_context =
@@ -277,6 +264,7 @@ let prepare_agent_setup
     task_skill_selection.selected;
   let turn_skill_projection =
     Keeper_skill_catalog.project_turn
+      ~names:skill_names
       ~global:global_skill_catalog
       ~task:(Keeper_task_skill_turn.skills task_skill_selection)
   in
@@ -288,6 +276,25 @@ let prepare_agent_setup
          meta.name
          (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
     turn_skill_projection.unavailable;
+  let executable_task_skill_selection =
+    Keeper_task_skill_turn.executable_selection
+      ~projection:turn_skill_projection
+      task_skill_selection
+  in
+  let* skill_activation_context =
+    Keeper_skill_activation_recorder.make
+      ~trace_id:meta.runtime.trace_id
+      ~runtime_id:(fun () -> Atomic.get active_runtime_id)
+      ~turn_ref:
+        (Ids.Turn_ref.make
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ~absolute_turn:keeper_turn_id)
+      ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
+      ~task_selection:executable_task_skill_selection
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Internal
+           (Keeper_skill_activation_recorder.error_to_string error))
+  in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []

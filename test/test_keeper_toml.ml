@@ -694,6 +694,36 @@ let test_tool_groups_accepts_known_names () =
            (Some [ "execute"; "meta" ]) defaults.KTP.tool_groups)
 ;;
 
+let test_skill_names_preserve_absent_empty_and_exact_values () =
+  let parse input =
+    match TL.parse_toml input with
+    | Error error -> fail error
+    | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok defaults -> defaults
+       | Error detail -> fail detail)
+  in
+  let absent = parse "[keeper]\ninstructions = \"test\"\n" in
+  check (option (list string)) "absent means all" None absent.KTP.skill_names;
+  let empty = parse "[keeper]\ninstructions = \"test\"\n[keeper.skills]\nnames = []\n" in
+  check (option (list string)) "explicit empty means none" (Some []) empty.KTP.skill_names;
+  let exact =
+    parse
+      "[keeper]\ninstructions = \"test\"\n[keeper.skills]\nnames = [\"guide\", \"Guide\", \"guide\"]\n"
+  in
+  check
+    (option (list string))
+    "exact values are deduplicated without case normalization"
+    (Some [ "guide"; "Guide" ])
+    exact.KTP.skill_names;
+  let merged =
+    KTP.merge_keeper_profile_defaults
+      ~base:{ KTP.empty_keeper_profile_defaults with skill_names = Some [ "guide" ] }
+      ~overlay:{ KTP.empty_keeper_profile_defaults with skill_names = Some [] }
+  in
+  check (option (list string)) "explicit empty overrides inherited names" (Some []) merged.skill_names
+;;
+
 let test_profile_full () =
   let input = {|
 [keeper]
@@ -1767,6 +1797,8 @@ let () =
             test_tool_groups_rejects_unknown_names;
           test_case "tool groups accept known names" `Quick
             test_tool_groups_accepts_known_names;
+          test_case "Skill names preserve three-state selection" `Quick
+            test_skill_names_preserve_absent_empty_and_exact_values;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick

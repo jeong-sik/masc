@@ -535,6 +535,13 @@ export type DashboardEffectiveKeeperSurface =
       tool_delivery: DashboardToolDelivery
       native_posture: string | null
       tool_groups: string[]
+      skill_selection:
+        | { mode: 'all' }
+        | { mode: 'names'; names: string[] }
+      unavailable_skill_names: Array<{
+        name: string
+        reason: 'not_in_turn_skill_catalog'
+      }>
       current_task_id: string | null
       skill_snapshot_revision: string
       skill_resource_read_max_bytes: number | null

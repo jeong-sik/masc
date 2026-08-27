@@ -119,6 +119,9 @@ type turn_unavailable =
       ; selected_name : string
       ; unavailable_name : string
       }
+  | Configured_skill_name_unavailable of { name : string }
+
+type configured_name_unavailable = private Configured_name_unavailable of string
 
 type turn_projection = private
   { catalog : t
@@ -177,18 +180,25 @@ val project_entry_or_fallback :
     instruction body with a typed diagnostic. Other rejected declarations are
     explicitly unavailable. *)
 
-val project_turn : global:t -> task:skill list -> turn_projection
-(** Merge exact Task-selected entries before the global catalog. Exact
+val project_turn : names:string list option -> global:t -> task:skill list -> turn_projection
+(** Merge exact Task-selected entries before the global catalog, then apply the
+    same optional exact-name selection to both sources. Absent [names] exposes
+    all Skills; [[]] exposes none. Exact
     duplicates collapse. When two different exact composition references
     publish one model tool name, the Task-first entry stays available and the
     other reference is returned as typed unavailable instead of silently
     replacing either identity. *)
 
 val turn_unavailable_to_string : turn_unavailable -> string
+val configured_names_unavailable : turn_projection -> configured_name_unavailable list
+val configured_name_unavailable_to_yojson : configured_name_unavailable -> Yojson.Safe.t
 
 val exact_surfaces : turn_projection -> task:skill list -> exact_surface list
 (** Render every Task-selected exact reference from the same turn projection
     that builds executable tools. *)
+
+val exact_is_executable : turn_projection -> Skill_reference.t -> bool
+(** Whether one exact reference is present in the executable turn catalog. *)
 
 val exact_surface_to_yojson : exact_surface -> Yojson.Safe.t
 

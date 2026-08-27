@@ -27,6 +27,9 @@ type t =
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
+  ; skill_names : string list option
+        (** [None] means all; [Some []] means the profile explicitly selects none. *)
+  ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
@@ -67,6 +70,7 @@ module For_testing : sig
     tool_delivery:tool_delivery ->
     native_posture:Runtime_native_tools.posture option ->
     tool_groups:string list option ->
+    skill_names:string list option ->
     current_task_id:string option ->
     task_skill_references:Skill_reference.t list ->
     task_selection:Keeper_task_skill_turn.t option ->

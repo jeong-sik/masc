@@ -28,6 +28,8 @@ type parsed_args =
   ; network_mode_opt : string option
   ; tool_groups_opt : string list option
   ; tool_groups_present : bool
+  ; skill_names_opt : string list option
+  ; skill_names_present : bool
   ; native_tool_posture_opt : Runtime_native_tools.posture option
   ; native_tool_posture_present : bool
   ; instructions_arg : string option

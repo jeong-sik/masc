@@ -75,3 +75,15 @@ items = { type = "string" }
 description = """
 Restrict file writes to these path prefixes. Empty list means \
 playground-only (.masc/playground/<name>/)."""
+
+[[params]]
+name = "skills"
+type = "object"
+additional_properties = false
+description = "Profile-only exact Keeper Skill name selection. Omit to keep it unchanged; skills={} selects all; names=[] selects none."
+
+[[params.params]]
+name = "names"
+type = "array"
+items = { type = "string" }
+description = "Exact canonical Skill names. Unknown names remain observable and do not block known names."

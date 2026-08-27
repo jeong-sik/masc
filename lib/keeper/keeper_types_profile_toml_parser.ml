@@ -43,6 +43,7 @@ let keeper_toml_fields =
        word, which is what naming them here prevents. *)
   ; "tools.native", Field_string
   ; "tools.groups", Field_string_array
+  ; "skills.names", Field_string_array
   ]
 
 let keeper_toml_field_names = List.map fst keeper_toml_fields
@@ -185,6 +186,13 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let tool_groups =
     match tool_groups_result with Ok groups -> groups | Error _ -> None
   in
+  (* Do not use [strs] alone here: it maps an absent array and an explicit []
+     to the same value. The profile contract gives those opposite meanings. *)
+  let skill_names =
+    if has "skills.names"
+    then Some (strs "skills.names" |> dedupe_keep_order)
+    else None
+  in
   let result =
     Result.bind result (fun () ->
         validate_known_keeper_field_types doc)
@@ -282,6 +290,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         native_tool_posture =
           Option.bind (str "tools.native") Runtime_native_tools.of_string;
         tool_groups;
+        skill_names;
         agent_core_env;
       })
       max_context_override_result)
@@ -334,6 +343,7 @@ let merge_keeper_profile_defaults
     native_tool_posture =
       prefer overlay.native_tool_posture base.native_tool_posture;
     tool_groups = prefer overlay.tool_groups base.tool_groups;
+    skill_names = prefer overlay.skill_names base.skill_names;
     agent_core_env =
       (let overlay_keys = List.map fst overlay.agent_core_env in
        let surviving_base =

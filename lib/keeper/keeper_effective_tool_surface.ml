@@ -22,6 +22,8 @@ type t =
   ; tool_delivery : tool_delivery
   ; native_posture : Runtime_native_tools.posture option
   ; tool_groups : string list
+  ; skill_names : string list option
+  ; unavailable_skill_names : Keeper_skill_catalog.configured_name_unavailable list
   ; current_task_id : string option
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
@@ -110,6 +112,7 @@ let project
       ~tool_delivery
       ~native_posture
       ~tool_groups
+      ~skill_names
       ~current_task_id
       ~task_skill_references
       ~(task_selection : Keeper_task_skill_turn.t option)
@@ -141,6 +144,7 @@ let project
   | Ok task_selection ->
     let turn_skill_projection =
       Keeper_skill_catalog.project_turn
+        ~names:skill_names
         ~global:global_skill_catalog
         ~task:(Keeper_task_skill_turn.skills task_selection)
     in
@@ -260,6 +264,9 @@ let project
       ; tool_delivery
       ; native_posture
       ; tool_groups = Option.value ~default:[] tool_groups
+      ; skill_names
+      ; unavailable_skill_names =
+          Keeper_skill_catalog.configured_names_unavailable turn_skill_projection
       ; current_task_id
       ; skill_snapshot_revision =
           Skill_catalog_snapshot.snapshot_revision skill_snapshot
@@ -389,6 +396,17 @@ let resolve ~config ~keeper_name =
     let current_task_id =
       Option.map Keeper_id.Task_id.to_string meta.current_task_id
     in
+    (match
+       Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+         ~base_path:config.base_path
+         keeper_name
+     with
+     | Error error ->
+       unavailable
+         keeper_name
+         ( "keeper_profile_unreadable"
+         , Keeper_types_profile.keeper_toml_load_error_to_string error )
+     | Ok profile_defaults ->
     (match published_skill_snapshot ~base_path:config.base_path with
      | Error error -> unavailable keeper_name error
      | Ok (skill_snapshot, skills_left_out) ->
@@ -428,6 +446,7 @@ let resolve ~config ~keeper_name =
                      ~tool_delivery:(runtime_tool_delivery runtime)
                      ~native_posture
                      ~tool_groups:meta.tool_groups
+                     ~skill_names:profile_defaults.skill_names
                      ~current_task_id
                      ~skills_left_out
                      ~task_skill_references:[]
@@ -439,7 +458,7 @@ let resolve ~config ~keeper_name =
                    unavailable
                      keeper_name
                      ( Keeper_task_skill_turn.error_code error
-                     , Keeper_task_skill_turn.error_to_string error ))))))
+                     , Keeper_task_skill_turn.error_to_string error )))))))
 ;;
 
 let string_list values = `List (List.map (fun value -> `String value) values)
@@ -489,6 +508,19 @@ let to_yojson = function
           | None -> `Null
           | Some posture -> `String (Runtime_native_tools.to_string posture) )
       ; "tool_groups", string_list surface.tool_groups
+      ; ( "skill_selection"
+        , match surface.skill_names with
+          | None -> `Assoc [ "mode", `String "all" ]
+          | Some names ->
+            `Assoc
+              [ "mode", `String "names"
+              ; "names", string_list names
+              ] )
+      ; ( "unavailable_skill_names"
+        , `List
+            (List.map
+               Keeper_skill_catalog.configured_name_unavailable_to_yojson
+               surface.unavailable_skill_names) )
       ; ( "current_task_id"
         , match surface.current_task_id with
           | None -> `Null

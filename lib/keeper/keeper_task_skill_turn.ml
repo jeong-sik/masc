@@ -11,9 +11,16 @@ type error =
 type selected =
   { reference : Skill_reference.t
   ; skill : Keeper_skill_catalog.skill
+  ; diagnostic : Keeper_skill_catalog.error option
+  ; task_ids : string list
   }
 
 type t = { selected : selected list }
+
+type partition =
+  { instructions : selected list
+  ; compositions : selected list
+  }
 
 type task_scope =
   | No_task
@@ -24,18 +31,59 @@ type task_scope =
 
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
-let resolve ~snapshot references =
+let resolve_with_task_ids ~snapshot ~task_ids references =
   let rec loop resolved = function
     | [] -> Ok { selected = List.rev resolved }
     | reference :: rest ->
       (match Skill_catalog_snapshot.resolve_reference snapshot reference with
        | Error error -> Error (Reference_resolution_failed { reference; error })
        | Ok entry ->
-         (match Keeper_skill_catalog.project_entry snapshot entry with
-          | Error error -> Error (Projection_failed { reference; error })
-          | Ok skill -> loop ({ reference; skill } :: resolved) rest))
+         (match Keeper_skill_catalog.project_entry_or_fallback snapshot entry with
+          | Keeper_skill_catalog.Projected skill ->
+            loop ({ reference; skill; diagnostic = None; task_ids } :: resolved) rest
+          | Keeper_skill_catalog.Frozen_instruction { skill; diagnostic } ->
+            loop
+              ({ reference; skill; diagnostic = Some diagnostic; task_ids } :: resolved)
+              rest
+          | Keeper_skill_catalog.Entry_unavailable error ->
+            Error (Projection_failed { reference; error })))
   in
   loop [] references
+;;
+
+let resolve ~snapshot references =
+  resolve_with_task_ids ~snapshot ~task_ids:[] references
+;;
+
+let resolve_for_task ~snapshot ~task_id references =
+  resolve_with_task_ids ~snapshot ~task_ids:[ task_id ] references
+;;
+
+let empty = { selected = [] }
+
+let merge selections =
+  let add selected candidate =
+    match
+      List.find_opt
+        (fun known -> Skill_reference.equal known.reference candidate.reference)
+        selected
+    with
+    | None -> selected @ [ candidate ]
+    | Some known ->
+      let merged =
+        { known with
+          task_ids =
+            List.sort_uniq String.compare (known.task_ids @ candidate.task_ids)
+        }
+      in
+      List.map
+        (fun existing ->
+           if Skill_reference.equal existing.reference candidate.reference
+           then merged
+           else existing)
+        selected
+  in
+  { selected = List.fold_left add [] (List.concat_map (fun t -> t.selected) selections) }
 ;;
 
 let error_code = function
@@ -113,3 +161,21 @@ let references = function
   | No_task -> []
   | Task { references; _ } -> references
 ;;
+
+let partition selection =
+  List.fold_left
+    (fun partition selected ->
+       match selected.skill.surface with
+       | Keeper_skill_catalog.Instruction ->
+         { partition with instructions = selected :: partition.instructions }
+       | Keeper_skill_catalog.Composition _ ->
+         { partition with compositions = selected :: partition.compositions })
+    { instructions = []; compositions = [] }
+    selection.selected
+  |> fun partition ->
+  { instructions = List.rev partition.instructions
+  ; compositions = List.rev partition.compositions
+  }
+;;
+
+let skills selection = List.map (fun selected -> selected.skill) selection.selected

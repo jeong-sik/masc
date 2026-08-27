@@ -114,7 +114,7 @@ let project
       ~task_skill_references
       ~skill_snapshot
   =
-  let skill_catalog, _projection_diagnostics =
+  let global_skill_catalog, _projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
   let skill_resource_read_max_bytes =
@@ -132,34 +132,13 @@ let project
   match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
   | Error _ as error -> error
   | Ok task_selection ->
-    let task_instruction_skills =
-      List.map
-        (fun (selected : Keeper_task_skill_turn.selected) ->
-           let resource_location =
-             match selected.skill.provenance with
-             | Some
-                 { source_root = Some source_root
-                 ; resource_read_max_bytes = Some resource_read_max_bytes
-                 ; directory
-                 ; _
-                 } ->
-               Some
-                 Keeper_tool_composition_surface.
-                   { source_root; directory; resource_read_max_bytes }
-             | Some { source_root = None; _ }
-             | Some { resource_read_max_bytes = None; _ }
-             | None ->
-               None
-           in
-           Keeper_tool_composition_surface.instruction_skill
-             ?resource_location
-             ~reference:selected.reference
-             ~description:selected.skill.description
-             ~body:selected.skill.body
-             ())
-        task_selection.selected
+    let turn_skill_projection =
+      Keeper_skill_catalog.project_turn
+        ~global:global_skill_catalog
+        ~task:(Keeper_task_skill_turn.skills task_selection)
     in
-    let global_instruction_skills =
+    let skill_catalog = turn_skill_projection.catalog in
+    let readable_instruction_skills =
       Keeper_skill_catalog.skills skill_catalog
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
            match skill.reference, skill.surface with
@@ -189,11 +168,6 @@ let project
                   ())
            | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
              None)
-    in
-    let readable_instruction_skills =
-      Keeper_tool_composition_surface.merge_instruction_skills
-        ~task:task_instruction_skills
-        ~global:global_instruction_skills
     in
     let instruction_skills =
       List.map
@@ -289,26 +263,17 @@ let project
       ; tool_surface_bytes
       ; skill_tool_surface_bytes
       ; skill_body_bytes
-      ; skills_left_out
+        (* Both sides of the train meet here: main (#31092) added the four
+           profile fields above, and this branch widens skills_left_out with
+           the turn projection's typed unavailable rows. *)
+      ; skills_left_out =
+          skills_left_out
+          @ List.map
+              Keeper_skill_catalog.turn_unavailable_to_string
+              turn_skill_projection.unavailable
       ; tools
       ; tool_surface_sha256
       }
-;;
-
-let task_skills config current_task_id =
-  match current_task_id with
-  | None -> Ok []
-  | Some task_id ->
-    (match
-       Workspace.get_tasks_safe config
-       |> List.find_opt (fun (task : Masc_domain.task) ->
-         String.equal task.id task_id)
-     with
-     | Some task -> Ok task.skills
-     | None ->
-       Error
-         ( "current_task_missing"
-         , Printf.sprintf "Keeper metadata names missing task %S" task_id ))
 ;;
 
 let resolve_runtime keeper_name =
@@ -416,12 +381,27 @@ let resolve ~config ~keeper_name =
     let current_task_id =
       Option.map Keeper_id.Task_id.to_string meta.current_task_id
     in
-    (match task_skills config current_task_id with
+    (match published_skill_snapshot ~base_path:config.base_path with
      | Error error -> unavailable keeper_name error
-     | Ok task_skill_references ->
-       (match published_skill_snapshot ~base_path:config.base_path with
-        | Error error -> unavailable keeper_name error
-        | Ok (skill_snapshot, skills_left_out) ->
+     | Ok (skill_snapshot, skills_left_out) ->
+       (match
+          Keeper_run_tools_setup.resolve_held_task_skill_selection
+            ~config
+            ~meta
+            ~skill_snapshot
+        with
+        | Error error ->
+          unavailable
+            keeper_name
+            ( "task_skill_selection_unavailable"
+            , Agent_core.Error.to_string error )
+        | Ok task_selection ->
+          let task_skill_references =
+            List.map
+              (fun (selected : Keeper_task_skill_turn.selected) ->
+                 selected.reference)
+              task_selection.selected
+          in
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->

@@ -345,6 +345,7 @@ let test_current_task_section_renders () =
 (* task-364: the other held tasks' skills get their own lines. *)
 let test_held_task_skills_section_renders () =
   let user =
+    with_repo_prompt_config @@ fun () ->
     user_message
       { base_observation with
         held_task_skills =
@@ -362,11 +363,10 @@ let test_held_task_skills_section_renders () =
     (contains ~needle:"task-364 (held by you) names skills: [{" user
      && contains ~needle:"\"name\":\"mission-snapshot\"" user
      && contains ~needle:"\"name\":\"work-intake\"" user);
-  check bool "tool named" true (contains ~needle:"`keeper_skill`" user);
-  check bool "exact object instruction" true
-    (contains ~needle:"with one exact reference object" user);
-  check bool "legacy name instruction absent" false
-    (contains ~needle:"with a name" user)
+  check bool "unprojected refs are explicitly unavailable" true
+    (contains ~needle:"\"kind\":\"unavailable\"" user);
+  check bool "unprojected refs do not invent keeper_skill" false
+    (contains ~needle:"`keeper_skill`" user)
 
 let test_held_task_skills_section_absent_without_held_tasks () =
   let user = user_message base_observation in
@@ -533,6 +533,7 @@ let test_direct_turn_reuses_current_task_context () =
    claimed gets the same skill lines the scheduled lane renders. *)
 let test_direct_turn_carries_held_task_skills () =
   let context =
+    with_repo_prompt_config @@ fun () ->
     Turn.For_testing.direct_turn_dynamic_context
       ~current_task:Inputs.No_current_task
       ~held_task_skills:

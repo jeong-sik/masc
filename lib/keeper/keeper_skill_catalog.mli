@@ -94,6 +94,41 @@ type projection_diagnostic = private
   ; error : error
   }
 
+type entry_projection =
+  | Projected of skill
+  | Frozen_instruction of
+      { skill : skill
+      ; diagnostic : error
+      }
+  | Entry_unavailable of error
+
+type turn_unavailable =
+  | Composition_tool_name_collision of
+      { tool_name : string
+      ; selected : Skill_reference.t
+      ; unavailable : Skill_reference.t
+      }
+  | Composition_tool_name_collision_unattributed of
+      { tool_name : string
+      ; selected_name : string
+      ; unavailable_name : string
+      }
+
+type turn_projection = private
+  { catalog : t
+  ; unavailable : turn_unavailable list
+  }
+
+type exact_surface_availability =
+  | Instruction_tool
+  | Composition_tool of { tool_name : string }
+  | Exact_unavailable of { diagnostic : string }
+
+type exact_surface = private
+  { reference : Skill_reference.t
+  ; availability : exact_surface_availability
+  }
+
 val parse_skill : directory:string -> string -> (skill, error) result
 (** Parse one SKILL.md document. [directory] is the skill's directory name;
     {!Agent_core.Skill_document.decode} enforces the frontmatter contract. A
@@ -119,13 +154,35 @@ val of_snapshot :
 val all_entries_of_snapshot :
   Skill_catalog_snapshot.t -> t * projection_diagnostic list
 (** Project every exact snapshot entry, including shadowed identities. This is
-    the operator-surface projection; executable turn catalogs continue to use
-    {!of_snapshot} and therefore contain effective entries only. *)
+    the operator-surface projection. Executable turn catalogs start with
+    {!of_snapshot}, then {!project_turn} merges exact Task-selected shadows. *)
 
 val project_entry :
   Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> (skill, error) result
 (** Project one exact snapshot entry, including a shadowed entry. The returned
     Skill preserves the entry's exact reference and source provenance. *)
+
+val project_entry_or_fallback :
+  Skill_catalog_snapshot.t -> Skill_catalog_snapshot.entry -> entry_projection
+(** Canonical projection for global, Task-selected, and shadowed entries.
+    Malformed composition declarations remain available as their frozen
+    instruction body with a typed diagnostic. Other rejected declarations are
+    explicitly unavailable. *)
+
+val project_turn : global:t -> task:skill list -> turn_projection
+(** Merge exact Task-selected entries before the global catalog. Exact
+    duplicates collapse. When two different exact composition references
+    publish one model tool name, the Task-first entry stays available and the
+    other reference is returned as typed unavailable instead of silently
+    replacing either identity. *)
+
+val turn_unavailable_to_string : turn_unavailable -> string
+
+val exact_surfaces : turn_projection -> task:skill list -> exact_surface list
+(** Render every Task-selected exact reference from the same turn projection
+    that builds executable tools. *)
+
+val exact_surface_to_yojson : exact_surface -> Yojson.Safe.t
 
 val empty : t
 val skills : t -> skill list

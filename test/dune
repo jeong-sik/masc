@@ -1840,9 +1840,18 @@
   unix
   yojson))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the keeper meta fixtures carry no
+; sandbox_profile, which resolves to Local (incidental — the suite measures
+; schedule consumer dispatch and occurrence recovery, not sandbox
+; isolation), and dispatch now rejects Local fail-closed without the hatch.
 (test
  (name test_schedule_consumer_dispatch)
  (modules test_schedule_consumer_dispatch)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
  (libraries masc_test_deps masc_schedule masc_server))
 
 (test

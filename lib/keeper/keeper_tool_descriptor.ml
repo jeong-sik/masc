@@ -1907,8 +1907,10 @@ let internal_descriptors : t list =
       ~handler:Tool_time_now
       ()
      |> with_composable_output (Json_output { schema = time_now_output_schema }))
-  ; (in_process_descriptor
+  ; (in_process_descriptor_with_schema_source
+       ~capability_identity:Internal_name_identity
        ~keeper_model_projection:Internal_name
+       ~input_schema_source:Canonical_registry
        ~id:"keeper.tools_list"
        ~name:"keeper_tools_list"
        ~description:keeper_tools_list_schema.description

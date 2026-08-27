@@ -48,23 +48,59 @@ let bind_text db statement index value =
   else Error (Index_unavailable (sqlite_error db "bind capability field"))
 ;;
 
-let finalize statement =
-  try ignore (Sqlite3.finalize statement : Sqlite3.Rc.t) with
-  | Sqlite3.Error _ -> ()
-;;
-
-let close db =
-  try ignore (Sqlite3.db_close db : bool) with
-  | Sqlite3.Error _ -> ()
-;;
-
 let with_statement db sql f =
   match Sqlite3.prepare db sql with
   | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
   | statement ->
-    Fun.protect
-      ~finally:(fun () -> finalize statement)
-      (fun () -> f statement)
+    let outcome =
+      try `Result (f statement) with
+      | exn -> `Exception exn
+    in
+    let finalized =
+      match Sqlite3.finalize statement with
+      | exception Sqlite3.Error detail ->
+        Error (Index_unavailable ("finalize capability statement: " ^ detail))
+      | rc when Sqlite3.Rc.is_success rc -> Ok ()
+      | rc ->
+        (* SQLite always destroys the statement; finalize returns the most
+           recent step error again. Preserve the already-classified query or
+           runtime failure instead of relabeling it as cleanup failure. A
+           non-success finalize after an otherwise successful operation is a
+           new index failure. *)
+        (match outcome with
+         | `Result (Error _) -> Ok ()
+         | `Result (Ok _) | `Exception _ ->
+           Error
+             (Index_unavailable
+                (Printf.sprintf
+                   "finalize capability statement: %s"
+                   (Sqlite3.Rc.to_string rc))))
+    in
+    (match outcome, finalized with
+     | `Result result, Ok () -> result
+     | `Result _, (Error _ as error) -> error
+     | `Exception exn, _ -> raise exn)
+;;
+
+let with_database db f =
+  let outcome =
+    try `Result (f db) with
+    | exn -> `Exception exn
+  in
+  let closed =
+    match Sqlite3.db_close db with
+    | exception Sqlite3.Error detail ->
+      Error (Index_unavailable ("close capability index: " ^ detail))
+    | true -> Ok ()
+    | false ->
+      Error
+        (Index_unavailable
+           ("close capability index: " ^ Sqlite3.errmsg db))
+  in
+  match outcome, closed with
+  | `Result result, Ok () -> result
+  | `Result _, (Error _ as error) -> error
+  | `Exception exn, _ -> raise exn
 ;;
 
 let insert_document db statement (document : document) =
@@ -109,6 +145,8 @@ let query db text =
        | Ok () ->
          let rec rows hits =
            match Sqlite3.step statement with
+           | exception Sqlite3.Error detail ->
+             Error (Index_unavailable ("search capabilities: " ^ detail))
            | Sqlite3.Rc.ROW ->
              let document =
                { id = Sqlite3.column_text statement 0
@@ -119,7 +157,15 @@ let query db text =
              in
              rows ({ document; rank = Sqlite3.column_double statement 4 } :: hits)
            | Sqlite3.Rc.DONE -> Ok (List.rev hits)
-           | _ -> Error (Invalid_query (sqlite_error db "search capabilities"))
+           | Sqlite3.Rc.ERROR ->
+             Error (Invalid_query (sqlite_error db "search capabilities"))
+           | rc ->
+             Error
+               (Index_unavailable
+                  (Printf.sprintf
+                     "search capabilities: %s (%s)"
+                     (Sqlite3.Rc.to_string rc)
+                     (Sqlite3.errmsg db)))
          in
          rows [])
 ;;
@@ -128,22 +174,22 @@ let search ~query:text documents =
   if String.equal (String.trim text) ""
   then Error Empty_query
   else
-    match Sqlite3.db_open ":memory:" with
-    | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
-    | db ->
-      Fun.protect
-        ~finally:(fun () -> close db)
-        (fun () ->
-           match
-             exec
-               db
-               "create capability index"
-               "CREATE VIRTUAL TABLE capability_search USING \
-                fts5(id UNINDEXED, name, description, category, tokenize='unicode61')"
-           with
-           | Error _ as error -> error
-           | Ok () ->
-             (match populate db documents with
-              | Error _ as error -> error
-              | Ok () -> query db text))
+    try
+      match Sqlite3.db_open ":memory:" with
+      | db ->
+        with_database db (fun db ->
+             match
+               exec
+                 db
+                 "create capability index"
+                 "CREATE VIRTUAL TABLE capability_search USING \
+                  fts5(id UNINDEXED, name, description, category, tokenize='unicode61')"
+             with
+             | Error _ as error -> error
+             | Ok () ->
+               (match populate db documents with
+                | Error _ as error -> error
+                | Ok () -> query db text))
+    with
+    | Sqlite3.Error detail -> Error (Index_unavailable detail)
 ;;

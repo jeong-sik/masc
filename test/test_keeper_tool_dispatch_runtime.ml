@@ -442,6 +442,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     | None -> fail ("missing descriptor_surface entry for " ^ internal_name)
   in
   let find_descriptor = find_descriptor_in descriptor_surface in
+  let tools_list = find_descriptor "keeper_tools_list" in
+  check string
+    "tools_list schema authority is the TOML registry"
+    "canonical_registry"
+    (string_member "input_schema_source" tools_list);
   let descriptor_for_internal internal_name =
     match KTD.descriptors_for_internal internal_name with
     | descriptor :: _ -> descriptor
@@ -4827,31 +4832,37 @@ let test_tools_search_error_reaches_agent_core_as_typed_payload () =
          | Some tool -> tool
          | None -> fail "keeper_tools_list is absent from Agent Core bundle"
        in
-       match
-         Agent_core.Tool.execute
-           ~invocation:
-             (composition_invocation
-                ~completion:Agent_core.Tool_contract.Continue_after_success)
-           tool
-           (`Assoc [ "query", `String "  " ])
-       with
-       | Ok _ -> fail "empty capability search unexpectedly completed"
-       | Error error ->
-         check
-           (option bool)
-           "policy rejection remains deterministic"
-           (Some true)
-           (Option.map
-              (fun class_ -> class_ = Agent_core.Types.Deterministic)
-              error.Agent_core.Types.error_class);
-         let payload =
+       let reject input =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             tool
+             input
+         with
+         | Ok _ -> fail "invalid capability search unexpectedly completed"
+         | Error error ->
+           check
+             (option bool)
+             "policy rejection remains deterministic"
+             (Some true)
+             (Option.map
+                (fun class_ -> class_ = Agent_core.Types.Deterministic)
+                error.Agent_core.Types.error_class);
            parse_json error.Agent_core.Types.message
            |> Yojson.Safe.Util.member "masc.payload"
-         in
-         check string
-           "Agent Core receives the typed search error kind"
-           "empty_query"
-           Yojson.Safe.Util.(payload |> member "error" |> member "kind" |> to_string))
+       in
+       let empty = reject (`Assoc [ "query", `String "  " ]) in
+       check string
+         "Agent Core receives the typed search error kind"
+         "empty_query"
+         Yojson.Safe.Util.(empty |> member "error" |> member "kind" |> to_string);
+       let wrong_type = reject (`Assoc [ "query", `Int 3 ]) in
+       check string
+         "descriptor validation reaches Agent Core as typed data"
+         "invalid_args"
+         Yojson.Safe.Util.(wrong_type |> member "reason" |> to_string))
 ;;
 
 let one_node_clock_composition =

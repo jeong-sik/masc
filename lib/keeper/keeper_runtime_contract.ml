@@ -10,6 +10,7 @@ let backend_of_meta (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
   | Micro_vm -> "microvm"
+  | Remote_ssh -> "remote_ssh"
 
 (* Closed set of claim-scope modes. Was a bare [string] (#20674): producers
    and consumers matched on free string literals, so the compiler could not

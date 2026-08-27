@@ -111,6 +111,10 @@ let execution_location_json ~config ~meta ~args ~cwd =
   let host_location = host_execution_location_json ~config ~meta ~args ~cwd in
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Local -> host_location
+  (* Phase 1: no container or remote projection exists for remote_ssh
+     yet; the execution location is the host bookkeeping bundle, and
+     dispatch itself fails closed upstream. *)
+  | Keeper_types_profile_sandbox.Remote_ssh -> host_location
   | Keeper_types_profile_sandbox.Docker | Keeper_types_profile_sandbox.Micro_vm ->
     let host_root = normalize_path (playground_root_no_create ~config ~meta) in
     let visible_root =

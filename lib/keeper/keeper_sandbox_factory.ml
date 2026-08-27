@@ -3,6 +3,7 @@ type resolve_result =
   | No_factory
   | Local_profile
   | Backend_unimplemented of Keeper_types_profile_sandbox.sandbox_profile
+  | Remote_ssh_profile
 
 type t = {
   config : Workspace.config;
@@ -72,6 +73,10 @@ let resolve (t : t) ~cwd =
     in
     match effective_profile with
     | Keeper_types_profile_sandbox.Local -> Local_profile
+    (* Distinct from [Local_profile]: callers must not read this as
+       "host execution is fine". There is no SSH turn runtime yet
+       (Phase 1 task 6); consumers fail closed on this constructor. *)
+    | Keeper_types_profile_sandbox.Remote_ssh -> Remote_ssh_profile
     (* Both guest profiles share the runtime value; the runtime itself
        branches on [meta.sandbox_profile] for every CLI it builds (start,
        exec, inspect, stop), so a VM keeper's commands run under Apple's

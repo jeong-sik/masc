@@ -80,6 +80,15 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
                  (Keeper_types_profile_sandbox.sandbox_profile_to_string profile) )
            ]
          (Keeper_types_profile_sandbox.backend_unimplemented_message profile))
+  | Remote_ssh_profile ->
+    (* Unreachable from typed dispatch (the Remote_ssh arm there fails
+       closed first), but fail closed here too: never improvise a Docker
+       or host target for a remote_ssh keeper (RFC-0001). *)
+    Error
+      (target_error
+         "remote_ssh_dispatch_unavailable: typed Shell IR Docker dispatch does \
+          not apply to sandbox_profile=remote_ssh; SSH runner not wired yet \
+          (Phase 1 task 6)")
   | Runtime runtime ->
     let image = docker_image meta in
     (match

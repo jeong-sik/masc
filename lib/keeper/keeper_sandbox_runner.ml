@@ -129,6 +129,11 @@ let uses_backend ~config:_ ~meta ~cwd:_ =
      entrypoints refuse the profile before building an argv. *)
   | Keeper_types_profile_sandbox.Micro_vm, _ -> true
   | Keeper_types_profile_sandbox.Local, _ -> false
+  (* remote_ssh does not route through the (Docker) sandbox backend —
+     answering [true] would silently downgrade it to Docker and [false]
+     only means "not the Docker backend": the typed Execute dispatch
+     fails closed on Remote_ssh before any Host route can claim it. *)
+  | Keeper_types_profile_sandbox.Remote_ssh, _ -> false
 
 let route_for ~config ~meta ~cwd =
   if uses_backend ~config ~meta ~cwd then Sandbox_backend else Host

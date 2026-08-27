@@ -8,6 +8,7 @@ type sandbox_profile =
   | Local
   | Docker
   | Micro_vm
+  | Remote_ssh
 
 exception Invalid_keeper_sandbox_config of string
 

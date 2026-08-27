@@ -17,6 +17,12 @@ let is_hardened = function
      route through the guest the same way. *)
   | Micro_vm -> true
   | Local -> false
+  (* remote_ssh reads do not go through the Docker read backend; the SSH
+     read backend lands behind the Keeper_sandbox_read_runner seam with
+     the lane's path-translation task. Until then the containment-checked
+     host bookkeeping bundle is the only readable namespace, exactly like
+     Local. *)
+  | Remote_ssh -> false
 
 let should_route_read ~(meta : keeper_meta) : bool =
   is_hardened meta.sandbox_profile
@@ -125,7 +131,10 @@ let run_command_with_status ?turn_sandbox_factory
   let no_runtime =
     match resolve_result with
     | Runtime _ -> false
-    | Backend_unimplemented _ | No_factory | Local_profile -> true
+    (* [Remote_ssh_profile]: no turn runtime exists (SSH runner is Phase 1
+       task 6); the second match below fails closed on it before any
+       Docker fallback can claim the call. *)
+    | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> true
   in
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
@@ -145,6 +154,11 @@ let run_command_with_status ?turn_sandbox_factory
     | Backend_unimplemented profile ->
       Error
         (Keeper_types_profile_sandbox.backend_unimplemented_message profile)
+    | Remote_ssh_profile ->
+      Error
+        "remote_ssh_read_unavailable: sandbox_profile=remote_ssh has no \
+         sandbox read backend yet (Phase 1 task 9); no fallback to docker \
+         or host reads"
     | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->

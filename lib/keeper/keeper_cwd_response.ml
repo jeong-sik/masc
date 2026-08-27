@@ -11,6 +11,10 @@ let of_sandbox ~(sandbox : Keeper_sandbox.t) ~host_cwd
     ~container_cwd_for_docker =
   match sandbox.backend with
   | Keeper_sandbox.Local -> local ~host_cwd
+  (* Phase 1: no remote<->host cwd translation exists yet; the
+     keeper-visible cwd is the host bookkeeping path, and execution
+     dispatch fails closed upstream. *)
+  | Keeper_sandbox.Remote_ssh -> local ~host_cwd
   (* Both guest backends answer with a container-side cwd; the shape of the
      reply does not depend on what runs the guest. *)
   | Keeper_sandbox.Docker | Keeper_sandbox.Micro_vm ->

@@ -114,6 +114,7 @@ let effective_sandbox_profile ~(meta : keeper_meta) =
   | Docker -> Docker, meta.network_mode
   | Micro_vm -> Micro_vm, meta.network_mode
   | Local -> Local, meta.network_mode
+  | Remote_ssh -> Remote_ssh, meta.network_mode
 ;;
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)

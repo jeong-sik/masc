@@ -25,6 +25,7 @@ type sandbox_profile =
     Local
   | Docker
   | Micro_vm
+  | Remote_ssh
 module Sandbox_profile_tla =
   Keeper_types_profile_sandbox.Sandbox_profile_tla
 type network_mode =
@@ -64,6 +65,7 @@ type keeper_profile_defaults =
     Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
+  remote_endpoint : string option;
   autonomous_wake_prompt : string option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;

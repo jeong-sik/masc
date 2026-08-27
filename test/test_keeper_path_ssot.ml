@@ -295,7 +295,7 @@ let test_config_agent_projection_rejects_legacy_alias () =
     "legacy sandbox_profile aliases are rejected"
     (Keeper_sandbox_config.Invalid_keeper_sandbox_config
        (Printf.sprintf
-          "%s: invalid sandbox_profile %S (allowed: local, docker)"
+          "%s: invalid sandbox_profile %S (allowed: local, docker, remote_ssh)"
           (Keeper_sandbox_config.keeper_toml_path
              ~base_path:config.Workspace.base_path
              ~agent_name:"keeper-alpha-agent")

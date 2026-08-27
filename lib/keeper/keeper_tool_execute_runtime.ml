@@ -349,6 +349,18 @@ let handle_tool_execute_typed
                 (Keeper_sandbox_shell_ir_target.target_error
                    ("local_playground_disabled: "
                     ^ Env_config_sandbox.Gate.disabled_message))
+          (* Fail closed, never a silent Docker/host fallthrough
+             (RFC-0001): the SSH runner is Phase 1 task 6. *)
+          | Remote_ssh ->
+            Error
+              (Keeper_sandbox_shell_ir_target.target_error
+                 ~class_:Tool_result.Policy_rejection
+                 ~fields:
+                   [ "requested_sandbox", `String "remote_ssh"
+                   ; "sandbox_profile", `String "remote_ssh"
+                   ]
+                 "remote_ssh_dispatch_unavailable: SSH runner not wired yet \
+                  (Phase 1 task 6); no fallback to docker or host dispatch")
           (* Both guest profiles enter the same target constructor, but a
              [Micro_vm] keeper never reaches a docker runtime: the factory
              resolves it to [Backend_unimplemented] and the constructor

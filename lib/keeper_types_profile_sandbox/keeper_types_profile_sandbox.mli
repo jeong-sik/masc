@@ -2,12 +2,14 @@ type sandbox_profile =
   | Local
   | Docker
   | Micro_vm
+  | Remote_ssh
 
 module Sandbox_profile_tla : sig
   type t = sandbox_profile =
     | Local [@tla.symbol "Local"]
     | Docker [@tla.symbol "Docker"]
     | Micro_vm [@tla.symbol "Micro_vm"]
+    | Remote_ssh [@tla.symbol "Remote_ssh"]
   [@@deriving tla]
 end
 

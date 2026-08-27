@@ -3763,3 +3763,8 @@
  (name test_keeper_local_playground_gate)
  (modules test_keeper_local_playground_gate)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_remote_ssh_profile)
+ (modules test_keeper_remote_ssh_profile)
+ (libraries masc_test_deps))

@@ -11,6 +11,7 @@ type backend =
   | Local
   | Docker
   | Micro_vm
+  | Remote_ssh
 
 type t = {
   keeper_name : string;

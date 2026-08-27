@@ -83,4 +83,14 @@ module For_testing : sig
 
   val paths : t -> paths
   val settings_json : unit -> Yojson.Safe.t
+
+  val replace_keychain : home_dir:string -> string -> keychain_state
+  (** Discard the keychain at the given path and build a fresh one. This is
+      what a first preparation does when it finds a keychain an earlier
+      process left behind, whose lock state nothing can ask about. *)
+
+  val security_environment : home_dir:string -> string array
+  (** The environment every [security] child runs under. HOME decides which
+      keychain search list [create-keychain] appends to; pointing it at the
+      managed home is what keeps the operator's own list out of it. *)
 end

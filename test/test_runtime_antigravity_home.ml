@@ -254,6 +254,126 @@ let seeded_prepare runtime_root =
 (* macOS resolves a HOME's login keychain only from this path. Without the
    file the CLI's token save finds no default keychain and macOS raises an
    operator dialog asking to create one (masc#28922). *)
+let env_value env key =
+  let prefix = key ^ "=" in
+  Array.to_list env
+  |> List.filter_map (fun entry ->
+    if String.starts_with ~prefix entry
+    then Some (String.sub entry (String.length prefix) (String.length entry - String.length prefix))
+    else None)
+;;
+
+(* [security create-keychain] appends the new keychain to the search list of
+   the HOME it runs under. Run with the operator's HOME it grows
+   ~/Library/Preferences/com.apple.security.plist on every preparation, and
+   every later find-generic-password by any process walks the result. *)
+let test_security_runs_under_the_managed_home () =
+  let env = Runtime_antigravity_home.For_testing.security_environment ~home_dir:"/managed/home" in
+  check (list string) "exactly one HOME" [ "/managed/home" ] (env_value env "HOME");
+  check
+    bool
+    "inherited entries survive"
+    true
+    (Array.length env > 1 || Array.length (Unix.environment ()) <= 1)
+;;
+
+let operator_keychain_list () =
+  let channel = Unix.open_process_in "/usr/bin/security list-keychains" in
+  let rec drain acc =
+    match input_line channel with
+    | line -> drain (line :: acc)
+    | exception End_of_file -> List.rev acc
+  in
+  let lines = drain [] in
+  ignore (Unix.close_process_in channel);
+  lines
+;;
+
+let test_preparation_leaves_the_operator_keychain_list_alone () =
+  if not security_available
+  then check bool "no security tool" false security_available
+  else
+    with_temp_root
+    @@ fun runtime_root ->
+    let before = operator_keychain_list () in
+    let layout = seeded_prepare runtime_root in
+    let after = operator_keychain_list () in
+    check
+      (list string)
+      "operator search list unchanged"
+      before
+      after;
+    check
+      bool
+      "keychain still provisioned"
+      true
+      (match Runtime_antigravity_home.keychain_state layout with
+       | Runtime_antigravity_home.Provisioned -> true
+       | _ -> false)
+;;
+
+let read_command command =
+  let channel = Unix.open_process_in command in
+  let rec drain acc =
+    match input_line channel with
+    | line -> drain (line :: acc)
+    | exception End_of_file -> List.rev acc
+  in
+  let lines = drain [] in
+  ignore (Unix.close_process_in channel);
+  lines
+;;
+
+(* [create-keychain] leaves the keychain locking on sleep and 300s after the
+   last read, and a keychain under this name cannot be unlocked again once it
+   does. The settings call that clears both is the whole reason preparation
+   spawns [security] twice. *)
+let test_provisioned_keychain_never_locks_itself () =
+  if not security_available
+  then check bool "no security tool" false security_available
+  else
+    with_temp_root
+    @@ fun runtime_root ->
+    let layout = seeded_prepare runtime_root in
+    let path = keychain_path (Runtime_antigravity_home.home_dir layout) in
+    let info =
+      read_command (Printf.sprintf "/usr/bin/security show-keychain-info %s 2>&1" (Filename.quote path))
+      |> String.concat " "
+    in
+    check bool ("no-timeout in " ^ info) true (String_util.contains_substring info "no-timeout");
+    check bool ("no lock-on-sleep in " ^ info) false (String_util.contains_substring info "lock-on-sleep")
+;;
+
+(* What a first preparation does with a keychain an earlier process left: the
+   old file goes, a fresh one takes its place, and the fresh one carries the
+   0600 mode and the cleared auto-lock rather than inheriting anything. *)
+let test_replacing_a_carried_over_keychain_rebuilds_it () =
+  if not security_available
+  then check bool "no security tool" false security_available
+  else
+    with_temp_root
+    @@ fun runtime_root ->
+    let layout = seeded_prepare runtime_root in
+    let home = Runtime_antigravity_home.home_dir layout in
+    let path = keychain_path home in
+    let before = (Unix.stat path).Unix.st_ino in
+    let state = Runtime_antigravity_home.For_testing.replace_keychain ~home_dir:home path in
+    check
+      string
+      "replaced"
+      "provisioned"
+      (Runtime_antigravity_home.keychain_state_to_string state);
+    check bool "keychain exists" true (Sys.file_exists path);
+    check bool "a different file" true ((Unix.stat path).Unix.st_ino <> before);
+    check int "keychain mode" 0o600 (permission path);
+    let info =
+      read_command
+        (Printf.sprintf "/usr/bin/security show-keychain-info %s 2>&1" (Filename.quote path))
+      |> String.concat " "
+    in
+    check bool ("no-timeout in " ^ info) true (String_util.contains_substring info "no-timeout")
+;;
+
 let test_provisions_login_keychain_at_the_conventional_path () =
   with_temp_root
   @@ fun runtime_root ->
@@ -347,6 +467,22 @@ let () =
             "owner path containment"
             `Quick
             test_rejects_owner_path_escape_before_mutation
+        ; test_case
+            "security runs under the managed HOME"
+            `Quick
+            test_security_runs_under_the_managed_home
+        ; test_case
+            "operator keychain search list untouched"
+            `Quick
+            test_preparation_leaves_the_operator_keychain_list_alone
+        ; test_case
+            "provisioned keychain never locks itself"
+            `Quick
+            test_provisioned_keychain_never_locks_itself
+        ; test_case
+            "carried-over keychain is rebuilt"
+            `Quick
+            test_replacing_a_carried_over_keychain_rebuilds_it
         ; test_case
             "login keychain at the conventional path"
             `Quick

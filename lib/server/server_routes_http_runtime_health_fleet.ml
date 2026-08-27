@@ -588,6 +588,8 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "runtime_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit_source
     ; "binary_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit
     ; "binary_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit_source
+    ; "source_fingerprint", Option.fold ~none:`Null ~some:(fun value -> `String value) build.source_fingerprint
+    ; "executable_sha256", Option.fold ~none:`Null ~some:(fun value -> `String value) build.executable_sha256
     ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
     ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
     ; "keeper_fibers", `Int keeper_fibers

@@ -114,6 +114,14 @@ let test_current_json_exposes_runtime_binary_identity () =
     (match json |> member "commit_source" with `Null | `String _ -> true | _ -> false);
   Alcotest.(check bool) "binary commit field present" true
     (match json |> member "binary_commit" with `Null | `String _ -> true | _ -> false);
+  Alcotest.(check bool) "source fingerprint field present" true
+    (match json |> member "source_fingerprint" with
+     | `Null | `String _ -> true
+     | _ -> false);
+  Alcotest.(check bool) "executable sha256 field present" true
+    (match json |> member "executable_sha256" with
+     | `Null | `String _ -> true
+     | _ -> false);
   Alcotest.(check bool) "repo head commit field present" true
     (match json |> member "repo_head_commit" with `Null | `String _ -> true | _ -> false);
   Alcotest.(check bool) "executable path populated" true

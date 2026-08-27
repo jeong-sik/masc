@@ -35,6 +35,9 @@ def load_module():
 producer = load_module()
 HEAD = "a" * 40
 TREE = "b" * 40
+SOURCE_FINGERPRINT = "c" * 64
+EXECUTABLE_SHA256 = "d" * 64
+INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 
 
 def source():
@@ -145,6 +148,35 @@ def run(transport, **overrides):
 
 
 class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
+    def test_health_binds_dune_inputs_and_executable_bytes(self):
+        health = {
+            "health_detail": "full",
+            "build": {
+                "binary_commit": HEAD,
+                "binary_commit_source": "embedded",
+                "source_fingerprint": SOURCE_FINGERPRINT,
+                "executable_sha256": EXECUTABLE_SHA256,
+                "runtime_instance_id": INSTANCE,
+                "started_at": "2026-08-27T00:00:00Z",
+            },
+            "paths": {
+                "effective_base_path": "/workspace",
+                "effective_masc_root": "/workspace/.masc",
+            },
+        }
+
+        identity = producer.validate_health(
+            health, source=source(), expected_base_path="/workspace"
+        )
+
+        self.assertEqual(identity["source_fingerprint"], SOURCE_FINGERPRINT)
+        self.assertEqual(identity["executable_sha256"], EXECUTABLE_SHA256)
+        del health["build"]["source_fingerprint"]
+        with self.assertRaisesRegex(producer.ProducerError, "source_fingerprint"):
+            producer.validate_health(
+                health, source=source(), expected_base_path="/workspace"
+            )
+
     def test_mcp_initialize_sends_initialized_notification(self):
         client = producer.McpClient(
             "http://127.0.0.1:8935/mcp", "secret", 1.0, "test-version"

@@ -41,6 +41,8 @@ WORKSPACE = "c" * 64
 SNAPSHOT = "d" * 64
 CONTENT = "e" * 64
 INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
+SOURCE_FINGERPRINT = "f" * 64
+EXECUTABLE_SHA256 = "e" * 64
 TURN_REF = "trace-one#7"
 SKILL_ID = "call-skill-1"
 MESSAGE = "Natural proof request.\n"
@@ -65,6 +67,8 @@ def file_identity(payload: bytes):
 def server():
     return {
         "binary_commit": HEAD,
+        "source_fingerprint": SOURCE_FINGERPRINT,
+        "executable_sha256": EXECUTABLE_SHA256,
         "runtime_instance_id": INSTANCE,
         "started_at": "2026-08-27T00:00:00Z",
         "effective_base_path": "/workspace",
@@ -78,6 +82,8 @@ def health():
         "build": {
             "binary_commit": HEAD,
             "binary_commit_source": "embedded",
+            "source_fingerprint": SOURCE_FINGERPRINT,
+            "executable_sha256": EXECUTABLE_SHA256,
             "runtime_instance_id": INSTANCE,
             "started_at": server()["started_at"],
         },
@@ -378,6 +384,8 @@ def make_bundle(root: Path):
             "tracked_checkout_clean": True,
             "binary_commit": HEAD,
             "binary_commit_source": "embedded",
+            "source_fingerprint": SOURCE_FINGERPRINT,
+            "executable_sha256": EXECUTABLE_SHA256,
             "server_started_at": server()["started_at"],
             "server_runtime_instance_id": INSTANCE,
             "tui_build": {
@@ -601,6 +609,16 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(verifier.VerificationError, "server differs"):
                 verify(bundle)
+
+    def test_server_executable_identity_tamper_is_rejected(self):
+        for field in ("source_fingerprint", "executable_sha256"):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                bundle["proof"]["source"][field] = "0" * 64
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "server differs"
+                ):
+                    verify(bundle)
 
     def test_delivery_and_action_tamper_are_rejected(self):
         for field, value in (

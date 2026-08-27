@@ -137,6 +137,8 @@ def fixture():
         "build": {
             "binary_commit": SHA,
             "binary_commit_source": "embedded",
+            "source_fingerprint": "f" * 64,
+            "executable_sha256": "a" * 64,
             "runtime_instance_id": INSTANCE,
             "started_at": "2026-08-27T00:00:00Z",
         },
@@ -284,9 +286,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         self.assertNotIn(
             ("page_locator", '[data-testid="skill-activation-row"]'), calls
         )
-        screenshot_index = calls.index(
-            ("panel_screenshot", "dashboard-skill-use.png")
-        )
+        screenshot_index = calls.index(("panel_screenshot", "dashboard-skill-use.png"))
         row_identity_checks = [
             index
             for index, call in enumerate(calls)
@@ -322,9 +322,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
         def open_request(request, timeout):
             self.assertEqual(timeout, 3.0)
-            self.assertEqual(
-                request.get_header("Authorization"), f"Bearer {token}"
-            )
+            self.assertEqual(request.get_header("Authorization"), f"Bearer {token}")
             return Response()
 
         with mock.patch.object(
@@ -509,6 +507,13 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         health["build"]["binary_commit"] = "0" * 64
 
         with self.assertRaisesRegex(proof.ProofError, "binary commit does not match"):
+            self.validate(health, dashboard, ledger)
+
+    def test_rejects_unbound_executable_identity(self):
+        health, dashboard, ledger = fixture()
+        health["build"]["source_fingerprint"] = None
+
+        with self.assertRaisesRegex(proof.ProofError, "source_fingerprint"):
             self.validate(health, dashboard, ledger)
 
     def test_rejects_non_full_health_response(self):

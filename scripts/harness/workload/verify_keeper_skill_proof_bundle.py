@@ -420,6 +420,10 @@ def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
     runtime = object_field(evidence, "runtime", "proof")
     return {
         "binary_commit": string_field(source, "binary_commit", "proof source"),
+        "source_fingerprint": string_field(
+            source, "source_fingerprint", "proof source"
+        ),
+        "executable_sha256": string_field(source, "executable_sha256", "proof source"),
         "runtime_instance_id": string_field(
             source, "server_runtime_instance_id", "proof source"
         ),
@@ -438,6 +442,8 @@ def server_identity(value: dict[str, Any], context: str) -> dict[str, str]:
         field: string_field(value, field, context)
         for field in (
             "binary_commit",
+            "source_fingerprint",
+            "executable_sha256",
             "runtime_instance_id",
             "started_at",
             "effective_base_path",
@@ -448,6 +454,8 @@ def server_identity(value: dict[str, Any], context: str) -> dict[str, str]:
         GIT_SHA_RE.fullmatch(identity["binary_commit"]) is not None,
         f"{context}.binary_commit is not a Git SHA",
     )
+    require_sha256(identity["source_fingerprint"], f"{context}.source_fingerprint")
+    require_sha256(identity["executable_sha256"], f"{context}.executable_sha256")
     try:
         parsed = uuid.UUID(identity["runtime_instance_id"])
     except ValueError as error:

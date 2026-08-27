@@ -27,6 +27,12 @@ type t = {
         is the only commit field that operators should use as binary-build
         identity in this module. *)
   binary_commit_source : string option;
+  source_fingerprint : string option;
+    (** SHA-256 identity of the exact Dune link action and dependency bytes
+        bound to this executable by a validated provenance sidecar. *)
+  executable_sha256 : string option;
+    (** SHA-256 of the running executable, present only when it matches the
+        adjacent provenance sidecar. *)
   binary_commit_unix_ts : float option;
   binary_commit_age_seconds : int option;
   repo_head_commit : string option;

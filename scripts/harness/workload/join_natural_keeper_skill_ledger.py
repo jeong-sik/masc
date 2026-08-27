@@ -303,6 +303,8 @@ def validate_receipt(
         server,
         {
             "binary_commit",
+            "source_fingerprint",
+            "executable_sha256",
             "runtime_instance_id",
             "started_at",
             "effective_base_path",
@@ -322,6 +324,12 @@ def validate_receipt(
         "server": {
             "binary_commit": required_string(
                 server, "binary_commit", "producer server"
+            ),
+            "source_fingerprint": required_string(
+                server, "source_fingerprint", "producer server"
+            ),
+            "executable_sha256": required_string(
+                server, "executable_sha256", "producer server"
             ),
             "runtime_instance_id": producer_instance_id,
             "started_at": required_string(server, "started_at", "producer server"),
@@ -352,6 +360,12 @@ def health_identity(
     )
     identity = {
         "binary_commit": required_string(build, "binary_commit", "health.build"),
+        "source_fingerprint": required_string(
+            build, "source_fingerprint", "health.build"
+        ),
+        "executable_sha256": required_string(
+            build, "executable_sha256", "health.build"
+        ),
         "runtime_instance_id": required_string(
             build, "runtime_instance_id", "health.build"
         ),
@@ -370,6 +384,14 @@ def health_identity(
     require(
         identity["binary_commit"] == expected_source_head,
         "server binary differs from producer source",
+    )
+    require(
+        proof.SHA256_RE.fullmatch(identity["source_fingerprint"]) is not None,
+        "server source fingerprint is invalid",
+    )
+    require(
+        proof.SHA256_RE.fullmatch(identity["executable_sha256"]) is not None,
+        "server executable digest is invalid",
     )
     return identity
 
@@ -510,9 +532,7 @@ def validate_historical_projection(
         "historical Skill summary differs from typed ledger",
     )
     require(
-        required_list(
-            projection, "scoped_summaries", "historical Skill projection"
-        )
+        required_list(projection, "scoped_summaries", "historical Skill projection")
         == proof.scoped_summaries(typed_activations, typed_rejections),
         "historical scoped Skill summaries differ from typed ledger",
     )
@@ -630,9 +650,7 @@ def validate_join(
         "current server differs from producer server",
     )
     require(after_identity == before_identity, "server restarted during ledger join")
-    durable = validate_durable_ledger(
-        durable_ledger, trace_id=producer["trace_id"]
-    )
+    durable = validate_durable_ledger(durable_ledger, trace_id=producer["trace_id"])
     ledger = validate_historical_projection(
         historical_before,
         durable_ledger=durable,

@@ -8,6 +8,8 @@ type t =
   ; commit_source : string option [@default None]
   ; binary_commit : string option [@default None]
   ; binary_commit_source : string option [@default None]
+  ; source_fingerprint : string option [@default None]
+  ; executable_sha256 : string option [@default None]
   ; binary_commit_unix_ts : float option [@default None]
   ; binary_commit_age_seconds : int option [@default None]
   ; repo_head_commit : string option [@default None]
@@ -369,6 +371,42 @@ let parse_executable_provenance
   | _ -> Error "executable provenance is not an object"
 ;;
 
+let sha256_file path =
+  try
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let buffer = Bytes.create Sys.io_buffer_size in
+        let rec loop context =
+          match input ic buffer 0 (Bytes.length buffer) with
+          | 0 -> Digestif.SHA256.(get context |> to_hex)
+          | count ->
+            Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer |> loop
+        in
+        Some (loop Digestif.SHA256.empty))
+  with
+  | Sys_error _ -> None
+  | Unix.Unix_error _ -> None
+;;
+
+let resolved_executable_provenance =
+  let sidecar = resolved_executable_path ^ ".identity.json" in
+  match commit_resolution.binary_commit, read_file sidecar, sha256_file resolved_executable_path with
+  | Some expected_binary_commit, Some raw, Some expected_executable_sha256 ->
+    (match
+       parse_executable_provenance
+         ~expected_binary_commit
+         ~expected_executable_sha256
+         raw
+     with
+     | Ok provenance -> Some provenance
+     | Error message ->
+       Log.Identity.warn "build_identity rejected %s: %s" sidecar message;
+       None)
+  | _ -> None
+;;
+
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root
 let repo_version = Option.bind resolved_repo_root probe_repo_version
@@ -384,6 +422,10 @@ let current () =
   ; commit_source = commit_resolution.commit_source
   ; binary_commit = commit_resolution.binary_commit
   ; binary_commit_source = commit_resolution.binary_commit_source
+  ; source_fingerprint =
+      Option.map (fun provenance -> provenance.build_input_fingerprint) resolved_executable_provenance
+  ; executable_sha256 =
+      Option.map (fun provenance -> provenance.executable_sha256) resolved_executable_provenance
   ; binary_commit_unix_ts
   ; binary_commit_age_seconds = age_seconds ~now binary_commit_unix_ts
   ; repo_head_commit = commit_resolution.repo_head_commit

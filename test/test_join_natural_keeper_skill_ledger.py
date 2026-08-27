@@ -31,6 +31,8 @@ HEAD = "a" * 40
 TREE = "b" * 40
 TURN_REF = "trace-one#7"
 INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
+SOURCE_FINGERPRINT = "f" * 64
+EXECUTABLE_SHA256 = "e" * 64
 MESSAGE = "Natural proof request.\n"
 
 
@@ -44,6 +46,8 @@ def health(started_at="2026-08-27T00:00:00Z"):
         "build": {
             "binary_commit": HEAD,
             "binary_commit_source": "embedded",
+            "source_fingerprint": SOURCE_FINGERPRINT,
+            "executable_sha256": EXECUTABLE_SHA256,
             "runtime_instance_id": INSTANCE,
             "started_at": started_at,
         },
@@ -130,6 +134,8 @@ def receipt():
         "producer_calls": {"masc_keeper_msg": 1},
         "server": {
             "binary_commit": HEAD,
+            "source_fingerprint": SOURCE_FINGERPRINT,
+            "executable_sha256": EXECUTABLE_SHA256,
             "runtime_instance_id": INSTANCE,
             "started_at": "2026-08-27T00:00:00Z",
             "effective_base_path": "/workspace",

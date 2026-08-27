@@ -25,6 +25,7 @@ import produce_natural_keeper_skill_proof as natural_producer
 
 
 JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v1"
+HISTORICAL_PROJECTION_SCHEMA = "masc.dashboard.skill-activations/v1"
 
 
 class JoinError(RuntimeError):
@@ -460,6 +461,63 @@ def validate_durable_ledger(ledger: dict[str, Any], *, trace_id: str) -> dict[st
     return ledger
 
 
+def validate_historical_projection(
+    projection: dict[str, Any],
+    *,
+    durable_ledger: dict[str, Any],
+    trace_id: str,
+) -> dict[str, Any]:
+    require_exact_fields(
+        projection,
+        {
+            "schema",
+            "status",
+            "trace_id",
+            "ledger",
+            "summary",
+            "scoped_summaries",
+        },
+        "historical Skill projection",
+    )
+    require(
+        projection.get("schema") == HISTORICAL_PROJECTION_SCHEMA,
+        "historical Skill projection schema is unsupported",
+    )
+    require(
+        projection.get("status") == "available",
+        "historical Skill projection is unavailable",
+    )
+    require(
+        required_string(projection, "trace_id", "historical Skill projection")
+        == trace_id,
+        "historical Skill projection trace differs from producer Turn_ref",
+    )
+    ledger = required_object(projection, "ledger", "historical Skill projection")
+    require(
+        ledger == durable_ledger,
+        "typed historical Skill projection differs from durable ledger",
+    )
+    activations = required_list(ledger, "activations", "historical Skill ledger")
+    rejections = required_list(
+        ledger, "transition_rejections", "historical Skill ledger"
+    )
+    typed_activations = cast(list[dict[str, Any]], activations)
+    typed_rejections = cast(list[dict[str, Any]], rejections)
+    require(
+        required_object(projection, "summary", "historical Skill projection")
+        == proof.summarize(typed_activations, typed_rejections),
+        "historical Skill summary differs from typed ledger",
+    )
+    require(
+        required_list(
+            projection, "scoped_summaries", "historical Skill projection"
+        )
+        == proof.scoped_summaries(typed_activations, typed_rejections),
+        "historical scoped Skill summaries differ from typed ledger",
+    )
+    return ledger
+
+
 def typed_match(activation: dict[str, Any], *, turn_ref: str) -> dict[str, Any]:
     require(activation.get("turn_ref") == turn_ref, "activation turn reference differs")
     source_id, package_id, name, content_revision = proof.reference_key(
@@ -543,6 +601,8 @@ def validate_join(
     health_after: dict[str, Any],
     dashboard_before: dict[str, Any],
     dashboard_after: dict[str, Any],
+    historical_before: dict[str, Any],
+    historical_after: dict[str, Any],
     durable_ledger: dict[str, Any],
     durable_ledger_after: dict[str, Any],
 ) -> dict[str, Any]:
@@ -566,10 +626,26 @@ def validate_join(
         "current server differs from producer server",
     )
     require(after_identity == before_identity, "server restarted during ledger join")
-    ledger = validate_durable_ledger(durable_ledger, trace_id=producer["trace_id"])
+    durable = validate_durable_ledger(
+        durable_ledger, trace_id=producer["trace_id"]
+    )
+    ledger = validate_historical_projection(
+        historical_before,
+        durable_ledger=durable,
+        trace_id=producer["trace_id"],
+    )
     require(
         durable_ledger_after == durable_ledger,
         "durable Skill ledger changed during join",
+    )
+    after_historical_ledger = validate_historical_projection(
+        historical_after,
+        durable_ledger=durable_ledger_after,
+        trace_id=producer["trace_id"],
+    )
+    require(
+        after_historical_ledger == ledger,
+        "typed historical Skill projection changed during join",
     )
     before_projection = required_object(
         required_object(dashboard_before, "skill_activations", "dashboard"),
@@ -731,11 +807,18 @@ def main() -> int:
             f"{base_url}/api/v1/dashboard/tools?keeper="
             f"{quote(producer['keeper'], safe='')}"
         )
+        historical_url = (
+            f"{base_url}/api/v1/dashboard/skill-activations?trace_id="
+            f"{quote(producer['trace_id'], safe='')}"
+        )
         health_before, health_raw = request_json(
             health_url, token=token, timeout=args.timeout
         )
         dashboard_before, dashboard_raw = request_json(
             dashboard_url, token=token, timeout=args.timeout
+        )
+        historical_before, historical_raw = request_json(
+            historical_url, token=token, timeout=args.timeout
         )
         identity = health_identity(
             health_before, expected_source_head=producer["source"]["head"]
@@ -746,6 +829,9 @@ def main() -> int:
         )
         dashboard_after, dashboard_after_raw = request_json(
             dashboard_url, token=token, timeout=args.timeout
+        )
+        historical_after, historical_after_raw = request_json(
+            historical_url, token=token, timeout=args.timeout
         )
         durable_after, durable_after_raw, durable_path_after = read_durable_ledger(
             effective_masc_root=identity["effective_masc_root"],
@@ -766,6 +852,8 @@ def main() -> int:
             health_after=health_after,
             dashboard_before=dashboard_before,
             dashboard_after=dashboard_after,
+            historical_before=historical_before,
+            historical_after=historical_after,
             durable_ledger=durable,
             durable_ledger_after=durable_after,
         )
@@ -775,6 +863,8 @@ def main() -> int:
             "health-after.json": health_after_raw,
             "dashboard-tools-before.json": dashboard_raw,
             "dashboard-tools-after.json": dashboard_after_raw,
+            "historical-skill-activations-before.json": historical_raw,
+            "historical-skill-activations-after.json": historical_after_raw,
             "durable-skill-activations-before.json": durable_raw,
             "durable-skill-activations-after.json": durable_after_raw,
             "source-before.json": (

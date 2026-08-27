@@ -154,22 +154,36 @@ let format_goal_summaries (summaries : goal_summary list) : string =
          | None -> base)
        summaries)
 
-let format_task_skills skills =
-  let skill_references =
-    Skill_reference.list_to_yojson skills |> Yojson.Safe.to_string
+let format_task_skills ?surfaces skills =
+  let skill_surfaces =
+    (match surfaces with
+     | Some surfaces ->
+       `List (List.map Keeper_skill_catalog.exact_surface_to_yojson surfaces)
+     | None ->
+       `List
+         (List.map
+            (fun reference ->
+               `Assoc
+                 [ "reference", Skill_reference.to_yojson reference
+                 ; "kind", `String "unavailable"
+                 ; ( "diagnostic"
+                   , `String "exact executable Skill projection is unavailable" )
+                 ])
+            skills))
+    |> Yojson.Safe.to_string
   in
   match
     Prompt_registry.render_prompt_template
       Prompt_names.keeper_current_task_skills
-      [ "skill_references", skill_references ]
+      [ "skill_surfaces", skill_surfaces ]
   with
   | Ok text -> String.trim text
   | Error detail ->
     Log.Misc.error
-      "keeper current-task skills prompt %s did not render, falling back to exact references: %s"
+      "keeper current-task skills prompt %s did not render, falling back to exact surfaces: %s"
       Prompt_names.keeper_current_task_skills
       detail;
-    "- skill_references=" ^ skill_references
+    "- skill_surfaces=" ^ skill_surfaces
 ;;
 
 (* The other held tasks' skills, one line each, under their own heading. The
@@ -179,6 +193,7 @@ let format_task_skills skills =
    Heading and lines are prompt templates; a template that does not render
    is logged and falls back to the bare data, never to prose written here. *)
 let format_held_task_skills
+      ?(skill_surfaces_by_task = [])
       (held : Keeper_world_observation_inputs.held_task_skills list)
   : string option
   =
@@ -201,14 +216,31 @@ let format_held_task_skills
     let lines =
       List.map
         (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
-           let skill_references =
-             Skill_reference.list_to_yojson entry.held_skills
-             |> Yojson.Safe.to_string
+           let skill_surfaces =
+             let surfaces = List.assoc_opt entry.held_task_id skill_surfaces_by_task in
+             match surfaces with
+             | Some surfaces ->
+               `List
+                 (List.map Keeper_skill_catalog.exact_surface_to_yojson surfaces)
+               |> Yojson.Safe.to_string
+             | None ->
+               `List
+                 (List.map
+                    (fun reference ->
+                       `Assoc
+                         [ "reference", Skill_reference.to_yojson reference
+                         ; "kind", `String "unavailable"
+                         ; ( "diagnostic"
+                           , `String
+                               "exact executable Skill projection is unavailable" )
+                         ])
+                    entry.held_skills)
+               |> Yojson.Safe.to_string
            in
            render
              Prompt_names.keeper_held_task_skills
-             [ "task_id", entry.held_task_id; "skill_references", skill_references ]
-             ~fallback:(entry.held_task_id ^ ": " ^ skill_references))
+             [ "task_id", entry.held_task_id; "skill_surfaces", skill_surfaces ]
+             ~fallback:(entry.held_task_id ^ ": " ^ skill_surfaces))
         held
     in
     Some (String.concat "\n" ((if String.equal heading "" then [] else [ heading ]) @ lines) ^ "\n\n")
@@ -218,7 +250,8 @@ let format_held_task_skills
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
     owner's handoff summary when one exists. *)
-let format_current_task_with_heading ~heading (task : Masc_domain.task) : string =
+let format_current_task_with_heading ?skill_surfaces ~heading
+      (task : Masc_domain.task) : string =
   let status_line =
     match task.Masc_domain.task_status with
     | Masc_domain.Claimed { assignee; claimed_at } ->
@@ -286,7 +319,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
   (match task.Masc_domain.skills with
    | [] -> ()
    | skills ->
-       Buffer.add_string buf (format_task_skills skills ^ "\n"));
+       Buffer.add_string buf (format_task_skills ?surfaces:skill_surfaces skills ^ "\n"));
   Buffer.add_string buf
     "\n";
   Buffer.contents buf
@@ -307,7 +340,7 @@ let format_current_task_with_heading ~heading (task : Masc_domain.task) : string
 
    The heading is the whole fix: no new field, no new line, and the status was
    already on the row underneath. *)
-let format_current_task (task : Masc_domain.task) =
+let format_current_task ?skill_surfaces (task : Masc_domain.task) =
   let heading =
     match task.Masc_domain.task_status with
     | Masc_domain.AwaitingVerification _ ->
@@ -318,7 +351,7 @@ let format_current_task (task : Masc_domain.task) =
     | Masc_domain.Done _
     | Masc_domain.Cancelled _ -> "Current Task (held by you)"
   in
-  format_current_task_with_heading ~heading task
+  format_current_task_with_heading ?skill_surfaces ~heading task
 
 (** Format one conversation endpoint presence line. *)
 let format_surface_presence (p : Gate_surface.surface_presence) : string =
@@ -391,12 +424,14 @@ let observation_prose key vars ~fallback =
     fallback
 ;;
 
-let format_current_task_observation = function
+let format_current_task_observation ?skill_surfaces = function
   | Keeper_world_observation_inputs.No_current_task -> None
-  | Keeper_world_observation_inputs.Current_task task -> Some (format_current_task task)
+  | Keeper_world_observation_inputs.Current_task task ->
+    Some (format_current_task ?skill_surfaces task)
   | Keeper_world_observation_inputs.Recovered_current_task { task; recovery = _ } ->
     Some
       (format_current_task_with_heading
+         ?skill_surfaces
          ~heading:"Current Task (recovery observation; non-authoritative)"
          task
        ^ observation_prose
@@ -1075,6 +1110,8 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
+    ?(task_skill_surfaces :
+        (string * Keeper_skill_catalog.exact_surface list) list = [])
     ?(active_goal_summaries : goal_summary list option)
     ?(context_budget_bytes : int option)
     ~(observation : Keeper_world_observation.world_observation)
@@ -1155,9 +1192,23 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     (* 1b. Current task — the claim that admitted this turn (RFC-0315).
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
+      let current_task_skill_surfaces =
+        match current_task with
+        | Keeper_world_observation_inputs.Current_task task
+        | Recovered_current_task { task; _ } ->
+          List.assoc_opt task.id task_skill_surfaces
+        | No_current_task
+        | Current_task_missing _
+        | Current_task_unavailable _ ->
+          None
+      in
       (match
-         ( format_current_task_observation current_task
-         , format_held_task_skills observation.held_task_skills )
+         ( format_current_task_observation
+             ?skill_surfaces:current_task_skill_surfaces
+             current_task
+         , format_held_task_skills
+             ~skill_surfaces_by_task:task_skill_surfaces
+             observation.held_task_skills )
        with
        | None, None -> None
        | Some block, None | None, Some block -> Some block
@@ -1492,6 +1543,7 @@ let build_prompt
       ?profile_defaults
       ~turn_decision
       ~current_task
+      ?task_skill_surfaces
       ?active_goal_summaries
       ?context_budget_bytes
       ~observation
@@ -1504,6 +1556,7 @@ let build_prompt
       ?profile_defaults
       ~turn_decision:(Some turn_decision)
       ~current_task
+      ?task_skill_surfaces
       ?active_goal_summaries
       ?context_budget_bytes
       ~observation
@@ -1518,6 +1571,7 @@ let build_prompt_preview
       ~config
       ?profile_defaults
       ~current_task
+      ?task_skill_surfaces
       ?active_goal_summaries
       ~observation
       ()
@@ -1528,6 +1582,7 @@ let build_prompt_preview
     ?profile_defaults
     ~turn_decision:None
     ~current_task
+    ?task_skill_surfaces
     ?active_goal_summaries
     ~observation
     ()

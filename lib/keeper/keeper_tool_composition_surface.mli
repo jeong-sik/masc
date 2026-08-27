@@ -64,13 +64,6 @@ val schema_tool_rows :
     preserves typed provenance through materialization instead of recovering it
     from a generated tool name. *)
 
-val merge_instruction_skills :
-  task:instruction_skill list ->
-  global:instruction_skill list ->
-  instruction_skill list
-(** Preserve Task-selected order, then append globally discoverable exact
-    entries that are not already selected. *)
-
 val instruction_skill_schema_tool :
   instruction_skills:instruction_skill list ->
   Agent_core.Tool.t

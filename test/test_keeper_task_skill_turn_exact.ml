@@ -33,6 +33,16 @@ let document ~name ~description body =
   Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
 ;;
 
+let composition_document ~name ~node_id =
+  document
+    ~name
+    ~description:"exact composition"
+    (Printf.sprintf
+       "```toml composition\n[[compositions]]\nname = %S\ndescription = \"exact composition\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = %S\ntool = \"keeper_time_now\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```"
+       name
+       node_id)
+;;
+
 let scan ~base_path source candidates =
   let resolved = Skill_source_config.resolve ~base_path ~user_home:None source in
   let resolved_path =
@@ -122,6 +132,203 @@ let test_shadow_reference_selects_shadow_not_effective_winner () =
   let selected = resolve_one snapshot reference in
   check string "shadow body" "SHADOW_BODY" selected.skill.body;
   check bool "exact reference preserved" true (Reference.equal reference selected.reference)
+;;
+
+let test_held_shadow_composition_wins_with_exact_collision_evidence () =
+  let config =
+    config
+      (source_row ~id:"first" ~path:"first"
+       ^ source_row ~id:"second" ~path:"second")
+  in
+  let skill_snapshot =
+    snapshot
+      config
+      [ [ "review", composition_document ~name:"review" ~node_id:"global" ]
+      ; [ "review", composition_document ~name:"review" ~node_id:"task" ]
+      ]
+  in
+  let task_source_id =
+    match config.sources with
+    | [ _; task_source ] -> task_source.id
+    | _ -> fail "expected two sources"
+  in
+  let task_reference =
+    exact_reference
+      skill_snapshot
+      ~source_id:task_source_id
+      ~package_id:"review"
+      ~name:"review"
+  in
+  let task_selection =
+    match
+      Selection.resolve_for_task
+        ~snapshot:skill_snapshot
+        ~task_id:"task-held"
+        [ task_reference ]
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let task_partition = Selection.partition task_selection in
+  check (list string) "held Task provenance retained" [ "task-held" ]
+    (one_selected task_selection).task_ids;
+  check int "not exposed through keeper_skill" 0
+    (List.length task_partition.instructions);
+  check int "one exact Task composition" 1
+    (List.length task_partition.compositions);
+  let global, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
+  let projected =
+    Masc.Keeper_skill_catalog.project_turn
+      ~global
+      ~task:(Selection.skills task_selection)
+  in
+  let composition_references =
+    Masc.Keeper_skill_catalog.skills projected.catalog
+    |> List.filter_map (fun (skill : Masc.Keeper_skill_catalog.skill) ->
+         match skill.reference, skill.surface with
+         | Some reference, Masc.Keeper_skill_catalog.Composition _ -> Some reference
+         | None, _ | Some _, Masc.Keeper_skill_catalog.Instruction -> None)
+  in
+  check int "one executable composition tool" 1 (List.length composition_references);
+  check bool "Task exact identity has priority" true
+    (match composition_references with
+     | [ reference ] -> Reference.equal task_reference reference
+     | _ -> false);
+  check int "global collision is typed unavailable" 1
+    (List.length projected.unavailable);
+  let prompt_surfaces =
+    Masc.Keeper_skill_catalog.exact_surfaces
+      projected
+      ~task:(Selection.skills task_selection)
+  in
+  check bool "prompt names the exact composition tool" true
+    (match prompt_surfaces with
+     | [ surface ] ->
+       let json = Masc.Keeper_skill_catalog.exact_surface_to_yojson surface in
+       Yojson.Safe.Util.(member "kind" json |> to_string) = "composition"
+       && Yojson.Safe.Util.(member "tool_name" json |> to_string)
+          = "keeper_compose_review"
+     | _ -> false);
+  check bool "collision names both exact identities" true
+    (match projected.unavailable with
+     | [ Masc.Keeper_skill_catalog.Composition_tool_name_collision
+           { selected; unavailable; _ } ] ->
+       Reference.equal selected task_reference
+       && not (Reference.equal unavailable task_reference)
+     | _ -> false)
+  ;
+  let current_source_id =
+    match config.sources with
+    | current_source :: _ -> current_source.id
+    | [] -> fail "expected a current source"
+  in
+  let current_reference =
+    exact_reference
+      skill_snapshot
+      ~source_id:current_source_id
+      ~package_id:"review"
+      ~name:"review"
+  in
+  let resolve_task task_id reference =
+    match
+      Selection.resolve_for_task
+        ~snapshot:skill_snapshot
+        ~task_id
+        [ reference ]
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let current = resolve_task "task-current" current_reference in
+  let held = resolve_task "task-held" task_reference in
+  let merged = Selection.merge [ current; held ] in
+  let collision_projection =
+    Masc.Keeper_skill_catalog.project_turn
+      ~global
+      ~task:(Selection.skills merged)
+  in
+  let held_prompt =
+    Masc.Keeper_skill_catalog.exact_surfaces
+      collision_projection
+      ~task:(Selection.skills held)
+  in
+  check bool "held collision is explicit prompt unavailability" true
+    (match held_prompt with
+     | [ surface ] ->
+       let json = Masc.Keeper_skill_catalog.exact_surface_to_yojson surface in
+       Yojson.Safe.Util.(member "kind" json |> to_string) = "unavailable"
+       && not (Yojson.Safe.Util.member "diagnostic" json = `Null)
+     | _ -> false)
+;;
+
+let test_malformed_exact_composition_is_frozen_instruction () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let malformed =
+    document
+      ~name:"broken"
+      ~description:"malformed exact composition"
+      "```toml composition\n[[compositions]]\nname =\n```"
+  in
+  let skill_snapshot = snapshot config [ [ "broken", malformed ] ] in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let reference =
+    exact_reference
+      skill_snapshot
+      ~source_id
+      ~package_id:"broken"
+      ~name:"broken"
+  in
+  let selection =
+    match Selection.resolve ~snapshot:skill_snapshot [ reference ] with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let selected = one_selected selection in
+  check bool "frozen body retained" true
+    (String_util.contains_substring selected.skill.body "name =");
+  check bool "typed composition diagnostic retained" true
+    (match selected.diagnostic with
+     | Some (Masc.Keeper_skill_catalog.Composition_rejected _) -> true
+     | Some _ | None -> false);
+  let partition = Selection.partition selection in
+  check int "fallback admitted to keeper_skill" 1
+    (List.length partition.instructions);
+  check int "malformed composition is not executable" 0
+    (List.length partition.compositions)
+;;
+
+let test_shared_exact_reference_retains_every_task_id () =
+  let config = config (source_row ~id:"only" ~path:"skills") in
+  let skill_snapshot =
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"shared" "BODY" ] ]
+  in
+  let source_id =
+    match config.sources with
+    | [ source ] -> source.id
+    | _ -> fail "expected one source"
+  in
+  let reference =
+    exact_reference
+      skill_snapshot
+      ~source_id
+      ~package_id:"guide"
+      ~name:"guide"
+  in
+  let resolve task_id =
+    match Selection.resolve_for_task ~snapshot:skill_snapshot ~task_id [ reference ] with
+    | Ok selection -> selection
+    | Error error -> fail (Selection.error_to_string error)
+  in
+  let merged = Selection.merge [ resolve "task-a"; resolve "task-b" ] in
+  check int "one exact selection" 1 (List.length merged.selected);
+  check (list string) "all Task ids retained" [ "task-a"; "task-b" ]
+    (one_selected merged).task_ids
 ;;
 
 let run_skill_tool tool input =
@@ -436,6 +643,12 @@ let () =
     [ ( "selection"
       , [ test_case "shadow exact ref selects shadow" `Quick
             test_shadow_reference_selects_shadow_not_effective_winner
+        ; test_case "held shadow composition collision is exact" `Quick
+            test_held_shadow_composition_wins_with_exact_collision_evidence
+        ; test_case "malformed exact composition falls back" `Quick
+            test_malformed_exact_composition_is_frozen_instruction
+        ; test_case "shared exact ref retains all Task ids" `Quick
+            test_shared_exact_reference_retains_every_task_id
         ; test_case "exact ref consumer rejects name fallback" `Quick
             test_exact_reference_consumer_rejects_name_fallback
         ; test_case "resolved body remains frozen" `Quick

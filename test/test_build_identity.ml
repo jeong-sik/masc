@@ -86,6 +86,14 @@ let test_current_started_at_is_stable () =
   Unix.sleepf 0.01;
   let second = Build_identity.current () in
   Alcotest.(check string) "stable started_at" first.started_at second.started_at;
+  Alcotest.(check string)
+    "stable runtime instance id"
+    first.runtime_instance_id
+    second.runtime_instance_id;
+  Alcotest.(check bool)
+    "runtime instance id has canonical UUID width"
+    true
+    (String.length first.runtime_instance_id = 36);
   Alcotest.(check bool) "uptime monotonic" true
     (second.uptime_seconds >= first.uptime_seconds)
 
@@ -113,7 +121,11 @@ let test_current_json_exposes_runtime_binary_identity () =
   Alcotest.(check bool) "executable dir populated" true
     (String.length (json |> member "executable_dir" |> to_string) > 0);
   Alcotest.(check bool) "repo_root field present" true
-    (match json |> member "repo_root" with `Null | `String _ -> true | _ -> false)
+    (match json |> member "repo_root" with `Null | `String _ -> true | _ -> false);
+  Alcotest.(check string)
+    "runtime instance id projected"
+    current.runtime_instance_id
+    (json |> member "runtime_instance_id" |> to_string)
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
   (* Regression for the bug where running `cd ~/me && .../masc/main_eio.exe`

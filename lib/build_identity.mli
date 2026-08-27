@@ -44,6 +44,10 @@ type t = {
     (** Directory containing [executable_path]. *)
   repo_root : string option;
     (** Git root resolved from the executable path first, then cwd. *)
+  runtime_instance_id : string;
+    (** Process-unique UUIDv7 minted once when this module initializes. Unlike
+        [started_at], this remains collision-free across same-second restarts
+        of the same binary and is the server-process identity for evidence. *)
   started_at : string;
   uptime_seconds : int;
 }

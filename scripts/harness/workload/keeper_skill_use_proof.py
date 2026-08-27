@@ -16,6 +16,7 @@ import re
 import stat
 import subprocess
 from typing import Any
+import uuid
 from urllib.parse import quote, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
@@ -60,6 +61,19 @@ def source_snapshot(repo: Path) -> dict[str, Any]:
             text=True,
         ).splitlines(),
     }
+
+
+def runtime_instance_id(build: dict[str, Any], context: str) -> str:
+    value = string_field(build, "runtime_instance_id", context)
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError as error:
+        raise ProofError(f"{context}.runtime_instance_id is not a UUID") from error
+    require(
+        parsed.version == 7 and str(parsed) == value,
+        f"{context}.runtime_instance_id is not canonical UUIDv7",
+    )
+    return value
 
 
 def validate_tui_build_evidence(
@@ -411,6 +425,7 @@ def validate_proof(
         string_field(build, "binary_commit", "health.build") == expected_source_sha,
         "live binary commit does not match expected source SHA",
     )
+    runtime_instance_id(build, "health.build")
     string_field(build, "started_at", "health.build")
 
     surface = object_field(dashboard, "effective_keeper_surface", "dashboard")
@@ -764,6 +779,9 @@ def main() -> int:
                 object_field(health, "build", "health"),
                 "started_at",
                 "health.build",
+            ),
+            "server_runtime_instance_id": runtime_instance_id(
+                object_field(health, "build", "health"), "health.build"
             ),
             "tui_build": {
                 "manifest_sha256": digest_bytes(tui_build_raw),

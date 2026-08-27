@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from typing import Any, Protocol, cast
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -43,6 +44,8 @@ class ProducerError(RuntimeError):
 
 
 class ToolTransport(Protocol):
+    caller_agent_id: str | None
+
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
 
@@ -61,6 +64,82 @@ def utc_now() -> str:
 
 def digest_bytes(value: bytes) -> str:
     return sha256(value).hexdigest()
+
+
+def canonical_json_digest(value: Any) -> str:
+    payload = json.dumps(
+        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+    ).encode()
+    return digest_bytes(payload)
+
+
+def direct_message_input(message: str) -> dict[str, Any]:
+    return {
+        "schema": "masc.keeper_chat_operation.input.v1",
+        "message": message,
+        "user_blocks": [],
+        "turn_instructions": None,
+        "surface_context": None,
+        "attachments": [],
+    }
+
+
+def parse_turn_ref(value: str) -> tuple[str, int]:
+    trace_id, separator, turn_text = value.rpartition("#")
+    require(separator == "#" and trace_id != "", "turn_ref is not canonical")
+    require(
+        turn_text.isascii() and turn_text.isdecimal(),
+        "turn_ref absolute turn is not canonical",
+    )
+    absolute_turn = int(turn_text)
+    require(
+        absolute_turn >= 0 and str(absolute_turn) == turn_text,
+        "turn_ref absolute turn is not canonical",
+    )
+    return trace_id, absolute_turn
+
+
+def validate_turn_ref(value: str) -> None:
+    parse_turn_ref(value)
+
+
+def validate_runtime_instance_id(value: str) -> None:
+    try:
+        parsed = uuid.UUID(value)
+    except ValueError as error:
+        raise ProducerError("runtime instance id is not a UUID") from error
+    require(
+        parsed.version == 7 and str(parsed) == value,
+        "runtime instance id is not canonical UUIDv7",
+    )
+
+
+def validate_direct_message_source(
+    value: Any, *, keeper: str, submitted_by: str
+) -> None:
+    expected_thread = f"keeper:{keeper}"
+    expected = {
+        "schema": "masc.keeper_chat_operation.source.v1",
+        "submitted_by": submitted_by,
+        "thread_id": expected_thread,
+        "continuation_channel": {
+            "kind": "dashboard",
+            "thread_id": expected_thread,
+        },
+        "surface": {"kind": "agent"},
+        "channel": "agent",
+        "channel_user_id": "",
+        "channel_user_name": "",
+        "channel_workspace_id": "",
+        "conversation_id": None,
+        "external_message_id": None,
+        "workspace_id": None,
+        "extra_mentions": [],
+        "user_row_origin": "needs_append",
+    }
+    require(
+        value == expected, "operation source differs from exact direct-message source"
+    )
 
 
 def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -220,8 +299,11 @@ def validate_health(
         effective_base_path == expected_base_path,
         "server effective base path differs from requested base path",
     )
+    runtime_instance_id = required_string(build, "runtime_instance_id", "health.build")
+    validate_runtime_instance_id(runtime_instance_id)
     return {
         "binary_commit": binary_commit,
+        "runtime_instance_id": runtime_instance_id,
         "started_at": required_string(build, "started_at", "health.build"),
         "effective_base_path": effective_base_path,
         "effective_masc_root": required_string(
@@ -243,6 +325,7 @@ class McpClient:
         self.timeout = timeout
         self.protocol_version = protocol_version
         self.session_id: str | None = None
+        self.caller_agent_id: str | None = None
         self._next_request_id = 1
 
     def _decode_response(self, body: bytes, request_id: int) -> dict[str, Any]:
@@ -357,6 +440,19 @@ class McpClient:
         require(isinstance(result, dict), f"tool {name} result is not an object")
         result = cast(dict[str, Any], result)
         require(result.get("isError") is not True, f"tool {name} returned isError")
+        meta = result.get("_meta")
+        require(isinstance(meta, dict), f"tool {name} _meta is not an object")
+        meta = cast(dict[str, Any], meta)
+        observed_agent_id = meta.get("agent_id")
+        require(
+            isinstance(observed_agent_id, str) and observed_agent_id != "",
+            f"tool {name} _meta.agent_id is empty",
+        )
+        require(
+            self.caller_agent_id in (None, observed_agent_id),
+            f"tool {name} caller agent identity changed",
+        )
+        self.caller_agent_id = observed_agent_id
         structured = result.get("structuredContent")
         if structured is not None:
             require(
@@ -479,6 +575,35 @@ def validate_operation(value: dict[str, Any], operation_id: str) -> str:
     return state
 
 
+def validate_producer_operation(
+    value: dict[str, Any],
+    *,
+    operation_id: str,
+    keeper: str,
+    submitted_by: str,
+    message: str,
+) -> str:
+    state = validate_operation(value, operation_id)
+    validate_direct_message_source(
+        value.get("source"), keeper=keeper, submitted_by=submitted_by
+    )
+    expected_input = direct_message_input(message)
+    require(
+        value.get("execution_digest") == canonical_json_digest(expected_input),
+        "operation execution digest differs from exact direct-message input",
+    )
+    if state in NONTERMINAL_STATES:
+        require(
+            value.get("input") == expected_input,
+            "nonterminal operation input differs from exact direct-message input",
+        )
+    if state == "Succeeded":
+        validate_turn_ref(
+            required_string(value, "outcome_ref", "Keeper chat operation")
+        )
+    return state
+
+
 def run_producer(
     *,
     transport: ToolTransport,
@@ -515,6 +640,12 @@ def run_producer(
         },
     )
     validate_keeper_status(status, keeper=keeper, runtime_id=runtime_id)
+    submitted_by = transport.caller_agent_id
+    require(
+        isinstance(submitted_by, str) and submitted_by != "",
+        "MCP tool metadata did not identify the submitting agent",
+    )
+    submitted_by = cast(str, submitted_by)
 
     # This is the sole producer mutation.  In particular, no transport error
     # path calls it again; the caller receives an incomplete run instead.
@@ -533,7 +664,13 @@ def run_producer(
             },
         )
         observations += 1
-        state = validate_operation(operation, operation_id)
+        state = validate_producer_operation(
+            operation,
+            operation_id=operation_id,
+            keeper=keeper,
+            submitted_by=submitted_by,
+            message=message,
+        )
         if state in TERMINAL_STATES:
             break
         now = monotonic()
@@ -553,6 +690,7 @@ def run_producer(
             "tracked_checkout_clean": True,
         },
         "keeper": keeper,
+        "submitted_by": submitted_by,
         "keeper_admission": "exact_existing",
         "keeper_declarative_runtime_id": runtime_id,
         "actual_invocation_runtime_id": None,
@@ -563,6 +701,9 @@ def run_producer(
             "turn_ref": turn_ref,
             "status_observations": observations,
             "typed_terminal_record": operation,
+            "expected_operation_input_digest": canonical_json_digest(
+                direct_message_input(message)
+            ),
         },
         "message": {"bytes": len(message_raw), "sha256": digest_bytes(message_raw)},
         "skill_tool_use_id": None,

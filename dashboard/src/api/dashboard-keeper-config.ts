@@ -70,6 +70,35 @@ function decodeManifestRevision(value: unknown): KeeperManifestRevision {
   throw new Error(`Invalid keeper config response: manifest_revision is unavailable or malformed${detail}`)
 }
 
+function decodeManifestWarnings(value: unknown): KeeperConfig['manifest_transaction_warnings'] {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) {
+    throw new Error('Invalid keeper config response: manifest warnings must be an array')
+  }
+  return value.map((warning) => {
+    if (
+      !isRecord(warning)
+      || typeof warning.code !== 'string'
+      || typeof warning.detail !== 'string'
+    ) {
+      throw new Error('Invalid keeper config response: manifest warning must carry code and detail')
+    }
+    return { code: warning.code, detail: warning.detail }
+  })
+}
+
+function decodeManifestWrite(value: unknown): KeeperConfig['manifest_write'] {
+  if (value === undefined) return undefined
+  if (!isRecord(value) || typeof value.applied !== 'boolean') {
+    throw new Error('Invalid keeper config response: manifest_write is malformed')
+  }
+  return {
+    revision: decodeManifestRevision(value.revision),
+    applied: value.applied,
+    warnings: decodeManifestWarnings(value.warnings) ?? [],
+  }
+}
+
 function normalizeStringList(value: unknown): string[] {
   const array = asStringArray(value)
   if (array.length > 0) return array
@@ -231,6 +260,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     manifest_revision: decodeManifestRevision(data.manifest_revision),
+    manifest_write: decodeManifestWrite(data.manifest_write),
+    manifest_transaction_warnings:
+      decodeManifestWarnings(data.manifest_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),

@@ -30,6 +30,7 @@ type parsed_args = {
   native_tool_posture_present : bool;
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
+  declarative_manifest_snapshot : declarative_manifest_snapshot;
   instructions_opt : string option;
   autonomous_instructions_arg : string option;
   autonomous_instructions_opt : string option;
@@ -279,13 +280,13 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       get_string_opt args "autonomous_instructions"
     in
     match
-      load_keeper_profile_defaults_result_for_base_path
+      load_declarative_materialization_defaults
         ~base_path:ctx.config.base_path
         name
     with
     | Error error ->
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
-    | Ok profile_defaults ->
+    | Ok { profile_defaults; manifest_snapshot = declarative_manifest_snapshot } ->
     (* An explicit profile must be valid. When neither the call nor keeper TOML states
        one, resolution falls back to [Local] (playground-only writes) — which
        create/update validation rejects unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
@@ -345,6 +346,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       native_tool_posture_present;
       instructions_arg;
       profile_defaults;
+      declarative_manifest_snapshot;
       instructions_opt;
       autonomous_instructions_arg;
       autonomous_instructions_opt;

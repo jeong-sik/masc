@@ -1281,6 +1281,7 @@ type keeper_config_post_error =
   | Keeper_config_transport_error of string
   | Keeper_config_revision_conflict of Yojson.Safe.t
   | Keeper_config_reconciliation_required of Yojson.Safe.t
+  | Keeper_config_runtime_sync_failed of Yojson.Safe.t
   | Keeper_config_http_error of
       { status : int
       ; body : string
@@ -1292,6 +1293,8 @@ let keeper_config_post_error_to_string = function
     "keeper manifest revision conflict; authoritative reload required"
   | Keeper_config_reconciliation_required _ ->
     "keeper manifest reconciliation required; authoritative reload required"
+  | Keeper_config_runtime_sync_failed _ ->
+    "keeper config applied but runtime sync failed; authoritative reload required"
   | Keeper_config_http_error { status; body } ->
     Printf.sprintf "keeper config returned %d: %s" status body
 
@@ -1330,7 +1333,18 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
        Error (Keeper_config_revision_conflict json)
      | 503, Some "keeper_manifest_reconciliation_required", Some json ->
        Error (Keeper_config_reconciliation_required json)
+     | 503, Some "keeper_runtime_sync_failed", Some json
+       when Json_util.assoc_member_opt "config_applied" json = Some (`Bool true) ->
+       Error (Keeper_config_runtime_sync_failed json)
      | _ -> Error (Keeper_config_http_error { status; body }))
+
+let keeper_config_manifest_warning_count json =
+  match Json_util.assoc_member_opt "manifest_write" json with
+  | Some write ->
+    (match Json_util.assoc_member_opt "warnings" write with
+     | Some (`List warnings) -> List.length warnings
+     | Some _ | None -> 0)
+  | None -> 0
 
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
     contract. The keeper name in the path is the row the operator launched

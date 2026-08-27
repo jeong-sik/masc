@@ -14,6 +14,7 @@ import {
   KCF_TAB_IDS,
   keeperConfigControlContractStatus,
   keeperConfigControlInventory,
+  keeperConfigFailureRequiresAuthoritativeReload,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
   parseAutonomousWakePromptDraft,
@@ -23,6 +24,27 @@ import {
 } from './keeper-config-panel'
 
 void vi
+
+describe('keeper config save failure authority', () => {
+  it('reloads committed runtime-sync failures and reconciliation uncertainty', () => {
+    expect(keeperConfigFailureRequiresAuthoritativeReload(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/keeper-sangsu/config',
+      status: 503,
+      errorCode: 'keeper_runtime_sync_failed',
+      configApplied: true,
+      runtimeSync: false,
+    }))).toBe(true)
+    expect(keeperConfigFailureRequiresAuthoritativeReload(new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/keeper-sangsu/config',
+      status: 503,
+      errorCode: 'keeper_manifest_reconciliation_required',
+      configApplied: null,
+      authoritativeReloadRequired: true,
+    }))).toBe(true)
+  })
+})
 
 function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
   return {

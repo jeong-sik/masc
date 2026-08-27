@@ -11,8 +11,10 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
+        manifest_revision: { state: 'sha256', value: 'a'.repeat(64) },
         max_context_override: null,
         proactive: { enabled: true },
+        skills: { names: null },
         sources: {
           live_meta_path: '/workspace/.masc/keepers/rtprobe.json',
           default_manifest_path: '/workspace/.masc/config/keepers/rtprobe.toml',
@@ -85,5 +87,46 @@ describe('keeper config source projection', () => {
     await expect(fetchKeeperConfig('rtprobe')).rejects.toThrow(
       'Keeper config unavailable for rtprobe: profile_error at /workspace/.masc/config/keepers/rtprobe.toml: missing required sandbox_profile',
     )
+  })
+
+  it('preserves manifest write and durability warning receipts', async () => {
+    const revision = { state: 'sha256', value: 'a'.repeat(64) }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'rtprobe',
+        manifest_revision: revision,
+        manifest_write: {
+          revision,
+          applied: true,
+          warnings: [{
+            code: 'keeper_manifest_parent_sync_unconfirmed',
+            detail: 'parent fsync failed',
+          }],
+        },
+        manifest_transaction_warnings: [{
+          code: 'keeper_manifest_lock_release_unconfirmed',
+          detail: 'unlock failed',
+        }],
+        max_context_override: null,
+        skills: { names: null },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ))
+
+    const config = await fetchKeeperConfig('rtprobe')
+    expect(config.manifest_write).toEqual({
+      revision,
+      applied: true,
+      warnings: [{
+        code: 'keeper_manifest_parent_sync_unconfirmed',
+        detail: 'parent fsync failed',
+      }],
+    })
+    expect(config.manifest_transaction_warnings).toEqual([{
+      code: 'keeper_manifest_lock_release_unconfirmed',
+      detail: 'unlock failed',
+    }])
   })
 })

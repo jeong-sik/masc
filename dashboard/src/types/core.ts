@@ -1469,6 +1469,17 @@ export interface KeeperConfigFieldPresence {
   present_paths: string[]
 }
 
+export interface KeeperManifestWarning {
+  code: string
+  detail: string
+}
+
+export interface KeeperManifestWriteReceipt {
+  revision: KeeperManifestRevision
+  applied: boolean
+  warnings: KeeperManifestWarning[]
+}
+
 export interface KeeperHookSlot {
   active: boolean
   source: string
@@ -1485,6 +1496,8 @@ interface KeeperHookIntrospection {
 export interface KeeperConfig {
   name: string
   manifest_revision: KeeperManifestRevision
+  manifest_write?: KeeperManifestWriteReceipt
+  manifest_transaction_warnings?: KeeperManifestWarning[]
   autoboot_enabled: boolean
   max_context_override: number | null
   /** Keeper-level autonomous wake prompt override; null inherits the fleet

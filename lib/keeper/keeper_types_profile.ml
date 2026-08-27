@@ -177,6 +177,51 @@ let load_keeper_profile_defaults_result_for_base_path ~base_path name :
     ~keeper_toml_path_opt:(keeper_toml_path_opt_for_base_path ~base_path name)
     name
 
+type declarative_manifest_snapshot =
+  | Declarative_manifest_missing
+  | Declarative_manifest_present of
+      { path : string
+      ; sha256 : string
+      }
+
+type declarative_materialization_defaults =
+  { profile_defaults : keeper_profile_defaults
+  ; manifest_snapshot : declarative_manifest_snapshot
+  }
+
+let load_declarative_materialization_defaults ~base_path name =
+  match keeper_toml_path_opt_for_base_path ~base_path name with
+  | None ->
+    Ok
+      { profile_defaults = empty_keeper_profile_defaults
+      ; manifest_snapshot = Declarative_manifest_missing
+      }
+  | Some path ->
+    (match Safe_ops.read_file_safe path with
+     | Error detail ->
+       Error
+         { keeper_path = path
+         ; failing_path = path
+         ; kind = Read_error
+         ; detail
+         }
+     | Ok bytes ->
+       (match inspect_keeper_toml_content ~path bytes with
+        | Error _ as error -> error
+        | Ok (loaded_name, defaults) ->
+          (match load_keeper_instructions ~toml_path:path loaded_name defaults with
+           | Error _ as error -> error
+           | Ok profile_defaults ->
+             Ok
+               { profile_defaults
+               ; manifest_snapshot =
+                   Declarative_manifest_present
+                     { path
+                     ; sha256 =
+                         Digestif.SHA256.(digest_string bytes |> to_hex)
+                     }
+               })))
+
 type keeper_toml_config_error = {
   keeper_name : string;
   keeper_path : string;

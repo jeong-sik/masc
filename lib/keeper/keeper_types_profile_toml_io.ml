@@ -37,24 +37,21 @@ let keeper_toml_load_error_paths error =
   else [ error.keeper_path; error.failing_path ]
 ;;
 
-let load_profile_doc ~path =
+let load_profile_doc_content ~path content =
   let error kind detail =
     Error { keeper_path = path; failing_path = path; kind; detail }
   in
-  match Safe_ops.read_file_safe path with
-  | Error detail -> error Read_error detail
-  | Ok content ->
-    (match Keeper_toml_loader.parse_toml content with
-     | Error detail -> error Parse_error detail
-     | Ok doc ->
-       (match profile_defaults_of_toml doc with
-        | Error detail -> error Profile_error detail
-        | Ok defaults -> Ok (doc, defaults)))
+  match Keeper_toml_loader.parse_toml content with
+  | Error detail -> error Parse_error detail
+  | Ok doc ->
+    (match profile_defaults_of_toml doc with
+     | Error detail -> error Profile_error detail
+     | Ok defaults -> Ok (doc, defaults))
 ;;
 
-let inspect_keeper_toml (path : string)
+let inspect_keeper_toml_content ~(path : string) content
     : (string * keeper_profile_defaults, keeper_toml_load_error) result =
-  match load_profile_doc ~path with
+  match load_profile_doc_content ~path content with
   | Error _ as error -> error
   | Ok (doc, defaults) ->
     let name =
@@ -76,6 +73,17 @@ let inspect_keeper_toml (path : string)
       Ok (name,
           { defaults with manifest_path = Some path
                         ; id = Some id })
+
+let inspect_keeper_toml (path : string) =
+  match Safe_ops.read_file_safe path with
+  | Error detail ->
+    Error
+      { keeper_path = path
+      ; failing_path = path
+      ; kind = Read_error
+      ; detail
+      }
+  | Ok content -> inspect_keeper_toml_content ~path content
 
 let load_keeper_toml = inspect_keeper_toml
 

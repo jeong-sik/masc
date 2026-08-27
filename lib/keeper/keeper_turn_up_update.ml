@@ -319,8 +319,9 @@ let finish_publication_after_runtime_failure ~supersession ctx detail =
       tool_result_error ~class_:Tool_result.Runtime_failure detail)
 ;;
 
-let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revision
-    (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool_result
+let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
+    ~expected_manifest_revision (ctx : _ context) (p : parsed_args)
+    (old : keeper_meta) : tool_result
     =
   let allowed_paths =
     Option.value ~default:old.allowed_paths p.allowed_paths_opt
@@ -432,14 +433,8 @@ let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revisio
               (Keeper_shutdown_supersession.error_to_string error)
           | Ok supersession ->
             let publish outcome =
-              match resume_operator_pause ctx old with
-              | Error message ->
-                Keeper_turn_up_config_persistence.Rollback
-                  (Publication_rolled_back
-                     (outcome, config_publication_rollback_result message))
-              | Ok _resumed ->
-                (match
-                   Keeper_owner_registry.apply_meta
+              match
+                apply_profile
                      ~base_path:ctx.config.base_path
                      ~keeper_name:updated.name
                      (Keeper_owner_reducer.Update_profile
@@ -461,8 +456,8 @@ let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revisio
                         ; tool_groups = updated.tool_groups
                         ; updated_at = updated.updated_at
                         })
-                 with
-                 | Error error ->
+              with
+              | Error error ->
                    Otel_metric_store.inc_counter
                      Keeper_metrics.(to_string WriteMetaFailures)
                      ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
@@ -472,13 +467,18 @@ let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revisio
                      ( outcome
                      , config_publication_rollback_result
                          (Keeper_owner_registry.command_error_to_string error) ))
-                 | Ok None ->
-                   Keeper_turn_up_config_persistence.Rollback
-                     (Publication_rolled_back
-                        ( outcome
-                        , config_publication_rollback_result
-                            "Keeper owner metadata disappeared during update" ))
-                 | Ok (Some published_meta) ->
+              | Ok None ->
+                Keeper_turn_up_config_persistence.Rollback
+                  (Publication_rolled_back
+                     ( outcome
+                     , config_publication_rollback_result
+                         "Keeper owner metadata disappeared during update" ))
+              | Ok (Some published_meta) ->
+                (match resume_operator_pause ctx published_meta with
+                 | Error message ->
+                   Keeper_turn_up_config_persistence.Commit
+                     (Publication_applied_with_runtime_failure (outcome, message))
+                 | Ok resumed_meta ->
                    let runtime_assignment_result =
                      match p.runtime_id_opt with
                      | None -> Ok ()
@@ -492,7 +492,7 @@ let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revisio
                    (match runtime_assignment_result with
                     | Ok () ->
                       Keeper_turn_up_config_persistence.Commit
-                        (Publication_applied (outcome, published_meta))
+                        (Publication_applied (outcome, resumed_meta))
                     | Error err ->
                       Otel_metric_store.inc_counter
                         Keeper_metrics.(to_string TurnUpUpdateFailures)
@@ -572,3 +572,18 @@ let update_keeper ?(preserve_prompt_defaults = false) ~expected_manifest_revisio
                     ~revision:outcome.revision
                     ~warnings
                     ~applied:true))
+
+let update_keeper ?preserve_prompt_defaults ~expected_manifest_revision ctx p old =
+  update_keeper_with
+    ~apply_profile:(fun ~base_path ~keeper_name command ->
+      Keeper_owner_registry.apply_meta ~base_path ~keeper_name command)
+    ?preserve_prompt_defaults
+    ~expected_manifest_revision
+    ctx
+    p
+    old
+;;
+
+module For_testing = struct
+  let update_keeper_with_apply_profile = update_keeper_with
+end

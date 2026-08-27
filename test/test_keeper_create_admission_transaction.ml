@@ -293,6 +293,52 @@ let test_create_wins_intake_fence_overlap_through_production_handoff () =
        | None -> fail "create handoff erased the later shutdown reservation")
 ;;
 
+let test_config_only_keeper_materializes_without_rewriting_manifest () =
+  with_workspace @@ fun ~env ~sw ~config ~keepers_dir ~runtime_path:_ ->
+  let keeper_name = "config-only-autoboot-probe" in
+  let toml_path = Filename.concat keepers_dir (keeper_name ^ ".toml") in
+  let declarative_bytes =
+    {|[keeper]
+instructions = "Materialize this declarative Keeper"
+sandbox_profile = "local"
+proactive_enabled = false
+autoboot_enabled = true
+|}
+  in
+  write_file toml_path declarative_bytes;
+  let ctx : _ Profile.context =
+    { config
+    ; agent_name = "test-agent"
+    ; sw
+    ; clock = Eio.Stdenv.clock env
+    ; proc_mgr = None
+    ; net = None
+    ; publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider
+    }
+  in
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_keepalive.stop_keepalive keeper_name)
+    (fun () ->
+       let result =
+         Turn_up.handle_keeper_up ctx (`Assoc [ "name", `String keeper_name ])
+       in
+       check bool "config-only Keeper materializes" true
+         (Profile.tool_result_success result);
+       check string "materialization preserves exact declarative bytes"
+         declarative_bytes
+         (read_file toml_path);
+       (match Store.read_meta config keeper_name with
+        | Ok (Some meta) ->
+          check bool "declarative autoboot survives materialization" true
+            meta.autoboot_enabled
+        | Ok None -> fail "materialized Keeper has no owner metadata"
+        | Error detail -> fail detail);
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some _ -> ()
+       | None -> fail "materialized Keeper has no running lane")
+;;
+
 let () =
   Alcotest.run
     "keeper_create_admission_transaction"
@@ -305,6 +351,10 @@ let () =
     "production create keeps create-wins intake admission through lane fork"
     `Quick
     test_create_wins_intake_fence_overlap_through_production_handoff
+        ; test_case
+            "config-only declarative Keeper materializes without rewrite"
+            `Quick
+            test_config_only_keeper_materializes_without_rewriting_manifest
         ] )
     ]
 ;;

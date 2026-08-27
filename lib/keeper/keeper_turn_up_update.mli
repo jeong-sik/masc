@@ -26,3 +26,20 @@ val config_publication_rollback_of_result :
 
 val config_reconciliation_required_of_result :
   Keeper_types_profile.tool_result -> Yojson.Safe.t option
+
+module For_testing : sig
+  val update_keeper_with_apply_profile :
+    apply_profile:
+      (base_path:string ->
+       keeper_name:string ->
+       Keeper_owner_reducer.meta_command ->
+       ( Keeper_meta_contract.keeper_meta option
+       , Keeper_owner_registry.command_error )
+       result) ->
+    ?preserve_prompt_defaults:bool ->
+    expected_manifest_revision:Keeper_turn_up_config_persistence.revision ->
+    _ Keeper_types_profile.context ->
+    Keeper_turn_up_args.parsed_args ->
+    Keeper_meta_contract.keeper_meta ->
+    Keeper_types_profile.tool_result
+end

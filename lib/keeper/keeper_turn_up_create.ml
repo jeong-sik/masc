@@ -38,7 +38,8 @@ let with_manifest_warnings warnings result =
          ])
       result
 
-let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+let create_keeper ~expected_manifest_revision (ctx : _ context)
+    (p : parsed_args) : tool_result =
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:7 () in
@@ -183,7 +184,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       Progress.Tracker.step tracker ~message:"Writing declarative keeper configuration" ();
       (match
          Keeper_turn_up_config_persistence.persist_with_publication
-           ~expected_revision:Keeper_turn_up_config_persistence.Missing
+           ~expected_revision:expected_manifest_revision
            ~config:ctx.config
            ~parsed:p
            ~meta

@@ -32,6 +32,21 @@ let with_manifest_read_warnings warnings result =
           :: fields))
       result
 
+let declarative_manifest_revision (p : Keeper_turn_up_args.parsed_args) =
+  match p.declarative_manifest_snapshot with
+  | Declarative_manifest_missing -> Keeper_turn_up_config_persistence.Missing
+  | Declarative_manifest_present { sha256; _ } ->
+    Keeper_turn_up_config_persistence.Sha256 sha256
+
+let manifest_revision_conflict ~expected ~observed =
+  tool_result_error_data
+    ~class_:Tool_result.Workflow_rejection
+    (`Assoc
+       [ "code", `String "keeper_manifest_revision_conflict"
+       ; "expected", Keeper_turn_up_config_persistence.revision_to_yojson expected
+       ; "observed", Keeper_turn_up_config_persistence.revision_to_yojson observed
+       ])
+
 let handle_keeper_up ctx args : tool_result =
   match Keeper_turn_up_args.parse ctx args with
   | Error result -> result
@@ -47,8 +62,15 @@ let handle_keeper_up ctx args : tool_result =
      | Ok { value = _, Error e; warnings } ->
        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "%s" e)
        |> with_manifest_read_warnings warnings
-     | Ok { value = _, Ok None; warnings } ->
-       Keeper_turn_up_create.create_keeper ctx p
+     | Ok { value = observed, Ok None; warnings } ->
+       let expected = declarative_manifest_revision p in
+       (if expected = observed
+        then
+          Keeper_turn_up_create.create_keeper
+            ~expected_manifest_revision:expected
+            ctx
+            p
+        else manifest_revision_conflict ~expected ~observed)
        |> with_manifest_read_warnings warnings
      | Ok { value = revision, Ok (Some old); warnings } ->
        Keeper_turn_up_update.update_keeper

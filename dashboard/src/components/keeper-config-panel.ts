@@ -533,6 +533,15 @@ function keeperConfigManifestSource(c: KeeperConfig): string {
 }
 
 const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
+
+export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): boolean {
+  return error instanceof ApiRequestError
+    && (
+      error.errorCode === 'keeper_manifest_reconciliation_required'
+      || error.authoritativeReloadRequired
+      || (error.configApplied === true && error.runtimeSync === false)
+    )
+}
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
@@ -1707,7 +1716,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      showToast('Keeper 설정 저장 완료', 'success')
+      if ((updated.manifest_write?.warnings.length ?? 0) > 0) {
+        showToast('Keeper 설정은 적용됐지만 manifest durability 경고가 있습니다', 'warning')
+      } else {
+        showToast('Keeper 설정 저장 완료', 'success')
+      }
     } catch (err) {
       const activeOwner = activeKeeperConfigOwner.value
       if (
@@ -1723,13 +1736,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
         return
       }
-      if (
-        err instanceof ApiRequestError
-        && (
-          err.errorCode === 'keeper_manifest_reconciliation_required'
-          || err.authoritativeReloadRequired
-        )
-      ) {
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
         runtimeDraft.value = null
         await loadKeeperConfig(keeperName, { force: true })
         showToast('Keeper 설정 저장 결과를 확정할 수 없어 권위 설정을 다시 불러왔습니다', 'warning')
@@ -1816,7 +1823,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()
-      showToast('프롬프트 저장 완료', 'success')
+      if ((updated.manifest_write?.warnings.length ?? 0) > 0) {
+        showToast('프롬프트는 적용됐지만 manifest durability 경고가 있습니다', 'warning')
+      } else {
+        showToast('프롬프트 저장 완료', 'success')
+      }
     } catch (err) {
       const activeOwner = activeKeeperConfigOwner.value
       if (
@@ -1833,13 +1844,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         showToast('Keeper 설정이 다른 화면에서 변경되어 최신 값을 다시 불러왔습니다', 'warning')
         return
       }
-      if (
-        err instanceof ApiRequestError
-        && (
-          err.errorCode === 'keeper_manifest_reconciliation_required'
-          || err.authoritativeReloadRequired
-        )
-      ) {
+      if (keeperConfigFailureRequiresAuthoritativeReload(err)) {
         editMode.value = false
         editDraft.value = null
         await loadKeeperConfig(keeperName, { force: true })

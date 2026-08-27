@@ -8717,7 +8717,8 @@ and is loaded on demand through keeper_skill.
                 with
                 | Error
                     (( Masc_tui_http.Keeper_config_revision_conflict _
-                     | Masc_tui_http.Keeper_config_reconciliation_required _ ) as
+                     | Masc_tui_http.Keeper_config_reconciliation_required _
+                     | Masc_tui_http.Keeper_config_runtime_sync_failed _ ) as
                      error) ->
                   add_event state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error);
@@ -8728,9 +8729,19 @@ and is loaded on demand through keeper_skill.
                 | Error error ->
                   add_event state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error)
-                | Ok _ ->
-                    add_event state "system"
-                      (keeper.k_name ^ ": changed settings applied");
+                | Ok response ->
+                    let warning_count =
+                      Masc_tui_http.keeper_config_manifest_warning_count response
+                    in
+                    add_event state
+                      (if warning_count = 0 then "system" else "error")
+                      (if warning_count = 0
+                       then keeper.k_name ^ ": changed settings applied"
+                       else
+                         Printf.sprintf
+                           "%s: settings applied with %d manifest durability warning(s)"
+                           keeper.k_name
+                           warning_count);
                     if
                       state.view = Keepers Keeper_detail
                       && state.detail_tab = Detail_instructions

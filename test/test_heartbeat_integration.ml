@@ -1754,6 +1754,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; native_tool_posture_present = false
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
@@ -1909,6 +1911,26 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
          check bool "stale update leaves pause bit set" true meta.paused
        | Ok None -> fail "stale update removed paused metadata"
        | Error detail -> fail detail);
+      let before_profile_failure = authority_snapshot () in
+      let profile_failure_result =
+        Turn_up_update.For_testing.update_keeper_with_apply_profile
+          ~apply_profile:(fun ~base_path:_ ~keeper_name _command ->
+            Error
+              (Keeper_owner_registry.Command_lookup_failed
+                 (Keeper_owner_registry.Owner_not_found keeper_name)))
+          ~expected_manifest_revision:(manifest_revision_exn config stale_name)
+          ctx
+          stale_parsed
+          stale_meta
+      in
+      check bool "profile failure is reported as unapplied" true
+        (Option.is_some
+           (Turn_up_update.config_publication_rollback_of_result
+              profile_failure_result));
+      check bool
+        "profile failure before resume leaves pause receipt, meta, manifest, runtime, and checkpoint unchanged"
+        true
+        (authority_snapshot () = before_profile_failure);
 
       let stopped_name = "explicit-up-resumes-operator-stop" in
       let stopped_meta =
@@ -1997,6 +2019,8 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; native_tool_posture_present = false
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None
@@ -2165,6 +2189,8 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
         ; native_tool_posture_present = false
         ; instructions_arg = Some "durable cancelled update"
         ; profile_defaults
+        ; declarative_manifest_snapshot =
+            Keeper_types_profile.Declarative_manifest_missing
         ; instructions_opt = profile_defaults.instructions
         ; autonomous_instructions_arg = None
         ; autonomous_instructions_opt = None

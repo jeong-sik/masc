@@ -3,12 +3,14 @@ open Alcotest
 module History = Masc_tui_keeper_chat_history
 module Transcript = Masc_tui_keeper_chat_transcript
 
-let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface content =
+let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface
+    ?(speaker_authority = "owner") content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String "user"
      ; "content", `String content
      ; "ts", `Float ts
+     ; "speaker_authority", `String speaker_authority
      ]
      @ (match speaker_name with
         | None -> []
@@ -19,14 +21,22 @@ let addressed ?(ts = 1.0) ?speaker_name ?speaker_id ?surface content =
      @ (match surface with None -> [] | Some json -> [ "surface", json ]))
 ;;
 
+(* The live store holds 6217 unnamed user rows and 6216 of them carry
+   [speaker_authority], so a fixture without it is not a row this pane will
+   normally see. [owner] is the operator's own, which is what these cases are
+   about; the one row that lacks it falls to unresolved, which is the case
+   below. *)
 let row ?(ts = 1.0) ~role ?kind ?tool_call_id ?execution_id ?tool_call_name
-    ?delivery_key ?transcript_slot ?turn_ref content =
+    ?delivery_key ?transcript_slot ?turn_ref ?(speaker_authority = "owner")
+    content =
   `Assoc
     ([ "id", `String "row"
      ; "role", `String role
      ; "content", `String content
      ; "ts", `Float ts
      ]
+     @ (if role = "user" then [ "speaker_authority", `String speaker_authority ]
+        else [])
      @ (match kind with None -> [] | Some k -> [ "kind", `String k ])
      @ (match delivery_key with None -> [] | Some json -> [ "delivery_key", json ])
      @ (match transcript_slot with
@@ -232,8 +242,20 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
         failf "expected an addressed row"
   in
   let surface kind extra = `Assoc (("kind", `String kind) :: extra) in
-  check string "an unnamed row is still the operator" "you"
+  check string "an unnamed row the store calls the owner's is the operator" "you"
     (label (addressed "hello"));
+  (* Who spoke is written down; the surface only says where it came in. The
+     pane used to read the absence of a surface as "the operator", so an
+     unnamed external speaker on the dashboard lane was drawn as the reader
+     themselves. *)
+  check string "an unnamed external row is not the reader" "someone"
+    (label (addressed ~speaker_authority:"external" "hello"));
+  check string "and it keeps the id it came with" "U09L0RH"
+    (label (addressed ~speaker_authority:"external" ~speaker_id:"U09L0RH" "hi"));
+  (* An authority this build does not know is not a licence to call someone
+     the reader. *)
+  check string "an authority this build cannot read stays unresolved" "someone"
+    (label (addressed ~speaker_authority:"something_new" "hi"));
   check string "the dashboard is an operator surface, so it adds nothing"
     "vincent"
     (label (addressed ~speaker_name:"vincent" ~surface:(surface "dashboard" []) "hi"));
@@ -309,7 +331,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
   check string "an unnamed connector author is not the operator"
     "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
     (label
-       (addressed ~speaker_id:"U09L0RHPW7P"
+       (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_authority:"external"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
   (* The producer repeating the id in the name field is the store saying it had
@@ -318,6 +340,7 @@ let test_an_addressed_row_is_labelled_by_who_sent_it () =
     "\xe2\x80\xa6L0RHPW7P \xc2\xb7 slack C1"
     (label
        (addressed ~speaker_id:"U09L0RHPW7P" ~speaker_name:"U09L0RHPW7P"
+          ~speaker_authority:"external"
           ~surface:(surface "slack" [ "channel_id", `String "C1" ])
           "from slack"));
   (* And a row with no surface at all is still the operator's own: this pane

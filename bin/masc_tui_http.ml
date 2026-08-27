@@ -932,6 +932,29 @@ let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/keepers/tool-approvals"
 
+(** POST /api/v1/keepers/<name>/identity-switch — turn one attached service
+    on or off for this keeper without touching the consent. *)
+let post_identity_switch ~(host : string) ~(port : int) ~(keeper_name : string)
+    ~(provider_id : string) ~(enabled : bool) : (unit, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ ("provider", `String provider_id); ("enabled", `Bool enabled) ])
+  in
+  match
+    post_json ~host ~port
+      ~path:
+        (Printf.sprintf "/api/v1/keepers/%s/identity-switch" keeper_name)
+      ~body
+  with
+  | Error detail -> Error detail
+  | Ok json -> (
+      match json with
+      | `Assoc fields -> (
+          match List.assoc_opt "ok" fields with
+          | Some (`Bool true) -> Ok ()
+          | Some _ | None -> Error "identity switch response does not say ok")
+      | _ -> Error "identity switch response was not a JSON object")
+
 (** GET /api/v1/dashboard/gate — the durable Gate: pending approvals that
     survive nobody watching, plus both lane modes. *)
 let fetch_dashboard_gate ~(host : string) ~(port : int) :

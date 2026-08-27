@@ -115,6 +115,14 @@ val handle_keeper_oauth_login_post :
 val handle_keeper_identity_refresh_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
+val handle_keeper_identity_switch_post :
+  Mcp_server.server_state ->
+  actor:string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->

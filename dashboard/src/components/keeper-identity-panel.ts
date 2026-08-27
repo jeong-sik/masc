@@ -5,6 +5,7 @@ import {
   isAttachable,
   refreshIdentityTools,
   setIdentityClient,
+  setIdentitySwitch,
   startIdentityLogin,
   type AttachedProvider,
   type IdentityLoginStarted,
@@ -19,6 +20,11 @@ function toolSummary(provider: AttachedProvider): string {
   // Three states, not two. "attached and offering nothing" read as "not
   // attached" would tell an operator to consent again for no reason.
   if (!provider.attached) return '연결 안 됨'
+  // An unreadable switch store must not render as "on": say so instead.
+  if (provider.switch_problem !== undefined) return '연결됨 · 스위치 확인 불가'
+  // The switch first: an operator who turned a service off reads that
+  // before a tool count that no turn is being handed anyway.
+  if (provider.enabled === false) return '연결됨 · 꺼짐'
   const tools = provider.tools ?? []
   return tools.length === 0 ? '연결됨, 도구 없음' : `도구 ${tools.length}개`
 }
@@ -104,6 +110,21 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
     }
   }
 
+  const toggle = async (providerId: string, enabled: boolean) => {
+    setBusy(providerId)
+    setActionError(null)
+    try {
+      await setIdentitySwitch(keeperName, providerId, enabled)
+      // Re-read rather than patch what is on screen: the switch the server
+      // just wrote is the answer.
+      setReloadKey(key => key + 1)
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const refresh = async (providerId: string) => {
     setBusy(providerId)
     setActionError(null)
@@ -147,6 +168,15 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
                       disabled=${busy !== null}
                       onClick=${() => void connect(provider.provider)}
                     >${busy === provider.provider ? '여는 중...' : provider.attached ? '다시 연결' : '연결'}</button>
+                    ${provider.attached && provider.switch_problem === undefined && html`
+                      <button
+                        type="button"
+                        class="kcf-btn ghost"
+                        disabled=${busy !== null}
+                        data-testid=${`identity-switch-${provider.provider}`}
+                        onClick=${() => void toggle(provider.provider, provider.enabled === false)}
+                      >${provider.enabled === false ? '켜기' : '끄기'}</button>
+                    `}
                     ${provider.attached && html`
                       <button
                         type="button"

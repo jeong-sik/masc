@@ -153,7 +153,13 @@ val for_turn : base_path:string -> keeper_name:string -> offering
     screen says it can call cannot disagree -- and then the catalog each one
     wrote down. A provider this Keeper never attached to contributes nothing
     and is not a problem; one whose catalog is unreadable is reported in
-    [unusable] rather than passed over. *)
+    [unusable] rather than passed over.
+
+    A provider an operator switched off ({!Keeper_identity_switch})
+    contributes nothing either, and is not [unusable]: nothing is broken,
+    the identity screen says off, and the audit log says who threw the
+    switch. An unreadable switch store marks every declared provider
+    unusable rather than offering tools that may have been turned off. *)
 
 val renew_if_needed :
   ?token_post:Keeper_oauth_flow.post ->

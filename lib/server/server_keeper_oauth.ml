@@ -165,6 +165,18 @@ let refresh_tools ~base_path ~keeper ~provider_id ~now =
 ;;
 
 let attached_tools_json ~base_path ~keeper =
+  (* Read once for the listing. The screen this feeds carries the on/off
+     switch, so what it shows must be the store's answer — an unreadable
+     store is shown as a problem on each attached row, never as "on". *)
+  let switched_off =
+    Keeper_identity_switch.disabled_providers_for_keeper ~base_path
+      ~keeper_name:keeper
+  in
+  let switch_fields provider_id =
+    match switched_off with
+    | Ok off -> [ "enabled", `Bool (not (List.mem provider_id off)) ]
+    | Error problem -> [ "switch_problem", `String problem ]
+  in
   `List
     (List.map
        (fun declaration ->
@@ -194,23 +206,27 @@ let attached_tools_json ~base_path ~keeper =
                 ]
             | Ok (Some catalog) ->
               `Assoc
-                [ "provider", `String id
-                ; "provider_label", `String provider.Provider.label
-                ; "attached", `Bool true
-                ; ( "also_on"
-                  , `List
-                      (List.map
-                         (fun name -> `String name)
-                         (Keeper_identity_tools.keepers_with ~base_path
-                            ~provider_id:provider.Provider.id
-                            ~excluding:keeper)) )
-                ; "discovered_at", `Float catalog.Keeper_identity_tools.discovered_at
-                ; ( "tools"
-                  , `List
-                      (List.map
-                         (fun (tool : Mcp_client.tool) -> `String tool.Mcp_client.name)
-                         catalog.Keeper_identity_tools.tools) )
-                ]))
+                ([ "provider", `String id
+                 ; "provider_label", `String provider.Provider.label
+                 ; "attached", `Bool true
+                 ]
+                 @ switch_fields provider.Provider.id
+                 @ [ ( "also_on"
+                     , `List
+                         (List.map
+                            (fun name -> `String name)
+                            (Keeper_identity_tools.keepers_with ~base_path
+                               ~provider_id:provider.Provider.id
+                               ~excluding:keeper)) )
+                   ; ( "discovered_at"
+                     , `Float catalog.Keeper_identity_tools.discovered_at )
+                   ; ( "tools"
+                     , `List
+                         (List.map
+                            (fun (tool : Mcp_client.tool) ->
+                              `String tool.Mcp_client.name)
+                            catalog.Keeper_identity_tools.tools) )
+                   ])))
        (Declarations.all ()))
 ;;
 

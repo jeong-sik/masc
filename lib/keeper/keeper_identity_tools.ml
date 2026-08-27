@@ -443,6 +443,13 @@ let agent_tools ~(provider : Provider.t) catalog =
 ;;
 
 let for_turn ~base_path ~keeper_name =
+  (* Read once for the turn, not once per provider. An unreadable switch
+     store marks every declared provider unusable rather than offering
+     tools an operator may have turned off — the same reading the store
+     itself gives an unreadable file. *)
+  let switched_off =
+    Keeper_identity_switch.disabled_providers_for_keeper ~base_path ~keeper_name
+  in
   List.fold_left
     (fun acc declaration ->
       match declaration with
@@ -452,18 +459,30 @@ let for_turn ~base_path ~keeper_name =
       | Keeper_oauth_declarations.Unreadable { id; problem } ->
         { acc with unusable = (id, problem) :: acc.unusable }
       | Keeper_oauth_declarations.Declared provider ->
-        (match
-           load ~base_path ~keeper_name ~provider_id:provider.Provider.id
-         with
-         (* Never attached. Nothing to offer and nothing wrong. *)
-         | Ok None -> acc
+        (match switched_off with
          | Error problem ->
            { acc with unusable = (provider.Provider.id, problem) :: acc.unusable }
-         | Ok (Some catalog) ->
-           let offering = agent_tools ~provider catalog in
-           { offered = acc.offered @ offering.offered
-           ; unusable = List.rev_append offering.unusable acc.unusable
-           }))
+         | Ok off when List.mem provider.Provider.id off ->
+           (* Switched off by an operator. Not [unusable]: nothing is
+              broken, and the identity screen says off while the audit log
+              says who and when. Reporting it every turn would be noise
+              about a choice. *)
+           acc
+         | Ok _ ->
+           (match
+              load ~base_path ~keeper_name ~provider_id:provider.Provider.id
+            with
+            (* Never attached. Nothing to offer and nothing wrong. *)
+            | Ok None -> acc
+            | Error problem ->
+              { acc with
+                unusable = (provider.Provider.id, problem) :: acc.unusable
+              }
+            | Ok (Some catalog) ->
+              let offering = agent_tools ~provider catalog in
+              { offered = acc.offered @ offering.offered
+              ; unusable = List.rev_append offering.unusable acc.unusable
+              })))
     { offered = []; unusable = [] }
     (Keeper_oauth_declarations.all ())
   |> fun acc -> { acc with unusable = List.rev acc.unusable }

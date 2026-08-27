@@ -3911,6 +3911,16 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
+  let switch_of id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared
+            { idp_id; idp_enabled; idp_switch_problem; _ }
+          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
+        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
+          -> None)
+      providers
+  in
   let also_on id =
     List.find_map
       (function
@@ -3930,9 +3940,19 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
           match tools_of id with
           | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
           | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names ->
-              Printf.sprintf "%s%d tools%s" (Theme.ok ()) (List.length names)
-                Ansi.reset
+          | Some names -> (
+              (* The switch outranks the tool count: a service an operator
+                 turned off is handing this keeper nothing, however many
+                 tools its catalog names, and an unreadable switch store
+                 must not render as on. *)
+              match switch_of id with
+              | Some (_, Some _) ->
+                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+              | Some (Some false, None) ->
+                  (Theme.warn ()) ^ "off" ^ Ansi.reset
+              | Some ((Some true | None), None) | None ->
+                  Printf.sprintf "%s%d tools%s" (Theme.ok ())
+                    (List.length names) Ansi.reset)
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,

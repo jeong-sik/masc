@@ -1129,9 +1129,16 @@ let load_identity_providers ~(host : string) ~(port : int) ~(keeper_name : strin
                       names
                   | Some _ | None -> []
                 in
+                let idp_enabled =
+                  match field "enabled" with
+                  | Some (`Bool value) -> Some value
+                  | Some _ | None -> None
+                in
+                let idp_switch_problem = string_field "switch_problem" in
                 Some
                   (Masc_tui_types.Identity_declared
-                     { idp_id; idp_label; idp_tools; idp_also_on })
+                     { idp_id; idp_label; idp_tools; idp_also_on
+                     ; idp_enabled; idp_switch_problem })
               | None, _ -> None)
             rows))
 

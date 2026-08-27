@@ -8,9 +8,15 @@
 
 let check = Alcotest.check
 
-let declared ?tools ?(also_on = []) id label =
+let declared ?tools ?(also_on = []) ?enabled ?switch_problem id label =
   Masc_tui_types.Identity_declared
-    { idp_id = id; idp_label = label; idp_tools = tools; idp_also_on = also_on }
+    { idp_id = id
+    ; idp_label = label
+    ; idp_tools = tools
+    ; idp_also_on = also_on
+    ; idp_enabled = enabled
+    ; idp_switch_problem = switch_problem
+    }
 
 let unreadable id problem =
   Masc_tui_types.Identity_unreadable { idp_id = id; idp_problem = problem }

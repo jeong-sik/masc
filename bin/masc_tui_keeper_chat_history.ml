@@ -240,6 +240,28 @@ let turn_id_of_fields fields =
       Some (Delivery_identity.Request_id.to_string request_id)
   | Ok None | Error _ -> string_field fields "turn_ref"
 
+(* The row's text with one line per file under it.
+
+   A file posted with no caption arrives with [text] empty, and joining on it
+   anyway put a blank line above the file — the reader sees a gap where a
+   sentence would be (task-552). The connector side makes the same choice when
+   it composes an inbound message; the two have to agree or the same message
+   reads differently depending on which path wrote it. *)
+let text_with_attachments ~format_bytes ~text ~notes =
+  match notes with
+  | [] -> text
+  | notes ->
+    let line (n : attachment_note) =
+      Printf.sprintf "\xe2\x8e\x98 %s%s%s" n.att_name
+        (if n.att_bytes > 0 then
+           Printf.sprintf " \xc2\xb7 %s" (format_bytes n.att_bytes)
+         else "")
+        (if n.att_mime = "" then "" else " \xc2\xb7 " ^ n.att_mime)
+    in
+    let body = String.trim text in
+    String.concat "\n"
+      (if body = "" then List.map line notes else body :: List.map line notes)
+
 let attachment_notes_of fields =
   match List.assoc_opt "attachments" fields with
   | Some (`List items) ->

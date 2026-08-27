@@ -3328,21 +3328,9 @@ let msg_entry_of_history_row keeper_name (row : Keeper_chat_history.row) =
      the conversation mentions. What the reader needs here is to know a file
      is there at all. *)
   let text =
-    match row.Keeper_chat_history.attachments with
-    | [] -> text
-    | notes ->
-      let note (n : Keeper_chat_history.attachment_note) =
-        Printf.sprintf "\xe2\x8e\x98 %s%s%s"
-          n.Keeper_chat_history.att_name
-          (if n.Keeper_chat_history.att_bytes > 0 then
-             Printf.sprintf " \xc2\xb7 %s"
-               (Masc_tui_context_inspector.format_bytes
-                  n.Keeper_chat_history.att_bytes)
-           else "")
-          (if n.Keeper_chat_history.att_mime = "" then ""
-           else " \xc2\xb7 " ^ n.Keeper_chat_history.att_mime)
-      in
-      String.concat "\n" (text :: List.map note notes)
+    Keeper_chat_history.text_with_attachments
+      ~format_bytes:Masc_tui_context_inspector.format_bytes ~text
+      ~notes:row.Keeper_chat_history.attachments
   in
   { me_role = role
   ; me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text

@@ -175,6 +175,16 @@ val page_of_json : Yojson.Safe.t -> (page, string) result
     object or carries no [messages] array; a single unreadable row inside is
     dropped and counted, as in {!rows_of_json}. *)
 
+(** The row's text with one line per file under it. A file posted with no
+    caption arrives with empty text, and joining on it anyway puts a blank line
+    where a sentence would be (task-552). [format_bytes] is supplied by the
+    caller: this module sits below the one that renders sizes. *)
+val text_with_attachments :
+  format_bytes:(int -> string) ->
+  text:string ->
+  notes:attachment_note list ->
+  string
+
 val rows_of_json : Yojson.Safe.t -> (decoded, string) result
 (** Decode a [/chat/history] response.
 

@@ -167,6 +167,8 @@ type error =
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
       }
   | Process_exited of string
   | Timeout of float

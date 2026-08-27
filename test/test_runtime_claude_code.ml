@@ -694,9 +694,28 @@ let test_quota_is_structurally_classified () =
         (Runtime_claude_code.Quota_blocked
           { api_error_status = Some 429
           ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; tool_effect_attempted = false
+          ; response_emitted = false
           }) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "typed quota rejection was reported as completion")
+;;
+
+let test_quota_after_native_tool_records_effect () =
+  with_fixture
+    [ Emit native_tool_assistant
+    ; Emit native_tool_result
+    ; Emit rate_limit_rejected
+    ; Emit quota_result
+    ]
+    (fun path ->
+      match run_fixture path with
+      | Error
+          (Runtime_claude_code.Quota_blocked
+            { tool_effect_attempted = true; response_emitted = false; _ }) ->
+        ()
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-native-tool quota rejection was reported as completion")
 ;;
 
 let test_rejected_rate_limit_overrides_success_flag () =
@@ -706,6 +725,8 @@ let test_rejected_rate_limit_overrides_success_flag () =
         (Runtime_claude_code.Quota_blocked
           { api_error_status = None
           ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; tool_effect_attempted = false
+          ; response_emitted = false
           }) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "typed quota rejection was overridden by is_error=false")
@@ -1596,6 +1617,8 @@ let () =
             "quota is structurally classified"
             `Quick
             test_quota_is_structurally_classified
+        ; test_case "quota after native tool records effect" `Quick
+            test_quota_after_native_tool_records_effect
         ; test_case
             "rejected rate limit overrides success flag"
             `Quick

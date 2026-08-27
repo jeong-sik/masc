@@ -181,6 +181,8 @@ type error =
   | Quota_blocked of
       { api_error_status : int option
       ; rate_limit : rate_limit option
+      ; tool_effect_attempted : bool
+      ; response_emitted : bool
       }
   | Process_exited of string
   | Timeout of float
@@ -219,7 +221,8 @@ let error_to_string = function
       repeated_count
   | Stopped_by_host (Terminal_tool_boundary { tool_name; _ }) ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
-  | Quota_blocked { api_error_status; rate_limit } ->
+  | Quota_blocked
+      { api_error_status; rate_limit; tool_effect_attempted; response_emitted } ->
     let status =
       Option.fold
         ~none:"unknown"
@@ -230,9 +233,11 @@ let error_to_string = function
       Option.fold ~none:"unknown" ~some:string_of_int api_error_status
     in
     Printf.sprintf
-      "Claude Code subscription quota blocked (rate_limit=%s api_status=%s)"
+      "Claude Code subscription quota blocked (rate_limit=%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
       status
       api_status
+      tool_effect_attempted
+      response_emitted
   | Process_exited detail ->
     "Claude Code exited before terminal result: " ^ detail
   | Timeout seconds ->
@@ -884,7 +889,14 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
           result
     in
     if structurally_quota_blocked
-    then Error (Quota_blocked { api_error_status; rate_limit })
+    then
+      Error
+        (Quota_blocked
+           { api_error_status
+           ; rate_limit
+           ; tool_effect_attempted
+           ; response_emitted
+           })
     else if is_error && provider_reported_context_window_exceeded
     then
       Error
@@ -916,8 +928,8 @@ let max_ignored_messages = 256
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session_id
     ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
-    ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
-    ~response_emitted ~ignored =
+    ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+    ~stream_started ~response_emitted ~ignored =
   let* json = io.receive () in
   let* type_, fields = wire_fields json in
   match type_ with
@@ -935,7 +947,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started ~ignored
-      ~native_tool_calls ~on_stream_event ~stream_started ~response_emitted
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
@@ -951,6 +964,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
           texts_rev := text :: !texts_rev;
           emit_stream_event on_stream_event (Text_delta text)
         | Assistant_native_tool observation ->
+          native_tool_attempted := true;
           Option.iter
             (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
             observation.call_id;
@@ -962,21 +976,21 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model:(Some model)
       ~assistant_texts:(assistant_texts @ texts)
-      ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
-      ~response_emitted ~ignored
+      ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+      ~stream_started ~response_emitted ~ignored
   | "rate_limit_event" ->
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
-      ~native_tool_calls ~on_turn_started ~on_stream_event ~stream_started
-      ~response_emitted ~ignored
+      ~native_tool_calls ~native_tool_attempted ~on_turn_started ~on_stream_event
+      ~stream_started ~response_emitted ~ignored
   | "result" ->
     let parsed_result =
       parse_result
         ~expected_session_id
         ~rate_limit
-        ~tool_effect_attempted:(!tool_call_count > 0)
+        ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
         fields
     in
@@ -1037,8 +1051,9 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       finished_ids;
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls ~on_turn_started
-      ~on_stream_event ~stream_started ~response_emitted ~ignored:(ignored + 1)
+      ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
+      ~native_tool_attempted ~on_turn_started ~on_stream_event ~stream_started
+      ~response_emitted ~ignored:(ignored + 1)
   | ("system" | "tool_progress") when ignored < max_ignored_messages ->
     (* Claude Code emits [tool_progress] while a built-in tool is still
        running.  It is observation-only: tool ownership and completion still
@@ -1047,8 +1062,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~expected_session_id ~subscription ~resumed
       ~rate_limit ~assistant_model ~assistant_texts ~on_turn_started
-      ~native_tool_calls ~on_stream_event ~stream_started ~response_emitted
-      ~ignored:(ignored + 1)
+      ~native_tool_calls ~native_tool_attempted ~on_stream_event ~stream_started
+      ~response_emitted ~ignored:(ignored + 1)
   | other ->
     protocol_error
       "turn"
@@ -1241,6 +1256,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~assistant_model:None
     ~assistant_texts:[]
     ~native_tool_calls:(Hashtbl.create 8)
+    ~native_tool_attempted:(ref false)
     ~on_turn_started
     ~on_stream_event
     ~stream_started:(ref false)

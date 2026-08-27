@@ -1201,28 +1201,12 @@ let test_quota_enters_typed_recovery () =
     (fun () ->
        with_fixture [ Emit rate_limit_rejected; Emit quota_result ] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"QUOTA_GOAL" () with
-          | Error error ->
-            (* Since #28178 the fence also wraps failures where the runtime
-               lost complete effect observation, which is this path: the
-               caller no longer sees the raw [HardQuota]. The recovery
-               assertions below still carry the quota identity; here we pin
-               the fence and that the quota diagnostic survives it. *)
-            (match Keeper_internal_error.classify_masc_internal_error error with
-             | Some
-                 (Keeper_internal_error.Provider_attempt_effect_fenced
-                    { effect_disposition; diagnostic; _ }) ->
-               check
-                 bool
-                 "quota rejection is fenced against same-turn retry"
-                 false
-                 (Keeper_provider_attempt_effect.allows_same_turn_retry
-                    effect_disposition);
-               check
-                 bool
-                 "the fenced envelope keeps the quota diagnostic"
-                 true
-                 (Astring.String.is_infix ~affix:"quota" diagnostic)
-             | _ -> fail (Agent_core.Error.to_string error))
+          | Error
+              (Agent_core.Error.Provider
+                 (Llm_provider.Error.HardQuota { detail; _ })) ->
+            check bool "quota diagnostic survives" true
+              (Astring.String.is_infix ~affix:"quota" detail)
+          | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "quota rejection completed the Keeper turn");
          let state = load_state base_path in
          match state.phase with
@@ -1237,6 +1221,96 @@ let test_quota_enters_typed_recovery () =
              (Option.is_some required.observed_session_id);
            check (option string) "no fabricated turn" None required.observed_turn_id
          | _ -> fail "quota rejection did not require explicit recovery"))
+;;
+
+let test_quota_after_tool_effect_remains_fenced () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_THEN_QUOTA"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check bool "post-effect quota remains fenced" false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-effect quota completed the Keeper turn");
+       check int "tool effect is not replayed" 1 !call_count)
+;;
+
+let test_quota_after_native_tool_remains_fenced () =
+  let base_path = temp_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit
+             (native_tool_call_block
+                ~turn_id:"native-quota"
+                ~call_id:"native-quota-call"
+                ~tool_name:"Write")
+         ; Emit
+             (native_tool_result
+                ~call_id:"native-quota-call"
+                ~content:"native tool output")
+         ; Emit rate_limit_rejected
+         ; Emit quota_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~base_path
+                ~cli_path
+                ~goal:"NATIVE_TOOL_THEN_QUOTA"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check bool "post-native-tool quota remains fenced" false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-native-tool quota completed the Keeper turn"))
 ;;
 
 let test_spawn_failure_releases_claim () =
@@ -1546,6 +1620,10 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "quota after tool effect remains fenced" `Quick
+            test_quota_after_tool_effect_remains_fenced
+        ; test_case "quota after native tool remains fenced" `Quick
+            test_quota_after_native_tool_remains_fenced
         ; test_case
             "spawn failure releases claim"
             `Quick

@@ -638,12 +638,18 @@ let parse_row (entry : Yojson.Safe.t) : parsed list =
                    && not (Option.equal String.equal (Some name) speaker_id) ->
                 Named name
             | Some _ | None ->
-                (* Only a row with no surface is the operator's own. A row that
-                   came in from Slack or Discord has an author this build could
-                   not name, which is not the same as the reader. *)
-                (match List.assoc_opt "surface" fields with
-                 | None | Some `Null -> Operator
-                 | Some _ -> Unresolved { id = speaker_id })
+                (* The producer wrote down whose row this is; reading that
+                   beats inferring it. The surface says where a row came from,
+                   not who spoke — a dashboard row can carry an external
+                   author, and an operator can write from a connector.
+
+                   Absent or unrecognised authority stays unresolved rather
+                   than defaulting to the reader: calling someone else "you"
+                   is the one wrong answer with no way back. *)
+                (match List.assoc_opt "speaker_authority" fields with
+                 | Some (`String "owner") -> Operator
+                 | Some (`String _) | Some _ | None ->
+                     Unresolved { id = speaker_id })
           in
           let surface =
             match List.assoc_opt "surface" fields with

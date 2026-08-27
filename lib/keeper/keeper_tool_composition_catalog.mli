@@ -179,6 +179,7 @@ type instantiation_error =
   | Instantiated_plan_rejected of Keeper_tool_plan.error
 
 val instantiation_error_to_string : instantiation_error -> string
+val instantiation_error_to_json : instantiation_error -> Yojson.Safe.t
 
 val instantiate
   :  descriptors:Keeper_tool_descriptor.t list

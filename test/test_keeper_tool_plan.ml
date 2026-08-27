@@ -792,9 +792,28 @@ let test_request_rejects_off_surface_tool () =
   let json = request_of_string {|{"nodes":[{"id":"help","tool":"masc_tool_help"}]}|} in
   match parse_request json with
   | Error
-      (Request.Plan_rejected
-         (Plan.Tool_off_keeper_surface
-            { tool_name = "masc_tool_help"; reason = Plan.Operator_only_tool; _ })) -> ()
+      ((Request.Plan_rejected
+          (Plan.Tool_off_keeper_surface
+            { tool_name = "masc_tool_help"; reason = Plan.Operator_only_tool; _ })) as
+        error) ->
+    let projection = Request.error_to_json error in
+    let open Yojson.Safe.Util in
+    check string
+      "request error kind"
+      "plan_rejected"
+      (projection |> member "kind" |> to_string);
+    check string
+      "typed plan error kind"
+      "tool_off_keeper_surface"
+      (projection |> member "error" |> member "kind" |> to_string);
+    check string
+      "typed off-surface reason"
+      "operator_only"
+      (projection
+       |> member "error"
+       |> member "reason"
+       |> member "kind"
+       |> to_string)
   | Error error -> failf "wrong rejection: %s" (Request.error_message error)
   | Ok _ -> fail "off-surface tool was accepted"
 ;;

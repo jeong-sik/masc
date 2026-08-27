@@ -123,7 +123,11 @@ let error_to_json error =
   | Unknown_request_field { field } ->
     tag "unknown_request_field" [ "field", `String field ]
   | Plan_rejected plan_error ->
-    tag "plan_rejected" [ "message", `String (Plan.error_to_string plan_error) ]
+    tag
+      "plan_rejected"
+      [ "error", Plan.error_to_json plan_error
+      ; "message", `String (Plan.error_to_string plan_error)
+      ]
 ;;
 
 let composable_tool_names ~descriptors =

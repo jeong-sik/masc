@@ -254,6 +254,8 @@ type error =
   | Dependency_cycle of Node_id.t list
 
 val error_to_string : error -> string
+val error_to_json : error -> Yojson.Safe.t
+(** Exhaustive typed projection for operator and client surfaces. *)
 
 type t
 

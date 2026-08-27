@@ -738,6 +738,132 @@ let error_to_string = function
       (node_ids |> List.map Node_id.to_string |> String.concat " -> ")
 ;;
 
+let json_strings values =
+  `List (List.map (fun value -> `String value) values)
+;;
+
+let node_id_to_json node_id = `String (Node_id.to_string node_id)
+
+let node_ids_to_json node_ids =
+  `List (List.map node_id_to_json node_ids)
+;;
+
+let pointer_schema_error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  match error with
+  | Json_pointer.Missing_properties property ->
+    tag "missing_properties" [ "property", `String property ]
+  | Json_pointer.Missing_property_schema property ->
+    tag "missing_property_schema" [ "property", `String property ]
+  | Json_pointer.Ambiguous_property_schema property ->
+    tag "ambiguous_property_schema" [ "property", `String property ]
+  | Json_pointer.Missing_items_schema segment ->
+    tag "missing_items_schema" [ "segment", `String segment ]
+  | Json_pointer.Expected_schema_container segment ->
+    tag "expected_schema_container" [ "segment", `String segment ]
+;;
+
+let schema_contract_error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  let path segments = "path", json_strings segments in
+  match error with
+  | Expected_schema_object { path = segments; schema } ->
+    tag "expected_schema_object" [ path segments; "schema", schema ]
+  | Duplicate_schema_keyword { path = segments; keyword } ->
+    tag
+      "duplicate_schema_keyword"
+      [ path segments; "keyword", `String keyword ]
+  | Missing_schema_type { path = segments } ->
+    tag "missing_schema_type" [ path segments ]
+  | Unsupported_contract_type { path = segments; value } ->
+    tag "unsupported_contract_type" [ path segments; "value", value ]
+  | Unsupported_schema_keyword { path = segments; keyword } ->
+    tag
+      "unsupported_schema_keyword"
+      [ path segments; "keyword", `String keyword ]
+  | Invalid_schema_keyword_value { path = segments; keyword; value } ->
+    tag
+      "invalid_schema_keyword_value"
+      [ path segments; "keyword", `String keyword; "value", value ]
+  | Duplicate_required_field { path = segments; field } ->
+    tag
+      "duplicate_required_field"
+      [ path segments; "field", `String field ]
+  | Unknown_required_property { path = segments; field } ->
+    tag
+      "unknown_required_property"
+      [ path segments; "field", `String field ]
+;;
+
+let off_surface_reason_to_json = function
+  | Operator_only_tool -> `Assoc [ "kind", `String "operator_only" ]
+  | Aliased_by { projected_by } ->
+    `Assoc
+      [ "kind", `String "aliased_by"; "projected_by", `String projected_by ]
+  | Unresolved_schema -> `Assoc [ "kind", `String "unresolved_schema" ]
+;;
+
+let error_to_json error =
+  let tag kind fields = `Assoc (("kind", `String kind) :: fields) in
+  match error with
+  | Empty_plan -> tag "empty_plan" []
+  | Unknown_descriptor_id descriptor_id ->
+    tag "unknown_descriptor_id" [ "descriptor_id", `String descriptor_id ]
+  | Duplicate_node_id node_id ->
+    tag "duplicate_node_id" [ "node_id", node_id_to_json node_id ]
+  | Duplicate_tool_name tool_name ->
+    tag "duplicate_tool_name" [ "tool_name", `String tool_name ]
+  | Unknown_tool { node_id; tool_name } ->
+    tag
+      "unknown_tool"
+      [ "node_id", node_id_to_json node_id; "tool_name", `String tool_name ]
+  | Tool_off_keeper_surface { node_id; tool_name; reason } ->
+    tag
+      "tool_off_keeper_surface"
+      [ "node_id", node_id_to_json node_id
+      ; "tool_name", `String tool_name
+      ; "reason", off_surface_reason_to_json reason
+      ]
+  | Missing_dependency { node_id; dependency } ->
+    tag
+      "missing_dependency"
+      [ "node_id", node_id_to_json node_id
+      ; "dependency", node_id_to_json dependency
+      ]
+  | Opaque_output_reference { node_id; source_node_id; source_tool_name } ->
+    tag
+      "opaque_output_reference"
+      [ "node_id", node_id_to_json node_id
+      ; "source_node_id", node_id_to_json source_node_id
+      ; "source_tool_name", `String source_tool_name
+      ]
+  | Invalid_output_pointer { node_id; source_node_id; pointer; error } ->
+    tag
+      "invalid_output_pointer"
+      [ "node_id", node_id_to_json node_id
+      ; "source_node_id", node_id_to_json source_node_id
+      ; "pointer", json_strings (Json_pointer.segments pointer)
+      ; "error", pointer_schema_error_to_json error
+      ]
+  | Invalid_output_schema { node_id; tool_name; error } ->
+    tag
+      "invalid_output_schema"
+      [ "node_id", node_id_to_json node_id
+      ; "tool_name", `String tool_name
+      ; "error", schema_contract_error_to_json error
+      ]
+  | Multiple_terminal_nodes node_ids ->
+    tag "multiple_terminal_nodes" [ "node_ids", node_ids_to_json node_ids ]
+  | Terminal_node_missing_dependency { terminal_node_id; node_id } ->
+    tag
+      "terminal_node_missing_dependency"
+      [ "terminal_node_id", node_id_to_json terminal_node_id
+      ; "node_id", node_id_to_json node_id
+      ]
+  | Dependency_cycle node_ids ->
+    tag "dependency_cycle" [ "node_ids", node_ids_to_json node_ids ]
+;;
+
 type t =
   { identity : int
   ; nodes : node list

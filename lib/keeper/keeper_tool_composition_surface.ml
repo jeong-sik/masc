@@ -1560,7 +1560,7 @@ let make_tools
                        (`Assoc
                            [ "composition_tool", `String tool_name
                            ; tool_kind_field (Catalog.tool_kind entry)
-                           ; "error", `String message
+                           ; "error", Catalog.instantiation_error_to_json error
                            ])
                      message
                  | Ok plan ->
@@ -1631,7 +1631,7 @@ let make_tools
                        (`Assoc
                            [ "composition_tool", `String tool_name
                            ; tool_kind_field (Catalog.tool_kind entry)
-                           ; "error", `String message
+                           ; "error", Catalog.instantiation_error_to_json error
                            ])
                      message
                  | Ok plan ->

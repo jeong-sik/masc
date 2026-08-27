@@ -579,6 +579,44 @@ printf 'built\n' >"${BUILD_MARKER:?}"
       check bool "dirty source reported separately" true
         (String_util.contains_substring stderr "Source state: dirty"))
 
+let test_source_change_after_binary_resolution_blocks_exec () =
+  with_temp_dir "run-local-pre-exec-race" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let fake_bin = Filename.concat dir "bin" in
+      mkdir_p fake_bin;
+      let raced_source = Filename.concat repo_root "lib/raced.ml" in
+      mkdir_p (Filename.dirname raced_source);
+      write_executable
+        (Filename.concat fake_bin "lsof")
+        {|
+#!/bin/sh
+set -eu
+printf 'let raced = true\n' >"${SOURCE_RACE_PATH:?}"
+exit 1
+|};
+      let capture = Filename.concat dir "captured-env.txt" in
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let path =
+        Printf.sprintf "%s:%s" fake_bin
+          (Option.value ~default:"" (Sys.getenv_opt "PATH"))
+      in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:
+            [ "PATH", path
+            ; "SOURCE_RACE_PATH", raced_source
+            ; "FAKE_CAPTURE_FILE", capture
+            ]
+          [| script; "--target-dir"; target |]
+      in
+      check bool "source race is rejected" true (code <> 0);
+      check bool "stale binary never executed" false (Sys.file_exists capture);
+      check bool "error names the final identity fence" true
+        (String_util.contains_substring stderr
+           "Source or binary identity changed before executing"))
+
 let () =
   run "run_local_script"
     [
@@ -611,5 +649,7 @@ let () =
             test_exact_local_binary_skips_build;
           test_case "dirty source builds locally and reports dirty" `Quick
             test_dirty_source_builds_local_and_reports_dirty;
+          test_case "source change after binary resolution blocks exec" `Quick
+            test_source_change_after_binary_resolution_blocks_exec;
         ] );
     ]

@@ -97,6 +97,19 @@ binary_matches_source() {
     && [ "$embedded_fingerprint" = "$expected_fingerprint" ]
 }
 
+require_exec_identity() {
+  local observed_commit=""
+  local observed_fingerprint=""
+  observed_commit="$(source_commit 2>/dev/null || true)"
+  observed_fingerprint="$(source_fingerprint 2>/dev/null || true)"
+  if [ "$observed_commit" != "$SOURCE_COMMIT" ] \
+    || [ "$observed_fingerprint" != "$SOURCE_FINGERPRINT" ] \
+    || ! binary_matches_source "$EXE" "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT"; then
+    echo "Source or binary identity changed before executing the local server" >&2
+    exit 1
+  fi
+}
+
 bootstrap_local_config() {
   local target="$1"
   local local_masc_dir="$target/.masc"
@@ -298,7 +311,9 @@ if [ -n "${MASC_LOG_FILE:-}" ]; then
   mkdir -p "$(dirname "$MASC_LOG_FILE")"
   echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
   set -o pipefail
+  require_exec_identity
   exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR" 2>&1 | tee -a "$MASC_LOG_FILE"
 else
+  require_exec_identity
   exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR"
 fi

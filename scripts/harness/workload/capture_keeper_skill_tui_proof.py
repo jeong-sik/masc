@@ -197,7 +197,7 @@ def validate_bundle(
     tracked_checkout_clean: bool,
 ) -> dict[str, Any]:
     require(
-        evidence.get("schema") == "masc.keeper-skill-use-proof.v1",
+        evidence.get("schema") == "masc.keeper-skill-use-proof.v2",
         "input is not a Keeper Skill-use proof bundle",
     )
     source = object_field(evidence, "source", "evidence")

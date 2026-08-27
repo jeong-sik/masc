@@ -243,7 +243,12 @@ let test_missing_exact_trace_is_not_recorded () =
         (Projection.Trace_not_recorded { trace_id = observed })
     in
     check string "typed absence" "not_recorded"
-      Yojson.Safe.Util.(json |> member "status" |> to_string)
+      Yojson.Safe.Util.(json |> member "status" |> to_string);
+    let session_dir =
+      Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)
+    in
+    check bool "read-only absence leaves no lock" false
+      (Sys.file_exists (session_dir ^ ".checkpoint.lock"))
   | Projection.Trace_available _ -> fail "missing trace was synthesized as available"
   | Projection.Trace_unavailable _ -> fail "missing trace was reported unreadable"
 ;;

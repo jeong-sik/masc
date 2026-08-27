@@ -1720,8 +1720,17 @@ let load ~config ~trace_id =
 ;;
 
 let load_existing ~config ~trace_id =
-  with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
-    read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
+  let session_dir =
+    Keeper_fs.keeper_session_dir config (Keeper_id.Trace_id.to_string trace_id)
+  in
+  let ownership_root = Filename.dirname session_dir in
+  let path = ledger_path session_dir in
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error -> Error (Read_failed error)
+  | Ok None -> Ok None
+  | Ok (Some _) ->
+    with_lock ~config ~trace_id (fun ~ownership_root session_dir ->
+      read_existing_locked ~ownership_root ~expected_trace_id:trace_id session_dir)
 ;;
 
 let persist_locked

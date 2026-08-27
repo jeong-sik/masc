@@ -127,6 +127,79 @@ let test_current_json_exposes_runtime_binary_identity () =
     current.runtime_instance_id
     (json |> member "runtime_instance_id" |> to_string)
 
+let executable_provenance_json ?(extra = []) ~commit ~fingerprint ~sha256 () =
+  `Assoc
+    ([ "schema", `String "masc.run-local-executable-identity.v1"
+     ; "binary_commit", `String commit
+     ; "build_input_fingerprint", `String fingerprint
+     ; "executable_sha256", `String sha256
+     ]
+     @ extra)
+  |> Yojson.Safe.to_string
+;;
+
+let test_executable_provenance_requires_exact_identity () =
+  let commit = String.make 40 'a' in
+  let fingerprint = String.make 64 'b' in
+  let sha256 = String.make 64 'c' in
+  let raw = executable_provenance_json ~commit ~fingerprint ~sha256 () in
+  let expected : Build_identity.executable_provenance =
+    { binary_commit = commit
+    ; build_input_fingerprint = fingerprint
+    ; executable_sha256 = sha256
+    }
+  in
+  Alcotest.(check (result (testable (fun ppf (value : Build_identity.executable_provenance) ->
+    Format.fprintf ppf "%s/%s/%s"
+      value.Build_identity.binary_commit
+      value.build_input_fingerprint
+      value.executable_sha256) ( = )) string))
+    "exact sidecar accepted"
+    (Ok expected)
+    (Build_identity.parse_executable_provenance
+       ~expected_binary_commit:commit
+       ~expected_executable_sha256:sha256
+       raw)
+;;
+
+let test_executable_provenance_rejects_mismatches () =
+  let commit = String.make 40 'a' in
+  let fingerprint = String.make 64 'b' in
+  let sha256 = String.make 64 'c' in
+  let parse raw =
+    Build_identity.parse_executable_provenance
+      ~expected_binary_commit:commit
+      ~expected_executable_sha256:sha256
+      raw
+  in
+  let check_error label expected raw =
+    match parse raw with
+    | Error actual -> Alcotest.(check string) label expected actual
+    | Ok _ -> Alcotest.fail (label ^ ": malformed sidecar was accepted")
+  in
+  check_error
+    "digest mismatch"
+    "executable provenance executable digest differs"
+    (executable_provenance_json
+       ~commit
+       ~fingerprint
+       ~sha256:(String.make 64 'd')
+       ());
+  check_error
+    "invalid build fingerprint"
+    "executable provenance build-input fingerprint is invalid"
+    (executable_provenance_json ~commit ~fingerprint:"not-a-digest" ~sha256 ());
+  check_error
+    "unknown fields"
+    "executable provenance has unsupported fields"
+    (executable_provenance_json
+       ~extra:[ "unexpected", `Bool true ]
+       ~commit
+       ~fingerprint
+       ~sha256
+       ())
+;;
+
 let test_pick_repo_candidates_exe_first_when_distinct () =
   (* Regression for the bug where running `cd ~/me && .../masc/main_eio.exe`
      reported ~/me's commit instead of masc's. exe_dir must come first. *)
@@ -257,6 +330,10 @@ let () =
             test_binary_identity_survives_without_checkout;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
+          Alcotest.test_case "executable provenance requires exact identity" `Quick
+            test_executable_provenance_requires_exact_identity;
+          Alcotest.test_case "executable provenance rejects mismatches" `Quick
+            test_executable_provenance_rejects_mismatches;
           Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick
             test_runtime_cwd_is_resolver_backed_snapshot;
           Alcotest.test_case "current JSON exposes runtime binary identity" `Quick

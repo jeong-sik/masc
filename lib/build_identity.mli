@@ -61,10 +61,20 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val current : unit -> t
 (** Snapshot of the running build identity with current uptime. *)
 
-val embedded_source_fingerprint : unit -> string option
-(** Fingerprint of the executable-affecting source bytes observed by the Dune
-    build rule. Unlike the embedded commit, this changes for dirty sources and
-    therefore distinguishes two builds made from the same HEAD. *)
+type executable_provenance = {
+  binary_commit : string;
+  build_input_fingerprint : string;
+  executable_sha256 : string;
+}
+
+val parse_executable_provenance :
+  expected_binary_commit:string ->
+  expected_executable_sha256:string ->
+  string ->
+  (executable_provenance, string) result
+(** Decode the exact sidecar written beside a content-addressed local
+    executable. The sidecar is accepted only when its commit and executable
+    digest match the independently observed values. *)
 
 val repo_root : unit -> string option
 (** Git root used for the running server binary, preferring the executable

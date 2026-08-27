@@ -315,7 +315,59 @@ let commit_resolution =
     ~probe:probe_git_commit
 ;;
 
-let embedded_source_fingerprint () = Build_commit_generated.source_fingerprint
+type executable_provenance =
+  { binary_commit : string
+  ; build_input_fingerprint : string
+  ; executable_sha256 : string
+  }
+
+let executable_provenance_schema = "masc.run-local-executable-identity.v1"
+let sha256_hex_length = Digestif.SHA256.digest_size * 2
+
+let valid_sha256 value =
+  String.length value = sha256_hex_length
+  && String.for_all
+       (function
+         | '0' .. '9' | 'a' .. 'f' -> true
+         | _ -> false)
+       value
+;;
+
+let parse_executable_provenance
+      ~expected_binary_commit
+      ~expected_executable_sha256
+      raw
+  =
+  let required_string fields name =
+    match List.find_all (fun (field, _) -> String.equal field name) fields with
+    | [ _, `String value ] -> Ok value
+    | [ _ ] -> Error (Printf.sprintf "executable provenance %s is not a string" name)
+    | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
+    | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
+  in
+  let ( let* ) = Result.bind in
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error message -> Error ("invalid executable provenance JSON: " ^ message)
+  | `Assoc fields ->
+    let* schema = required_string fields "schema" in
+    let* binary_commit = required_string fields "binary_commit" in
+    let* build_input_fingerprint = required_string fields "build_input_fingerprint" in
+    let* executable_sha256 = required_string fields "executable_sha256" in
+    if List.length fields <> 4
+    then Error "executable provenance has unsupported fields"
+    else if not (String.equal schema executable_provenance_schema)
+    then Error "executable provenance schema is unsupported"
+    else if not (String.equal binary_commit expected_binary_commit)
+    then Error "executable provenance binary commit differs"
+    else if not (valid_sha256 build_input_fingerprint)
+    then Error "executable provenance build-input fingerprint is invalid"
+    else if not (valid_sha256 executable_sha256)
+    then Error "executable provenance executable digest is invalid"
+    else if not (String.equal executable_sha256 expected_executable_sha256)
+    then Error "executable provenance executable digest differs"
+    else Ok { binary_commit; build_input_fingerprint; executable_sha256 }
+  | _ -> Error "executable provenance is not an object"
+;;
 
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root

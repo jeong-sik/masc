@@ -7,6 +7,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_TARGET="bin/main_eio.exe"
+BUILT_EXE="$REPO_ROOT/_build/default/bin/main_eio.exe"
 TARGET_DIR="${PWD}"
 HOST="${MASC_HOST:-127.0.0.1}"
 PORT="${MASC_PORT:-}"
@@ -15,6 +17,9 @@ PRINT_PORT_ONLY=0
 BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
 BOOTSTRAP_KEEPERS=0
+
+# shellcheck source=scripts/lib/runtime-artifact-contract.sh
+source "$REPO_ROOT/scripts/lib/runtime-artifact-contract.sh"
 
 usage() {
   cat >&2 <<'EOF'
@@ -59,14 +64,6 @@ source_commit() {
   git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null
 }
 
-source_fingerprint() {
-  "$REPO_ROOT/scripts/source-binary-identity.sh" fingerprint
-}
-
-source_state() {
-  "$REPO_ROOT/scripts/source-binary-identity.sh" state
-}
-
 binary_embedded_commit() {
   local exe="$1"
   if [ ! -x "$exe" ]; then
@@ -75,37 +72,88 @@ binary_embedded_commit() {
   "$exe" build-commit 2>/dev/null
 }
 
-binary_embedded_source_fingerprint() {
-  local exe="$1"
-  if [ ! -x "$exe" ]; then
-    return 1
-  fi
-  "$exe" build-source-fingerprint 2>/dev/null
-}
-
-binary_matches_source() {
+binary_matches_commit() {
   local exe="$1"
   local expected_commit="$2"
-  local expected_fingerprint="$3"
   local embedded_commit=""
-  local embedded_fingerprint=""
   embedded_commit="$(binary_embedded_commit "$exe" 2>/dev/null || true)"
-  embedded_fingerprint="$(binary_embedded_source_fingerprint "$exe" 2>/dev/null || true)"
   [ -n "$embedded_commit" ] \
-    && [ "$embedded_commit" = "$expected_commit" ] \
-    && [ -n "$embedded_fingerprint" ] \
-    && [ "$embedded_fingerprint" = "$expected_fingerprint" ]
+    && [ "$embedded_commit" = "$expected_commit" ]
+}
+
+build_input_fingerprint() {
+  "$REPO_ROOT/scripts/dune-build-input-fingerprint.py" \
+    --repo-root "$REPO_ROOT" \
+    --target "$BUILD_TARGET"
+}
+
+build_local_binary() {
+  "$REPO_ROOT/scripts/dune-local.sh" build "$BUILD_TARGET"
+  [ -x "$BUILT_EXE" ] || {
+    echo "Dune did not materialize $BUILT_EXE" >&2
+    exit 1
+  }
+  binary_matches_commit "$BUILT_EXE" "$SOURCE_COMMIT" || {
+    echo "Built binary commit differs from source commit $SOURCE_COMMIT" >&2
+    exit 1
+  }
+  BUILD_INPUT_FINGERPRINT="$(build_input_fingerprint)" || {
+    echo "Failed to fingerprint Dune inputs for $BUILD_TARGET" >&2
+    exit 1
+  }
+  BUILT_EXE_SHA256="$(masc_runtime_artifact_hash "$BUILT_EXE")" || exit 1
+}
+
+write_executable_provenance() {
+  local path="$1"
+  local temp="$path.tmp.$$"
+  umask 077
+  printf \
+    '{"schema":"masc.run-local-executable-identity.v1","binary_commit":"%s","build_input_fingerprint":"%s","executable_sha256":"%s"}\n' \
+    "$SOURCE_COMMIT" "$BUILD_INPUT_FINGERPRINT" "$BUILT_EXE_SHA256" >"$temp"
+  chmod 600 "$temp"
+  mv -f "$temp" "$path"
+}
+
+materialize_executable_provenance() {
+  local descriptor_dir="$TARGET_DIR/.masc/run-local-artifact"
+  local candidate="$descriptor_dir/candidate"
+  local current="$descriptor_dir/current"
+  mkdir -p "$descriptor_dir"
+  masc_runtime_artifact_descriptor_write \
+    "$candidate" http "$BUILT_EXE" "$BUILT_EXE_SHA256" "$HOST" "$PORT"
+  masc_runtime_artifact_promote "$candidate" "$current" "$REPO_ROOT"
+  masc_runtime_artifact_descriptor_read "$current"
+  EXE="$MASC_ARTIFACT_PATH"
+  EXE_SHA256="$MASC_ARTIFACT_SHA256"
+  EXE_PROVENANCE="$EXE.identity.json"
+  write_executable_provenance "$EXE_PROVENANCE"
+  EXE_PROVENANCE_SHA256="$(masc_runtime_artifact_hash "$EXE_PROVENANCE")" || exit 1
 }
 
 require_exec_identity() {
+  local expected_fingerprint="$BUILD_INPUT_FINGERPRINT"
+  local expected_built_sha256="$BUILT_EXE_SHA256"
   local observed_commit=""
-  local observed_fingerprint=""
+  local observed_exe_sha256=""
+  local observed_provenance_sha256=""
+
+  # Dune is the build-input authority. Re-running the focused target here is
+  # cached when nothing changed and materializes a new link result when any
+  # transitive input changed after the first build.
+  build_local_binary
   observed_commit="$(source_commit 2>/dev/null || true)"
-  observed_fingerprint="$(source_fingerprint 2>/dev/null || true)"
+  observed_exe_sha256="$(masc_runtime_artifact_hash "$EXE" 2>/dev/null || true)"
+  observed_provenance_sha256="$(
+    masc_runtime_artifact_hash "$EXE_PROVENANCE" 2>/dev/null || true
+  )"
   if [ "$observed_commit" != "$SOURCE_COMMIT" ] \
-    || [ "$observed_fingerprint" != "$SOURCE_FINGERPRINT" ] \
-    || ! binary_matches_source "$EXE" "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT"; then
-    echo "Source or binary identity changed before executing the local server" >&2
+    || [ "$BUILD_INPUT_FINGERPRINT" != "$expected_fingerprint" ] \
+    || [ "$BUILT_EXE_SHA256" != "$expected_built_sha256" ] \
+    || [ "$observed_exe_sha256" != "$EXE_SHA256" ] \
+    || [ "$observed_provenance_sha256" != "$EXE_PROVENANCE_SHA256" ] \
+    || ! binary_matches_commit "$EXE" "$SOURCE_COMMIT"; then
+    echo "Dune input or executable identity changed before local server exec" >&2
     exit 1
   fi
 }
@@ -161,22 +209,6 @@ build_dashboard_if_requested() {
   else
     echo "[local-run] Dashboard build helper missing, skipping." >&2
   fi
-}
-
-resolve_built_exe() {
-  local expected_commit="$1"
-  local expected_fingerprint="$2"
-  local -a candidates=(
-    "$REPO_ROOT/_build/default/bin/main_eio.exe"
-  )
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if binary_matches_source "$candidate" "$expected_commit" "$expected_fingerprint"; then
-      printf '%s\n' "$candidate"
-      return 0
-    fi
-  done
-  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -244,28 +276,11 @@ SOURCE_COMMIT="$(source_commit)" || {
   echo "Failed to resolve source commit for $REPO_ROOT" >&2
   exit 1
 }
-SOURCE_FINGERPRINT="$(source_fingerprint)" || {
-  echo "Failed to fingerprint binary source inputs for $REPO_ROOT" >&2
-  exit 1
-}
-SOURCE_STATE="$(source_state)"
-EXE="$(resolve_built_exe "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT" || true)"
-
-if [ -z "$EXE" ]; then
-  echo "[local-run] Building local binary..." >&2
-  "$REPO_ROOT/scripts/dune-local.sh" build bin/main_eio.exe
-  AFTER_COMMIT="$(source_commit)" || true
-  AFTER_FINGERPRINT="$(source_fingerprint)" || true
-  if [ "$AFTER_COMMIT" != "$SOURCE_COMMIT" ] \
-    || [ "$AFTER_FINGERPRINT" != "$SOURCE_FINGERPRINT" ]; then
-    echo "Source changed while building the local binary; refusing a raced executable" >&2
-    exit 1
-  fi
-  EXE="$(resolve_built_exe "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT" || true)"
-fi
-
-if [ -z "$EXE" ]; then
-  echo "Failed to resolve a worktree-local binary for commit $SOURCE_COMMIT" >&2
+echo "[local-run] Validating local binary with Dune..." >&2
+build_local_binary
+AFTER_COMMIT="$(source_commit)" || true
+if [ "$AFTER_COMMIT" != "$SOURCE_COMMIT" ]; then
+  echo "Source commit changed while building the local binary" >&2
   exit 1
 fi
 
@@ -273,12 +288,14 @@ if [ "$BOOTSTRAP_ONLY" = "1" ]; then
   echo "[local-run] Bootstrap ready" >&2
   echo "  Target dir: $TARGET_DIR" >&2
   echo "  Config root: $LOCAL_CONFIG_DIR" >&2
-  echo "  Binary: $EXE" >&2
+  echo "  Binary: $BUILT_EXE" >&2
   echo "  Binary commit: $SOURCE_COMMIT" >&2
-  echo "  Source fingerprint: $SOURCE_FINGERPRINT" >&2
-  echo "  Source state: $SOURCE_STATE" >&2
+  echo "  Build input fingerprint: $BUILD_INPUT_FINGERPRINT" >&2
+  echo "  Binary sha256: $BUILT_EXE_SHA256" >&2
   exit 0
 fi
+
+materialize_executable_provenance
 
 if lsof -iTCP:"$PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
   listener_pid="$(lsof -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)"

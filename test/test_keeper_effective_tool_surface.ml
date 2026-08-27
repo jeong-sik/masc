@@ -169,6 +169,7 @@ let names (surface : Keeper_effective_tool_surface.t) =
 let project
       ?(snapshot = skill_snapshot ())
       ?(skills_left_out = [])
+      ?(skill_names = None)
       ~tool_groups
       ~task_skill_references
       ~native_posture
@@ -181,11 +182,67 @@ let project
     ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
     ~native_posture:(Some native_posture)
     ~tool_groups
+    ~skill_names
     ~current_task_id:(Some "task-001")
     ~skills_left_out
     ~task_skill_references
     ~task_selection:None
     ~skill_snapshot:snapshot
+;;
+
+let test_skill_name_selection_is_structured_and_filters_task () =
+  ignore (Masc_test_deps.init_unified_tool_registry ());
+  let snapshot = skill_snapshot () in
+  let task_snapshot = reference_by_name snapshot "snapshot" in
+  let selected =
+    match
+      project
+        ~snapshot
+        ~skill_names:(Some [ "guide"; "missing" ])
+        ~tool_groups:None
+        ~task_skill_references:[ task_snapshot ]
+        ~native_posture:Runtime_native_tools.Native_read
+        ()
+    with
+    | Ok surface -> surface
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
+  check int "one selected instruction" 1 (List.length selected.instruction_skills);
+  check int "Task composition is filtered" 0 (List.length selected.composition_skills);
+  let json = Keeper_effective_tool_surface.to_yojson (Available selected) in
+  check string
+    "selection mode"
+    "names"
+    Yojson.Safe.Util.(member "skill_selection" json |> member "mode" |> to_string);
+  check (list string)
+    "configured names"
+    [ "guide"; "missing" ]
+    Yojson.Safe.Util.(member "skill_selection" json |> member "names" |> to_list |> List.map to_string);
+  let unavailable = Yojson.Safe.Util.(member "unavailable_skill_names" json |> to_list) in
+  check int "one structured unavailable name" 1 (List.length unavailable);
+  (match unavailable with
+   | [ value ] ->
+     check string "unavailable name" "missing" Yojson.Safe.Util.(member "name" value |> to_string);
+     check string
+       "unavailable reason"
+       "not_in_turn_skill_catalog"
+       Yojson.Safe.Util.(member "reason" value |> to_string)
+   | _ -> fail "unavailable name projection changed shape");
+  let none =
+    match
+      project
+        ~snapshot
+        ~skill_names:(Some [])
+        ~tool_groups:None
+        ~task_skill_references:[ task_snapshot ]
+        ~native_posture:Runtime_native_tools.Native_read
+        ()
+    with
+    | Ok surface -> surface
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
+  check int "explicit empty has no instruction Skills" 0 (List.length none.instruction_skills);
+  check int "explicit empty has no composition Skills" 0 (List.length none.composition_skills)
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
@@ -196,6 +253,7 @@ let test_projection_names_equal_turn_surface_authority () =
     project
       ~snapshot
       ~tool_groups:None
+      ~skill_names:None
       ~task_skill_references:[ task_reference ]
       ~native_posture:Runtime_native_tools.Native_read
       ()
@@ -304,6 +362,7 @@ let test_external_composition_preserves_snapshot_provenance () =
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
       ~tool_groups:None
+      ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]
       ~task_skill_references:[]
@@ -599,6 +658,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
                ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
                ~native_posture:None
                ~tool_groups:(Some [ "board" ])
+               ~skill_names:None
                ~current_task_id:(Some task_a)
                ~skills_left_out:[]
                ~task_skill_references:[]
@@ -614,7 +674,7 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
              let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
              let projection =
                Keeper_skill_catalog.project_turn
-                 ~global ~task:(Keeper_task_skill_turn.skills selection)
+                 ~names:None ~global ~task:(Keeper_task_skill_turn.skills selection)
              in
              let prompt_instruction_refs =
                Keeper_skill_catalog.exact_surfaces
@@ -649,6 +709,7 @@ let test_left_out_skills_reach_the_surface () =
     project
       ~skills_left_out:[ "not-a-policy: skill \"not-a-policy\": unsupported" ]
       ~tool_groups:None
+      ~skill_names:None
       ~task_skill_references:[]
       ~native_posture:Runtime_native_tools.Native_read
       ()
@@ -705,6 +766,7 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
         Keeper_effective_tool_surface.Tools_suppressed_runtime_unsupported
       ~native_posture:None
       ~tool_groups:None
+      ~skill_names:None
       ~current_task_id:(Some "task-001")
       ~skills_left_out:[]
       ~task_skill_references:[ reference_by_name skill_snapshot "guide" ]
@@ -831,6 +893,7 @@ let test_frozen_selection_carries_the_shadowed_exact_reference () =
       ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
       ~native_posture:None
       ~tool_groups:(Some [ "board" ])
+      ~skill_names:None
       ~current_task_id:None
       ~skills_left_out:[]
       ~task_skill_references:[]
@@ -861,6 +924,8 @@ let () =
     [ ( "projection"
       , [ test_case "names equal turn setup authority" `Quick
             test_projection_names_equal_turn_surface_authority
+        ; test_case "Skill names filter Task and expose unavailable" `Quick
+            test_skill_name_selection_is_structured_and_filters_task
         ; test_case "different Keeper declarations change names and digest" `Quick
             test_two_surfaces_have_different_names_and_digests
         ; test_case

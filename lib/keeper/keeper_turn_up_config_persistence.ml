@@ -56,6 +56,15 @@ let full_fields
   in
   let fields =
     match
+      if parsed.skill_names_present
+      then parsed.skill_names_opt
+      else parsed.profile_defaults.skill_names
+    with
+    | Some names -> ("skills.names", Keeper_toml_loader.Toml_string_array names) :: fields
+    | None -> fields
+  in
+  let fields =
+    match
       if parsed.native_tool_posture_present
       then parsed.native_tool_posture_opt
       else parsed.profile_defaults.native_tool_posture
@@ -102,6 +111,15 @@ let explicit_edits
      ( "tools.groups"
      , match parsed.tool_groups_opt with
        | Some groups -> set_strings groups
+       | None -> Keeper_toml_loader.Remove )
+     :: fields)
+  |> fun fields ->
+  (if not parsed.skill_names_present
+   then fields
+   else
+     ( "skills.names"
+     , match parsed.skill_names_opt with
+       | Some names -> set_strings names
        | None -> Keeper_toml_loader.Remove )
      :: fields)
   |> fun fields ->

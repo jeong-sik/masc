@@ -24,6 +24,8 @@ type parsed_args = {
   network_mode_opt : string option;
   tool_groups_opt : string list option;
   tool_groups_present : bool;
+  skill_names_opt : string list option;
+  skill_names_present : bool;
   native_tool_posture_opt : Runtime_native_tools.posture option;
   native_tool_posture_present : bool;
   instructions_arg : string option;
@@ -131,6 +133,33 @@ let parse_tools_patch args =
          (Json_util.kind_name other))
 ;;
 
+let parse_skills_patch args =
+  match Json_util.assoc_member_opt "skills" args with
+  | None -> Ok (false, None)
+  | Some (`Assoc []) -> Ok (true, None)
+  | Some (`Assoc [ ("names", `List values) ]) ->
+    let rec collect acc index = function
+      | [] -> Ok (true, Some (Json_util.dedupe_keep_order (List.rev acc)))
+      | `String value :: rest -> collect (value :: acc) (index + 1) rest
+      | bad :: _ ->
+        Error
+          (Printf.sprintf
+             "skills.names[%d] must be a string (received %s)"
+             index
+             (Json_util.kind_name bad))
+    in
+    collect [] 0 values
+  | Some (`Assoc fields) ->
+    Error
+      ("unsupported skills field(s): "
+       ^ String.concat ", " (List.map fst fields))
+  | Some other ->
+    Error
+      (Printf.sprintf
+         "skills must be an object (received %s)"
+         (Json_util.kind_name other))
+;;
+
 let parse_present_string_list_opt args key =
   match Json_util.assoc_member_opt key args with
   | None -> Ok None
@@ -232,21 +261,24 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     let mention_targets_opt_res = parse_present_string_list_opt args "mention_targets" in
     let runtime_id_opt_res = parse_runtime_id_opt args in
     let tools_patch_res = parse_tools_patch args in
+    let skills_patch_res = parse_skills_patch args in
     match
       allowed_paths_opt_res, mention_targets_opt_res,
-      runtime_id_opt_res, tools_patch_res
+      runtime_id_opt_res, tools_patch_res, skills_patch_res
     with
-    | Error e, _, _, _
-    | _, Error e, _, _
-    | _, _, Error e, _
-    | _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
+    | Error e, _, _, _, _
+    | _, Error e, _, _, _
+    | _, _, Error e, _, _
+    | _, _, _, Error e, _
+    | _, _, _, _, Error e -> Error (tool_result_error ~class_:Tool_result.Policy_rejection e)
     | Ok allowed_paths_opt, Ok mention_targets_opt,
       Ok runtime_id_opt,
       Ok
         ( tool_groups_present
         , tool_groups_opt
         , native_tool_posture_present
-        , native_tool_posture_opt ) ->
+        , native_tool_posture_opt ),
+      Ok (skill_names_present, skill_names_opt) ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
     let autonomous_wake_prompt_res = parse_autonomous_wake_prompt args in
@@ -318,6 +350,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       network_mode_opt;
       tool_groups_opt;
       tool_groups_present;
+      skill_names_opt;
+      skill_names_present;
       native_tool_posture_opt;
       native_tool_posture_present;
       instructions_arg;

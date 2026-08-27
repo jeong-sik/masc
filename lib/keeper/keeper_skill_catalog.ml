@@ -92,6 +92,9 @@ type turn_unavailable =
       ; selected_name : string
       ; unavailable_name : string
       }
+  | Configured_skill_name_unavailable of { name : string }
+
+type configured_name_unavailable = Configured_name_unavailable of string
 
 type turn_projection =
   { catalog : t
@@ -238,17 +241,17 @@ let parse_skill ~directory content =
 let empty = []
 
 let partition_documents documents =
-  let rec build parsed rejected = function
+  let rec build (parsed : skill list) rejected = function
     | [] ->
       ( List.sort
-          (fun left right -> String.compare left.name right.name)
+          (fun (left : skill) (right : skill) -> String.compare left.name right.name)
           (List.rev parsed)
       , List.rev rejected )
     | (directory, content) :: rest ->
       (match parse_skill ~directory content with
        | Error error -> build parsed ({ directory; error } :: rejected) rest
-       | Ok skill ->
-         if List.exists (fun known -> String.equal known.name skill.name) parsed
+       | Ok (skill : skill) ->
+         if List.exists (fun (known : skill) -> String.equal known.name skill.name) parsed
          then
            build
              parsed
@@ -396,7 +399,27 @@ let collision ~tool_name ~(selected : skill) ~(unavailable : skill) =
       }
 ;;
 
-let project_turn ~global ~task =
+let project_turn ~names ~global ~task =
+  let candidates = task @ skills global in
+  let selected_candidates, configured_unavailable =
+    match names with
+    | None -> candidates, []
+    | Some names ->
+      let selected =
+        List.filter
+          (fun (skill : skill) -> List.exists (String.equal skill.name) names)
+          candidates
+      in
+      let unavailable =
+        names
+        |> Json_util.dedupe_keep_order
+        |> List.filter_map (fun name ->
+             if List.exists (fun (skill : skill) -> String.equal skill.name name) candidates
+             then None
+             else Some (Configured_skill_name_unavailable { name }))
+      in
+      selected, unavailable
+  in
   let add (selected, unavailable) (skill : skill) =
     if List.exists (same_exact_reference skill) selected
     then selected, unavailable
@@ -416,7 +439,7 @@ let project_turn ~global ~task =
          | Some winner ->
            selected, collision ~tool_name ~selected:winner ~unavailable:skill :: unavailable)
   in
-  List.fold_left add ([], []) (task @ skills global)
+  List.fold_left add ([], List.rev configured_unavailable) selected_candidates
   |> fun (catalog, unavailable) -> { catalog; unavailable = List.rev unavailable }
 ;;
 
@@ -434,6 +457,25 @@ let turn_unavailable_to_string = function
       tool_name
       selected_name
       unavailable_name
+  | Configured_skill_name_unavailable { name } ->
+    Printf.sprintf "configured Keeper Skill name %S is unavailable" name
+;;
+
+let configured_names_unavailable projection =
+  List.filter_map
+    (function
+      | Configured_skill_name_unavailable { name } ->
+        Some (Configured_name_unavailable name)
+      | Composition_tool_name_collision _
+      | Composition_tool_name_collision_unattributed _ -> None)
+    projection.unavailable
+;;
+
+let configured_name_unavailable_to_yojson (Configured_name_unavailable name) =
+  `Assoc
+    [ "name", `String name
+    ; "reason", `String "not_in_turn_skill_catalog"
+    ]
 ;;
 
 let exact_skill catalog reference =
@@ -445,12 +487,17 @@ let exact_skill catalog reference =
     (skills catalog)
 ;;
 
+let exact_is_executable projection reference =
+  Option.is_some (exact_skill projection.catalog reference)
+;;
+
 let collision_for_reference unavailable reference =
   List.find_opt
     (function
       | Composition_tool_name_collision { unavailable; _ } ->
         Skill_reference.equal unavailable reference
-      | Composition_tool_name_collision_unattributed _ -> false)
+      | Composition_tool_name_collision_unattributed _
+      | Configured_skill_name_unavailable _ -> false)
     unavailable
 ;;
 

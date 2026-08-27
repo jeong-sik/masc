@@ -61,14 +61,22 @@ val partition : t -> partition
 
 val skills : t -> Keeper_skill_catalog.skill list
 
+val executable_selection :
+  projection:Keeper_skill_catalog.turn_projection -> t -> t
+(** Retain only Task selections present in the executable turn projection.
+    Activation provenance uses this view, so a profile-filtered Task Skill
+    cannot be recorded as an executable Task activation. *)
+
 val exact_task_surfaces :
   snapshot:Skill_catalog_snapshot.t ->
+  skill_names:string list option ->
   selection:t ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
   held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
   (string * Keeper_skill_catalog.exact_surface list) list
 (** Project the per-task exact Skill surfaces a turn advertises and executes,
     keyed by task id in observation order (current task first). Takes the
-    already-resolved frozen [selection] and never re-resolves, so prompt,
+    already-resolved frozen [selection] and never re-resolves. [skill_names]
+    is the same profile selection used by the executable bundle, so prompt,
     bundle, and preview consumers share one computation without breaking the
     turn-boundary freeze. *)

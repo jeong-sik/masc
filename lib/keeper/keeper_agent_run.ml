@@ -725,6 +725,7 @@ let run_turn
       ~config_root
       ~runtime_config_path
       ~skill_snapshot
+      ~skill_names:profile_defaults.skill_names
       ~task_skill_selection
       ~trajectory_acc
       ~runtime_manifest_context

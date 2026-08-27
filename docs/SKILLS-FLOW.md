@@ -99,6 +99,7 @@ sequenceDiagram
   Snap-->>Turn: snapshot_revision + exact source_text
   Turn->>Setup: prepare_agent_setup ~skill_snapshot
   Setup->>Cat: of_snapshot
+  Setup->>Cat: project_turn ~names (global + Task 공통 선택)
   Setup->>Setup: validate_held_task_skill_admission
   Note over Setup: 보유 task(current+held)의 스킬이<br/>카탈로그에 있나
   Setup->>Surface: make_tools ~instruction_skills ~skill_compositions
@@ -109,9 +110,15 @@ sequenceDiagram
 
 `prepare_agent_setup`(`keeper_run_tools_setup.ml`)이 전달받은 frozen snapshot을 투영하고
 `validate_held_task_skill_admission`으로 **보유한 모든 task**(current + 나머지
-Claimed/InProgress, task-364 수리)가 지명한 스킬을 검사한다: 카탈로그에 없는 스킬만
-config error다. 지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
+Claimed/InProgress, task-364 수리)가 지명한 exact reference를 검사한다. snapshot에서
+해소되지 않는 reference만 typed admission error다. Profile 이름 선택에서 제외된 알려진
+Task Skill은 실행 projection과 prompt에서 unavailable이며 admission 전체를 막지 않는다.
+지시 본문은 `keeper_skill`이 직접 서빙하므로 `Read`와 무관하다. 통과하면
 `Keeper_tool_composition_surface.make_tools`가:
+
+- Keeper profile의 `[keeper.skills].names`를 global과 Task-selected Skill에 한 번 적용한다.
+  없음은 all, 빈 배열은 none이다. exact canonical name equality만 사용한다.
+- 설정에만 있는 이름은 `Configured_skill_name_unavailable`로 남기며 다른 Skill은 막지 않는다.
 
 - 합성 스킬 → exact `composition_skill { reference; entry }` closure가 만드는
   `keeper_compose_<name>` 도구. activation recorder는 도구 이름에서 reference를 역추론하지

@@ -150,7 +150,8 @@ let keeper_config_json (config : Workspace.config) (name : string)
             | Error _ -> []
             | Ok selection ->
               Keeper_task_skill_turn.exact_task_surfaces
-                ~snapshot:skill_snapshot ~selection ~current_task
+                ~snapshot:skill_snapshot ~skill_names:defaults.skill_names
+                ~selection ~current_task
                 ~held_task_skills:observation.held_task_skills
           in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~config

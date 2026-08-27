@@ -112,6 +112,8 @@ val prepare_agent_setup
   -> config_root:string
   -> runtime_config_path:string option
   -> skill_snapshot:Skill_catalog_snapshot.t
+  -> skill_names:string list option
+       (** Profile-only exact Skill name selection. *)
   -> task_skill_selection:
        (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result
        (** Frozen current+held exact selection captured beside the prompt.

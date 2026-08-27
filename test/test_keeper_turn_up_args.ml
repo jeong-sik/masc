@@ -337,6 +337,60 @@ let test_tools_patch_round_trips_and_rejects_invalid_values () =
     ]
 ;;
 
+let test_skills_names_patch_round_trips_three_states () =
+  with_persisting_context @@ fun ctx ->
+  let name = "skills-persist-fixture" in
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name
+           ; "instructions", `String "fixture instructions"
+           ])
+    with
+    | Ok meta -> meta
+    | Error error -> failf "meta fixture: %s" error
+  in
+  let parse_or_fail json =
+    match Keeper_turn_up_args.parse ctx json with
+    | Ok parsed -> parsed
+    | Error result -> failf "parse: %s" (Keeper_types_profile.tool_result_body result)
+  in
+  let persist parsed =
+    match Keeper_turn_up_config_persistence.persist ~config:ctx.config ~parsed ~meta with
+    | Ok (_ : Keeper_turn_up_config_persistence.outcome) -> ()
+    | Error error -> failf "persist: %s" error
+  in
+  let read_back () =
+    match
+      Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
+        ~base_path:ctx.config.base_path
+        name
+    with
+    | Ok defaults -> defaults.skill_names
+    | Error error ->
+      failf "read back: %s" (Keeper_types_profile.keeper_toml_load_error_to_string error)
+  in
+  persist
+    (parse_or_fail
+       (`Assoc
+          [ "name", `String name
+          ; "instructions", `String "fixture instructions"
+          ; ( "skills"
+            , `Assoc
+                [ "names", `List [ `String "guide"; `String "Guide"; `String "guide" ] ] )
+          ]));
+  check (option (list string)) "exact names round-trip" (Some [ "guide"; "Guide" ]) (read_back ());
+  persist
+    (parse_or_fail
+       (`Assoc [ "name", `String name; "skills", `Assoc [ "names", `List [] ] ]));
+  check (option (list string)) "explicit empty round-trips" (Some []) (read_back ());
+  persist
+    (parse_or_fail
+       (`Assoc [ "name", `String name; "skills", `Assoc [] ]));
+  check (option (list string)) "empty skills patch clears to absent" None (read_back ())
+;;
+
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
    while creation required a sandbox_profile readable only from a keeper TOML the tool
    does not write. The argument was parsed and honoured on update but ignored by the
@@ -431,6 +485,12 @@ let () =
             "groups/native round-trip, clear, and invalid rejection"
             `Quick
             test_tools_patch_round_trips_and_rejects_invalid_values
+        ] )
+    ; ( "skills"
+      , [ test_case
+            "names round-trip absent, empty, and exact values"
+            `Quick
+            test_skills_names_patch_round_trips_three_states
         ] )
     ; ( "keeper_name"
       , [ test_case

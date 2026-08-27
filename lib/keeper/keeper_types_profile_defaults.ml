@@ -32,6 +32,8 @@ type keeper_profile_defaults = {
      [Keeper_tool_descriptor.tool_surface] at the consumption site to avoid
      a dependency cycle through Keeper_meta_contract. *)
   tool_groups : string list option;
+  (* Profile-only Skill selection; explicit empty is distinct from absence. *)
+  skill_names : string list option;
   (* Per-keeper AGENT_CORE CLI transport env vars (AGENT_CORE 0.159+).
      Parsed from [[keeper.agent_core_env]] table.  Keys MUST match
      ^AGENT_CORE_[A-Z]+_.+ — any other entries are dropped with
@@ -61,6 +63,7 @@ let empty_keeper_profile_defaults =
     always_allow = None;
     native_tool_posture = None;
     tool_groups = None;
+    skill_names = None;
     agent_core_env = [];
   }
 ;;

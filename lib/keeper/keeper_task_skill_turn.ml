@@ -183,6 +183,16 @@ let partition selection =
 
 let skills selection = List.map (fun selected -> selected.skill) selection.selected
 
+let executable_selection ~projection selection =
+  let selected =
+    List.filter
+      (fun selected ->
+         Keeper_skill_catalog.exact_is_executable projection selected.reference)
+      selection.selected
+  in
+  { selected }
+;;
+
 (* One computation feeds every surface that advertises a turn's per-task
    Skills: the unified turn prompt, the direct turn prompt, and the dashboard
    prompt preview. The preview regression that motivated this (#31076 review
@@ -190,10 +200,16 @@ let skills selection = List.map (fun selected -> selected.skill) selection.selec
    nothing, which rendered every Task Skill as unavailable while the real turn
    advertised it. Callers pass the already-frozen [selection]; this function
    never re-resolves, so the turn-boundary freeze contract stays intact. *)
-let exact_task_surfaces ~snapshot ~selection ~current_task ~held_task_skills =
+let exact_task_surfaces
+      ~snapshot
+      ~skill_names
+      ~selection
+      ~current_task
+      ~held_task_skills
+  =
   let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
   let projection =
-    Keeper_skill_catalog.project_turn ~global ~task:(skills selection)
+    Keeper_skill_catalog.project_turn ~names:skill_names ~global ~task:(skills selection)
   in
   let task_ids =
     let current =

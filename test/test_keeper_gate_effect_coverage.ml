@@ -403,6 +403,53 @@ let test_keeper_effects_defer_without_dispatch () =
   check int "no Keeper effect dispatched" 0 (List.length !calls)
 ;;
 
+(* YOLO is read in one place -- the PreToolUse hook that asks over the open
+   chat stream -- and the Gate is not it. Before 2026-08-27 those happened to
+   look like the same setting, because writing to somebody else's Jira did not
+   reach the Gate at all. Now it does, and an operator who pressed `g yolo`
+   must not be able to believe otherwise. *)
+let test_yolo_does_not_carry_a_call_past_the_gate () =
+  with_clean_gate_runtime @@ fun () ->
+  let base_path = temp_dir "keeper-gate-yolo" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) @@ fun () ->
+  let config = Workspace.default_config base_path in
+  (match Keeper_gate_mode.set config ~actor:"test" Keeper_gate_mode.Manual with
+   | Ok _ -> ()
+   | Error error -> fail ("failed to select manual Gate mode: " ^ error));
+  ignore (install_exn ~base_path);
+  let meta = make_meta "gate-yolo-keeper" in
+  Keeper_tool_approval_mode.set
+    (Keeper_tool_approval_mode.shared ())
+    ~keeper_name:"gate-yolo-keeper" Keeper_tool_approval_mode.Yolo;
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_tool_approval_mode.set
+        (Keeper_tool_approval_mode.shared ())
+        ~keeper_name:"gate-yolo-keeper" Keeper_tool_approval_mode.Auto)
+  @@ fun () ->
+  (* The stance is in force -- otherwise this test would pass by not having
+     set anything. *)
+  check bool "the keeper is on YOLO" true
+    (Keeper_tool_approval_mode.resolve
+       (Keeper_tool_approval_mode.shared ())
+       ~keeper_name:"gate-yolo-keeper"
+     = Keeper_tool_approval_mode.Yolo);
+  with_publication_recovery ~registry_root:base_path ~meta
+  @@ fun publication_recovery ->
+  with_keeper_dispatch_probe @@ fun calls ->
+  List.iter
+    (fun name ->
+      let args = `Assoc [ "opaque", `String name ] in
+      let result =
+        Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome
+          ~publication_recovery_provider:publication_recovery.provider
+          ~config ~meta ~name ~args ()
+      in
+      expect_deferred (name ^ " still defers under YOLO") result)
+    keeper_effect_names;
+  check int "no Keeper effect dispatched under YOLO" 0 (List.length !calls)
+;;
+
 let test_keeper_effects_unavailable_without_dispatch () =
   with_clean_gate_runtime @@ fun () ->
   let config = Workspace.default_config "/dev/null" in
@@ -675,6 +722,10 @@ let () =
             "Deferred executes no sandbox/lifecycle effect"
             `Quick
             test_keeper_effects_defer_without_dispatch
+        ; test_case
+            "YOLO does not carry a call past the Gate"
+            `Quick
+            test_yolo_does_not_carry_a_call_past_the_gate
         ; test_case
             "Unavailable executes no sandbox/lifecycle effect"
             `Quick

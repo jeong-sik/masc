@@ -261,6 +261,13 @@ strip of competing colours.
 will happen next: `g yolo` from the approval policy and `g auto` while YOLO is
 active, so the safe return path is visible.
 
+What YOLO covers is narrower than the name. It skips the approval hook that
+asks over the open chat stream, and nothing else. External effects that go to
+the Gate — writing to a service the Keeper is attached to, a sandbox command,
+a durable memory write — are still decided by the workspace Gate mode and that
+Keeper's own override, whatever this toggle says. It is in memory too: a
+restart puts every Keeper back on `auto`.
+
 ### Lanes
 
 The current composite lifecycle and turn-cycle reading for every Keeper. Open

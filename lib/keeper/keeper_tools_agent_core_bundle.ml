@@ -52,7 +52,6 @@ let make_tool_bundle_for_descriptors
       ?(skill_catalog = Keeper_skill_catalog.empty)
       ?(identity_tools : Agent_core.Tool.t list = [])
       ?composition_plan_index
-      ?(task_instruction_skills = [])
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
@@ -61,8 +60,7 @@ let make_tool_bundle_for_descriptors
   : tool_bundle
   =
   let skill_surface_present =
-    task_instruction_skills <> []
-    || Keeper_skill_catalog.skills skill_catalog <> []
+    Keeper_skill_catalog.skills skill_catalog <> []
   in
   (match skill_surface_present, skill_activation_context with
    | true, None when not allow_unrecorded_skill_surface ->
@@ -388,7 +386,7 @@ let make_tool_bundle_for_descriptors
       descriptors
   in
   let composition_tools =
-    let global_instruction_skills =
+    let instruction_skills =
       Keeper_skill_catalog.skills skill_catalog
       |> List.filter_map (fun (skill : Keeper_skill_catalog.skill) ->
            match skill.reference, skill.surface with
@@ -418,11 +416,6 @@ let make_tool_bundle_for_descriptors
                   ())
            | None, _ | Some _, Keeper_skill_catalog.Composition _ ->
              None)
-    in
-    let instruction_skills =
-      Keeper_tool_composition_surface.merge_instruction_skills
-        ~task:task_instruction_skills
-        ~global:global_instruction_skills
     in
     let composition_skills =
       Keeper_skill_catalog.skills skill_catalog
@@ -509,7 +502,6 @@ let make_tool_bundle_with_policy
       ?skill_catalog
       ?identity_tools
       ?composition_plan_index
-      ?task_instruction_skills
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
       ?turn_ctx_cell
@@ -534,7 +526,6 @@ let make_tool_bundle_with_policy
     ?skill_catalog
     ?identity_tools
     ?composition_plan_index
-    ?task_instruction_skills
     ?skill_activation_context
     ~allow_unrecorded_skill_surface
     ?turn_ctx_cell
@@ -554,7 +545,6 @@ let make_tool_bundle
       ?skill_catalog
       ?identity_tools
       ?composition_plan_index
-      ?task_instruction_skills
       ?skill_activation_context
       ?turn_ctx_cell
       ()
@@ -571,7 +561,6 @@ let make_tool_bundle
     ?skill_catalog
     ?identity_tools
     ?composition_plan_index
-    ?task_instruction_skills
     ?skill_activation_context
     ~allow_unrecorded_skill_surface:false
     ?turn_ctx_cell
@@ -586,7 +575,6 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?skill_catalog
-      ?task_instruction_skills
       ?skill_activation_context
       ?turn_ctx_cell
       ()
@@ -599,7 +587,6 @@ let make_tools
      ~ctx_snapshot
      ?clock
      ?skill_catalog
-     ?task_instruction_skills
      ?skill_activation_context
      ?turn_ctx_cell
      ())
@@ -617,7 +604,6 @@ module For_testing = struct
         ?gate_context
         ?hitl_resolution
         ?skill_catalog
-        ?task_instruction_skills
         ?turn_ctx_cell
         ()
     =
@@ -631,7 +617,6 @@ module For_testing = struct
       ?gate_context
       ?hitl_resolution
       ?skill_catalog
-      ?task_instruction_skills
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell
       ()
@@ -644,7 +629,6 @@ module For_testing = struct
         ~ctx_snapshot
         ?clock
         ?skill_catalog
-        ?task_instruction_skills
         ?turn_ctx_cell
         ()
     =
@@ -655,7 +639,6 @@ module For_testing = struct
        ~ctx_snapshot
        ?clock
        ?skill_catalog
-       ?task_instruction_skills
        ?turn_ctx_cell
        ())
       .tools

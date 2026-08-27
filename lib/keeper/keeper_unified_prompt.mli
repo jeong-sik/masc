@@ -54,17 +54,23 @@ val effective_autonomous_wake_prompt :
     keep the wording they were woken with, because the checkpoint is history
     rather than a view. *)
 
-val format_current_task : Masc_domain.task -> string
+val format_current_task :
+  ?skill_surfaces:Keeper_skill_catalog.exact_surface list ->
+  Masc_domain.task ->
+  string
 
 val format_held_task_skills
-  :  Keeper_world_observation_inputs.held_task_skills list
+  :  ?skill_surfaces_by_task:
+       (string * Keeper_skill_catalog.exact_surface list) list
+  -> Keeper_world_observation_inputs.held_task_skills list
   -> string option
 (** One line per other held task that names skills, under its own heading;
     [None] when there is none. The current task's block carries its own
     skills, so this covers a keeper holding several tasks (task-364). *)
 
 val format_current_task_observation
-  :  Keeper_world_observation_inputs.current_task_observation
+  :  ?skill_surfaces:Keeper_skill_catalog.exact_surface list
+  -> Keeper_world_observation_inputs.current_task_observation
   -> string option
 (** Render one held task as per-turn observation context. The direct-message
     lane reuses this renderer so it sees the same task identity, status,
@@ -127,6 +133,7 @@ val build_prompt :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
+  ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:goal_summary list ->
   ?context_budget_bytes:int ->
   observation:Keeper_world_observation.world_observation ->
@@ -150,6 +157,7 @@ val build_prompt_preview :
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
+  ?task_skill_surfaces:(string * Keeper_skill_catalog.exact_surface list) list ->
   ?active_goal_summaries:goal_summary list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->

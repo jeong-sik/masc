@@ -318,13 +318,6 @@ let with_bundle_tools ?(record_activations = true) f =
            ~skill_catalog
            ~identity_tools:(identity_tools ~base_path:dir)
            ~composition_plan_index
-           ~task_instruction_skills:
-             [ Keeper_tool_composition_surface.instruction_skill
-                 ~reference
-                 ~description:"what the gate reads"
-                 ~body:"body"
-                 ()
-             ]
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
            ()
@@ -567,16 +560,18 @@ let test_bundle_names_are_unique () =
 
 let test_bundle_matches_expected_projection () =
   with_bundle (fun _ names ->
-    let _snapshot, skill_catalog = skill_snapshot_and_catalog () in
+    let snapshot, skill_catalog = skill_snapshot_and_catalog () in
+    let identity_tool_names =
+      List.map
+        (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+        (identity_tools ~base_path:(Filename.get_temp_dir_name ()))
+    in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         (* Named from the same fixture the bundle was handed. Passing [] here
            while the bundle carries them is what this check exists to catch,
            and it did. *)
-        ~identity_tool_names:
-          (List.map
-             (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-             (identity_tools ~base_path:(Filename.get_temp_dir_name ())))
+        ~identity_tool_names
         ~skill_catalog
         ~model_visible_descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
         ()
@@ -585,7 +580,32 @@ let test_bundle_matches_expected_projection () =
       (list string)
       "instruction and composition tools match the expected projection"
       expected
-      (List.sort_uniq String.compare names))
+      (List.sort_uniq String.compare names);
+    let task_reference = snapshot_reference snapshot "gate-instruction" in
+    match
+      Keeper_effective_tool_surface.For_testing.project
+        ~keeper_name:"bundle-classifiable"
+        ~runtime_id:"test.runtime"
+        ~skills_left_out:[]
+        ~official_client_kind:"agent_core"
+        ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+        ~native_posture:None
+        ~tool_groups:None
+        ~current_task_id:(Some "task-001")
+        ~task_skill_references:[ task_reference ]
+        ~skill_snapshot:snapshot
+    with
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    | Ok surface ->
+      let effective_names =
+        identity_tool_names
+        @ List.map
+            (fun (tool : Keeper_effective_tool_surface.tool) -> tool.name)
+            surface.tools
+        |> List.sort_uniq String.compare
+      in
+      check (list string) "actual bundle equals effective surface" effective_names
+        (List.sort_uniq String.compare names))
 ;;
 
 let () =

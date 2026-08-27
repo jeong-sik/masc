@@ -1132,23 +1132,6 @@ let instruction_skill ?resource_location ~reference ~description ~body () =
   { reference; description; body; resource_location }
 ;;
 
-let merge_instruction_skills
-      ~(task : instruction_skill list)
-      ~(global : instruction_skill list)
-  =
-  List.fold_left
-    (fun (selected : instruction_skill list) (skill : instruction_skill) ->
-       if
-         List.exists
-           (fun (known : instruction_skill) ->
-              Skill_reference.equal skill.reference known.reference)
-           selected
-       then selected
-       else selected @ [ skill ])
-    task
-    global
-;;
-
 let instruction_skill_schema_tool
       ~(instruction_skills : instruction_skill list)
   =

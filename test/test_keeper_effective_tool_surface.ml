@@ -124,6 +124,7 @@ let instruction_entries snapshot references =
   match Keeper_task_skill_turn.resolve ~snapshot references with
   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok selection ->
+    let partition = Keeper_task_skill_turn.partition selection in
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
          Keeper_tool_composition_surface.instruction_skill
@@ -131,7 +132,7 @@ let instruction_entries snapshot references =
            ~description:selected.skill.description
            ~body:selected.skill.body
            ())
-      selection.selected
+      partition.instructions
 ;;
 
 let names (surface : Keeper_effective_tool_surface.t) =
@@ -182,11 +183,9 @@ let test_projection_names_equal_turn_surface_authority () =
     let descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
     let catalog, diagnostics = Keeper_skill_catalog.of_snapshot snapshot in
     check int "snapshot projection diagnostics" 0 (List.length diagnostics);
-    let task_instruction_skills = instruction_entries snapshot [ task_reference ] in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names
         ~identity_tool_names:[]
-        ~task_instruction_skills
         ~skill_catalog:catalog
         ~model_visible_descriptors:descriptors
         ()
@@ -221,7 +220,7 @@ let test_projection_names_equal_turn_surface_authority () =
        |> Skill_catalog_snapshot.snapshot_revision_to_string)
       (Skill_catalog_snapshot.snapshot_revision_to_string
          surface.skill_snapshot_revision);
-    let instruction_entries = task_instruction_skills in
+    let instruction_entries = instruction_entries snapshot [ task_reference ] in
     let tool =
       Keeper_tool_composition_surface.instruction_skill_schema_tool
         ~instruction_skills:instruction_entries
@@ -522,6 +521,23 @@ let test_turn_admission_covers_held_tasks_beyond_current () =
         with
         | Ok () -> ()
         | Error error -> fail (Agent_core.Error.to_string error));
+       (match
+          Keeper_run_tools_setup.resolve_held_task_skill_selection
+            ~config
+            ~meta:(meta ~tool_groups:(Some [ "board" ]))
+            ~skill_snapshot:snapshot
+        with
+        | Error error -> fail (Agent_core.Error.to_string error)
+        | Ok selection ->
+          check int "held exact ref reaches executable selection" 1
+            (List.length selection.selected);
+          (match selection.selected with
+           | [ selected ] ->
+             check bool "held reference stays exact" true
+               (Skill_reference.equal guide_reference selected.reference);
+             check (list string) "held Task provenance stays attached" [ task_b ]
+               selected.task_ids
+           | _ -> fail "held exact selection cardinality changed"));
        match
          Keeper_run_tools_setup.validate_held_task_skill_admission
            ~config ~meta:(meta ~tool_groups:None) ~skill_snapshot:snapshot

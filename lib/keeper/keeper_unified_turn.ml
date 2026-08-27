@@ -694,6 +694,63 @@ let run_keeper_cycle
                let task_skill_scope =
                  Keeper_task_skill_turn.scope_of_observation current_task
                in
+               let skill_snapshot =
+                 Keeper_agent_run.capture_skill_snapshot
+                   ~base_path:config.base_path
+               in
+               let task_skill_groups =
+                 let current =
+                   match current_task with
+                   | Keeper_world_observation_inputs.Current_task task
+                   | Recovered_current_task { task; _ } ->
+                     [ task.id, task.skills ]
+                   | No_current_task
+                   | Current_task_missing _
+                   | Current_task_unavailable _ ->
+                     []
+                 in
+                 current
+                 @ List.map
+                     (fun (held : Keeper_world_observation_inputs.held_task_skills) ->
+                        held.held_task_id, held.held_skills)
+                     observation.held_task_skills
+               in
+               let task_skill_surfaces =
+                 let rec resolve selections = function
+                   | [] -> Some (List.rev selections)
+                   | (task_id, references) :: rest ->
+                     (match
+                        Keeper_task_skill_turn.resolve_for_task
+                          ~snapshot:skill_snapshot
+                          ~task_id
+                          references
+                      with
+                      | Error _ -> None
+                      | Ok selection ->
+                        resolve ((task_id, selection) :: selections) rest)
+                 in
+                 match resolve [] task_skill_groups with
+                 | None -> []
+                 | Some selections ->
+                   let merged =
+                     Keeper_task_skill_turn.merge (List.map snd selections)
+                   in
+                   let global, _ =
+                     Keeper_skill_catalog.of_snapshot skill_snapshot
+                   in
+                   let projection =
+                     Keeper_skill_catalog.project_turn
+                       ~global
+                       ~task:(Keeper_task_skill_turn.skills merged)
+                   in
+                   List.map
+                     (fun (task_id, selection) ->
+                        ( task_id
+                        , Keeper_skill_catalog.exact_surfaces
+                            projection
+                            ~task:(Keeper_task_skill_turn.skills selection) ))
+                     selections
+               in
                let active_goal_summaries =
                  Keeper_unified_prompt.active_goal_summaries_of_store ~config
                in
@@ -715,6 +772,7 @@ let run_keeper_cycle
                    ~profile_defaults
                    ~turn_decision
                    ~current_task
+                   ~task_skill_surfaces
                    ~active_goal_summaries
                    ?context_budget_bytes
                    ~observation
@@ -881,10 +939,6 @@ let run_keeper_cycle
                        Keeper_metrics.(to_string TurnCleanupFailures)
                        ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
-                 in
-                 let skill_snapshot =
-                   Keeper_agent_run.capture_skill_snapshot
-                     ~base_path:config.base_path
                  in
                  match
                    Inference_utils.timed (fun () ->

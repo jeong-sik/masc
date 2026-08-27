@@ -69,6 +69,41 @@ type projection_diagnostic =
   ; error : error
   }
 
+type entry_projection =
+  | Projected of skill
+  | Frozen_instruction of
+      { skill : skill
+      ; diagnostic : error
+      }
+  | Entry_unavailable of error
+
+type turn_unavailable =
+  | Composition_tool_name_collision of
+      { tool_name : string
+      ; selected : Skill_reference.t
+      ; unavailable : Skill_reference.t
+      }
+  | Composition_tool_name_collision_unattributed of
+      { tool_name : string
+      ; selected_name : string
+      ; unavailable_name : string
+      }
+
+type turn_projection =
+  { catalog : t
+  ; unavailable : turn_unavailable list
+  }
+
+type exact_surface_availability =
+  | Instruction_tool
+  | Composition_tool of { tool_name : string }
+  | Exact_unavailable of { diagnostic : string }
+
+type exact_surface =
+  { reference : Skill_reference.t
+  ; availability : exact_surface_availability
+  }
+
 let composition_fence_open = "```toml composition"
 let fence_close = "```"
 
@@ -313,17 +348,25 @@ let project_entry snapshot (entry : Skill_catalog_snapshot.entry) =
     })
 ;;
 
+let project_entry_or_fallback snapshot (entry : Skill_catalog_snapshot.entry) =
+  match project_entry snapshot entry with
+  | Ok skill -> Projected skill
+  | Error diagnostic when composition_projection_failed diagnostic ->
+    Frozen_instruction
+      { skill = fallback_instruction_of_entry snapshot entry; diagnostic }
+  | Error error -> Entry_unavailable error
+;;
+
 let project_entries snapshot entries =
   entries
   |> List.fold_left
        (fun (catalog, diagnostics) (entry : Skill_catalog_snapshot.entry) ->
-          match project_entry snapshot entry with
-          | Ok skill ->
+          match project_entry_or_fallback snapshot entry with
+          | Projected skill ->
             skill :: catalog, diagnostics
-          | Error error when composition_projection_failed error ->
-            ( fallback_instruction_of_entry snapshot entry :: catalog
-            , { identity = entry.identity; error } :: diagnostics )
-          | Error error ->
+          | Frozen_instruction { skill; diagnostic } ->
+            skill :: catalog, { identity = entry.identity; error = diagnostic } :: diagnostics
+          | Entry_unavailable error ->
             catalog, { identity = entry.identity; error } :: diagnostics)
        ([], [])
   |> fun (catalog, diagnostics) -> List.rev catalog, List.rev diagnostics
@@ -335,6 +378,133 @@ let of_snapshot snapshot =
 
 let all_entries_of_snapshot snapshot =
   project_entries snapshot (Skill_catalog_snapshot.entries snapshot)
+;;
+
+let same_exact_reference (left : skill) (right : skill) =
+  match left.reference, right.reference with
+  | Some left, Some right -> Skill_reference.equal left right
+  | Some _, None | None, Some _ | None, None -> false
+;;
+
+let composition_tool_name (skill : skill) =
+  match skill.surface with
+  | Instruction -> None
+  | Composition entry -> Some (Catalog.tool_name entry)
+;;
+
+let collision ~tool_name ~(selected : skill) ~(unavailable : skill) =
+  match selected.reference, unavailable.reference with
+  | Some selected, Some unavailable ->
+    Composition_tool_name_collision { tool_name; selected; unavailable }
+  | _ ->
+    Composition_tool_name_collision_unattributed
+      { tool_name
+      ; selected_name = selected.name
+      ; unavailable_name = unavailable.name
+      }
+;;
+
+let project_turn ~global ~task =
+  let add (selected, unavailable) (skill : skill) =
+    if List.exists (same_exact_reference skill) selected
+    then selected, unavailable
+    else
+      match composition_tool_name skill with
+      | None -> selected @ [ skill ], unavailable
+      | Some tool_name ->
+        (match
+           List.find_opt
+             (fun known ->
+                match composition_tool_name known with
+                | Some known_name -> String.equal tool_name known_name
+                | None -> false)
+             selected
+         with
+         | None -> selected @ [ skill ], unavailable
+         | Some winner ->
+           selected, collision ~tool_name ~selected:winner ~unavailable:skill :: unavailable)
+  in
+  List.fold_left add ([], []) (task @ skills global)
+  |> fun (catalog, unavailable) -> { catalog; unavailable = List.rev unavailable }
+;;
+
+let turn_unavailable_to_string = function
+  | Composition_tool_name_collision { tool_name; selected; unavailable } ->
+    Printf.sprintf
+      "composition tool %S is already provided by exact Skill %s; exact Skill %s is unavailable"
+      tool_name
+      (Skill_reference.to_yojson selected |> Yojson.Safe.to_string)
+      (Skill_reference.to_yojson unavailable |> Yojson.Safe.to_string)
+  | Composition_tool_name_collision_unattributed
+      { tool_name; selected_name; unavailable_name } ->
+    Printf.sprintf
+      "composition tool %S is already provided by Skill %S; Skill %S has no exact snapshot reference and is unavailable"
+      tool_name
+      selected_name
+      unavailable_name
+;;
+
+let exact_skill catalog reference =
+  List.find_opt
+    (fun (skill : skill) ->
+       match skill.reference with
+       | Some known -> Skill_reference.equal known reference
+       | None -> false)
+    (skills catalog)
+;;
+
+let collision_for_reference unavailable reference =
+  List.find_opt
+    (function
+      | Composition_tool_name_collision { unavailable; _ } ->
+        Skill_reference.equal unavailable reference
+      | Composition_tool_name_collision_unattributed _ -> false)
+    unavailable
+;;
+
+let exact_surfaces projection ~task =
+  List.filter_map
+    (fun (skill : skill) ->
+       match skill.reference with
+       | None -> None
+       | Some reference ->
+         let availability =
+           match exact_skill projection.catalog reference with
+           | Some { surface = Instruction; _ } -> Instruction_tool
+           | Some { surface = Composition entry; _ } ->
+             Composition_tool { tool_name = Catalog.tool_name entry }
+           | None ->
+             let diagnostic =
+               match collision_for_reference projection.unavailable reference with
+               | Some collision -> turn_unavailable_to_string collision
+               | None ->
+                 Printf.sprintf
+                   "exact Task Skill is unavailable in the executable turn projection: %s"
+                   (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
+             in
+             Exact_unavailable { diagnostic }
+         in
+         Some { reference; availability })
+    task
+;;
+
+let exact_surface_to_yojson surface =
+  let kind, tool_name, diagnostic =
+    match surface.availability with
+    | Instruction_tool ->
+      "instruction", Some Catalog.skill_tool_name, None
+    | Composition_tool { tool_name } ->
+      "composition", Some tool_name, None
+    | Exact_unavailable { diagnostic } ->
+      "unavailable", None, Some diagnostic
+  in
+  `Assoc
+    ([ "reference", Skill_reference.to_yojson surface.reference
+     ; "kind", `String kind
+     ]
+     @ Option.to_list (Option.map (fun value -> "tool_name", `String value) tool_name)
+     @ Option.to_list
+         (Option.map (fun value -> "diagnostic", `String value) diagnostic))
 ;;
 
 let find catalog name =

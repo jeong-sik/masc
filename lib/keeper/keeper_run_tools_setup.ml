@@ -102,7 +102,6 @@ let skill_catalog_config_error detail =
     (Agent_core.Error.InvalidConfig { field = "skills"; detail })
 ;;
 let expected_model_tool_names
-      ?(task_instruction_skills = [])
       ~skill_catalog
       ~identity_tool_names
       ~model_visible_descriptors
@@ -117,9 +116,7 @@ let expected_model_tool_names
     List.map Keeper_tool_composition_catalog.tool_name entries
   in
   let instruction_names =
-    if
-      task_instruction_skills <> []
-      || Keeper_skill_catalog.instruction_entries skill_catalog <> []
+    if Keeper_skill_catalog.instruction_entries skill_catalog <> []
     then [ Keeper_tool_composition_catalog.skill_tool_name ]
     else []
   in
@@ -151,12 +148,17 @@ let expected_model_tool_names
          @ identity_tool_names))
 ;;
 
-(* Every held task is checked against the same immutable snapshot as the
+(* Every held task is resolved against the same immutable snapshot as the
    current task. The resolver's typed carrier remains intact; only its message
    is enriched with the task that supplied the bad reference. *)
-let validate_task_skills ~skill_snapshot ~task_id skills =
-  match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot skills with
-  | Ok _ -> Ok ()
+let resolve_task_skills ~skill_snapshot ~task_id skills =
+  match
+    Keeper_task_skill_turn.resolve_for_task
+      ~snapshot:skill_snapshot
+      ~task_id
+      skills
+  with
+  | Ok selection -> Ok selection
   | Error error ->
     let core_error = Keeper_task_skill_turn.core_error error in
     (match core_error with
@@ -176,14 +178,9 @@ let validate_task_skills ~skill_snapshot ~task_id skills =
        Error error)
 ;;
 
-(* The skills a turn admits are the ones every held task names: the current
-   task and the other Claimed/InProgress tasks this keeper owns. The prompt
-   lists all of them (task-364), so all of them are checked here — a missing
-   current task is still a config error, because metadata names it. *)
-let validate_held_task_skill_admission
+let task_skill_sets
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
-      ~skill_snapshot
   =
   let tasks = Workspace.get_tasks_safe config in
   let current =
@@ -210,13 +207,35 @@ let validate_held_task_skill_admission
       |> List.map (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
            entry.held_task_id, entry.held_skills)
     in
-    List.fold_left
-      (fun acc (task_id, skills) ->
-         match acc with
-         | Error _ -> acc
-         | Ok () -> validate_task_skills ~skill_snapshot ~task_id skills)
-      (Ok ())
-      (current @ held)
+    Ok (current @ held)
+;;
+
+(* The executable bundle carries the skills every held task names: the current
+   task and the other Claimed/InProgress tasks this keeper owns. The prompt
+   lists all of them, so validating and then discarding held selections would
+   advertise an exact reference that [keeper_skill] cannot execute. *)
+let resolve_held_task_skill_selection
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~skill_snapshot
+  =
+  match task_skill_sets ~config ~meta with
+  | Error _ as error -> error
+  | Ok task_skill_sets ->
+    let rec resolve selections = function
+      | [] -> Ok (Keeper_task_skill_turn.merge (List.rev selections))
+      | (task_id, skills) :: rest ->
+        (match resolve_task_skills ~skill_snapshot ~task_id skills with
+         | Error _ as error -> error
+         | Ok selection -> resolve (selection :: selections) rest)
+    in
+    resolve [] task_skill_sets
+;;
+
+let validate_held_task_skill_admission ~config ~meta ~skill_snapshot =
+  Result.map
+    (fun _ -> ())
+    (resolve_held_task_skill_selection ~config ~meta ~skill_snapshot)
 ;;
 
 let prepare_agent_setup
@@ -296,41 +315,8 @@ let prepare_agent_setup
              "tool result arrived before the resolved runtime attempt owner was observed")
       on_tool_result_ready
   in
-  let task_skill_references =
-    Keeper_task_skill_turn.references task_skill_scope
-  in
   let* task_skill_selection =
-    Keeper_task_skill_turn.resolve
-      ~snapshot:skill_snapshot
-      task_skill_references
-    |> Result.map_error Keeper_task_skill_turn.core_error
-  in
-  let task_instruction_skills =
-    List.map
-      (fun (selected : Keeper_task_skill_turn.selected) ->
-         let resource_location =
-           match selected.skill.provenance with
-           | Some
-               { source_root = Some source_root
-               ; resource_read_max_bytes = Some resource_read_max_bytes
-               ; directory
-               ; _
-               } ->
-             Some
-               Keeper_tool_composition_surface.
-                 { source_root; directory; resource_read_max_bytes }
-           | Some { source_root = None; _ }
-           | Some { resource_read_max_bytes = None; _ }
-           | None ->
-             None
-         in
-         Keeper_tool_composition_surface.instruction_skill
-           ?resource_location
-           ~reference:selected.reference
-           ~description:selected.skill.description
-           ~body:selected.skill.body
-           ())
-       task_skill_selection.selected
+    resolve_held_task_skill_selection ~config ~meta ~skill_snapshot
   in
   let* skill_activation_context =
     Keeper_skill_activation_recorder.make
@@ -359,19 +345,42 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
-  let skill_catalog, skill_projection_diagnostics =
+  let global_skill_catalog, skill_projection_diagnostics =
     Keeper_skill_catalog.of_snapshot skill_snapshot
   in
   List.iter
     (fun (diagnostic : Keeper_skill_catalog.projection_diagnostic) ->
        Log.Keeper.warn
-         "Skill composition projection omitted for keeper=%s identity=%s error=%s"
+         "Skill projection diagnostic for keeper=%s identity=%s error=%s"
          meta.name
          (Yojson.Safe.to_string
             (Skill_catalog_snapshot.identity_to_yojson diagnostic.identity))
          (Keeper_skill_catalog.error_to_string diagnostic.error))
     skill_projection_diagnostics;
-  let* () = validate_held_task_skill_admission ~config ~meta ~skill_snapshot in
+  List.iter
+    (fun (selected : Keeper_task_skill_turn.selected) ->
+       Option.iter
+         (fun diagnostic ->
+            Log.Keeper.warn
+              "Task Skill frozen as instruction for keeper=%s reference=%s error=%s"
+              meta.name
+              (Skill_reference.to_yojson selected.reference |> Yojson.Safe.to_string)
+              (Keeper_skill_catalog.error_to_string diagnostic))
+         selected.diagnostic)
+    task_skill_selection.selected;
+  let turn_skill_projection =
+    Keeper_skill_catalog.project_turn
+      ~global:global_skill_catalog
+      ~task:(Keeper_task_skill_turn.skills task_skill_selection)
+  in
+  let skill_catalog = turn_skill_projection.catalog in
+  List.iter
+    (fun unavailable ->
+       Log.Keeper.warn
+         "Task Skill unavailable for keeper=%s error=%s"
+         meta.name
+         (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
+    turn_skill_projection.unavailable;
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -432,7 +441,6 @@ let prepare_agent_setup
       ~skill_catalog
       ~identity_tools:identity_offering.Keeper_identity_tools.offered
       ?composition_plan_index
-      ~task_instruction_skills
       ~skill_activation_context
       ~turn_ctx_cell
       ()
@@ -558,7 +566,7 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    expected_model_tool_names ~task_instruction_skills ~skill_catalog
+    expected_model_tool_names ~skill_catalog
       ~identity_tool_names:
         (List.map
            (fun (tool : Agent_core.Tool.t) -> tool.schema.name)

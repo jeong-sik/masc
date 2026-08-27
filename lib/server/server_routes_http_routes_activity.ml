@@ -1386,6 +1386,89 @@ let add_routes ~sw ~clock router =
              let catalog, diagnostics =
                Keeper_skill_catalog.of_snapshot snapshot
              in
+             let profiles = Keeper_skill_observability.of_catalog catalog in
+             let usage_ledgers, usage_unavailable =
+               match Keeper_meta_store.keeper_names_result config with
+               | Error _ -> [], [ "keeper catalog: unavailable" ]
+               | Ok keeper_names ->
+                 List.fold_left
+                   (fun (loaded, unavailable) keeper_name ->
+                      match Keeper_meta_store.read_meta config keeper_name with
+                      | Error _ ->
+                        loaded, (keeper_name ^ ": metadata unavailable") :: unavailable
+                      | Ok None -> loaded, unavailable
+                      | Ok (Some meta) ->
+                        (match
+                           Keeper_skill_activation_ledger.load
+                             ~config
+                             ~trace_id:meta.runtime.trace_id
+                         with
+                         | Ok ledger -> (keeper_name, ledger) :: loaded, unavailable
+                         | Error error ->
+                           ( loaded
+                           , (keeper_name
+                              ^ ": "
+                              ^ Keeper_skill_activation_ledger.store_error_code
+                                  error)
+                             :: unavailable )))
+                   ([], [])
+                   keeper_names
+             in
+             let usage_for_reference reference =
+               usage_ledgers
+               |> List.filter_map (fun (keeper_name, ledger) ->
+                 let matching =
+                   Keeper_skill_activation_ledger.activations ledger
+                   |> List.filter
+                        (fun (activation : Keeper_skill_activation_ledger.activation) ->
+                     let observed =
+                       Skill_reference.make
+                         ~identity:activation.identity
+                         ~content_revision:activation.content_revision
+                     in
+                     Skill_reference.equal reference observed)
+                 in
+                 match matching with
+                 | [] -> None
+                 | activations ->
+                   let delivered =
+                     List.fold_left
+                       (fun count
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          if Option.is_some activation.delivery then count + 1 else count)
+                       0
+                       activations
+                   in
+                   let actions =
+                     List.fold_left
+                       (fun count
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          count + List.length activation.actions)
+                       0
+                       activations
+                   in
+                   let last_used_at =
+                     List.fold_left
+                       (fun latest
+                            (activation : Keeper_skill_activation_ledger.activation) ->
+                          max latest activation.activated_at)
+                       ""
+                       activations
+                   in
+                   Some
+                     (`Assoc
+                        [ "keeper", `String keeper_name
+                        ; "invocations", `Int (List.length activations)
+                        ; "deliveries", `Int delivered
+                        ; "actions", `Int actions
+                        ; "last_used_at", `String last_used_at
+                        ]))
+             in
+             let profile_for_reference reference =
+               profiles
+               |> List.find_opt (fun (profile : Keeper_skill_observability.profile) ->
+                 Skill_reference.equal reference profile.reference)
+             in
              let diagnostic_messages identity =
                diagnostics
                |> List.filter_map
@@ -1408,6 +1491,12 @@ let add_routes ~sw ~clock router =
                | Some reference ->
                  let base =
                    [ ("reference", Skill_reference.to_yojson reference) ]
+                   @ [ ( "profile"
+                       , match profile_for_reference reference with
+                         | Some profile -> Keeper_skill_observability.to_yojson profile
+                         | None -> `Null )
+                     ; "usage", `List (usage_for_reference reference)
+                     ]
                    @ diagnostic_fields reference.identity
                  in
                  Some
@@ -1468,6 +1557,15 @@ let add_routes ~sw ~clock router =
                ; ("state", `String "ready")
                ; ("snapshot", Skill_catalog_snapshot.to_public_yojson snapshot)
                ; ("surfaces", `List surfaces)
+               ; ( "usage_coverage"
+                 , `Assoc
+                     [ "ledgers_loaded", `Int (List.length usage_ledgers)
+                     ; ( "unavailable"
+                       , `List
+                           (List.map
+                              (fun detail -> `String detail)
+                              (List.rev usage_unavailable)) )
+                     ] )
                ]
          in
          Http.Response.json_value json reqd

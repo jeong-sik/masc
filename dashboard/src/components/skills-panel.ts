@@ -91,6 +91,30 @@ export function kindLabel(surface: SkillSurface | null): string {
   }
 }
 
+export function capabilityLabel(surface: SkillSurface | null): string {
+  const profile = surface?.profile
+  if (!profile) return kindLabel(surface)
+  if (profile.kind === 'instruction') return 'on-demand · model orchestrated'
+  const flags = [profile.execution, `${profile.plan.node_count} nodes`]
+  if (profile.capabilities.batch) flags.push(`${profile.plan.batch_count} batches`)
+  if (profile.capabilities.parallel) flags.push(`parallel ×${profile.plan.max_parallelism}`)
+  return flags.join(' · ')
+}
+
+export function contextLabel(surface: SkillSurface | null, bodyBytes: number): string {
+  const context = surface?.profile?.context
+  if (!context) return `${formatBytes(bodyBytes)} body`
+  return `${formatBytes(context.discovery_bytes)} discovery · ${formatBytes(context.eager_body_bytes)} eager · ${formatBytes(context.body_bytes)} body`
+}
+
+export function usageLabel(surface: SkillSurface | null): string {
+  const usage = surface?.usage ?? []
+  if (usage.length === 0) return 'unused in current sessions'
+  return usage
+    .map(row => `${row.keeper} ${row.invocations}×/${row.deliveries} delivered/${row.actions} actions`)
+    .join(' · ')
+}
+
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   return `${(bytes / 1024).toFixed(1)} KB`
@@ -171,7 +195,7 @@ export function SkillsPanel() {
       <table class="ss-table" data-testid="skills-table">
         <thead>
           <tr>
-            <th>skill</th><th>kind</th><th>tool</th><th>body</th><th>source</th>
+            <th>skill</th><th>capability</th><th>context</th><th>current users</th><th>source</th>
           </tr>
         </thead>
         <tbody>
@@ -184,9 +208,12 @@ export function SkillsPanel() {
                     diagnostic => html`<div class="mt-1 text-3xs text-[var(--color-status-warn)]">⚠ ${diagnostic}</div>`,
                   )}
                 </td>
-                <td>${kindLabel(row.surface)}</td>
-                <td class="mono">${row.surface?.kind === 'composition' ? row.surface.tool_name : '—'}</td>
-                <td>${formatBytes(row.body_bytes)}</td>
+                <td>
+                  ${capabilityLabel(row.surface)}
+                  <div class="ss-muted mono">${row.surface?.profile?.activation_tool ?? (row.surface?.kind === 'composition' ? row.surface.tool_name : 'keeper_skill')}</div>
+                </td>
+                <td>${contextLabel(row.surface, row.body_bytes)}</td>
+                <td>${usageLabel(row.surface)}</td>
                 <td class="mono">${row.source}</td>
               </tr>
             `,

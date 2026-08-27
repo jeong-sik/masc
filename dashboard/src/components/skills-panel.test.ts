@@ -4,11 +4,10 @@ import type {
   SkillSnapshotEntry,
   SkillSurface,
 } from '../api/dashboard-skills'
+import { decodeSkillsResponse, SkillsContractError } from '../api/dashboard-skills'
 import {
-  decodeSkillsResponse,
-  SkillsContractError,
-} from '../api/dashboard-skills'
-import {
+  capabilityLabel,
+  contextLabel,
   formatBytes,
   kindLabel,
   mergeSkillRows,
@@ -16,6 +15,7 @@ import {
   skillRowKey,
   sortSkillRows,
   stateMessage,
+  usageLabel,
 } from './skills-panel'
 
 function entry(
@@ -278,6 +278,53 @@ describe('decodeSkillsResponse', () => {
 })
 
 describe('labels', () => {
+  it('renders execution, context and current-user evidence from a profile', () => {
+    const profiled: SkillSurface = {
+      reference: reference(mission),
+      kind: 'composition',
+      tool_name: 'keeper_compose_mission-snapshot',
+      execution: 'async',
+      profile: {
+        reference: reference(mission),
+        kind: 'composition',
+        activation_tool: 'keeper_compose_mission-snapshot',
+        execution: 'async',
+        capabilities: {
+          as_skill: true,
+          as_tool: true,
+          batch: true,
+          parallel: true,
+          async: true,
+          tool_scope: 'registered_tools_only',
+        },
+        context: {
+          body_bytes: 2048,
+          eager_body_bytes: 0,
+          discovery_bytes: 320,
+          tool_schema_bytes: 320,
+        },
+        plan: {
+          node_count: 4,
+          batch_count: 2,
+          parallel_batch_count: 1,
+          max_parallelism: 3,
+          statically_read_only: true,
+        },
+        declaration: { start_line: 3, end_line: 30 },
+      },
+      usage: [{
+        keeper: 'rondo',
+        invocations: 9,
+        deliveries: 9,
+        actions: 134,
+        last_used_at: '2026-08-27T01:00:00Z',
+      }],
+    }
+    expect(capabilityLabel(profiled)).toBe('async · 4 nodes · 2 batches · parallel ×3')
+    expect(contextLabel(profiled, 2048)).toBe('320 B discovery · 0 B eager · 2.0 KB body')
+    expect(usageLabel(profiled)).toBe('rondo 9×/9 delivered/134 actions')
+  })
+
   it('shows the parsed kind, refusal, or unavailable projection', () => {
     expect(kindLabel(surfaces[0]!)).toBe('composition · inline')
     expect(kindLabel(surfaces[1]!)).toBe('instruction')

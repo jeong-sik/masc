@@ -19,12 +19,14 @@ type skill =
   ; conformance : Agent_core.Skill_document.conformance
   ; reference : Skill_reference.t option
   ; provenance : provenance option
+  ; composition_span : Keeper_skill_body_ast.span option
   ; surface : surface
   }
 
 type composition =
   { entry : Catalog.entry
   ; provenance : provenance option
+  ; span : Keeper_skill_body_ast.span option
   }
 
 type t = skill list
@@ -70,88 +72,26 @@ type projection_diagnostic =
   }
 
 let composition_fence_open = "```toml composition"
-let fence_close = "```"
 
-(* The run of fence characters a line opens or closes with, if any: three or
-   more backticks or tildes, counted the CommonMark way — the two characters
-   do not close each other, and a longer run encloses a shorter one. *)
-let fence_run line =
-  let length = String.length line in
-  if length = 0
-  then None
-  else (
-    let fence_char = line.[0] in
-    if not (Char.equal fence_char '`' || Char.equal fence_char '~')
-    then None
-    else (
-      let index = ref 0 in
-      while !index < length && Char.equal line.[!index] fence_char do
-        incr index
-      done;
-      if !index < 3
-      then None
-      else Some (fence_char, !index, String.sub line !index (length - !index))))
-;;
-
-let closes_fence ~fence_char ~length trimmed =
-  match fence_run trimmed with
-  | Some (other_char, other_length, info) ->
-    Char.equal other_char fence_char
-    && other_length >= length
-    && String.equal (String.trim info) ""
-  | None -> false
-;;
-
-(* Where the scan is when it reads the next line. [Enclosing_fence] is the state
-   that makes the difference: a skill that *documents* the composition grammar
-   wraps the example in a longer outer fence, the CommonMark way, and the inner
-   ```toml composition must then be read as text. Without this state the scanner
-   matched that example and promoted a documentation skill to a composition
-   (or rejected it on the name). *)
-type fence_scan =
-  | Outside
-  | Reading_composition of string list
-  | Enclosing_fence of
-      { fence_char : char
-      ; length : int
-      }
-
-(* A fence line is compared after trimming so CRLF bodies and trailing
-   spaces read the same as a bare fence, matching [Frontmatter]'s delimiter
-   rule. Inside an open composition block the first close fence ends it. *)
 let composition_blocks body =
-  let rec scan closed state = function
-    | [] ->
-      (match state with
-       | Reading_composition _ -> Error `Unterminated
-       (* An unclosed ordinary fence runs to the end of the document, as
-          CommonMark says — whatever it swallowed was never a declaration. *)
-       | Outside | Enclosing_fence _ -> Ok (List.rev closed))
-    | line :: rest ->
-      let trimmed = String.trim line in
-      (match state with
-       | Outside ->
-         if String.equal trimmed composition_fence_open
-         then scan closed (Reading_composition []) rest
-         else (
-           match fence_run trimmed with
-           | Some (fence_char, length, _info) ->
-             scan closed (Enclosing_fence { fence_char; length }) rest
-           | None -> scan closed Outside rest)
-       | Enclosing_fence { fence_char; length } ->
-         if closes_fence ~fence_char ~length trimmed
-         then scan closed Outside rest
-         else scan closed state rest
-       | Reading_composition block ->
-         if String.equal trimmed fence_close
-         then scan (String.concat "\n" (List.rev block) :: closed) Outside rest
-         else scan closed (Reading_composition (line :: block)) rest)
-  in
-  scan [] Outside (String.split_on_char '\n' body)
+  Keeper_skill_body_ast.parse body
+  |> Keeper_skill_body_ast.fenced_code_blocks
+  |> List.filter
+       (fun (block : Keeper_skill_body_ast.fenced_code_block) ->
+          String.equal block.info "toml composition")
+  |> fun blocks ->
+  match
+    List.find_opt
+      (fun (block : Keeper_skill_body_ast.fenced_code_block) ->
+         not block.terminated)
+      blocks
+  with
+  | Some _ -> Error `Unterminated
+  | None -> Ok blocks
 ;;
 
 let composition_of_block ~skill block =
-  match Catalog.parse block with
+  match Catalog.parse block.Keeper_skill_body_ast.body with
   | Error error -> Error (Composition_rejected { skill; error })
   | Ok catalog ->
     (match Catalog.entries catalog with
@@ -201,6 +141,7 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
          ; conformance
          ; reference = None
          ; provenance = None
+         ; composition_span = None
          ; surface = Instruction
          }
      | Ok [ block ] ->
@@ -214,6 +155,7 @@ let parse_document ~conformance (document : Agent_core.Skill_document.t) =
             ; conformance
             ; reference = None
             ; provenance = None
+            ; composition_span = Some block.span
             ; surface = Composition entry
             })
      | Ok blocks ->
@@ -288,6 +230,7 @@ let fallback_instruction_of_entry snapshot (entry : Skill_catalog_snapshot.entry
   ; conformance = entry.conformance
   ; reference = Some (Skill_catalog_snapshot.entry_reference entry)
   ; provenance = provenance_of_entry snapshot entry
+  ; composition_span = None
   ; surface = Instruction
   }
 ;;
@@ -362,7 +305,12 @@ let compositions catalog =
     (fun skill ->
        match skill.surface with
        | Instruction -> None
-       | Composition entry -> Some { entry; provenance = skill.provenance })
+       | Composition entry ->
+         Some
+           { entry
+           ; provenance = skill.provenance
+           ; span = skill.composition_span
+           })
     catalog
 ;;
 

@@ -367,6 +367,36 @@ let test_ordinary_fence_does_not_hide_a_declaration () =
       (Catalog.tool_name entry)
 ;;
 
+let test_composition_ast_keeps_source_span_and_long_close () =
+  let document =
+    String.concat
+      "\n"
+      [ "---"
+      ; "name: located-clock"
+      ; "description: Keep the declaration location."
+      ; "---"
+      ; ""
+      ; "```toml composition"
+      ; "[[compositions]]"
+      ; "name = \"located-clock\""
+      ; "execution = \"inline\""
+      ; "[[compositions.nodes]]"
+      ; "id = \"clock\""
+      ; "tool = \"keeper_time_now\""
+      ; "[compositions.nodes.input]"
+      ; "kind = \"literal\""
+      ; "value = {}"
+      ; "````"
+      ]
+  in
+  let skill = parsed ~directory:"located-clock" document in
+  match skill.composition_span with
+  | None -> fail "composition AST lost its source span"
+  | Some span ->
+    check int "body-relative opening line" 2 span.start_line;
+    check int "longer CommonMark close line" 12 span.end_line
+;;
+
 let test_unterminated_block_rejected () =
   let document =
     "---\nname: broken\ndescription: never closes the fence\n---\n\n```toml composition\n[[compositions]]\n"
@@ -636,6 +666,10 @@ let () =
             "an ordinary fence does not hide a later declaration"
             `Quick
             test_ordinary_fence_does_not_hide_a_declaration
+        ; test_case
+            "composition AST keeps source span and accepts a longer close"
+            `Quick
+            test_composition_ast_keeps_source_span_and_long_close
         ; test_case
             "malformed snapshot composition is diagnostic-only"
             `Quick

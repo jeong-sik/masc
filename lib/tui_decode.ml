@@ -1461,6 +1461,17 @@ type effective_tool_delivery =
   | Effective_tools_delivered
   | Effective_tools_suppressed_runtime_unsupported
 
+type effective_skill_profile = {
+  esp_name : string;
+  esp_kind : string;
+  esp_execution : string;
+  esp_body_bytes : int;
+  esp_discovery_bytes : int;
+  esp_node_count : int;
+  esp_batch_count : int;
+  esp_max_parallelism : int;
+}
+
 type effective_tool_surface =
   | Effective_surface_available of {
       ets_keeper_name : string;
@@ -1478,6 +1489,10 @@ type effective_tool_surface =
          wrote. *)
       ets_skills_left_out : string list;
       ets_composition_skills : Skill_reference.t list;
+      ets_skill_profiles : effective_skill_profile list;
+      ets_tool_surface_bytes : int;
+      ets_skill_tool_surface_bytes : int;
+      ets_skill_body_bytes : int;
       ets_tools : effective_tool list;
       ets_tool_surface_sha256 : string option;
     }
@@ -1739,6 +1754,30 @@ let decode_effective_tool_delivery json =
   | unknown ->
       Error (Printf.sprintf "tool_delivery.status has unknown value %S" unknown)
 
+let decode_effective_skill_profile json =
+  let* reference = required_object_field json "reference" in
+  let* identity = required_object_field reference "identity" in
+  let* esp_name = required_string_field identity "name" in
+  let* esp_kind = required_string_field json "kind" in
+  let* esp_execution = required_string_field json "execution" in
+  let* context = required_object_field json "context" in
+  let* esp_body_bytes = required_int_field context "body_bytes" in
+  let* esp_discovery_bytes = required_int_field context "discovery_bytes" in
+  let* plan = required_object_field json "plan" in
+  let* esp_node_count = required_int_field plan "node_count" in
+  let* esp_batch_count = required_int_field plan "batch_count" in
+  let* esp_max_parallelism = required_int_field plan "max_parallelism" in
+  Ok
+    { esp_name
+    ; esp_kind
+    ; esp_execution
+    ; esp_body_bytes
+    ; esp_discovery_bytes
+    ; esp_node_count
+    ; esp_batch_count
+    ; esp_max_parallelism
+    }
+
 let decode_effective_tool_surface json =
   let* status = required_string_field json "status" in
   let* ets_keeper_name = required_string_field json "keeper_name" in
@@ -1774,6 +1813,23 @@ let decode_effective_tool_surface json =
       let* ets_composition_skills =
         decode_skill_reference_list json "composition_skills"
       in
+      let* skill_profiles_json = optional_list_field json "skill_profiles" in
+      let* ets_skill_profiles =
+        decode_list
+          "effective_keeper_surface.skill_profiles"
+          decode_effective_skill_profile
+          skill_profiles_json
+      in
+      let* tool_surface_bytes = optional_int_field json "tool_surface_bytes" in
+      let ets_tool_surface_bytes = Option.value ~default:0 tool_surface_bytes in
+      let* ets_skill_tool_surface_bytes =
+        optional_int_field json "skill_tool_surface_bytes"
+      in
+      let ets_skill_tool_surface_bytes =
+        Option.value ~default:0 ets_skill_tool_surface_bytes
+      in
+      let* skill_body_bytes = optional_int_field json "skill_body_bytes" in
+      let ets_skill_body_bytes = Option.value ~default:0 skill_body_bytes in
       let* tools_json = required_list_field json "tools" in
       let* ets_tools =
         decode_list "effective_keeper_surface.tools" decode_effective_tool
@@ -1795,6 +1851,10 @@ let decode_effective_tool_surface json =
              ets_instruction_skills;
              ets_skills_left_out;
              ets_composition_skills;
+             ets_skill_profiles;
+             ets_tool_surface_bytes;
+             ets_skill_tool_surface_bytes;
+             ets_skill_body_bytes;
              ets_tools;
              ets_tool_surface_sha256;
            })

@@ -145,6 +145,12 @@ instruction/composition/unavailable과 typed projection diagnostics를 표시한
 별도 session activation ledger의 exact activation/delivery/action 기록에서 읽는다. 이름,
 tool prefix, 최근 로그 행 수로 사용 횟수를 재구성하지 않는다.
 
+같은 projection은 각 Skill의 실행 유도 방식, 실제 plan schedule의 node/batch/최대 병렬
+폭, async 여부, 정적 read-only 판정, 본문/discovery/tool-schema 바이트를 `profile`로
+내보낸다. `eager_body_bytes=0`은 본문 전체가 매 턴 prompt에 실리지 않았다는 계약이다.
+Keeper별 effective tool surface에는 전체 schema 바이트와 그중 Skill 때문에 추가된
+바이트를 따로 내보내므로, 점진 공개의 이득과 도구 표면 비용을 함께 확인할 수 있다.
+
 ## 3. 실행과 관측
 
 ```mermaid

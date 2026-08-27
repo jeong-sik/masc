@@ -7411,6 +7411,10 @@ let render_tools (state : state) =
                    ets_instruction_skills;
                    ets_skills_left_out;
                    ets_composition_skills;
+                   ets_skill_profiles;
+                   ets_tool_surface_bytes;
+                   ets_skill_tool_surface_bytes;
+                   ets_skill_body_bytes;
                    ets_tools;
                    ets_tool_surface_sha256;
                  });
@@ -7462,6 +7466,26 @@ let render_tools (state : state) =
                  (Terminal_text.single_line source))
             ets_tools
         in
+        let skill_profile_lines =
+          List.map
+            (fun (profile : Masc.Tui_decode.effective_skill_profile) ->
+               let execution =
+                 if String.equal profile.esp_kind "instruction"
+                 then "on-demand"
+                 else profile.esp_execution
+               in
+               Ansi.dim,
+               Printf.sprintf
+                 "   %-24s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
+                 (Terminal_text.single_line profile.esp_name)
+                 (Terminal_text.single_line execution)
+                 profile.esp_node_count
+                 profile.esp_batch_count
+                 profile.esp_max_parallelism
+                 profile.esp_discovery_bytes
+                 profile.esp_body_bytes)
+            ets_skill_profiles
+        in
         [ Ansi.bold,
           Printf.sprintf " Effective Keeper Surface — %s (%d tools)"
             (Terminal_text.single_line ets_keeper_name)
@@ -7481,7 +7505,12 @@ let render_tools (state : state) =
           ^ Terminal_text.single_line ets_skill_snapshot_revision;
           Ansi.dim,
           "   deferred resource bound=" ^ Terminal_text.single_line resource_bound;
+          Ansi.bold,
+          Printf.sprintf
+            "   Skill footprint: %dB/%dB tool context · %dB catalog bodies · eager body 0B"
+            ets_skill_tool_surface_bytes ets_tool_surface_bytes ets_skill_body_bytes;
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
+        @ skill_profile_lines
         (* Said on this surface because this is the one that answers "what can
            this Keeper call". A document the catalog could not read is absent
            from that answer, and absence with nothing beside it reads as a

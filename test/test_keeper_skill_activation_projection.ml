@@ -200,6 +200,81 @@ let test_corrupt_ledger_is_unavailable_not_empty () =
     fail "corrupt ledger was projected as an empty success"
 ;;
 
+let test_exact_trace_projection_uses_typed_ledger () =
+  with_workspace @@ fun config ->
+  let keeper_name = "historical-projection-keeper" in
+  let meta = persist_session config keeper_name in
+  record_one config meta;
+  match Projection.resolve_trace ~config ~trace_id:meta.runtime.trace_id with
+  | Projection.Trace_available { trace_id; ledger } ->
+    check string "exact trace id"
+      (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      (Keeper_id.Trace_id.to_string trace_id);
+    check int "one typed activation" 1 (List.length (Ledger.activations ledger));
+    let json =
+      Projection.trace_to_yojson
+        (Projection.Trace_available { trace_id; ledger })
+    in
+    check string "available status" "available"
+      Yojson.Safe.Util.(json |> member "status" |> to_string);
+    check string "projection schema" "masc.dashboard.skill-activations/v1"
+      Yojson.Safe.Util.(json |> member "schema" |> to_string);
+    check int "derived summary"
+      1
+      Yojson.Safe.Util.(json |> member "summary" |> member "instruction_invocations" |> to_int)
+  | Projection.Trace_not_recorded _ -> fail "recorded exact trace was absent"
+  | Projection.Trace_unavailable _ -> fail "exact trace projection was unavailable"
+;;
+
+let test_missing_exact_trace_is_not_recorded () =
+  with_workspace @@ fun config ->
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-never-recorded" with
+    | Ok trace_id -> trace_id
+    | Error detail -> fail detail
+  in
+  match Projection.resolve_trace ~config ~trace_id with
+  | Projection.Trace_not_recorded { trace_id = observed } ->
+    check string "exact missing trace"
+      (Keeper_id.Trace_id.to_string trace_id)
+      (Keeper_id.Trace_id.to_string observed);
+    let json =
+      Projection.trace_to_yojson
+        (Projection.Trace_not_recorded { trace_id = observed })
+    in
+    check string "typed absence" "not_recorded"
+      Yojson.Safe.Util.(json |> member "status" |> to_string)
+  | Projection.Trace_available _ -> fail "missing trace was synthesized as available"
+  | Projection.Trace_unavailable _ -> fail "missing trace was reported unreadable"
+;;
+
+let test_invalid_exact_trace_is_rejected_before_resolution () =
+  with_workspace @@ fun config ->
+  match Projection.resolve_trace_string ~config "../escape" with
+  | Error _ -> ()
+  | Ok _ -> fail "invalid trace id reached historical resolution"
+;;
+
+let test_corrupt_exact_trace_is_unavailable () =
+  with_workspace @@ fun config ->
+  let meta = persist_session config "corrupt-historical-ledger" in
+  let path =
+    Filename.concat
+      (Keeper_fs.keeper_session_dir
+         config
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+      "skill-activations.json"
+  in
+  let channel = open_out_bin path in
+  output_string channel "{}";
+  close_out channel;
+  match Projection.resolve_trace ~config ~trace_id:meta.runtime.trace_id with
+  | Projection.Trace_unavailable { reason; _ } ->
+    check string "typed reason" "activation_ledger_unreadable" reason
+  | Projection.Trace_available _ -> fail "corrupt exact trace was projected"
+  | Projection.Trace_not_recorded _ -> fail "corrupt exact trace disappeared"
+;;
+
 let () =
   run
     "keeper Skill activation projection"
@@ -210,6 +285,14 @@ let () =
             test_dashboard_projection_is_live_outside_inventory_cache
         ; test_case "corrupt ledger is unavailable" `Quick
             test_corrupt_ledger_is_unavailable_not_empty
+        ; test_case "exact trace uses typed ledger" `Quick
+            test_exact_trace_projection_uses_typed_ledger
+        ; test_case "missing exact trace is not recorded" `Quick
+            test_missing_exact_trace_is_not_recorded
+        ; test_case "invalid exact trace is rejected" `Quick
+            test_invalid_exact_trace_is_rejected_before_resolution
+        ; test_case "corrupt exact trace is unavailable" `Quick
+            test_corrupt_exact_trace_is_unavailable
         ] )
     ]
 ;;

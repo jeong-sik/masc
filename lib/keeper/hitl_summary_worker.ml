@@ -67,8 +67,50 @@ let thinking_block = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
 ;;
 
-let drop_thinking_blocks context =
+(* Newest first, because a constraint a Keeper set for itself is the one it
+   just wrote down. The messages arrive oldest-first, so the budget is spent
+   walking them backwards and the survivors are marked before the forward pass
+   rewrites each message. Physical identity is the mark: two thinking blocks
+   with the same text are still two blocks, and keeping "the newest one" has to
+   mean the one that is newest. *)
+let newest_thinking_blocks ~keep messages =
+  if keep <= 0
+  then []
+  else
+    List.fold_left
+      (fun kept message ->
+        if List.length kept >= keep
+        then kept
+        else
+          match message with
+          | `Assoc fields -> (
+            match List.assoc_opt "content_blocks" fields with
+            | Some (`List blocks) ->
+              List.fold_left
+                (fun kept block ->
+                  if List.length kept >= keep || not (thinking_block block)
+                  then kept
+                  else block :: kept)
+                kept (List.rev blocks)
+            | Some _ | None -> kept)
+          | _ -> kept)
+      [] (List.rev messages)
+;;
+
+let drop_thinking_blocks ?(keep_newest = 0) context =
   let dropped = ref 0 in
+  let survivors =
+    match context with
+    | `Assoc fields -> (
+      match List.assoc_opt "initial" fields with
+      | Some (`Assoc initial) -> (
+        match List.assoc_opt "history_messages" initial with
+        | Some (`List messages) -> newest_thinking_blocks ~keep:keep_newest messages
+        | Some _ | None -> [])
+      | Some _ | None -> [])
+    | _ -> []
+  in
+  let survives block = List.exists (fun kept -> kept == block) survivors in
   let strip_message = function
     | `Assoc fields ->
       `Assoc
@@ -76,7 +118,9 @@ let drop_thinking_blocks context =
            (fun (key, value) ->
              match key, value with
              | "content_blocks", `List blocks ->
-               let kept = List.filter (fun b -> not (thinking_block b)) blocks in
+               let kept =
+                 List.filter (fun b -> (not (thinking_block b)) || survives b) blocks
+               in
                dropped := !dropped + (List.length blocks - List.length kept);
                key, `List kept
              | _ -> key, value)
@@ -125,7 +169,11 @@ let build_context_bundle ~(entry : pending_approval) =
   in
   match entry.request_context with
   | Some request_context ->
-    let request_context, thinking_dropped = drop_thinking_blocks request_context in
+    let request_context, thinking_dropped =
+      drop_thinking_blocks
+        ~keep_newest:(Keeper_config.keeper_hitl_thinking_blocks ())
+        request_context
+    in
     `Assoc
       (request_identity
        @ [ "partial_context", `Bool false

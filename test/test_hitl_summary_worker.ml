@@ -378,6 +378,84 @@ let test_a_context_of_another_shape_is_carried_through () =
   check yojson "carried through unchanged" foreign
     (bundle |> member "request_context")
 
+(* Through the real knob, so the wiring is covered and not just the trimming.
+   Restored afterwards: a leaked runtime param would decide the next test. *)
+let thinking_blocks_key = "keeper.hitl.thinking_blocks"
+
+let with_thinking_blocks_kept n f =
+  let restore () =
+    ignore (Masc.Runtime_params.clear_by_key thinking_blocks_key)
+  in
+  (match Masc.Runtime_params.set_by_key thinking_blocks_key (`Int n) with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "could not set the knob: %s" detail);
+  Fun.protect ~finally:restore f
+
+let test_the_newest_reasoning_can_be_kept () =
+  (* The knob exists because the two sides pull opposite ways: the bundle is
+     smaller without reasoning, and the judge's deny rationales cite the
+     constraints a Keeper wrote for itself. Newest, because that is where a
+     self-imposed constraint is. *)
+  with_temp_dir "hitl-thinking-keep" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  with_thinking_blocks_kept 1 @@ fun () ->
+  let bundle =
+    Worker.For_testing.build_context_bundle
+      ~entry:{ entry with request_context = Some context_with_thinking }
+  in
+  let open Yojson.Safe.Util in
+  check (list string) "the reasoning survives beside what was done"
+    [ "thinking"; "text"; "tool_result" ] (block_types bundle);
+  check yojson "and nothing is reported as cut" (`Int 0)
+    (bundle |> member "thinking_blocks_omitted")
+
+let test_the_budget_keeps_the_newest_not_the_first () =
+  with_temp_dir "hitl-thinking-newest" @@ fun base_path ->
+  install_queue base_path;
+  let entry = pending_entry ~base_path () in
+  let thinking text =
+    `Assoc [ "type", `String "thinking"; "thinking", `String text ]
+  in
+  let context =
+    `Assoc
+      [ ( "initial"
+        , `Assoc
+            [ ( "history_messages"
+              , `List
+                  [ `Assoc
+                      [ "role", `String "assistant"
+                      ; "content_blocks", `List [ thinking "old" ]
+                      ]
+                  ; `Assoc
+                      [ "role", `String "assistant"
+                      ; "content_blocks", `List [ thinking "newest" ]
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  with_thinking_blocks_kept 1 @@ fun () ->
+  let bundle =
+    Worker.For_testing.build_context_bundle
+      ~entry:{ entry with request_context = Some context }
+  in
+  let open Yojson.Safe.Util in
+  let kept =
+    bundle
+    |> member "request_context"
+    |> member "initial"
+    |> member "history_messages"
+    |> to_list
+    |> List.concat_map (fun m ->
+         match m |> member "content_blocks" with
+         | `List blocks -> List.map (fun b -> b |> member "thinking" |> to_string) blocks
+         | _ -> [])
+  in
+  check (list string) "the one it just wrote down" [ "newest" ] kept;
+  check yojson "and the older one is reported as cut" (`Int 1)
+    (bundle |> member "thinking_blocks_omitted")
+
 let test_context_bundle_is_exact () =
   with_temp_dir "hitl-context" @@ fun base_path ->
   install_queue base_path;
@@ -1973,6 +2051,10 @@ let () =
             test_a_turn_without_reasoning_reports_nothing_cut
         ; test_case "a context of another shape is carried through" `Quick
             test_a_context_of_another_shape_is_carried_through
+        ; test_case "the newest reasoning can be kept" `Quick
+            test_the_newest_reasoning_can_be_kept
+        ; test_case "the budget keeps the newest, not the first" `Quick
+            test_the_budget_keeps_the_newest_not_the_first
         ; test_case
             "missing context is reported as partial"
             `Quick

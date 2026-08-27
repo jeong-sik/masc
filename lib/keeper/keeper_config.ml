@@ -45,6 +45,32 @@ let keeper_status_fast_default () : bool =
    observation carries per turn. The Board query applies canonical ownership
    before this result limit, so unrelated traffic cannot hide the keeper's
    latest post. *)
+(* How many of the Keeper's own newest [thinking] blocks the HITL judgment
+   bundle carries. 0 drops them all, which is what #31172 shipped.
+
+   Not a plain on/off, because the two things at stake pull opposite ways and
+   both live in the same blocks. Size: measured 2026-08-27, thinking was 51%
+   of the bundle's message blocks (23.2 kB of 85.6 kB) while the call being
+   judged was 2.5 kB. Evidence: the judge's own deny rationales that day cited
+   the Keeper's self-imposed constraints -- "the agent's own memory notes ...
+   explicitly state 'Do NOT retry task-366'" -- and those constraints are
+   stated in the newest blocks, not the oldest.
+
+   Newest rather than oldest: a constraint a Keeper set for itself is the one
+   it just wrote down, and the bulk is the reasoning it has since moved past.
+
+   Left at 0 so this knob changes nothing on its own. Raising it is how an
+   operator buys the deny evidence back, and how the two settings can be
+   compared against the same durable queue. *)
+let keeper_hitl_thinking_blocks_rp =
+  _rp_int ~key:"keeper.hitl.thinking_blocks"
+    ~default:(fun () -> int_of_env_default "MASC_KEEPER_HITL_THINKING_BLOCKS"
+                          ~default:0 ~min_v:0 ~max_v:1000)
+    ~min_v:0 ~max_v:1000
+    ~description:"Newest keeper thinking blocks kept in the HITL judgment bundle (0 = drop all)" ()
+let keeper_hitl_thinking_blocks () : int =
+  Runtime_params.get keeper_hitl_thinking_blocks_rp
+
 let keeper_board_own_recent_max_rp =
   _rp_int ~key:"keeper.board.own_recent.max"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOARD_OWN_RECENT_MAX"

@@ -7,8 +7,9 @@ boundary and are not claimable Keeper work. Never Read producer sandbox \
 paths directly. With task_id, claims that exact task when a user, mention, \
 board item, or keeper_tasks_list row identifies it; an awaiting_verification \
 task returns the typed pending-verdict refusal. If you already own another \
-Claimed/InProgress task, finish it with keeper_task_done or explicitly \
-release it first; keeper_task_claim does not auto-release active work."""
+Claimed/InProgress task, finish it with keeper_task_done or hand it back \
+with keeper_task_release first; keeper_task_claim does not auto-release \
+active work."""
 
 [[params]]
 name = "task_id"

@@ -55,8 +55,13 @@ let held_task_label (task : Masc_domain.task) =
    passed it. *)
 let held_tasks_refusal_message ~agent_name held_tasks =
   Printf.sprintf
-    "%s already holds %s. Finish it, or hand it back with masc_transition \
-     action=release and a handoff_context.summary, before claiming different work."
+    (* Names both surfaces on purpose: a Keeper cannot call [masc_transition]
+       (keeper_tool_descriptor.ml projects it away behind keeper_task_claim),
+       so a message that named only that told the reader to use a tool it
+       could not see. *)
+    "%s already holds %s. Finish it, or hand it back before claiming different \
+     work: keeper_task_release with a summary if you are a Keeper, otherwise \
+     masc_transition action=release with a handoff_context.summary."
     agent_name
     (String.concat ", " (List.map held_task_label held_tasks))
 ;;

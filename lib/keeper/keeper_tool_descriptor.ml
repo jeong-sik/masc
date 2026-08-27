@@ -2149,6 +2149,14 @@ let internal_descriptors : t list =
          (keeper_tool_task_runtime.ml:910). The description that says so now
          lives once, on the canonical schema this descriptor reads. *)
       ~readonly:false
+  ; task_descriptor
+      ~capability_identity:Internal_name_identity
+      "release"
+      "keeper_task_release"
+      (* The other half of the claim refusal: a keeper holding work it cannot
+         finish is also barred from claiming anything else, and until this
+         existed the only way back was shutting the keeper down. *)
+      ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
   (* Zero keeper dispatches in the live window (tool_usage 2026-07..08):
      keepers create and move tasks through the keeper_task_* surface, so the

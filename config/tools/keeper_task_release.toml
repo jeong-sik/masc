@@ -1,0 +1,47 @@
+name = "keeper_task_release"
+description = """
+Hand your claimed task back to the backlog so another Keeper can take it. \
+Use this when you cannot finish the task and it should not sit with you: the \
+work is blocked on something outside your reach, it needs a checkout or a \
+tool you do not have, or your verification keeps coming back rejected. The \
+task returns to the backlog with your summary attached, and you can claim \
+different work immediately. This does not cancel the task and does not \
+delete anything you already submitted. You must own the task."""
+
+[[params]]
+name = "task_id"
+type = "string"
+required = true
+description = "Task ID you currently hold"
+min_length = 1
+
+[[params]]
+name = "summary"
+type = "string"
+required = true
+description = """
+Where the task stands right now, in one line. The next owner starts from \
+this. Example: 'reproduced on the merged-cell table, fix not started'."""
+min_length = 1
+
+[[params]]
+name = "reason"
+type = "string"
+description = "Why you are handing it back: what blocked you, or what you lack."
+
+[[params]]
+name = "next_step"
+type = "string"
+description = "What the next owner should do first."
+
+[help]
+short_description = "Hand your claimed task back to the backlog with a summary."
+when_to_use = "Use when you hold a task you cannot finish and it should go back so someone else can take it."
+key_constraints = [
+  "Caller must own the task.",
+  "summary is required; the next owner starts from it.",
+  "The task returns to the backlog and can be reclaimed. It is not cancelled.",
+]
+details_markdown = "Issues release. Holding a task you cannot finish also blocks you from claiming anything else, so hand it back rather than idling on it. Evidence you already submitted stays on the task."
+examples = ["task_id='task-384' summary='4 verification rejections, no path forward from this Keeper' reason='no completion authority accepted the evidence' next_step='re-read the rejection notes before re-claiming'"]
+alternatives = ["keeper_task_done"]

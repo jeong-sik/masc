@@ -117,6 +117,10 @@ let all_surface_golden_names =
   ; "keeper_task_claim"
   ; "keeper_task_create"
   ; "keeper_task_done"
+  (* +1 for keeper_task_release: a Keeper could claim a task and never hand
+     it back, so one that could not finish what it held was barred from all
+     other work until it was shut down. *)
+  ; "keeper_task_release"
   ; "keeper_tasks_audit"
   ; "keeper_tasks_list"
   ; "keeper_time_now"

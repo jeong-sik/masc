@@ -112,6 +112,7 @@ let project
       ~tool_groups
       ~current_task_id
       ~task_skill_references
+      ~(task_selection : Keeper_task_skill_turn.t option)
       ~skill_snapshot
   =
   let global_skill_catalog, _projection_diagnostics =
@@ -129,7 +130,13 @@ let project
   let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors_for_surface ~surface
   in
-  match Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references with
+  let task_selection =
+    match task_selection with
+    | Some selection -> Ok selection
+    | None ->
+      Keeper_task_skill_turn.resolve ~snapshot:skill_snapshot task_skill_references
+  in
+  match task_selection with
   | Error _ as error -> error
   | Ok task_selection ->
     let turn_skill_projection =
@@ -385,23 +392,19 @@ let resolve ~config ~keeper_name =
      | Error error -> unavailable keeper_name error
      | Ok (skill_snapshot, skills_left_out) ->
        (match
-          Keeper_run_tools_setup.resolve_held_task_skill_selection
-            ~config
-            ~meta
-            ~skill_snapshot
+          Keeper_task_skill_turn.resolve_observations
+            ~snapshot:skill_snapshot
+            ~current_task:
+              (Keeper_world_observation_inputs.read_current_task ~config ~meta)
+            ~held_task_skills:
+              (Keeper_world_observation_inputs.read_held_task_skills ~config ~meta)
         with
         | Error error ->
           unavailable
             keeper_name
             ( "task_skill_selection_unavailable"
-            , Agent_core.Error.to_string error )
+            , Keeper_task_skill_turn.error_to_string error )
         | Ok task_selection ->
-          let task_skill_references =
-            List.map
-              (fun (selected : Keeper_task_skill_turn.selected) ->
-                 selected.reference)
-              task_selection.selected
-          in
           (match resolve_runtime keeper_name with
            | Error error -> unavailable keeper_name error
            | Ok (runtime_id, runtime) ->
@@ -426,7 +429,8 @@ let resolve ~config ~keeper_name =
                      ~tool_groups:meta.tool_groups
                      ~current_task_id
                      ~skills_left_out
-                     ~task_skill_references
+                     ~task_skill_references:[]
+                     ~task_selection:(Some task_selection)
                      ~skill_snapshot
                  with
                  | Ok surface -> Available surface

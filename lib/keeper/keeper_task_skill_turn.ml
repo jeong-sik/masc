@@ -22,13 +22,6 @@ type partition =
   ; compositions : selected list
   }
 
-type task_scope =
-  | No_task
-  | Task of
-      { task_id : string
-      ; references : Skill_reference.t list
-      }
-
 type Agent_core.Error.carrier += Task_skill_resolution_error of error
 
 let resolve_with_task_ids ~snapshot ~task_ids references =
@@ -84,6 +77,31 @@ let merge selections =
         selected
   in
   { selected = List.fold_left add [] (List.concat_map (fun t -> t.selected) selections) }
+;;
+
+let resolve_observations ~snapshot ~current_task ~held_task_skills =
+  let current =
+    match current_task with
+    | Keeper_world_observation_inputs.Current_task task
+    | Recovered_current_task { task; _ } -> [ task.id, task.skills ]
+    | No_current_task
+    | Current_task_missing _
+    | Current_task_unavailable _ -> []
+  in
+  let held =
+    List.map
+      (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
+         entry.held_task_id, entry.held_skills)
+      held_task_skills
+  in
+  let rec loop selections = function
+    | [] -> Ok (merge (List.rev selections))
+    | (task_id, references) :: rest ->
+      (match resolve_for_task ~snapshot ~task_id references with
+       | Error _ as error -> error
+       | Ok selection -> loop (selection :: selections) rest)
+  in
+  loop [] (current @ held)
 ;;
 
 let error_code = function
@@ -145,21 +163,6 @@ let of_core_error = function
     | Internal _
     | Internal_carried _ ) ->
     None
-;;
-
-let scope_of_observation = function
-  | Keeper_world_observation_inputs.Current_task task
-  | Recovered_current_task { task; _ } ->
-    Task { task_id = task.id; references = task.skills }
-  | No_current_task
-  | Current_task_missing _
-  | Current_task_unavailable _ ->
-    No_task
-;;
-
-let references = function
-  | No_task -> []
-  | Task { references; _ } -> references
 ;;
 
 let partition selection =

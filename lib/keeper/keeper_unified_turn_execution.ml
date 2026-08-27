@@ -86,7 +86,8 @@ type ctx =
   ; publication_recovery :
       Keeper_publication_recovery_availability.turn_context
   ; skill_snapshot : Skill_catalog_snapshot.t
-  ; task_skill_scope : Keeper_task_skill_turn.task_scope
+  ; task_skill_selection :
+      (Keeper_task_skill_turn.t, Keeper_task_skill_turn.error) result
   ; shared_context : Agent_core.Context.t option
   ; trajectory_acc : Trajectory.accumulator
   ; turn_id : int
@@ -124,7 +125,7 @@ let run (ctx : ctx)
       ; profile_defaults
       ; publication_recovery
       ; skill_snapshot
-      ; task_skill_scope
+      ; task_skill_selection
       ; cleanup
       ; drain_turn_event_bus
       ; event_bus
@@ -205,7 +206,7 @@ let run (ctx : ctx)
                  ~user_message
                  ~turn_kind:Turn_record.Autonomous
                  ~skill_snapshot
-                 ~task_skill_scope
+                 ~task_skill_selection
                  ~runtime_id:execution.runtime_id
                  ~world_observation:observation
                  ~history_user_source:"world_state_prompt"

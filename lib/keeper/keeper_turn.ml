@@ -46,15 +46,22 @@ let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
 let direct_turn_task_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
+      ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
   : string
   =
   let current =
-    match Keeper_unified_prompt.format_current_task_observation current_task with
+    let skill_surfaces =
+      match current_task with
+      | Keeper_world_observation_inputs.Current_task task
+      | Recovered_current_task { task; _ } -> List.assoc_opt task.id task_skill_surfaces
+      | No_current_task | Current_task_missing _ | Current_task_unavailable _ -> None
+    in
+    match Keeper_unified_prompt.format_current_task_observation ?skill_surfaces current_task with
     | Some rendered -> rendered
     | None -> ""
   in
   let held =
-    match Keeper_unified_prompt.format_held_task_skills held_task_skills with
+    match Keeper_unified_prompt.format_held_task_skills ~skill_surfaces_by_task:task_skill_surfaces held_task_skills with
     | Some rendered -> rendered
     | None -> ""
   in
@@ -63,13 +70,14 @@ let direct_turn_task_context
 let direct_turn_dynamic_context
       ~(current_task : Keeper_world_observation_inputs.current_task_observation)
       ~(held_task_skills : Keeper_world_observation_inputs.held_task_skills list)
+      ~(task_skill_surfaces : (string * Keeper_skill_catalog.exact_surface list) list)
       ~(recent_direct_conversation_text : string)
       ~(worktree_text : string)
       ~(telemetry_feedback_text : string)
       ~(turn_instructions_text : string)
   : string
   =
-  [ direct_turn_task_context ~current_task ~held_task_skills
+  [ direct_turn_task_context ~current_task ~held_task_skills ~task_skill_surfaces
   ; recent_direct_conversation_text
   ; worktree_text
   ; telemetry_feedback_text
@@ -528,8 +536,49 @@ let run_keeper_invocation_turn_admitted_inner
                 ~config:ctx.config
                 ~meta
             in
-            let task_skill_scope =
-              Keeper_task_skill_turn.scope_of_observation current_task
+            let skill_snapshot =
+              Keeper_agent_run.capture_skill_snapshot
+                ~base_path:ctx.config.base_path
+            in
+            let task_skill_selection =
+              Keeper_task_skill_turn.resolve_observations
+                ~snapshot:skill_snapshot ~current_task ~held_task_skills
+            in
+            let task_skill_surfaces =
+              match task_skill_selection with
+              | Error _ -> []
+              | Ok selection ->
+                let global, _ = Keeper_skill_catalog.of_snapshot skill_snapshot in
+                let projection =
+                  Keeper_skill_catalog.project_turn
+                    ~global ~task:(Keeper_task_skill_turn.skills selection)
+                in
+                let task_ids =
+                  let current =
+                    match current_task with
+                    | Keeper_world_observation_inputs.Current_task task
+                    | Recovered_current_task { task; _ } -> [ task.id ]
+                    | No_current_task
+                    | Current_task_missing _
+                    | Current_task_unavailable _ -> []
+                  in
+                  current
+                  @ List.map
+                      (fun (held : Keeper_world_observation_inputs.held_task_skills) ->
+                         held.held_task_id)
+                      held_task_skills
+                  |> List.sort_uniq String.compare
+                in
+                List.map (fun task_id ->
+                     let task =
+                       selection.selected
+                       |> List.filter (fun (selected : Keeper_task_skill_turn.selected) ->
+                            List.mem task_id selected.task_ids)
+                       |> List.map (fun (selected : Keeper_task_skill_turn.selected) ->
+                            selected.skill)
+                     in
+                     task_id, Keeper_skill_catalog.exact_surfaces projection ~task)
+                  task_ids
             in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =
@@ -588,6 +637,7 @@ let run_keeper_invocation_turn_admitted_inner
                 direct_turn_dynamic_context
                   ~current_task
                   ~held_task_skills
+                  ~task_skill_surfaces
                   ~recent_direct_conversation_text
                   ~worktree_text
                   ~telemetry_feedback_text
@@ -605,10 +655,6 @@ let run_keeper_invocation_turn_admitted_inner
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
             let world_observation = direct_turn_observation ~config:ctx.config meta in
-            let skill_snapshot =
-              Keeper_agent_run.capture_skill_snapshot
-                ~base_path:ctx.config.base_path
-            in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let run_result, latency_ms =
@@ -741,7 +787,7 @@ let run_keeper_invocation_turn_admitted_inner
 		                                ~user_message:message
 		                                ~turn_kind:Turn_record.Direct
 		                                ~skill_snapshot
-		                                ~task_skill_scope
+			                                ~task_skill_selection
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation

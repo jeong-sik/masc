@@ -590,6 +590,11 @@ let test_bundle_matches_expected_projection () =
       expected
       (List.sort_uniq String.compare names);
     let task_reference = snapshot_reference snapshot "gate-instruction" in
+    let task_selection =
+      match Keeper_task_skill_turn.resolve ~snapshot [ task_reference ] with
+      | Ok selection -> selection
+      | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+    in
     match
       Keeper_effective_tool_surface.For_testing.project
         ~keeper_name:"bundle-classifiable"
@@ -602,6 +607,7 @@ let test_bundle_matches_expected_projection () =
         ~current_task_id:(Some "task-001")
         ~task_skill_references:[ task_reference ]
         ~skill_snapshot:snapshot
+        ~task_selection:(Some task_selection)
     with
     | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
     | Ok surface ->

@@ -126,6 +126,42 @@ type keeper_lanes_snapshot = {
   kls_lanes : keeper_lane list;
 }
 
+type standalone_lane_status =
+  | Standalone_running
+  | Standalone_idle
+  | Standalone_degraded
+  | Standalone_no_retained_observation
+  | Standalone_unavailable
+
+type standalone_lane_slot_count = {
+  slsc_slot_id : string;
+  slsc_count : int;
+}
+
+type standalone_lane = {
+  sl_lane_id : string;
+  sl_label : string;
+  sl_required : bool;
+  sl_status : standalone_lane_status;
+  sl_configuration_state : string;
+  sl_admitted_slots : string list;
+  sl_admission_error : string option;
+  sl_retained_run_count : int;
+  sl_running_count : int;
+  sl_succeeded_count : int;
+  sl_failed_count : int;
+  sl_cancelled_count : int;
+  sl_last_terminal_at : float option;
+  sl_last_outcome : string option;
+  sl_p50_elapsed_s : float option;
+  sl_selected_slots : standalone_lane_slot_count list;
+}
+
+type standalone_lanes_snapshot = {
+  sls_observed_at_unix : float;
+  sls_lanes : standalone_lane list;
+}
+
 type keeper_secret_status =
   | Secret_ready
   | Secret_empty
@@ -2986,6 +3022,99 @@ let decode_keeper_lanes_snapshot json =
   let* kls_lanes = decode_list "snapshots" decode_keeper_lane items in
   Ok { kls_generated_at; kls_count; kls_lanes }
 
+let standalone_lane_status_of_string = function
+  | "running" -> Ok Standalone_running
+  | "idle" -> Ok Standalone_idle
+  | "degraded" -> Ok Standalone_degraded
+  | "no_retained_observation" -> Ok Standalone_no_retained_observation
+  | "unavailable" -> Ok Standalone_unavailable
+  | other -> Error ("standalone lane status: unknown value " ^ other)
+
+let standalone_lane_status_to_string = function
+  | Standalone_running -> "running"
+  | Standalone_idle -> "idle"
+  | Standalone_degraded -> "degraded"
+  | Standalone_no_retained_observation -> "no retained observation"
+  | Standalone_unavailable -> "unavailable"
+
+let decode_standalone_lane_slot_count json =
+  let* slsc_slot_id = required_string_field json "slot_id" in
+  let* slsc_count = required_int_field json "count" in
+  Ok { slsc_slot_id; slsc_count }
+
+let decode_standalone_lane json =
+  let* sl_lane_id = required_string_field json "lane_id" in
+  let* sl_label = required_string_field json "label" in
+  let* sl_required = required_bool_field json "required" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "standalone lane row is not observation-only"
+  in
+  let* _configured = required_nullable_bool_field json "configured" in
+  let* sl_configuration_state = required_string_field json "configuration_state" in
+  let* admitted_slots = required_list_field json "admitted_slots" in
+  let* sl_admitted_slots =
+    decode_list
+      "admitted_slots"
+      (function
+        | `String slot_id -> Ok slot_id
+        | _ -> Error "admitted_slots: expected a string")
+      admitted_slots
+  in
+  let* sl_admission_error = required_nullable_string_field json "admission_error" in
+  let* status = required_string_field json "status" in
+  let* sl_status = standalone_lane_status_of_string status in
+  let* sl_retained_run_count = required_int_field json "retained_run_count" in
+  let* sl_running_count = required_int_field json "running_count" in
+  let* sl_succeeded_count = required_int_field json "succeeded_count" in
+  let* sl_failed_count = required_int_field json "failed_count" in
+  let* sl_cancelled_count = required_int_field json "cancelled_count" in
+  let* _last_started_at = required_nullable_float_field json "last_started_at" in
+  let* sl_last_terminal_at = required_nullable_float_field json "last_terminal_at" in
+  let* sl_last_outcome = required_nullable_string_field json "last_outcome" in
+  let* sl_p50_elapsed_s = required_nullable_float_field json "p50_elapsed_s" in
+  let* selected_slots = required_list_field json "selected_slots" in
+  let* sl_selected_slots =
+    decode_list "selected_slots" decode_standalone_lane_slot_count selected_slots
+  in
+  Ok
+    { sl_lane_id
+    ; sl_label
+    ; sl_required
+    ; sl_status
+    ; sl_configuration_state
+    ; sl_admitted_slots
+    ; sl_admission_error
+    ; sl_retained_run_count
+    ; sl_running_count
+    ; sl_succeeded_count
+    ; sl_failed_count
+    ; sl_cancelled_count
+    ; sl_last_terminal_at
+    ; sl_last_outcome
+    ; sl_p50_elapsed_s
+    ; sl_selected_slots
+    }
+
+let decode_standalone_lanes_snapshot json =
+  let* schema = required_string_field json "schema" in
+  let* () =
+    if String.equal schema "masc.standalone_llm_lanes.v1" then Ok ()
+    else Error ("standalone lanes: unsupported schema " ^ schema)
+  in
+  let* _generated_at = required_string_field json "generated_at" in
+  let* sls_observed_at_unix = require_float_field json "observed_at_unix" in
+  let* observation_only = required_bool_field json "observation_only" in
+  let* () =
+    if observation_only then Ok ()
+    else Error "standalone lanes snapshot is not observation-only"
+  in
+  let* items = required_list_field json "lanes" in
+  let* sls_lanes = decode_list "lanes" decode_standalone_lane items in
+  if List.length sls_lanes = 5 then Ok { sls_observed_at_unix; sls_lanes }
+  else Error "standalone lanes: expected exactly five lanes"
+
 let keeper_secret_status_of_string = function
   | "ready" -> Secret_ready
   | "empty" -> Secret_empty
@@ -3256,6 +3385,131 @@ let decode_tool_approval_mode_overrides json =
         loop ((keeper, mode) :: acc) rest
   in
   loop [] items
+
+type gate_pending = {
+  gp_id : string;
+  gp_keeper : string;
+  gp_operation : string;
+  gp_display_tool : string;
+  gp_input_preview : string option;
+  gp_waiting_s : float option;
+}
+
+type gate_lane_modes = {
+  glm_workspace : string;
+  glm_external : string;
+}
+
+type gate_snapshot = {
+  gs_pending : gate_pending list;
+  gs_modes : gate_lane_modes option;
+}
+
+(* What a human decides on. An identity_call row carries the real target
+   inside its input; the closed operation name alone would make every
+   outside-service row read the same. The literal comes from the producer so
+   the two cannot drift. *)
+let gate_display_tool ~operation input =
+  if not (String.equal operation Keeper_identity_gate.gate_operation) then
+    operation
+  else
+    match input with
+    | Some input -> (
+        let provider =
+          match optional_string_field input "provider_id" with
+          | Ok (Some value) when String.trim value <> "" -> Some value
+          | Ok _ | Error _ -> None
+        in
+        let remote =
+          match optional_string_field input "remote_name" with
+          | Ok (Some value) when String.trim value <> "" -> Some value
+          | Ok _ | Error _ -> None
+        in
+        match provider, remote with
+        | Some provider, Some remote -> provider ^ " \xc2\xb7 " ^ remote
+        | None, Some remote -> remote
+        | Some _, None | None, None -> operation)
+    | None -> operation
+
+let decode_gate_pending json =
+  let* gp_id = required_string_field json "id" in
+  let* gp_keeper = required_string_field json "keeper_name" in
+  let* gp_operation = required_string_field json "tool_name" in
+  let* gp_input_preview = optional_string_field json "input_preview" in
+  let gp_waiting_s =
+    match member "waiting_s" json with
+    | `Float value -> Some value
+    | `Int value -> Some (float_of_int value)
+    | _ -> None
+  in
+  let input =
+    match member "input" json with
+    | `Assoc _ as input -> Some input
+    | _ -> None
+  in
+  Ok
+    {
+      gp_id;
+      gp_keeper;
+      gp_operation;
+      gp_display_tool = gate_display_tool ~operation:gp_operation input;
+      gp_input_preview;
+      gp_waiting_s;
+    }
+
+let decode_gate_lane_modes json =
+  let* workspace = required_object_field json "gate_mode" in
+  let* glm_workspace = required_string_field workspace "mode" in
+  let* external_lane = required_object_field json "external_gate_mode" in
+  let* glm_external = required_string_field external_lane "mode" in
+  Ok { glm_workspace; glm_external }
+
+let decode_gate_snapshot json =
+  let* gs_pending =
+    match member "approval_queue" json with
+    (* The server sends [null] when the queue store is unavailable; the
+       snapshot still carries the lanes, so this is empty-with-modes rather
+       than a decode failure. The dashboard shows the same face. *)
+    | `Null -> Ok []
+    | `List items ->
+        let rec loop acc = function
+          | [] -> Ok (List.rev acc)
+          | item :: rest ->
+              let* decoded = decode_gate_pending item in
+              loop (decoded :: acc) rest
+        in
+        loop [] items
+    | _ -> Error "approval_queue is neither a list nor null"
+  in
+  let* gs_modes =
+    match member "hitl" json with
+    | `Null -> Ok None
+    | hitl ->
+        let* modes = decode_gate_lane_modes hitl in
+        Ok (Some modes)
+  in
+  Ok { gs_pending; gs_modes }
+
+(* The durable per-Keeper Gate settings, which are a different thing from the
+   in-memory YOLO stance above: this is what the Gate decides an external
+   effect under, and it survives a restart. Both lists carry only Keepers
+   somebody singled out, so an empty one means everybody follows the
+   workspace. *)
+let decode_keeper_gate_settings json =
+  let pairs field value_key =
+    let* items = required_list_field json field in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        let* keeper = required_string_field item "keeper_name" in
+        let* value = required_string_field item value_key in
+        loop ((keeper, value) :: acc) rest
+    in
+    loop [] items
+  in
+  let* modes = pairs "modes" "mode" in
+  let* judges = pairs "judges" "slot_id" in
+  Ok (modes, judges)
 
 let decode_keeper_tool_approvals json =
   let* items = required_list_field json "pending" in

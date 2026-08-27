@@ -18,7 +18,9 @@ import subprocess
 import time
 from typing import Any, Iterator
 from urllib.parse import quote, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+import proof_http
 
 
 REQUIRED_PRODUCER_ARTIFACTS = {
@@ -161,7 +163,7 @@ def read_json_url(url: str, timeout: float, token: str) -> dict[str, Any]:
         url, headers={"Accept": "application/json", **auth_headers(token)}
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with proof_http.open_no_redirect(request, timeout=timeout) as response:
             return decode_object(response.read(), f"response from {url}")
     except OSError as error:
         raise CaptureError(f"cannot read {url}: {error}") from error
@@ -195,7 +197,7 @@ def validate_bundle(
     tracked_checkout_clean: bool,
 ) -> dict[str, Any]:
     require(
-        evidence.get("schema") == "masc.keeper-skill-use-proof.v1",
+        evidence.get("schema") == "masc.keeper-skill-use-proof.v2",
         "input is not a Keeper Skill-use proof bundle",
     )
     source = object_field(evidence, "source", "evidence")

@@ -205,17 +205,24 @@ and verdict_for_undescribed ~composition_plan_index ~tool_name ~input =
   | Control verdict -> verdict
   | Attached_service (Some true) ->
     Run { because = "the service says this tool only reads" }
+  (* Writes and silence both belong to the durable Gate now
+     ({!Keeper_identity_gate}): the tool itself defers to the approvals
+     queue on the external-services lane, survives nobody watching, and is
+     resolved from the dashboard or TUI. Asking here too would put two
+     authorities in front of one call, and this stream-bound one loses on
+     the lanes that cannot ask — which is exactly where the 2026-08-27
+     incident ran. *)
   | Attached_service (Some false) ->
-    Ask { because = "the service says this tool can change something there" }
-  (* Silence is not permission. On a lane that can ask, this reaches an
-     operator; on one that cannot -- the official-client lanes pass no
-     approval callback -- it is a refusal, so the reason has to say what
-     would change it rather than only what is wrong. *)
-  | Attached_service None ->
-    Ask
+    Run
       { because =
-          "the service did not say whether this tool only reads; it runs \
-           once the service annotates it, or while this keeper is set to yolo"
+          "the durable Gate decides this write; unapproved calls defer to \
+           the approvals queue"
+      }
+  | Attached_service None ->
+    Run
+      { because =
+          "the service did not say whether this tool only reads; the \
+           durable Gate treats that silence as a write and defers it"
       }
   | Composition node_tools -> verdict_of_nodes node_tools
   | Ad_hoc_plan ->

@@ -17,6 +17,7 @@ SCRIPT_PATH = (
     / "workload"
     / "produce_natural_keeper_skill_proof.py"
 )
+sys.path.insert(0, str(SCRIPT_PATH.parent))
 
 
 def load_module():

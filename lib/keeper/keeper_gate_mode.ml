@@ -36,6 +36,16 @@ let parse_json = function
 ;;
 
 let path = Keeper_gate_path.mode
+let external_path = Keeper_gate_path.external_mode
+
+(* The external-services lane answers one question the workspace lane cannot:
+   what happens to a call that leaves for an attached outside service when
+   the workspace lane is opened for internal velocity. Measured on
+   2026-08-27, 374 of 379 Gate decisions rode workspace Always_allow; a lane
+   that inherited that switch would have let the incident's Jira writes
+   through with only an audit row. Manual is the default for the same reason
+   the approval policy treats silence as "might write". *)
+let default_external = Manual
 
 let state_json ~actor ~changed_at mode =
   `Assoc
@@ -53,37 +63,42 @@ let mode_of_state_json = function
   | _ -> Error "keeper Gate mode state must be an object"
 ;;
 
-let read ~base_path =
-  let file = path ~base_path in
+let read_lane ~file ~absent =
   if not (Sys.file_exists file)
-  then Ok default
+  then Ok absent
   else
     match Safe_ops.read_json_file_safe file with
     | Ok json -> mode_of_state_json json
     | Error detail -> Error (Printf.sprintf "keeper Gate mode read failed: %s" detail)
 ;;
 
-let status_json ~base_path =
-  match read ~base_path with
+let read ~base_path = read_lane ~file:(path ~base_path) ~absent:default
+
+let read_external ~base_path =
+  read_lane ~file:(external_path ~base_path) ~absent:default_external
+;;
+
+let status_json_lane ~file read_result =
+  match read_result with
   | Ok Auto_judge ->
     (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Ok () ->
        `Assoc
          [ "mode", `String (to_string Auto_judge)
-         ; "configured", `Bool (Sys.file_exists (path ~base_path))
+         ; "configured", `Bool (Sys.file_exists file)
          ; "state", `String "ready"
          ]
      | Error detail ->
        `Assoc
          [ "mode", `String (to_string Auto_judge)
-         ; "configured", `Bool (Sys.file_exists (path ~base_path))
+         ; "configured", `Bool (Sys.file_exists file)
          ; "state", `String "unavailable"
          ; "read_error", `String detail
          ])
   | Ok mode ->
     `Assoc
       [ "mode", `String (to_string mode)
-      ; "configured", `Bool (Sys.file_exists (path ~base_path))
+      ; "configured", `Bool (Sys.file_exists file)
       ; "state", `String "ready"
       ]
   | Error detail ->
@@ -93,6 +108,14 @@ let status_json ~base_path =
       ; "state", `String "invalid"
       ; "read_error", `String detail
       ]
+;;
+
+let status_json ~base_path =
+  status_json_lane ~file:(path ~base_path) (read ~base_path)
+;;
+
+let status_json_external ~base_path =
+  status_json_lane ~file:(external_path ~base_path) (read_external ~base_path)
 ;;
 
 (* Strictness, and only for resolving an override against the workspace. A
@@ -264,17 +287,55 @@ let set_for_keeper (config : Workspace.config) ~actor ~keeper_name mode =
          })
 ;;
 
-let set (config : Workspace.config) ~actor mode =
+(* The external-services lane, through the same Keeper override: an operator
+   who singled a Keeper out for a higher bar meant it for everything that
+   Keeper does, and outside writes are the last place to quietly exempt. *)
+let resolve_external ~base_path ~keeper_name =
+  match read_external ~base_path with
+  | Error detail -> Error detail
+  | Ok lane ->
+    (match keeper_override ~base_path ~keeper_name with
+     | Error detail -> Error detail
+     | Ok None -> Ok lane
+     | Ok (Some o) -> Ok (stricter lane o.mode))
+;;
+
+let rec set (config : Workspace.config) ~actor mode =
+  set_lane
+    config
+    ~actor
+    ~read_lane:read
+    ~file_of_base:path
+    ~audit_action:"keeper_gate_mode_set"
+    mode
+
+and set_external (config : Workspace.config) ~actor mode =
+  set_lane
+    config
+    ~actor
+    ~read_lane:read_external
+    ~file_of_base:external_path
+    ~audit_action:"keeper_gate_external_mode_set"
+    mode
+
+and set_lane
+      (config : Workspace.config)
+      ~actor
+      ~read_lane
+      ~file_of_base
+      ~audit_action
+      mode
+  =
   let base_path = config.base_path in
   let previous, replaced_read_error =
-    match read ~base_path with
+    match read_lane ~base_path with
     | Ok previous -> Some previous, None
     | Error detail -> None, Some detail
   in
   let changed_at = Masc_domain.now_iso () in
   let dir = Keeper_gate_path.dir ~base_path in
   Fs_compat.mkdir_p dir;
-  let file = path ~base_path in
+  let file = file_of_base ~base_path in
   match
     Fs_compat.save_file_atomic
       file
@@ -285,7 +346,7 @@ let set (config : Workspace.config) ~actor mode =
     Audit_log.log_action
       config
       ~agent_id:actor
-      ~action:(Audit_log.Custom "keeper_gate_mode_set")
+      ~action:(Audit_log.Custom audit_action)
       ~details:
         (`Assoc
            ([ ( "previous_mode"

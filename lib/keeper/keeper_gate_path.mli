@@ -3,6 +3,12 @@
 
 val dir : base_path:string -> string
 val mode : base_path:string -> string
+
+val external_mode : base_path:string -> string
+(** Operating mode for calls that leave the workspace for an attached outside
+    service (Jira, Slack, GitHub). A separate file from {!mode} on purpose:
+    the workspace lane gets opened for internal velocity, and that gesture
+    must not silently open writes to somebody else's service. *)
 val pending : base_path:string -> string
 val replay_results : base_path:string -> string
 (** Derived host-replay result references live beside [pending.json].

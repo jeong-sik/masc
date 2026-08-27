@@ -67,8 +67,12 @@ flowchart LR
 
 fence 개수가 유일한 갈림길이다. `masc-composition-tool`과 다른 클라이언트의
 `disable-model-invocation`은 명시적으로 거부한다. [Agent Skills
-규격](https://agentskills.io/specification)의 실험적 선택 필드인 `allowed-tools`는 문자열일
-때 파싱하지만, MASC 권한이나 도구 제한으로 해석하지 않고 저장하지도 않는다.
+규격](https://agentskills.io/specification)의 실험적 선택 필드인 `allowed-tools`는 공백으로
+구분한 문자열이다. decoder는 YAML에서 읽은 문자열을 `Skill_document.allowed_tools`에
+관측용으로 보존하되 토큰을 해석하지 않는다. 공식 `skills-ref` parser의 값 복사 동작과
+규격 적합성은 구분하며, MASC는 null이나 목록을 `runtime_compatible` 진단으로 남기고 값은
+보존하지 않는다. 보존한 문자열은 런타임 정책, Gate, 도구 선택, 프롬프트, Keeper
+effective surface, 공개 registry 응답에 투영하지 않는다.
 composition 선언을 남겨 놓고 도구만 숨기는 별도 상태는 없다. 문서용 예시는 더 긴
 CommonMark 외부 fence로 감싼다.
 

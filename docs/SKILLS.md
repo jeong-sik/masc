@@ -37,10 +37,14 @@ description: Walk the release checklist before shipping.
   선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark 외부
   fence로 감싼다.
 - [Agent Skills 규격](https://agentskills.io/specification)의 실험적 선택 필드인
-  `allowed-tools`는 문자열일 때 받아들인다. MASC는 이 값을 런타임 권한이나 도구 제한으로
-  해석하지 않으며 저장하지도 않는다. MASC가 제공하는 도구 호출은 기존 MASC 승인 흐름을
-  그대로 따르고, 각 runtime의 native 도구는 해당 runtime의 sandbox와 권한 정책을 따른다.
-  문자열이 아닌 값은 frontmatter 오류다.
+  `allowed-tools`는 공백으로 구분한 문자열이다. MASC는 YAML에서 읽은 문자열을
+  `Agent_core.Skill_document.allowed_tools`에 관측용으로 보존하지만 토큰을 해석하지 않는다.
+  이 값은 런타임 권한, Gate, 도구 표면, 프롬프트, Keeper effective surface, 공개 registry
+  응답에 쓰이지 않는다. MASC가 제공하는 도구 호출은 기존 MASC 승인 흐름을 그대로
+  따르고, 각 runtime의 native 도구는 해당 runtime의 sandbox와 권한 정책을 따른다.
+  공식 `skills-ref` parser가 YAML 값을 별도 형식 검사 없이 복사하는 동작과 규격 적합성은
+  구분한다. MASC는 null이나 목록을 값으로 보존하지 않고 `runtime_compatible` frontmatter
+  진단을 남긴다.
 - 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
   제외된 exact reference를 task가 지명한 경우에만 admission이 typed 오류를 반환한다.
   정확한 파싱 오류는 `/api/v1/skills`의 `rejections`와 exact surface diagnostic에 남는다.

@@ -1272,6 +1272,8 @@ type async_msg =
         * Masc.Tui_decode.keeper_secret_projection list,
         string )
       result
+  | Standalone_lanes_loaded of
+      (Masc.Tui_decode.standalone_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -1313,8 +1315,20 @@ type async_msg =
       Keeper_chat.request * string * bool * (bool, string) result
   | Keeper_tool_approvals_loaded of
       (Tui_decode.keeper_tool_approval list, string) result
+  | Gate_snapshot_loaded of (Tui_decode.gate_snapshot, string) result
+      (** The durable Gate beside the held calls: pending approvals that
+          survive nobody watching, and both lane modes. *)
+  | Gate_approval_resolved of string * bool * (unit, string) result
+      (** approval id, approve, and whether the resolve route took it. *)
+  | Gate_external_mode_set of string * (unit, string) result
+      (** The external-services lane the operator asked for, and whether the
+          server took it. *)
   | Surface_tool_approval_answered of
       string * string * bool * (bool, string) result
+  (* Its own message rather than a field on the stance one: the two come from
+     different endpoints and one failing must not blank the other. *)
+  | Keeper_gate_settings_loaded of
+      (((string * string) list * (string * string) list), string) result
   | Keeper_tool_modes_loaded of
       ((string * string) list, string) result * Approval.Flow.generation
       (** The stance listing replaces the whole yolo set, so a fetch that
@@ -1368,6 +1382,10 @@ type async_msg =
   | Github_identity_view_loaded of string * (string list, string) result
   | Identity_providers_loaded of
       string * (Masc_tui_types.identity_provider list, string) result
+  | Identity_switch_set of
+      string * string * bool * (unit, string) result
+      (** keeper, provider, the state the operator asked for, and whether
+          the server took it. *)
   | Identity_login_started of
       string * (string * string * string, string) result
       (** keeper, then (provider id, label, url) *)
@@ -1597,6 +1615,70 @@ let launch_keeper_tool_approvals_load state ~mailbox =
       enqueue_async mailbox
         (Keeper_tool_approvals_loaded (Error "Eio switch is unavailable"))
 
+let launch_gate_snapshot_load state ~mailbox =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_dashboard_gate ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_snapshot_loaded result)
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_snapshot_loaded (Error "Eio switch is unavailable"))
+
+let launch_gate_resolve state ~mailbox ~approval_id ~approve =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_dashboard_gate_resolve ~host ~port ~approval_id
+          ~approve
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_approval_resolved (approval_id, approve, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_approval_resolved
+           (approval_id, approve, Error "Eio switch is unavailable"))
+
+let launch_gate_external_mode_set state ~mailbox ~mode =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_http.post_dashboard_gate_external_mode ~host ~port ~mode with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Gate_external_mode_set (mode, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Gate_external_mode_set (mode, Error "Eio switch is unavailable"))
+
 let launch_keeper_tool_modes_load state ~mailbox =
   (* [reserve_refresh] declines while the operator's own press is still in
      flight: the answer on the way back would be the stance from before it. *)
@@ -1613,7 +1695,17 @@ let launch_keeper_tool_modes_load state ~mailbox =
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> Error (Printexc.to_string exn)
         in
-        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation))
+        enqueue_async mailbox (Keeper_tool_modes_loaded (result, generation));
+        (* Same trip, because both answer "what did somebody set about this
+           Keeper" and a detail pane showing one fresh and one stale would be
+           two different moments beside each other. No generation guard: this
+           listing has no operator press to be superseded by. *)
+        let settings =
+          try Masc_tui_loader.load_keeper_gate_settings ~host ~port with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn -> Error (Printexc.to_string exn)
+        in
+        enqueue_async mailbox (Keeper_gate_settings_loaded settings)
       in
       match Eio_context.get_switch_opt () with
       | Some sw ->
@@ -2420,6 +2512,33 @@ let launch_identity_view state ~mailbox keeper_name =
       enqueue_async mailbox
         (Identity_providers_loaded (keeper_name, Error "Eio switch is unavailable"))
 
+(* Throw or clear one attached service's switch. Off keeps the token and
+   catalog; the keeper's turns stop being handed that provider's tools. *)
+let launch_identity_switch state ~mailbox ~keeper_name ~provider_id ~enabled =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try
+        Masc_tui_http.post_identity_switch ~host ~port ~keeper_name
+          ~provider_id ~enabled
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox
+      (Identity_switch_set (keeper_name, provider_id, enabled, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Identity_switch_set
+           (keeper_name, provider_id, enabled, Error "Eio switch is unavailable"))
+
 (* Begin a login. The answer is a URL the operator has to open; nothing is
    written to the keeper until the browser comes back to the server. *)
 (* Recording an app the operator made. Answers on the same notice line a
@@ -2874,12 +2993,18 @@ let launch_lanes_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
   let run () =
-    let result =
+    let keeper_result =
       try Masc_tui_loader.load_keeper_lanes ~host ~port with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Lanes_loaded result)
+    enqueue_async mailbox (Lanes_loaded keeper_result);
+    let standalone_result =
+      try Masc_tui_loader.load_standalone_lanes ~host ~port with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Standalone_lanes_loaded standalone_result)
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
@@ -3039,7 +3164,9 @@ let goto_surface state ~mailbox (destination : surface) =
     state.lanes_action_error <- None;
   (match destination with
    | Lanes -> launch_lanes_load state ~mailbox
-   | Approvals -> launch_keeper_tool_approvals_load state ~mailbox
+   | Approvals ->
+       launch_keeper_tool_approvals_load state ~mailbox;
+       launch_gate_snapshot_load state ~mailbox
    | Schedules -> launch_schedules_load state ~mailbox
    | Verification -> launch_verification_load state ~mailbox
    | Harness -> launch_harness_load state ~mailbox
@@ -3853,6 +3980,7 @@ let follow_target (kind : Link.kind) (id : string) =
 
 let approval_row_reference = function
   | Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
+  | Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
   | Operator_row item ->
       Option.bind item.ap_target_id (fun target_id ->
           match
@@ -4843,8 +4971,12 @@ let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
        | None -> ());
     (* Held tool calls ride every tick, not just the Approvals surface: the
        strip's Approvals badge is drawn from every surface, and a stale count
-       there would be worse than none. The payload is a handful of rows. *)
+       there would be worse than none. The payload is a handful of rows. The
+       durable Gate rides with them for the same badge — its rows are the
+       ones that keep when nobody is watching, which is exactly when the
+       badge is how an operator finds out. The server caches the snapshot. *)
     launch_keeper_tool_approvals_load state ~mailbox;
+    launch_gate_snapshot_load state ~mailbox;
     (* The schedule list rides for the same reason, now that the agenda strip
        names the next wake from every surface. Fetched only on the Schedules
        surface it was empty everywhere else, and a strip that says nothing is
@@ -6390,6 +6522,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.github_identity_view <- Some (keeper_name, lines);
             state.github_identity_view_error <- None
         | Error detail -> state.github_identity_view_error <- Some detail)
+  | Identity_switch_set (keeper_name, provider_id, enabled, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "%s: %s switched %s" keeper_name provider_id
+                (if enabled then "on" else "off"));
+           (* Re-read rather than patch what is on screen: the switch the
+              server just wrote is the answer. *)
+           launch_identity_view state ~mailbox keeper_name
+       | Error detail ->
+           state.identity_attempt_error <-
+             Some
+               ( Masc_tui_types.Notice_bad
+               , Printf.sprintf "switch %s: %s" provider_id detail ))
   | Identity_providers_loaded (keeper_name, result) -> (
       let still_selected =
         match List.nth_opt state.keepers state.keeper_cursor with
@@ -6619,6 +6765,58 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
            if state.approval_cursor >= count then
              state.approval_cursor <- max 0 (count - 1)
        | Error detail -> state.keeper_tool_approvals_error <- Some detail)
+  | Gate_snapshot_loaded result ->
+      (match result with
+       | Ok snapshot ->
+           state.gate_pending <- snapshot.Tui_decode.gs_pending;
+           state.gate_modes <- snapshot.Tui_decode.gs_modes;
+           state.gate_error <- None;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1)
+       | Error detail -> state.gate_error <- Some detail)
+  | Gate_approval_resolved (approval_id, approve, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "Gate %s %s"
+                (if approve then "approved" else "rejected")
+                approval_id);
+           (* Durably resolved on the server; the row leaves now rather than
+              waiting out the next refresh, and the refresh confirms. *)
+           state.gate_pending <-
+             List.filter
+               (fun (pending : Tui_decode.gate_pending) ->
+                 not (String.equal pending.Tui_decode.gp_id approval_id))
+               state.gate_pending;
+           let count = List.length (approval_items state) in
+           if state.approval_cursor >= count then
+             state.approval_cursor <- max 0 (count - 1);
+           launch_gate_snapshot_load state ~mailbox
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "Gate decision for %s failed: %s" approval_id
+                detail))
+  | Gate_external_mode_set (mode, result) ->
+      (match result with
+       | Ok () ->
+           add_event state "system"
+             (Printf.sprintf "External-services Gate lane set to %s" mode);
+           launch_gate_snapshot_load state ~mailbox
+       | Error detail ->
+           add_event state "error"
+             (Printf.sprintf "External-services Gate lane change failed: %s"
+                detail))
+  | Keeper_gate_settings_loaded result ->
+      (match result with
+       | Ok (modes, judges) ->
+           state.keeper_gate_modes <- modes;
+           state.keeper_gate_judges <- judges
+       | Error _ ->
+           (* Keep the last known settings rather than showing every Keeper as
+              following the workspace, which is the looser reading and the one
+              an operator would act on. *)
+           ())
   | Keeper_tool_modes_loaded (result, generation) ->
       (* A listing from an older flow describes the stance before the press
          that superseded it. Dropping it is what keeps an armed gate armed
@@ -6979,6 +7177,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              stale; clearing them would turn a failed refresh into an empty
              reading. *)
           state.lanes_error <- Some detail)
+  | Standalone_lanes_loaded result -> (
+      match result with
+      | Ok snapshot ->
+          state.standalone_lanes <- Some snapshot;
+          state.standalone_lanes_error <- None
+      | Error detail -> state.standalone_lanes_error <- Some detail)
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->
@@ -7494,6 +7698,10 @@ let main () =
           ~keeper_name:held.kta_keeper
           ~tool_call_id:held.kta_tool_call_id
           ~allow:(match decision with Confirm -> true | Deny -> false)
+    | Some { Approval_authority.row = Gate_row pending; decision } ->
+        launch_gate_resolve state ~mailbox:async_messages
+          ~approval_id:pending.Tui_decode.gp_id
+          ~approve:(match decision with Confirm -> true | Deny -> false)
     | None ->
         add_event state "system"
           "Approval list changed; review the updated row before deciding"
@@ -8819,6 +9027,51 @@ and is loaded on demand through keeper_skill.
                       || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
                  set (current ^ s)
                | _ -> ()))
+       | Some "T"
+         when state.view = Keepers Keeper_detail
+              && state.detail_tab = Detail_identity
+              && not compact_viewport -> (
+           match (selected_keeper state, state.identity_view) with
+           | Some keeper, Some (stamp, providers)
+             when String.equal stamp keeper.k_name -> (
+               match
+                 Masc_tui_types.identity_cursor_provider
+                   ~query:(identity_query state) ~providers
+                   state.identity_cursor
+               with
+               | Some (provider_id, _) -> (
+                   let row =
+                     List.find_map
+                       (function
+                         | Masc_tui_types.Identity_declared
+                             { idp_id
+                             ; idp_tools
+                             ; idp_enabled
+                             ; idp_switch_problem
+                             ; _
+                             }
+                           when String.equal idp_id provider_id ->
+                             Some (idp_tools, idp_enabled, idp_switch_problem)
+                         | Masc_tui_types.Identity_declared _
+                         | Masc_tui_types.Identity_unreadable _ -> None)
+                       providers
+                   in
+                   match row with
+                   | Some (Some _, enabled, None) ->
+                       state.identity_attempt_error <- None;
+                       launch_identity_switch state ~mailbox:async_messages
+                         ~keeper_name:keeper.k_name ~provider_id
+                         ~enabled:(enabled = Some false)
+                   | Some (Some _, _, Some problem) ->
+                       state.identity_attempt_error <-
+                         Some
+                           ( Masc_tui_types.Notice_bad
+                           , "switch store unreadable: " ^ problem )
+                   | Some (None, _, _) | None ->
+                       add_event state "system"
+                         "connect it first; the switch is for an attached service")
+               | None -> ())
+           | Some _, (Some _ | None) | None, _ -> ())
        | Some "A"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_identity
@@ -11053,9 +11306,27 @@ and is loaded on demand through keeper_skill.
                 if state.config_pane = Config_prompts then handle_prompt_edit ()
                 else handle_runtime_config_edit ()
             | Tools -> handle_skill_edit ()
+            | Approvals ->
+                (* Cycle the external-services Gate lane: what happens to a
+                   Keeper's call into an attached outside service. Its own
+                   switch — the workspace lane never opens it. An unknown
+                   stored value cycles to manual, the fail-closed end. *)
+                (match state.gate_modes with
+                 | None ->
+                     add_event state "system"
+                       "Gate lanes are not loaded yet; wait for the refresh"
+                 | Some modes ->
+                     let next =
+                       match modes.Tui_decode.glm_external with
+                       | "manual" -> "auto_judge"
+                       | "auto_judge" -> "always_allow"
+                       | _ -> "manual"
+                     in
+                     launch_gate_external_mode_set state
+                       ~mailbox:async_messages ~mode:next)
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
-            | Board | Approvals | Planning | Schedules | Verification | Harness
+            | Board | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->

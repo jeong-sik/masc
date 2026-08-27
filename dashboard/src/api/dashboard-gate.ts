@@ -21,6 +21,9 @@ import type {
   KeeperResolvedApprovalState,
   KeeperApprovalQueueState,
   KeeperApprovalRulesState,
+  KeeperGateModeOverride,
+  KeeperGateJudgePreference,
+  KeeperGateSettingsState,
   KeeperAutoJudgeRearmExpectation,
   GateDecisionSource,
   GateJudgeLane,
@@ -152,6 +155,70 @@ function normalizeApprovalRulesState(raw: unknown): KeeperApprovalRulesState {
   return gateSnapshotProtocolDrift('approval_rules_state is not a current closed variant')
 }
 
+/**
+ * Same closed-variant shape as the approval-rules state, decoded separately so
+ * a drift in one payload is reported against the field it came from.
+ */
+function normalizeKeeperSettingsState(raw: unknown, field: string): KeeperGateSettingsState {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift(`${field} is not an object`)
+  if (raw.state === 'ready' && Object.keys(raw).length === 1) return { state: 'ready' }
+  if (
+    raw.state === 'unavailable'
+    && typeof raw.error === 'string'
+    && raw.error.trim() !== ''
+    && Object.keys(raw).length === 2
+  ) {
+    return { state: 'unavailable', error: raw.error }
+  }
+  return gateSnapshotProtocolDrift(`${field} is not a current closed variant`)
+}
+
+/**
+ * Both per-Keeper rows carry the same four fields and differ only in the one
+ * that says what was chosen, so they decode through one function.
+ */
+function normalizeKeeperSettingRow<K extends string>(
+  raw: unknown,
+  valueField: K,
+  valueOf: (value: unknown) => string | null,
+): ({ keeper_name: string; updated_by: string; updated_at: string } & Record<K, string>) | null {
+  if (!isRecord(raw)) return null
+  const expectedKeys = ['keeper_name', 'updated_at', 'updated_by', valueField].sort()
+  const keys = Object.keys(raw).sort()
+  if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
+    return null
+  }
+  const keeperName = typeof raw.keeper_name === 'string' ? raw.keeper_name.trim() : ''
+  if (keeperName === '') return null
+  const value = valueOf(raw[valueField])
+  if (value === null) return null
+  return {
+    keeper_name: keeperName,
+    updated_by: typeof raw.updated_by === 'string' ? raw.updated_by : '',
+    updated_at: typeof raw.updated_at === 'string' ? raw.updated_at : '',
+    [valueField]: value,
+  } as { keeper_name: string; updated_by: string; updated_at: string } & Record<K, string>
+}
+
+function normalizeKeeperSettingRows<T>(
+  raw: unknown,
+  field: string,
+  state: KeeperGateSettingsState,
+  row: (item: unknown) => T | null,
+): T[] {
+  if (!Array.isArray(raw)) return gateSnapshotProtocolDrift(`${field} must be an array`)
+  const rows = raw.map(row)
+  if (rows.some(item => item === null)) {
+    return gateSnapshotProtocolDrift(`${field} contains an invalid row`)
+  }
+  // Unavailable means the file could not be read, so there is nothing to have
+  // parsed. Rows alongside that state would mean two sources disagreeing.
+  if (state.state === 'unavailable' && rows.length !== 0) {
+    return gateSnapshotProtocolDrift(`unavailable ${field} must be empty`)
+  }
+  return rows as T[]
+}
+
 function normalizeGateModeValue(raw: unknown): GateMode | null {
   return raw === 'manual' || raw === 'auto_judge' || raw === 'always_allow' ? raw : null
 }
@@ -163,11 +230,11 @@ function hasExactKeys(raw: Record<string, unknown>, expected: string[]): boolean
     && keys.every((key, index) => key === sortedExpected[index])
 }
 
-function normalizeGateMode(raw: unknown): GateModeStatus {
-  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.gate_mode is not an object')
+function normalizeGateMode(label: string, raw: unknown): GateModeStatus {
+  if (!isRecord(raw)) return gateSnapshotProtocolDrift(`${label} is not an object`)
   const mode = normalizeGateModeValue(raw.mode)
   if (!mode || typeof raw.configured !== 'boolean') {
-    return gateSnapshotProtocolDrift('hitl.gate_mode has an invalid mode or configured flag')
+    return gateSnapshotProtocolDrift(`${label} has an invalid mode or configured flag`)
   }
   if (raw.state === 'ready' && hasExactKeys(raw, ['mode', 'configured', 'state'])) {
     return { mode, configured: raw.configured, state: 'ready' }
@@ -191,7 +258,7 @@ function normalizeGateMode(raw: unknown): GateModeStatus {
   ) {
     return { mode, configured: true, state: 'invalid', read_error: raw.read_error }
   }
-  return gateSnapshotProtocolDrift('hitl.gate_mode is not a current closed variant')
+  return gateSnapshotProtocolDrift(`${label} is not a current closed variant`)
 }
 
 function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
@@ -219,11 +286,18 @@ function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
 }
 
 function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
-  if (!isRecord(raw) || !hasExactKeys(raw, ['gate_mode', 'judge_lane'])) {
+  if (
+    !isRecord(raw)
+    || !hasExactKeys(raw, ['gate_mode', 'external_gate_mode', 'judge_lane'])
+  ) {
     return gateSnapshotProtocolDrift('hitl is not the current exact object')
   }
   return {
-    gate_mode: normalizeGateMode(raw.gate_mode),
+    gate_mode: normalizeGateMode('hitl.gate_mode', raw.gate_mode),
+    external_gate_mode: normalizeGateMode(
+      'hitl.external_gate_mode',
+      raw.external_gate_mode,
+    ),
     judge_lane: normalizeGateJudgeLane(raw.judge_lane),
   }
 }
@@ -444,6 +518,23 @@ export function fetchDashboardGate(
     if (approvalRulesState.state === 'unavailable' && approvalRules.length !== 0) {
       return gateSnapshotProtocolDrift('unavailable approval_rules must be empty')
     }
+    const keeperModesState = normalizeKeeperSettingsState(raw.keeper_modes_state, 'keeper_modes_state')
+    const keeperModes = normalizeKeeperSettingRows<KeeperGateModeOverride>(
+      raw.keeper_modes,
+      'keeper_modes',
+      keeperModesState,
+      item => normalizeKeeperSettingRow(item, 'mode', normalizeGateModeValue) as KeeperGateModeOverride | null,
+    )
+    const keeperJudgesState = normalizeKeeperSettingsState(raw.keeper_judges_state, 'keeper_judges_state')
+    const keeperJudges = normalizeKeeperSettingRows<KeeperGateJudgePreference>(
+      raw.keeper_judges,
+      'keeper_judges',
+      keeperJudgesState,
+      item =>
+        normalizeKeeperSettingRow(item, 'slot_id', value =>
+          typeof value === 'string' && value.trim() !== '' ? value.trim() : null,
+        ) as KeeperGateJudgePreference | null,
+    )
     return {
       generated_at: asNullableIsoTimestamp(raw.generated_at) ?? undefined,
       note: typeof raw.note === 'string' && raw.note.trim() !== '' ? raw.note.trim() : undefined,
@@ -455,6 +546,10 @@ export function fetchDashboardGate(
       recent_resolved_state: recentResolvedState,
       approval_rules: approvalRules as KeeperApprovalRule[],
       approval_rules_state: approvalRulesState,
+      keeper_modes: keeperModes,
+      keeper_modes_state: keeperModesState,
+      keeper_judges: keeperJudges,
+      keeper_judges_state: keeperJudgesState,
       hitl: normalizeHitlStatus(raw.hitl),
     }
   })
@@ -782,5 +877,13 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
 
 export async function setGateMode(mode: GateMode): Promise<SetGateModeResponse> {
   const raw = await post<unknown>('/api/v1/dashboard/gate/mode', { mode })
+  return decodeSetGateModeResponse(raw, mode)
+}
+
+/** The external-services lane. Same request and response contract as
+ *  `setGateMode`; a different switch on the server, so opening the workspace
+ *  lane never opens writes into an attached outside service. */
+export async function setExternalGateMode(mode: GateMode): Promise<SetGateModeResponse> {
+  const raw = await post<unknown>('/api/v1/dashboard/gate/external-mode', { mode })
   return decodeSetGateModeResponse(raw, mode)
 }

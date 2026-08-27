@@ -18,7 +18,9 @@ import subprocess
 from typing import Any
 import uuid
 from urllib.parse import quote, urlsplit, urlunsplit
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+import proof_http
 
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -215,12 +217,29 @@ def auth_headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def dashboard_context_options(token: str) -> dict[str, Any]:
+def dashboard_context_options() -> dict[str, Any]:
     return {
         "viewport": {"width": 1440, "height": 1000},
         "device_scale_factor": 1,
-        "extra_http_headers": auth_headers(token),
     }
+
+
+def handle_dashboard_route(route: Any, *, base_url: str, token: str) -> None:
+    request_url = route.request.url
+    headers = proof_http.scoped_bearer_headers(
+        base_url=base_url,
+        request_url=request_url,
+        headers=route.request.headers,
+        token=token,
+    )
+    if not proof_http.same_origin(request_url, base_url):
+        route.continue_(headers=headers)
+        return
+    response = route.fetch(headers=headers, max_redirects=0)
+    if 300 <= response.status < 400:
+        route.abort("blockedbyclient")
+        return
+    route.fulfill(response=response)
 
 
 def read_json(url: str, timeout: float, token: str) -> tuple[dict[str, Any], bytes]:
@@ -228,7 +247,7 @@ def read_json(url: str, timeout: float, token: str) -> tuple[dict[str, Any], byt
         url, headers={"Accept": "application/json", **auth_headers(token)}
     )
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with proof_http.open_no_redirect(request, timeout=timeout) as response:
             payload = response.read()
     except OSError as error:
         raise ProofError(f"cannot read {url}: {error}") from error
@@ -603,6 +622,7 @@ def validate_proof(
     return {
         "keeper": keeper,
         "skill_tool_use_id": skill_tool_use_id,
+        "workspace_key": string_field(ledger, "workspace_key", "skill ledger"),
         "session_id": string_field(ledger, "session_id", "skill ledger"),
         "ledger_revision": string_field(ledger, "revision", "skill ledger"),
         "reference": {
@@ -641,7 +661,13 @@ def capture_dashboard(
         browser = playwright.chromium.launch()
         context = None
         try:
-            context = browser.new_context(**dashboard_context_options(token))
+            context = browser.new_context(**dashboard_context_options())
+            context.route(
+                "**/*",
+                lambda route: handle_dashboard_route(
+                    route, base_url=base_url, token=token
+                ),
+            )
             page = context.new_page()
             page.goto(
                 f"{base_url}/dashboard/#lab?section=tools",
@@ -796,7 +822,7 @@ def main() -> int:
         "collector source checkout changed during proof capture",
     )
     evidence = {
-        "schema": "masc.keeper-skill-use-proof.v1",
+        "schema": "masc.keeper-skill-use-proof.v2",
         "generated_at": utc_now(),
         "source": {
             "expected_sha": args.expected_source_sha,

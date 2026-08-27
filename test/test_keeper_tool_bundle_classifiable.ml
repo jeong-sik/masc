@@ -185,7 +185,7 @@ let contains ~needle haystack =
    the gate that walks what the model is actually handed, and a later path
    that hands one out without recording its annotation would make every call
    ask with a reason nobody can act on. *)
-let identity_tools ~base_path =
+let identity_tools () =
   let declaration =
     {|
 id = "atlassian"
@@ -226,8 +226,7 @@ audience = "api.atlassian.com"
         ]
     }
   in
-  (Keeper_identity_tools.agent_tools ~base_path ~keeper_name:"bundle-classifiable"
-     ~provider catalog)
+  (Keeper_identity_tools.agent_tools ~provider catalog)
     .Keeper_identity_tools.offered
 ;;
 
@@ -324,7 +323,7 @@ let with_bundle_tools ?(record_activations = true) f =
            ~publication_recovery
            ~ctx_snapshot
            ~skill_catalog
-           ~identity_tools:(identity_tools ~base_path:dir)
+           ~identity_tools:(identity_tools ())
            ~composition_plan_index
            ?skill_activation_context:
              (if record_activations then Some skill_activation_context else None)
@@ -571,8 +570,9 @@ let test_bundle_matches_expected_projection () =
     let snapshot, skill_catalog = skill_snapshot_and_catalog () in
     let identity_tool_names =
       List.map
-        (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
-        (identity_tools ~base_path:(Filename.get_temp_dir_name ()))
+        (fun (offered : Keeper_identity_tools.offered_tool) ->
+           offered.Keeper_identity_tools.schema.name)
+        (identity_tools ())
     in
     let expected =
       Keeper_run_tools_setup.expected_model_tool_names

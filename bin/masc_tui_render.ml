@@ -1341,6 +1341,16 @@ let approval_detail_pane (state : state) ~rows ~cols (row : approval_row) buf =
       ; "question", held.Tui_decode.kta_question
       ; "args", held.Tui_decode.kta_args
       ]
+    | Gate_row pending ->
+      [ "keeper", pending.Tui_decode.gp_keeper
+      ; "tool", pending.Tui_decode.gp_display_tool
+      ; "operation", pending.Tui_decode.gp_operation
+      ; "approval", pending.Tui_decode.gp_id
+      ; "input",
+        (match pending.Tui_decode.gp_input_preview with
+         | Some preview -> preview
+         | None -> "")
+      ]
     | Operator_row a ->
       [ "actor", a.Masc_tui_operator_projection.ap_actor
       ; "action", a.Masc_tui_operator_projection.ap_action_type
@@ -1384,6 +1394,7 @@ let approval_detail_pane (state : state) ~rows ~cols (row : approval_row) buf =
 let approval_sidebar_label (row : approval_row) =
   match row with
   | Keeper_tool_row held -> held.Tui_decode.kta_tool
+  | Gate_row pending -> pending.Tui_decode.gp_display_tool
   | Operator_row item -> item.ap_action_type
 
 let render_approval_detail (state : state) (row : approval_row) =
@@ -1573,7 +1584,12 @@ let render_approvals (state : state) =
   let ask_buf = Buffer.create 1024 in
   draw_ask_questions ask_buf cols state;
   let ask_rows = ask_section_rows ask_buf in
-  let approval_body_rows = max 1 (rows - boxed_surface_chrome_rows - ask_rows) in
+  (* One extra chrome row on this surface only: the always-drawn Gate lane
+     line between the header and the divider. *)
+  let gate_lane_rows = 1 in
+  let approval_body_rows =
+    max 1 (rows - boxed_surface_chrome_rows - gate_lane_rows - ask_rows)
+  in
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -1606,6 +1622,22 @@ let render_approvals (state : state) =
 
   box_top buf cols;
   box_line buf cols header;
+  (* Both Gate lanes, always on screen here — exactly one row, so the body
+     arithmetic below can subtract it as a constant. The durable rows obey
+     the external lane, and an operator deciding them needs to see which
+     switch they are under. [e] cycles the external lane. *)
+  box_line buf cols
+    (match state.gate_modes, Terminal_text.optional_single_line state.gate_error with
+     | Some modes, _ ->
+         Printf.sprintf
+           "  %sGate workspace:%s  ·  outside services:%s  [e] cycle outside lane%s"
+           Ansi.dim
+           modes.Tui_decode.glm_workspace
+           modes.Tui_decode.glm_external
+           Ansi.reset
+     | None, Some err -> data_unreliable_row ~cols ("gate: " ^ err)
+     | None, None ->
+         Ansi.dim ^ "  Gate lanes: loading" ^ Ansi.reset);
   box_divider buf cols;
 
   let approvals_error =
@@ -1664,6 +1696,27 @@ let render_approvals (state : state) =
                 (Terminal_text.single_line held.kta_question ^ " — "
                 ^ Terminal_text.single_line_or ~default:"(not provided)"
                     held.kta_because)
+          | Gate_row pending ->
+              (* The age, not a countdown: a durable Gate row keeps until
+                 somebody answers it, and what an operator weighs is how
+                 long it has been waiting. *)
+              let waited =
+                match pending.Tui_decode.gp_waiting_s with
+                | Some seconds -> Printf.sprintf "%.0fs waiting" seconds
+                | None -> "waiting"
+              in
+              Printf.sprintf "  %s  %s  %s  %s"
+                (fit_width
+                   (Terminal_text.single_line pending.Tui_decode.gp_keeper)
+                   16)
+                (fit_width
+                   ("gate: "
+                   ^ Terminal_text.single_line
+                       pending.Tui_decode.gp_display_tool)
+                   20)
+                (fit_width waited 16)
+                (Terminal_text.single_line_or ~default:"(no input preview)"
+                   pending.Tui_decode.gp_input_preview)
         in
         let is_selected = idx = state.approval_cursor in
         let content =
@@ -1721,6 +1774,19 @@ let render_approvals (state : state) =
                 held.kta_because)
              (max 8 (cols - 12)))
           Ansi.reset
+    | Some (Gate_row pending) ->
+        (* A durable Gate ask: it keeps until answered, and the answer goes
+           through the dashboard resolve route. What the eye needs is who
+           wants to touch what, and that the decision spends here. *)
+        Printf.sprintf "  %s%s → %s  [y] approve  [n] reject%s"
+          (Theme.warn ())
+          (fit_width
+             (Terminal_text.single_line pending.Tui_decode.gp_keeper)
+             20)
+          (fit_width
+             (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
+             (max 8 (cols - 48)))
+          Ansi.reset
     | None -> ""
   in
   Buffer.add_string buf (Printf.sprintf "%s\n" detail_line);
@@ -1752,6 +1818,20 @@ let render_approvals (state : state) =
             (fit_width
                (Terminal_text.single_line held.kta_args)
                (max 8 (cols - 9)))
+            Ansi.reset )
+    | Some (Gate_row pending) ->
+        ( Printf.sprintf "  %skeeper=%s  operation=%s  approval=%s%s" Ansi.dim
+            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_keeper) 20)
+            (fit_width
+               (Terminal_text.single_line pending.Tui_decode.gp_operation)
+               20)
+            (fit_width (Terminal_text.single_line pending.Tui_decode.gp_id) 30)
+            Ansi.reset
+        , Printf.sprintf "  %sinput=%s%s" Ansi.dim
+            (fit_width
+               (Terminal_text.single_line_or ~default:"(no input preview)"
+                  pending.Tui_decode.gp_input_preview)
+               (max 8 (cols - 10)))
             Ansi.reset )
   in
   Buffer.add_string buf (Printf.sprintf "%s\n%s\n" metadata_line payload_line);
@@ -3657,6 +3737,44 @@ let keeper_lane_row (columns : keeper_lane_columns)
 (** Render one current composite row per Keeper. This is a read-only operator
     view: the endpoint owns the phase diagnosis and this surface only makes
     the six facts scannable together. *)
+let standalone_lane_status_style = function
+  | Tui_decode.Standalone_running -> Ansi.yellow
+  | Tui_decode.Standalone_idle -> Ansi.green
+  | Tui_decode.Standalone_degraded
+  | Tui_decode.Standalone_unavailable -> Ansi.red
+  | Tui_decode.Standalone_no_retained_observation -> Ansi.gray
+
+let standalone_lane_row width (lane : Tui_decode.standalone_lane) =
+  let status = Tui_decode.standalone_lane_status_to_string lane.sl_status in
+  let slots =
+    match lane.sl_admitted_slots with
+    | [] -> "no admitted slot"
+    | slots -> String.concat "," slots
+  in
+  let observed_slots =
+    match lane.sl_selected_slots with
+    | [] -> "none"
+    | slots ->
+        slots
+        |> List.map (fun slot ->
+          Printf.sprintf "%s×%d" slot.slsc_slot_id slot.slsc_count)
+        |> String.concat ","
+  in
+  let p50 =
+    match lane.sl_p50_elapsed_s with
+    | None -> "—"
+    | Some seconds -> Printf.sprintf "%.1fs" seconds
+  in
+  let prefix = standalone_lane_status_style lane.sl_status in
+  let line =
+    Printf.sprintf
+      "  %s● %-15s %-14s%s slots %-20s active %d  runs %d  ok/fail/cancel %d/%d/%d  p50 %s  observed %s"
+      prefix lane.sl_label status Ansi.reset slots lane.sl_running_count
+      lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count
+      lane.sl_cancelled_count p50 observed_slots
+  in
+  fit_width line width
+
 let render_lanes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -3689,6 +3807,22 @@ let render_lanes (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
+  box_line_styled buf cols ~style:(Ansi.bold ^ Ansi.cyan)
+    "  Standalone LLM lanes · READ-ONLY OBSERVATION";
+  let standalone_rows =
+    match state.standalone_lanes with
+    | Some snapshot ->
+        List.map (standalone_lane_row inner) snapshot.Tui_decode.sls_lanes
+    | None ->
+        [ (match state.standalone_lanes_error with
+           | None -> Ansi.dim ^ "  loading standalone lane observations…" ^ Ansi.reset
+           | Some detail ->
+               Ansi.red ^ "  standalone lane observation unavailable: "
+               ^ Keeper_chat.terminal_safe_text detail ^ Ansi.reset)
+        ]
+  in
+  List.iter (box_line buf cols) standalone_rows;
+  box_divider buf cols;
   box_line_styled buf cols ~style:(Theme.recede ()) (keeper_lane_header columns);
   box_divider buf cols;
   (match state.lanes_error with
@@ -3709,6 +3843,7 @@ let render_lanes (state : state) =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
       ~overflow_takes_row:layout.sc_overflow_takes_row
+    |> fun height -> max 1 (height - 2 - List.length standalone_rows)
   in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lanes_scroll max_scroll) in
@@ -3831,6 +3966,16 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
      row it says the coverage, and on an unattached one it says the service
      is already in use somewhere, which is the row an operator is most likely
      to have lost track of. *)
+  let switch_of id =
+    List.find_map
+      (function
+        | Masc_tui_types.Identity_declared
+            { idp_id; idp_enabled; idp_switch_problem; _ }
+          when String.equal idp_id id -> Some (idp_enabled, idp_switch_problem)
+        | Masc_tui_types.Identity_declared _ | Masc_tui_types.Identity_unreadable _
+          -> None)
+      providers
+  in
   let also_on id =
     List.find_map
       (function
@@ -3850,9 +3995,19 @@ let identity_lines (state : state) (k : keeper) ~cols providers =
           match tools_of id with
           | None -> Ansi.dim ^ "not attached" ^ Ansi.reset
           | Some [] -> Ansi.dim ^ "attached, no tools" ^ Ansi.reset
-          | Some names ->
-              Printf.sprintf "%s%d tools%s" (Theme.ok ()) (List.length names)
-                Ansi.reset
+          | Some names -> (
+              (* The switch outranks the tool count: a service an operator
+                 turned off is handing this keeper nothing, however many
+                 tools its catalog names, and an unreadable switch store
+                 must not render as on. *)
+              match switch_of id with
+              | Some (_, Some _) ->
+                  (Theme.bad ()) ^ "switch unreadable" ^ Ansi.reset
+              | Some (Some false, None) ->
+                  (Theme.warn ()) ^ "off" ^ Ansi.reset
+              | Some ((Some true | None), None) | None ->
+                  Printf.sprintf "%s%d tools%s" (Theme.ok ())
+                    (List.length names) Ansi.reset)
         in
         (* The row the arrows are on is marked rather than merely numbered:
            past nine the number is no longer a key an operator can press,
@@ -4013,6 +4168,27 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     add_row "Paused:"
       (if k.k_paused then (Theme.warn ()) ^ "yes" ^ Ansi.reset
        else Ansi.dim ^ "no" ^ Ansi.reset);
+    add_empty ();
+
+    (* Gate section. Two settings with similar names decide different things,
+       so both are named rather than merged: YOLO is the in-memory stance that
+       stops this chat asking and a restart clears, while the Gate mode is
+       durable and is what an external effect -- a write to a service this
+       Keeper is attached to -- is actually decided under. An operator reading
+       one for the other is how a call gets made that nobody meant to allow. *)
+    add_section "Gate";
+    add_row "Chat asks (YOLO):"
+      (if List.mem k.k_name state.keeper_yolo_names then
+         (Theme.bad ()) ^ "skipped" ^ Ansi.reset
+       else Ansi.dim ^ "asked" ^ Ansi.reset);
+    add_row "Effects (Gate mode):"
+      (match List.assoc_opt k.k_name state.keeper_gate_modes with
+       | Some mode -> Ansi.cyan ^ Terminal_text.single_line mode ^ Ansi.reset
+       | None -> Ansi.dim ^ "workspace" ^ Ansi.reset);
+    add_row "Judge first:"
+      (match List.assoc_opt k.k_name state.keeper_gate_judges with
+       | Some slot -> Ansi.cyan ^ Terminal_text.single_line slot ^ Ansi.reset
+       | None -> Ansi.dim ^ "lane order" ^ Ansi.reset);
     add_empty ();
 
     (* Current work section *)

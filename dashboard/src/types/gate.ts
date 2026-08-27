@@ -245,6 +245,30 @@ export interface KeeperApprovalRule {
   expires_at: number | null
 }
 
+/** One Keeper an operator has held to a stricter mode than the workspace. */
+export interface KeeperGateModeOverride {
+  keeper_name: string
+  mode: GateMode
+  updated_by: string
+  updated_at: string
+}
+
+/** One Keeper pointed at a particular admitted judge, tried before the rest. */
+export interface KeeperGateJudgePreference {
+  keeper_name: string
+  slot_id: string
+  updated_by: string
+  updated_at: string
+}
+
+/**
+ * Unavailable carries why. An empty list is a working configuration -- nobody
+ * singled out -- so a file that cannot be read must not look like one.
+ */
+export type KeeperGateSettingsState =
+  | { state: 'ready' }
+  | { state: 'unavailable'; error: string }
+
 export type KeeperApprovalRulesState =
   | { state: 'ready' }
   | { state: 'unavailable'; error: string }
@@ -287,8 +311,18 @@ export interface DashboardGateResponse {
   recent_resolved_state: KeeperResolvedApprovalState
   approval_rules: KeeperApprovalRule[]
   approval_rules_state: KeeperApprovalRulesState
+  keeper_modes: KeeperGateModeOverride[]
+  keeper_modes_state: KeeperGateSettingsState
+  keeper_judges: KeeperGateJudgePreference[]
+  keeper_judges_state: KeeperGateSettingsState
   hitl: {
     gate_mode: GateModeStatus
+    /** The external-services lane: calls that leave for an attached outside
+     *  service (Jira, Slack, GitHub through a Keeper identity). A separate
+     *  switch from `gate_mode` on purpose — opening the workspace lane must
+     *  not silently open writes into somebody else's service. Absent state
+     *  file defaults to manual server-side. */
+    external_gate_mode: GateModeStatus
     judge_lane: GateJudgeLane
   } | null
 }

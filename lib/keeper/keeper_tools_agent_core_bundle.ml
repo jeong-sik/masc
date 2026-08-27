@@ -50,7 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?(skill_catalog = Keeper_skill_catalog.empty)
-      ?(identity_tools : Agent_core.Tool.t list = [])
+      ?(identity_tools : Keeper_identity_tools.offered_tool list = [])
       ?composition_plan_index
       ?skill_activation_context
       ?(allow_unrecorded_skill_surface = false)
@@ -493,7 +493,24 @@ let make_tool_bundle_for_descriptors
         ~descriptors
         ()
   in
-  { tools = descriptor_tools @ composition_tools @ identity_tools
+  (* Identity tools are external effects by definition; they join the turn
+     only behind the durable Gate. A row whose provider said "read only"
+     runs as before, everything else defers to the approvals queue. The
+     cycle's one-shot grant threads through so an approved exact call can be
+     spent in the woken cycle. *)
+  let identity_agent_tools =
+    List.map
+      (fun offered ->
+         Keeper_identity_gate.agent_tool
+           ~config
+           ~meta
+           ?continuation_channel
+           ?gate_context:gate_context_provider
+           ?gate_grant
+           offered)
+      identity_tools
+  in
+  { tools = descriptor_tools @ composition_tools @ identity_agent_tools
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)

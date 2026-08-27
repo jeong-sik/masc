@@ -630,6 +630,48 @@ val decode_keeper_lanes_snapshot :
     the reading; additional producer fields are outside this light
     projection and do not. *)
 
+(** Read-only standalone LLM lane observation. These rows describe existing
+    admission and run registries; they never carry a control action. *)
+type standalone_lane_status =
+  | Standalone_running
+  | Standalone_idle
+  | Standalone_degraded
+  | Standalone_no_retained_observation
+  | Standalone_unavailable
+
+type standalone_lane_slot_count = {
+  slsc_slot_id : string;
+  slsc_count : int;
+}
+
+type standalone_lane = {
+  sl_lane_id : string;
+  sl_label : string;
+  sl_required : bool;
+  sl_status : standalone_lane_status;
+  sl_configuration_state : string;
+  sl_admitted_slots : string list;
+  sl_admission_error : string option;
+  sl_retained_run_count : int;
+  sl_running_count : int;
+  sl_succeeded_count : int;
+  sl_failed_count : int;
+  sl_cancelled_count : int;
+  sl_last_terminal_at : float option;
+  sl_last_outcome : string option;
+  sl_p50_elapsed_s : float option;
+  sl_selected_slots : standalone_lane_slot_count list;
+}
+
+type standalone_lanes_snapshot = {
+  sls_observed_at_unix : float;
+  sls_lanes : standalone_lane list;
+}
+
+val standalone_lane_status_to_string : standalone_lane_status -> string
+val decode_standalone_lanes_snapshot :
+  Yojson.Safe.t -> (standalone_lanes_snapshot, string) result
+
 (** What the secret projection reports for one Keeper. The producer computes
     this from the directory: [Secret_absent] when no root is configured,
     [Secret_empty] when a configured root holds nothing, [Secret_ready] when
@@ -774,10 +816,53 @@ type keeper_tool_approval = {
   kta_timeout_sec : float;
 }
 
+val decode_keeper_gate_settings :
+  Yojson.Safe.t -> ((string * string) list * (string * string) list, string) result
+(** [(keeper, mode) list, (keeper, slot_id) list] from
+    [/api/v1/dashboard/gate/keeper-settings].
+
+    Distinct from {!decode_tool_approval_mode_overrides}: that one is the
+    in-memory YOLO stance a restart clears, this is what the Gate decides an
+    external effect under. Two per-Keeper settings with similar names, and an
+    operator reading one for the other is the reason both are named in
+    full. *)
+
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result
 (** Decode [GET /api/v1/keepers/tool-approval-mode]'s
     [{overrides: [{keeper, mode}]}] into (keeper, mode) pairs. *)
+
+type gate_pending = {
+  gp_id : string;
+  gp_keeper : string;
+  gp_operation : string;
+      (** The closed operation identity the Gate stored, e.g.
+          [identity_call]. *)
+  gp_display_tool : string;
+      (** What a human decides on: for an identity call, the provider and
+          the remote tool name read out of the stored input; otherwise the
+          operation itself. *)
+  gp_input_preview : string option;
+  gp_waiting_s : float option;
+}
+
+type gate_lane_modes = {
+  glm_workspace : string;
+  glm_external : string;
+      (** The external-services lane. A separate switch from the workspace
+          lane: opening one does not open the other. *)
+}
+
+type gate_snapshot = {
+  gs_pending : gate_pending list;
+  gs_modes : gate_lane_modes option;
+}
+
+val decode_gate_snapshot : Yojson.Safe.t -> (gate_snapshot, string) result
+(** Decode [GET /api/v1/dashboard/gate] down to what the Approvals surface
+    draws: the durable pending queue and the two Gate lanes. A [null] queue
+    (store unavailable) is an empty list beside whatever the lanes say, the
+    same face the dashboard shows. *)
 
 val decode_keeper_tool_approvals :
   Yojson.Safe.t -> (keeper_tool_approval list, string) result

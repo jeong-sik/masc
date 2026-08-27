@@ -483,7 +483,8 @@ let prepare_agent_setup
     expected_model_tool_names ~skill_catalog
       ~identity_tool_names:
         (List.map
-           (fun (tool : Agent_core.Tool.t) -> tool.schema.name)
+           (fun (offered : Keeper_identity_tools.offered_tool) ->
+              offered.Keeper_identity_tools.schema.name)
            identity_offering.Keeper_identity_tools.offered)
       ~model_visible_descriptors
       ()

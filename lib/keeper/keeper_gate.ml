@@ -1621,7 +1621,7 @@ let decide_from_selected_mode request = function
     allow request source [ audit_receipt ]
 ;;
 
-let decide_without_cycle_grant ~keeper_always_allow request =
+let decide_without_cycle_grant ~read_mode ~keeper_always_allow request =
   if keeper_always_allow
   then (
     let source = Keeper_always_allow in
@@ -1633,8 +1633,11 @@ let decide_without_cycle_grant ~keeper_always_allow request =
     in
     allow request source [ audit_receipt ])
   else
+    (* Both lanes resolve through the Keeper override (#31128): an operator
+       who singled a Keeper out for a higher bar meant it for everything
+       that Keeper does, outside services included. *)
     let mode =
-      Keeper_gate_mode.resolve ~base_path:request.base_path
+      read_mode ~base_path:request.base_path
         ~keeper_name:request.keeper_name
     in
     (match mode with
@@ -1676,7 +1679,7 @@ let decide_without_cycle_grant ~keeper_always_allow request =
           decide_from_selected_mode request mode))
 ;;
 
-let decide ?cycle_grant ~keeper_always_allow request =
+let decide_with_mode ~read_mode ?cycle_grant ~keeper_always_allow request =
   let grant_result =
     match cycle_grant with
     | None -> Cycle_grant_not_applicable
@@ -1690,7 +1693,7 @@ let decide ?cycle_grant ~keeper_always_allow request =
     in
     allow request source [ grant_audit_receipt; gate_audit_receipt ]
   | Cycle_grant_not_applicable ->
-    decide_without_cycle_grant ~keeper_always_allow request
+    decide_without_cycle_grant ~read_mode ~keeper_always_allow request
   | Cycle_grant_temporarily_unavailable (approval_id, reason) ->
     Log.Keeper.warn
       ~keeper_name:request.keeper_name
@@ -1713,6 +1716,22 @@ let decide ?cycle_grant ~keeper_always_allow request =
       ~labels:[ "keeper", request.keeper_name; "site", "cycle_grant_lookup" ]
       ();
     Unavailable reason
+;;
+
+let decide ?cycle_grant ~keeper_always_allow request =
+  decide_with_mode
+    ~read_mode:Keeper_gate_mode.resolve
+    ?cycle_grant
+    ~keeper_always_allow
+    request
+;;
+
+let decide_external_service ?cycle_grant ~keeper_always_allow request =
+  decide_with_mode
+    ~read_mode:Keeper_gate_mode.resolve_external
+    ?cycle_grant
+    ~keeper_always_allow
+    request
 ;;
 
 module For_testing = struct

@@ -919,14 +919,22 @@ let execute_prepared_lane_current
          ; ( "window_units"
            , eligible_units_json (planning_window_sources prepared_lane.window) )
          ]));
+  (* Derived observation only: this mirrors the candidate whose dispatch
+     authority passed and never participates in lane selection or ownership. *)
+  let authorized_observation = ref None in
   let complete outcome output =
+    let selected_slot =
+      Option.map
+        (fun (observation : attempt_observation) -> observation.slot_id)
+        !authorized_observation
+    in
     match
       Exact_lane_run_registry.mark_completed
         registry
         ~run_id
         ~outcome
         ~elapsed_s:(Time_compat.now () -. started_at)
-        ~selected_slot:None
+        ~selected_slot
         ~output
     with
     | Ok () -> ()
@@ -944,7 +952,6 @@ let execute_prepared_lane_current
   (* Process-local derived state only. It identifies the exact AGENT_CORE candidate
      whose dispatch callback passed, so cancellation can retain that source.
      It is not persisted and does not compete with AGENT_CORE execution ownership. *)
-  let authorized_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
     let* () =

@@ -112,18 +112,22 @@ python3 "$REPO/scripts/harness/workload/produce_natural_keeper_skill_proof.py" \
 ```
 
 Hash the immutable producer receipt out of band, then join its `Turn_ref` to
-the exact typed historical ledger:
+the exact typed historical ledger. The join producer prints its manifest
+SHA-256 on completion; record that value now — the final offline verification
+consumes it, and re-hashing the file later would erase the out-of-band
+property:
 
 ```sh
 PRODUCER_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/natural/receipt.json" | awk '{print $1}')
 
-python3 "$REPO/scripts/harness/workload/join_natural_keeper_skill_ledger.py" \
+JOIN_SUMMARY=$(python3 "$REPO/scripts/harness/workload/join_natural_keeper_skill_ledger.py" \
   --producer-receipt "$EVIDENCE_ROOT/natural/receipt.json" \
   --expected-producer-receipt-sha256 "$PRODUCER_SHA" \
   --base-url "$BASE_URL" \
   --token-file "$TOKEN_FILE" \
   --out "$EVIDENCE_ROOT/join" \
-  --timeout 30
+  --timeout 30)
+JOIN_SHA=$(jq -er '.sha256' <<<"$JOIN_SUMMARY")
 ```
 
 Continue only when `join.json` has `result.kind = exact_skill_invocation` and
@@ -134,7 +138,7 @@ Skill name, prefix, or response text.
 SKILL_TOOL_USE_ID=$(jq -er '.result.selected_skill_tool_use_id' "$EVIDENCE_ROOT/join/join.json")
 TUI_BUILD_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/tui-build/build-evidence.json" | awk '{print $1}')
 
-python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.py" \
+PROOF_SUMMARY=$(python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.py" \
   --base-url "$BASE_URL" \
   --token-file "$TOKEN_FILE" \
   --keeper "$KEEPER" \
@@ -143,23 +147,47 @@ python3 "$REPO/scripts/harness/workload/keeper_skill_use_proof.py" \
   --expected-tui-build-evidence-sha256 "$TUI_BUILD_SHA" \
   --skill-tool-use-id "$SKILL_TOOL_USE_ID" \
   --out "$EVIDENCE_ROOT/proof" \
-  --timeout 30
+  --timeout 30)
+PROOF_SHA=$(jq -er '.sha256' <<<"$PROOF_SUMMARY")
 ```
 
 Finally capture the same exact row in the TUI:
 
 ```sh
-PROOF_SHA=$(shasum -a 256 "$EVIDENCE_ROOT/proof/evidence.json" | awk '{print $1}')
-
-python3 "$REPO/scripts/harness/workload/capture_keeper_skill_tui_proof.py" \
+TUI_SUMMARY=$(python3 "$REPO/scripts/harness/workload/capture_keeper_skill_tui_proof.py" \
   --proof "$EVIDENCE_ROOT/proof/evidence.json" \
   --expected-proof-sha256 "$PROOF_SHA" \
   --token-file "$TOKEN_FILE" \
   --out "$EVIDENCE_ROOT/tui" \
   --cols 180 \
   --rows 42 \
-  --timeout 60
+  --timeout 60)
+TUI_SHA=$(jq -er '.sha256' <<<"$TUI_SUMMARY")
 ```
+
+Verify the complete bundle offline. This step performs no HTTP, browser, TUI,
+or executable call. It checks the out-of-band manifest hashes, every stored
+artifact, the seven-part Skill identity, source/server process identity,
+delivery and later actions, and both screenshots before emitting the numeric
+completion matrix. `JOIN_SHA`, `PROOF_SHA`, and `TUI_SHA` are the values each
+producer printed at completion; do not substitute a hash recomputed from the
+files here — a manifest edited after production would then verify against
+itself.
+
+```sh
+python3 "$REPO/scripts/harness/workload/verify_keeper_skill_proof_bundle.py" \
+  --join "$EVIDENCE_ROOT/join/join.json" \
+  --expected-join-sha256 "$JOIN_SHA" \
+  --proof "$EVIDENCE_ROOT/proof/evidence.json" \
+  --expected-proof-sha256 "$PROOF_SHA" \
+  --tui "$EVIDENCE_ROOT/tui/tui-evidence.json" \
+  --expected-tui-sha256 "$TUI_SHA" \
+  --out "$EVIDENCE_ROOT/verified"
+```
+
+Only `verified/verification.json` with schema
+`masc.keeper-skill-proof-verification/v1`, `status = passed`, and no sibling
+`INCOMPLETE` marker is the completed bundle index.
 
 ## Three execution paths
 

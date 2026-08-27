@@ -136,6 +136,11 @@ type replayable =
   | Replay_network_read
   | Replay_connector_post
   | Replay_memory_write
+  | Replay_identity
+      (** A call to an identity-attached outside service
+          ({!Keeper_identity_gate}); the heaviest payload class here, and the
+          reason it must replay rather than wait for a byte-identical
+          re-emission (#25947). *)
 
 val replayable_of_operation : string -> replayable option
 (** Which approved operations can be spent without the Keeper re-emitting the

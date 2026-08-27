@@ -1219,6 +1219,59 @@ let spawn_with
     let run_id = Random_id.prefixed ~prefix:"exact-hitl-judge-" ~bytes:16 in
     let started_at = Time_compat.now () in
     let observed_summary = ref None in
+    let selected_slot = ref None in
+    let bind
+          ~id
+          ~input_hash
+          ~sequence
+          ~slot_id
+          ~call_id
+          ~plan_fingerprint
+          ~request_body_sha256
+      =
+      let result =
+        queue_ops.bind
+          ~id
+          ~input_hash
+          ~sequence
+          ~slot_id
+          ~call_id
+          ~plan_fingerprint
+          ~request_body_sha256
+      in
+      (match result with
+       | Ok { write_outcome = Fsync_completed; _ } ->
+         selected_slot := Some slot_id
+       | Ok { write_outcome = Visible_sync_unconfirmed _; _ } | Error _ -> ());
+      result
+    in
+    let release_before_dispatch
+          ~id
+          ~input_hash
+          ~sequence
+          ~slot_id
+          ~call_id
+          ~plan_fingerprint
+          ~request_body_sha256
+      =
+      let result =
+        queue_ops.release_before_dispatch
+          ~id
+          ~input_hash
+          ~sequence
+          ~slot_id
+          ~call_id
+          ~plan_fingerprint
+          ~request_body_sha256
+      in
+      (match result with
+       | Ok { write_outcome = Fsync_completed; _ } -> selected_slot := None
+       | Ok { write_outcome = Visible_sync_unconfirmed _; _ } | Error _ -> ());
+      result
+    in
+    (* These wrappers only retain the durable binding selected by the existing
+       queue authority. They do not choose a candidate or alter settlement. *)
+    let observed_queue_ops = { queue_ops with bind; release_before_dispatch } in
     let on_summary summary =
       observed_summary := Some summary;
       on_summary summary
@@ -1250,7 +1303,7 @@ let spawn_with
           ~run_id
           ~outcome
           ~elapsed_s:(Time_compat.now () -. started_at)
-          ~selected_slot:None
+          ~selected_slot:!selected_slot
           ~output
       with
       | Ok () -> ()
@@ -1266,7 +1319,7 @@ let spawn_with
       try
         match
           execute_prepared_flow_with_queue_ops
-            ~queue_ops
+            ~queue_ops:observed_queue_ops
             ~net
             ?clock
             ~on_summary

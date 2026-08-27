@@ -190,6 +190,16 @@ val handle_keeper_identity_refresh_post :
 (** Handle [POST /identity-refresh]: ask an attached provider again what
     tools it has, and write the answer down. *)
 
+val handle_keeper_identity_switch_post :
+  Mcp_server.server_state ->
+  actor:string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** Handle [POST /identity-switch]: turn one attached service on or off for
+    this keeper without touching the consent. Body: [{provider, enabled}]. *)
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->

@@ -89,12 +89,13 @@ let failure
 let failure_data
       ~class_
       ?(effect_disposition = Tool_result.Effect_outcome_unknown)
+      ?metadata
       ~message
       data
   =
   { raw_output = message
   ; data = Some data
-  ; metadata = None
+  ; metadata
   ; failure_effect_disposition = effect_disposition
   ; disposition = Tool_result.Failed class_
   ; deferred_kind = None

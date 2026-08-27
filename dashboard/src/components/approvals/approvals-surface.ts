@@ -16,6 +16,9 @@ import type {
   KeeperApprovalQueueItem,
   KeeperApprovalRule,
   KeeperApprovalRulesState,
+  KeeperGateModeOverride,
+  KeeperGateJudgePreference,
+  KeeperGateSettingsState,
   KeeperResolvedApprovalItem,
   KeeperResolvedApprovalPage,
   GateDecisionSource,
@@ -48,6 +51,7 @@ import {
   refreshGate,
   respondToKeeperApproval,
   retryKeeperAutoJudge,
+  setKeeperExternalGateMode,
   setKeeperGateMode,
 } from '../gate-store'
 
@@ -136,8 +140,28 @@ function joinUnique(values: Array<string | null | undefined>): string | null {
   return seen.length ? seen.join(' · ') : null
 }
 
+/** Mirrors `Keeper_identity_gate.gate_operation` — the one closed operation
+ *  identity every outside-service call submits under. */
+const IDENTITY_CALL_OPERATION = 'identity_call'
+
+/** What a human reads as "the tool". An identity_call carries its real
+ *  target inside the input (provider_id · remote_name); the closed operation
+ *  name alone would make every outside-service row read the same. */
+function approvalToolDisplay(item: KeeperApprovalQueueItem): string {
+  if (item.tool_name !== IDENTITY_CALL_OPERATION) return item.tool_name
+  const input = item.input
+  if (typeof input === 'object' && input !== null && !Array.isArray(input)) {
+    const record = input as Record<string, unknown>
+    const provider = typeof record.provider_id === 'string' ? record.provider_id.trim() : ''
+    const remote = typeof record.remote_name === 'string' ? record.remote_name.trim() : ''
+    if (provider && remote) return `${provider} · ${remote}`
+    if (remote) return remote
+  }
+  return item.tool_name
+}
+
 function approvalTitle(item: KeeperApprovalQueueItem): string {
-  return `${item.tool_name} Gate 요청`
+  return `${approvalToolDisplay(item)} Gate 요청`
 }
 
 function approvalWorkSummary(item: KeeperApprovalQueueItem): string | null {
@@ -335,9 +359,13 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     item.exact_attempt.state === 'bound'
       ? `${item.exact_attempt.slot_id} · ${item.exact_attempt.status}`
       : item.exact_attempt.state
+  const toolDisplay = approvalToolDisplay(item)
   return [
     { label: '키퍼', value: item.keeper_name },
-    { label: '도구', value: item.tool_name },
+    { label: '도구', value: toolDisplay },
+    toolDisplay !== item.tool_name
+      ? { label: 'operation', value: item.tool_name }
+      : null,
     { label: '상태', value: 'Human 판단 대기 · Keeper lane nonblocking' },
     { label: '대기', value: apAge(item.waiting_s) },
     { label: '연결 작업', value: approvalWorkSummary(item) },
@@ -346,7 +374,7 @@ function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: strin
     { label: '입력', value: compactText(item.input_preview) || '입력 미리보기 없음' },
     { label: 'Auto Judge', value: disposition },
     { label: 'Exact attempt', value: exact },
-  ].filter((row): row is { label: string; value: string } => Boolean(row.value))
+  ].filter((row): row is { label: string; value: string } => Boolean(row?.value))
 }
 
 // Open this keeper's workspace conversation (work.ts idiom).
@@ -526,7 +554,7 @@ function ApprovalCard({
       <div class="ap-main">
         <div class="ap-h">
           <span class="ap-kind sev-info">● Human HITL</span>
-          <span class="ap-tool mono">${item.tool_name}</span>
+          <span class="ap-tool mono">${approvalToolDisplay(item)}</span>
           <span class="ap-id mono">${item.id}</span>
           <span class="ap-age sev-info">${apAge(item.waiting_s)}</span>
           <button
@@ -675,6 +703,93 @@ const GATE_MODES: ReadonlyArray<{ mode: GateMode; label: string }> = [
   { mode: 'always_allow', label: 'Always Allow' },
 ]
 
+// One Keeper an operator singled out. Both kinds render the same way -- who,
+// what was chosen, and who chose it -- because that is what an operator scans
+// the list for. The mode override says only what was asked for: the Gate keeps
+// the stricter of it and the workspace, and a row asking for less is on file
+// without being in force.
+function KeeperGateSettingRow({
+  keeperName,
+  value,
+  updatedBy,
+  updatedAt,
+  testId,
+}: {
+  keeperName: string
+  value: string
+  updatedBy: string
+  updatedAt: string
+  testId: string
+}) {
+  return html`
+    <li class="ap-rule-row" data-testid=${testId}>
+      <span class="ap-rule-keeper mono">${keeperName}</span>
+      <span class="ap-rule-tool mono">${value}</span>
+      <span class="ap-rule-provenance mono">${updatedBy}</span>
+      <span class="ap-rule-expiry mono">${updatedAt === '' ? '시각 없음' : updatedAt}</span>
+    </li>
+  `
+}
+
+function KeeperGateSettingsCard({
+  modes,
+  modesState,
+  judges,
+  judgesState,
+}: {
+  modes: KeeperGateModeOverride[]
+  modesState: KeeperGateSettingsState
+  judges: KeeperGateJudgePreference[]
+  judgesState: KeeperGateSettingsState
+}) {
+  const modeLabel = (mode: GateMode) =>
+    GATE_MODES.find(entry => entry.mode === mode)?.label ?? mode
+  return html`
+    <section class="wka-card" data-testid="keeper-gate-settings">
+      <div class="wka-h">
+        <h3>Keeper 개별 설정</h3>
+        <span class="mono">${(modes.length + judges.length).toLocaleString()}</span>
+      </div>
+      <div class="wka-hint mono">workspace 설정보다 엄격한 쪽만 적용됩니다</div>
+
+      ${modesState.state === 'unavailable'
+        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-modes-unavailable">모드 오버라이드 읽기 실패: ${modesState.error}</div>`
+        : modes.length > 0
+        ? html`
+            <ul class="ap-rule-list">${modes.map(row => html`
+              <${KeeperGateSettingRow}
+                key=${`mode:${row.keeper_name}`}
+                keeperName=${row.keeper_name}
+                value=${modeLabel(row.mode)}
+                updatedBy=${row.updated_by}
+                updatedAt=${row.updated_at}
+                testId="keeper-mode-row"
+              />
+            `)}</ul>
+          `
+        : html`<div class="ap-side-empty">모드를 따로 정한 Keeper 없음</div>`}
+
+      <div class="wka-hint mono">판정자 — lane 이 내놓는 것 중 먼저 갈 곳</div>
+      ${judgesState.state === 'unavailable'
+        ? html`<div class="ap-env-warn" role="alert" data-testid="keeper-judges-unavailable">판정자 설정 읽기 실패: ${judgesState.error}</div>`
+        : judges.length > 0
+        ? html`
+            <ul class="ap-rule-list">${judges.map(row => html`
+              <${KeeperGateSettingRow}
+                key=${`judge:${row.keeper_name}`}
+                keeperName=${row.keeper_name}
+                value=${row.slot_id}
+                updatedBy=${row.updated_by}
+                updatedAt=${row.updated_at}
+                testId="keeper-judge-row"
+              />
+            `)}</ul>
+          `
+        : html`<div class="ap-side-empty">판정자를 따로 정한 Keeper 없음</div>`}
+    </section>
+  `
+}
+
 function ApAside({
   openCount,
   resolvedItems,
@@ -691,6 +806,7 @@ function ApAside({
     .sort((a, b) => resolvedAtMs(b) - resolvedAtMs(a))
     .slice(0, ASIDE_RECENT_LIMIT)
   const gateMode = hitl?.gate_mode
+  const externalGateMode = hitl?.external_gate_mode
   const judgeLane = hitl?.judge_lane
   const acting = gateApprovalActing.value
   const modeDisabled = acting !== null
@@ -721,9 +837,29 @@ function ApAside({
               `)}
             </div>
           </div>
+          <div class="wka-auto-top">
+            <span class="wka-auto-lbl">
+              바깥 서비스 쓰기
+              <b>${GATE_MODES.find(option => option.mode === externalGateMode?.mode)?.label ?? '확인 필요'}</b>
+            </span>
+            <div class="wka-mode wka-mode-3" role="radiogroup" aria-label="바깥 서비스 Gate 모드" data-testid="gate-external-mode-selector">
+              ${GATE_MODES.map(option => html`
+                <button
+                  key=${option.mode}
+                  type="button"
+                  class=${`wka-mode-b ${externalGateMode?.mode === option.mode ? 'on' : ''}`}
+                  role="radio"
+                  aria-checked=${externalGateMode?.mode === option.mode}
+                  onClick=${() => void setKeeperExternalGateMode(option.mode)}
+                  disabled=${modeDisabled}
+                ><b>${option.label}</b></button>
+              `)}
+            </div>
+          </div>
           <div class="wka-auto-stat">${rulesState.state === 'ready' ? `${rules.length.toLocaleString()}개 Always 규칙` : 'Always 규칙 확인 불가'} · 열린 승인 ${openCount.toLocaleString()}건</div>
           <div class="wka-auto-note">
             Human은 사람이 판단하고, Auto Judge는 LLM이 판단하며, Always Allow는 workspace의 명시적 선택입니다.
+            바깥 서비스 쓰기(Jira · Slack · GitHub)는 자기 스위치를 따로 탑니다 — 위 Gate 모드를 열어도 바깥 쓰기는 열리지 않습니다.
           </div>
           ${judgeLane
             ? judgeLane.status === 'available'
@@ -742,6 +878,9 @@ function ApAside({
             : null}
           ${gateMode?.state === 'invalid' || gateMode?.state === 'unavailable'
             ? html`<div class="ap-env-warn mono">Gate mode ${gateMode.state}: ${gateMode.read_error}</div>`
+            : null}
+          ${externalGateMode?.state === 'invalid' || externalGateMode?.state === 'unavailable'
+            ? html`<div class="ap-env-warn mono">External gate mode ${externalGateMode.state}: ${externalGateMode.read_error}</div>`
             : null}
         </div>
       </section>
@@ -765,6 +904,13 @@ function ApAside({
             `
           : html`<div class="ap-side-empty">저장된 Always 규칙 없음</div>`}
       </section>
+
+      <${KeeperGateSettingsCard}
+        modes=${gateData.value?.keeper_modes ?? []}
+        modesState=${gateData.value?.keeper_modes_state ?? { state: 'ready' }}
+        judges=${gateData.value?.keeper_judges ?? []}
+        judgesState=${gateData.value?.keeper_judges_state ?? { state: 'ready' }}
+      />
 
       <section class="wka-card">
         <div class="wka-h">

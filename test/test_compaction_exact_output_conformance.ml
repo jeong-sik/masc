@@ -799,7 +799,7 @@ let test_observation_completion_failure_does_not_mask_source_terminal () =
   Alcotest.(check int) "provider is dispatched exactly once" 1 (F.post_count failed);
   match Exact_lane_run_registry.list_runs observation_registry with
   | [ { status = Exact_lane_run_registry.Completion_persistence_failed
-          { failure; _ }; _ } as run ] ->
+          { failure; selected_slot; _ }; _ } as run ] ->
     Alcotest.(check string)
       "failed observation append is explicitly uncertain"
       "completion_durability_unknown"
@@ -807,7 +807,11 @@ let test_observation_completion_failure_does_not_mask_source_terminal () =
     Alcotest.(check bool)
       "failure detail survives"
       true
-      (String.trim failure.detail <> "")
+      (String.trim failure.detail <> "");
+    Alcotest.(check (option string))
+      "authorized slot survives observation failure"
+      (Some slot_id)
+      selected_slot
   | [ _ ] ->
     Alcotest.fail "failed observation append was not exposed as a persistence failure"
   | runs ->

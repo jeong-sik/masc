@@ -10,9 +10,13 @@ let same_identity left right =
   | Keeper_tool_row left, Keeper_tool_row right ->
       String.equal left.kta_keeper right.kta_keeper
       && String.equal left.kta_tool_call_id right.kta_tool_call_id
+  | Gate_row left, Gate_row right ->
+      String.equal left.Tui_decode.gp_id right.Tui_decode.gp_id
   | Operator_row left, Operator_row right ->
       String.equal left.ap_token right.ap_token
-  | Keeper_tool_row _, Operator_row _ | Operator_row _, Keeper_tool_row _ ->
+  | Keeper_tool_row _, (Operator_row _ | Gate_row _)
+  | Gate_row _, (Keeper_tool_row _ | Operator_row _)
+  | Operator_row _, (Keeper_tool_row _ | Gate_row _) ->
       false
 
 let resolve ~presented ~current decision =

@@ -11,7 +11,10 @@ open Keeper_types_profile
 
 val handle_time_now : args:Yojson.Safe.t -> Yojson.Safe.t
 
-val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
+val handle_tools_list
+  :  meta:keeper_meta
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
 
 val network_read_gate_operation : string
 

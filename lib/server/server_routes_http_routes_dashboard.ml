@@ -991,7 +991,16 @@ let handle_gate_keeper_mode_body state operator_name request reqd body_str =
   with Yojson.Json_error message -> refuse message
 ;;
 
-let handle_gate_mode_body state operator_name request reqd body_str =
+
+let handle_gate_mode_body_for_lane
+      ~set_mode
+      ~sse_type
+      state
+      operator_name
+      request
+      reqd
+      body_str
+  =
   try
     let args = Yojson.Safe.from_string body_str in
     let mode_json =
@@ -1031,19 +1040,19 @@ let handle_gate_mode_body state operator_name request reqd body_str =
               reqd
               (operator_error_json ("Auto Judge unavailable: " ^ detail))
           | Ok () ->
-         (match Keeper_gate_mode.set config ~actor:operator_name mode with
+         (match set_mode config ~actor:operator_name mode with
           | Error message ->
             respond_json_value_with_cors
               ~status:`Bad_request
               request
               reqd
               (operator_error_json message)
-          | Ok change ->
+          | Ok (change : Keeper_gate_mode.change) ->
             Dashboard_cache.invalidate_prefix
               (Printf.sprintf "gate:%s;" config.base_path);
             Sse.broadcast
               (`Assoc
-                 [ "type", `String "gate_mode_changed"
+                 [ "type", `String sse_type
                  ; "mode", `String (Keeper_gate_mode.to_string mode)
                  ; ( "previous_mode"
                    , match change.previous with
@@ -1089,6 +1098,28 @@ let handle_gate_mode_body state operator_name request reqd body_str =
       request
       reqd
       (operator_error_json (Printf.sprintf "invalid json: %s" message))
+;;
+
+let handle_gate_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set
+    ~sse_type:"gate_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
+;;
+
+let handle_gate_external_mode_body state operator_name request reqd body_str =
+  handle_gate_mode_body_for_lane
+    ~set_mode:Keeper_gate_mode.set_external
+    ~sse_type:"gate_external_mode_changed"
+    state
+    operator_name
+    request
+    reqd
+    body_str
 ;;
 
 let handle_gate_resolve_body state operator_name request reqd body_str =
@@ -1285,6 +1316,19 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  (* One bounded, read-only join of lane admission and retained observations.
+     Unlike the paged run endpoint below this always names all five standalone
+     lanes, including configured lanes with no currently retained run. *)
+  |> Http.Router.get "/api/v1/dashboard/standalone-lanes" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+            Http.Response.json_value
+              ~compress:true
+              ~request:req
+              (Server_standalone_lane_projection.snapshot_json ())
+              reqd)
+         request
+         reqd)
   (* Paged, and without either exact payload. Serving every retained run with
      its payloads made this one response 246 MB for 5,908 runs — the whole
      rendered prompt of every lane run, to draw a table of timestamps — and the
@@ -2126,6 +2170,53 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
          request reqd)
+  (* The same two lists the Gate projection carries, on their own so a surface
+     that only wants them does not pay for the approval queue and the resolved
+     history to find out which Keepers were singled out. *)
+  |> Http.Router.get "/api/v1/dashboard/gate/keeper-settings" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let modes, modes_state =
+           match Keeper_gate_mode.keeper_overrides ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_mode.keeper_override) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "mode", `String (Keeper_gate_mode.to_string row.mode)
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         let judges, judges_state =
+           match Keeper_gate_judge_slot.all ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_judge_slot.t) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "slot_id", `String row.slot_id
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         Http.Response.json_value ~compress:true ~request:req
+           (`Assoc
+              [ "modes", modes
+              ; "modes_state", modes_state
+              ; "judges", judges
+              ; "judges_state", judges_state
+              ])
+           reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/keeper-mode" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->
@@ -2137,6 +2228,12 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_keeper_judge_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/external-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_external_mode_body state operator_name request reqd))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
@@ -2337,7 +2434,7 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/skill-activations" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let extra_headers = cors_headers (get_origin req) in
+         let extra_headers = public_read_cors_headers req in
          match Server_utils.query_param req "trace_id" |> Option.map String.trim with
          | None | Some "" ->
            Http.Response.json_value ~compress:true ~request:req
@@ -2749,6 +2846,17 @@ let add_routes ~sw ~clock router =
              (fun state _agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_identity_refresh_post state req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_identity_switch ->
+           (* Decides whether this keeper's turns are handed that provider's
+              tools at all, so it carries the same authority as the attach
+              that produced them. The operator name feeds the audit row. *)
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_identity_switch_post state
+                   ~actor:agent_name req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_oauth_login ->

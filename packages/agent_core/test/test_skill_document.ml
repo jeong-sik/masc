@@ -27,6 +27,7 @@ let test_official_document () =
     "description"
     "Process PDF files when requested."
     document.description;
+  Alcotest.(check (option string)) "no allowed-tools" None document.allowed_tools;
   Alcotest.(check (list (pair string string)))
     "metadata"
     [ "author", "example-org"; "version", "1.0" ]
@@ -257,31 +258,47 @@ let test_invalid_optional_values_are_diagnostic () =
        (Skill_document.diagnostics null_compatibility))
 ;;
 
-let test_allowed_tools_is_validated_but_not_retained () =
+let test_allowed_tools_preserves_skills_ref_string_vector () =
   let valid =
     Skill_document.decode
-      ~directory_name:"allowed-tools"
-      "---\nname: allowed-tools\ndescription: Validate the official optional field.\nallowed-tools: Bash(git:*) Read\n---\nBody"
+      ~directory_name:"my-skill"
+      "---\nname: my-skill\ndescription: A test skill\nallowed-tools: Bash(jq:*) Bash(git:*)\n---\nBody"
   in
   check_conformance "conformant" valid;
+  let document = document_exn valid in
+  Alcotest.(check (option string))
+    "skills-ref positive parser vector"
+    (Some "Bash(jq:*) Bash(git:*)")
+    document.allowed_tools;
   Alcotest.(check (list (pair string string)))
-    "not retained as metadata"
+    "not merged into client metadata"
     []
-    (document_exn valid).metadata;
+    document.metadata;
   Alcotest.(check int)
-    "not retained as an extension"
+    "not treated as an extension"
     0
-    (List.length (document_exn valid).extensions);
+    (List.length document.extensions)
+;;
+
+(* The Agent Skills specification owns the string shape. The reference parser
+   copies the YAML value without validating that shape, so its positive vector
+   does not define null or list behavior. MASC keeps a non-string document
+   usable with an explicit conformance diagnostic and no observed value. *)
+let test_allowed_tools_non_string_is_masc_conformance_diagnostic () =
   List.iter
     (fun (label, value) ->
        let decoded =
          Skill_document.decode
            ~directory_name:"allowed-tools"
            (Printf.sprintf
-              "---\nname: allowed-tools\ndescription: Reject a non-string official field.\nallowed-tools: %s\n---\nBody"
+              "---\nname: allowed-tools\ndescription: Diagnose a non-string allowed-tools value.\nallowed-tools: %s\n---\nBody"
               value)
        in
        check_conformance "runtime_compatible" decoded;
+       Alcotest.(check (option string))
+         (label ^ " is not retained")
+         None
+         (document_exn decoded).allowed_tools;
        Alcotest.(check bool)
          label
          true
@@ -440,9 +457,13 @@ let () =
             `Quick
             test_invalid_optional_values_are_diagnostic
         ; Alcotest.test_case
-            "allowed-tools optional string"
+            "allowed-tools skills-ref string vector"
             `Quick
-            test_allowed_tools_is_validated_but_not_retained
+            test_allowed_tools_preserves_skills_ref_string_vector
+        ; Alcotest.test_case
+            "allowed-tools non-string MASC policy"
+            `Quick
+            test_allowed_tools_non_string_is_masc_conformance_diagnostic
         ; Alcotest.test_case
             "foreign and duplicate metadata"
             `Quick

@@ -11,6 +11,7 @@
   mcp_protocol.eio
   yojson
   otoml
+  sqlite3
   base64
   graphql
   graphql_parser

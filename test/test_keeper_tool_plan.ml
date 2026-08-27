@@ -901,6 +901,74 @@ let test_request_composable_names_match_registry () =
     (List.mem "keeper_context_status" names)
 ;;
 
+let test_plan_error_json_covers_closed_sum () =
+  let a = node_id "a" in
+  let b = node_id "b" in
+  let rows =
+    [ Plan.Empty_plan, "empty_plan", None
+    ; Plan.Unknown_descriptor_id "descriptor", "unknown_descriptor_id", None
+    ; Plan.Duplicate_node_id a, "duplicate_node_id", None
+    ; Plan.Duplicate_tool_name "tool", "duplicate_tool_name", None
+    ; Plan.Unknown_tool { node_id = a; tool_name = "tool" }, "unknown_tool", None
+    ; ( Plan.Tool_off_keeper_surface
+          { node_id = a; tool_name = "tool"; reason = Plan.Operator_only_tool }
+      , "tool_off_keeper_surface"
+      , Some "operator_only" )
+    ; ( Plan.Tool_off_keeper_surface
+          { node_id = a
+          ; tool_name = "tool"
+          ; reason = Plan.Aliased_by { projected_by = "public-tool" }
+          }
+      , "tool_off_keeper_surface"
+      , Some "aliased_by" )
+    ; ( Plan.Tool_off_keeper_surface
+          { node_id = a; tool_name = "tool"; reason = Plan.Unresolved_schema }
+      , "tool_off_keeper_surface"
+      , Some "unresolved_schema" )
+    ; Plan.Missing_dependency { node_id = a; dependency = b }, "missing_dependency", None
+    ; ( Plan.Opaque_output_reference
+          { node_id = b; source_node_id = a; source_tool_name = "source" }
+      , "opaque_output_reference"
+      , None )
+    ; ( Plan.Invalid_output_pointer
+          { node_id = b
+          ; source_node_id = a
+          ; pointer = pointer "/value"
+          ; error = Plan.Json_pointer.Missing_properties "value"
+          }
+      , "invalid_output_pointer"
+      , None )
+    ; ( Plan.Invalid_output_schema
+          { node_id = a
+          ; tool_name = "tool"
+          ; error = Plan.Missing_schema_type { path = [ "output" ] }
+          }
+      , "invalid_output_schema"
+      , None )
+    ; Plan.Multiple_terminal_nodes [ a; b ], "multiple_terminal_nodes", None
+    ; ( Plan.Terminal_node_missing_dependency
+          { terminal_node_id = b; node_id = a }
+      , "terminal_node_missing_dependency"
+      , None )
+    ; Plan.Dependency_cycle [ a; b ], "dependency_cycle", None
+    ]
+  in
+  check int "closed error rows" 15 (List.length rows);
+  List.iter
+    (fun (error, expected_kind, expected_reason) ->
+       let json = Plan.error_to_json error in
+       let open Yojson.Safe.Util in
+       check string "error kind" expected_kind (json |> member "kind" |> to_string);
+       match expected_reason with
+       | None -> ()
+       | Some expected ->
+         check string
+           "off-surface reason"
+           expected
+           (json |> member "reason" |> member "kind" |> to_string))
+    rows
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
@@ -936,6 +1004,7 @@ let () =
         ; test_case "composition run UUID" `Quick test_composition_run_id_is_uuid_v7_identity
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation
         ; test_case "JSON template" `Quick test_json_template_preserves_declared_structure
+        ; test_case "plan error JSON sum" `Quick test_plan_error_json_covers_closed_sum
         ] )
     ; ( "plan"
       , [ test_case

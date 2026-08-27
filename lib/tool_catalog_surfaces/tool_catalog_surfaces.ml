@@ -124,6 +124,7 @@ let spawned_agent_surface_tools =
        that asks, and an operator answers over HTTP, not by calling a tool. *)
     "masc_ask"
   ; "masc_ask_status"
+  ; "masc_ask_withdraw"
   ; "masc_status"
   ; "masc_tasks"
   ; "masc_transition"

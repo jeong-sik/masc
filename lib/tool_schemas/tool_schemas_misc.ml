@@ -39,8 +39,10 @@ type mcp_runtime_operation =
   | Messages
   | Ask
   | Ask_status
+  | Ask_withdraw
 
-let mcp_runtime_operations = [ Start; Broadcast; Messages; Ask; Ask_status ]
+let mcp_runtime_operations =
+  [ Start; Broadcast; Messages; Ask; Ask_status; Ask_withdraw ]
 
 let mcp_runtime_tool_name = function
   | Start -> "masc_start"
@@ -48,6 +50,7 @@ let mcp_runtime_tool_name = function
   | Messages -> "masc_messages"
   | Ask -> "masc_ask"
   | Ask_status -> "masc_ask_status"
+  | Ask_withdraw -> "masc_ask_withdraw"
 ;;
 
 let mcp_runtime_operation_of_tool_name = function
@@ -56,6 +59,7 @@ let mcp_runtime_operation_of_tool_name = function
   | "masc_messages" -> Some Messages
   | "masc_ask" -> Some Ask
   | "masc_ask_status" -> Some Ask_status
+  | "masc_ask_withdraw" -> Some Ask_withdraw
   | _ -> None
 ;;
 

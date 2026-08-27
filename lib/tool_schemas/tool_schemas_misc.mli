@@ -58,6 +58,7 @@ type mcp_runtime_operation =
   | Messages
   | Ask
   | Ask_status
+  | Ask_withdraw
 (** Closed vocabulary dispatched by [Mcp_tool_runtime]. *)
 
 val mcp_runtime_operations : mcp_runtime_operation list

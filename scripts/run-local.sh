@@ -16,21 +16,6 @@ BOOTSTRAP_ONLY=0
 BUILD_DASHBOARD=0
 BOOTSTRAP_KEEPERS=0
 
-git_common_root() {
-  if ! command -v git >/dev/null 2>&1; then
-    return 1
-  fi
-  local common_dir
-  common_dir="$(git -C "$REPO_ROOT" rev-parse --git-common-dir 2>/dev/null || true)"
-  if [ -z "$common_dir" ]; then
-    return 1
-  fi
-  if [[ "$common_dir" != /* ]]; then
-    common_dir="$REPO_ROOT/$common_dir"
-  fi
-  (cd "$(dirname "$common_dir")" && pwd)
-}
-
 usage() {
   cat >&2 <<'EOF'
 Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--print-port] [--bootstrap-only] [--build-dashboard] [--bootstrap-keepers]
@@ -70,37 +55,32 @@ set_default_env() {
   fi
 }
 
-binary_is_stale() {
+source_commit() {
+  git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null
+}
+
+binary_embedded_commit() {
   local exe="$1"
   if [ ! -x "$exe" ]; then
+    return 1
+  fi
+  "$exe" build-commit 2>/dev/null
+}
+
+binary_matches_source_commit() {
+  local exe="$1"
+  local expected_commit="$2"
+  local embedded_commit=""
+  embedded_commit="$(binary_embedded_commit "$exe" 2>/dev/null || true)"
+  [ -n "$embedded_commit" ] && [ "$embedded_commit" = "$expected_commit" ]
+}
+
+source_affecting_binary_is_dirty() {
+  if ! git -C "$REPO_ROOT" diff --quiet HEAD -- bin lib proto dune-project 2>/dev/null; then
     return 0
   fi
-  if [[ "$exe" != "$REPO_ROOT/"* ]]; then
-    local common_root="" common_head=""
-    common_root="$(git_common_root 2>/dev/null || true)"
-    if [ -n "$common_root" ] && [ "$common_root" != "$REPO_ROOT" ]; then
-      common_head="$(git -C "$common_root" rev-parse HEAD 2>/dev/null || true)"
-      if [ -n "$common_head" ] \
-        && git -C "$REPO_ROOT" diff --quiet "${common_head}"...HEAD -- bin lib proto dune-project 2>/dev/null \
-        && git -C "$REPO_ROOT" diff --quiet -- bin lib proto dune-project 2>/dev/null \
-        && git -C "$REPO_ROOT" diff --cached --quiet -- bin lib proto dune-project 2>/dev/null; then
-        if ! git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib proto dune-project 2>/dev/null \
-          | grep -q .; then
-          return 1
-        fi
-      fi
-    fi
-  fi
-  if [ "$REPO_ROOT/dune-project" -nt "$exe" ]; then
-    return 0
-  fi
-  if find "$REPO_ROOT/bin" "$REPO_ROOT/lib" "$REPO_ROOT/proto" \
-      -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
-      -newer "$exe" -print -quit 2>/dev/null \
-    | grep -q .; then
-    return 0
-  fi
-  return 1
+  git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib proto dune-project \
+    2>/dev/null | grep -q .
 }
 
 bootstrap_local_config() {
@@ -157,22 +137,18 @@ build_dashboard_if_requested() {
 }
 
 resolve_built_exe() {
-  local common_root=""
-  common_root="$(git_common_root 2>/dev/null || true)"
+  local expected_commit="$1"
   local -a candidates=(
     "$REPO_ROOT/_build/default/bin/main_eio.exe"
   )
-  if [ -n "$common_root" ] && [ "$common_root" != "$REPO_ROOT" ]; then
-    candidates+=("$common_root/_build/default/bin/main_eio.exe")
-  fi
   local candidate
   for candidate in "${candidates[@]}"; do
-    if [ -x "$candidate" ]; then
+    if binary_matches_source_commit "$candidate" "$expected_commit"; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
-  printf '%s\n' "$REPO_ROOT/_build/default/bin/main_eio.exe"
+  return 1
 }
 
 while [[ $# -gt 0 ]]; do
@@ -236,15 +212,24 @@ bootstrap_local_config "$TARGET_DIR"
 build_dashboard_if_requested
 
 LOCAL_CONFIG_DIR="${MASC_CONFIG_DIR:-$TARGET_DIR/.masc/config}"
-EXE="$(resolve_built_exe)"
+SOURCE_COMMIT="$(source_commit)" || {
+  echo "Failed to resolve source commit for $REPO_ROOT" >&2
+  exit 1
+}
+SOURCE_STATE="clean"
+if source_affecting_binary_is_dirty; then
+  SOURCE_STATE="dirty"
+fi
+EXE="$(resolve_built_exe "$SOURCE_COMMIT" || true)"
 
-if binary_is_stale "$EXE"; then
+if [ -z "$EXE" ] || [ "$SOURCE_STATE" = "dirty" ]; then
   echo "[local-run] Building local binary..." >&2
   "$REPO_ROOT/scripts/dune-local.sh" build bin/main_eio.exe
+  EXE="$(resolve_built_exe "$SOURCE_COMMIT" || true)"
 fi
 
-if [ ! -x "$EXE" ]; then
-  echo "Failed to resolve built binary: $EXE" >&2
+if [ -z "$EXE" ]; then
+  echo "Failed to resolve a worktree-local binary for commit $SOURCE_COMMIT" >&2
   exit 1
 fi
 
@@ -253,6 +238,8 @@ if [ "$BOOTSTRAP_ONLY" = "1" ]; then
   echo "  Target dir: $TARGET_DIR" >&2
   echo "  Config root: $LOCAL_CONFIG_DIR" >&2
   echo "  Binary: $EXE" >&2
+  echo "  Binary commit: $SOURCE_COMMIT" >&2
+  echo "  Source state: $SOURCE_STATE" >&2
   exit 0
 fi
 

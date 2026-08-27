@@ -1211,6 +1211,19 @@ let keeper_github_cmd =
     (Cmd.info "keeper-github" ~doc:"Manage Keeper-specific GitHub CLI identity.")
     [ login; status; logout ]
 
+let build_commit_cmd_exit () =
+  match (Build_identity.current ()).binary_commit with
+  | Some commit ->
+      print_endline commit;
+      0
+  | None ->
+      prerr_endline "build commit is not embedded";
+      1
+
+let build_commit_cmd =
+  let doc = "Print the Git commit embedded in this server binary at build time." in
+  Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1239,6 +1252,7 @@ let cmd =
     ; runtime_wizard_catalog_cmd
     ; schedule_prune_cmd
     ; keeper_github_cmd
+    ; build_commit_cmd
     ]
 
 let () =

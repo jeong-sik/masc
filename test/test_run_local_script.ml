@@ -112,24 +112,46 @@ let write_keeper_seed repo_root =
     (Filename.concat repo_root "config/keepers/alpha.toml")
     "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
 
-let write_fake_eio_exe exe_path =
+let write_fake_eio_exe ~commit exe_path =
   mkdir_p (Filename.dirname exe_path);
   let content =
-    {|
+    Printf.sprintf
+      {|
 #!/bin/sh
 set -eu
+if [ "${1:-}" = "build-commit" ]; then
+  printf '%%s\n' %s
+  exit 0
+fi
 capture="${FAKE_CAPTURE_FILE:?}"
 {
-  printf 'MASC_BASE_PATH=%s\n' "${MASC_BASE_PATH:-}"
-  printf 'MASC_CONFIG_DIR=%s\n' "${MASC_CONFIG_DIR:-}"
-  printf 'MASC_GRPC_ENABLED=%s\n' "${MASC_GRPC_ENABLED:-}"
-  printf 'MASC_WS_ENABLED=%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'ARGS=%s\n' "$*"
+  printf 'MASC_BASE_PATH=%%s\n' "${MASC_BASE_PATH:-}"
+  printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
+  printf 'MASC_GRPC_ENABLED=%%s\n' "${MASC_GRPC_ENABLED:-}"
+  printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
+  printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
 |}
+      (Filename.quote commit)
   in
   write_executable exe_path content
+
+let run_git ~cwd args =
+  let argv = Array.of_list ("git" :: args) in
+  let code, stdout, stderr = run_process ~cwd "git" argv in
+  if code <> 0 then
+    failf "git %s failed (%d)\nstdout:\n%s\nstderr:\n%s"
+      (String.concat " " args) code stdout stderr;
+  String.trim stdout
+
+let git_commit_all repo_root message =
+  ignore (run_git ~cwd:repo_root [ "add"; "." ]);
+  ignore
+    (run_git ~cwd:repo_root
+       [ "-c"; "user.name=Run Local Test"; "-c";
+         "user.email=run-local@example.invalid"; "commit"; "-q"; "-m";
+         message ])
 
 let setup_fake_repo root =
   let repo_root = Filename.concat root "repo" in
@@ -138,7 +160,10 @@ let setup_fake_repo root =
   mkdir_p scripts_dir;
   ignore (make_config_root repo_root);
   copy_script (run_local_script_path ()) (Filename.concat scripts_dir "run-local.sh");
-  write_fake_eio_exe (Filename.concat build_dir "main_eio.exe");
+  ignore (run_git ~cwd:repo_root [ "init"; "-q" ]);
+  git_commit_all repo_root "fixture";
+  let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+  write_fake_eio_exe ~commit (Filename.concat build_dir "main_eio.exe");
   repo_root
 
 let test_bootstraps_local_config_and_sets_http_only_env () =
@@ -393,6 +418,137 @@ let test_bootstrap_only_materializes_state_without_exec () =
       check bool "bootstrap ready message" true
         (String_util.contains_substring stderr "[local-run] Bootstrap ready"))
 
+let setup_linked_worktree_fixture ?(advance_head = true) ?(dirty_common = false) root
+    ~local_binary =
+  let common_root = setup_fake_repo root in
+  let old_commit = run_git ~cwd:common_root [ "rev-parse"; "HEAD" ] in
+  let worktree_root = Filename.concat root "worktree" in
+  ignore
+    (run_git ~cwd:common_root
+       [ "worktree"; "add"; "-q"; "-b"; "feature"; worktree_root ]);
+  if advance_head then begin
+    mkdir_p (Filename.concat worktree_root "lib");
+    write_file (Filename.concat worktree_root "lib/feature.ml") "let exact = true\n";
+    git_commit_all worktree_root "feature source"
+  end;
+  if dirty_common then begin
+    mkdir_p (Filename.concat common_root "lib");
+    write_file (Filename.concat common_root "lib/dirty.ml") "let uncommitted = true\n";
+    write_fake_eio_exe ~commit:old_commit
+      (Filename.concat common_root "_build/default/bin/main_eio.exe")
+  end;
+  let exact_commit = run_git ~cwd:worktree_root [ "rev-parse"; "HEAD" ] in
+  let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
+  (match local_binary with
+   | `Absent -> ()
+   | `Stale -> write_fake_eio_exe ~commit:old_commit local_exe);
+  let built_exe = Filename.concat root "built-main-eio.exe" in
+  write_fake_eio_exe ~commit:exact_commit built_exe;
+  let build_marker = Filename.concat root "build.marker" in
+  write_executable
+    (Filename.concat worktree_root "scripts/dune-local.sh")
+    {|
+#!/bin/sh
+set -eu
+: "${FAKE_BUILD_EXE:?}"
+: "${BUILD_MARKER:?}"
+script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+mkdir -p "$repo_root/_build/default/bin"
+cp "$FAKE_BUILD_EXE" "$repo_root/_build/default/bin/main_eio.exe"
+printf 'built\n' >"$BUILD_MARKER"
+|};
+  common_root, worktree_root, exact_commit, built_exe, build_marker
+
+let check_worktree_binary_selected_after_build ?(advance_head = true)
+    ?(dirty_common = false) local_binary =
+  with_temp_dir "run-local-linked" (fun dir ->
+      let common_root, worktree_root, exact_commit, built_exe, build_marker =
+        setup_linked_worktree_fixture ~advance_head ~dirty_common dir ~local_binary
+      in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat worktree_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:worktree_root script
+          ~env:[ ("FAKE_BUILD_EXE", built_exe); ("BUILD_MARKER", build_marker) ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "linked run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
+      let common_exe = Filename.concat common_root "_build/default/bin/main_eio.exe" in
+      check bool "build invoked" true (Sys.file_exists build_marker);
+      check bool "worktree binary selected" true
+        (String_util.contains_substring stderr ("Binary: " ^ local_exe));
+      check bool "common binary not selected" false
+        (String_util.contains_substring stderr ("Binary: " ^ common_exe));
+      check bool "bootstrap reports exact embedded commit" true
+        (String_util.contains_substring stderr ("Binary commit: " ^ exact_commit)))
+
+let test_common_binary_does_not_win_when_worktree_binary_is_absent () =
+  check_worktree_binary_selected_after_build `Absent
+
+let test_common_binary_does_not_win_when_worktree_binary_is_stale () =
+  check_worktree_binary_selected_after_build `Stale
+
+let test_same_commit_common_binary_is_not_worktree_authority () =
+  check_worktree_binary_selected_after_build ~advance_head:false ~dirty_common:true
+    `Absent
+
+let test_exact_local_binary_skips_build () =
+  with_temp_dir "run-local-no-build" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let exact_commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "exact local run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "build skipped" false
+        (String_util.contains_substring stderr "Building local binary");
+      check bool "bootstrap reports exact embedded commit" true
+        (String_util.contains_substring stderr ("Binary commit: " ^ exact_commit)))
+
+let test_dirty_source_builds_local_and_reports_dirty () =
+  with_temp_dir "run-local-dirty-source" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let exact_commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      mkdir_p (Filename.concat repo_root "lib");
+      write_file (Filename.concat repo_root "lib/dirty.ml") "let dirty = true\n";
+      let built_exe = Filename.concat dir "built-main-eio.exe" in
+      write_fake_eio_exe ~commit:exact_commit built_exe;
+      let build_marker = Filename.concat dir "build.marker" in
+      write_executable
+        (Filename.concat repo_root "scripts/dune-local.sh")
+        {|
+#!/bin/sh
+set -eu
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+cp "${FAKE_BUILD_EXE:?}" "$repo_root/_build/default/bin/main_eio.exe"
+printf 'built\n' >"${BUILD_MARKER:?}"
+|};
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ ("FAKE_BUILD_EXE", built_exe); ("BUILD_MARKER", build_marker) ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "dirty source run-local failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "dirty source rebuilt" true (Sys.file_exists build_marker);
+      check bool "dirty source reported separately" true
+        (String_util.contains_substring stderr "Source state: dirty"))
+
 let () =
   run "run_local_script"
     [
@@ -415,5 +571,15 @@ let () =
             test_explicit_config_env_is_preserved_without_bootstrap;
           test_case "bootstrap-only materializes state without exec" `Quick
             test_bootstrap_only_materializes_state_without_exec;
+          test_case "common binary loses when worktree binary is absent" `Quick
+            test_common_binary_does_not_win_when_worktree_binary_is_absent;
+          test_case "common binary loses when worktree binary is stale" `Quick
+            test_common_binary_does_not_win_when_worktree_binary_is_stale;
+          test_case "same-commit common binary is not worktree authority" `Quick
+            test_same_commit_common_binary_is_not_worktree_authority;
+          test_case "exact local binary skips build" `Quick
+            test_exact_local_binary_skips_build;
+          test_case "dirty source builds locally and reports dirty" `Quick
+            test_dirty_source_builds_local_and_reports_dirty;
         ] );
     ]

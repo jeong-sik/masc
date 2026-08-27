@@ -873,6 +873,129 @@ let test_done_refuses_oversized_artifact_evidence () =
    land nowhere the reader looks, so recovery reported [primary] and the done
    transition read as non-terminal. Bind the real filesystem once, here, so
    every case sees the store it writes to. *)
+
+let contains ~needle haystack =
+  let nl = String.length needle and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
+  nl = 0 || go 0
+
+(* Keeper task payloads are not one shape. A claim reports refusal through
+   [typed_outcome] and carries no "ok" at all -- a claimed task deliberately
+   omits the field -- while the release path reports through "ok". Read
+   refusal as "the payload says Error", which both express, so these tests do
+   not pin a field one of the two tools never had. *)
+let refused json =
+  (match json |> U.member "ok" with
+   | `Bool false -> true
+   | _ -> false)
+  || (match Outcome.of_json (json |> U.member "typed_outcome") with
+      | Some (Outcome.Error _) -> true
+      | Some Outcome.Progress | Some (Outcome.No_progress _) | None -> false)
+
+let accepted json = not (refused json)
+
+let release_test_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String "release-test"
+        ; "agent_name", `String "keeper-release-test-agent"
+        ; "trace_id", `String "trace-release-test"
+        ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
+
+let with_release_fixture f =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = release_test_meta () in
+       ignore
+         (Masc.Workspace.bind_session
+            config
+            ~agent_name:meta.agent_name
+            ~capabilities:[ "test" ]
+            ());
+       ignore
+         (Masc.Workspace.add_task config ~title:"Held work" ~priority:1 ~description:"");
+       ignore
+         (Masc.Workspace.add_task config ~title:"Other work" ~priority:1 ~description:"");
+       let call name args =
+         Yojson.Safe.from_string (Task.handle_keeper_task_tool ~config ~meta ~name ~args)
+       in
+       f call)
+
+(* keeper_task_release exists so a Keeper holding work it cannot finish can go
+   take different work. "release returned ok" on its own does not show that:
+   the claim refusal reads backlog ownership, so the proof is the second claim
+   failing before the release and succeeding after it. Before this tool that
+   second claim stayed refused for the life of the Keeper. *)
+let test_release_frees_the_keeper_to_claim_again () =
+  with_release_fixture (fun call ->
+    let claim task_id = call "keeper_task_claim" (`Assoc [ "task_id", `String task_id ]) in
+    check bool "first claim succeeds" true (accepted (claim "task-001"));
+    let second = claim "task-002" in
+    check bool "a second claim is refused while the first is held" true (refused second);
+    (* The refusal has to name something the reader can call. It used to name
+       only masc_transition, which the Keeper surface projects away behind
+       keeper_task_claim. *)
+    check
+      bool
+      "the refusal names keeper_task_release"
+      true
+      (contains ~needle:"keeper_task_release" (Yojson.Safe.to_string second));
+    let released =
+      call
+        "keeper_task_release"
+        (`Assoc
+          [ "task_id", `String "task-001"
+          ; "summary", `String "blocked on a checkout this Keeper does not have"
+          ])
+    in
+    check bool "release succeeds" true (accepted released);
+    check
+      bool
+      "the Keeper can claim different work once it has handed the task back"
+      true
+      (accepted (claim "task-002")))
+
+(* The next owner reads the summary and nothing else about where the work
+   stands, so an empty one is refused at the tool rather than stored. *)
+let test_release_without_summary_is_refused () =
+  with_release_fixture (fun call ->
+    check
+      bool
+      "claim succeeds"
+      true
+      (accepted (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-001" ])));
+    let rejection = call "keeper_task_release" (`Assoc [ "task_id", `String "task-001" ]) in
+    check bool "release without a summary is refused" true (refused rejection);
+    (* Pin the Keeper-vocabulary rejection, not the transition layer's. The
+       transition also refuses an empty handoff_context.summary, so a test
+       that only asked "was it refused" stayed green with this tool's own
+       check deleted -- and the Keeper would then read a message naming
+       handoff_context.summary, a field it never sent. Same reason
+       keeper_task_done enforces its schema locally. *)
+    check
+      bool
+      "the refusal names the parameter the Keeper actually sent"
+      true
+      (contains
+         ~needle:"keeper_task_release rejected: summary required"
+         (Yojson.Safe.to_string rejection));
+    (* A refused release must not hand the task back anyway. Re-claiming
+       task-001 is a bad probe -- an owner re-claiming what it holds can
+       succeed -- so ask whether different work is still barred. *)
+    check
+      bool
+      "different work is still barred after the refused release"
+      true
+      (refused (call "keeper_task_claim" (`Assoc [ "task_id", `String "task-002" ]))))
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -922,5 +1045,11 @@ let () =
         ; test_case
             "done refuses oversized artifact evidence (task-540)"
             `Quick test_done_refuses_oversized_artifact_evidence
+        ; test_case
+            "release frees the Keeper to claim different work"
+            `Quick test_release_frees_the_keeper_to_claim_again
+        ; test_case
+            "release without a summary is refused and keeps the task held"
+            `Quick test_release_without_summary_is_refused
         ] )
     ]

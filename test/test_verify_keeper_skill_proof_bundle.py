@@ -1,6 +1,7 @@
 import copy
 import importlib.util
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -256,22 +257,27 @@ def receipt():
     }
 
 
-def png(width=2, height=3):
-    def chunk(kind, payload):
-        body = kind + payload
-        return (
-            struct.pack(">I", len(payload))
-            + body
-            + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
-        )
+def png_chunk(kind, payload):
+    body = kind + payload
+    return (
+        struct.pack(">I", len(payload))
+        + body
+        + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    )
 
+
+def png(width=2, height=3, decoded=None):
     ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
-    pixels = b"".join(b"\x00" + (b"\x00\x00\x00" * width) for _ in range(height))
+    pixels = (
+        b"".join(b"\x00" + (b"\x00\x00\x00" * width) for _ in range(height))
+        if decoded is None
+        else decoded
+    )
     return (
         verifier.PNG_SIGNATURE
-        + chunk(b"IHDR", ihdr)
-        + chunk(b"IDAT", zlib.compress(pixels))
-        + chunk(b"IEND", b"")
+        + png_chunk(b"IHDR", ihdr)
+        + png_chunk(b"IDAT", zlib.compress(pixels))
+        + png_chunk(b"IEND", b"")
     )
 
 
@@ -394,6 +400,8 @@ def make_bundle(root: Path):
         },
         "dashboard": {
             "path": "dashboard-skill-use.png",
+            "keeper": "keeper-one",
+            "ledger_revision": durable["revision"],
             "exact_row": SKILL_ID,
             **file_identity(dashboard_png),
         },
@@ -720,6 +728,19 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             with self.assertRaisesRegex(verifier.VerificationError, "no terminal IEND"):
                 verify(bundle)
 
+    def test_short_idat_scanlines_are_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            payload = png(1440, 1000, decoded=b"x")
+            (bundle["proof_root"] / "dashboard-skill-use.png").write_bytes(payload)
+            identity = file_identity(payload)
+            bundle["proof"]["dashboard"].update(identity)
+            bundle["tui"]["producer_artifacts"]["dashboard-skill-use.png"] = identity
+            with self.assertRaisesRegex(
+                verifier.VerificationError, "scanline length differs"
+            ):
+                verify(bundle)
+
     def test_dashboard_exact_row_is_required_and_bound(self):
         for exact_row in (None, "call-other"):
             with (
@@ -732,9 +753,31 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 else:
                     bundle["proof"]["dashboard"]["exact_row"] = exact_row
                 with self.assertRaisesRegex(
-                    verifier.VerificationError, "Dashboard exact row differs"
+                    verifier.VerificationError, "Dashboard capture identity differs"
                 ):
                     verify(bundle)
+
+    def test_dashboard_keeper_and_ledger_revision_are_bound(self):
+        cases = (("keeper", "foreign-keeper"), ("ledger_revision", "0" * 64))
+        for field, value in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                bundle = make_bundle(Path(raw))
+                bundle["proof"]["dashboard"][field] = value
+                with self.assertRaisesRegex(
+                    verifier.VerificationError, "Dashboard capture identity differs"
+                ):
+                    verify(bundle)
+
+    def test_dashboard_and_tui_screenshots_cannot_be_hardlink_aliases(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            dashboard = bundle["proof_root"] / "dashboard-skill-use.png"
+            tui_screenshot = bundle["tui_root"] / "tui-skill-use.png"
+            tui_screenshot.unlink()
+            os.link(dashboard, tui_screenshot)
+            bundle["tui"]["screenshot"].update(file_identity(dashboard.read_bytes()))
+            with self.assertRaisesRegex(verifier.VerificationError, "hardlink aliases"):
+                verify(bundle)
 
     def test_png_zero_dimension_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -50,6 +50,23 @@ PROOF_ARTIFACTS = {
 }
 EXPECTED_VERIFIED_ARTIFACTS = 18
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_DEPTHS_BY_COLOR_TYPE = {
+    0: {1, 2, 4, 8, 16},
+    2: {8, 16},
+    3: {1, 2, 4, 8},
+    4: {8, 16},
+    6: {8, 16},
+}
+PNG_SAMPLES_BY_COLOR_TYPE = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+PNG_ADAM7_PASSES = (
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+)
 
 
 class VerificationError(RuntimeError):
@@ -183,19 +200,52 @@ def verify_artifact_set(
     return verified, payloads
 
 
+def png_extent(size: int, start: int, step: int) -> int:
+    return 0 if size <= start else (size - start + step - 1) // step
+
+
+def png_scanline_layouts(
+    *, width: int, height: int, bit_depth: int, color_type: int, interlace: int
+) -> list[tuple[int, int]]:
+    samples = PNG_SAMPLES_BY_COLOR_TYPE[color_type]
+    passes = ((0, 0, 1, 1),) if interlace == 0 else PNG_ADAM7_PASSES
+    layouts: list[tuple[int, int]] = []
+    for start_x, start_y, step_x, step_y in passes:
+        pass_width = png_extent(width, start_x, step_x)
+        pass_height = png_extent(height, start_y, step_y)
+        if pass_width == 0 or pass_height == 0:
+            continue
+        row_bytes = (pass_width * samples * bit_depth + 7) // 8
+        layouts.append((pass_height, row_bytes))
+    return layouts
+
+
 def validate_png(payload: bytes, context: str) -> tuple[int, int]:
     require(payload.startswith(PNG_SIGNATURE), f"{context} is not a PNG")
     offset = len(PNG_SIGNATURE)
     chunk_index = 0
     width = 0
     height = 0
+    bit_depth = 0
+    color_type = 0
+    interlace = 0
     idat_parts: list[bytes] = []
     idat_closed = False
+    saw_plte = False
     saw_iend = False
     while offset < len(payload):
         require(len(payload) - offset >= 12, f"{context} has a truncated PNG chunk")
         chunk_length = struct.unpack(">I", payload[offset : offset + 4])[0]
         chunk_type = payload[offset + 4 : offset + 8]
+        require(
+            len(chunk_type) == 4
+            and all(
+                ord("A") <= byte <= ord("Z") or ord("a") <= byte <= ord("z")
+                for byte in chunk_type
+            )
+            and ord("A") <= chunk_type[2] <= ord("Z"),
+            f"{context} has an invalid PNG chunk type",
+        )
         data_start = offset + 8
         data_end = data_start + chunk_length
         chunk_end = data_end + 4
@@ -211,12 +261,47 @@ def validate_png(payload: bytes, context: str) -> tuple[int, int]:
                 chunk_type == b"IHDR" and chunk_length == 13,
                 f"{context} first chunk is not IHDR",
             )
-            width, height = struct.unpack(">II", chunk_data[:8])
+            (
+                width,
+                height,
+                bit_depth,
+                color_type,
+                compression,
+                filter_method,
+                interlace,
+            ) = struct.unpack(">IIBBBBB", chunk_data)
             require(width > 0 and height > 0, f"{context} dimensions are invalid")
+            require(
+                color_type in PNG_DEPTHS_BY_COLOR_TYPE
+                and bit_depth in PNG_DEPTHS_BY_COLOR_TYPE[color_type],
+                f"{context} IHDR color encoding is invalid",
+            )
+            require(
+                compression == 0 and filter_method == 0 and interlace in (0, 1),
+                f"{context} IHDR methods are invalid",
+            )
         else:
             require(chunk_type != b"IHDR", f"{context} repeats IHDR")
+        if chunk_type == b"PLTE":
+            require(
+                not saw_plte and not idat_parts,
+                f"{context} PLTE is repeated or follows IDAT",
+            )
+            entries, remainder = divmod(chunk_length, 3)
+            require(
+                remainder == 0
+                and 1 <= entries <= 256
+                and color_type not in (0, 4)
+                and (color_type != 3 or entries <= 2**bit_depth),
+                f"{context} PLTE is invalid for its IHDR",
+            )
+            saw_plte = True
         if chunk_type == b"IDAT":
             require(not idat_closed, f"{context} has nonconsecutive IDAT chunks")
+            require(
+                color_type != 3 or saw_plte,
+                f"{context} indexed PNG has no PLTE before IDAT",
+            )
             idat_parts.append(chunk_data)
         elif idat_parts and chunk_type != b"IEND":
             idat_closed = True
@@ -227,21 +312,51 @@ def validate_png(payload: bytes, context: str) -> tuple[int, int]:
             saw_iend = True
             offset = chunk_end
             break
+        if chunk_type[0] & 0x20 == 0:
+            require(
+                chunk_type in (b"IHDR", b"PLTE", b"IDAT"),
+                f"{context} has an unsupported critical PNG chunk",
+            )
         offset = chunk_end
         chunk_index += 1
     require(saw_iend and offset == len(payload), f"{context} has no terminal IEND")
+    layouts = png_scanline_layouts(
+        width=width,
+        height=height,
+        bit_depth=bit_depth,
+        color_type=color_type,
+        interlace=interlace,
+    )
+    expected_decoded_bytes = sum(rows * (row_bytes + 1) for rows, row_bytes in layouts)
     compressed = b"".join(idat_parts)
     try:
         decompressor = zlib.decompressobj()
-        decoded = decompressor.decompress(compressed) + decompressor.flush()
+        decoded = decompressor.decompress(compressed, expected_decoded_bytes + 1)
     except zlib.error as error:
         raise VerificationError(f"{context} IDAT stream is invalid: {error}") from error
     require(
-        decompressor.eof
+        len(decoded) <= expected_decoded_bytes and decompressor.unconsumed_tail == b"",
+        f"{context} decompressed scanline length differs from IHDR",
+    )
+    try:
+        decoded += decompressor.flush()
+    except zlib.error as error:
+        raise VerificationError(f"{context} IDAT stream is invalid: {error}") from error
+    require(
+        len(decoded) == expected_decoded_bytes
+        and decompressor.eof
         and decompressor.unused_data == b""
-        and decompressor.unconsumed_tail == b""
-        and decoded != b"",
-        f"{context} IDAT stream is incomplete",
+        and decompressor.unconsumed_tail == b"",
+        f"{context} decompressed scanline length differs from IHDR",
+    )
+    cursor = 0
+    for rows, row_bytes in layouts:
+        for _ in range(rows):
+            require(decoded[cursor] <= 4, f"{context} scanline filter is invalid")
+            cursor += row_bytes + 1
+    require(
+        cursor == len(decoded),
+        f"{context} decompressed scanline layout differs from IHDR",
     )
     return width, height
 
@@ -654,8 +769,10 @@ def verify_bundle(
         "Dashboard screenshot path is not the exact producer artifact",
     )
     require(
-        dashboard.get("exact_row") == selected_id,
-        "Dashboard exact row differs from the selected Skill invocation",
+        dashboard.get("keeper") == proof_identity.get("keeper")
+        and dashboard.get("ledger_revision") == proof_identity.get("ledger_revision")
+        and dashboard.get("exact_row") == selected_id,
+        "Dashboard capture identity differs from the selected Skill invocation",
     )
     dashboard_identity, dashboard_payload = verify_file(
         root=proof_root,
@@ -754,6 +871,11 @@ def verify_bundle(
         len({path.resolve(strict=True) for path in artifact_paths})
         == EXPECTED_VERIFIED_ARTIFACTS,
         "verified artifact paths are not distinct",
+    )
+    require(
+        len({(path.stat().st_dev, path.stat().st_ino) for path in artifact_paths})
+        == EXPECTED_VERIFIED_ARTIFACTS,
+        "verified artifacts contain hardlink aliases",
     )
     require(
         verified_count == EXPECTED_VERIFIED_ARTIFACTS,

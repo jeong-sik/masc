@@ -201,8 +201,41 @@ let test_local_route_does_not_force_backend_cwd () =
              ; trust = Keeper_sandbox_runner.User_shell
              }
        in
-       check string "via" "host" result.via;
-       check bool "no backend error" true (Option.is_none result.backend_error))
+       match result with
+       | Error e -> Alcotest.fail e
+       | Ok result ->
+         check string "via" "host" result.via;
+         check bool "no backend error" true (Option.is_none result.backend_error))
+
+let test_remote_ssh_route_fails_closed () =
+  let base = temp_dir "keeper_sandbox_runner_remote_ssh_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let config = Workspace.default_config base in
+       let meta = make_meta ~sandbox:Keeper_types_profile_sandbox.Remote_ssh in
+       let cwd = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+       match
+         Keeper_sandbox_runner.run_command_with_status
+           ~config ~meta ~timeout_sec:5.0
+           ~host:
+             { env = None
+             ; cwd = Some cwd
+             ; argv = [ "true" ]
+             }
+           ~backend:
+             { route_cwd = cwd
+             ; cwd = (fun () -> cwd)
+             ; command_text = "true"
+             ; network_mode = Keeper_types_profile_sandbox.Network_inherit
+             ; trust = Keeper_sandbox_runner.User_shell
+             }
+       with
+       | Ok _ ->
+         Alcotest.fail "remote_ssh must fail closed, not dispatch via host"
+       | Error msg ->
+         check bool "named error" true
+           (string_starts_with ~prefix:"remote_ssh_dispatch_unavailable" msg))
 
 let () =
   Alcotest.run
@@ -221,5 +254,9 @@ let () =
             "local route does not force backend cwd"
             `Quick
             test_local_route_does_not_force_backend_cwd
+        ; test_case
+            "remote_ssh route fails closed"
+            `Quick
+            test_remote_ssh_route_fails_closed
         ] )
     ]

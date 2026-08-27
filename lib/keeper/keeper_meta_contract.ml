@@ -374,9 +374,14 @@ let effective_meta_of_profile_defaults
      gate must NOT reject it — but it is undispatchable without the
      [remote_endpoint] naming its [exec.ssh.endpoints.<name>] registry
      entry, so config-load validation fails closed here instead of
-     letting the keeper boot into a dispatch that can only error. The
-     masc_keeper_up tool-arg side of this check is Phase 1 task 9. *)
-  | Ok Remote_ssh when Option.is_none defaults.remote_endpoint ->
+     letting the keeper boot into a dispatch that can only error. A blank
+     or whitespace-only value counts as missing (same trim idiom as
+     [runtime_id] below). The masc_keeper_up tool-arg side of this check
+     is Phase 1 task 9. *)
+  | Ok Remote_ssh
+    when (match defaults.remote_endpoint with
+          | None -> true
+          | Some endpoint -> String.trim endpoint = "") ->
       Error
         (Printf.sprintf
            "keeper %s rejected: remote_ssh_endpoint_missing: sandbox_profile \

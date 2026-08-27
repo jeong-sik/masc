@@ -34,8 +34,9 @@
 \*
 \* Bug Model (memory: TLA+ Bug Model pattern):
 \*   - Spec       (clean): all dispatches respect the profile contract.
-\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker-declared
-\*     keeper resolve to Host. DockerImpliesDockerVia MUST flag it.
+\*   - SpecBuggy:  ExecuteHostFallback action lets a Docker- or
+\*     Remote_ssh-declared keeper resolve to Host. DockerImpliesDockerVia
+\*     or RemoteSshImpliesSshVia MUST flag it.
 \*
 \* Reference: issue #11611 part 2.
 

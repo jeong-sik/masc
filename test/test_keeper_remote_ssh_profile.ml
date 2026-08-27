@@ -119,6 +119,26 @@ let test_endpoint_present_accepted () =
     check string "profile kept" "remote_ssh"
       (Keeper_types_profile_sandbox.sandbox_profile_to_string meta.sandbox_profile)
 
+let test_endpoint_blank_rejected () =
+  let reject endpoint =
+    let defaults =
+      { Masc.Keeper_types_profile.empty_keeper_profile_defaults with
+        manifest_path = Some ".masc/config/keepers/remote-ssh-gated.toml"
+      ; sandbox_profile = Some Keeper_types_profile_sandbox.Remote_ssh
+      ; remote_endpoint = Some endpoint
+      }
+    in
+    match
+      Masc.Keeper_meta_contract.effective_meta_of_profile_defaults
+        defaults (gate_meta ())
+    with
+    | Ok _ -> fail "remote_ssh with blank remote_endpoint must be rejected"
+    | Error msg ->
+      check bool "named error" true (contains "remote_ssh_endpoint_missing" msg)
+  in
+  reject "";
+  reject "   "
+
 let () =
   run "remote_ssh profile"
     [ "profile", [ test_case "roundtrip" `Quick test_profile_roundtrip
@@ -128,4 +148,5 @@ let () =
                  ; test_case "none rejected" `Quick test_network_mode_none_rejected
                  ; test_case "inherit accepted" `Quick test_network_mode_inherit_accepted ]
     ; "endpoint", [ test_case "missing rejected" `Quick test_endpoint_missing_rejected
+                  ; test_case "blank rejected" `Quick test_endpoint_blank_rejected
                   ; test_case "present accepted" `Quick test_endpoint_present_accepted ] ]

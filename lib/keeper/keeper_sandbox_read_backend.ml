@@ -128,14 +128,27 @@ let run_command_with_status ?turn_sandbox_factory
     | Some img when String.trim img <> "" -> img
     | _ -> Env_config_sandbox.Runtime.docker_image ()
   in
+  (* [Remote_ssh_profile] is answered before the image guard below so the
+     named read-unavailable error is never masked by an empty-image
+     complaint: no SSH read backend exists yet (Phase 1 task 9); no
+     fallback to docker or host reads. *)
+  let remote_ssh_read_unavailable =
+    "remote_ssh_read_unavailable: sandbox_profile=remote_ssh has no \
+     sandbox read backend yet (Phase 1 task 9); no fallback to docker \
+     or host reads"
+  in
   let no_runtime =
     match resolve_result with
     | Runtime _ -> false
     (* [Remote_ssh_profile]: no turn runtime exists (SSH runner is Phase 1
-       task 6); the second match below fails closed on it before any
-       Docker fallback can claim the call. *)
+    (* [Remote_ssh_profile]: no turn runtime exists (SSH runner is Phase 1
+       task 6); the match below fails closed on it before the image guard
+       or any Docker fallback can claim the call. *)
     | Backend_unimplemented _ | No_factory | Local_profile | Remote_ssh_profile -> true
   in
+  match resolve_result with
+  | Remote_ssh_profile -> Error remote_ssh_read_unavailable
+  | Runtime _ | No_factory | Local_profile ->
   if no_runtime && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
@@ -155,10 +168,10 @@ let run_command_with_status ?turn_sandbox_factory
       Error
         (Keeper_types_profile_sandbox.backend_unimplemented_message profile)
     | Remote_ssh_profile ->
-      Error
-        "remote_ssh_read_unavailable: sandbox_profile=remote_ssh has no \
-         sandbox read backend yet (Phase 1 task 9); no fallback to docker \
-         or host reads"
+      (* Unreachable: answered above, before the image guard. Kept so the
+         match stays exhaustive and flags this site if the guard order
+         changes. *)
+      Error remote_ssh_read_unavailable
     | No_factory | Local_profile ->
       match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
       | Error err ->

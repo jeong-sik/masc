@@ -182,10 +182,16 @@ val route_via :
   cwd:string ->
   string
 
+(** Routes the command to the Docker backend or to host execution per the
+    effective sandbox profile. Fails closed with
+    [remote_ssh_dispatch_unavailable] when the effective profile is
+    [Remote_ssh]: [route_for] classifies that profile as "not the Docker
+    backend", which would otherwise be a silent host route (RFC-0001).
+    The SSH runner lands in Phase 1 task 6. *)
 val run_command_with_status :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   timeout_sec:float ->
   host:host_command ->
   backend:backend_command ->
-  routed_result
+  (routed_result, string) result

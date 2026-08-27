@@ -18,9 +18,10 @@ import sys
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 import keeper_skill_use_proof as proof
+import proof_http
 import produce_natural_keeper_skill_proof as natural_producer
 
 
@@ -97,7 +98,7 @@ def request_json(
         headers["Authorization"] = f"Bearer {token}"
     request = Request(url, headers=headers)
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with proof_http.open_no_redirect(request, timeout=timeout) as response:
             raw = response.read()
     except (HTTPError, URLError, OSError) as error:
         raise JoinError(f"cannot read {url}: {error}") from error

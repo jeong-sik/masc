@@ -265,6 +265,7 @@ let connector_event_ids_of_queue queue =
        | Q.Connector_attention { event_id; _ } -> Some event_id
        | Q.Board_signal _ | Q.Board_attention _ | Q.Bootstrap
        | Q.Fusion_completed _ | Q.Schedule_due _ | Q.Hitl_resolved _
+      | Q.Ask_answered _
        | Q.Manual_compaction_requested
        | Q.Completion_authority_rejected _
        | Q.Task_cancelled _ | Q.Workspace_message _

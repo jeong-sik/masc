@@ -171,6 +171,7 @@ let connector_attention_event_ids_of_stimuli stimuli =
       | Keeper_event_queue.Schedule_due _
       | Keeper_event_queue.Bootstrap
       | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Ask_answered _
       | Keeper_event_queue.Manual_compaction_requested
       | Keeper_event_queue.Completion_authority_rejected _
       | Keeper_event_queue.Task_cancelled _
@@ -185,8 +186,11 @@ let record_replay_owned_turn_started_reactions ~ctx ~keeper_name stimuli =
   List.iter
     (fun (stimulus : Keeper_event_queue.stimulus) ->
        match stimulus.payload with
+       (* Same shape as the HITL resolution beside it: an async thing this
+          keeper was waiting on came back, and the turn's cause should say so. *)
        | ( Keeper_event_queue.Schedule_due _
-         | Keeper_event_queue.Hitl_resolved _ ) ->
+         | Keeper_event_queue.Hitl_resolved _
+         | Keeper_event_queue.Ask_answered _ ) ->
          record_event_queue_stimulus_turn_started ~ctx ~keeper_name stimulus
        | Keeper_event_queue.Board_signal _
        | Keeper_event_queue.Board_attention _

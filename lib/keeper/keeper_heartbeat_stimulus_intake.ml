@@ -62,6 +62,7 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Schedule_due _
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
   | Keeper_event_queue.Manual_compaction_requested
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
@@ -198,6 +199,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
     Some Keeper_world_observation.Scheduled_automation_stimulus
   | Keeper_event_queue.Connector_attention _ ->
     Some Keeper_world_observation.Connector_attention_stimulus
+  | Keeper_event_queue.Ask_answered _ ->
+    (* A dedicated turn_reason for the same reason the HITL one below has it:
+       the prompt has to steer the keeper back to the question it asked, not
+       let it proceed on its own state as if nothing came back. *)
+    Some Keeper_world_observation.Ask_answered_stimulus
   | Keeper_event_queue.Hitl_resolved _ ->
     (* RFC-0320 W3b: give the HITL-resolution wake a dedicated turn_reason so
        the prompt can steer the keeper back to the originating conversation
@@ -278,6 +284,47 @@ let consume_single_heartbeat_stimulus
         cancellation.tc_cancelled_by
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Ask_answered answered ->
+      (* The ask_id is a pointer only; the answer stays in Keeper_ask_store.
+         Load it here and promote it to a pending observation, the same split
+         Connector_attention makes — a wake carrying no answer is one the
+         Keeper cannot act on, which is how this feature went unused. *)
+      let resolved =
+        List.assoc_opt
+          answered.ask_id
+          (Keeper_ask_store.rows
+             ~base_path:ctx.config.base_path
+             ~keeper_name:meta_after_triage.name)
+      in
+      let pending_events =
+        match resolved with
+        | Some
+            ( ask
+            , Keeper_ask.Answered_by { answers; responder; answered_at } ) ->
+          [ Keeper_world_observation.pending_board_event_of_ask_answer
+              ~meta:meta_after_triage
+              ~ask
+              ~answers
+              ~responder
+              ~answered_at
+          ]
+        | Some (_, Keeper_ask.Open)
+        | Some (_, Keeper_ask.Withdrawn_because _)
+        | None ->
+          (* The wake outlived what it pointed at, or the answer is not
+             recorded. Say so rather than injecting a row about nothing. *)
+          Log.Keeper.warn
+            "ask answer stimulus has no recorded answer ask_id=%s (keeper=%s)"
+            answered.ask_id
+            meta_after_triage.name;
+          []
+      in
+      Log.Keeper.info
+        "turn entry: ask answer delivered ask_id=%s rows=%d (keeper=%s)"
+        answered.ask_id
+        (List.length pending_events)
+        meta_after_triage.name;
+      Stimulus_consumed pending_events
     | Keeper_event_queue.Manual_compaction_requested ->
       Log.Keeper.info
         "turn entry: manual compaction request delivered (keeper=%s)"
@@ -404,6 +451,9 @@ let consume_single_heartbeat_stimulus
 
 let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
+  (* Nothing else has to settle first: the answer is already durable when the
+     wake is enqueued. *)
+  | Keeper_event_queue.Ask_answered _ -> true
   | Keeper_event_queue.Hitl_resolved resolution ->
     (match
        Keeper_approval_queue.get_pending_entry_for_workspace
@@ -452,6 +502,7 @@ let ready_hitl_resolution_peek ~base_path ~keeper_name =
          | Keeper_event_queue.Fusion_completed _
          | Keeper_event_queue.Schedule_due _
          | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Ask_answered _
          | Keeper_event_queue.Manual_compaction_requested
          | Keeper_event_queue.Completion_authority_rejected _
          | Keeper_event_queue.Task_cancelled _
@@ -523,6 +574,7 @@ let reconcile_spent_selection
      | Error _ ->
        Ok Selection_actionable)
   | Hitl_resolved { decision = Keeper_event_queue.Hitl_rejected _; _ }
+  | Ask_answered _
   | Board_signal _
   | Board_attention _
   | Bootstrap
@@ -570,6 +622,7 @@ let heartbeat_event_intake
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Schedule_due _
     | Keeper_event_queue.Hitl_resolved _
+    | Keeper_event_queue.Ask_answered _
     | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Completion_authority_rejected _
     | Keeper_event_queue.Task_cancelled _
@@ -581,6 +634,7 @@ let heartbeat_event_intake
   let is_manual_compaction (selection : Keeper_event_queue_state.pending_selection) =
     match selection.source.payload with
     | Keeper_event_queue.Manual_compaction_requested -> true
+    | Keeper_event_queue.Ask_answered _
     | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _
     | Keeper_event_queue.Bootstrap
@@ -642,6 +696,7 @@ let heartbeat_event_intake
   let is_board_source (selection : Keeper_event_queue_state.pending_selection) =
     match selection.source.payload with
     | Keeper_event_queue.Board_signal _ | Keeper_event_queue.Board_attention _ -> true
+    | Keeper_event_queue.Ask_answered _
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Schedule_due _
@@ -824,6 +879,7 @@ let heartbeat_event_intake
             | Keeper_world_observation.Completion_authority_rejected _
             | Keeper_world_observation.Task_cancelled _
             | Keeper_world_observation.Delegate_completed
+            | Keeper_world_observation.Ask_answered_row
             | Keeper_world_observation.Composition_completed ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"

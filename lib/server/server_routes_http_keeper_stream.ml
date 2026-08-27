@@ -2948,6 +2948,54 @@ let ask_answer_failure_json failure =
   | Keeper_ask_store.Store_failed _ ->
       `Assoc [ ("error", `String detail) ]
 
+(* The wake that closes the loop between a human answering and the Keeper that
+   asked. The stimulus carries the ask_id only; the answer stays in
+   [Keeper_ask_store] and the turn reads it there. The continuation the Keeper
+   recorded when it asked rides along so a woken Keeper replies where the
+   question came from rather than wherever its own state last left it. *)
+let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
+  let channel =
+    match
+      List.assoc_opt ask_id (Keeper_ask_store.rows ~base_path ~keeper_name)
+    with
+    | Some (ask, _) -> ask.Keeper_ask.continuation
+    | None ->
+        Keeper_continuation_channel.unrouted
+          "answered ask is no longer in the store"
+  in
+  let payload = { Keeper_event_queue.ask_id; channel } in
+  let stimulus =
+    { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
+      (* A human addressed this Keeper directly, the same as a mention. *)
+    ; urgency = Keeper_event_queue.Normal
+      (* NDT-OK: stimulus receipt time, used only for ordering/age *)
+    ; arrived_at = Unix.gettimeofday ()
+    ; payload = Keeper_event_queue.Ask_answered payload
+    }
+  in
+  match
+    Keeper_registry_event_queue.enqueue_stimulus_durable_result ~base_path keeper_name
+      stimulus
+  with
+  | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+      Log.Server.error "ask answer wake could not be stored (keeper=%s ask_id=%s): %s"
+        keeper_name ask_id detail
+  | Keeper_registry_event_queue.Stimulus_enqueued
+  | Keeper_registry_event_queue.Stimulus_already_present -> (
+      match
+        Keeper_registry.wakeup_running ~intent:Keeper_registry.Reactive_signal ~base_path
+          keeper_name
+      with
+      | Keeper_registry.Signaled -> ()
+      | Keeper_registry.Deferred_not_running _
+      | Keeper_registry.Deferred_lifecycle _
+      | Keeper_registry.Deferred_unregistered ->
+          (* Durable either way: the stimulus is stored and the Keeper reads it
+             when it next runs. *)
+          Log.Server.info
+            "ask answer wake stored for a keeper that is not running (keeper=%s ask_id=%s)"
+            keeper_name ask_id)
+
 let handle_keeper_ask_answer state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
       let base_path = (Mcp_server.workspace_config state).base_path in
@@ -3012,6 +3060,11 @@ let handle_keeper_ask_answer state request reqd =
             | Ok answers ->
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s answers=%d" keeper_name
                   ask_id (List.length answers);
+                (* The answer is durable now; the Keeper that asked still has
+                   no idea. Without this wake it is written down where only a
+                   screen reads it and the asker has to remember to go and
+                   look, which is why no Keeper had ever asked. *)
+                wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id;
                 respond_json_value_with_cors ~status:`OK request reqd
                   (`Assoc
                     [

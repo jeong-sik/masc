@@ -24,6 +24,7 @@ type wake_producer =
   | Fusion_sink
   | Connector_attention_hook
   | Hitl_resolution_hook
+  | Keeper_ask_answer
   | External_attention_store
   | Schedule_store
   | Schedule_runner
@@ -98,6 +99,7 @@ let wake_producer_to_string = function
   | Fusion_sink -> "fusion_sink"
   | Connector_attention_hook -> "connector_attention_hook"
   | Hitl_resolution_hook -> "hitl_resolution_hook"
+  | Keeper_ask_answer -> "keeper_ask_answer"
   | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
@@ -120,6 +122,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Schedule_due _ -> Schedule_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
+  | Ask_answered _ -> Keeper_ask_answer
   | Manual_compaction_requested -> Keeper_compaction_request
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
@@ -172,6 +175,7 @@ let queue_payload_detail_fields : Keeper_event_queue.stimulus_payload -> (string
     [ "rejection_reason", `String rejection.car_reason
     ; "rejection_task_id", `String rejection.car_task_id
     ]
+  | Ask_answered answered -> [ "answered_ask_id", `String answered.ask_id ]
   | Task_cancelled cancellation ->
     (* The reason is emitted only when the canceller gave one, so an operator
        can tell an unexplained cancellation from one whose reason was empty. *)
@@ -245,6 +249,7 @@ let queue_payload_what : Keeper_event_queue.stimulus_payload -> string = functio
     (match resolution.decision with
      | Hitl_approved -> Printf.sprintf "운영자 승인됨 · %s" resolution.approval_id
      | Hitl_rejected _ -> Printf.sprintf "운영자 거절됨 · %s" resolution.approval_id)
+  | Ask_answered _ -> "질문에 답이 왔음"
   | Manual_compaction_requested -> "운영자 압축 요청"
   | Completion_authority_rejected rejection ->
     Printf.sprintf "작업 %s 완료 증거 거절됨" rejection.car_task_id

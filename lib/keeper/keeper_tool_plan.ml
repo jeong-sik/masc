@@ -730,9 +730,9 @@ let error_to_string = function
       source_tool_name
   | Invalid_output_pointer { node_id; source_node_id; pointer; _ } ->
     Printf.sprintf
-      "node %S has invalid output pointer /%s for node %S"
+      "node %S has invalid output pointer %s for node %S"
       (Node_id.to_string node_id)
-      (String.concat "/" (Json_pointer.segments pointer))
+      (Json_pointer.to_string pointer)
       (Node_id.to_string source_node_id)
   | Invalid_output_schema { node_id; tool_name; _ } ->
     Printf.sprintf

@@ -56,6 +56,16 @@ let test_json_pointer_is_exact_rfc6901_navigation () =
     "canonical pointer spelling"
     "/a~1b/~0key"
     (Plan.Json_pointer.to_string escaped);
+  check string
+    "human fallback preserves canonical pointer identity"
+    "node \"target\" has invalid output pointer /a~1b/~0key for node \"source\""
+    (Plan.error_to_string
+       (Plan.Invalid_output_pointer
+          { node_id = node_id "target"
+          ; source_node_id = node_id "source"
+          ; pointer = escaped
+          ; error = Plan.Json_pointer.Missing_property_schema "~key"
+          }));
   (match Plan.Json_pointer.resolve escaped source with
    | Ok (`Int 7) -> ()
    | Ok value -> failf "unexpected resolved value: %s" (Yojson.Safe.to_string value)
@@ -907,6 +917,7 @@ let test_request_composable_names_match_registry () =
 ;;
 
 let test_plan_error_json_covers_closed_sum () =
+  let json = testable Yojson.Safe.pp Yojson.Safe.equal in
   let a = node_id "a" in
   let b = node_id "b" in
   let rows =
@@ -973,18 +984,35 @@ let test_plan_error_json_covers_closed_sum () =
            (json |> member "reason" |> member "kind" |> to_string))
     rows;
   let pointer_errors =
-    [ Plan.Json_pointer.Missing_properties "value", "missing_properties"
-    ; Plan.Json_pointer.Missing_property_schema "value", "missing_property_schema"
+    [ ( Plan.Json_pointer.Missing_properties "value"
+      , `Assoc
+          [ "kind", `String "missing_properties"
+          ; "property", `String "value"
+          ] )
+    ; ( Plan.Json_pointer.Missing_property_schema "value"
+      , `Assoc
+          [ "kind", `String "missing_property_schema"
+          ; "property", `String "value"
+          ] )
     ; ( Plan.Json_pointer.Ambiguous_property_schema "value"
-      , "ambiguous_property_schema" )
-    ; Plan.Json_pointer.Missing_items_schema "0", "missing_items_schema"
-    ; Plan.Json_pointer.Expected_schema_container "value", "expected_schema_container"
+      , `Assoc
+          [ "kind", `String "ambiguous_property_schema"
+          ; "property", `String "value"
+          ] )
+    ; ( Plan.Json_pointer.Missing_items_schema "0"
+      , `Assoc
+          [ "kind", `String "missing_items_schema"; "segment", `String "0" ] )
+    ; ( Plan.Json_pointer.Expected_schema_container "value"
+      , `Assoc
+          [ "kind", `String "expected_schema_container"
+          ; "segment", `String "value"
+          ] )
     ]
   in
   check int "closed pointer schema error rows" 5 (List.length pointer_errors);
   List.iter
-    (fun (error, expected_kind) ->
-       let json =
+    (fun (error, expected_error) ->
+       let encoded =
          Plan.error_to_json
            (Plan.Invalid_output_pointer
               { node_id = b
@@ -997,47 +1025,80 @@ let test_plan_error_json_covers_closed_sum () =
        check string
          "canonical pointer wire"
          "/a~1b/~0key"
-         (json |> member "pointer" |> to_string);
+         (encoded |> member "pointer" |> to_string);
        check
          (list string)
          "decoded pointer segments"
          [ "a/b"; "~key" ]
-         (json |> member "pointer_segments" |> to_list |> List.map to_string);
-       check string
-         "pointer schema error kind"
-         expected_kind
-         (json |> member "error" |> member "kind" |> to_string))
+         (encoded |> member "pointer_segments" |> to_list |> List.map to_string);
+       check json
+         "pointer schema error payload"
+         expected_error
+         (encoded |> member "error"))
     pointer_errors;
+  let path = [ "properties"; "value" ] in
+  let json_path = `List [ `String "properties"; `String "value" ] in
   let schema_errors =
-    [ Plan.Expected_schema_object { path = []; schema = `Null }, "expected_schema_object"
-    ; ( Plan.Duplicate_schema_keyword { path = []; keyword = "type" }
-      , "duplicate_schema_keyword" )
-    ; Plan.Missing_schema_type { path = [] }, "missing_schema_type"
-    ; ( Plan.Unsupported_contract_type { path = []; value = `String "tuple" }
-      , "unsupported_contract_type" )
-    ; ( Plan.Unsupported_schema_keyword { path = []; keyword = "oneOf" }
-      , "unsupported_schema_keyword" )
+    [ ( Plan.Expected_schema_object { path; schema = `Null }
+      , `Assoc
+          [ "kind", `String "expected_schema_object"
+          ; "path", json_path
+          ; "schema", `Null
+          ] )
+    ; ( Plan.Duplicate_schema_keyword { path; keyword = "type" }
+      , `Assoc
+          [ "kind", `String "duplicate_schema_keyword"
+          ; "path", json_path
+          ; "keyword", `String "type"
+          ] )
+    ; ( Plan.Missing_schema_type { path }
+      , `Assoc [ "kind", `String "missing_schema_type"; "path", json_path ] )
+    ; ( Plan.Unsupported_contract_type { path; value = `String "tuple" }
+      , `Assoc
+          [ "kind", `String "unsupported_contract_type"
+          ; "path", json_path
+          ; "value", `String "tuple"
+          ] )
+    ; ( Plan.Unsupported_schema_keyword { path; keyword = "oneOf" }
+      , `Assoc
+          [ "kind", `String "unsupported_schema_keyword"
+          ; "path", json_path
+          ; "keyword", `String "oneOf"
+          ] )
     ; ( Plan.Invalid_schema_keyword_value
-          { path = []; keyword = "required"; value = `Null }
-      , "invalid_schema_keyword_value" )
-    ; ( Plan.Duplicate_required_field { path = []; field = "value" }
-      , "duplicate_required_field" )
-    ; ( Plan.Unknown_required_property { path = []; field = "value" }
-      , "unknown_required_property" )
+          { path; keyword = "required"; value = `Null }
+      , `Assoc
+          [ "kind", `String "invalid_schema_keyword_value"
+          ; "path", json_path
+          ; "keyword", `String "required"
+          ; "value", `Null
+          ] )
+    ; ( Plan.Duplicate_required_field { path; field = "value" }
+      , `Assoc
+          [ "kind", `String "duplicate_required_field"
+          ; "path", json_path
+          ; "field", `String "value"
+          ] )
+    ; ( Plan.Unknown_required_property { path; field = "value" }
+      , `Assoc
+          [ "kind", `String "unknown_required_property"
+          ; "path", json_path
+          ; "field", `String "value"
+          ] )
     ]
   in
   check int "closed schema contract error rows" 8 (List.length schema_errors);
   List.iter
-    (fun (error, expected_kind) ->
-       let json =
+    (fun (error, expected_error) ->
+       let encoded =
          Plan.error_to_json
            (Plan.Invalid_output_schema
               { node_id = a; tool_name = "tool"; error })
        in
-       check string
-         "schema contract error kind"
-         expected_kind
-         Yojson.Safe.Util.(json |> member "error" |> member "kind" |> to_string))
+       check json
+         "schema contract error payload"
+         expected_error
+         Yojson.Safe.Util.(encoded |> member "error"))
     schema_errors
 ;;
 

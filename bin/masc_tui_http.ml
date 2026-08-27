@@ -971,6 +971,13 @@ let post_dashboard_gate_external_mode ~(host : string) ~(port : int)
   | Error detail -> Error detail
   | Ok json -> expect_ok_true ~what:"gate external mode" json
 
+(** GET /api/v1/dashboard/gate/keeper-settings — durable per-keeper Gate
+    settings: which Keepers were held stricter than the workspace, and which
+    judge each is put to first. *)
+let fetch_keeper_gate_settings ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/gate/keeper-settings"
+
 (** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
 let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

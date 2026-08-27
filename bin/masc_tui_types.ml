@@ -1258,6 +1258,12 @@ type state = {
      wire carries (keeper, mode) pairs and [auto] is the absent default, so
      what the pane needs is exactly the yolo set. *)
   mutable keeper_yolo_names: string list;
+  (* Durable per-keeper Gate settings, as (keeper, value) pairs. Only keepers
+     somebody singled out are here, so absence means "follows the workspace"
+     rather than "unknown". Distinct from [keeper_yolo_names], which is the
+     in-memory stance a restart clears. *)
+  mutable keeper_gate_modes: (string * string) list;
+  mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* The list draws each ask on one row; this opens the selected one whole.
      Keyed on the cursor rather than a token so an ask that resolves while it
@@ -1837,6 +1843,8 @@ let create_state
   gate_modes = None;
   gate_error = None;
   keeper_yolo_names = [];
+  keeper_gate_modes = [];
+  keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_detail_open = false;
   approval_detail_scroll = 0;

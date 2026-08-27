@@ -3384,6 +3384,59 @@ let test_decode_gate_row_missing_id_is_an_error () =
   | Ok _ -> Alcotest.fail "a row with no id decoded"
   | Error _ -> ()
 
+let keeper_gate_settings_json =
+  `Assoc
+    [ ( "modes"
+      , `List
+          [ `Assoc [ ("keeper_name", `String "kidsnote"); ("mode", `String "manual") ] ] )
+    ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+    ; ( "judges"
+      , `List
+          [ `Assoc
+              [ ("keeper_name", `String "kidsnote")
+              ; ("slot_id", `String "glm-coding.glm-5-turbo")
+              ] ] )
+    ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+    ]
+
+let test_decode_keeper_gate_settings_reads_both_lists () =
+  match Tui_decode.decode_keeper_gate_settings keeper_gate_settings_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok (modes, judges) ->
+    Alcotest.(check (list (pair string string)))
+      "modes" [ ("kidsnote", "manual") ] modes;
+    Alcotest.(check (list (pair string string)))
+      "judges" [ ("kidsnote", "glm-coding.glm-5-turbo") ] judges
+
+let test_decode_keeper_gate_settings_takes_an_empty_workspace () =
+  (* Nobody singled out is a working configuration, not a missing answer. *)
+  let json =
+    `Assoc
+      [ ("modes", `List [])
+      ; ("modes_state", `Assoc [ ("state", `String "ready") ])
+      ; ("judges", `List [])
+      ; ("judges_state", `Assoc [ ("state", `String "ready") ])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Ok ([], []) -> ()
+  | Ok _ -> Alcotest.fail "invented a setting nobody made"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+
+let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
+  (* A row that names no Keeper cannot be shown against one, and dropping it
+     silently would leave a setting in force that no detail pane mentions. *)
+  let json =
+    `Assoc
+      [ ("modes", `List [ `Assoc [ ("mode", `String "manual") ] ])
+      ; ("judges", `List [])
+      ]
+  in
+  match Tui_decode.decode_keeper_gate_settings json with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
+
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -3677,6 +3730,15 @@ let () =
       [
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
+      ] );
+    ( "keeper_gate_settings",
+      [
+        Alcotest.test_case "reads both lists" `Quick
+          test_decode_keeper_gate_settings_reads_both_lists;
+        Alcotest.test_case "takes an empty workspace" `Quick
+          test_decode_keeper_gate_settings_takes_an_empty_workspace;
+        Alcotest.test_case "rejects a row without a keeper" `Quick
+          test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper;
       ] );
     ( "keeper_secret_projection",
       [

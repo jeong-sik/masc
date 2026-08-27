@@ -2157,6 +2157,53 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
          request reqd)
+  (* The same two lists the Gate projection carries, on their own so a surface
+     that only wants them does not pay for the approval queue and the resolved
+     history to find out which Keepers were singled out. *)
+  |> Http.Router.get "/api/v1/dashboard/gate/keeper-settings" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let modes, modes_state =
+           match Keeper_gate_mode.keeper_overrides ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_mode.keeper_override) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "mode", `String (Keeper_gate_mode.to_string row.mode)
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         let judges, judges_state =
+           match Keeper_gate_judge_slot.all ~base_path with
+           | Ok rows ->
+             ( `List
+                 (List.map
+                    (fun (row : Keeper_gate_judge_slot.t) ->
+                      `Assoc
+                        [ "keeper_name", `String row.keeper_name
+                        ; "slot_id", `String row.slot_id
+                        ])
+                    rows)
+             , `Assoc [ "state", `String "ready" ] )
+           | Error detail ->
+             ( `List []
+             , `Assoc [ "state", `String "unavailable"; "error", `String detail ] )
+         in
+         Http.Response.json_value ~compress:true ~request:req
+           (`Assoc
+              [ "modes", modes
+              ; "modes_state", modes_state
+              ; "judges", judges
+              ; "judges_state", judges_state
+              ])
+           reqd)
+         request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/keeper-mode" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state operator_name _req reqd ->

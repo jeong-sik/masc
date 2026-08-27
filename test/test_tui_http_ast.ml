@@ -1915,13 +1915,24 @@ let test_renderers_sanitize_untrusted_terminal_fields () =
      carry action affordances. The fields the row shows did not change, and
      neither did their sanitizers -- only the binding that holds them. *)
   check_fields "keeper_row_content" [ "k_current_task_id"; "k_name" ];
-  (* Both calls compare the raw Keeper identity before anything is rendered:
-     [String.equal] checks the cached detail stamp, and the typed context lookup
-     checks its own snapshot stamp. Neither reaches the terminal, so those raw
-     [k_name] accesses do not belong inside a text sanitizer. *)
+  (* These calls compare or look up the raw Keeper identity before anything is
+     rendered: [String.equal] checks the cached detail stamp, the typed context
+     lookup checks its own snapshot stamp, and the Gate section asks two
+     (keeper, value) lists what was set for this one. None reaches the
+     terminal -- what the Gate rows draw is the value, sanitized where it is
+     drawn -- so those raw [k_name] accesses do not belong inside a text
+     sanitizer.
+
+     The lookups in particular must stay raw: the stored key is the Keeper's
+     own name, and a sanitized copy would simply stop matching, which reads on
+     screen as "follows the workspace" for a Keeper somebody moved. *)
   check_fields
     ~non_rendering_calls:
-      [ "String.equal"; "Context_state.reading_for_keeper" ]
+      [ "String.equal"
+      ; "Context_state.reading_for_keeper"
+      ; "List.mem"
+      ; "List.assoc_opt"
+      ]
     "keeper_detail_pane"
     [ "k_name"
     ; "k_current_task_id"

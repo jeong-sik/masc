@@ -752,6 +752,13 @@ let load_dashboard_gate ~(host : string) ~(port : int) :
   | Error err -> Error ("gate load failed: " ^ err)
   | Ok json -> Tui_decode.decode_gate_snapshot json
 
+(** Load the durable per-keeper Gate settings. *)
+let load_keeper_gate_settings ~(host : string) ~(port : int) :
+    ((string * string) list * (string * string) list, string) result =
+  match fetch_keeper_gate_settings ~host ~port with
+  | Error err -> Error ("keeper Gate settings load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_keeper_gate_settings json
+
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     ((string * string) list, string) result =

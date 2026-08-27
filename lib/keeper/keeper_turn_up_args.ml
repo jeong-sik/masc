@@ -298,9 +298,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       Error (tool_result_error ~class_:Tool_result.Policy_rejection (keeper_toml_load_error_to_string error))
     | Ok profile_defaults ->
     (* An explicit profile must be valid. When neither the call nor keeper TOML states
-       one, creation uses the local sandbox with playground-only writes. This is the
-       narrow safe bootstrap: a fresh keeper can start without a hand-authored TOML,
-       while docker remains an explicit opt-in. *)
+       one, resolution falls back to [Local] (playground-only writes) — which
+       create/update validation rejects unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1
+       dev/test hatch is set. Docker remains an explicit opt-in. *)
     let sandbox_profile_error =
       match sandbox_profile_opt, profile_defaults.sandbox_profile,
         profile_defaults.manifest_path
@@ -370,8 +370,10 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
   in
   raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
-(* An explicit request wins over the TOML default. Without either source, use the
-   canonical local sandbox; creation pairs it with playground-only writes. *)
+(* An explicit request wins over the TOML default. Without either source, the
+   fallback resolves to [Local] — which keeper-up create/update validation
+   rejects fail-closed unless the MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 dev/test
+   hatch is set (config-load gating follows in the same plan). *)
 let resolve_sandbox_profile ?requested ~fallback () =
   match Option.bind requested sandbox_profile_of_string with
   | Some stated -> stated

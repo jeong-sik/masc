@@ -31,8 +31,9 @@ type = "string"
 enum = ["local", "docker"]
 default = "local"
 description = """
-Sandbox isolation profile. New keepers default to local with playground-only \
-writes when omitted; select docker explicitly when required."""
+Sandbox isolation profile. Pass explicitly: \"docker\" for containerized \
+execution. \"local\" is fail-closed and only resolves when the dev/test \
+hatch MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1 is set."""
 
 [[params]]
 name = "autoboot_enabled"

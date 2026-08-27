@@ -449,25 +449,30 @@ let contains needle haystack =
 
 let hatch_key = "MASC_EXEC_ALLOW_LOCAL_PLAYGROUND"
 
+(* Every case restores the cleared state so no empty-string value leaks into
+   the next case (registry reads are fresh per call, but env is process-global). *)
+let with_hatch value f =
+  Unix.putenv hatch_key value;
+  Fun.protect ~finally:(fun () -> Unix.putenv hatch_key "") f
+
 let test_validate_rejects_local_when_gate_off () =
   let module A = Keeper_turn_up_args in
-  Unix.putenv hatch_key "";
-  (match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Local with
-   | Error msg ->
-     check bool "rejection names the hatch" true (contains hatch_key msg)
-   | Ok () -> fail "local profile must be rejected when the gate is off")
+  with_hatch "" (fun () ->
+      match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Local with
+      | Error msg ->
+        check bool "rejection names the hatch" true (contains hatch_key msg)
+      | Ok () -> fail "local profile must be rejected when the gate is off")
 
 let test_validate_allows_docker_when_gate_off () =
   let module A = Keeper_turn_up_args in
-  Unix.putenv hatch_key "";
-  (match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Docker with
-   | Ok () -> ()
-   | Error err -> fail ("docker must stay allowed: " ^ err))
+  with_hatch "" (fun () ->
+      match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Docker with
+      | Ok () -> ()
+      | Error err -> fail ("docker must stay allowed: " ^ err))
 
 let test_validate_allows_local_with_hatch () =
   let module A = Keeper_turn_up_args in
-  Unix.putenv hatch_key "true";
-  Fun.protect ~finally:(fun () -> Unix.putenv hatch_key "") (fun () ->
+  with_hatch "true" (fun () ->
       match A.validate_sandbox_profile_allowed ~profile:Keeper_types_profile_sandbox.Local with
       | Ok () -> ()
       | Error err -> fail ("hatch must allow local: " ^ err))

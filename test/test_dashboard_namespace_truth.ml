@@ -128,6 +128,19 @@ let expire_execution_warmup () =
 
 let create_keeper env sw state name =
   let workspace_scope = Lib.Mcp_server.workspace_scope state in
+  (* Keeper creation commits metadata through the owner inventory, which only
+     server bootstrap installs in production; mirror the sibling-suite fixture
+     setup (test_heartbeat_integration, test_operator_control_snapshot). *)
+  (match
+     Lib.Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       ~on_turn_slot_released:None
+       workspace_scope.config
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Lib.Keeper_owner_registry.install_error_to_string error));
   let ctx : _ Lib.Keeper_tool_surface.context =
     {
       config = workspace_scope.config;

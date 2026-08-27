@@ -78,9 +78,12 @@ val resolve_sandbox_profile :
   sandbox_profile
 (** An explicit [requested] profile wins over the TOML [fallback].
 
-    When neither source states a profile, returns the canonical local sandbox default.
-    Fresh keepers also default to an empty [allowed_paths] list, so that local sandbox
-    is restricted to [.masc/playground/<keeper_name>/].
+    When neither source states a profile, the fallback resolves to [Local],
+    which keeper-up validation (create/update) rejects unless the dev/test
+    hatch [MASC_EXEC_ALLOW_LOCAL_PLAYGROUND=1] is set; config-load gating
+    follows in the same fail-closed plan.  Fresh keepers still default to an
+    empty [allowed_paths] list, which under [Local] restricts writes to
+    [.masc/playground/<keeper_name>/].
 
     [requested] is the caller's raw string; an unparseable one is treated as absent,
     since the gate rejects those first. *)

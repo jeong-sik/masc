@@ -116,7 +116,6 @@
   test_host_fd_pressure_poller
   test_operator_control_actions
   test_operator_control_snapshot_state
-  test_operator_control_snapshot
   test_operator_control_judgment
   test_with_cleanups_on_release
   test_auth_login
@@ -262,7 +261,6 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
-  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -461,7 +459,6 @@
   test_operator_control_actions
   test_operator_control_confirm
   test_operator_control_snapshot_state
-  test_operator_control_snapshot
   test_operator_control_judgment
   test_operator_control_support
   test_with_cleanups_on_release
@@ -609,7 +606,6 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
-  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -848,6 +844,36 @@
  (name test_operator_control_snapshot_cache)
  (modules test_operator_control_snapshot_cache)
  (libraries alcotest yojson masc_test_deps eio_main))
+
+; Extracted from the big (tests ...) group above: the "keeper up ok" case
+; creates a keeper without a sandbox_profile, which resolves to Local and is
+; now rejected fail-closed. The profile is incidental to what this suite
+; measures (operator snapshot contents), so the stanza sets the dev/test
+; hatch rather than migrating the fixture to docker (no daemon here).
+(test
+ (name test_operator_control_snapshot)
+ (modules test_operator_control_snapshot test_operator_control_support)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps masc.keeper_identity))
+
+; Extracted from the big (tests ...) group above: the cases pass
+; sandbox_profile = "local" explicitly to exercise admission fencing around
+; creation — the profile is incidental to the transaction semantics under
+; test — and keeper-up validation now rejects Local fail-closed without the
+; hatch.
+(test
+ (name test_keeper_create_admission_transaction)
+ (modules test_keeper_create_admission_transaction)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
 
 ; Focused CI gate: the conditions wire vocabulary must match on both ends.
 ; #26569 had the encoder emitting thirteen fields while the client zod object
@@ -1199,7 +1225,6 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_dashboard_namespace_truth
   test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
@@ -1344,7 +1369,6 @@
   test_activity_graph
   test_tool_agent_timeline_build
   test_masc_log
-  test_dashboard_namespace_truth
   test_library_resource_topic
   test_dashboard_snapshot
   test_server_runtime_startup_maintenance
@@ -1482,6 +1506,20 @@
   decompress.de
   decompress.gz)
  (deps ../bin/main_eio.exe))
+
+; Extracted from the Group 3 (tests ...) list above: the read-model fixtures
+; seed sandbox_profile = "local" (incidental — the suite measures namespace
+; truth, not sandbox isolation), and keeper-up validation now rejects Local
+; fail-closed without the hatch.
+(test
+ (name test_dashboard_namespace_truth)
+ (modules test_dashboard_namespace_truth)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries masc_test_deps))
 
 (test
  (name test_server_bootstrap_durable_demand_owner)

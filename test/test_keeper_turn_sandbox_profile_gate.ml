@@ -44,12 +44,21 @@ let test_every_entry_point_resolves_through_the_shared_function () =
 ;;
 
 let test_entry_points_do_not_apply_the_overlay_themselves () =
-  Alcotest.(check int)
-    "the overlay is applied in one place, not once per entry point"
-    0
-    (Ast_grep.count_calls_across_files
-       ~module_paths:turn_entry_points
-       ~callee:"Keeper_meta_contract.effective_meta_of_profile_defaults")
+  (* #31178 sanctions exactly one direct re-application: the owner-projection
+     refresh inside [Keeper_unified_turn.run_keeper_cycle] reapplies the
+     already-loaded [entry_profile_defaults] rather than re-reading the
+     profile, so two reads in one turn cannot disagree. Every other entry
+     point must resolve through [turn_profile_and_meta]. *)
+  List.iter
+    (fun (module_path, sanctioned) ->
+      Alcotest.(check int)
+        (Printf.sprintf
+           "%s applies the overlay only at its sanctioned sites" module_path)
+        sanctioned
+        (Ast_grep.count_calls
+           ~module_path
+           ~callee:"Keeper_meta_contract.effective_meta_of_profile_defaults"))
+    [ "lib/keeper/keeper_unified_turn.ml", 1; "lib/keeper/keeper_turn.ml", 0 ]
 ;;
 
 (* ------------------------------------------------------------------ *)

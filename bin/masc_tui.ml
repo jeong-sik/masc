@@ -1713,6 +1713,38 @@ let launch_tools_load state ~mailbox =
           `Stop_daemon)
   | None -> enqueue_async mailbox (Tools_loaded (Error "Eio switch is unavailable"))
 
+let tools_skill_profiles state =
+  match state.tools_inventory with
+  | Some
+      { Masc.Tui_decode.ts_effective =
+          Some
+            (Masc.Tui_decode.Effective_surface_available
+               { ets_skill_profiles; _ });
+        _ } ->
+    ets_skill_profiles
+  | Some _ | None -> []
+;;
+
+let normalize_tools_skill_cursor state =
+  let count = List.length (tools_skill_profiles state) in
+  if count = 0
+  then state.tools_skill_cursor <- 0
+  else if state.tools_skill_cursor >= count
+  then state.tools_skill_cursor <- count - 1
+  else if state.tools_skill_cursor < 0
+  then state.tools_skill_cursor <- 0
+;;
+
+let selected_tools_skill_profile state =
+  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+;;
+
+let move_tools_skill_cursor state delta =
+  let count = List.length (tools_skill_profiles state) in
+  if count > 0
+  then state.tools_skill_cursor <- (state.tools_skill_cursor + delta + count) mod count
+;;
+
 let cycle_tools_keeper state ~mailbox ~delta =
   let count = List.length state.keepers in
   if count > 0 then begin
@@ -1721,6 +1753,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.tools_inventory <- None;
     state.tools_error <- None;
     state.tools_scroll <- 0;
+    state.tools_skill_cursor <- 0;
     launch_tools_load state ~mailbox
   end
 ;;
@@ -6769,7 +6802,8 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       match result with
       | Ok snapshot ->
           state.tools_inventory <- Some snapshot;
-          state.tools_error <- None
+          state.tools_error <- None;
+          normalize_tools_skill_cursor state
       | Error detail -> state.tools_error <- Some detail)
   | Runtime_catalog_loaded result -> (
       match result with
@@ -7796,6 +7830,84 @@ let main () =
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in
+  let handle_skill_edit () =
+    match selected_tools_skill_profile state with
+    | None -> add_event state "error" "no published Skill selected"
+    | Some profile ->
+      let name = profile.Masc.Tui_decode.esp_name in
+      let host = server_peer_host in
+      let port = state.port in
+      (match
+         Masc_tui_http.post_skill_editor_read
+           ~host
+           ~port
+           profile.esp_reference
+       with
+       | Error detail -> add_event state "error" ("Skill read failed: " ^ detail)
+       | Ok loaded when not (String.equal loaded.sel_access "read_write") ->
+         add_event state "error" (name ^ " belongs to a read-only Skill source")
+       | Ok loaded ->
+         (match Masc_tui_editor.editor_command () with
+          | None ->
+            add_event state "error" "no $EDITOR set; export EDITOR to edit Skills"
+          | Some _ ->
+            (match
+               Masc_tui_editor.roundtrip
+                 ~restore:restore_terminal
+                 ~reenter:reenter_terminal
+                 ~suffix:".md"
+                 loaded.sel_source_text
+             with
+             | None -> add_event state "system" (name ^ " edit cancelled")
+             | Some edited when String.equal edited loaded.sel_source_text ->
+               add_event state "system" (name ^ " unchanged")
+             | Some edited ->
+               (match
+                  Masc_tui_http.post_skill_editor_preview
+                    ~host
+                    ~port
+                    ~reference:loaded.sel_reference
+                    ~source_text:edited
+                with
+                | Error detail ->
+                  add_event state "error" ("Skill preview rejected: " ^ detail)
+                | Ok _ ->
+                  (match
+                     Masc_tui_http.post_skill_editor_save
+                       ~host
+                       ~port
+                       ~reference:loaded.sel_reference
+                       ~source_text:edited
+                   with
+                   | Error detail ->
+                     add_event state "error" ("Skill save failed: " ^ detail)
+                   | Ok receipt ->
+                     (match receipt.ses_status with
+                      | Masc_tui_http.Skill_unchanged ->
+                        add_event state "system" (name ^ " unchanged")
+                      | Skill_saved_and_published ->
+                        let revision =
+                          Skill_reference.content_revision_to_string
+                            receipt.ses_reference.content_revision
+                        in
+                        let revision_short =
+                          String.sub revision 0 (min 12 (String.length revision))
+                        in
+                        add_event state "system"
+                          (Printf.sprintf
+                             "%s saved + published · %s%s"
+                             name
+                             revision_short
+                             (match receipt.ses_snapshot_revision with
+                              | None -> ""
+                              | Some snapshot ->
+                                " · snapshot "
+                                ^ String.sub snapshot 0 (min 12 (String.length snapshot))));
+                        launch_tools_load state ~mailbox:async_messages
+                      | Skill_saved_but_unpublished reason ->
+                        add_event state "error"
+                          (name ^ " was saved but NOT published: " ^ reason)))))))
+  in
   (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
      actually gets, and the server persists what comes back. The effective
      text is the stem rather than the file's, because an overridden prompt is
@@ -8789,6 +8901,8 @@ let main () =
            state.resource_scroll <- state.resource_scroll + 1
        | Some "K" when state.view = Resources ->
            state.resource_scroll <- max 0 (state.resource_scroll - 1)
+       | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
+       | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some (("n" | "N") as direction)
          when state.search_last <> ""
               && Option.is_some (surface_row_texts state state.view) ->
@@ -10824,10 +10938,11 @@ let main () =
             | Config ->
                 if state.config_pane = Config_prompts then handle_prompt_edit ()
                 else handle_runtime_config_edit ()
+            | Tools -> handle_skill_edit ()
             | Overview | Acting | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Board | Approvals | Planning | Schedules | Verification | Harness
-            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | Tools | System_logs -> ())
+            | Fusion | Repositories | Changes | Connectors | Runtime | Resources | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            handle_prompt_clear ()

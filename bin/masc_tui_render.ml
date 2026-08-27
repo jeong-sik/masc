@@ -7467,16 +7467,17 @@ let render_tools (state : state) =
             ets_tools
         in
         let skill_profile_lines =
-          List.map
-            (fun (profile : Masc.Tui_decode.effective_skill_profile) ->
+          List.mapi
+            (fun index (profile : Masc.Tui_decode.effective_skill_profile) ->
                let execution =
                  if String.equal profile.esp_kind "instruction"
                  then "on-demand"
                  else profile.esp_execution
                in
-               Ansi.dim,
+               (if index = state.tools_skill_cursor then Theme.selection else Ansi.dim),
                Printf.sprintf
-                 "   %-24s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
+                 " %s %-22s %-11s nodes=%d batches=%d parallel=%d discovery=%dB body=%dB"
+                 (if index = state.tools_skill_cursor then "▸" else " ")
                  (Terminal_text.single_line profile.esp_name)
                  (Terminal_text.single_line execution)
                  profile.esp_node_count
@@ -7509,6 +7510,7 @@ let render_tools (state : state) =
           Printf.sprintf
             "   Skill footprint: %dB/%dB tool context · %dB catalog bodies · eager body 0B"
             ets_skill_tool_surface_bytes ets_tool_surface_bytes ets_skill_body_bytes;
+          Ansi.bold, "   Skills — J/K select · e edit + validate + publish";
           Ansi.dim, "   digest=" ^ Terminal_text.single_line digest ]
         @ skill_profile_lines
         (* Said on this surface because this is the one that answers "what can

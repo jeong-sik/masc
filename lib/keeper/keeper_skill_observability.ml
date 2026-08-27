@@ -72,15 +72,11 @@ let instruction_discovery_bytes reference description =
   + String.length description
 ;;
 
-let of_skill (skill : Keeper_skill_catalog.skill) =
-  match skill.reference with
-  | None -> None
-  | Some reference ->
-    let body_bytes = String.length skill.body in
-    (match skill.surface with
+let of_skill_with_reference reference (skill : Keeper_skill_catalog.skill) =
+  let body_bytes = String.length skill.body in
+  match skill.surface with
      | Keeper_skill_catalog.Instruction ->
-       Some
-         { reference
+       { reference
          ; kind = "instruction"
          ; activation_tool = Keeper_tool_composition_catalog.skill_tool_name
          ; execution = "on_demand"
@@ -100,8 +96,7 @@ let of_skill (skill : Keeper_skill_catalog.skill) =
          schedule_profile entry.plan
        in
        let tool_schema_bytes = composition_tool_component_bytes entry in
-       Some
-         { reference
+       { reference
          ; kind = "composition"
          ; activation_tool = Keeper_tool_composition_catalog.tool_name entry
          ; execution =
@@ -116,7 +111,11 @@ let of_skill (skill : Keeper_skill_catalog.skill) =
          ; max_parallelism
          ; statically_read_only = Some (statically_read_only entry.plan)
          ; declaration_span = skill.composition_span
-         })
+         }
+;;
+
+let of_skill (skill : Keeper_skill_catalog.skill) =
+  Option.map (fun reference -> of_skill_with_reference reference skill) skill.reference
 ;;
 
 let of_catalog catalog =

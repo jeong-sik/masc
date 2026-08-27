@@ -11,6 +11,20 @@
   masc.skill_snapshot
   masc_test_deps))
 
+(test
+ (name test_server_skill_editor)
+ (modules test_server_skill_editor)
+ (libraries
+  alcotest
+  masc_server
+  masc.skill_config
+  masc.skill_reference
+  masc.skill_snapshot
+  masc.skill_snapshot_service
+  eio_main
+  fs_compat
+  unix))
+
 (env
  (_
   (env-vars

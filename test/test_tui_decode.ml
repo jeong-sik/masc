@@ -1586,6 +1586,10 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
          |> Yojson.Safe.to_string);
       Alcotest.(check string) "tool origin" "composition_skill" tool.et_origin;
       Alcotest.(check string) "profile name" "mission-snapshot" profile.esp_name;
+      Alcotest.(check string)
+        "profile keeps the exact editable reference"
+        (Yojson.Safe.to_string (exact_reference "mission-snapshot" 'b'))
+        (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string);
       Alcotest.(check string) "profile execution" "async" profile.esp_execution;
       Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
       Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;

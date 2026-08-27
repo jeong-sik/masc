@@ -24,10 +24,14 @@ let test_disabled_message_names_hatch () =
   check bool "message names the hatch env var" true
     (contains hatch_key Env_config_sandbox.Gate.disabled_message)
 
+let test_env_key_pinned () =
+  check string "env_key pinned" hatch_key Env_config_sandbox.Gate.env_key
+
 let () =
   run "Local playground gate"
     [ "gate",
       [ test_case "default disabled" `Quick test_gate_default_disabled
       ; test_case "enabled via hatch" `Quick test_gate_enabled_via_hatch
       ; test_case "message names hatch" `Quick test_disabled_message_names_hatch
+      ; test_case "env_key pinned" `Quick test_env_key_pinned
       ] ]

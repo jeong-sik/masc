@@ -56,7 +56,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~name:p.name
   in
     match
-      validate_sandbox_settings ~allowed_paths
+      validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths
     with
     | Error err ->
         Otel_metric_store.inc_counter

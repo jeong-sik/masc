@@ -380,6 +380,14 @@ let resolve_sandbox_profile ?requested ~fallback () =
      | Some stated -> stated
      | None -> default_sandbox_profile)
 
+(* Fail-closed gate: the local playground is off unless the operator sets the
+   hatch.  See [Env_config_sandbox.Gate] for the SSOT. *)
+let validate_sandbox_profile_allowed ~profile =
+  match profile with
+  | Local when not (Env_config_sandbox.Gate.allow_local_playground ()) ->
+    Error Env_config_sandbox.Gate.disabled_message
+  | _ -> Ok ()
+
 let resolve_network_mode ~sandbox_profile ~fallback =
   fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
@@ -413,3 +421,11 @@ let validate_sandbox_settings ~allowed_paths =
              "allowed_paths entries may not contain globs or traversal segments \
               (rejected: %s)"
              (String.concat ", " rejected))
+
+(* Gate first, then the path checks: a rejected profile must not be masked by
+   an [allowed_paths] error, and an allowed profile falls through to the
+   unchanged path validation. *)
+let validate_sandbox_settings_with_profile ~sandbox_profile ~allowed_paths =
+  match validate_sandbox_profile_allowed ~profile:sandbox_profile with
+  | Error _ as err -> err
+  | Ok () -> validate_sandbox_settings ~allowed_paths

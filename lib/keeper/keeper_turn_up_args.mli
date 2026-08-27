@@ -90,7 +90,20 @@ val resolve_network_mode :
   fallback:network_mode option ->
   network_mode
 
+(** Reject the [Local] sandbox profile while the local playground is gated off
+    (fail-closed).  The hatch is [Env_config_sandbox.Gate]. *)
+val validate_sandbox_profile_allowed :
+  profile:sandbox_profile ->
+  (unit, string) result
+
 (** Validate allowed_paths without changing behavior by sandbox backend. *)
 val validate_sandbox_settings :
+  allowed_paths:string list ->
+  (unit, string) result
+
+(** [validate_sandbox_settings] with the profile gate
+    ([validate_sandbox_profile_allowed]) running first. *)
+val validate_sandbox_settings_with_profile :
+  sandbox_profile:sandbox_profile ->
   allowed_paths:string list ->
   (unit, string) result

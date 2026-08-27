@@ -54,8 +54,6 @@ type composition = private
 
 type t
 
-type named_skill_error = Missing_named_skill of { name : string }
-
 type error =
   | Definition_rejected of
       { directory : string
@@ -201,11 +199,6 @@ val instruction_entries : t -> (string * string * string) list
 (** Instruction skills as [(name, description, body)] in catalog order. This
     is the single input used to build both executable and schema-only
     [keeper_skill] tools. *)
-
-val instruction_names_for :
-  t -> string list -> (string list, named_skill_error) result
-(** Resolve task-declared names and return only instruction skill names in
-    declaration order. Composition names are valid but omitted. *)
 
 val compositions : t -> composition list
 (** Composition entries with their exact snapshot provenance. Catalogs built

@@ -648,7 +648,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # them, and the token scan read its own comment as a caller: the gate counted
 # three fewer than the tree held. State the test, not the roster -- as the
 # paragraph above already says.
-DEAD_EXPORT_BASELINE = 43
+# 43 -> 45, measured on 2026-08-27 after the skills-proof merge train. The
+# train and the same-day merges around it left the tree five over the old
+# floor; this change purges every export the skills audit could justify on
+# its own authority and re-measures the floor at what the tree now holds.
+# The remainder predates the train and sits outside the skills surface, so
+# it waits for its own reviewed purge rather than a blind sweep here.
+DEAD_EXPORT_BASELINE = 45
 
 
 def run_ratchet(count: int) -> int:

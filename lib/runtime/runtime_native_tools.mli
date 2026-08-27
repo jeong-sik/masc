@@ -31,10 +31,10 @@ type observation =
     into a call id. *)
 
 type exact_action = action_identity * string
-val exact_action : observation -> exact_action option
 (** Admit only an exact built-in provider identity with a non-empty tool name.
     MCP wrapper steps are observed but their canonical MASC invocation is the
-    action authority. *)
+    action authority; the admitting projection stays internal to
+    [observe_exact_action]. *)
 val observe_exact_action :
   official_turn:int ->
   observe:(official_turn:int -> identity:action_identity -> tool_name:string -> unit) ->

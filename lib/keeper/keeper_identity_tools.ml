@@ -350,12 +350,78 @@ let renew_if_needed ?token_post ?discover ~base_path ~keeper_name
       Ok tokens.Keeper_oauth_flow.access_token)
 ;;
 
-let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~remote_name
-      arguments =
+(* What the Gate is told this call is. The Gate never parses it -- it takes
+   an opaque identity and the caller is what composes one -- so the provider
+   is named here rather than left for a reader of the queue to guess. An
+   operator deciding on a pending request needs to know it is Jira and not
+   Slack, and the input alone does not say. *)
+let gate_operation ~(provider : Provider.t) =
+  Printf.sprintf "service_write:%s" provider.Provider.id
+;;
+
+(* A call that only reads runs without asking. Everything else goes to the
+   Gate, including a service that said nothing about this tool: silence is
+   not permission, and writing to somebody else's Jira unasked is the outcome
+   that has to stay unreachable.
+
+   The Gate rather than the PreToolUse approval hook, which can also read
+   [read_only] but asks over the open chat stream and is therefore only
+   installed on the one turn path that has one. This runs wherever the turn
+   came from, and a deferral survives a Keeper nobody is watching. *)
+let gate_verdict ~base_path ~keeper_name ~(provider : Provider.t) ~read_only
+      ~arguments =
+  match read_only with
+  | Some true -> Ok ()
+  | Some false | None -> (
+    match
+      Keeper_gate.decide ~keeper_always_allow:false
+        { Keeper_gate.keeper_name
+        ; operation = gate_operation ~provider
+        ; input = arguments
+        ; base_path
+          (* The turn's own evidence is not reachable from here: this handler
+             is closed over at catalog projection and holds no turn. The Gate
+             stores what it is given and does not require these, so a call
+             arrives without them rather than not arriving. *)
+        ; causal_context = None
+        ; task_id = None
+        ; continuation_channel = None
+        }
+    with
+    | Keeper_gate.Allow _ -> Ok ()
+    | Keeper_gate.Deferred { approval_id; _ } ->
+      (* Decision B: masc does not replay the call. The approval is durable,
+         so the Keeper reaching this again after it is granted is what runs
+         the effect -- and choosing whether to reach it again is the
+         Keeper's, not a queue's. *)
+      Error
+        (Printf.sprintf
+           "This call writes to %s and is waiting on approval %s. Nothing was \
+            sent. Do other work; call again once an operator has granted it."
+           provider.Provider.label approval_id)
+    | Keeper_gate.Unavailable reason ->
+      Error
+        (Printf.sprintf
+           "This call writes to %s and was not sent: the Gate could not \
+            durably record a decision about it (%s). This Keeper remains \
+            active and may continue other work."
+           provider.Provider.label
+           (Keeper_gate.unavailable_reason_to_string reason)))
+;;
+
+let handler ?post ~base_path ~keeper_name ~(provider : Provider.t) ~read_only
+      ~remote_name arguments =
   let refuse message =
     failed ~recoverable:false ~error_class:(Some Agent_core.Types.Deterministic)
       message
   in
+  match gate_verdict ~base_path ~keeper_name ~provider ~read_only ~arguments with
+  (* Recoverable: the same input succeeds once the approval is granted, so
+     this is not the shape that should retire the tool for the turn. *)
+  | Error message ->
+    failed ~recoverable:true ~error_class:(Some Agent_core.Types.Deterministic)
+      message
+  | Ok () ->
   match
     projected_env_value ~base_path ~keeper_name
       ~name:provider.Provider.access_token_env
@@ -405,6 +471,7 @@ let agent_tools ?post ~base_path ~keeper_name ~(provider : Provider.t) catalog =
           Agent_core.Base.Tool.of_schema schema
             (Agent_core.Base.Tool.ignoring_execution_env
                (handler ?post ~base_path ~keeper_name ~provider
+                  ~read_only:tool.Mcp_client.read_only
                   ~remote_name:tool.Mcp_client.name))
         in
         { acc with offered = projected :: acc.offered })

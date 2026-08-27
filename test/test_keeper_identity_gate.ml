@@ -168,6 +168,9 @@ let contains ~needle haystack =
 (* ── routing: the provider's word, and only that word ─────────────────── *)
 
 let test_silence_defers_durably () =
+  (* No token is projected and the transport faults the test on contact:
+     the deferral proves the Gate is asked before the credential is read
+     and before anything reaches the wire — ordering, not just outcome. *)
   let base_path = temp_base () in
   install_queue ~base_path;
   match
@@ -273,6 +276,8 @@ let test_opening_the_external_lane_is_its_own_gesture () =
       check str "the call ran" "PK-1" output.Agent_core.Types.content
 
 let test_the_external_lane_defaults_to_manual () =
+  check str "the lane's declared default is Manual" "manual"
+    (Mode.to_string Mode.default_external);
   let base_path = temp_base () in
   (match Mode.read_external ~base_path with
   | Ok mode -> check str "absent state selects Manual" "manual" (Mode.to_string mode)

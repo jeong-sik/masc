@@ -118,22 +118,11 @@ val run_call :
   (Mcp_client.tool_result, call_error) result
 (** One call to one attached provider's tool, as this Keeper.
 
-    A call that may change something there is put to the Gate first, and
-    only runs on [Allow]. What counts as "may change something" is the
-    service's own word -- [annotations.readOnlyHint] on its listing -- with
-    silence read as may: a service that said nothing has not given
-    permission, and writing to somebody else's Jira unasked is the outcome
-    that has to stay unreachable.
-
-    The Gate rather than the PreToolUse approval hook. That hook can read
-    the same hint, but it asks over the open chat stream, so it is installed
-    on the one turn path that has one and a Keeper running anywhere else
-    reached these tools with nothing between. A Gate deferral is durable and
-    does not need anybody watching.
-
-    masc does not replay a granted call. The Keeper reaching the tool again
-    is what runs the effect, which keeps the choice to reach it where the
-    other choices about what to do next already are.
+    The wire and nothing else: authorization lives in
+    {!Keeper_identity_gate}, which decides before this runs — over the
+    durable Gate, so a deferral survives a Keeper nobody is watching — and
+    spends a granted approval by host replay from the stored input rather
+    than waiting for a byte-identical re-emission (#25947).
 
     A call reads the token and opens a session of its own rather than
     holding one for the turn. That is three requests where one would do --

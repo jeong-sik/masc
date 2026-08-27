@@ -473,9 +473,9 @@ def validate_current_skill_projection(
     keeper: str,
     trace_id: str,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    projection_value = dashboard.get("skill_activations")
-    if projection_value is None:
+    if "skill_activations" not in dashboard:
         return {"status": "missing"}, None
+    projection_value = dashboard["skill_activations"]
     require(
         isinstance(projection_value, dict),
         "current Skill projection is not an object",
@@ -532,9 +532,9 @@ def validate_effective_keeper_surface(
     keeper: str,
     expected_runtime_id: str,
 ) -> dict[str, Any]:
-    surface_value = dashboard.get("effective_keeper_surface")
-    if surface_value is None:
+    if "effective_keeper_surface" not in dashboard:
         return {"status": "missing"}
+    surface_value = dashboard["effective_keeper_surface"]
     require(
         isinstance(surface_value, dict),
         "effective Keeper surface is not an object",

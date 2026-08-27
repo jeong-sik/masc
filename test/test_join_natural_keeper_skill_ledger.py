@@ -414,6 +414,33 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         )
         self.assertEqual(joined["current_surface"]["before"], {"status": "missing"})
 
+    def test_null_current_surface_is_rejected_as_malformed(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        malformed = unavailable_dashboard(durable)
+        malformed["effective_keeper_surface"] = None
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "effective Keeper surface is not an object"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=malformed,
+                dashboard_after=copy.deepcopy(malformed),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
+            )
+
     def test_warming_current_surface_keeps_available_current_projection_strict(self):
         producer, raw = receipt()
         durable = ledger([activation("call-skill-1")])
@@ -517,6 +544,33 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         )
         self.assertFalse(joined["ledger"]["dashboard_equals_durable"])
         self.assertEqual(joined["current_projection"]["before"], {"status": "missing"})
+
+    def test_null_current_projection_is_rejected_as_malformed(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        malformed = unavailable_dashboard(durable)
+        malformed["skill_activations"] = None
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "current Skill projection is not an object"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=malformed,
+                dashboard_after=copy.deepcopy(malformed),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+                durable_ledger_raw=ledger_raw(durable),
+                durable_ledger_after_raw=ledger_raw(durable),
+            )
 
     def test_unavailable_current_projection_uses_historical_raw_authority(self):
         producer, raw = receipt()

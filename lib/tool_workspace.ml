@@ -57,9 +57,12 @@ let credential_state (ctx : context) ~actual_name =
   let internal_keeper_credential_available name =
     (* Typed in-process read (RFC-0371 B11): this used to getenv the token
        the process itself had putenv'd at boot — its own environment as an
-       in-memory channel, re-read per tool call. *)
+       in-memory channel, re-read per tool call. RFC-0393: whether [name]
+       is a keeper is a registry lookup, not a name-shape parse. *)
     match
-      ( Workspace_identity_backend.keeper_name_for_agent_name name
+      ( Keeper_registry_lookup.find_by_name_in_base_path
+          ~base_path:ctx.config.base_path
+          name
       , Auth.internal_keeper_token () )
     with
     | Some _, Some raw ->
@@ -79,14 +82,7 @@ let credential_state (ctx : context) ~actual_name =
          (fun name ->
             is_initial_admin name
             || internal_keeper_credential_available name
-            (* PR-3b1: ask Auth for the canonical [keeper-<n>-agent]
-              form so a configured keeper's credential is never
-              resolved through the bare-name redirect stub. Non-keeper
-              names pass through unchanged. Spec: AuthIdentityFSM I1. *)
-            || Option.is_some
-                 (Auth.load_credential
-                    ctx.config.base_path
-                    (Workspace_identity_backend.canonicalize_if_keeper ctx.config name)))
+            || Option.is_some (Auth.load_credential ctx.config.base_path name))
          credential_candidates
   in
   { credential_required; credential_available; credential_candidates }

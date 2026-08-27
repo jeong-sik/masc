@@ -417,7 +417,7 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                     ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
                     ~keeper_name:meta.name
                     ~session
-                    ~agent_name:meta.agent_name
+                    ~agent_name:meta.name
                     ~ctx:cleared_ctx
                 with
                 | Ok _ -> ()

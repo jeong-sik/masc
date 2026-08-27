@@ -164,17 +164,12 @@ let internal_keeper_agent_from_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "x-masc-keeper-name" with
   | None -> None
   | Some raw ->
+      (* RFC-0393: the header carries the keeper_name itself — no wrapper
+         spelling to strip or re-mint. *)
       let normalized =
-        raw
-        |> Uri.pct_decode
-        |> String.trim
-        |> String.lowercase_ascii
-        |> strip_prefix ~prefix:"keeper-"
-        |> strip_suffix ~suffix:"-agent"
+        raw |> Uri.pct_decode |> String.trim |> String.lowercase_ascii
       in
-      if normalized = ""
-      then None
-      else Some (Printf.sprintf "keeper-%s-agent" normalized)
+      if normalized = "" then None else Some normalized
 
 let resolve_agent_name_for_auth_raw ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =

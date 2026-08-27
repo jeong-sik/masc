@@ -1522,13 +1522,7 @@ let handle_keeper_directive_post ~sw:_ ~clock:_ state _agent_name req reqd body_
                ])
             reqd
         | Ok () ->
-          let resolved_agent_name =
-            match Keeper_registry_lookup.find_by_name name, meta_opt with
-            | Some entry, _ -> entry.meta.agent_name
-            | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
-              meta.agent_name
-            | None, None -> Keeper_identity.keeper_agent_name name
-          in
+          let resolved_agent_name = name in
           Keeper_keepalive.process_directive
             ~agent_name:resolved_agent_name
             directive;
@@ -1678,12 +1672,7 @@ let handle_keeper_bulk_directive_post ~sw:_ ~clock:_ state _agent_name req reqd 
                      , `String error )
                    ]
                | Ok () ->
-                 let resolved_agent_name =
-                   match Keeper_registry_lookup.find_by_name name, meta_opt with
-                   | Some entry, _ -> entry.meta.agent_name
-                   | None, Some (meta : Keeper_meta_contract.keeper_meta) ->
-                     meta.agent_name
-                   | None, None -> Keeper_identity.keeper_agent_name name
+                 let resolved_agent_name = name
                  in
                  Keeper_keepalive.process_directive
                    ~agent_name:resolved_agent_name

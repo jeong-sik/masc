@@ -28,13 +28,6 @@ let make_meta name =
       (`Assoc
         [
           ("name", `String name);
-          (* Derived, not spelled out: [Keeper_meta_json_parse] rejects any
-             agent_name that is not [Keeper_identity.keeper_agent_name name],
-             and the literal this fixture used ("agent-" ^ name) stopped
-             matching that rule — every case in this file failed at
-             [make_meta] before reaching its assertions. *)
-          ( "agent_name"
-          , `String (Masc.Keeper_identity.keeper_agent_name name) );
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])

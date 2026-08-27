@@ -341,14 +341,11 @@ let execute_tool_eio
                      Keeper_registry.all ~base_path:config.base_path ()
                      |> List.exists
                           (fun (entry : Keeper_registry.registry_entry) ->
-                            String.equal entry.name agent_name
-                            || String.equal entry.meta.agent_name agent_name)
+                            String.equal entry.name agent_name)
                    in
                    Tool_agent_timeline.dispatch
                      ~load_chat:(fun ~agent_name:requested_agent_name ->
-                       if
-                         Keeper_identity.is_keeper_principal_agent_name agent_name
-                         || caller_is_registered_keeper
+                       if caller_is_registered_keeper
                        then
                          Keeper_chat_timeline_source.lines_for_self
                            ~base_dir:config.base_path

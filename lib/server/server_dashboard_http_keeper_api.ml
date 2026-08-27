@@ -1605,22 +1605,8 @@ let handle_keeper_get_subroutes state req request reqd =
         Server_utils.int_query_param req "limit" ~default:10
         |> max 1 |> min 100
       in
-      (* Use keeper name as agent_name for eval lookup.
-         Keepers may also have a separate agent_name — look up both. *)
-      let config = (Mcp_server.workspace_config state) in
-      let agent_name_opt =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some m) when m.agent_name <> name -> Some m.agent_name
-        | _ -> None
-      in
-      let snapshots_by_name =
-        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
-      in
       let snapshots =
-        match agent_name_opt with
-        | Some agent_name when snapshots_by_name = [] ->
-            Dashboard_eval_feed.read_latest ~base_path ~agent_name ~limit
-        | _ -> snapshots_by_name
+        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
       in
       let latest_verdict =
         match snapshots with

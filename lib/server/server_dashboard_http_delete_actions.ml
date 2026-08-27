@@ -529,8 +529,7 @@ let keeper_purge_resolve_status = function
   | Invalid_requested_name _ -> `Bad_request
   | Keeper_metadata_unreadable _ -> `Internal_server_error
   | Keeper_metadata_required _
-  | Keeper_metadata_name_mismatch _
-  | Keeper_agent_name_invalid _ -> `Conflict
+  | Keeper_metadata_name_mismatch _ -> `Conflict
   | Keeper_lane_executing _ -> `Conflict
   | Keeper_owner_unavailable _ -> `Service_unavailable
   | Keeper_operation_unreadable _ -> `Internal_server_error

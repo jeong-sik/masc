@@ -448,7 +448,6 @@ let test_keeper_status_http_200_valid_keeper () =
     let json =
       `Assoc
         [ ("name", `String "valid_keeper")
-        ; ("agent_name", `String "keeper-valid_keeper-agent")
         ; ("trace_id", `String "trace-valid_keeper")
         ]
     in

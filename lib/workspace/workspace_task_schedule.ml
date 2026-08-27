@@ -30,7 +30,6 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
 
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
-let keeper_name_from_agent_name = Workspace_task_receipts.keeper_name_from_agent_name
 let agent_record_keeper_name = Workspace_task_receipts.agent_record_keeper_name
 let keeper_receipt_candidate_names = Workspace_task_receipts.keeper_receipt_candidate_names
 let directory_exists = Workspace_task_receipts.directory_exists

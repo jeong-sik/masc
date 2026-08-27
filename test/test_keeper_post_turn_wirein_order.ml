@@ -219,7 +219,7 @@ let persist_checkpoint_source_exn
       ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
       ~keeper_name:meta.name
       ~session
-      ~agent_name:meta.agent_name
+      ~agent_name:meta.name
       ~ctx:context
   with
   | Error detail ->
@@ -691,7 +691,7 @@ let test_prepare_commit_source_cas () =
             ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
             ~keeper_name:meta.name
             ~session
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~ctx:context
         with
         | Ok _ -> ()
@@ -872,7 +872,7 @@ let test_post_install_cancellation_returns_committed_failure () =
             ~runtime_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
             ~keeper_name:meta.name
             ~session
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~ctx:context
         with
         | Ok _ -> ()

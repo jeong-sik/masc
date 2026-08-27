@@ -118,7 +118,7 @@ let append_decision_record
         ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
         ("turn_id", `Int turn_id);
         ("keeper_name", `String meta.name);
-        ("agent_name", `String meta.agent_name);
+        ("agent_name", `String meta.name);
         ("task_id", Json_util.string_opt_to_json task_id);
         ("runtime_contract", runtime_contract);
         ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);

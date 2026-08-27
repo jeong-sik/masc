@@ -5,6 +5,4 @@ type join_validation_error =
   ; detail : string
   }
 
-let keeper_name_for_agent_name = Keeper_identity.keeper_name_from_agent_name
-let canonicalize_if_keeper = Keeper_runtime.canonicalize_if_keeper
 

@@ -27,7 +27,6 @@ let base_json name =
   `Assoc
     [ "schema", `String "masc.keeper_meta.v1"
     ; "name", `String name
-    ; "agent_name", `String (Masc.Keeper_identity.keeper_agent_name name)
     ; "trace_id", `String ("trace-" ^ name)
     ]
 

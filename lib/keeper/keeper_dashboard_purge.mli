@@ -31,11 +31,6 @@ type resolve_error =
       { expected_keeper_name : string
       ; persisted_keeper_name : string
       }
-  | Keeper_agent_name_invalid of
-      { keeper_name : string
-      ; agent_name : string
-      ; detail : string
-      }
   | Keeper_owner_unavailable of
       { keeper_name : string
       ; detail : string

@@ -9,31 +9,20 @@ let () =
   |> Result.get_ok
 
 let minimal_keeper_json ~trace_id =
-  `Assoc
-    [ ("name", `String "alice")
-    ; ("agent_name", `String "keeper-alice-agent")
-    ; ("trace_id", `String trace_id)
-    ]
+  `Assoc [ ("name", `String "alice"); ("trace_id", `String trace_id) ]
 
 let strict_meta_of_fields fields =
   Masc.Keeper_meta_json_parse.meta_of_json (`Assoc fields)
 
 let test_valid_trace_id () =
   match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"alice-001") with
-  | Ok meta ->
-      check string "name" "alice" meta.name;
-      check string "agent_name" "keeper-alice-agent" meta.agent_name
+  | Ok meta -> check string "name" "alice" meta.name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
 let test_explicit_keeper_name_is_not_nickname_canonicalized () =
   let json =
     `Assoc
       [ ("name", `String "instruction-resync-test")
-      ; (* keeper_meta_json_parse rejects an agent_name that is not
-           Keeper_identity.keeper_agent_name of the keeper name. The point of
-           this case is that [name] itself is not nickname-canonicalized, which
-           the assertion below still checks. *)
-        ("agent_name", `String "keeper-instruction-resync-test-agent")
       ; ("trace_id", `String "instruction-resync-test-001")
       ]
   in
@@ -45,10 +34,7 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
 
 let test_missing_trace_id () =
   match
-    strict_meta_of_fields
-      [ ("name", `String "bob")
-      ; ("agent_name", `String "keeper-bob-agent")
-      ]
+    strict_meta_of_fields [ ("name", `String "bob") ]
   with
   | Error msg ->
       check bool "error mentions trace_id"

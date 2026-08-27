@@ -19,17 +19,6 @@ let find_by_name_in_base_path ~base_path name =
   |> List.find_opt (fun (v : registry_entry) -> String.equal v.name name)
 ;;
 
-let find_by_agent_name agent_name =
-  Keeper_registry.all ()
-  |> List.find_opt (fun (v : registry_entry) ->
-       String.equal v.meta.agent_name agent_name)
-;;
-
-let find_all_by_agent_name_in_base_path ~base_path agent_name =
-  Keeper_registry.all ~base_path ()
-  |> List.filter (fun (v : registry_entry) ->
-       String.equal v.meta.agent_name agent_name)
-;;
 
 let find_by_id (uid : Keeper_id.Uid.t) =
   Keeper_registry.all ()

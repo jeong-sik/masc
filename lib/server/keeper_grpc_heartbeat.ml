@@ -220,7 +220,7 @@ let start_keeper_grpc_heartbeat
       ~stop
       ~grpc_client:client
       ~config:ctx.config
-      ~agent_name:m.agent_name
+      ~agent_name:m.name
       ~session_id
       ~interval_sec:grpc_control_heartbeat_interval_sec
       ~clock:ctx.clock

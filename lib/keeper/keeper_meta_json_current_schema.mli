@@ -7,7 +7,6 @@ val validation_error_detail : validation_error -> string
 type field =
   | Schema
   | Name
-  | Agent_name
   | Instructions
   | Autonomous_instructions
   | Trace_id

@@ -284,19 +284,9 @@ let heartbeat_workspace_view ~keeper_paused ~active_agents ~tasks =
     [Resume_owner] transaction can clear, so a misaddressed pause is durable
     while a skipped one is retried on the next ping. *)
 let keeper_paused_for_heartbeat ~base_path ~agent_name =
-  match
-    Keeper_registry_lookup.find_all_by_agent_name_in_base_path ~base_path agent_name
-  with
-  | [] -> false
-  | [ entry ] -> entry.meta.paused
-  | entries ->
-    Log.Transport.warn
-      "gRPC heartbeat: ambiguous keeper agent binding for %s (%s); emitting no pause"
-      agent_name
-      (String.concat
-         ", "
-         (List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) entries));
-    false
+  match Keeper_registry_lookup.find_by_name_in_base_path ~base_path agent_name with
+  | None -> false
+  | Some entry -> entry.meta.paused
 ;;
 
 let directives_of_view ~agent_name view =

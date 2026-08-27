@@ -6,7 +6,6 @@ let make_meta () =
       (`Assoc
         [
           ("name", `String "verifier");
-          ("agent_name", `String "keeper-verifier-agent");
           ("trace_id", `String "trace-verifier");
         ])
   with

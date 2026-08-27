@@ -57,12 +57,6 @@ val validate_current_meta_file_result :
 val persisted_keeper_names_result : Workspace.config -> (string list, string) result
 val persisted_keeper_names : Workspace.config -> string list
 
-(** Resolve a Keeper name from its current persisted [agent_name] binding.
-    [Ok None] means no persisted Keeper owns [agent_name]. A metadata read
-    failure or duplicate identity is returned as [Error] and is never
-    collapsed into an absent Keeper. *)
-val persisted_keeper_name_for_agent_name :
-  Workspace.config -> agent_name:string -> (string option, string) result
 
 (** Resolve an exact configured [mention_target] against effective metadata.
     The canonical filename and the same TOML-overlaid metadata snapshot are

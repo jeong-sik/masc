@@ -45,32 +45,13 @@ let direct_call_block_message name =
     name
 
 let resolve_owner_keeper_identity config owner_name =
-  let candidates =
-    [
-      Keeper_identity.canonical_keeper_name owner_name;
-      Keeper_identity.canonical_keeper_name_from_agent_name owner_name;
-    ]
-    |> List.filter_map (function
-         | Some value ->
-             let trimmed = String.trim value in
-             if trimmed <> "" then
-               Some trimmed
-             else
-               None
-         | None -> None)
-    |> List.sort_uniq String.compare
-  in
-  let rec loop = function
-    | [] -> None
-    | candidate :: rest -> (
-        match Keeper_meta_store.read_meta_resolved config candidate with
-        | Ok (Some (resolved_name, meta)) ->
-            Some
-              (resolved_name, Option.map Keeper_id.Uid.to_string meta.keeper_id)
-        | Ok None -> loop rest
-        | Error _ -> loop rest)
-  in
-  loop candidates
+  match String.trim owner_name with
+  | "" -> None
+  | owner_name -> (
+      match Keeper_meta_store.read_meta_resolved config owner_name with
+      | Ok (Some (resolved_name, meta)) ->
+          Some (resolved_name, Option.map Keeper_id.Uid.to_string meta.keeper_id)
+      | Ok None | Error _ -> None)
 
 (** A resolved caller name tagged with the origin decided at mint time.
 

@@ -65,7 +65,6 @@ let fixture_meta_exn name =
   let json =
     `Assoc
       [ "name", `String name
-      ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
       ; "trace_id", `String "trace-ownerless-admission-release-test"
       ]
   in

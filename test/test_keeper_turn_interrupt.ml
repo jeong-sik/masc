@@ -32,7 +32,6 @@ let make_meta name =
           (* The canonical form is the identity module's, not a literal
              prefix: this fixture drifted and the suite has been failing at
              construction, unnoticed because it is not in the CI list. *)
-          ("agent_name", `String (Keeper_identity.keeper_agent_name name));
           ("trace_id", `String ("trace-" ^ name));
           ("allowed_paths", `List [ `String "*" ]);
         ])

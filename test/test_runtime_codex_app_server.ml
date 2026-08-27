@@ -1525,7 +1525,6 @@ let production_keeper_meta ~base_path ~trace_id =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String name
-         ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
          ; "trace_id", `String trace_id
          ; "allowed_paths", `List [ `String base_path ]
          ])
@@ -2346,7 +2345,6 @@ let test_dashboard_official_client_recovery_projection_and_resolution () =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
            [ "name", `String keeper_name
-           ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
            ; "trace_id", `String "trace-official-client-recovery"
            ; "allowed_paths", `List [ `String base_path ]
            ])

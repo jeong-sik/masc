@@ -200,7 +200,7 @@ let await_authority_verdict config task_id =
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"foreign-owned task" ~priority:1
          ~description:"claimed by another agent");
@@ -214,7 +214,7 @@ let test_completion_denied_for_non_owner () =
     (match assignee_of config "task-001" with
      | Some a ->
        check bool "pre-state: task owned by a non-caller agent" true
-         (not (String.equal a meta.agent_name))
+         (not (String.equal a meta.name))
      | None ->
        fail "task-001 must be Claimed/InProgress by the foreign agent before the attack");
     (* attack: caller (non-owner) tries to complete it, with substantive notes so
@@ -246,14 +246,14 @@ let test_completion_denied_for_non_owner () =
     (match assignee_of config "task-001" with
      | Some a ->
        check bool "task still owned by foreign agent after rejected completion" true
-         (not (String.equal a meta.agent_name))
+         (not (String.equal a meta.name))
      | None -> fail "task-001 must remain Claimed/InProgress after the rejected completion"))
 
 (* Test B — completion of an unclaimed (Todo) task is denied. *)
 let test_completion_denied_when_unclaimed () =
   with_ws "completion_trust_unclaimed"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"never claimed" ~priority:1
          ~description:"still in the backlog");
@@ -290,7 +290,7 @@ let test_short_notes_without_evidence_follow_llm_approval () =
   with_ws "completion_llm_short_notes"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict AR.Approve;
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"caller's own task" ~priority:1
          ~description:"the LLM reviews even a short completion claim");
@@ -318,7 +318,7 @@ let test_short_notes_without_evidence_follow_llm_approval () =
     | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
       ->
       check string "parked submission preserves the submitter"
-        meta.agent_name assignee
+        meta.name assignee
     | Some task ->
       fail
         ("expected Done or a parked submission after LLM approval, got "
@@ -330,7 +330,7 @@ let test_completion_with_evidence_refs_succeeds () =
   with_ws "completion_trust_evidence_refs"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
     reviewer_response := Reviewer_verdict AR.Approve;
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"complete with evidence refs" ~priority:1
          ~description:"claimed by the caller and completed with trusted proof");
@@ -364,7 +364,7 @@ let test_completion_with_evidence_refs_succeeds () =
     | Some
         { task_status = Masc_domain.Done { assignee; _ }; handoff_context; _ }
       ->
-      check string "done assignee" meta.agent_name assignee;
+      check string "done assignee" meta.name assignee;
       check_handoff_evidence handoff_context
     | Some
         { task_status = Masc_domain.AwaitingVerification { assignee; _ }
@@ -372,7 +372,7 @@ let test_completion_with_evidence_refs_succeeds () =
         ; _
         } ->
       check string "parked submission preserves the submitter"
-        meta.agent_name assignee;
+        meta.name assignee;
       check_handoff_evidence handoff_context
     | Some task ->
       fail
@@ -385,7 +385,7 @@ let test_completion_with_evidence_refs_succeeds () =
 let test_llm_rejection_keeps_task_active_then_approval_completes () =
   with_ws "completion_llm_reject_then_approve"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"LLM reviewed completion" ~priority:1
          ~description:"completion follows the evaluator verdict");
@@ -449,7 +449,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
         ; _
         } ->
       check string "rejected task returns to the same keeper"
-        meta.agent_name assignee;
+        meta.name assignee;
       (* The authority is live in this process, so the full round is
          exercised: a later approval completes the task. *)
       retry_after_reject ()
@@ -460,7 +460,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
          identity is still preserved for whoever decides; the approve round
          needs a live authority and is exercised where one runs. *)
       check string "parked submission preserves the submitter"
-        meta.agent_name assignee
+        meta.name assignee
     | Some { task_status; _ } ->
       fail
         ("rejected task must stay active or parked, got "
@@ -476,7 +476,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
 let test_unavailable_evaluator_keeps_task_active () =
   with_ws "completion_llm_unavailable"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"unavailable evaluator" ~priority:1
          ~description:"must stay active without an LLM verdict");
@@ -513,7 +513,7 @@ let test_unavailable_evaluator_keeps_task_active () =
     | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
       ->
       check string "submitter identity is preserved for the retry"
-        meta.agent_name assignee
+        meta.name assignee
     | Some { task_status; _ } ->
       fail
         ("task must park awaiting verification, got "
@@ -525,7 +525,7 @@ let test_unavailable_evaluator_keeps_task_active () =
 let test_legitimate_claim_succeeds () =
   with_ws "completion_trust_positive_claim"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
-    ignore (Workspace.init config ~agent_name:(Some meta.agent_name));
+    ignore (Workspace.init config ~agent_name:(Some meta.name));
     ignore
       (Workspace.add_task config ~title:"claimable task" ~priority:1
          ~description:"unowned backlog work");
@@ -536,7 +536,7 @@ let test_legitimate_claim_succeeds () =
     check string "legitimate claim outcome" "success"
       (outcome_label result.KTE.disposition);
     match assignee_of config "task-001" with
-    | Some assignee -> check string "claimed task is owned by the caller" meta.agent_name assignee
+    | Some assignee -> check string "claimed task is owned by the caller" meta.name assignee
     | None -> fail "task-001 must be Claimed/InProgress after a legitimate claim")
 
 let () =

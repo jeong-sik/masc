@@ -68,7 +68,7 @@ let held_task_skills_of_tasks
        let held =
          match task.task_status with
          | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } ->
-           Workspace_task_classify.same_task_actor config assignee meta.agent_name
+           Workspace_task_classify.same_task_actor config assignee meta.name
          | Masc_domain.Todo
          | Masc_domain.AwaitingVerification _
          | Masc_domain.Done _
@@ -189,7 +189,7 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
             claim without a materialized [.masc/agents/] record, so the audit can
             still see the self-assigned task as an orphan. *)
          Workspace.audit_orphan_tasks_in_tasks config backlog.tasks
-         |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
+         |> List.filter (fun (_, assignee) -> assignee <> meta.name)
          |> List.map fst
          |> List.length
        in

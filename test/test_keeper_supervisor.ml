@@ -328,7 +328,7 @@ let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta
   (match
      Masc.Workspace.claim_task_r
        config
-       ~agent_name:meta.agent_name
+       ~agent_name:meta.name
        ~task_id:created.task_id
        ()
    with
@@ -337,7 +337,7 @@ let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta
   (match
      Masc.Workspace.transition_task_r
        config
-       ~agent_name:meta.agent_name
+       ~agent_name:meta.name
        ~task_id:created.task_id
        ~action:Masc_domain.Start
        ()
@@ -807,7 +807,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     ctx;
   (match task_status_for_id config created.task_id with
    | Masc_domain.InProgress { assignee; _ } ->
-     check string "manual pause keeps active owner" base_meta.agent_name assignee
+     check string "manual pause keeps active owner" base_meta.name assignee
    | status ->
      fail
        (Printf.sprintf

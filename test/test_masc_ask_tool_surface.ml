@@ -50,41 +50,6 @@ let every_dispatched_operation_has_a_schema () =
       Alcotest.(check string) ("schema for " ^ name) name schema.Masc_domain.name)
     Tool_schemas_misc.mcp_runtime_operations
 
-(* A live Keeper reaches its own tools under the agent alias its runtime was
-   spawned with, not under the bare name the registry holds. Measured against
-   a running server on 2026-08-26: every unit test passed while a real keeper
-   was refused as an unregistered keeper -- the message named its alias, not
-   its registry name -- because the tool read the alias straight through. The
-   guard is right; the name it was handed was not.
-
-   The keeper this happened to is not named here. The rule does not depend on
-   which name it was, and the identity guard forbids a live one in tracked
-   source: an ordinary word eventually picks somebody's. *)
-let resolves = Masc.Mcp_tool_runtime_ask.asking_keeper_name
-
-let the_spellings_a_keeper_runtime_spawns_under () =
-  (* Four spellings reach the same registry row. The first fix here matched
-     only the first two by hand, so the other two stayed broken in exactly the
-     way the measurement had just found. *)
-  Alcotest.(check string) "the canonical agent alias" "orrery"
-    (resolves "keeper-orrery-agent");
-  Alcotest.(check string) "underscore spelling" "orrery"
-    (resolves "keeper_orrery_agent");
-  Alcotest.(check string) "the bare prefix form" "orrery" (resolves "keeper-orrery")
-
-let the_registry_name_passes_through () =
-  (* An operator and these tests call under the registry name itself. It has
-     to survive unchanged, or answering breaks for everyone who is not a
-     Keeper runtime. *)
-  Alcotest.(check string) "unchanged" "orrery" (resolves "orrery")
-
-let a_name_no_canonicaliser_knows_is_left_alone () =
-  (* Left alone on purpose: the registry check downstream is what refuses a
-     caller that is not a Keeper, and it can only name the caller if it is
-     handed the name the caller actually used. *)
-  Alcotest.(check string) "an ordinary client name" "codex-mcp-client"
-    (resolves "codex-mcp-client")
-
 (* Asking and reading back are two tools because they are two acts: one writes
    a question, the other only looks. Both have to be reachable, and the read
    one must not claim it writes. *)
@@ -135,14 +100,5 @@ let () =
             both_ask_tools_are_dispatched;
           Alcotest.test_case "every dispatched operation has a schema" `Quick
             every_dispatched_operation_has_a_schema;
-        ] );
-      ( "who is asking",
-        [
-          Alcotest.test_case "the spellings a Keeper runtime spawns under" `Quick
-            the_spellings_a_keeper_runtime_spawns_under;
-          Alcotest.test_case "the registry name passes through" `Quick
-            the_registry_name_passes_through;
-          Alcotest.test_case "a name no canonicaliser knows is left alone" `Quick
-            a_name_no_canonicaliser_knows_is_left_alone;
         ] );
     ]

@@ -567,23 +567,9 @@ let why_no_container (meta : keeper_meta) ~preflight containers =
               "no active turn or visible managed sandbox container; Docker containers start on sandboxed tool calls or via masc_keeper_sandbox_start, with the keeper playground mounted")
 
 let identity_json (meta : keeper_meta) =
-  let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
-  let agent_name_matches = String.equal expected_agent_name meta.agent_name in
   `Assoc
     [
-      ("agent_name", `String meta.agent_name);
-      ("expected_agent_name", `String expected_agent_name);
-      ("agent_name_matches", `Bool agent_name_matches);
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      ( "warnings",
-        if agent_name_matches then
-          `List []
-        else
-          `List
-            [
-              `String
-                "keeper agent_name does not match the canonical keeper name; repair or recreate this keeper trace before relying on scheduling evidence";
-            ] );
     ]
 
 let live_status_json ?(include_preflight = true)

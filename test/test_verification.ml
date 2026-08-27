@@ -373,7 +373,7 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; output =
         `Assoc [ "secret_output", `String "must not be duplicated" ]
     ; criteria = [ "secret criterion should stay in the audit store" ]
-    ; worker = "keeper-omega-agent"
+    ; worker = "omega"
     ; created_at = 1234.5
     }
   in
@@ -508,7 +508,7 @@ let test_unreadable_evidence_uses_structured_current_contract () =
   let request : VS.request_header =
     { id = "vrf-structured-reason"
     ; task_id = "task-structured-reason"
-    ; worker = "keeper-omega-agent"
+    ; worker = "omega"
     ; created_at = 1.0
     }
   in
@@ -567,7 +567,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
          ~task_id:"task-001"
          ~output
          ~criteria:[]
-         ~worker:"keeper-omega-agent"
+         ~worker:"omega"
          ()
      with
      | Ok _ -> ()
@@ -577,7 +577,7 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-omega-agent"
+        ~task_worker:"omega"
         ~authority:(Masc_domain.Human_operator { operator_id = "operator-test" })
     with
     | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
@@ -590,15 +590,13 @@ let test_invalid_reference_snapshot_rejects_hidden_payload () =
 let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let producer = "keeper-verification-rejection-producer-agent" in
+    (* RFC-0393: the producer is recorded under its keeper_name, and
+       keeper-ness is decided by the persisted meta at that name. *)
     let keeper_name = "persisted-canonical-producer" in
+    let producer = keeper_name in
     let meta_json =
       `Assoc
-        (* The filename is the durable queue identity. The metadata carries a
-           valid Keeper name for the same agent identity, but the two names
-           intentionally differ to ensure routing uses the canonical path. *)
-        [ "name", `String "verification-rejection-producer"
-        ; "agent_name", `String producer
+        [ "name", `String keeper_name
         ; "trace_id", `String "trace-persisted-producer"
         ]
     in
@@ -671,12 +669,11 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
 let test_system_llm_rejection_prefers_registered_producer_binding () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
-    let keeper_name = "keeper-omega-agent" in
-    let producer = "keeper-omega-agent-agent" in
+    let keeper_name = "registered-producer" in
+    let producer = keeper_name in
     let meta_json =
       `Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String producer
         ; "trace_id", `String "trace-registered-producer"
         ]
     in
@@ -1656,7 +1653,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
     Keeper_sandbox_config.keeper_toml_path
       ~base_path
-      ~agent_name:"keeper-omega-agent"
+      ~agent_name:"omega"
   in
   Fs_compat.mkdir_p (Filename.dirname profile_path);
   Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -1674,7 +1671,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
   let evidence_snapshot =
     VS.snapshot_submitted_evidence_json
       ~base_path
-      ~worker:"keeper-omega-agent"
+      ~worker:"omega"
       submitted_evidence
   in
   match
@@ -1686,7 +1683,7 @@ let create_evidence_request ~base_path ~request_id ~artifact_path =
         (`Assoc
             [ "submitted_evidence", evidence_snapshot ])
       ~criteria:[ "inspect artifact" ]
-      ~worker:"keeper-omega-agent"
+      ~worker:"omega"
       ()
   with
   | Ok request -> request
@@ -1722,7 +1719,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
      VP.create_submit_request
        ~config
        ~task
-       ~assignee:"keeper-omega-agent"
+       ~assignee:"omega"
        ~verification_id:request_id
        ~evidence_refs
    with
@@ -1731,7 +1728,7 @@ let create_protocol_evidence_request ~base_path ~request_id ~evidence_refs =
   task
 
 let inspect_evidence ?(task_id = "task-001")
-    ?(task_worker = "keeper-omega-agent") ~base_path ~request_id
+    ?(task_worker = "omega") ~base_path ~request_id
     () =
   VS.inspect_submitted_evidence_for_authority
     ~base_path
@@ -1775,7 +1772,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
         ~base_path
         ~request_id
         ~task_id:"task-001"
-        ~task_worker:"keeper-omega-agent"
+        ~task_worker:"omega"
         ~authority:(Masc_domain.Human_operator { operator_id = "" })
     with
     | VS.Evidence_unavailable _ -> ()
@@ -1785,13 +1782,13 @@ let test_submit_snapshot_resolves_docker_relative_artifact_and_explicit_note () 
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-omega-agent")
+           ~agent_name:"omega")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1854,13 +1851,13 @@ let test_submit_snapshot_survives_mutation_deletion_and_authority_cwd () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let artifact_dir =
       Filename.concat
         (Keeper_sandbox_config.host_root_abs_of_agent
            ~base_path
-           ~agent_name:"keeper-omega-agent")
+           ~agent_name:"omega")
         "artifacts"
     in
     Fs_compat.mkdir_p artifact_dir;
@@ -1926,12 +1923,12 @@ let test_submit_snapshot_rejects_relative_traversal_and_symlink_escape () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-omega-agent"
+        ~agent_name:"omega"
     in
     let artifact_dir = Filename.concat producer_root "artifacts" in
     Fs_compat.mkdir_p artifact_dir;
@@ -1978,12 +1975,12 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
   with_eio_temp_dir (fun base_path ->
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let producer_root =
       Keeper_sandbox_config.host_root_abs_of_agent
         ~base_path
-        ~agent_name:"keeper-omega-agent"
+        ~agent_name:"omega"
     in
     Fs_compat.mkdir_p producer_root;
     let absolute_path = Filename.concat producer_root "absolute.txt" in
@@ -1992,7 +1989,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
     let snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-omega-agent"
+        ~worker:"omega"
         [ "artifacts/bare.txt"; absolute_path ]
     in
     let persisted_snapshot = Yojson.Safe.to_string snapshot in
@@ -2009,7 +2006,7 @@ let test_submit_snapshot_rejects_bare_and_absolute_references () =
            ~task_id:"task-001"
            ~output:(`Assoc [ "submitted_evidence", snapshot ])
            ~criteria:[ "inspect explicit refs" ]
-           ~worker:"keeper-omega-agent"
+           ~worker:"omega"
            ()
        with
        | Ok request -> request
@@ -2064,7 +2061,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
     let profile_path =
       Keeper_sandbox_config.keeper_toml_path
         ~base_path
-        ~agent_name:"keeper-omega-agent"
+        ~agent_name:"omega"
     in
     Fs_compat.mkdir_p (Filename.dirname profile_path);
     Fs_compat.save_file profile_path "[keeper]\nsandbox_profile = \"docker\"\n";
@@ -2090,7 +2087,7 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-omega-agent"
+         ~worker:"omega"
          ()
      with
      | Ok _ -> ()
@@ -2158,7 +2155,7 @@ let test_transport_projection_keeps_the_most_items_it_can () =
     Fs_compat.mkdir_p artifact_dir;
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let cap = VS.verification_evidence_max_bytes in
     let sizes = [ "big", cap - 1_000; "s1", 400; "s2", 400; "s3", 400 ] in
@@ -2172,7 +2169,7 @@ let test_transport_projection_keeps_the_most_items_it_can () =
     let evidence_snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-omega-agent"
+        ~worker:"omega"
         (List.map (fun (name, _) -> "artifact:" ^ name ^ "-proof.json") sizes)
     in
     (match
@@ -2182,7 +2179,7 @@ let test_transport_projection_keeps_the_most_items_it_can () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-omega-agent"
+         ~worker:"omega"
          ()
      with
      | Ok _ -> ()
@@ -2244,7 +2241,7 @@ let test_transport_projection_bounds_the_evidence_total () =
     Fs_compat.mkdir_p artifact_dir;
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let cap = VS.verification_evidence_max_bytes in
     let each = cap / 3 in
@@ -2259,7 +2256,7 @@ let test_transport_projection_bounds_the_evidence_total () =
     let evidence_snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-omega-agent"
+        ~worker:"omega"
         (List.map (fun name -> "artifact:" ^ name ^ "-proof.json") names)
     in
     (match
@@ -2269,7 +2266,7 @@ let test_transport_projection_bounds_the_evidence_total () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-omega-agent"
+         ~worker:"omega"
          ()
      with
      | Ok _ -> ()
@@ -2346,7 +2343,7 @@ let test_transport_projection_omits_truncated_prefix () =
     Fs_compat.mkdir_p artifact_dir;
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let cap = VS.verification_evidence_max_bytes in
     let large = String.make (cap + 50_000) 'x' in
@@ -2358,7 +2355,7 @@ let test_transport_projection_omits_truncated_prefix () =
     let evidence_snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-omega-agent"
+        ~worker:"omega"
         [ "artifact:large-proof.json"
         ; "artifact:small-proof.txt"
         ; "note:producer summary"
@@ -2371,7 +2368,7 @@ let test_transport_projection_omits_truncated_prefix () =
          ~task_id:"task-001"
          ~output:(`Assoc [ "submitted_evidence", evidence_snapshot ])
          ~criteria:[ "inspect artifact" ]
-         ~worker:"keeper-omega-agent"
+         ~worker:"omega"
          ()
      with
     | Ok _ -> ()
@@ -2465,7 +2462,7 @@ let test_truncated_snapshot_items_names_only_truncated_artifacts () =
     Fs_compat.mkdir_p artifact_dir;
     write_keeper_profile
       ~base_path
-      ~keeper_name:"keeper-omega-agent"
+      ~keeper_name:"omega"
       ~sandbox_profile:"docker";
     let cap = VS.verification_evidence_max_bytes in
     let large = String.make (cap + 1_000) 'y' in
@@ -2476,7 +2473,7 @@ let test_truncated_snapshot_items_names_only_truncated_artifacts () =
     let evidence_snapshot =
       VS.snapshot_submitted_evidence_json
         ~base_path
-        ~worker:"keeper-omega-agent"
+        ~worker:"omega"
         [ "artifact:bulky.json"; "artifact:compact.json" ]
     in
     match VS.truncated_snapshot_items evidence_snapshot with
@@ -2605,11 +2602,11 @@ let test_submitted_evidence_requires_exact_task_assignment_identity () =
                 [ ( "submitted_evidence"
                   , VS.snapshot_submitted_evidence_json
                       ~base_path
-                      ~worker:"keeper-omega-agent"
+                      ~worker:"omega"
                       [ "artifact:assignment.txt" ] )
                 ])
           ~criteria:[ "inspect artifact" ]
-          ~worker:"keeper-omega-agent"
+          ~worker:"omega"
           ()
       with
       | Ok request -> request
@@ -2669,7 +2666,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
            { task with
              task_status =
                Masc_domain.AwaitingVerification
-                 { assignee = "keeper-omega-agent"
+                 { assignee = "omega"
                  ; started_at = "2026-07-27T23:59:00Z"
                  ; submitted_at = "2026-07-28T00:00:00Z"
                  ; verification_id = request_id
@@ -2689,7 +2686,7 @@ let test_keeper_task_projection_never_exposes_snapshot_or_verdict_action () =
       false
       (String_util.contains_substring projection "ACTION:");
     (match
-       W.claim_task_r config ~agent_name:"keeper-omega-agent" ~task_id:"task-001" ()
+       W.claim_task_r config ~agent_name:"omega" ~task_id:"task-001" ()
      with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "producer must not claim its pending obligation");

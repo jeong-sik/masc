@@ -141,7 +141,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let meta : Keeper_meta_contract.keeper_meta = {
         id = None;
         name = p.name;
-        agent_name = Keeper_identity.keeper_agent_name p.name;
         instructions;
         autonomous_instructions = None;
         sandbox_profile;
@@ -218,7 +217,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
             ~keeper_name:meta.name
             ~session
-            ~agent_name:meta.agent_name
+            ~agent_name:meta.name
             ~ctx:ctx0
           |> Result.map_error (fun error -> `Write_error error)
         with
@@ -314,7 +313,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         let json = `Assoc [
           ("name", `String meta.name);
-          ("agent_name", `String meta.agent_name);
+          ("agent_name", `String meta.name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("instructions", `String meta.instructions);
           ("proactive_enabled", `Bool meta.proactive.enabled);
@@ -324,7 +323,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         tool_result_ok_data json
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
-           | Keepalive_identity_unrepairable
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
            | Keepalive_memory_lane_not_ready _

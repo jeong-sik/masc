@@ -80,7 +80,6 @@ let write_meta config ~keeper_name ~trace_id ~paused =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [ "name", `String keeper_name
-         ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
          ; "trace_id", `String trace_id
          ; "autoboot_enabled", `Bool false
          ])

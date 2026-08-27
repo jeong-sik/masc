@@ -196,7 +196,6 @@ let publication_recovery_registry env sw config =
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
-    ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name));
     ("trace_id", `String ("trace-integ-" ^ name));
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -234,7 +233,7 @@ let dashboard_purge_cleanup requested_name
   { reason =
       Shutdown_types.Dashboard_keeper_purge
         { requested_name
-        ; agent_name = meta.agent_name
+        ; agent_name = meta.name
         }
   ; remove_session = true
   }
@@ -3624,11 +3623,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       let agent_path =
         Filename.concat
           (Workspace.agents_dir config)
-          (Workspace.safe_filename meta.agent_name ^ ".json")
+          (Workspace.safe_filename meta.name ^ ".json")
       in
       write_file agent_path "{}";
       let agent_metrics_dir =
-        Masc.Metrics_store_eio.agent_metrics_dir config meta.agent_name
+        Masc.Metrics_store_eio.agent_metrics_dir config meta.name
       in
       write_file (Filename.concat agent_metrics_dir "fixture.jsonl") "{}\n";
       let unrelated_path =
@@ -3639,7 +3638,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         config.base_path
         { id = None
         ; agent_id = None
-        ; agent_name = meta.agent_name
+        ; agent_name = meta.name
         ; token = Auth.sha256_hash "dashboard-purge-token"
         ; role = Masc_domain.Worker
         ; created_at = Masc_domain.now_iso ()
@@ -3648,11 +3647,11 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       ignore
         (Workspace.update_state config (fun state ->
            { state with
-             active_agents = meta.agent_name :: state.active_agents
+             active_agents = meta.name :: state.active_agents
            }));
       ignore
         (Heartbeat.start
-           ~agent_name:meta.agent_name
+           ~agent_name:meta.name
            ~interval:30
            ~message:"dashboard purge fixture");
       let operation_id = Shutdown_types.Operation_id.generate () in
@@ -3757,7 +3756,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; configuration_path
         ; agent_path
         ; agent_metrics_dir
-        ; Auth.credential_file config.base_path meta.agent_name
+        ; Auth.credential_file config.base_path meta.name
         ]
         @ sidecar_paths
       in
@@ -3771,7 +3770,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         "exact workspace owner unbound"
         false
         (List.exists
-           (String.equal meta.agent_name)
+           (String.equal meta.name)
            (Workspace.read_state config).active_agents);
       check int
         "exact agent heartbeats stopped"
@@ -3779,7 +3778,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         (List.length
            (List.filter
               (fun (heartbeat : Heartbeat.t) ->
-                 String.equal heartbeat.agent_name meta.agent_name)
+                 String.equal heartbeat.agent_name meta.name)
               (Heartbeat.list ())));
       (match Masc.Runtime_event_bus.drain completion_subscription with
        | [ event ] ->
@@ -4059,7 +4058,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       (match
          Masc.Workspace.claim_task_r
            config
-           ~agent_name:meta.agent_name
+           ~agent_name:meta.name
            ~task_id:task_id_wire
            ()
        with
@@ -4115,7 +4114,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       (match
          Masc.Workspace.release_task_r
            config
-           ~agent_name:meta.agent_name
+           ~agent_name:meta.name
            ~task_id:task_id_wire
            ~expected_version:backlog_version
            ~handoff_context

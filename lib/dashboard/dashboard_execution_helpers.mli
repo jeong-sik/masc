@@ -22,13 +22,12 @@
     [populate_neo4j_identity_cache_locked] internal
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
-    [extract_keeper_name] / [lookup_neo4j_profile] /
+    [lookup_neo4j_profile] /
     [is_health_at_risk] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
     [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
 
-val extract_keeper_name : string -> string
 (** Strip a keeper-agent alias down to the keeper name, or return the input
     unchanged when it is not one. Delegates to
     [Keeper_identity.keeper_name_of_agent_alias], which owns the four accepted

@@ -182,7 +182,7 @@ let goal_detail_keeper_json (detail : goal_detail_keeper) =
   `Assoc
     [
       ("name", `String meta.name);
-      ("agent_name", `String meta.agent_name);
+      ("agent_name", `String meta.name);
       ( "current_task_id",
         match meta.current_task_id with
         | Some task_id -> `String (Keeper_id.Task_id.to_string task_id)

@@ -65,38 +65,23 @@ let board_actor_keeper_identity raw =
   let raw = String.trim raw in
   if raw = "" then None
   else
-    match Keeper_registry_lookup.find_by_agent_name raw with
-    | Some entry ->
-        Some (entry.name, Some entry.meta.agent_name, "keeper_registry_agent_name")
-    | None -> (
-        match Keeper_registry_lookup.find_by_name raw with
-        | Some entry ->
-            Some (entry.name, Some entry.meta.agent_name, "keeper_registry_name")
-        | None -> (
-            match Keeper_identity.canonical_keeper_name_from_agent_name raw with
-            | Some name -> Some (name, Some raw, "keeper_alias_contract")
-            | None -> None))
+    match Keeper_registry_lookup.find_by_name raw with
+    | Some entry -> Some (entry.name, "keeper_registry_name")
+    | None -> None
 
 let board_actor_identity_json raw : Yojson.Safe.t =
   let raw = String.trim raw in
   match board_actor_keeper_identity raw with
-  | Some (keeper_name, runtime_agent_name, source) ->
-      let runtime_fields =
-        match runtime_agent_name with
-        | Some runtime when String.trim runtime <> "" && not (String.equal runtime keeper_name) ->
-            [ ("runtime_agent_name", `String runtime) ]
-        | _ -> []
-      in
+  | Some (keeper_name, source) ->
       `Assoc
-        ([
-           ("kind", `String "keeper");
-           ("id", `String keeper_name);
-           ("key", `String (board_actor_key ~kind:"keeper" keeper_name));
-           ("display_name", `String keeper_name);
-           ("raw", `String raw);
-           ("source", `String source);
-         ]
-        @ runtime_fields)
+        [
+          ("kind", `String "keeper");
+          ("id", `String keeper_name);
+          ("key", `String (board_actor_key ~kind:"keeper" keeper_name));
+          ("display_name", `String keeper_name);
+          ("raw", `String raw);
+          ("source", `String source);
+        ]
   | None ->
       `Assoc
         [
@@ -110,12 +95,12 @@ let board_actor_identity_json raw : Yojson.Safe.t =
 
 let board_actor_entity raw =
   match board_actor_keeper_identity raw with
-  | Some (keeper_name, _, _) -> Activity_graph.entity ~kind:"keeper" keeper_name
+  | Some (keeper_name, _) -> Activity_graph.entity ~kind:"keeper" keeper_name
   | None -> Activity_graph.entity ~kind:"agent" (String.trim raw)
 
 let board_actor_author_for_write raw =
   match board_actor_keeper_identity raw with
-  | Some (keeper_name, _, _) -> keeper_name
+  | Some (keeper_name, _) -> keeper_name
   | None -> String.trim raw
 
 let board_voter_query request =

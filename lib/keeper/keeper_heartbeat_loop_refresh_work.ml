@@ -39,7 +39,7 @@ let refresh_work_as_heartbeat
            A missing or unreadable agent file returns without raising, and
            counting that as a live workspace is what let the freshness clock
            advance while nothing was being persisted. *)
-        match Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.agent_name with
+        match Workspace.heartbeat ctx.config ~agent_name:meta_after_proactive.name with
         | Workspace.Heartbeat_updated _ -> true
         | Workspace.Agent_not_found _ | Workspace.Agent_file_invalid _ as outcome ->
           Log.Keeper.debug

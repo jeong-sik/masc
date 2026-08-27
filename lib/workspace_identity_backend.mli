@@ -5,6 +5,4 @@ type join_validation_error =
   ; detail : string
   }
 
-val keeper_name_for_agent_name : string -> string option
-val canonicalize_if_keeper : Workspace.config -> string -> string
 

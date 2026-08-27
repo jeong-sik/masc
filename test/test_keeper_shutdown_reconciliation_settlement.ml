@@ -70,7 +70,6 @@ let write_keeper_meta_exn ~(config : Workspace.config) ~keeper_name =
   let json =
     `Assoc
       [ "name", `String keeper_name
-      ; "agent_name", `String (Printf.sprintf "keeper-%s-agent" keeper_name)
       ; "trace_id", `String "trace-reconciliation-settlement-test"
       ]
   in
@@ -295,7 +294,6 @@ let meta_fixture_exn ~keeper_name =
   let json =
     `Assoc
       [ "name", `String keeper_name
-      ; "agent_name", `String (Printf.sprintf "keeper-%s-agent" keeper_name)
       ; "trace_id", `String "trace-reconciliation-settlement-test"
       ]
   in

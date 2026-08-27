@@ -865,7 +865,7 @@ let assemble_hooks
                 in
                 Keeper_tool_call_log.set_turn_context
                   ~cell:turn_ctx_cell
-                  ~agent_name:meta.agent_name
+                  ~agent_name:meta.name
                   ~turn_kind
                   ~lane:
                     (Keeper_agent_tool_surface.turn_lane_to_string lane)

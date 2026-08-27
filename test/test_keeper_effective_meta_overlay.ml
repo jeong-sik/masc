@@ -144,7 +144,6 @@ let seed_runtime_meta config name =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
       ]
   in
@@ -248,8 +247,8 @@ let test_keeper_exists_config_answers_typed () =
   in
   Alcotest.(check bool) "canonical name exists" true (exists name);
   Alcotest.(check bool)
-    "agent alias spelling exists"
-    true
+    "the wrapper spelling is not the keeper (RFC-0393)"
+    false
     (exists "keeper-existsprobe-agent");
   Alcotest.(check bool) "unknown name is Ok false" false (exists "no-such-keeper");
   Alcotest.(check bool)
@@ -257,7 +256,9 @@ let test_keeper_exists_config_answers_typed () =
     false
     (exists "not/a valid;name")
 
-let test_status_resolves_keeper_alias_names () =
+(* RFC-0393: the keeper name is the only spelling a status/surface call
+   understands — wrapper forms are ordinary (unknown) names. *)
+let test_status_reads_the_keeper_name_only () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
@@ -265,31 +266,19 @@ let test_status_resolves_keeper_alias_names () =
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "explicit agent alias reaches canonical keeper"
+    "the keeper name reaches its instructions"
     "alias status instructions"
-    (status_instructions_with ~name:"keeper-aliasprobe-agent" config);
-  Alcotest.(check string)
-    "prefixed alias reaches canonical keeper"
-    "alias status instructions"
-    (status_instructions_with ~name:"keeper-aliasprobe" config);
-  Alcotest.(check string)
-    "self fallback agent alias reaches canonical keeper"
-    "alias status instructions"
-    (status_instructions_with ~agent_name:"keeper-aliasprobe-agent" config)
+    (status_instructions_with ~name config)
 
-let test_keeper_surface_resolves_alias_names () =
+let test_keeper_surface_uses_the_name_verbatim () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
   let name = "aliasmsg" in
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "agent alias resolves for keeper surface tools"
+    "the keeper name resolves for keeper surface tools"
     name
-    (resolved_keeper_name config "keeper-aliasmsg-agent");
-  Alcotest.(check string)
-    "prefixed alias resolves for keeper surface tools"
-    name
-    (resolved_keeper_name config "keeper-aliasmsg")
+    (resolved_keeper_name config name)
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -1381,9 +1370,9 @@ let () =
             `Quick
             test_ensure_keeper_meta_preserves_live_usage_during_reconcile;
           Alcotest.test_case "status resolves keeper alias names" `Quick
-            test_status_resolves_keeper_alias_names;
+            test_status_reads_the_keeper_name_only;
           Alcotest.test_case "keeper surface resolves alias names" `Quick
-            test_keeper_surface_resolves_alias_names;
+            test_keeper_surface_uses_the_name_verbatim;
           Alcotest.test_case "turn setup uses effective meta" `Quick
             test_turn_setup_uses_effective_meta;
           Alcotest.test_case

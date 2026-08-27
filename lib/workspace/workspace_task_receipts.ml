@@ -19,26 +19,10 @@ let hyphen_name name =
     name
 ;;
 
-(* Receipt-directory candidate derivation. The canonical alias parse comes
-   from the shared codec — the local copy this replaces accepted only the
-   hyphen spelling and silently missed keeper_x_agent variants
-   (RFC-0371 B12). The bare "-agent" suffix strip below is NOT identity
-   parsing: it is a deliberately broad lookup heuristic kept so receipts
-   written under historical loose names stay findable. *)
-let keeper_name_from_agent_name agent_name =
-  let trimmed = String.trim agent_name in
-  match Keeper_name_codec.keeper_name_of_agent_alias trimmed with
-  | Some keeper_name -> Some keeper_name
-  | None -> None
-;;
-
-let loose_keeper_name_from_agent_name agent_name =
-  let trimmed = String.trim agent_name in
-  if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
-  then Some (String.sub trimmed 0 (String.length trimmed - 6))
-  else None
-;;
-
+(* Receipt-directory candidate derivation. RFC-0393: the alias parse and
+   the loose "-agent" suffix strip are gone — a keeper's receipts live
+   under its keeper_name, and the only other source is the agent record's
+   stored [keeper_name] binding (data, not spelling). *)
 let agent_record_keeper_name config ~agent_name =
   let agent_file =
     Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
@@ -54,20 +38,11 @@ let agent_record_keeper_name config ~agent_name =
 ;;
 
 let keeper_receipt_candidate_names config ~agent_name =
-  let base =
-    [ agent_record_keeper_name config ~agent_name
-    ; keeper_name_from_agent_name agent_name
-    ; loose_keeper_name_from_agent_name agent_name
-    ; Some agent_name
-    ]
-    |> List.filter_map Fun.id
-  in
-  base
+  [ agent_record_keeper_name config ~agent_name; Some agent_name ]
+  |> List.filter_map Fun.id
   |> List.concat_map (fun name ->
     let trimmed = String.trim name in
-    if trimmed = ""
-    then []
-    else [ trimmed; safe_filename trimmed; underscore_name trimmed; hyphen_name trimmed ])
+    if trimmed = "" then [] else [ trimmed; safe_filename trimmed ])
   |> List.sort_uniq String.compare
 ;;
 

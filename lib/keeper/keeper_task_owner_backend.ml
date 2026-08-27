@@ -3,7 +3,7 @@
 let is_keeper_agent_identity config ~agent_name =
   Keeper_registry.all ~base_path:config.Workspace.base_path ()
   |> List.exists (fun (entry : Keeper_registry.registry_entry) ->
-       String.equal entry.meta.agent_name agent_name)
+       String.equal entry.name agent_name)
 ;;
 
 let sync_current_task_binding config ~agent_name =

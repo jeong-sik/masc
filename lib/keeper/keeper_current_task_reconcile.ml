@@ -52,7 +52,7 @@ let owned_active_tasks_snapshot_for_meta ~(config : Workspace.config)
             when Workspace_task_classify.same_task_actor
                    config
                    assignee
-                   meta.agent_name ->
+                   meta.name ->
             task_id_of_owned_active_task ~keeper_name:meta.name task
             |> Option.map (fun task_id -> { task_id; task })
           | Masc_domain.Claimed _
@@ -195,7 +195,7 @@ let sync_current_task_id_for_agent_name ~(config : Workspace.config) ~agent_name
   match
     Keeper_registry.all ~base_path:config.base_path ()
     |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
-         String.equal entry.meta.agent_name agent_name)
+         String.equal entry.name agent_name)
   with
   | Some entry ->
     ignore (sync_current_task_id_from_backlog ~config entry.meta : Keeper_meta_contract.keeper_meta)

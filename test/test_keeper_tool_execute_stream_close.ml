@@ -64,7 +64,6 @@ let make_meta ~name () =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String (Keeper_identity.keeper_agent_name name))
       ; ("trace_id", `String ("trace-" ^ name))
       ]
   in

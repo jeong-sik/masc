@@ -30,12 +30,11 @@ let with_temp_workspace f =
       Board.reset_global_for_test ();
       f config)
 
-let make_keepalive_meta ~name ~agent_name =
+let make_keepalive_meta ~name =
   let json =
     `Assoc
       [
         ("name", `String name);
-        ("agent_name", `String agent_name);
         ("trace_id", `String ("trace-" ^ name));
         (* sandbox_profile and network_mode left the JSON wire schema — they
            arrive from keeper.toml now. This fixture only ever set them to the
@@ -74,9 +73,9 @@ let make_in_progress_task ~id ~assignee : Types.task =
 let test_current_task_id_for_agent_reconciles_from_empty_registry_task () =
   with_temp_workspace (fun config ->
     let keeper_name = "heartbeat-current-task-owner" in
-    let agent_name = "keeper-heartbeat-current-task-owner-agent" in
+    let agent_name = keeper_name in
     let task_id = "task-heartbeat-current" in
-    let meta = make_keepalive_meta ~name:keeper_name ~agent_name in
+    let meta = make_keepalive_meta ~name:keeper_name in
     (match Keeper_meta_store.replace_snapshot config meta with
      | Ok () -> ()
      | Error err -> fail ("write_meta failed: " ^ err));
@@ -194,7 +193,6 @@ let make_board_resume_meta name =
   let json =
     `Assoc
       [ ("name", `String name)
-      ; ("agent_name", `String (Masc.Keeper_identity.keeper_agent_name name))
       ; ("trace_id", `String ("trace-" ^ name))
       ]
   in
@@ -410,7 +408,7 @@ let test_closed_board_audience_routes_only_its_authority () =
     (match classified hearth_only with KBA.Discoverable -> true | _ -> false);
   check bool "Board category is absent from mention metrics" false
     (KWOBS.match_signal ~meta:alpha ~signal:hearth_only).explicit_mention;
-  let self_authored = audience_signal ~author:"keeper-alpha" "new research" in
+  let self_authored = audience_signal ~author:"alpha" "new research" in
   check bool "author lane never judges its own post" true
     (match route ~audience:(classified self_authored) ~meta:alpha self_authored with
      | KBA.Ignore -> true
@@ -761,7 +759,7 @@ let create_thread_fixture config ~keeper_name =
     | Error error -> fail (Board.show_board_error error)
     | Ok _comment -> ()
   in
-  add_comment ~author:meta.Keeper_meta_contract.agent_name ~content:"keeper was here";
+  add_comment ~author:meta.Keeper_meta_contract.name ~content:"keeper was here";
   add_comment ~author:"external-author" ~content:"follow up";
   let signal : Board_dispatch.addressed_board_signal =
     { signal =
@@ -814,7 +812,7 @@ let create_self_post_fixture config ~keeper_name =
   let post =
     match
       Board_dispatch.create_post
-        ~author:meta.Keeper_meta_contract.agent_name
+        ~author:meta.Keeper_meta_contract.name
         ~content:"does anyone know why the fixture is empty?"
         ~title:"question from the keeper"
         ~post_kind:Board.Human_post
@@ -917,7 +915,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
          KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
        let post_id =
          create_post_exn
-           ~author:meta.Keeper_meta_contract.agent_name
+           ~author:meta.Keeper_meta_contract.name
            ~title:"keeper finding"
            ~content:"the loader skips empty fixtures"
        in
@@ -930,7 +928,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
         | [ vote ] ->
           check string "stimulus names the voter" "external-voter" vote.voter;
           check string "stimulus names the voted-on author"
-            meta.Keeper_meta_contract.agent_name vote.target_author;
+            meta.Keeper_meta_contract.name vote.target_author;
           (match vote.direction with
            | Keeper_event_queue.Vote_up -> ()
            | Keeper_event_queue.Vote_down -> fail "direction must be up");
@@ -951,7 +949,7 @@ let test_vote_on_own_post_wakes_the_author_once () =
        (* The keeper voting on its own post addresses no lane. *)
        (match
           Board_dispatch.vote
-            ~voter:meta.Keeper_meta_contract.agent_name
+            ~voter:meta.Keeper_meta_contract.name
             ~post_id
             ~direction:Board.Up
         with
@@ -977,7 +975,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
          KKS.wakeup_relevant_keeper_for_board_signal ~config signal);
        let post_id =
          create_post_exn
-           ~author:poster.Keeper_meta_contract.agent_name
+           ~author:poster.Keeper_meta_contract.name
            ~title:"question"
            ~content:"why is the fixture empty?"
        in
@@ -985,7 +983,7 @@ let test_vote_on_own_comment_wakes_the_commenter_not_the_poster () =
          match
            Board_dispatch.add_comment
              ~post_id
-             ~author:commenter.Keeper_meta_contract.agent_name
+             ~author:commenter.Keeper_meta_contract.name
              ~content:"the loader skips it"
              ()
          with

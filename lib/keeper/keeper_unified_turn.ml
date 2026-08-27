@@ -466,7 +466,7 @@ let run_keeper_cycle
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
-    ; manifest_agent_name = Some meta.agent_name
+    ; manifest_agent_name = Some meta.name
     ; manifest_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
     ; manifest_keeper_turn_id = Some keeper_turn_id
     }

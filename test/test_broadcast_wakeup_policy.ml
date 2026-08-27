@@ -160,34 +160,6 @@ let test_stopped_keeper_persists_without_wake () =
   check int "stopped Keeper not woken" 0 !wakes
 ;;
 
-let test_runtime_agent_alias_resolves_before_delivery () =
-  with_workspace @@ fun config ->
-  let keeper_name = "beta" in
-  let target = Keeper_identity.keeper_agent_name keeper_name in
-  let request_id = "wmsg-aabbccddeeff0011" in
-  persist_meta config keeper_name;
-  let woken = ref None in
-  let outcome =
-    Broadcast_wakeup.deliver_broadcast_mention
-      ~config
-      ~base_path:config.base_path
-      ~is_running:(String.equal keeper_name)
-      ~wakeup:(fun name -> woken := Some name)
-      (delivery ~target ~request_id ~seq:3 ~content:"agent alias delivery")
-  in
-  (match outcome with
-   | Workspace_broadcast.Accepted -> ()
-   | _ -> fail "runtime agent alias did not resolve to the canonical Keeper");
-  check (option string) "canonical wake target" (Some keeper_name) !woken;
-  check int "delivery stored under canonical Keeper" 1
-    (count_delivery_rows
-       ~base_path:config.base_path
-       ~keeper_name
-       ~request_id);
-  check int "no alias-named chat store" 0
-    (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id)
-;;
-
 let delivery_message ~base_path ~keeper_name ~request_id =
   Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name
   |> List.find_opt (fun (message : Keeper_chat_store.chat_message) ->
@@ -359,10 +331,10 @@ let test_fleet_projection_reaches_other_keepers () =
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-       [ "beta", Keeper_identity.keeper_agent_name "beta"; "alpha", Keeper_identity.keeper_agent_name "alpha"; "fixture-keeper", Keeper_identity.keeper_agent_name "fixture-keeper" ])
+       [ "beta", "beta"; "alpha", "alpha"; "fixture-keeper", "fixture-keeper" ])
     (fleet_delivery
        ~request_id
-       ~from_agent:(Keeper_identity.keeper_agent_name "beta")
+       ~from_agent:("beta")
        ~content:"task-209 is mine, do not claim it");
   let rows keeper_name =
     count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id
@@ -383,10 +355,10 @@ let test_fleet_projection_adds_no_queue_entry () =
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-       [ "beta", Keeper_identity.keeper_agent_name "beta"; "alpha", Keeper_identity.keeper_agent_name "alpha" ])
+       [ "beta", "beta"; "alpha", "alpha" ])
     (fleet_delivery
        ~request_id
-       ~from_agent:(Keeper_identity.keeper_agent_name "beta")
+       ~from_agent:("beta")
        ~content:"status ping");
   check int "listener row is visibility only" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id);
@@ -414,8 +386,8 @@ let test_fleet_projection_preserves_the_mention_row () =
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-       [ "beta", Keeper_identity.keeper_agent_name "beta"
-       ; target, Keeper_identity.keeper_agent_name target
+       [ "beta", "beta"
+       ; target, target
        ])
     (fleet_delivery
        ~request_id
@@ -445,7 +417,7 @@ let test_system_record_is_not_projected () =
   let record =
     { (fleet_delivery
          ~request_id
-         ~from_agent:(Keeper_identity.keeper_agent_name "beta")
+         ~from_agent:("beta")
          ~content:"Claimed task-209")
       with Workspace_broadcast.audience = Workspace_broadcast.System_record
     }
@@ -453,7 +425,7 @@ let test_system_record_is_not_projected () =
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-       [ "beta", Keeper_identity.keeper_agent_name "beta"; "alpha", Keeper_identity.keeper_agent_name "alpha" ])
+       [ "beta", "beta"; "alpha", "alpha" ])
     record;
   check int "a system record reaches no conversation window" 0
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"alpha" ~request_id)
@@ -486,12 +458,12 @@ let test_hyphenated_names_do_not_collide_on_the_author () =
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-      [ author, Keeper_identity.keeper_agent_name author
-      ; listener, Keeper_identity.keeper_agent_name listener
+      [ author, author
+      ; listener, listener
       ])
     (fleet_delivery
        ~request_id
-       ~from_agent:(Keeper_identity.keeper_agent_name author)
+       ~from_agent:(author)
        ~content:"a name-shaped collision must not eat this");
   check int "the listener is not mistaken for the author" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:listener ~request_id);
@@ -534,8 +506,6 @@ let () =
             test_delivery_appends_once_before_wake
         ; test_case "stopped Keeper persists without wake" `Quick
             test_stopped_keeper_persists_without_wake
-        ; test_case "runtime agent alias resolves before delivery" `Quick
-            test_runtime_agent_alias_resolves_before_delivery
         ; test_case "configured mention alias resolves and stamps feed target" `Quick
             test_configured_mention_alias_resolves_and_stamps_feed_target
         ; test_case "canonical delivery stamps configured feed target" `Quick

@@ -87,18 +87,12 @@ val board_fetch_limit :
 
 (** {1 Board actor identity}
 
-    Resolves a raw author/voter string (which can be a keeper
-    name, an agent name aliased through the keeper registry, or a
-    plain agent id) into a structured identity record.  Three
-    lookup tiers, all operator-visible through the [source] field:
-
-    1. [keeper_registry_agent_name] —
-       {!Keeper_registry_lookup.find_by_agent_name}
-    2. [keeper_registry_name] — {!Keeper_registry_lookup.find_by_name}
-    3. [keeper_alias_contract] —
-       {!Keeper_identity.canonical_keeper_name_from_agent_name}
-
-    Misses fall through as [`agent`] kind with [source: "raw_agent"]. *)
+    Resolves a raw author/voter string into a structured identity
+    record. A name the keeper registry holds is a keeper
+    ([source: "keeper_registry_name"]); RFC-0393 removed the alias and
+    agent-name lookup tiers because a keeper appears everywhere under
+    its keeper_name. Misses fall through as [`agent`] kind with
+    [source: "raw_agent"]. *)
 
 (** [board_actor_key ~kind id] produces the canonical lookup key
     [<kind>:<lowercased trimmed id>].  Used by the dashboard's

@@ -118,7 +118,6 @@ let keeper_meta_for_name keeper_name =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [ "name", `String keeper_name
-        ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
         ; "trace_id", `String ("trace-" ^ keeper_name)
         ])
   with
@@ -1574,91 +1573,6 @@ let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
        | None -> fail "schedule wake missing")
 ;;
 
-let test_keeper_wake_agent_name_resolves_to_canonical_owner () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-agent-target" in
-  let agent_name = Keeper_identity.keeper_agent_name keeper_name in
-  let base_path = config.Workspace_utils.base_path in
-  let entry = register_keeper ~proactive_enabled:false config keeper_name in
-  Fun.protect
-    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
-    (fun () ->
-       let request =
-         create_named_keeper_wake_schedule
-           config
-           ~schedule_id:"agent-name-target"
-           ~keeper_name:agent_name
-       in
-       Atomic.set entry.fiber_wakeup false;
-       let result = tick_ok config ~now:201.0 in
-       check string "agent-name wake dispatch succeeds" "succeeded"
-         (Schedule_runner.dispatch_status_to_string
-            (List.hd result.dispatches).status);
-       check bool "canonical live owner is signaled" true
-         (Atomic.get entry.fiber_wakeup);
-       check int "canonical owner receives the durable wake" 1
-         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-          |> Keeper_event_queue.length);
-       check int "agent-name spelling owns no durable queue" 0
-         (Keeper_registry_event_queue.snapshot ~base_path agent_name
-          |> Keeper_event_queue.length);
-       match
-         Schedule_store.last_wake_for_schedule_instance
-           (Schedule_store.read_state config)
-           ~schedule_instance_id:request.schedule_instance_id
-           ~schedule_id:request.schedule_id
-       with
-       | Some { detail = Some detail; _ } ->
-         check string "receipt carries canonical Keeper name" keeper_name
-           Yojson.Safe.Util.(detail |> member "keeper_name" |> to_string);
-         check string "canonical owner activation is signaled" "signaled"
-           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-       | Some _ -> fail "agent-name wake detail missing"
-       | None -> fail "agent-name wake missing")
-;;
-
-let test_keeper_wake_ambiguous_agent_name_remains_retryable () =
-  with_workspace
-  @@ fun config ->
-  let agent_name = "keeper-shared-schedule-agent" in
-  let base_path = config.Workspace_utils.base_path in
-  let register keeper_name =
-    let meta = { (keeper_meta_for_name keeper_name) with agent_name } in
-    Keeper_registry.For_testing.register ~base_path keeper_name meta
-  in
-  ignore (register "shared-schedule-a" : Keeper_registry.registry_entry);
-  ignore (register "shared-schedule-b" : Keeper_registry.registry_entry);
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_registry.For_testing.unregister ~base_path "shared-schedule-a";
-      Keeper_registry.For_testing.unregister ~base_path "shared-schedule-b")
-    (fun () ->
-       let request =
-         create_named_keeper_wake_schedule
-           config
-           ~schedule_id:"ambiguous-agent-name-target"
-           ~keeper_name:agent_name
-       in
-       let result = tick_ok config ~now:201.0 in
-       check string "ambiguous target stays retryable" "failed"
-         (Schedule_runner.dispatch_status_to_string
-            (List.hd result.dispatches).status);
-       (match (List.hd result.dispatches).error with
-        | Some detail ->
-          check bool "ambiguity remains explicit" true
-            (String_util.contains_substring detail "target is ambiguous")
-        | None -> fail "ambiguous target failure detail missing");
-       check int "ambiguous spelling owns no durable queue" 0
-         (Keeper_registry_event_queue.snapshot ~base_path agent_name
-          |> Keeper_event_queue.length);
-       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-       | Some stored ->
-         check string "ambiguous schedule remains due" "due"
-           (Schedule_domain.schedule_status_to_string stored.status)
-       | None -> fail "ambiguous schedule disappeared")
-;;
-
 let test_keeper_wake_queue_evidence_rejects_stale_occurrence () =
   with_workspace
   @@ fun config ->
@@ -2214,10 +2128,6 @@ let () =
             test_retry_before_terminal_reconciliation_retains_wake
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
-        ; test_case "agent-name wake resolves to canonical owner" `Quick
-            test_keeper_wake_agent_name_resolves_to_canonical_owner
-        ; test_case "ambiguous agent-name wake remains retryable" `Quick
-            test_keeper_wake_ambiguous_agent_name_remains_retryable
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
             test_keeper_wake_queue_evidence_rejects_stale_occurrence
         ; test_case "dashboard live supported non-terminal evidence matches supported request"

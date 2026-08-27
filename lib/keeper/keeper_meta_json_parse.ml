@@ -314,7 +314,6 @@ let parse_agent_core_env fields =
 let decode_current_meta fields =
   let* schema = string_field fields "schema" in
   let* name = string_field fields "name" in
-  let* agent_name = string_field fields "agent_name" in
   let* instructions = string_field fields "instructions" in
   let* autonomous_instructions =
     nullable_string_field fields "autonomous_instructions"
@@ -367,12 +366,6 @@ let decode_current_meta fields =
      same bound on every read, so the bound is carried here rather than
      relaxed. Absence is already rejected because [int_field] goes through
      [required_field]. *)
-  else if
-    not
-      (String.equal
-         agent_name
-         (Keeper_identity.keeper_agent_name name))
-  then invalidf "agent_name does not match canonical keeper identity"
   else if not (validate_name (Keeper_id.Trace_id.to_string trace_id))
   then invalidf "trace_id is invalid: %S" trace_id_raw
   else
@@ -431,7 +424,6 @@ let decode_current_meta fields =
     let meta : keeper_meta =
       { id = None
       ; name
-      ; agent_name
       ; instructions
       ; autonomous_instructions
       ; sandbox_profile

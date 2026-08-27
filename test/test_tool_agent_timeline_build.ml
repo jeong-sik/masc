@@ -44,17 +44,13 @@ let summary_int json key =
   let open Yojson.Safe.Util in
   json |> member "summary" |> member key |> to_int
 
-(* A turn_completed event persisted with the FULL actor id must surface when
-   the timeline is queried by the SHORT handle. The payload carries no
-   identity field, so the only signal that can match is the actor.id full
-   form — this isolates the dual-representation identity match and would fail
-   if [identity_matches] regressed to a plain [String.equal] on the short
-   handle. *)
-let test_surfaces_turn_completed_for_short_handle () =
+(* RFC-0393: a keeper's activity is recorded under its keeper_name, and the
+   timeline queried by that same name surfaces it. *)
+let test_surfaces_turn_completed_for_the_keeper_name () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-1")
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
@@ -71,7 +67,7 @@ let test_excludes_other_keeper () =
   with_config (fun config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-other-agent")
+           ~actor:(Activity_graph.entity ~kind:"agent" "otherkeeper")
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
       let json = build config ~agent_name:"testkeeper" in
@@ -156,7 +152,7 @@ let test_chat_interleaves_with_autonomous () =
   with_dir_config (fun dir config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
       append_chat dir ~user:"hi" ~assistant:"hello";
@@ -175,7 +171,7 @@ let test_no_chat_no_regression () =
   with_dir_config (fun dir config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
-           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           ~actor:(Activity_graph.entity ~kind:"agent" "testkeeper")
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
       let json = build_with_chat dir config ~agent_name:"testkeeper" in
@@ -207,7 +203,7 @@ let test_self_scoped_chat_reader_blocks_cross_keeper () =
         (chat_field "content" (build_for "testkeeper"));
       check (list string) "own chat remains visible through agent alias"
         [ "own-q"; "own-a" ]
-        (chat_field "content" (build_for "keeper-testkeeper-agent"));
+        (chat_field "content" (build_for "testkeeper"));
       check (list string) "other keeper chat is hidden" []
         (chat_field "content" (build_for "otherkeeper")))
 
@@ -250,7 +246,7 @@ let emit_capacity_series config ~kind ~payload_of =
     ignore
       (Activity_graph.emit config ~kind
          ~actor:
-           (Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           (Activity_graph.entity ~kind:"agent" "testkeeper")
          ~payload:(payload_of (marker i))
          ())
   done
@@ -302,7 +298,6 @@ let emit_keeper_tool_exec config ~keeper_name ~tool_name ~success =
       Masc_test_deps.meta_of_json_fixture
         (`Assoc
             [ "name", `String keeper_name
-            ; "agent_name", `String ("keeper-" ^ keeper_name ^ "-agent")
             ; "trace_id", `String ("trace-" ^ keeper_name)
             ])
     with
@@ -379,7 +374,7 @@ let () =
       ( "activity-read",
         [
           test_case "turn_completed surfaces for short handle" `Quick
-            test_surfaces_turn_completed_for_short_handle;
+            test_surfaces_turn_completed_for_the_keeper_name;
           test_case "other keeper excluded" `Quick test_excludes_other_keeper;
         ] );
       ( "keeper-chat-source",

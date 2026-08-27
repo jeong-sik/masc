@@ -543,6 +543,15 @@ export function keeperConfigFailureRequiresAuthoritativeReload(error: unknown): 
       || (error.configApplied === true && error.runtimeSync === false)
     )
 }
+
+export function configDurabilityWarningMessage(
+  subject: string,
+  warnings: NonNullable<KeeperConfig['config_write']>['warnings'],
+): string | null {
+  if (warnings.length === 0) return null
+  const warningCodes = warnings.map(warning => warning.code).join(', ')
+  return `${subject} 적용됐지만 config durability 경고가 있습니다: ${warningCodes}`
+}
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
@@ -1717,8 +1726,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      if ((updated.config_write?.warnings.length ?? 0) > 0) {
-        showToast('Keeper 설정은 적용됐지만 manifest durability 경고가 있습니다', 'warning')
+      const durabilityWarning = configDurabilityWarningMessage(
+        'Keeper 설정은',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
       } else {
         showToast('Keeper 설정 저장 완료', 'success')
       }
@@ -1824,8 +1837,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()
-      if ((updated.config_write?.warnings.length ?? 0) > 0) {
-        showToast('프롬프트는 적용됐지만 manifest durability 경고가 있습니다', 'warning')
+      const durabilityWarning = configDurabilityWarningMessage(
+        '프롬프트는',
+        updated.config_write?.warnings ?? [],
+      )
+      if (durabilityWarning) {
+        showToast(durabilityWarning, 'warning')
       } else {
         showToast('프롬프트 저장 완료', 'success')
       }

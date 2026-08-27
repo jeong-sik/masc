@@ -107,9 +107,8 @@ let validate_runtime_assignment_revision = function
      | _ -> Error "keeper runtime assignment revision is invalid")
   | _ -> Error "keeper runtime assignment revision is invalid"
 
-let expected_config_revision before =
-  match member "config_revision" before with
-  | Some (`Assoc fields as revision)
+let validate_config_revision = function
+  | `Assoc fields
     when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
     (match
        List.assoc_opt "manifest" fields,
@@ -118,12 +117,15 @@ let expected_config_revision before =
      | Some manifest, Some runtime_assignment ->
        Result.bind
          (validate_manifest_revision manifest)
-         (fun () ->
-           Result.map
-             (fun () -> revision)
-             (validate_runtime_assignment_revision runtime_assignment))
+         (fun () -> validate_runtime_assignment_revision runtime_assignment)
      | _ -> Error "keeper config revision is incomplete")
-  | Some _ | None -> Error "keeper config revision was not observed"
+  | _ -> Error "keeper config revision is invalid"
+
+let expected_config_revision before =
+  match member "config_revision" before with
+  | Some revision ->
+    Result.map (fun () -> revision) (validate_config_revision revision)
+  | None -> Error "keeper config revision was not observed"
 
 let expected_runtime_assignment_revision before =
   Result.bind
@@ -158,6 +160,51 @@ let decode_unchanged_runtime_assignment_response = function
        Result.map (fun () -> revision) (validate_runtime_assignment_revision revision)
      | _ -> Error "runtime assignment response is not an unchanged write")
   | _ -> Error "runtime assignment response must be an object"
+
+let config_write_warning_codes json =
+  match member "config_write" json with
+  | Some (`Assoc fields)
+    when exact_keys [ "revision"; "applied"; "warnings" ] fields ->
+    (match
+       List.assoc_opt "revision" fields,
+       List.assoc_opt "applied" fields,
+       List.assoc_opt "warnings" fields
+     with
+     | Some revision, Some (`Bool _), Some (`List warnings) ->
+       Result.bind
+         (validate_config_revision revision)
+         (fun () ->
+           let rec decode acc = function
+             | [] -> Ok (List.rev acc)
+             | `Assoc warning_fields :: rest
+               when exact_keys [ "code"; "detail" ] warning_fields ->
+               (match
+                  List.assoc_opt "code" warning_fields,
+                  List.assoc_opt "detail" warning_fields
+                with
+                | Some (`String code), Some (`String detail)
+                  when String.trim code <> "" && String.trim detail <> "" ->
+                  decode (code :: acc) rest
+                | _ -> Error "config durability warning is malformed")
+             | _ -> Error "config durability warning is malformed"
+           in
+           decode [] warnings)
+     | _ -> Error "config_write receipt is malformed")
+  | Some _ -> Error "config_write receipt is malformed"
+  | None -> Error "config_write receipt is missing"
+
+let config_write_status_message ~keeper_name json =
+  Result.map
+    (function
+      | [] -> "system", keeper_name ^ ": changed settings applied"
+      | warning_codes ->
+        ( "error"
+        , Printf.sprintf
+            "%s: settings applied with %d config durability warning(s): %s"
+            keeper_name
+            (List.length warning_codes)
+            (String.concat ", " warning_codes) ))
+    (config_write_warning_codes json)
 
 let patch_of_edit ~before ~after =
   match after with

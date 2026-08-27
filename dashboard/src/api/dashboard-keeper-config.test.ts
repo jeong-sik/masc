@@ -105,8 +105,8 @@ describe('keeper config source projection', () => {
           revision,
           applied: true,
           warnings: [{
-            code: 'keeper_manifest_parent_sync_unconfirmed',
-            detail: 'parent fsync failed',
+            code: 'runtime_config_parent_sync_unconfirmed',
+            detail: 'runtime parent fsync failed',
           }],
         },
         config_transaction_warnings: [{
@@ -126,8 +126,8 @@ describe('keeper config source projection', () => {
       revision,
       applied: true,
       warnings: [{
-        code: 'keeper_manifest_parent_sync_unconfirmed',
-        detail: 'parent fsync failed',
+        code: 'runtime_config_parent_sync_unconfirmed',
+        detail: 'runtime parent fsync failed',
       }],
     })
     expect(config.config_transaction_warnings).toEqual([{

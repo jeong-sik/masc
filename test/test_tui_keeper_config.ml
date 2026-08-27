@@ -395,6 +395,61 @@ let test_unchanged_runtime_assignment_response_decoder () =
         ]
     ]
 
+let test_runtime_config_warning_names_its_authority () =
+  let revision =
+    match observed with
+    | `Assoc fields -> List.assoc "config_revision" fields
+    | _ -> Alcotest.fail "observed fixture must be an object"
+  in
+  let response =
+    `Assoc
+      [ ( "config_write"
+        , `Assoc
+            [ "revision", revision
+            ; "applied", `Bool true
+            ; ( "warnings"
+              , `List
+                  [ `Assoc
+                      [ "code", `String "runtime_config_parent_sync_unconfirmed"
+                      ; "detail", `String "runtime parent fsync failed"
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  let severity, message =
+    match config_write_status_message ~keeper_name:"alpha" response with
+    | Ok status -> status
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check string) "warning severity" "error" severity;
+  Alcotest.(check bool) "authority-neutral config wording" true
+    (String.starts_with
+       ~prefix:"alpha: settings applied with 1 config durability warning(s)"
+       message);
+  Alcotest.(check bool) "exact runtime warning code is visible" true
+    (String.ends_with
+       ~suffix:"runtime_config_parent_sync_unconfirmed"
+       message);
+  let malformed =
+    `Assoc
+      [ ( "config_write"
+        , `Assoc
+            [ "revision", revision
+            ; "applied", `Bool true
+            ; ( "warnings"
+              , `List
+                  [ `Assoc
+                      [ "code", `String "runtime_config_parent_sync_unconfirmed"
+                      ]
+                  ] )
+            ] )
+      ]
+  in
+  match config_write_status_message ~keeper_name:"alpha" malformed with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "malformed config warning became clean success"
+
 let () =
   Alcotest.run "tui keeper config"
     [ ( "projection"
@@ -428,5 +483,7 @@ let () =
             test_runtime_picker_revision_decoder
         ; Alcotest.test_case "strict unchanged assignment revision" `Quick
             test_unchanged_runtime_assignment_response_decoder
+        ; Alcotest.test_case "runtime config warning authority" `Quick
+            test_runtime_config_warning_names_its_authority
         ] )
     ]

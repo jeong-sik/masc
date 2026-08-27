@@ -1363,14 +1363,6 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
        Error (Keeper_config_runtime_sync_failed json)
      | _ -> Error (Keeper_config_http_error { status; body }))
 
-let keeper_config_warning_count json =
-  match Json_util.assoc_member_opt "config_write" json with
-  | Some write ->
-    (match Json_util.assoc_member_opt "warnings" write with
-     | Some (`List warnings) -> List.length warnings
-     | Some _ | None -> 0)
-  | None -> 0
-
 (** POST /api/v1/keepers/:name/up — masc_keeper_up's own create-or-update
     contract. The keeper name in the path is the row the operator launched
     from; the body carries the rest of the declaration. *)

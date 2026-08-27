@@ -6,6 +6,7 @@ import { ApiRequestError } from '../api/core'
 import {
   AUTONOMOUS_WAKE_PROMPT_MAX_BYTES,
   buildRuntimePayload,
+  configDurabilityWarningMessage,
   coerceNetworkMode,
   coerceSandboxProfile,
   filterHookSlots,
@@ -51,6 +52,16 @@ describe('keeper config save failure authority', () => {
       configApplicationState: 'indeterminate',
       authoritativeReloadRequired: true,
     }))).toBe(true)
+  })
+
+  it('names runtime authority in config durability warnings', () => {
+    const message = configDurabilityWarningMessage('Keeper 설정은', [{
+      code: 'runtime_config_parent_sync_unconfirmed',
+      detail: 'runtime parent fsync failed',
+    }])
+    expect(message).toContain('config durability')
+    expect(message).toContain('runtime_config_parent_sync_unconfirmed')
+    expect(message).not.toContain('manifest durability')
   })
 })
 

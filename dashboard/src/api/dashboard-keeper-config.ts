@@ -111,18 +111,21 @@ function decodeConfigRevision(value: unknown): KeeperConfigRevision {
   }
 }
 
-function decodeManifestWarnings(value: unknown): KeeperConfig['config_transaction_warnings'] {
+function decodeConfigWarnings(value: unknown): KeeperConfig['config_transaction_warnings'] {
   if (value === undefined) return undefined
   if (!Array.isArray(value)) {
-    throw new Error('Invalid keeper config response: manifest warnings must be an array')
+    throw new Error('Invalid keeper config response: config warnings must be an array')
   }
   return value.map((warning) => {
     if (
       !isRecord(warning)
       || typeof warning.code !== 'string'
       || typeof warning.detail !== 'string'
+      || warning.code.trim() === ''
+      || warning.detail.trim() === ''
+      || Object.keys(warning).length !== 2
     ) {
-      throw new Error('Invalid keeper config response: manifest warning must carry code and detail')
+      throw new Error('Invalid keeper config response: config warning must carry code and detail')
     }
     return { code: warning.code, detail: warning.detail }
   })
@@ -136,7 +139,7 @@ function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
   return {
     revision: decodeConfigRevision(value.revision),
     applied: value.applied,
-    warnings: decodeManifestWarnings(value.warnings) ?? [],
+    warnings: decodeConfigWarnings(value.warnings) ?? [],
   }
 }
 
@@ -303,7 +306,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     config_revision: decodeConfigRevision(data.config_revision),
     config_write: decodeConfigWrite(data.config_write),
     config_transaction_warnings:
-      decodeManifestWarnings(data.config_transaction_warnings),
+      decodeConfigWarnings(data.config_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),

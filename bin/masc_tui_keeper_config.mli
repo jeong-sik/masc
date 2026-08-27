@@ -7,6 +7,9 @@ val expected_runtime_assignment_revision :
 val decode_unchanged_runtime_assignment_response :
   Yojson.Safe.t -> (Yojson.Safe.t, string) result
 
+val config_write_status_message :
+  keeper_name:string -> Yojson.Safe.t -> ((string * string), string) result
+
 val patch_of_edit :
   before:Yojson.Safe.t ->
   after:Yojson.Safe.t ->

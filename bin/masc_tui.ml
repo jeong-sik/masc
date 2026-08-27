@@ -8746,18 +8746,15 @@ and is loaded on demand through keeper_skill.
                   add_event state "error"
                     (Masc_tui_http.keeper_config_post_error_to_string error)
                 | Ok response ->
-                    let warning_count =
-                      Masc_tui_http.keeper_config_warning_count response
-                    in
-                    add_event state
-                      (if warning_count = 0 then "system" else "error")
-                      (if warning_count = 0
-                       then keeper.k_name ^ ": changed settings applied"
-                       else
-                         Printf.sprintf
-                           "%s: settings applied with %d manifest durability warning(s)"
-                           keeper.k_name
-                           warning_count);
+                    (match
+                       Masc_tui_keeper_config.config_write_status_message
+                         ~keeper_name:keeper.k_name response
+                     with
+                     | Error detail ->
+                       add_event state "error"
+                         (keeper.k_name ^ ": invalid config write receipt: " ^ detail)
+                     | Ok (severity, message) ->
+                       add_event state severity message);
                     if
                       state.view = Keepers Keeper_detail
                       && state.detail_tab = Detail_instructions

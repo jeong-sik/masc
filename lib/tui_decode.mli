@@ -14,9 +14,11 @@ type task = {
       (** Goals this task is linked to, from the goal-task registry.
           The task record itself carries no goal: the registry is the source
           of truth, so a screen that reads only the backlog cannot say which
-          goal a task serves. Empty when nothing links it, and empty when the
-          registry could not be read -- the two are told apart by
-          {!Masc_tui_types.tasks_goal_link_error}, not by guessing here. *)
+          goal a task serves. Empty when nothing links it, and also empty when
+          no link facts were supplied to this projection. A caller that must
+          distinguish an empty registry from an unreadable one must retain the
+          result of {!Workspace_goal_index.read_goal_task_links_r} beside this
+          projected field. *)
 }
 
 type keeper = {

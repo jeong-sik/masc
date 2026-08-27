@@ -193,11 +193,11 @@ let observe_action
 ;;
 
 let observe_native_action ~config context ~active_skill_tool_use_ids
-      ~runtime_id ~official_turn ~identity ~tool_name =
+      ~runtime_id ~agent_core_turn ~identity ~tool_name =
   Ledger.observe_action
     ~config ~trace_id:context.trace_id ~turn_ref:context.turn_ref
     ~active_skill_tool_use_ids ~action_identity:identity ~tool_name ~runtime_id
-    ~agent_core_turn:official_turn ~observed_at:(Masc_domain.now_iso ())
+    ~agent_core_turn ~observed_at:(Masc_domain.now_iso ())
   |> Result.map snd
   |> Result.map_error (fun error -> Store_failed error)
 ;;

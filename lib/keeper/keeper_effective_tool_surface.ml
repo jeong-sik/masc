@@ -270,9 +270,10 @@ let project
       ; tool_surface_bytes
       ; skill_tool_surface_bytes
       ; skill_body_bytes
-        (* Both sides of the train meet here: main (#31092) added the four
-           profile fields above, and this branch widens skills_left_out with
-           the turn projection's typed unavailable rows. *)
+        (* Both sides added to this record and neither replaced the other:
+           main (#31092) brought the profile and byte fields above, and this
+           branch made [skills_left_out] also name what the turn could not
+           reach. Keeping one would drop the other's answer. *)
       ; skills_left_out =
           skills_left_out
           @ List.map

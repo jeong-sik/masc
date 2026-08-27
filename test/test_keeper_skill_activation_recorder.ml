@@ -428,6 +428,92 @@ let test_runtime_provider_tracks_candidate_failover () =
          (Ledger.activations ledger))
 ;;
 
+(* #31081 review P1: a long-lived Keeper's delivery sits at a high MASC
+   agent-core turn while a fresh official CLI session restarts its own claim
+   counter at 1. The ledger compares an action's turn against the delivery's
+   agent-core turn, so native actions must carry the delivery boundary's turn —
+   never the CLI session counter. The repaired shape records; the pre-repair
+   shape (session counter 1 below delivery turn 7) is a typed rejection that
+   the ledger persists append-only instead of silently dropping. *)
+let test_native_action_uses_the_delivery_turn_axis () =
+  with_session @@ fun config trace_id ->
+  let snapshot, task_reference, _session_reference = task_snapshot () in
+  let task_selection =
+    resolve_for_task snapshot ~task_id:"task-held" [ task_reference ]
+  in
+  let context = make_context ~trace_id ~task_selection () in
+  let body = "task body" in
+  (match
+     Recorder.record_instruction
+       ~config
+       context
+       ~invocation:(invocation "call-native")
+       ~content:(Recorder.Body body)
+       task_reference
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Recorder.error_to_string error));
+  let receipts =
+    [ Keeper_skill_activation_ledger.
+        { tool_use_id = "call-native"
+        ; content_bytes = String.length body
+        ; content_sha256 = Digestif.SHA256.(digest_string body |> to_hex)
+        }
+    ]
+  in
+  let delivery_turn = 7 in
+  let delivered =
+    match
+      Recorder.observe_delivery
+        ~config
+        context
+        ~tool_results:receipts
+        ~boundary:
+          (Keeper_skill_activation_ledger.Official_client_result_handoff
+             { agent_core_turn = delivery_turn })
+        ~runtime_id:"test.runtime"
+    with
+    | Ok delivered -> delivered
+    | Error error -> fail (Recorder.error_to_string error)
+  in
+  check (list string) "handoff delivers the served id" [ "call-native" ] delivered;
+  (match
+     Recorder.observe_native_action
+       ~config
+       context
+       ~active_skill_tool_use_ids:delivered
+       ~runtime_id:"test.runtime"
+       ~agent_core_turn:delivery_turn
+       ~identity:(Runtime_native_tools.Call_id "native-call-1")
+       ~tool_name:"shell"
+   with
+   | Ok recorded -> check int "delivery-axis native action records" 1 recorded
+   | Error error -> fail (Recorder.error_to_string error));
+  (match
+     Recorder.observe_native_action
+       ~config
+       context
+       ~active_skill_tool_use_ids:delivered
+       ~runtime_id:"test.runtime"
+       ~agent_core_turn:1
+       ~identity:(Runtime_native_tools.Call_id "native-call-2")
+       ~tool_name:"shell"
+   with
+   | Ok _ -> fail "a CLI session counter below the delivery turn was accepted"
+   | Error _ -> ());
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match Ledger.activations ledger with
+     | [ activation ] ->
+       check int "one action attached on the delivery axis" 1
+         (List.length activation.actions)
+     | _ -> fail "activation cardinality changed");
+    let summary = Ledger.summarize ledger in
+    check int "the rejected axis mismatch stays append-only" 1
+      summary.invalid_transitions
+;;
+
 let () =
   run
     "keeper Skill activation recorder"
@@ -446,6 +532,8 @@ let () =
             test_runtime_attempt_is_required_before_recording
         ; test_case "runtime provider follows failover" `Quick
             test_runtime_provider_tracks_candidate_failover
+        ; test_case "native action rides the delivery turn axis" `Quick
+            test_native_action_uses_the_delivery_turn_axis
         ] )
     ]
 ;;

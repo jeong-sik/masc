@@ -17,6 +17,7 @@ type t =
   ; executable_path : string [@default ""]
   ; executable_dir : string [@default ""]
   ; repo_root : string option [@default None]
+  ; runtime_instance_id : string
   ; started_at : string
   ; uptime_seconds : int
   }
@@ -301,6 +302,7 @@ let age_seconds ~now ts_opt =
 
 let started_at_unix = Unix.gettimeofday ()
 let started_at_iso = Masc_domain.iso8601_of_unix_seconds started_at_unix
+let runtime_instance_id = Random_id.uuid_v7 ()
 let resolved_executable_path = executable_path ()
 let resolved_executable_dir = Filename.dirname resolved_executable_path
 
@@ -337,6 +339,7 @@ let current () =
   ; executable_path = resolved_executable_path
   ; executable_dir = resolved_executable_dir
   ; repo_root = resolved_repo_root
+  ; runtime_instance_id
   ; started_at = started_at_iso
   ; uptime_seconds = max 0 (int_of_float (now -. started_at_unix))
   }

@@ -110,10 +110,12 @@ type summary =
   { instruction_invocations : int
   ; skill_bodies_served : int
   ; skill_resources_served : int
-  ; instruction_deliveries : int
+  ; instruction_provider_deliveries : int
+  ; instruction_official_client_handoffs : int
   ; instruction_actions_observed : int
   ; composition_invocations : int
-  ; composition_deliveries : int
+  ; composition_provider_deliveries : int
+  ; composition_official_client_handoffs : int
   ; composition_actions_observed : int
   ; invalid_transitions : int
   }
@@ -133,7 +135,8 @@ type runtime_count =
 type scoped_summary =
   { scope : summary_scope
   ; summary : summary
-  ; delivery_runtime_counts : runtime_count list
+  ; provider_delivery_runtime_counts : runtime_count list
+  ; official_client_handoff_runtime_counts : runtime_count list
   ; action_runtime_counts : runtime_count list
   }
 

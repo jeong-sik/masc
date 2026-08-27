@@ -117,10 +117,12 @@ type summary =
   { instruction_invocations : int
   ; skill_bodies_served : int
   ; skill_resources_served : int
-  ; instruction_deliveries : int
+  ; instruction_provider_deliveries : int
+  ; instruction_official_client_handoffs : int
   ; instruction_actions_observed : int
   ; composition_invocations : int
-  ; composition_deliveries : int
+  ; composition_provider_deliveries : int
+  ; composition_official_client_handoffs : int
   ; composition_actions_observed : int
   ; invalid_transitions : int
   }
@@ -140,7 +142,8 @@ type runtime_count =
 type scoped_summary =
   { scope : summary_scope
   ; summary : summary
-  ; delivery_runtime_counts : runtime_count list
+  ; provider_delivery_runtime_counts : runtime_count list
+  ; official_client_handoff_runtime_counts : runtime_count list
   ; action_runtime_counts : runtime_count list
   }
 
@@ -342,10 +345,12 @@ let empty_summary invalid_transitions =
   { instruction_invocations = 0
   ; skill_bodies_served = 0
   ; skill_resources_served = 0
-  ; instruction_deliveries = 0
+  ; instruction_provider_deliveries = 0
+  ; instruction_official_client_handoffs = 0
   ; instruction_actions_observed = 0
   ; composition_invocations = 0
-  ; composition_deliveries = 0
+  ; composition_provider_deliveries = 0
+  ; composition_official_client_handoffs = 0
   ; composition_actions_observed = 0
   ; invalid_transitions
   }
@@ -354,10 +359,11 @@ let empty_summary invalid_transitions =
 let summarize ledger =
   List.fold_left
     (fun summary activation ->
-       let delivered =
+       let provider_delivered, official_client_handoff =
          match activation.delivery with
-         | Some _ -> 1
-         | None -> 0
+         | Some { boundary = Model_response _; _ } -> 1, 0
+         | Some { boundary = Official_client_result_handoff _; _ } -> 0, 1
+         | None -> 0, 0
        in
        let actions = List.length activation.actions in
        match activation.invocation with
@@ -372,14 +378,22 @@ let summarize ledger =
            instruction_invocations = summary.instruction_invocations + 1
          ; skill_bodies_served
          ; skill_resources_served
-         ; instruction_deliveries = summary.instruction_deliveries + delivered
+         ; instruction_provider_deliveries =
+             summary.instruction_provider_deliveries + provider_delivered
+         ; instruction_official_client_handoffs =
+             summary.instruction_official_client_handoffs
+             + official_client_handoff
          ; instruction_actions_observed =
              summary.instruction_actions_observed + actions
          }
        | Composition_invocation _ ->
          { summary with
            composition_invocations = summary.composition_invocations + 1
-         ; composition_deliveries = summary.composition_deliveries + delivered
+         ; composition_provider_deliveries =
+             summary.composition_provider_deliveries + provider_delivered
+         ; composition_official_client_handoffs =
+             summary.composition_official_client_handoffs
+             + official_client_handoff
          ; composition_actions_observed =
              summary.composition_actions_observed + actions
          })
@@ -392,10 +406,16 @@ let summary_to_yojson summary =
     [ "instruction_invocations", `Int summary.instruction_invocations
     ; "skill_bodies_served", `Int summary.skill_bodies_served
     ; "skill_resources_served", `Int summary.skill_resources_served
-    ; "instruction_deliveries", `Int summary.instruction_deliveries
+    ; ( "instruction_provider_deliveries"
+      , `Int summary.instruction_provider_deliveries )
+    ; ( "instruction_official_client_handoffs"
+      , `Int summary.instruction_official_client_handoffs )
     ; "instruction_actions_observed", `Int summary.instruction_actions_observed
     ; "composition_invocations", `Int summary.composition_invocations
-    ; "composition_deliveries", `Int summary.composition_deliveries
+    ; ( "composition_provider_deliveries"
+      , `Int summary.composition_provider_deliveries )
+    ; ( "composition_official_client_handoffs"
+      , `Int summary.composition_official_client_handoffs )
     ; "composition_actions_observed", `Int summary.composition_actions_observed
     ; "invalid_transitions", `Int summary.invalid_transitions
     ]
@@ -479,12 +499,25 @@ let summarize_by_scope ledger =
            ledger.transition_rejections
        in
        let scoped_ledger = { ledger with activations; transition_rejections } in
-       let delivery_runtime_counts =
+       let provider_delivery_runtime_counts =
          activations
          |> List.filter_map (fun activation ->
-              Option.map
-                (fun (delivery : delivery) -> delivery.runtime_id)
-                activation.delivery)
+              match activation.delivery with
+              | Some { boundary = Model_response _; runtime_id; _ } ->
+                Some runtime_id
+              | Some { boundary = Official_client_result_handoff _; _ }
+              | None -> None)
+         |> runtime_counts
+       in
+       let official_client_handoff_runtime_counts =
+         activations
+         |> List.filter_map (fun activation ->
+              match activation.delivery with
+              | Some
+                  { boundary = Official_client_result_handoff _; runtime_id; _ } ->
+                Some runtime_id
+              | Some { boundary = Model_response _; _ }
+              | None -> None)
          |> runtime_counts
        in
        let action_runtime_counts =
@@ -493,7 +526,12 @@ let summarize_by_scope ledger =
               List.map (fun (action : action) -> action.runtime_id) activation.actions)
          |> runtime_counts
        in
-       { scope; summary = summarize scoped_ledger; delivery_runtime_counts; action_runtime_counts })
+       { scope
+       ; summary = summarize scoped_ledger
+       ; provider_delivery_runtime_counts
+       ; official_client_handoff_runtime_counts
+       ; action_runtime_counts
+       })
     scopes
 ;;
 
@@ -510,7 +548,7 @@ let scoped_summary_to_yojson scoped =
           ; "reference", Skill_reference.to_yojson scoped.scope.reference
           ] )
     ; "summary", summary_to_yojson scoped.summary
-    ; ( "delivery_runtime_counts"
+    ; ( "provider_delivery_runtime_counts"
       , `List
           (List.map
              (fun runtime ->
@@ -518,7 +556,16 @@ let scoped_summary_to_yojson scoped =
                   [ "runtime_id", `String runtime.runtime_id
                   ; "count", `Int runtime.count
                   ])
-             scoped.delivery_runtime_counts) )
+             scoped.provider_delivery_runtime_counts) )
+    ; ( "official_client_handoff_runtime_counts"
+      , `List
+          (List.map
+             (fun runtime ->
+                `Assoc
+                  [ "runtime_id", `String runtime.runtime_id
+                  ; "count", `Int runtime.count
+                  ])
+             scoped.official_client_handoff_runtime_counts) )
     ; ( "action_runtime_counts"
       , `List
           (List.map
@@ -1725,28 +1772,31 @@ let observe_delivery
     let* current =
       read_locked ~ownership_root ~expected_trace_id:trace_id session_dir
     in
-    let matching_receipt activation =
-      match
-        List.find_opt
-          (fun (receipt : tool_result_receipt) ->
-             String.equal receipt.tool_use_id activation.skill_tool_use_id)
-          tool_results
-      with
-      | None -> None
-      | Some receipt ->
-        (match activation.invocation with
-         | Composition_invocation _ -> Some receipt
-         | Instruction_invocation { served_content; _ } ->
-           let expected_bytes, expected_sha256 =
-             match served_content with
-             | Skill_body { bytes; sha256 }
-             | Skill_resource { bytes; sha256; _ } -> bytes, sha256
-           in
-           if
-             expected_bytes = receipt.content_bytes
-             && String.equal expected_sha256 receipt.content_sha256
-           then Some receipt
-           else None)
+    let matching_receipt (activation : activation) =
+      if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
+      then None
+      else
+        match
+          List.find_opt
+            (fun (receipt : tool_result_receipt) ->
+               String.equal receipt.tool_use_id activation.skill_tool_use_id)
+            tool_results
+        with
+        | None -> None
+        | Some receipt ->
+          (match activation.invocation with
+           | Composition_invocation _ -> Some receipt
+           | Instruction_invocation { served_content; _ } ->
+             let expected_bytes, expected_sha256 =
+               match served_content with
+               | Skill_body { bytes; sha256 }
+               | Skill_resource { bytes; sha256; _ } -> bytes, sha256
+             in
+             if
+               expected_bytes = receipt.content_bytes
+               && String.equal expected_sha256 receipt.content_sha256
+             then Some receipt
+             else None)
     in
     let rejected =
       List.find_map
@@ -1754,18 +1804,7 @@ let observe_delivery
            match matching_receipt activation with
            | None -> None
            | Some receipt ->
-             if not (Ids.Turn_ref.equal activation.turn_ref turn_ref)
-             then
-               Some
-                 ( Delivery_conflict_rejected
-                     { skill_tool_use_id = activation.skill_tool_use_id
-                     ; activation_turn_ref = activation.turn_ref
-                     ; observed_turn_ref = turn_ref
-                     ; observed_agent_core_turn = agent_core_turn
-                     ; observed_at = delivered_at
-                     }
-                 , Conflicting_delivery activation.skill_tool_use_id )
-           else if
+             if
              (match boundary with
               | Model_response _ -> agent_core_turn <= activation.agent_core_turn
               | Official_client_result_handoff _ ->

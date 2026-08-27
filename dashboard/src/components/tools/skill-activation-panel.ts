@@ -118,11 +118,12 @@ function ActivationReceipt({
         <span class="text-xs">invoked ${summary.instruction_invocations}</span>
         <span class="text-xs">bodies ${summary.skill_bodies_served}</span>
         <span class="text-xs">resources ${summary.skill_resources_served}</span>
-        <span class="text-xs">delivered ${summary.instruction_deliveries}</span>
+        <span class="text-xs">provider deliveries ${summary.instruction_provider_deliveries}</span>
+        <span class="text-xs">official handoffs ${summary.instruction_official_client_handoffs}</span>
         <span class="text-xs">actions ${summary.instruction_actions_observed}</span>
         <span class="text-xs">invalid ${summary.invalid_transitions}</span>
         <span class="text-xs">
-          compositions ${summary.composition_invocations}/${summary.composition_deliveries}/${summary.composition_actions_observed}
+          compositions invoked ${summary.composition_invocations} · provider deliveries ${summary.composition_provider_deliveries} · official handoffs ${summary.composition_official_client_handoffs} · actions ${summary.composition_actions_observed}
         </span>
       </div>
       <div class="text-xs text-[var(--color-fg-muted)]">
@@ -136,10 +137,10 @@ function ActivationReceipt({
               snapshot ${scoped.scope.snapshot_revision} · keeper turn ${scoped.scope.turn_ref} · invocation runtime ${scoped.scope.invocation_runtime_id}
             </code>
             <span class="text-3xs">
-              invoked ${scoped.summary.instruction_invocations} · bodies ${scoped.summary.skill_bodies_served} · resources ${scoped.summary.skill_resources_served} · delivered ${scoped.summary.instruction_deliveries} · actions ${scoped.summary.instruction_actions_observed} · compositions ${scoped.summary.composition_invocations}/${scoped.summary.composition_deliveries}/${scoped.summary.composition_actions_observed} · invalid ${scoped.summary.invalid_transitions}
+              invoked ${scoped.summary.instruction_invocations} · bodies ${scoped.summary.skill_bodies_served} · resources ${scoped.summary.skill_resources_served} · provider deliveries ${scoped.summary.instruction_provider_deliveries} · official handoffs ${scoped.summary.instruction_official_client_handoffs} · actions ${scoped.summary.instruction_actions_observed} · compositions invoked ${scoped.summary.composition_invocations} / provider ${scoped.summary.composition_provider_deliveries} / handoffs ${scoped.summary.composition_official_client_handoffs} / actions ${scoped.summary.composition_actions_observed} · invalid ${scoped.summary.invalid_transitions}
             </span>
             <code class="text-3xs break-all text-[var(--color-fg-muted)]">
-              delivery runtimes ${scoped.delivery_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'} · action runtimes ${scoped.action_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'}
+              provider delivery runtimes ${scoped.provider_delivery_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'} · official handoff runtimes ${scoped.official_client_handoff_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'} · action runtimes ${scoped.action_runtime_counts.map(item => `${item.runtime_id}:${item.count}`).join(', ') || 'none'}
             </code>
           </div>
         `)}
@@ -158,7 +159,7 @@ function ActivationReceipt({
               </code>
               <code class="text-3xs break-all text-[var(--color-fg-muted)]">
                 ${activation.delivery
-                  ? `delivered ${activation.delivery.boundary.kind} turn ${activation.delivery.boundary.agent_core_turn} · runtime ${activation.delivery.runtime_id} · bytes ${activation.delivery.content_bytes} · sha256 ${activation.delivery.content_sha256} · ${activation.delivery.delivered_at}`
+                  ? `${activation.delivery.boundary.kind === 'model_response' ? 'provider delivered' : 'official client handoff'} turn ${activation.delivery.boundary.agent_core_turn} · runtime ${activation.delivery.runtime_id} · bytes ${activation.delivery.content_bytes} · sha256 ${activation.delivery.content_sha256} · ${activation.delivery.delivered_at}${activation.delivery.boundary.kind === 'official_client_result_handoff' ? (activation.actions.length > 0 ? ' · proof complete: later action observed' : ' · proof incomplete: no later action') : ''}`
                   : 'delivery pending'}
               </code>
               ${activation.actions.map(action => html`

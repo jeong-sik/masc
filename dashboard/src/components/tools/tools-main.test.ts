@@ -162,10 +162,12 @@ function keeperReceiptFixture(
         instruction_invocations: 1,
         skill_bodies_served: 1,
         skill_resources_served: 0,
-        instruction_deliveries: 1,
+        instruction_provider_deliveries: 1,
+        instruction_official_client_handoffs: 0,
         instruction_actions_observed: 1,
         composition_invocations: 0,
-        composition_deliveries: 0,
+        composition_provider_deliveries: 0,
+        composition_official_client_handoffs: 0,
         composition_actions_observed: 0,
         invalid_transitions: 0,
       },
@@ -180,14 +182,17 @@ function keeperReceiptFixture(
           instruction_invocations: 1,
           skill_bodies_served: 1,
           skill_resources_served: 0,
-          instruction_deliveries: 1,
+          instruction_provider_deliveries: 1,
+          instruction_official_client_handoffs: 0,
           instruction_actions_observed: 1,
           composition_invocations: 0,
-          composition_deliveries: 0,
+          composition_provider_deliveries: 0,
+          composition_official_client_handoffs: 0,
           composition_actions_observed: 0,
           invalid_transitions: 0,
         },
-        delivery_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
+        provider_delivery_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
+        official_client_handoff_runtime_counts: [],
         action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
       }],
       ledger: {
@@ -465,16 +470,66 @@ describe('Tools', () => {
     expect(container.textContent).toContain('session totals')
     expect(container.textContent).toContain('proof project-masc/ocaml-coding:ocaml-coding')
     expect(container.textContent).toContain('invoked 1')
-    expect(container.textContent).toContain('delivered 1')
+    expect(container.textContent).toContain('provider deliveries 1')
+    expect(container.textContent).toContain('official handoffs 0')
     expect(container.textContent).toContain('actions 1')
     expect(container.textContent).toContain('invalid 0')
     expect(container.textContent).toContain('call-skill-1')
     expect(container.textContent).toContain('keeper_time_now')
     expect(container.textContent).toContain('invocation runtime openai.codex')
-    expect(container.textContent).toContain('delivery runtimes anthropic.claude:1')
+    expect(container.textContent).toContain('provider delivery runtimes anthropic.claude:1')
+    expect(container.textContent).toContain('official handoff runtimes none')
     expect(container.textContent).toContain('action runtimes anthropic.claude:1')
-    expect(container.textContent).toContain('delivered model_response turn 1 · runtime anthropic.claude')
+    expect(container.textContent).toContain('provider delivered turn 1 · runtime anthropic.claude')
     expect(container.textContent).toContain('action turn 1 · runtime anthropic.claude')
+  })
+
+  it('shows an official-client handoff without a later action as incomplete proof', async () => {
+    mocks.toolsData.value = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        registered_count: 0,
+        distinct_tools_called: 0,
+        never_called_count: 0,
+      },
+      keeper_waiting_inventory: waitingInventoryFixture(),
+    }
+    const receipt = keeperReceiptFixture('sangsu')
+    if (receipt.skill_activations?.status !== 'available') {
+      throw new Error('expected available Skill activation fixture')
+    }
+    receipt.skill_activations.summary.instruction_provider_deliveries = 0
+    receipt.skill_activations.summary.instruction_official_client_handoffs = 1
+    receipt.skill_activations.summary.instruction_actions_observed = 0
+    const scoped = receipt.skill_activations.scoped_summaries[0]!
+    scoped.summary.instruction_provider_deliveries = 0
+    scoped.summary.instruction_official_client_handoffs = 1
+    scoped.summary.instruction_actions_observed = 0
+    scoped.provider_delivery_runtime_counts = []
+    scoped.official_client_handoff_runtime_counts = [
+      { runtime_id: 'openai.codex', count: 1 },
+    ]
+    scoped.action_runtime_counts = []
+    const activation = receipt.skill_activations.ledger.activations[0]!
+    if (activation.delivery === null) throw new Error('expected delivery fixture')
+    activation.delivery.boundary = {
+      kind: 'official_client_result_handoff',
+      agent_core_turn: 0,
+    }
+    activation.delivery.runtime_id = 'openai.codex'
+    activation.actions = []
+    mocks.fetchDashboardTools.mockResolvedValue(receipt)
+
+    render(html`<${Tools} />`, container)
+    await flush()
+    selectKeeper(container, 'sangsu')
+    await flush()
+
+    expect(container.textContent).toContain('provider deliveries 0')
+    expect(container.textContent).toContain('official handoffs 1')
+    expect(container.textContent).toContain('official handoff runtimes openai.codex:1')
+    expect(container.textContent).toContain('official client handoff turn 0 · runtime openai.codex')
+    expect(container.textContent).toContain('proof incomplete: no later action')
   })
 
   it('fails loudly when one Keeper projection is omitted', async () => {

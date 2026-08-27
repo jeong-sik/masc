@@ -37,7 +37,29 @@ type error =
 
    Creating the file is the whole fix; no default-keychain setting is needed.
    Measured on 2026-08-25: 13 `Keyring SaveToken timed out` in one day before,
-   none after, with the following refresh saving in 0.7s. *)
+   none after, with the following refresh saving in 0.7s.
+
+   Creating it is not free of the operator's own machine, though, and two
+   properties the file's existence does not carry have to be asserted
+   separately:
+
+   - [security] writes the new keychain into the search list of whichever HOME
+     it runs under, and masc ran it with the operator's real HOME. Measured on
+     2026-08-27: 415 entries in ~/Library/Preferences/com.apple.security.plist,
+     398 of them deleted test temp dirs, 403 of the 415 pointing at nothing.
+     Every find-generic-password by every process on the machine walks that
+     list. Each [security] child now runs with HOME set to the managed home so
+     the write lands beside the keychain it describes.
+   - A keychain [create-keychain] made reports `lock-on-sleep timeout=300s`, so
+     it relocks five minutes after the last read, and lock state lives in the
+     securityd session, so a reboot leaves it locked. A locked one under this
+     name cannot be reopened: macOS routes an unlock of a keychain called
+     `login.keychain-db` through the account login password, and no login
+     window ever runs for the managed HOME. Every later read then raises a
+     dialog nobody can satisfy — 81 of them in the 24h before 2026-08-27
+     12:00, each within 15s of a [security] keychain search. Preparation
+     clears the auto-lock at creation and rebuilds a keychain carried over
+     from an earlier process. *)
 type keychain_state =
   | Present
   | Provisioned
@@ -339,13 +361,31 @@ let verify_owned_directory path =
    test_keeper_antigravity_runtime with EINTR. The direct path stays for
    callers with no Eio runtime, which is how preparation is exercised in
    test_runtime_antigravity_home, and retries EINTR for the same reason. *)
-let run_security_direct args =
+let env_key entry =
+  match String.index_opt entry '=' with
+  | Some index -> String.sub entry 0 index
+  | None -> entry
+;;
+
+(* HOME decides which search list [security] writes to and which login
+   keychain it resolves by convention. Every call is scoped to the managed
+   home so neither answer is the operator's. *)
+let security_environment ~home_dir =
+  ("HOME=" ^ home_dir)
+  :: (Unix.environment ()
+      |> Array.to_list
+      |> List.filter (fun entry -> env_key entry <> "HOME"))
+  |> Array.of_list
+;;
+
+let run_security_direct ~env args =
   let devnull = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
   let close () = try Unix.close devnull with Unix.Unix_error _ -> () in
   match
-    Unix.create_process
+    Unix.create_process_env
       security_tool
       (Array.of_list (security_tool :: args))
+      env
       devnull
       devnull
       devnull
@@ -372,10 +412,10 @@ let run_security_direct args =
         Error (Printf.sprintf "security stopped by signal %d" signal))
 ;;
 
-let run_security_eio mgr args =
+let run_security_eio mgr ~env args =
   match
     Eio.Switch.run (fun sw ->
-      Eio.Process.spawn ~sw mgr (security_tool :: args) |> Eio.Process.await)
+      Eio.Process.spawn ~sw mgr ~env (security_tool :: args) |> Eio.Process.await)
   with
   | `Exited 0 -> Ok ()
   | `Exited code -> Error (Printf.sprintf "security exited with %d" code)
@@ -384,10 +424,11 @@ let run_security_eio mgr args =
   | exception exn -> Error (Printexc.to_string exn)
 ;;
 
-let run_security args =
+let run_security ~home_dir args =
+  let env = security_environment ~home_dir in
   match Process_eio.get_proc_mgr () with
-  | Ok mgr -> run_security_eio mgr args
-  | Error _ -> run_security_direct args
+  | Ok mgr -> run_security_eio mgr ~env args
+  | Error _ -> run_security_direct ~env args
 ;;
 
 let inspect_keychain_path path =
@@ -409,46 +450,93 @@ let inspect_keychain_path path =
    CLI falls back to file storage — so a failure here costs the stall and the
    dialog, not the turn. The state is carried out so the caller can say so
    instead of the attempt disappearing. *)
+
+(* Whether a keychain is locked cannot be read without risking the dialog this
+   whole path exists to prevent: [security] has no non-interactive mode, and
+   [unlock-keychain] answers about the passphrase rather than the lock —
+   measured 2026-08-27, it returns 51 on an unlocked keychain masc created and
+   0 on one an operator had already unlocked through the dialog.
+
+   So preparation does not ask. Lock state lives in the securityd session, the
+   keychain is created with no auto-lock, and securityd outlives every turn
+   but not a boot — which restarts masc too. Rebuilding the keychain the first
+   time a process prepares a given home therefore covers every case masc can
+   distinguish, at the cost of the token copy the old keychain held. The 0600
+   seed beside it carries the same token, and the CLI writes a fresh copy on
+   its next refresh. *)
+let provisioned_this_process = Hashtbl.create 8
+let provisioned_lock = Mutex.create ()
+
+let claim_first_preparation home_dir =
+  Mutex.protect provisioned_lock (fun () ->
+    if Hashtbl.mem provisioned_this_process home_dir
+    then false
+    else (
+      Hashtbl.replace provisioned_this_process home_dir ();
+      true))
+;;
+
+let create_login_keychain ~home_dir path =
+  let library = Filename.concat home_dir "Library" in
+  let keychains = Filename.concat library "Keychains" in
+  let ( let* ) = Result.bind in
+  let* () = mkdir_if_absent library in
+  let* () = verify_owned_directory library in
+  let* () = mkdir_if_absent keychains in
+  let* () = verify_owned_directory keychains in
+  (* The passphrase is inert for this name — nothing can unlock the keychain
+     later, whatever it is — and it guards nothing the filesystem does not
+     already guard: the keychain holds a copy of the OAuth token that sits
+     beside it at 0600 inside a 0700 home. *)
+  let* () = run_security ~home_dir [ "create-keychain"; "-p"; ""; path ] in
+  (* No [-l], no [-u] and no [-t]: the keychain reports `no-timeout` and stops
+     relocking five minutes after the last read or when the machine sleeps.
+     Without it the keychain locks itself into the unrecoverable state within
+     the hour. *)
+  let* () = run_security ~home_dir [ "set-keychain-settings"; path ] in
+  (* [security] writes it 0644. Narrowing is reported rather than swallowed:
+     the 0700 home above still keeps other users out, so a failure here is not
+     fatal, but it does mean the file is readable to anything that reaches the
+     directory. *)
+  try
+    Unix.chmod path 0o600;
+    Ok ()
+  with
+  | Unix.Unix_error (error, fn, arg) ->
+    Error ("created, but could not narrow to 0600: " ^ unix_error_detail error fn arg)
+;;
+
+let provision ~home_dir path =
+  match create_login_keychain ~home_dir path with
+  | Ok () -> Provisioned
+  | Error detail -> Failed detail
+;;
+
+(* [delete-keychain] takes the file and any search-list entry macOS made for it
+   when it was created, so the rebuild starts from nothing. *)
+let replace_keychain ~home_dir path =
+  match run_security ~home_dir [ "delete-keychain"; path ] with
+  | Ok () -> provision ~home_dir path
+  | Error detail -> Failed ("stale keychain could not be replaced: " ^ detail)
+;;
+
 let ensure_login_keychain home_dir =
   let path =
     List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
   in
-  match inspect_keychain_path path with
-  | `Present -> Present
-  | `Unusable detail -> Failed detail
-  | `Missing ->
-    if not (try Unix.access security_tool [ Unix.X_OK ]; true with Unix.Unix_error _ -> false)
-    then Unsupported
-    else (
-      let library = Filename.concat home_dir "Library" in
-      let keychains = Filename.concat library "Keychains" in
-      let ( let* ) = Result.bind in
-      let provisioned =
-        let* () = mkdir_if_absent library in
-        let* () = verify_owned_directory library in
-        let* () = mkdir_if_absent keychains in
-        let* () = verify_owned_directory keychains in
-        (* The empty passphrase leaves the keychain unlocked for every later
-           turn, which is the point: no operator is present to type one. It
-           guards nothing that the filesystem does not already guard — the
-           file holds the same OAuth token that sits beside it at 0600 inside
-           a 0700 home, and any passphrase usable unattended would have to be
-           stored next to it. *)
-        let* () = run_security [ "create-keychain"; "-p"; ""; path ] in
-        (* [security] writes it 0644. Narrowing is reported rather than
-           swallowed: the 0700 home above still keeps other users out, so a
-           failure here is not fatal, but it does mean the file is readable to
-           anything that reaches the directory. *)
-        try
-          Unix.chmod path 0o600;
-          Ok ()
-        with
-        | Unix.Unix_error (error, fn, arg) ->
-          Error ("created, but could not narrow to 0600: " ^ unix_error_detail error fn arg)
-      in
-      match provisioned with
-      | Ok () -> Provisioned
-      | Error detail -> Failed detail)
+  if not (try Unix.access security_tool [ Unix.X_OK ]; true with Unix.Unix_error _ -> false)
+  then Unsupported
+  else (
+    match inspect_keychain_path path with
+    | `Unusable detail -> Failed detail
+    | `Missing ->
+      ignore (claim_first_preparation home_dir : bool);
+      provision ~home_dir path
+    | `Present ->
+      (* Carried over from a securityd session this process cannot ask about. *)
+      if claim_first_preparation home_dir
+      then replace_keychain ~home_dir path
+      else Present)
 ;;
 
 let prepare ~runtime_root ~owner_leaf ~oauth_source =
@@ -533,4 +621,6 @@ module For_testing = struct
   ;;
 
   let settings_json = settings_json
+  let security_environment = security_environment
+  let replace_keychain = replace_keychain
 end

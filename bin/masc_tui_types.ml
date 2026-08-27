@@ -1033,6 +1033,7 @@ type code_history_listing = {
    hold a third. *)
 type config_pane =
   | Config_runtime
+  | Config_params
   | Config_prompts
   | Config_themes
 
@@ -1273,6 +1274,12 @@ type state = {
      rather than "unknown". Distinct from [keeper_yolo_names], which is the
      in-memory stance a restart clears. *)
   mutable keeper_gate_modes: (string * string) list;
+  (* Runtime_params registry rows, as the surface reads them: key, current,
+     default, and whether somebody moved it. Loaded like the other config
+     views rather than kept live -- these change when an operator changes
+     them, not on their own. *)
+  mutable runtime_params: (string * string * string * bool) list;
+  mutable runtime_params_error: string option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* The list draws each ask on one row; this opens the selected one whole.
@@ -1858,6 +1865,8 @@ let create_state
   gate_modes = None;
   gate_error = None;
   keeper_yolo_names = [];
+  runtime_params = [];
+  runtime_params_error = None;
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;

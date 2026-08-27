@@ -3524,6 +3524,61 @@ let test_decode_keeper_gate_settings_rejects_a_row_without_a_keeper () =
   | Ok _ -> Alcotest.fail "accepted a setting that names nobody"
 
 
+let runtime_params_json =
+  `Assoc
+    [ ( "parameters"
+      , `List
+          [ `Assoc
+              [ ("key", `String "keeper.hitl.thinking_blocks")
+              ; ("current", `Int 5)
+              ; ("default", `Int 3)
+              ; ("has_override", `Bool true)
+              ]
+          ; `Assoc
+              [ ("key", `String "dashboard.agent_quiet_threshold_sec")
+              ; ("current", `Float 300.0)
+              ; ("default", `Float 300.0)
+              ; ("has_override", `Bool false)
+              ]
+          ] )
+    ; ("surfaces", `List [])
+    ]
+
+let test_decode_runtime_params_reads_current_and_default () =
+  match Tui_decode.decode_runtime_params runtime_params_json with
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+  | Ok rows ->
+    (* Both numbers, because "5 (기본 3)" is the whole point of the row: the
+       operator has to be able to answer "back to what". *)
+    Alcotest.(check (list (triple string string string)))
+      "key, current, default"
+      [ ("keeper.hitl.thinking_blocks", "5", "3")
+      ; ("dashboard.agent_quiet_threshold_sec", "300.0", "300.0")
+      ]
+      (List.map (fun (k, c, d, _) -> (k, c, d)) rows);
+    Alcotest.(check (list bool))
+      "and which one somebody moved" [ true; false ]
+      (List.map (fun (_, _, _, o) -> o) rows)
+
+let test_decode_runtime_params_takes_an_empty_registry () =
+  match
+    Tui_decode.decode_runtime_params (`Assoc [ ("parameters", `List []) ])
+  with
+  | Ok [] -> ()
+  | Ok _ -> Alcotest.fail "invented a parameter"
+  | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
+
+let test_decode_runtime_params_rejects_a_row_without_a_key () =
+  (* A row with no key cannot be shown against anything, and dropping it
+     quietly hides a knob that is in force. *)
+  match
+    Tui_decode.decode_runtime_params
+      (`Assoc [ ("parameters", `List [ `Assoc [ ("current", `Int 1) ] ]) ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "accepted a parameter that names nothing"
+
+
 let () =
   Alcotest.run "tui_decode" [
     ( "decode_runtime_surface",
@@ -3824,6 +3879,15 @@ let () =
       [
         Alcotest.test_case "stops on cycle" `Quick
           test_bounded_parent_depth_stops_on_cycle;
+      ] );
+    ( "runtime_params",
+      [
+        Alcotest.test_case "reads current and default" `Quick
+          test_decode_runtime_params_reads_current_and_default;
+        Alcotest.test_case "takes an empty registry" `Quick
+          test_decode_runtime_params_takes_an_empty_registry;
+        Alcotest.test_case "rejects a row without a key" `Quick
+          test_decode_runtime_params_rejects_a_row_without_a_key;
       ] );
     ( "keeper_gate_settings",
       [

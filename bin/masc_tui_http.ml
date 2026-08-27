@@ -1001,6 +1001,13 @@ let fetch_keeper_gate_settings ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/gate/keeper-settings"
 
+(** GET /api/v1/runtime/params — the Runtime_params registry: every knob this
+    build registered, what it is set to, and what it would be with nobody
+    overriding it. *)
+let fetch_runtime_params ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/runtime/params"
+
 (** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
 let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

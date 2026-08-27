@@ -759,6 +759,13 @@ let load_keeper_gate_settings ~(host : string) ~(port : int) :
   | Error err -> Error ("keeper Gate settings load failed: " ^ err)
   | Ok json -> Tui_decode.decode_keeper_gate_settings json
 
+(** Load the Runtime_params registry rows. *)
+let load_runtime_params ~(host : string) ~(port : int) :
+    ((string * string * string * bool) list, string) result =
+  match fetch_runtime_params ~host ~port with
+  | Error err -> Error ("runtime params load failed: " ^ err)
+  | Ok json -> Tui_decode.decode_runtime_params json
+
 (** Load the keepers whose approval gate is moved off [auto]. *)
 let load_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     ((string * string) list, string) result =

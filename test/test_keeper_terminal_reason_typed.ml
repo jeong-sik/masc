@@ -253,6 +253,15 @@ let frozen_operator_disposition (receipt : R.t)
       R.Disp_pass, R.Reason_healthy
     | `Ok when receipt.runtime_outcome = R.Runtime_not_dispatched ->
       R.Disp_pass, R.Reason_healthy
+    (* Focused policy update (2026-08-27): a turn that provably ran and
+       completed (terminal success, tool execution observed) but whose
+       runtime attempt observation is absent is healthy bookkeeping-wise,
+       mirroring production. Gated on the success wire so a failed turn
+       without an observation stays unmapped. *)
+    | `Ok
+      when receipt.runtime_outcome = R.Runtime_not_observed
+           && String.equal terminal_reason "success" ->
+      R.Disp_pass, R.Reason_healthy
     | _ when String.equal terminal_reason "accept_rejected" ->
       R.Disp_fail_open_next_runtime, R.Reason_accept_rejected
     | _ -> R.Disp_unknown, R.Reason_unmapped_runtime_state)

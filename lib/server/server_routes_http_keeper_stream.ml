@@ -2953,6 +2953,30 @@ let ask_answer_failure_json failure =
    [Keeper_ask_store] and the turn reads it there. The continuation the Keeper
    recorded when it asked rides along so a woken Keeper replies where the
    question came from rather than wherever its own state last left it. *)
+(* What the route says once an answer is recorded. Recording it and telling the
+   Keeper are one act: a 2xx when only the first half happened leaves the
+   operator believing a decision landed while the Keeper waits on it forever.
+   Split out so the choice can be read and tested on its own. *)
+let ask_answer_response ~ask_id ~answer_count ~open_remaining ~delivered =
+  let body =
+    [
+      ("recorded", `Bool true);
+      ("ask_id", `String ask_id);
+      ("answer_count", `Int answer_count);
+      ("delivered", `Bool delivered);
+      ("open_remaining", `Int open_remaining);
+    ]
+  in
+  if delivered then (`OK, `Assoc body)
+  else
+    ( `Internal_server_error,
+      `Assoc
+        (( "error",
+           `String
+             "answer recorded but the keeper could not be told; answer again to \
+              deliver it" )
+        :: body) )
+
 let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
   let channel =
     match
@@ -2979,22 +3003,25 @@ let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
   with
   | Keeper_registry_event_queue.Stimulus_storage_error detail ->
       Log.Server.error "ask answer wake could not be stored (keeper=%s ask_id=%s): %s"
-        keeper_name ask_id detail
+        keeper_name ask_id detail;
+      false
   | Keeper_registry_event_queue.Stimulus_enqueued
   | Keeper_registry_event_queue.Stimulus_already_present -> (
       match
         Keeper_registry.wakeup_running ~intent:Keeper_registry.Reactive_signal ~base_path
           keeper_name
       with
-      | Keeper_registry.Signaled -> ()
+      | Keeper_registry.Signaled -> true
       | Keeper_registry.Deferred_not_running _
       | Keeper_registry.Deferred_lifecycle _
       | Keeper_registry.Deferred_unregistered ->
-          (* Durable either way: the stimulus is stored and the Keeper reads it
-             when it next runs. *)
+          (* Delivered all the same: the stimulus is stored and the Keeper
+             reads it when it next runs. Only the storage failure above leaves
+             an answer nobody will ever be told about. *)
           Log.Server.info
             "ask answer wake stored for a keeper that is not running (keeper=%s ask_id=%s)"
-            keeper_name ask_id)
+            keeper_name ask_id;
+          true)
 
 let handle_keeper_ask_answer state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
@@ -3052,6 +3079,21 @@ let handle_keeper_ask_answer state request reqd =
                 ~now
             with
             | Error failure ->
+                (* An answer recorded but never delivered leaves the Keeper
+                   waiting on a decision that already exists. Answering again
+                   is how an operator retries, so the retry finishes the
+                   delivery instead of only being told it lost the race. The
+                   wake is keyed by ask_id, so re-enqueueing a delivered one
+                   is a no-op. *)
+                (match failure with
+                 | Keeper_ask_store.Already_answered _ ->
+                     ignore
+                       (wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id
+                         : bool)
+                 | Keeper_ask_store.Ask_not_found _
+                 | Keeper_ask_store.Already_withdrawn _
+                 | Keeper_ask_store.Rejected _
+                 | Keeper_ask_store.Store_failed _ -> ());
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s refused=%s" keeper_name
                   ask_id
                   (Keeper_ask_store.answer_failure_to_string failure);
@@ -3064,16 +3106,19 @@ let handle_keeper_ask_answer state request reqd =
                    no idea. Without this wake it is written down where only a
                    screen reads it and the asker has to remember to go and
                    look, which is why no Keeper had ever asked. *)
-                wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id;
-                respond_json_value_with_cors ~status:`OK request reqd
-                  (`Assoc
-                    [
-                      ("recorded", `Bool true);
-                      ("ask_id", `String ask_id);
-                      ("answer_count", `Int (List.length answers));
-                      ( "open_remaining",
-                        `Int (Keeper_ask_store.open_ask_count ~base_path ~keeper_name) );
-                    ]))
+                let delivered =
+                  wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id
+                in
+                Log.Keeper.info
+                  "keeper_ask_answer: keeper=%s ask_id=%s answers=%d delivered=%b"
+                  keeper_name ask_id (List.length answers) delivered;
+                let status, body =
+                  ask_answer_response ~ask_id ~answer_count:(List.length answers)
+                    ~open_remaining:
+                      (Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
+                    ~delivered
+                in
+                respond_json_value_with_cors ~status request reqd body)
 
 (* GET /api/v1/keepers/asks?name=<keeper>&include_resolved=<bool>
 

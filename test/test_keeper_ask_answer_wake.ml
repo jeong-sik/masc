@@ -222,6 +222,54 @@ let test_the_answer_route_emits_the_wake () =
       n
 ;;
 
+(* Recording the answer and telling the Keeper are one act, so the route cannot
+   report success when only the first half happened. An operator who reads 200
+   stops thinking about it while the Keeper waits forever. *)
+let test_an_undelivered_answer_is_not_reported_as_success () =
+  let status, body =
+    Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
+      ~answer_count:1 ~open_remaining:0 ~delivered:false
+  in
+  check bool "not a success" true (status = `Internal_server_error);
+  (match body with
+   | `Assoc fields ->
+     check bool "says the keeper was not told" true
+       (List.assoc_opt "delivered" fields = Some (`Bool false));
+     check bool "and says so in words" true (List.mem_assoc "error" fields)
+   | _ -> fail "the body is not an object")
+;;
+
+let test_a_delivered_answer_is_a_success () =
+  let status, body =
+    Server_routes_http_keeper_stream.ask_answer_response ~ask_id:"ask-1"
+      ~answer_count:1 ~open_remaining:0 ~delivered:true
+  in
+  check bool "success" true (status = `OK);
+  (match body with
+   | `Assoc fields ->
+     check bool "delivered" true
+       (List.assoc_opt "delivered" fields = Some (`Bool true));
+     check bool "nothing to explain" false (List.mem_assoc "error" fields)
+   | _ -> fail "the body is not an object")
+;;
+
+(* The retry that finishes a delivery. An answer already recorded but never
+   delivered can only be rescued by answering again, so the refusal path has
+   to re-enqueue rather than stop at "you lost the race". *)
+let test_answering_again_completes_a_lost_delivery () =
+  let n =
+    Ast_grep.count_calls_in_value_binding
+      ~module_path:"lib/server/server_routes_http_keeper_stream.ml"
+      ~binding_name:"handle_keeper_ask_answer"
+      ~callee:"wake_keeper_for_answered_ask"
+  in
+  if n < 2 then
+    failf
+      "answering again must complete a delivery that failed the first time; \
+       wake_keeper_for_answered_ask is called %d time(s)"
+      n
+;;
+
 let () =
   run "keeper_ask_answer_wake"
     [ ( "wake"
@@ -230,6 +278,12 @@ let () =
             test_the_wake_is_keyed_by_the_question
         ; test_case "the answer route emits the wake" `Quick
             test_the_answer_route_emits_the_wake
+        ; test_case "an undelivered answer is not reported as success" `Quick
+            test_an_undelivered_answer_is_not_reported_as_success
+        ; test_case "a delivered answer is a success" `Quick
+            test_a_delivered_answer_is_a_success
+        ; test_case "answering again completes a lost delivery" `Quick
+            test_answering_again_completes_a_lost_delivery
         ] )
     ; ( "row"
       , [ test_case "the row says what the human picked" `Quick

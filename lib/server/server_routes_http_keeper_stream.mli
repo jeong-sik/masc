@@ -1,3 +1,12 @@
+(** The route's answer once an answer is recorded: [delivered] false means
+    the Keeper could not be told, which is not a success. *)
+val ask_answer_response :
+  ask_id:string ->
+  answer_count:int ->
+  open_remaining:int ->
+  delivered:bool ->
+  Http.Status.t * Yojson.Safe.t
+
 (** Server_routes_http_keeper_stream — keeper chat
     streaming HTTP route + payload parser.
 

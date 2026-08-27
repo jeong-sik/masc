@@ -1060,10 +1060,23 @@ let test_capacity_refuses_oversized_fixed_sections () =
   | Ok _ -> fail "oversized fixed prompt sections were admitted"
 ;;
 
+let test_native_action_observer_keeps_exact_provider_identity () =
+  let seen = ref [] in
+  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
+  Keeper_antigravity_runtime.For_testing.observe_stream_native_action ~turn_count:11 ~observe
+    (Runtime_antigravity.Native_tool_started
+       { Runtime_native_tools.call_id = Some "antigravity-call"; tool_name = Some "Bash" });
+  Keeper_antigravity_runtime.For_testing.observe_stream_native_action ~turn_count:12 ~observe
+    (Runtime_antigravity.Native_tool_started
+       { Runtime_native_tools.call_id = None; tool_name = None });
+  check (list (triple int string string)) "exact only" [ 11, "antigravity-call", "Bash" ] (List.rev !seen)
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
-    [ ( "lifecycle"
+    [ ( "native action", [ test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
+    ; ( "lifecycle"
         , [ test_case
             "projects MCP tool and settles"
             `Quick

@@ -65,6 +65,8 @@ type agent_setup = Keeper_run_tools_hooks.agent_setup =
       invocation:Agent_core.Tool_contract.Invocation.t ->
       content:string ->
       unit
+  ; observe_official_client_native_action :
+      runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string -> unit
   ; gate_replay_evidence : Keeper_gate_replay.model_evidence option
   ; acc : hook_accumulator
   ; all_tool_names : string list

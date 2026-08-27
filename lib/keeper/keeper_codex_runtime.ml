@@ -244,9 +244,9 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
   }
 ;;
 
-let codex_stream_callback ~keeper_name ~raw_trace_run on_event =
-  match on_event, raw_trace_run with
-  | None, None -> None
+let codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event =
+  match on_event, raw_trace_run, on_native_action with
+  | None, None, None -> None
   | _ ->
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
@@ -288,6 +288,9 @@ let codex_stream_callback ~keeper_name ~raw_trace_run on_event =
                emit (Agent_core.Types.ContentBlockStop { index }))
             (Hashtbl.find_opt tool_indexes call_id)
         | Runtime_codex_app_server.Native_tool_started observation ->
+          Option.iter
+            (fun observe -> Runtime_native_tools.observe_exact_action ~official_turn:turn_count ~observe observation)
+            on_native_action;
           Host.record_raw_native_tool
             ~keeper_name
             ~raw_trace_run
@@ -495,7 +498,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion
-    ~on_official_client_result_handoff
+    ~on_official_client_result_handoff ~on_native_action
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -895,7 +898,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     let turn_result =
       try
         let on_stream_event =
-          codex_stream_callback ~keeper_name ~raw_trace_run on_event
+          codex_stream_callback ~keeper_name ~raw_trace_run ~turn_count ~on_native_action on_event
         in
         (match
        Runtime_codex_app_server.run_turn
@@ -1127,6 +1130,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?on_native_action
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1199,7 +1203,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
           ~context_injector
           ~context
           ~terminal_effect_state
-          ~on_official_client_result_handoff
+        ~on_official_client_result_handoff ~on_native_action
           ~event_bus
           ~raw_trace
           ~on_event
@@ -1215,6 +1219,18 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
+  let observe_stream_native_action ~turn_count ~observe event =
+    match
+      codex_stream_callback
+        ~keeper_name:"test"
+        ~raw_trace_run:None
+        ~turn_count
+        ~on_native_action:(Some observe)
+        None
+    with
+    | Some callback -> callback event
+    | None -> invalid_arg "native observer did not install Codex stream callback"
+  ;;
   let native_posture_note = native_posture_note
   let codex_error_to_core_error = codex_error_to_core_error
   let clamp_reasoning_effort_to_catalog = clamp_reasoning_effort_to_catalog

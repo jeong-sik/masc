@@ -59,6 +59,11 @@ val observe_action :
   tool_name:string ->
   (int, error) result
 
+val observe_native_action :
+  config:Workspace.config -> t -> active_skill_tool_use_ids:string list ->
+  runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string ->
+  (int, error) result
+
 val error_code : error -> string
 val error_to_string : error -> string
 val error_to_yojson : error -> Yojson.Safe.t

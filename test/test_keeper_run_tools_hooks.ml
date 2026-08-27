@@ -1046,6 +1046,24 @@ let test_skill_delivery_requires_serialization_and_success_response () =
     [] (State.active state)
 ;;
 
+let test_first_round_cross_turn_replay_stays_inactive () =
+  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
+  let state = State.create () in
+  let observer_calls = ref 0 in
+  State.begin_turn state;
+  State.stage state ~runtime_id:"runtime-next-turn" ~agent_core_turn:1
+    [ wire_receipt "call-from-previous-turn" ];
+  State.commit_model_response state ~agent_core_turn:1
+    ~observe:(fun _staged ->
+      incr observer_calls;
+      (* The durable ledger observer filters this exact id because its
+         activation Turn_ref belongs to the preceding outer turn. *)
+      []);
+  check int "first response reaches the delivery observer" 1 !observer_calls;
+  check (list string) "replayed result activates no Skill id" []
+    (State.active state)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1181,6 +1199,10 @@ let () =
             "requires serialization and successful response"
             `Quick
             test_skill_delivery_requires_serialization_and_success_response
+        ; test_case
+            "first-round cross-turn replay stays inactive"
+            `Quick
+            test_first_round_cross_turn_replay_stays_inactive
         ] )
     ]
 ;;

@@ -1055,6 +1055,90 @@ describe('fetchTlcResults', () => {
   })
 })
 
+function validSkillActivationProjectionFixture() {
+  const reference = {
+    identity: {
+      source_id: 'workspace',
+      package_id: 'review-skill',
+      name: 'review-skill',
+    },
+    content_revision: 'a'.repeat(64),
+  }
+  const summary = {
+    instruction_invocations: 1,
+    skill_bodies_served: 1,
+    skill_resources_served: 0,
+    instruction_provider_deliveries: 1,
+    instruction_official_client_handoffs: 0,
+    instruction_actions_observed: 1,
+    composition_invocations: 0,
+    composition_provider_deliveries: 0,
+    composition_official_client_handoffs: 0,
+    composition_actions_observed: 0,
+    invalid_transitions: 0,
+  }
+  return {
+    status: 'available',
+    keeper_name: 'keeper/one',
+    summary,
+    scoped_summaries: [{
+      scope: {
+        snapshot_revision: 'b'.repeat(64),
+        turn_ref: 'trace-one#1',
+        invocation_runtime_id: 'openai.codex',
+        reference,
+      },
+      summary,
+      provider_delivery_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
+      official_client_handoff_runtime_counts: [],
+      action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
+    }],
+    ledger: {
+      schema: 'masc.skill-activations/v4',
+      workspace_key: 'c'.repeat(64),
+      session_id: 'trace-one',
+      revision: 'd'.repeat(64),
+      activations: [{
+        ...reference,
+        snapshot_revision: 'b'.repeat(64),
+        turn_ref: 'trace-one#1',
+        runtime_id: 'openai.codex',
+        skill_tool_use_id: 'call-skill-1',
+        agent_core_turn: 0,
+        invocation: {
+          kind: 'instruction',
+          origin: { kind: 'task_instruction', task_ids: ['task-one', 'task-two'] },
+          served_content: { kind: 'skill_body', bytes: 12, sha256: 'e'.repeat(64) },
+        },
+        delivery: {
+          boundary: { kind: 'model_response', agent_core_turn: 1 },
+          runtime_id: 'anthropic.claude',
+          delivered_at: '2026-08-27T00:00:01Z',
+          content_bytes: 12,
+          content_sha256: 'e'.repeat(64),
+        },
+        actions: [{
+          tool_use_id: 'call-action-1',
+          tool_name: 'keeper_time_now',
+          runtime_id: 'anthropic.claude',
+          agent_core_turn: 1,
+          observed_at: '2026-08-27T00:00:02Z',
+        }],
+        activated_at: '2026-08-27T00:00:00Z',
+      }],
+      transition_rejections: [{
+        kind: 'delivery_order',
+        skill_tool_use_id: 'call-skill-1',
+        activation_turn_ref: 'trace-one#1',
+        observed_turn_ref: 'trace-one#2',
+        activation_agent_core_turn: 0,
+        observed_agent_core_turn: 1,
+        observed_at: '2026-08-27T00:00:03Z',
+      }],
+    },
+  }
+}
+
 describe('fetchDashboardTools', () => {
   it('hard-cuts stale Skill activation schemas before rendering', () => {
     expect(() => normalizeSkillActivationProjection({
@@ -1063,6 +1147,64 @@ describe('fetchDashboardTools', () => {
       scoped_summaries: [],
       ledger: { schema: 'masc.skill-activations/v3', activations: [] },
     })).toThrow('skill_activations schema is not v4')
+  })
+
+  it('decodes every nested field of an available v4 Skill activation projection', () => {
+    const projection = validSkillActivationProjectionFixture()
+
+    expect(normalizeSkillActivationProjection(projection)).toEqual(projection)
+  })
+
+  it('rejects a null entry inside scoped delivery runtime counts', () => {
+    const projection = validSkillActivationProjectionFixture()
+    Object.assign(projection.scoped_summaries[0]!, { provider_delivery_runtime_counts: [null] })
+
+    expect(() => normalizeSkillActivationProjection(projection)).toThrow(
+      'available.scoped_summaries[0].provider_delivery_runtime_counts[0] is not an object',
+    )
+  })
+
+  it.each([
+    {
+      name: 'missing ledger session id',
+      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
+        delete (projection.ledger as Partial<typeof projection.ledger>).session_id
+      },
+      message: 'available.ledger.session_id must be a nonempty string',
+    },
+    {
+      name: 'null nested summary',
+      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
+        Object.assign(projection.scoped_summaries[0]!, { summary: null })
+      },
+      message: 'available.scoped_summaries[0].summary is not an object',
+    },
+    {
+      name: 'unknown action field',
+      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
+        Object.assign(projection.ledger.activations[0]!.actions[0]!, { unchecked: true })
+      },
+      message: 'available.ledger.activations[0].actions[0] has unexpected field unchecked',
+    },
+    {
+      name: 'negative served bytes',
+      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
+        projection.ledger.activations[0]!.invocation.served_content.bytes = -1
+      },
+      message: 'available.ledger.activations[0].invocation.served_content.bytes must be a nonnegative integer',
+    },
+    {
+      name: 'non-sha256 delivery digest',
+      mutate: (projection: ReturnType<typeof validSkillActivationProjectionFixture>) => {
+        projection.ledger.activations[0]!.delivery.content_sha256 = 'not-a-digest'
+      },
+      message: 'available.ledger.activations[0].delivery.content_sha256 must be a 64-character sha256',
+    },
+  ])('rejects malformed nested v4 evidence: $name', ({ mutate, message }) => {
+    const projection = validSkillActivationProjectionFixture()
+    mutate(projection)
+
+    expect(() => normalizeSkillActivationProjection(projection)).toThrow(message)
   })
 
   it('requests an exact Keeper surface when selected', async () => {

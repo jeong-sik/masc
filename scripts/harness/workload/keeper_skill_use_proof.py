@@ -622,6 +622,7 @@ def validate_proof(
     return {
         "keeper": keeper,
         "skill_tool_use_id": skill_tool_use_id,
+        "workspace_key": string_field(ledger, "workspace_key", "skill ledger"),
         "session_id": string_field(ledger, "session_id", "skill ledger"),
         "ledger_revision": string_field(ledger, "revision", "skill ledger"),
         "reference": {
@@ -821,7 +822,7 @@ def main() -> int:
         "collector source checkout changed during proof capture",
     )
     evidence = {
-        "schema": "masc.keeper-skill-use-proof.v1",
+        "schema": "masc.keeper-skill-use-proof.v2",
         "generated_at": utc_now(),
         "source": {
             "expected_sha": args.expected_source_sha,

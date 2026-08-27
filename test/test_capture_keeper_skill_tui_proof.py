@@ -68,7 +68,7 @@ def fixture(action_identity=None):
         json.dumps(dashboard, indent=2, sort_keys=True) + "\n"
     ).encode()
     evidence = {
-        "schema": "masc.keeper-skill-use-proof.v1",
+        "schema": "masc.keeper-skill-use-proof.v2",
         "source": {
             "expected_sha": HEAD,
             "collector_tree": TREE,

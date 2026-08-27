@@ -25,7 +25,7 @@ import proof_http
 import produce_natural_keeper_skill_proof as natural_producer
 
 
-JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v1"
+JOIN_SCHEMA = "masc.natural-keeper-skill-ledger-join/v2"
 HISTORICAL_PROJECTION_SCHEMA = "masc.dashboard.skill-activations/v1"
 
 
@@ -540,6 +540,9 @@ def typed_match(activation: dict[str, Any], *, turn_ref: str) -> dict[str, Any]:
             activation, "skill_tool_use_id", "activation"
         ),
         "turn_ref": turn_ref,
+        "snapshot_revision": required_string(
+            activation, "snapshot_revision", "activation"
+        ),
         "reference": {
             "identity": {
                 "source_id": source_id,
@@ -696,6 +699,7 @@ def validate_join(
         "server": before_identity,
         "ledger": {
             "schema": ledger["schema"],
+            "workspace_key": required_string(ledger, "workspace_key", "Skill ledger"),
             "session_id": required_string(ledger, "session_id", "Skill ledger"),
             "revision": required_string(ledger, "revision", "Skill ledger"),
             "dashboard_equals_durable": dashboard_equals_durable,

@@ -306,12 +306,15 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
         )
 
     def test_one_exact_turn_match_selects_exact_identity(self):
-        result = validate([activation("call-skill-1")])["result"]
+        joined = validate([activation("call-skill-1")])
+        result = joined["result"]
 
+        self.assertEqual(joined["ledger"]["workspace_key"], "f" * 64)
         self.assertEqual(result["match_count"], 1)
         self.assertEqual(result["kind"], "exact_skill_invocation")
         self.assertEqual(result["selected_skill_tool_use_id"], "call-skill-1")
         self.assertEqual(result["matches"][0]["turn_ref"], TURN_REF)
+        self.assertEqual(result["matches"][0]["snapshot_revision"], "d" * 64)
         self.assertEqual(result["matches"][0]["invocation_runtime_id"], "runtime-one")
         self.assertEqual(
             result["matches"][0]["actions"][0]["tool_name"], "keeper_status"

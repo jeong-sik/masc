@@ -346,6 +346,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
         result = self.validate(health, dashboard, ledger)
 
+        self.assertEqual(result["workspace_key"], "e" * 64)
         self.assertEqual(result["turn_ref"], "trace-one#7")
         self.assertEqual(
             result["actions"][0]["identity"],

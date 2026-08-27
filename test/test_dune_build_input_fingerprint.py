@@ -46,6 +46,26 @@ class DuneBuildInputFingerprintTest(unittest.TestCase):
             after = fingerprint.fingerprint_rule(root, "bin/main_eio.exe", [rule])
             self.assertNotEqual(before, after)
 
+    def test_relative_rule_target_resolves_from_repo(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            rule = self.fixture(root)
+            self.assertEqual(
+                fingerprint.target_path(root, "bin/main_eio.exe", [rule]),
+                root / "_build/default/bin/main_eio.exe",
+            )
+
+    def test_absolute_custom_build_target_stays_authoritative(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            rule = self.fixture(root)
+            custom_target = root / "custom-build/default/bin/main_eio.exe"
+            rule["targets"]["files"] = [str(custom_target)]
+            self.assertEqual(
+                fingerprint.target_path(root, "bin/main_eio.exe", [rule]),
+                custom_target,
+            )
+
     def test_link_action_changes_identity(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)

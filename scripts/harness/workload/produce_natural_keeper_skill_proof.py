@@ -301,6 +301,16 @@ def validate_health(
     binary_commit = required_string(build, "binary_commit", "health.build")
     source_fingerprint = required_sha256(build, "source_fingerprint", "health.build")
     executable_sha256 = required_sha256(build, "executable_sha256", "health.build")
+    executable_provenance_path = required_string(
+        build, "executable_provenance_path", "health.build"
+    )
+    require(
+        Path(executable_provenance_path).is_absolute(),
+        "health.build.executable_provenance_path is not absolute",
+    )
+    executable_provenance_sha256 = required_sha256(
+        build, "executable_provenance_sha256", "health.build"
+    )
     require(binary_commit == source["head"], "server binary differs from source HEAD")
     require(
         build.get("binary_commit_source") == "embedded",
@@ -317,6 +327,8 @@ def validate_health(
         "binary_commit": binary_commit,
         "source_fingerprint": source_fingerprint,
         "executable_sha256": executable_sha256,
+        "executable_provenance_path": executable_provenance_path,
+        "executable_provenance_sha256": executable_provenance_sha256,
         "runtime_instance_id": runtime_instance_id,
         "started_at": required_string(build, "started_at", "health.build"),
         "effective_base_path": effective_base_path,

@@ -10,6 +10,8 @@ type t =
   ; binary_commit_source : string option [@default None]
   ; source_fingerprint : string option [@default None]
   ; executable_sha256 : string option [@default None]
+  ; executable_provenance_path : string option [@default None]
+  ; executable_provenance_sha256 : string option [@default None]
   ; binary_commit_unix_ts : float option [@default None]
   ; binary_commit_age_seconds : int option [@default None]
   ; repo_head_commit : string option [@default None]
@@ -321,6 +323,8 @@ type executable_provenance =
   { binary_commit : string
   ; build_input_fingerprint : string
   ; executable_sha256 : string
+  ; executable_device : int
+  ; executable_inode : int
   }
 
 let executable_provenance_schema = "masc.run-local-executable-identity.v1"
@@ -338,6 +342,8 @@ let valid_sha256 value =
 let parse_executable_provenance
       ~expected_binary_commit
       ~expected_executable_sha256
+      ~expected_executable_device
+      ~expected_executable_inode
       raw
   =
   let required_string fields name =
@@ -348,6 +354,13 @@ let parse_executable_provenance
     | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
   in
   let ( let* ) = Result.bind in
+  let required_nonnegative_int fields name =
+    match List.find_all (fun (field, _) -> String.equal field name) fields with
+    | [ _, `Int value ] when value >= 0 -> Ok value
+    | [ _ ] -> Error (Printf.sprintf "executable provenance %s is not a nonnegative integer" name)
+    | [] -> Error (Printf.sprintf "executable provenance %s is missing" name)
+    | _ -> Error (Printf.sprintf "executable provenance %s is duplicated" name)
+  in
   match Yojson.Safe.from_string raw with
   | exception Yojson.Json_error message -> Error ("invalid executable provenance JSON: " ^ message)
   | `Assoc fields ->
@@ -355,7 +368,9 @@ let parse_executable_provenance
     let* binary_commit = required_string fields "binary_commit" in
     let* build_input_fingerprint = required_string fields "build_input_fingerprint" in
     let* executable_sha256 = required_string fields "executable_sha256" in
-    if List.length fields <> 4
+    let* executable_device = required_nonnegative_int fields "executable_device" in
+    let* executable_inode = required_nonnegative_int fields "executable_inode" in
+    if List.length fields <> 6
     then Error "executable provenance has unsupported fields"
     else if not (String.equal schema executable_provenance_schema)
     then Error "executable provenance schema is unsupported"
@@ -367,44 +382,130 @@ let parse_executable_provenance
     then Error "executable provenance executable digest is invalid"
     else if not (String.equal executable_sha256 expected_executable_sha256)
     then Error "executable provenance executable digest differs"
-    else Ok { binary_commit; build_input_fingerprint; executable_sha256 }
+    else if executable_device <> expected_executable_device
+    then Error "executable provenance executable device differs"
+    else if executable_inode <> expected_executable_inode
+    then Error "executable provenance executable inode differs"
+    else
+      Ok
+        { binary_commit
+        ; build_input_fingerprint
+        ; executable_sha256
+        ; executable_device
+        ; executable_inode
+        }
   | _ -> Error "executable provenance is not an object"
 ;;
 
-let sha256_file path =
-  try
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let buffer = Bytes.create Sys.io_buffer_size in
-        let rec loop context =
-          match input ic buffer 0 (Bytes.length buffer) with
-          | 0 -> Digestif.SHA256.(get context |> to_hex)
-          | count ->
-            Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer |> loop
-        in
-        Some (loop Digestif.SHA256.empty))
-  with
-  | Sys_error _ -> None
-  | Unix.Unix_error _ -> None
+let sha256_channel ic =
+  let buffer = Bytes.create Sys.io_buffer_size in
+  let rec loop context =
+    match input ic buffer 0 (Bytes.length buffer) with
+    | 0 -> Digestif.SHA256.(get context |> to_hex)
+    | count -> Digestif.SHA256.feed_bytes context ~off:0 ~len:count buffer |> loop
+  in
+  loop Digestif.SHA256.empty
 ;;
 
-let resolved_executable_provenance =
-  let sidecar = resolved_executable_path ^ ".identity.json" in
-  match commit_resolution.binary_commit, read_file sidecar, sha256_file resolved_executable_path with
-  | Some expected_binary_commit, Some raw, Some expected_executable_sha256 ->
-    (match
-       parse_executable_provenance
-         ~expected_binary_commit
-         ~expected_executable_sha256
-         raw
-     with
-     | Ok provenance -> Some provenance
-     | Error message ->
-       Log.Identity.warn "build_identity rejected %s: %s" sidecar message;
-       None)
-  | _ -> None
+let sha256_string value = Digestif.SHA256.(digest_string value |> to_hex)
+
+let validate_executable_provenance_binding
+      ~path
+      ~expected_sidecar_sha256
+      ~expected_sidecar_device
+      ~expected_sidecar_inode
+      ~expected_binary_commit
+      ~expected_executable_sha256
+      ~expected_executable_device
+      ~expected_executable_inode
+  =
+  if Filename.is_relative path
+  then Error "executable provenance path is not absolute"
+  else if not (valid_sha256 expected_sidecar_sha256)
+  then Error "executable provenance sidecar digest is invalid"
+  else
+    try
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          match Unix.fstat (Unix.descr_of_in_channel ic) with
+          | { st_kind = Unix.S_REG; st_uid; st_perm; st_nlink; st_dev; st_ino; _ }
+            when st_uid = Unix.geteuid ()
+                 && st_perm = 0o400
+                 && st_nlink = 1
+                 && st_dev = expected_sidecar_device
+                 && st_ino = expected_sidecar_inode ->
+            let raw = really_input_string ic (in_channel_length ic) in
+            if not (String.equal (sha256_string raw) expected_sidecar_sha256)
+            then Error "executable provenance sidecar digest differs"
+            else
+              parse_executable_provenance
+                ~expected_binary_commit
+                ~expected_executable_sha256
+                ~expected_executable_device
+                ~expected_executable_inode
+                raw
+          | _ -> Error "executable provenance sidecar metadata differs")
+    with
+    | Sys_error _ | Unix.Unix_error _ ->
+      Error "executable provenance sidecar is unreadable"
+;;
+
+type bound_executable_provenance =
+  { path : string
+  ; sidecar_sha256 : string
+  ; provenance : executable_provenance
+  }
+
+let executable_provenance_binding : bound_executable_provenance option Atomic.t =
+  Atomic.make None
+;;
+
+let bind_executable_provenance ~path ~sha256 ~device ~inode =
+  let ( let* ) = Result.bind in
+  let* expected_binary_commit =
+    match commit_resolution.binary_commit with
+    | Some value -> Ok value
+    | None -> Error "running executable has no embedded commit"
+  in
+  let* executable_stat, expected_executable_sha256 =
+    try
+      let ic = open_in_bin resolved_executable_path in
+      Fun.protect
+        ~finally:(fun () -> close_in_noerr ic)
+        (fun () ->
+          match Unix.fstat (Unix.descr_of_in_channel ic) with
+          | { st_kind = Unix.S_REG; st_uid; st_perm; st_nlink; _ } as value
+            when st_uid = Unix.geteuid () && st_perm = 0o500 && st_nlink = 1 ->
+            Ok (value, sha256_channel ic)
+          | _ -> Error "running executable metadata differs")
+    with
+    | Sys_error _ | Unix.Unix_error _ ->
+      Error "running executable cannot be inspected"
+  in
+  let* provenance =
+    validate_executable_provenance_binding
+      ~path
+      ~expected_sidecar_sha256:sha256
+      ~expected_sidecar_device:device
+      ~expected_sidecar_inode:inode
+      ~expected_binary_commit
+      ~expected_executable_sha256
+      ~expected_executable_device:executable_stat.st_dev
+      ~expected_executable_inode:executable_stat.st_ino
+  in
+  let binding = { path; sidecar_sha256 = sha256; provenance } in
+  let rec publish () =
+    match Atomic.get executable_provenance_binding with
+    | Some existing when existing = binding -> Ok ()
+    | Some _ -> Error "executable provenance was already bound to another identity"
+    | None ->
+      if Atomic.compare_and_set executable_provenance_binding None (Some binding)
+      then Ok ()
+      else publish ()
+  in
+  publish ()
 ;;
 
 let resolved_repo_root = probe_repo_root ()
@@ -415,6 +516,7 @@ let repo_head_commit_unix_ts = probe_commit_unix_ts commit_resolution.repo_head_
 
 let current () =
   let now = Unix.gettimeofday () in
+  let provenance_binding = Atomic.get executable_provenance_binding in
   { release_version = Runtime_build_version.current
   ; binary_version = Runtime_build_version.current
   ; repo_version
@@ -423,9 +525,14 @@ let current () =
   ; binary_commit = commit_resolution.binary_commit
   ; binary_commit_source = commit_resolution.binary_commit_source
   ; source_fingerprint =
-      Option.map (fun provenance -> provenance.build_input_fingerprint) resolved_executable_provenance
+      Option.map
+        (fun binding -> binding.provenance.build_input_fingerprint)
+        provenance_binding
   ; executable_sha256 =
-      Option.map (fun provenance -> provenance.executable_sha256) resolved_executable_provenance
+      Option.map (fun binding -> binding.provenance.executable_sha256) provenance_binding
+  ; executable_provenance_path = Option.map (fun binding -> binding.path) provenance_binding
+  ; executable_provenance_sha256 =
+      Option.map (fun binding -> binding.sidecar_sha256) provenance_binding
   ; binary_commit_unix_ts
   ; binary_commit_age_seconds = age_seconds ~now binary_commit_unix_ts
   ; repo_head_commit = commit_resolution.repo_head_commit
@@ -442,6 +549,7 @@ let current () =
 ;;
 
 module For_testing = struct
+  let validate_executable_provenance_binding = validate_executable_provenance_binding
   let observe_probe_failure = observe_probe_failure
   let probe_commit_unix_ts = probe_commit_unix_ts
   let runtime_cwd = runtime_cwd

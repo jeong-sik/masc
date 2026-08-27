@@ -156,6 +156,8 @@ class NaturalKeeperSkillProofProducerTest(unittest.TestCase):
                 "binary_commit_source": "embedded",
                 "source_fingerprint": SOURCE_FINGERPRINT,
                 "executable_sha256": EXECUTABLE_SHA256,
+                "executable_provenance_path": "/private/provenance.json",
+                "executable_provenance_sha256": "e" * 64,
                 "runtime_instance_id": INSTANCE,
                 "started_at": "2026-08-27T00:00:00Z",
             },

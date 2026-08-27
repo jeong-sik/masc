@@ -481,6 +481,20 @@ def validate_proof(
         SHA256_RE.fullmatch(executable_sha256) is not None,
         "live executable digest is not SHA-256",
     )
+    executable_provenance_path = string_field(
+        build, "executable_provenance_path", "health.build"
+    )
+    require(
+        Path(executable_provenance_path).is_absolute(),
+        "live executable provenance path is not absolute",
+    )
+    executable_provenance_sha256 = string_field(
+        build, "executable_provenance_sha256", "health.build"
+    )
+    require(
+        SHA256_RE.fullmatch(executable_provenance_sha256) is not None,
+        "live executable provenance digest is not SHA-256",
+    )
     runtime_instance_id(build, "health.build")
     string_field(build, "started_at", "health.build")
 
@@ -638,6 +652,8 @@ def validate_proof(
         "ledger_revision": string_field(ledger, "revision", "skill ledger"),
         "source_fingerprint": source_fingerprint,
         "executable_sha256": executable_sha256,
+        "executable_provenance_path": executable_provenance_path,
+        "executable_provenance_sha256": executable_provenance_sha256,
         "reference": {
             "source_id": reference_key(activation, "activation")[0],
             "package_id": reference_key(activation, "activation")[1],
@@ -653,6 +669,30 @@ def validate_proof(
         "actions": actions,
         "scoped_summary": scoped[0],
     }
+
+
+def server_identity(health: dict[str, Any]) -> dict[str, str]:
+    build = object_field(health, "build", "health")
+    return {
+        field: string_field(build, field, "health.build")
+        for field in (
+            "binary_commit",
+            "binary_commit_source",
+            "source_fingerprint",
+            "executable_sha256",
+            "executable_provenance_path",
+            "executable_provenance_sha256",
+            "runtime_instance_id",
+            "started_at",
+        )
+    }
+
+
+def require_same_server(before: dict[str, Any], after: dict[str, Any]) -> None:
+    require(
+        server_identity(after) == server_identity(before),
+        "server identity changed during Dashboard capture",
+    )
 
 
 def capture_dashboard_page(
@@ -905,6 +945,10 @@ def main() -> int:
         output=args.out,
         token=token,
     )
+    health_after, _health_after_raw = read_json(
+        f"{base_url}/health?full=1", args.timeout, token
+    )
+    require_same_server(health, health_after)
     source_after = source_snapshot(repo)
     require(
         source_after == source_before,
@@ -926,6 +970,8 @@ def main() -> int:
             ),
             "source_fingerprint": proof["source_fingerprint"],
             "executable_sha256": proof["executable_sha256"],
+            "executable_provenance_path": proof["executable_provenance_path"],
+            "executable_provenance_sha256": proof["executable_provenance_sha256"],
             "server_started_at": string_field(
                 object_field(health, "build", "health"),
                 "started_at",

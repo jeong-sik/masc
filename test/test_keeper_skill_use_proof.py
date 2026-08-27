@@ -139,6 +139,8 @@ def fixture():
             "binary_commit_source": "embedded",
             "source_fingerprint": "f" * 64,
             "executable_sha256": "a" * 64,
+            "executable_provenance_path": "/private/provenance.json",
+            "executable_provenance_sha256": "b" * 64,
             "runtime_instance_id": INSTANCE,
             "started_at": "2026-08-27T00:00:00Z",
         },
@@ -162,6 +164,18 @@ def refresh_projection(dashboard, ledger):
 
 
 class KeeperSkillUseProofTest(unittest.TestCase):
+    def test_dashboard_capture_rejects_same_head_server_restart(self):
+        health, _dashboard, _ledger = fixture()
+        restarted = copy.deepcopy(health)
+        restarted["build"]["runtime_instance_id"] = (
+            "018f1d5e-7b3c-7abc-8def-0123456789ac"
+        )
+
+        with self.assertRaisesRegex(
+            proof.ProofError, "server identity changed during Dashboard capture"
+        ):
+            proof.require_same_server(health, restarted)
+
     def test_dashboard_capture_uses_exact_keeper_and_ledger_scoped_rows(self):
         calls = []
 

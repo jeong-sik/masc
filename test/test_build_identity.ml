@@ -122,6 +122,14 @@ let test_current_json_exposes_runtime_binary_identity () =
     (match json |> member "executable_sha256" with
      | `Null | `String _ -> true
      | _ -> false);
+  Alcotest.(check bool) "provenance path field present" true
+    (match json |> member "executable_provenance_path" with
+     | `Null | `String _ -> true
+     | _ -> false);
+  Alcotest.(check bool) "provenance digest field present" true
+    (match json |> member "executable_provenance_sha256" with
+     | `Null | `String _ -> true
+     | _ -> false);
   Alcotest.(check bool) "repo head commit field present" true
     (match json |> member "repo_head_commit" with `Null | `String _ -> true | _ -> false);
   Alcotest.(check bool) "executable path populated" true
@@ -141,6 +149,8 @@ let executable_provenance_json ?(extra = []) ~commit ~fingerprint ~sha256 () =
      ; "binary_commit", `String commit
      ; "build_input_fingerprint", `String fingerprint
      ; "executable_sha256", `String sha256
+     ; "executable_device", `Int 1
+     ; "executable_inode", `Int 2
      ]
      @ extra)
   |> Yojson.Safe.to_string
@@ -155,6 +165,8 @@ let test_executable_provenance_requires_exact_identity () =
     { binary_commit = commit
     ; build_input_fingerprint = fingerprint
     ; executable_sha256 = sha256
+    ; executable_device = 1
+    ; executable_inode = 2
     }
   in
   Alcotest.(check (result (testable (fun ppf (value : Build_identity.executable_provenance) ->
@@ -167,6 +179,8 @@ let test_executable_provenance_requires_exact_identity () =
     (Build_identity.parse_executable_provenance
        ~expected_binary_commit:commit
        ~expected_executable_sha256:sha256
+       ~expected_executable_device:1
+       ~expected_executable_inode:2
        raw)
 ;;
 
@@ -178,6 +192,8 @@ let test_executable_provenance_rejects_mismatches () =
     Build_identity.parse_executable_provenance
       ~expected_binary_commit:commit
       ~expected_executable_sha256:sha256
+      ~expected_executable_device:1
+      ~expected_executable_inode:2
       raw
   in
   let check_error label expected raw =
@@ -198,6 +214,18 @@ let test_executable_provenance_rejects_mismatches () =
     "executable provenance build-input fingerprint is invalid"
     (executable_provenance_json ~commit ~fingerprint:"not-a-digest" ~sha256 ());
   check_error
+    "replacement inode"
+    "executable provenance executable inode differs"
+    (`Assoc
+       [ "schema", `String "masc.run-local-executable-identity.v1"
+       ; "binary_commit", `String commit
+       ; "build_input_fingerprint", `String fingerprint
+       ; "executable_sha256", `String sha256
+       ; "executable_device", `Int 1
+       ; "executable_inode", `Int 3
+       ]
+     |> Yojson.Safe.to_string);
+  check_error
     "unknown fields"
     "executable provenance has unsupported fields"
     (executable_provenance_json
@@ -206,6 +234,41 @@ let test_executable_provenance_rejects_mismatches () =
        ~fingerprint
        ~sha256
        ())
+;;
+
+let test_executable_provenance_binding_rejects_replacement_and_forgery () =
+  let path = Filename.temp_file "build-provenance" ".json" in
+  let commit = String.make 40 'a' in
+  let sha256 = String.make 64 'c' in
+  let raw = executable_provenance_json ~commit ~fingerprint:(String.make 64 'b') ~sha256 () in
+  let write value =
+    if Sys.file_exists path then Unix.chmod path 0o600;
+    Out_channel.with_open_bin path (fun channel -> output_string channel value);
+    Unix.chmod path 0o400
+  in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      write raw;
+      let sidecar = Unix.lstat path in
+      let digest = Digestif.SHA256.(digest_string raw |> to_hex) in
+      let validate () =
+        Build_identity.For_testing.validate_executable_provenance_binding
+          ~path
+          ~expected_sidecar_sha256:digest
+          ~expected_sidecar_device:sidecar.st_dev
+          ~expected_sidecar_inode:sidecar.st_ino
+          ~expected_binary_commit:commit
+          ~expected_executable_sha256:sha256
+          ~expected_executable_device:1
+          ~expected_executable_inode:2
+      in
+      Alcotest.(check bool) "exact inode binding accepted" true (Result.is_ok (validate ()));
+      Sys.remove path;
+      write raw;
+      Alcotest.(check bool) "same-byte replacement rejected" true (Result.is_error (validate ()));
+      write (raw ^ " ");
+      Alcotest.(check bool) "forged bytes rejected" true (Result.is_error (validate ())))
 ;;
 
 let test_pick_repo_candidates_exe_first_when_distinct () =
@@ -342,6 +405,8 @@ let () =
             test_executable_provenance_requires_exact_identity;
           Alcotest.test_case "executable provenance rejects mismatches" `Quick
             test_executable_provenance_rejects_mismatches;
+          Alcotest.test_case "executable provenance rejects replacement and forgery" `Quick
+            test_executable_provenance_binding_rejects_replacement_and_forgery;
           Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick
             test_runtime_cwd_is_resolver_backed_snapshot;
           Alcotest.test_case "current JSON exposes runtime binary identity" `Quick

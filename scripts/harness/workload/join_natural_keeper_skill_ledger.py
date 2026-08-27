@@ -305,6 +305,8 @@ def validate_receipt(
             "binary_commit",
             "source_fingerprint",
             "executable_sha256",
+            "executable_provenance_path",
+            "executable_provenance_sha256",
             "runtime_instance_id",
             "started_at",
             "effective_base_path",
@@ -330,6 +332,12 @@ def validate_receipt(
             ),
             "executable_sha256": required_string(
                 server, "executable_sha256", "producer server"
+            ),
+            "executable_provenance_path": required_string(
+                server, "executable_provenance_path", "producer server"
+            ),
+            "executable_provenance_sha256": required_string(
+                server, "executable_provenance_sha256", "producer server"
             ),
             "runtime_instance_id": producer_instance_id,
             "started_at": required_string(server, "started_at", "producer server"),
@@ -366,6 +374,12 @@ def health_identity(
         "executable_sha256": required_string(
             build, "executable_sha256", "health.build"
         ),
+        "executable_provenance_path": required_string(
+            build, "executable_provenance_path", "health.build"
+        ),
+        "executable_provenance_sha256": required_string(
+            build, "executable_provenance_sha256", "health.build"
+        ),
         "runtime_instance_id": required_string(
             build, "runtime_instance_id", "health.build"
         ),
@@ -392,6 +406,14 @@ def health_identity(
     require(
         proof.SHA256_RE.fullmatch(identity["executable_sha256"]) is not None,
         "server executable digest is invalid",
+    )
+    require(
+        Path(identity["executable_provenance_path"]).is_absolute(),
+        "server executable provenance path is invalid",
+    )
+    require(
+        proof.SHA256_RE.fullmatch(identity["executable_provenance_sha256"]) is not None,
+        "server executable provenance digest is invalid",
     )
     return identity
 

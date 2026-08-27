@@ -8,7 +8,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_TARGET="bin/main_eio.exe"
-BUILT_EXE="$REPO_ROOT/_build/default/bin/main_eio.exe"
 TARGET_DIR="${PWD}"
 HOST="${MASC_HOST:-127.0.0.1}"
 PORT="${MASC_PORT:-}"
@@ -81,54 +80,84 @@ binary_matches_commit() {
     && [ "$embedded_commit" = "$expected_commit" ]
 }
 
-build_input_fingerprint() {
+write_dune_build_receipt() {
+  local receipt="$1"
   "$REPO_ROOT/scripts/dune-build-input-fingerprint.py" \
     --repo-root "$REPO_ROOT" \
-    --target "$BUILD_TARGET"
+    --target "$BUILD_TARGET" \
+    --receipt >"$receipt"
+}
+
+read_dune_build_receipt() {
+  local receipt="$1"
+  local schema=""
+  {
+    IFS= read -r schema
+    IFS= read -r BUILT_EXE
+    IFS= read -r BUILD_INPUT_FINGERPRINT
+    if IFS= read -r _extra; then
+      return 1
+    fi
+  } <"$receipt"
+  [ "$schema" = "masc.dune-build-input-receipt.v1" ] \
+    && [ -x "$BUILT_EXE" ] \
+    && masc_runtime_artifact_valid_hash "$BUILD_INPUT_FINGERPRINT"
 }
 
 build_local_binary() {
+  local receipt=""
   "$REPO_ROOT/scripts/dune-local.sh" build "$BUILD_TARGET"
-  [ -x "$BUILT_EXE" ] || {
-    echo "Dune did not materialize $BUILT_EXE" >&2
+  receipt="$(mktemp "${TMPDIR:-/tmp}/masc-dune-build-receipt.XXXXXX")"
+  if ! write_dune_build_receipt "$receipt" || ! read_dune_build_receipt "$receipt"; then
+    rm -f "$receipt"
+    echo "Dune did not return an exact build-input receipt" >&2
     exit 1
-  }
+  fi
+  rm -f "$receipt"
   binary_matches_commit "$BUILT_EXE" "$SOURCE_COMMIT" || {
     echo "Built binary commit differs from source commit $SOURCE_COMMIT" >&2
-    exit 1
-  }
-  BUILD_INPUT_FINGERPRINT="$(build_input_fingerprint)" || {
-    echo "Failed to fingerprint Dune inputs for $BUILD_TARGET" >&2
     exit 1
   }
   BUILT_EXE_SHA256="$(masc_runtime_artifact_hash "$BUILT_EXE")" || exit 1
 }
 
-write_executable_provenance() {
-  local path="$1"
-  local temp="$path.tmp.$$"
-  umask 077
-  printf \
-    '{"schema":"masc.run-local-executable-identity.v1","binary_commit":"%s","build_input_fingerprint":"%s","executable_sha256":"%s"}\n' \
-    "$SOURCE_COMMIT" "$BUILD_INPUT_FINGERPRINT" "$BUILT_EXE_SHA256" >"$temp"
-  chmod 600 "$temp"
-  mv -f "$temp" "$path"
-}
-
 materialize_executable_provenance() {
-  local descriptor_dir="$TARGET_DIR/.masc/run-local-artifact"
-  local candidate="$descriptor_dir/candidate"
-  local current="$descriptor_dir/current"
-  mkdir -p "$descriptor_dir"
-  masc_runtime_artifact_descriptor_write \
-    "$candidate" http "$BUILT_EXE" "$BUILT_EXE_SHA256" "$HOST" "$PORT"
-  masc_runtime_artifact_promote "$candidate" "$current" "$REPO_ROOT"
-  masc_runtime_artifact_descriptor_read "$current"
-  EXE="$MASC_ARTIFACT_PATH"
-  EXE_SHA256="$MASC_ARTIFACT_SHA256"
-  EXE_PROVENANCE="$EXE.identity.json"
-  write_executable_provenance "$EXE_PROVENANCE"
-  EXE_PROVENANCE_SHA256="$(masc_runtime_artifact_hash "$EXE_PROVENANCE")" || exit 1
+  local git_common_dir=""
+  local private_root=""
+  local receipt=""
+  local schema=""
+  local receipt_extra=0
+  git_common_dir="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir)"
+  private_root="$git_common_dir/masc-run-local-artifacts"
+  receipt="$(mktemp "${TMPDIR:-/tmp}/masc-launch-binding.XXXXXX")"
+  if ! "$REPO_ROOT/scripts/run-local-executable-binding.py" \
+      --private-root "$private_root" \
+      --executable "$BUILT_EXE" \
+      --commit "$SOURCE_COMMIT" \
+      --fingerprint "$BUILD_INPUT_FINGERPRINT" >"$receipt"
+  then
+    rm -f "$receipt"
+    exit 1
+  fi
+  {
+    IFS= read -r schema
+    IFS= read -r EXE
+    IFS= read -r EXE_SHA256
+    IFS= read -r EXE_PROVENANCE
+    IFS= read -r EXE_PROVENANCE_SHA256
+    IFS= read -r EXE_PROVENANCE_DEVICE
+    IFS= read -r EXE_PROVENANCE_INODE
+    if IFS= read -r _extra; then receipt_extra=1; fi
+  } <"$receipt"
+  rm -f "$receipt"
+  [ "$receipt_extra" = "0" ] \
+    && [ "$schema" = "masc.run-local-launch-binding.v1" ] \
+    && [ -x "$EXE" ] \
+    && [ -f "$EXE_PROVENANCE" ] \
+    && masc_runtime_artifact_valid_hash "$EXE_SHA256" \
+    && masc_runtime_artifact_valid_hash "$EXE_PROVENANCE_SHA256" \
+    && [ "$EXE_PROVENANCE_DEVICE" -ge 0 ] \
+    && [ "$EXE_PROVENANCE_INODE" -ge 0 ]
 }
 
 require_exec_identity() {
@@ -268,6 +297,11 @@ if [ "$PRINT_PORT_ONLY" = "1" ]; then
   exit 0
 fi
 
+if [ "${MASC_DUNE_DRY_RUN:-0}" = "1" ]; then
+  echo "run-local exact launch does not accept MASC_DUNE_DRY_RUN=1" >&2
+  exit 1
+fi
+
 bootstrap_local_config "$TARGET_DIR"
 build_dashboard_if_requested
 
@@ -329,8 +363,17 @@ if [ -n "${MASC_LOG_FILE:-}" ]; then
   echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
   set -o pipefail
   require_exec_identity
-  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR" 2>&1 | tee -a "$MASC_LOG_FILE"
+  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR" \
+    --build-provenance-path="$EXE_PROVENANCE" \
+    --build-provenance-sha256="$EXE_PROVENANCE_SHA256" \
+    --build-provenance-device="$EXE_PROVENANCE_DEVICE" \
+    --build-provenance-inode="$EXE_PROVENANCE_INODE" \
+    2>&1 | tee -a "$MASC_LOG_FILE"
 else
   require_exec_identity
-  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR"
+  exec "$EXE" --host="$HOST" --port="$PORT" --base-path="$TARGET_DIR" \
+    --build-provenance-path="$EXE_PROVENANCE" \
+    --build-provenance-sha256="$EXE_PROVENANCE_SHA256" \
+    --build-provenance-device="$EXE_PROVENANCE_DEVICE" \
+    --build-provenance-inode="$EXE_PROVENANCE_INODE"
 fi

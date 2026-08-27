@@ -13,6 +13,11 @@ let runtime_artifact_contract_script_path () =
     (Filename.concat (source_root ()) "scripts/lib")
     "runtime-artifact-contract.sh"
 
+let run_local_executable_binding_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts")
+    "run-local-executable-binding.py"
+
 let build_dashboard_if_needed_script_path () =
   Filename.concat
     (Filename.concat (source_root ()) "scripts")
@@ -170,15 +175,30 @@ let setup_fake_repo root =
   copy_script
     (runtime_artifact_contract_script_path ())
     (Filename.concat scripts_lib_dir "runtime-artifact-contract.sh");
+  copy_script
+    (run_local_executable_binding_script_path ())
+    (Filename.concat scripts_dir "run-local-executable-binding.py");
   write_executable
     (Filename.concat scripts_dir "dune-build-input-fingerprint.py")
     {|
 #!/bin/sh
 set -eu
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+build_dir="${DUNE_BUILD_DIR:-$repo_root/_build}"
+receipt=0
+for argument in "$@"; do
+  if [ "$argument" = "--receipt" ]; then receipt=1; fi
+done
 if [ -n "${FAKE_DUNE_INPUT_CHANGED_FILE:-}" ] && [ -f "$FAKE_DUNE_INPUT_CHANGED_FILE" ]; then
-  printf '%064d\n' 1 | tr '1' 'd'
+  fingerprint="$(printf '%064d' 1 | tr '1' 'd')"
 else
-  printf '%064d\n' 1 | tr '1' 'b'
+  fingerprint="$(printf '%064d' 1 | tr '1' 'b')"
+fi
+if [ "$receipt" = "1" ]; then
+  printf 'masc.dune-build-input-receipt.v1\n%s\n%s\n' \
+    "$build_dir/default/bin/main_eio.exe" "$fingerprint"
+else
+  printf '%s\n' "$fingerprint"
 fi
 |};
   write_executable
@@ -232,19 +252,15 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (String_util.contains_substring captured "MASC_WS_ENABLED=0");
       check bool "port passed through" true
         (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955");
-      let descriptor =
-        Filename.concat target_abs ".masc/run-local-artifact/current"
-        |> read_file
-        |> String.split_on_char '\n'
+      let private_root = Filename.concat repo_root ".git/masc-run-local-artifacts" in
+      let provenance_dir = Filename.concat private_root "provenance" in
+      let provenance_files = Sys.readdir provenance_dir |> Array.to_list in
+      let provenance_path =
+        match provenance_files with
+        | [ name ] -> Filename.concat provenance_dir name
+        | _ -> fail "run-local did not materialize exactly one provenance sidecar"
       in
-      let promoted_executable, executable_sha256 =
-        match descriptor with
-        | _schema :: _mode :: path :: sha256 :: _ -> path, sha256
-        | _ -> fail "run-local artifact descriptor is incomplete"
-      in
-      let provenance =
-        Yojson.Safe.from_file (promoted_executable ^ ".identity.json")
-      in
+      let provenance = Yojson.Safe.from_file provenance_path in
       let open Yojson.Safe.Util in
       check string
         "sidecar commit matches exact worktree"
@@ -254,10 +270,15 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         "sidecar has SHA-256 build-input fingerprint"
         64
         (provenance |> member "build_input_fingerprint" |> to_string |> String.length);
-      check string
-        "sidecar executable digest matches promoted descriptor"
-        executable_sha256
-        (provenance |> member "executable_sha256" |> to_string))
+      check bool
+        "launch uses content-addressed provenance path"
+        true
+        (String_util.contains_substring captured
+           ("--build-provenance-path=" ^ Unix.realpath provenance_path));
+      check bool
+        "sidecar binds executable inode"
+        true
+        (provenance |> member "executable_inode" |> to_int >= 0))
 
 let test_bootstrap_keepers_flag_is_opt_in () =
   with_temp_dir "run-local-script" (fun dir ->
@@ -573,6 +594,43 @@ let test_exact_local_binary_is_validated_by_dune () =
       check bool "bootstrap reports exact embedded commit" true
         (String_util.contains_substring stderr ("Binary commit: " ^ exact_commit)))
 
+let test_custom_dune_build_dir_is_the_launch_authority () =
+  with_temp_dir "run-local-custom-build-dir" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
+      let custom_build = Filename.concat dir "custom-build" in
+      let custom_exe = Filename.concat custom_build "default/bin/main_eio.exe" in
+      write_fake_eio_exe ~commit custom_exe;
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ "DUNE_BUILD_DIR", custom_build ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      if code <> 0 then
+        failf "custom DUNE_BUILD_DIR failed (%d)\nstdout:\n%s\nstderr:\n%s"
+          code stdout stderr;
+      check bool "custom Dune target selected" true
+        (String_util.contains_substring stderr ("Binary: " ^ custom_exe)))
+
+let test_dune_dry_run_is_rejected_for_exact_launch () =
+  with_temp_dir "run-local-dry-run" (fun dir ->
+      let repo_root = setup_fake_repo dir in
+      let target = Filename.concat dir "target" in
+      mkdir_p target;
+      let script = Filename.concat repo_root "scripts/run-local.sh" in
+      let code, _stdout, stderr =
+        run_process ~cwd:repo_root script
+          ~env:[ "MASC_DUNE_DRY_RUN", "1" ]
+          [| script; "--target-dir"; target; "--bootstrap-only" |]
+      in
+      check bool "Dune dry-run rejected" true (code <> 0);
+      check bool "dry-run rejection is explicit" true
+        (String_util.contains_substring stderr
+           "does not accept MASC_DUNE_DRY_RUN=1"))
+
 let test_dune_input_change_before_exec_is_rejected () =
   with_temp_dir "run-local-dune-input-race" (fun dir ->
       let repo_root = setup_fake_repo dir in
@@ -685,6 +743,10 @@ let () =
             test_same_commit_common_binary_is_not_worktree_authority;
           test_case "exact local binary is validated by Dune" `Quick
             test_exact_local_binary_is_validated_by_dune;
+          test_case "custom Dune build dir is launch authority" `Quick
+            test_custom_dune_build_dir_is_the_launch_authority;
+          test_case "Dune dry-run is rejected for exact launch" `Quick
+            test_dune_dry_run_is_rejected_for_exact_launch;
           test_case "Dune input change before exec is rejected" `Quick
             test_dune_input_change_before_exec_is_rejected;
           test_case "mutable build path replacement blocks exec" `Quick

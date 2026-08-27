@@ -43,6 +43,8 @@ CONTENT = "e" * 64
 INSTANCE = "018f1d5e-7b3c-7abc-8def-0123456789ab"
 SOURCE_FINGERPRINT = "f" * 64
 EXECUTABLE_SHA256 = "e" * 64
+EXECUTABLE_PROVENANCE_PATH = "/private/provenance.json"
+EXECUTABLE_PROVENANCE_SHA256 = "d" * 64
 TURN_REF = "trace-one#7"
 SKILL_ID = "call-skill-1"
 MESSAGE = "Natural proof request.\n"
@@ -69,6 +71,8 @@ def server():
         "binary_commit": HEAD,
         "source_fingerprint": SOURCE_FINGERPRINT,
         "executable_sha256": EXECUTABLE_SHA256,
+        "executable_provenance_path": EXECUTABLE_PROVENANCE_PATH,
+        "executable_provenance_sha256": EXECUTABLE_PROVENANCE_SHA256,
         "runtime_instance_id": INSTANCE,
         "started_at": "2026-08-27T00:00:00Z",
         "effective_base_path": "/workspace",
@@ -84,6 +88,8 @@ def health():
             "binary_commit_source": "embedded",
             "source_fingerprint": SOURCE_FINGERPRINT,
             "executable_sha256": EXECUTABLE_SHA256,
+            "executable_provenance_path": EXECUTABLE_PROVENANCE_PATH,
+            "executable_provenance_sha256": EXECUTABLE_PROVENANCE_SHA256,
             "runtime_instance_id": INSTANCE,
             "started_at": server()["started_at"],
         },
@@ -386,6 +392,8 @@ def make_bundle(root: Path):
             "binary_commit_source": "embedded",
             "source_fingerprint": SOURCE_FINGERPRINT,
             "executable_sha256": EXECUTABLE_SHA256,
+            "executable_provenance_path": EXECUTABLE_PROVENANCE_PATH,
+            "executable_provenance_sha256": EXECUTABLE_PROVENANCE_SHA256,
             "server_started_at": server()["started_at"],
             "server_runtime_instance_id": INSTANCE,
             "tui_build": {
@@ -611,7 +619,11 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
                 verify(bundle)
 
     def test_server_executable_identity_tamper_is_rejected(self):
-        for field in ("source_fingerprint", "executable_sha256"):
+        for field in (
+            "source_fingerprint",
+            "executable_sha256",
+            "executable_provenance_sha256",
+        ):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
                 bundle = make_bundle(Path(raw))
                 bundle["proof"]["source"][field] = "0" * 64

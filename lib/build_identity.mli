@@ -32,7 +32,9 @@ type t = {
         bound to this executable by a validated provenance sidecar. *)
   executable_sha256 : string option;
     (** SHA-256 of the running executable, present only when it matches the
-        adjacent provenance sidecar. *)
+        explicitly bound provenance sidecar. *)
+  executable_provenance_path : string option;
+  executable_provenance_sha256 : string option;
   binary_commit_unix_ts : float option;
   binary_commit_age_seconds : int option;
   repo_head_commit : string option;
@@ -71,16 +73,26 @@ type executable_provenance = {
   binary_commit : string;
   build_input_fingerprint : string;
   executable_sha256 : string;
+  executable_device : int;
+  executable_inode : int;
 }
 
 val parse_executable_provenance :
   expected_binary_commit:string ->
   expected_executable_sha256:string ->
+  expected_executable_device:int ->
+  expected_executable_inode:int ->
   string ->
   (executable_provenance, string) result
-(** Decode the exact sidecar written beside a content-addressed local
-    executable. The sidecar is accepted only when its commit and executable
-    digest match the independently observed values. *)
+(** Decode the exact sidecar bound to a content-addressed local executable.
+    The sidecar is accepted only when its commit, executable digest, device,
+    and inode match the independently observed values. *)
+
+val bind_executable_provenance :
+  path:string -> sha256:string -> device:int -> inode:int -> (unit, string) result
+(** Bind a content-addressed provenance sidecar to this process exactly once.
+    The supplied digest, embedded commit, and running executable bytes are all
+    validated before the immutable value becomes visible through [current]. *)
 
 val repo_root : unit -> string option
 (** Git root used for the running server binary, preferring the executable
@@ -128,6 +140,16 @@ val parse_dune_project_version : string -> string option
 (** Parse the top-level [(version ...)] field from [dune-project] contents. *)
 
 module For_testing : sig
+  val validate_executable_provenance_binding :
+    path:string ->
+    expected_sidecar_sha256:string ->
+    expected_sidecar_device:int ->
+    expected_sidecar_inode:int ->
+    expected_binary_commit:string ->
+    expected_executable_sha256:string ->
+    expected_executable_device:int ->
+    expected_executable_inode:int ->
+    (executable_provenance, string) result
   val observe_probe_failure : site:string -> exn -> unit
   val probe_commit_unix_ts : string option -> float option
   val runtime_cwd : unit -> string

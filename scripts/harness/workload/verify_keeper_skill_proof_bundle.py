@@ -424,6 +424,12 @@ def server_from_proof(evidence: dict[str, Any]) -> dict[str, str]:
             source, "source_fingerprint", "proof source"
         ),
         "executable_sha256": string_field(source, "executable_sha256", "proof source"),
+        "executable_provenance_path": string_field(
+            source, "executable_provenance_path", "proof source"
+        ),
+        "executable_provenance_sha256": string_field(
+            source, "executable_provenance_sha256", "proof source"
+        ),
         "runtime_instance_id": string_field(
             source, "server_runtime_instance_id", "proof source"
         ),
@@ -444,6 +450,8 @@ def server_identity(value: dict[str, Any], context: str) -> dict[str, str]:
             "binary_commit",
             "source_fingerprint",
             "executable_sha256",
+            "executable_provenance_path",
+            "executable_provenance_sha256",
             "runtime_instance_id",
             "started_at",
             "effective_base_path",
@@ -456,6 +464,14 @@ def server_identity(value: dict[str, Any], context: str) -> dict[str, str]:
     )
     require_sha256(identity["source_fingerprint"], f"{context}.source_fingerprint")
     require_sha256(identity["executable_sha256"], f"{context}.executable_sha256")
+    require(
+        Path(identity["executable_provenance_path"]).is_absolute(),
+        f"{context}.executable_provenance_path is not absolute",
+    )
+    require_sha256(
+        identity["executable_provenance_sha256"],
+        f"{context}.executable_provenance_sha256",
+    )
     try:
         parsed = uuid.UUID(identity["runtime_instance_id"])
     except ValueError as error:

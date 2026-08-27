@@ -14,6 +14,7 @@ from typing import Any
 
 
 SCHEMA = "masc.dune-build-input.v1"
+RECEIPT_SCHEMA = "masc.dune-build-input-receipt.v1"
 
 
 class FingerprintError(RuntimeError):
@@ -95,6 +96,27 @@ def fingerprint_rule(repo_root: Path, target: str, payload: Any) -> str:
     return hashlib.sha256(canonical_json(manifest)).hexdigest()
 
 
+def target_path(repo_root: Path, target: str, payload: Any) -> Path:
+    if not isinstance(payload, list) or len(payload) != 1:
+        raise FingerprintError(f"expected exactly one Dune rule for {target}")
+    rule = payload[0]
+    targets = rule.get("targets") if isinstance(rule, dict) else None
+    if not isinstance(targets, dict):
+        raise FingerprintError("Dune rule targets are not an object")
+    files = targets.get("files")
+    if (
+        not isinstance(files, list)
+        or len(files) != 1
+        or targets.get("directories") != []
+    ):
+        raise FingerprintError("Dune rule does not have one file target")
+    value = files[0]
+    if not isinstance(value, str) or "\n" in value or "\r" in value:
+        raise FingerprintError("Dune target path is malformed")
+    path = Path(value)
+    return path if path.is_absolute() else repo_root / path
+
+
 def describe_rule(repo_root: Path, target: str) -> Any:
     command = [
         "dune",
@@ -128,6 +150,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", required=True, type=Path)
     parser.add_argument("--target", required=True)
+    parser.add_argument("--receipt", action="store_true")
     return parser.parse_args()
 
 
@@ -135,11 +158,14 @@ def main() -> int:
     args = parse_args()
     try:
         repo_root = args.repo_root.resolve(strict=True)
-        print(
-            fingerprint_rule(
-                repo_root, args.target, describe_rule(repo_root, args.target)
-            )
-        )
+        payload = describe_rule(repo_root, args.target)
+        fingerprint = fingerprint_rule(repo_root, args.target, payload)
+        if args.receipt:
+            print(RECEIPT_SCHEMA)
+            print(target_path(repo_root, args.target, payload))
+            print(fingerprint)
+        else:
+            print(fingerprint)
     except (OSError, FingerprintError) as error:
         print(str(error), file=sys.stderr)
         return 1

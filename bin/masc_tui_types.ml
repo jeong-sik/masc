@@ -1290,8 +1290,15 @@ type state = {
      default, and whether somebody moved it. Loaded like the other config
      views rather than kept live -- these change when an operator changes
      them, not on their own. *)
-  mutable runtime_params: (string * string * string * bool) list;
+  mutable runtime_params: Tui_decode.runtime_param_row list;
   mutable runtime_params_error: string option;
+  mutable runtime_params_loading: bool;
+  (* The Runtime params pane is an operator surface, not a passive dump.
+     Selection and the in-progress JSON value live separately from the shared
+     Config scroll used by runtime.toml/prompt bodies. *)
+  mutable runtime_params_cursor: int;
+  mutable runtime_param_edit: (string * string) option;
+  mutable runtime_params_notice: (bool * string) option;
   mutable keeper_gate_judges: (string * string) list;
   mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   (* The list draws each ask on one row; this opens the selected one whole.
@@ -1883,6 +1890,10 @@ let create_state
   keeper_yolo_names = [];
   runtime_params = [];
   runtime_params_error = None;
+  runtime_params_loading = false;
+  runtime_params_cursor = 0;
+  runtime_param_edit = None;
+  runtime_params_notice = None;
   keeper_gate_modes = [];
   keeper_gate_judges = [];
   approval_flow = Masc_tui_operator_projection.Flow.initial;

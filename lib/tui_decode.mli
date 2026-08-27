@@ -830,13 +830,26 @@ val decode_keeper_gate_settings :
     operator reading one for the other is the reason both are named in
     full. *)
 
-val decode_runtime_params :
-  Yojson.Safe.t -> ((string * string * string * bool) list, string) result
-(** [(key, current, default, has_override)] from [/api/v1/runtime/params].
+type runtime_param_row =
+  { rpr_key : string
+  ; rpr_current_json : string
+  ; rpr_default_json : string
+  ; rpr_has_override : bool
+  ; rpr_description : string
+  ; rpr_value_type : string
+  ; rpr_min_json : string option
+  ; rpr_max_json : string option
+  }
 
-    Values arrive as whatever type the parameter registered and leave as text:
-    this feeds a surface that shows them, and carrying four cases further would
-    only push the same rendering decision downstream. *)
+val decode_runtime_params :
+  Yojson.Safe.t -> (runtime_param_row list, string) result
+(** Typed display/edit rows from [/api/v1/runtime/params].
+
+    Current and default use their exact JSON spelling.  The TUI displays a
+    friendly form but keeps this spelling for the inline edit/write boundary,
+    so a JSON string cannot be confused with a number or boolean.  Registry
+    metadata stays attached so the selected row can explain its type, bounds,
+    and purpose before an operator changes it. *)
 
 val decode_tool_approval_mode_overrides :
   Yojson.Safe.t -> ((string * string) list, string) result

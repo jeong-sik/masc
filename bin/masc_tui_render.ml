@@ -4432,11 +4432,12 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
       | Detail_sandbox -> "[ ]:tab  R:refresh"
+      | Detail_instructions -> "[ ]:tab  e:edit JSON in $EDITOR"
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
       | Detail_identity ->
         "[ ]:tab  arrows+enter:connect  A:app  /:filter  R:refresh"
-      | Detail_info | Detail_instructions | Detail_secrets -> "[ ]:tab"
+      | Detail_info | Detail_secrets -> "[ ]:tab"
     in
     let title =
       Printf.sprintf " Keepers \xe2\x96\xb8 %s%s%s   %s   %s%s%s" Ansi.bold
@@ -9285,33 +9286,104 @@ let render_runtime_params (state : state) =
        (screen_title " MASC Config")
        (config_pane_strip state)
        (connection_badge state));
+  (match state.runtime_params_notice with
+   | None ->
+     box_line_styled buf cols ~style:(Theme.recede ())
+       "  Live overrides · persisted in .masc/runtime_params.json · server validates type/range"
+   | Some (ok, detail) ->
+     box_line_styled buf cols ~style:(if ok then Theme.ok () else Theme.bad ())
+       ("  " ^ Terminal_text.single_line detail));
+  let selected = List.nth_opt state.runtime_params state.runtime_params_cursor in
+  let selected_contract =
+    match selected with
+    | None -> "  Select a row to see its contract"
+    | Some row ->
+      let open Tui_decode in
+      let type_name =
+        if String.trim row.rpr_value_type = "" then "typed value"
+        else row.rpr_value_type
+      in
+      let bounds =
+        [ Option.map (fun value -> "min " ^ value) row.rpr_min_json
+        ; Option.map (fun value -> "max " ^ value) row.rpr_max_json
+        ]
+        |> List.filter_map Fun.id
+        |> String.concat " · "
+      in
+      String.concat " · "
+        (List.filter (fun text -> String.trim text <> "")
+           [ "  " ^ type_name; bounds; row.rpr_description ])
+  in
+  box_line_styled buf cols ~style:(Theme.recede ())
+    (fit_width (Terminal_text.single_line selected_contract) (max 1 (cols - 1)));
+  box_divider buf cols;
+  let editing = Option.is_some state.runtime_param_edit in
+  (* Editing adds a divider and two form rows.  Spend those rows out of the
+     list budget so the footer remains visible instead of falling underneath
+     the always-present composer. *)
+  let content_height = max 1 (rows - (if editing then 10 else 7)) in
+  let count = List.length state.runtime_params in
+  let cursor = max 0 (min state.runtime_params_cursor (count - 1)) in
+  let first = if cursor < content_height then 0 else cursor - content_height + 1 in
+  let display_json text =
+    match Yojson.Safe.from_string text with
+    | `String value -> value
+    | _ -> text
+    | exception Yojson.Json_error _ -> text
+  in
   (match state.runtime_params_error with
    | Some detail ->
-     (* Not an empty list. Empty means nothing is registered, which is a
-        working state, and a failed read must not be able to look like one. *)
      box_line buf cols ((Theme.bad ()) ^ "설정을 읽지 못했습니다: " ^ Ansi.reset
-                        ^ Terminal_text.single_line detail)
+                        ^ Terminal_text.single_line detail);
+     for _ = 2 to content_height do box_empty buf cols done
    | None ->
-     if state.runtime_params = []
-     then box_line buf cols (Ansi.dim ^ "등록된 설정 없음" ^ Ansi.reset)
-     else
-       List.iteri
-         (fun i (key, current, default, overridden) ->
-           if i < rows - boxed_surface_chrome_rows
-           then
-             box_line buf cols
-               (Printf.sprintf "  %-44s %s%s%s%s"
-                  (Terminal_text.single_line key)
-                  (if overridden then Ansi.cyan else Ansi.dim)
-                  (Terminal_text.single_line current)
-                  Ansi.reset
-                  (if overridden
-                   then
-                     Printf.sprintf "%s  (기본 %s)%s" Ansi.dim
-                       (Terminal_text.single_line default) Ansi.reset
-                   else "")))
-         state.runtime_params);
+     if state.runtime_params_loading && state.runtime_params = []
+     then begin
+       box_line buf cols (Ansi.dim ^ "  (loading runtime parameters…)" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
+     end
+     else if state.runtime_params = []
+     then begin
+       box_line buf cols (Ansi.dim ^ "  등록된 설정 없음" ^ Ansi.reset);
+       for _ = 2 to content_height do box_empty buf cols done
+     end else begin
+       for index = 0 to content_height - 1 do
+         match List.nth_opt state.runtime_params (first + index) with
+         | None -> box_empty buf cols
+         | Some row ->
+           let open Tui_decode in
+           let line =
+             Printf.sprintf "  %s %-43s %-16s%s"
+               (if row.rpr_has_override then "●" else "○")
+               (Terminal_text.single_line row.rpr_key)
+               (Terminal_text.single_line (display_json row.rpr_current_json))
+               (if row.rpr_has_override
+                then Printf.sprintf "  default %s"
+                       (Terminal_text.single_line (display_json row.rpr_default_json))
+                else "")
+           in
+           if first + index = cursor then box_line_selected buf cols line
+           else
+             box_line_styled buf cols
+               ~style:(if row.rpr_has_override then Ansi.cyan else Ansi.dim) line
+       done
+     end);
+  (match state.runtime_param_edit with
+   | None -> ()
+   | Some (key, draft) ->
+     box_divider buf cols;
+     box_line buf cols
+       (Printf.sprintf "  %svalue>%s %s" Ansi.bold Ansi.reset
+          (fit_width (Terminal_text.single_line draft) (max 1 (cols - 12))));
+     box_line_styled buf cols ~style:(Theme.recede ())
+       (Printf.sprintf "  editing %s · JSON value · Enter apply · Ctrl-U clear · Esc cancel"
+          (Terminal_text.single_line key)));
   box_bottom buf cols;
+  Buffer.add_string buf
+    (footer_line state ~max_cells:cols
+       ~hints:
+         (if editing then "type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
+          else "j/k:select  Enter/e:edit  x:default  p:next  r:reload"));
   finish_surface state ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 

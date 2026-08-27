@@ -3550,15 +3550,25 @@ let decode_keeper_gate_settings json =
   let* judges = pairs "judges" "slot_id" in
   Ok (modes, judges)
 
-(* Values are rendered, not computed on, so they are flattened to text here.
-   The registry holds ints, floats, bools and strings; a surface that only
-   shows them has no reason to carry four cases into the renderer. *)
+(* Keep the JSON spelling, including quotes around strings.  The Config pane
+   now hands this exact spelling to its inline editor and sends the parsed
+   value back to the typed runtime-parameter route.  Flattening strings to
+   their display text made it impossible to distinguish ["30"] from [30] at
+   the write boundary.  The renderer removes quotes for display only. *)
+type runtime_param_row =
+  { rpr_key : string
+  ; rpr_current_json : string
+  ; rpr_default_json : string
+  ; rpr_has_override : bool
+  ; rpr_description : string
+  ; rpr_value_type : string
+  ; rpr_min_json : string option
+  ; rpr_max_json : string option
+  }
+
 let decode_runtime_params json =
   let* items = required_list_field json "parameters" in
-  let text = function
-    | `String s -> s
-    | other -> Yojson.Safe.to_string other
-  in
+  let text = Yojson.Safe.to_string in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | item :: rest ->
@@ -3573,7 +3583,27 @@ let decode_runtime_params json =
       let overridden =
         match field "has_override" with Some (`Bool b) -> b | Some _ | None -> false
       in
-      loop ((key, current, default, overridden) :: acc) rest
+      let meta_field name =
+        match field "meta" with
+        | Some (`Assoc fields) -> List.assoc_opt name fields
+        | Some _ | None -> None
+      in
+      let meta_string name =
+        match meta_field name with Some (`String value) -> value | Some _ | None -> ""
+      in
+      let meta_json name = Option.map text (meta_field name) in
+      let row =
+        { rpr_key = key
+        ; rpr_current_json = current
+        ; rpr_default_json = default
+        ; rpr_has_override = overridden
+        ; rpr_description = meta_string "description"
+        ; rpr_value_type = meta_string "value_type"
+        ; rpr_min_json = meta_json "min_value"
+        ; rpr_max_json = meta_json "max_value"
+        }
+      in
+      loop (row :: acc) rest
   in
   loop [] items
 

@@ -208,6 +208,10 @@ let view_lines ~sanitize json =
       (styled Masc_tui_theme.Sgr.cyan editable_glyph)
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
   ; ""
+  ; section "edit here" "$EDITOR JSON form"
+  ; "   Press e. Save and close the editor to apply; exit non-zero to cancel."
+  ; "   Only changed fields are sent. The server validates before persisting."
+  ; ""
   ; section "effective settings" (Printf.sprintf "e opens %d fields" editable_count)
   ; editable_value_row "Runtime"
       (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
@@ -268,8 +272,7 @@ let view_lines ~sanitize json =
            |> String.split_on_char '\n'
            |> List.map (fun line -> "   " ^ sanitize line)))
   @ [ ""
-    ; section "editing" ""
-    ; "   e opens the observed values. Only changed fields are sent."
+    ; section "field rules" ""
     ; "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
     ; "   Deleting a field means unchanged. null clears context/wake overrides."
     ]

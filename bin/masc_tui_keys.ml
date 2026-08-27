@@ -218,15 +218,16 @@ let for_surface = function
   | Runtime ->
       [ b Navigate "j/k" "scroll"; b Act "Esc" "overview" ] @ listing_meta
   | Config ->
-      [ b Navigate "j/k" "scroll"
-        (* The surface owns the two files the server reads. Which one [e]
-           opens depends on which list is showing, so the row says both. *)
-      ; b Navigate "p" "runtime.toml / prompts / themes"
+      [ b Navigate "j/k" "select / scroll"
+        (* Config combines persisted files, typed live params, and the local
+           theme choice.  The pane strip says which meaning each key has. *)
+      ; b Navigate "p" "runtime.toml / params / prompts / themes"
       ; b Act "e" "edit"
-          ~help:"runtime.toml previews before it writes; a prompt saves as an override"
-      ; b Act "Enter" "use theme" ~help:"on themes: draw with that scheme's colours"
-      ; b Act "x" "clear override"
-          ~help:"on a prompt: back to the file's words. on themes: back to the terminal's colours"
+          ~help:"params edit inline; runtime.toml uses preview; prompts save an override"
+      ; b Act "Enter" "edit / use"
+          ~help:"edit the selected param; on themes, use that colour scheme"
+      ; b Act "x" "default / clear"
+          ~help:"params return to default; prompts clear override; themes follow terminal colours"
       ; b Act "Esc" "overview"
       ; b Meta "r" "reload"
       ; b Meta "Tab" "next"

@@ -768,7 +768,7 @@ let load_keeper_gate_settings ~(host : string) ~(port : int) :
 
 (** Load the Runtime_params registry rows. *)
 let load_runtime_params ~(host : string) ~(port : int) :
-    ((string * string * string * bool) list, string) result =
+    (Tui_decode.runtime_param_row list, string) result =
   match fetch_runtime_params ~host ~port with
   | Error err -> Error ("runtime params load failed: " ^ err)
   | Ok json -> Tui_decode.decode_runtime_params json

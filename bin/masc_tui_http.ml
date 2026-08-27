@@ -1015,6 +1015,24 @@ let fetch_runtime_params ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/params"
 
+(** Set one typed Runtime_params override.  [value] stays JSON all the way to
+    the server; the registry owns type and bounds validation. *)
+let post_runtime_param_set ~(host : string) ~(port : int) ~(key : string)
+    ~(value : Yojson.Safe.t) : (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc [ "param_key", `String key; "value", value ])
+  in
+  post_json ~host ~port ~path:"/api/v1/runtime/params/set" ~body
+
+(** Clear one Runtime_params override, returning it to the registered default. *)
+let post_runtime_param_clear ~(host : string) ~(port : int) ~(key : string) :
+    (Yojson.Safe.t, string) result =
+  let body =
+    Yojson.Safe.to_string (`Assoc [ "param_key", `String key ])
+  in
+  post_json ~host ~port ~path:"/api/v1/runtime/params/clear" ~body
+
 (** GET /api/v1/keepers/tool-approval-mode — per-keeper gate stances. *)
 let fetch_keeper_tool_approval_modes ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =

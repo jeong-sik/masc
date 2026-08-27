@@ -1367,7 +1367,7 @@ type async_msg =
       string * (Masc_tui_keeper_sandbox.t, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Runtime_params_loaded of
-      ((string * string * string * bool) list, string) result
+      (Tui_decode.runtime_param_row list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Librarian_input_loaded of string * (string list, string) result
   | Resources_listed of ((string * string) list, string) result
@@ -2432,6 +2432,7 @@ let launch_runtime_config_load state ~mailbox =
         (Runtime_config_view_loaded (Error "Eio switch is unavailable"))
 
 let launch_runtime_params_load state ~mailbox =
+  state.runtime_params_loading <- true;
   let host = server_peer_host in
   let port = state.port in
   let run () =
@@ -6396,9 +6397,12 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.prompts_librarian_input_error <- Some detail
       end
   | Runtime_params_loaded result -> (
+      state.runtime_params_loading <- false;
       match result with
       | Ok rows ->
           state.runtime_params <- rows;
+          state.runtime_params_cursor <-
+            max 0 (min state.runtime_params_cursor (List.length rows - 1));
           state.runtime_params_error <- None
       | Error detail ->
           (* Reported, not swallowed into an empty list: empty means nothing is
@@ -8154,6 +8158,57 @@ let main () =
                 launch_runtime_config_load state ~mailbox:async_messages
               | Error detail -> add_event state "error" ("save failed: " ^ detail))))))
   in
+  let selected_runtime_param () =
+    List.nth_opt state.runtime_params state.runtime_params_cursor
+  in
+  let handle_runtime_param_edit_open () =
+    match selected_runtime_param () with
+    | None ->
+      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+    | Some row ->
+      state.runtime_param_edit <- Some (row.Tui_decode.rpr_key, row.rpr_current_json);
+      state.runtime_params_notice <- None
+  in
+  let handle_runtime_param_edit_apply () =
+    match state.runtime_param_edit with
+    | None -> ()
+    | Some (key, draft) -> (
+      match Yojson.Safe.from_string draft with
+      | exception Yojson.Json_error detail ->
+        state.runtime_params_notice <-
+          Some (false, "Invalid JSON value: " ^ detail)
+      | value -> (
+        match
+          Masc_tui_http.post_runtime_param_set ~host:server_peer_host
+            ~port:state.port ~key ~value
+        with
+        | Error detail ->
+          state.runtime_params_notice <- Some (false, "Set failed: " ^ detail)
+        | Ok _ ->
+          state.runtime_param_edit <- None;
+          state.runtime_params_notice <-
+            Some (true, Printf.sprintf "Set %s = %s" key (Yojson.Safe.to_string value));
+          launch_runtime_params_load state ~mailbox:async_messages))
+  in
+  let handle_runtime_param_clear () =
+    match selected_runtime_param () with
+    | None ->
+      state.runtime_params_notice <- Some (false, "No runtime parameter is selected")
+    | Some row ->
+      let key = row.Tui_decode.rpr_key in
+      if not row.rpr_has_override then
+        state.runtime_params_notice <- Some (true, key ^ " already uses its default")
+      else (
+        match
+          Masc_tui_http.post_runtime_param_clear ~host:server_peer_host
+            ~port:state.port ~key
+        with
+        | Error detail ->
+          state.runtime_params_notice <- Some (false, "Reset failed: " ^ detail)
+        | Ok _ ->
+          state.runtime_params_notice <- Some (true, "Reset " ^ key ^ " to its default");
+          launch_runtime_params_load state ~mailbox:async_messages)
+  in
   let skill_template ~composition =
     if composition
     then
@@ -8695,6 +8750,7 @@ and is loaded on demand through keeper_skill.
         && (not state.agenda_open)
         && (not state.context_inspector_open)
         && (not state.palette_open)
+        && Option.is_none state.runtime_param_edit
         && Option.is_none state.search
         && not (state.view = Board && state.board_mode = Board_compose)
         && state.view <> Keepers Keeper_message
@@ -8707,6 +8763,31 @@ and is loaded on demand through keeper_skill.
       in
       (match key with
        | Some _ when composer_claimed -> ()
+       (* Inline Runtime_params editing is modal: printable keys, including q,
+          belong to the JSON value.  The server remains the type/range
+          authority when Enter submits it. *)
+       | Some k when Option.is_some state.runtime_param_edit ->
+           (match state.runtime_param_edit with
+            | None -> ()
+            | Some (param_key, draft) ->
+              let set value = state.runtime_param_edit <- Some (param_key, value) in
+              (match k with
+               | "esc" ->
+                 state.runtime_param_edit <- None;
+                 state.runtime_params_notice <- Some (true, param_key ^ ": edit cancelled")
+               | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
+               | "\127" | "\b" | "backspace" ->
+                 set (Masc_tui_message_layout.drop_last_utf8_scalar draft);
+                 state.runtime_params_notice <- None
+               | s when String.length s = 1 && Char.code s.[0] = 21 ->
+                 set "";
+                 state.runtime_params_notice <- None
+               | s
+                 when (String.length s = 1 && Char.code s.[0] >= 32)
+                      || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
+                 set (draft ^ s);
+                 state.runtime_params_notice <- None
+               | _ -> ()))
        | Some _
          when quit_key
               && (compact_viewport
@@ -9414,6 +9495,9 @@ and is loaded on demand through keeper_skill.
        | Some "J" when state.view = Tools -> move_tools_skill_cursor state 1
        | Some "K" when state.view = Tools -> move_tools_skill_cursor state (-1)
        | Some "\r" when state.view = Tools -> handle_skill_run ()
+       | Some ("\r" | "\n" | "enter")
+         when state.view = Config && state.config_pane = Config_params ->
+           handle_runtime_param_edit_open ()
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_themes ->
            (* Applying is the whole action: the palette's generation bumps and
@@ -10334,6 +10418,12 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_error <- None;
                   state.prompts_librarian_input_loading <- false
                 end
+            | Config when state.config_pane = Config_params ->
+                state.runtime_params_cursor <-
+                  min
+                    (max 0 (List.length state.runtime_params - 1))
+                    (state.runtime_params_cursor + 1);
+                state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <- state.approval_detail_scroll + 1
             | Approvals ->
@@ -10584,6 +10674,10 @@ and is loaded on demand through keeper_skill.
                   state.prompts_librarian_input_error <- None;
                   state.prompts_librarian_input_loading <- false
                 end
+            | Config when state.config_pane = Config_params ->
+                state.runtime_params_cursor <-
+                  max 0 (state.runtime_params_cursor - 1);
+                state.runtime_params_notice <- None
             | Approvals when state.approval_detail_open ->
                 state.approval_detail_scroll <-
                   max 0 (state.approval_detail_scroll - 1)
@@ -11355,6 +11449,9 @@ and is loaded on demand through keeper_skill.
             | Board | Approvals | Planning | Schedules | Verification | Harness
             | Fusion | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> ())
        | Some "x" | Some "X"
+         when state.view = Config && state.config_pane = Config_params ->
+           handle_runtime_param_clear ()
+       | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_themes ->
            (* Back to whatever the terminal reports. Not a theme named
               "terminal" -- there is nothing to name, only the absence of a
@@ -11378,6 +11475,9 @@ and is loaded on demand through keeper_skill.
               | Config_themes -> Config_runtime);
            state.prompts_cursor <- 0;
            state.config_scroll <- 0;
+           state.runtime_params_cursor <- 0;
+           state.runtime_param_edit <- None;
+           state.runtime_params_notice <- None;
            state.prompts_librarian_input <- None;
            state.prompts_librarian_input_error <- None;
            state.prompts_librarian_input_loading <- false;
@@ -11469,8 +11569,11 @@ and is loaded on demand through keeper_skill.
             | Keepers Keeper_runtime_pick -> ()
             | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_settings_edit ()
             | Config ->
-                if state.config_pane = Config_prompts then handle_prompt_edit ()
-                else handle_runtime_config_edit ()
+                (match state.config_pane with
+                 | Config_prompts -> handle_prompt_edit ()
+                 | Config_runtime -> handle_runtime_config_edit ()
+                 | Config_params -> handle_runtime_param_edit_open ()
+                 | Config_themes -> ())
             | Tools -> handle_skill_edit ()
             | Approvals ->
                 (* Cycle the external-services Gate lane: what happens to a

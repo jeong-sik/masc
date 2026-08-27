@@ -337,14 +337,72 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
+let render_manifest_revision = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok "manifest=missing"
+  | `Assoc fields when exact_keys [ "state"; "value" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "value" fields with
+     | Some (`String "sha256"), Some (`String value)
+       when is_lowercase_sha256 value -> Ok ("manifest=sha256:" ^ value)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_assignment = function
+  | `Assoc [ ("state", `String "missing") ] -> Ok "assignment=missing"
+  | `Assoc fields when exact_keys [ "state"; "runtime_id" ] fields ->
+    (match List.assoc_opt "state" fields, List.assoc_opt "runtime_id" fields with
+     | Some (`String "assigned"), Some (`String runtime_id)
+       when String.trim runtime_id <> "" -> Ok ("assignment=assigned:" ^ runtime_id)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_runtime_assignment_revision = function
+  | `Assoc [ ("state", `String "runtime_config_missing") ] -> Ok "runtime=missing"
+  | `Assoc fields
+    when exact_keys [ "state"; "source_revision"; "assignment" ] fields ->
+    (match
+       List.assoc_opt "state" fields,
+       List.assoc_opt "source_revision" fields,
+       List.assoc_opt "assignment" fields
+     with
+     | ( Some (`String "runtime_config_present")
+       , Some (`String source_revision)
+       , Some assignment )
+       when is_lowercase_sha256 source_revision ->
+       Result.map
+         (fun rendered_assignment ->
+           Printf.sprintf "runtime=present source=sha256:%s %s"
+             source_revision rendered_assignment)
+         (render_assignment assignment)
+     | _ -> Error ())
+  | _ -> Error ()
+
+let render_config_revision = function
+  | `Assoc fields when exact_keys [ "manifest"; "runtime_assignment" ] fields ->
+    (match
+       List.assoc_opt "manifest" fields,
+       List.assoc_opt "runtime_assignment" fields
+     with
+     | Some manifest, Some runtime_assignment ->
+       Result.bind
+         (validate_config_revision (`Assoc fields)
+          |> Result.map_error (fun _detail -> ()))
+         (fun () ->
+           Result.bind
+             (render_manifest_revision manifest)
+             (fun rendered_manifest ->
+               Result.map
+                 (fun rendered_runtime ->
+                   rendered_manifest ^ " | " ^ rendered_runtime)
+                 (render_runtime_assignment_revision runtime_assignment)))
+     | _ -> Error ())
+  | _ -> Error ()
+
 let config_revision_value = function
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt "manifest" fields with
-     | Some (`Assoc [ ("state", `String "missing") ]) -> "manifest missing"
-     | Some (`Assoc manifest) -> string_value (List.assoc_opt "value" manifest)
-     | Some value -> string_value (Some value)
-     | None -> "not observed")
-  | value -> string_value value
+  | Some revision ->
+    (match render_config_revision revision with
+     | Ok rendered -> rendered
+     | Error () -> "invalid composite config revision")
+  | None -> "invalid composite config revision"
 
 (* One document, but the reader has to be able to answer "will [e] change
    this?" without counting rows against the editor stem. The glyph answers it

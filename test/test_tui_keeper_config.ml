@@ -282,6 +282,71 @@ let with_config_revision revision =
     `Assoc (("config_revision", revision) :: List.remove_assoc "config_revision" fields)
   | _ -> Alcotest.fail "observed fixture must be an object"
 
+let test_config_revision_projection_assigned () =
+  let row = row_of observed "Config revision" in
+  List.iter
+    (fun expected ->
+      Alcotest.(check bool) expected true (contains row expected))
+    [ "manifest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ; "runtime=present"
+    ; "source=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ; "assignment=assigned:codex_subscription.gpt-5.6-sol"
+    ]
+
+let test_config_revision_projection_assignment_missing () =
+  let revision =
+    `Assoc
+      [ ( "manifest"
+        , `Assoc
+            [ "state", `String "sha256"
+            ; "value", `String (String.make 64 'a')
+            ] )
+      ; ( "runtime_assignment"
+        , `Assoc
+            [ "state", `String "runtime_config_present"
+            ; "source_revision", `String (String.make 64 'b')
+            ; "assignment", `Assoc [ "state", `String "missing" ]
+            ] )
+      ]
+  in
+  let row = row_of (with_config_revision revision) "Config revision" in
+  Alcotest.(check bool) "runtime source is present" true
+    (contains row "runtime=present source=sha256:");
+  Alcotest.(check bool) "assignment is explicitly missing" true
+    (contains row "assignment=missing")
+
+let test_config_revision_projection_runtime_missing () =
+  let revision =
+    `Assoc
+      [ "manifest", `Assoc [ "state", `String "missing" ]
+      ; ( "runtime_assignment"
+        , `Assoc [ "state", `String "runtime_config_missing" ] )
+      ]
+  in
+  let row = row_of (with_config_revision revision) "Config revision" in
+  Alcotest.(check bool) "manifest is explicitly missing" true
+    (contains row "manifest=missing");
+  Alcotest.(check bool) "runtime config is explicitly missing" true
+    (contains row "runtime=missing")
+
+let test_config_revision_projection_rejects_malformed_runtime () =
+  let revision =
+    `Assoc
+      [ "manifest", `Assoc [ "state", `String "missing" ]
+      ; ( "runtime_assignment"
+        , `Assoc
+            [ "state", `String "runtime_config_present"
+            ; "source_revision", `String (String.make 64 'B')
+            ; "assignment", `Assoc [ "state", `String "missing" ]
+            ] )
+      ]
+  in
+  let row = row_of (with_config_revision revision) "Config revision" in
+  Alcotest.(check bool) "malformed runtime invalidates the full product" true
+    (contains row "invalid composite config revision");
+  Alcotest.(check bool) "manifest-only success is not rendered" false
+    (contains row "manifest=missing")
+
 let changed_proactive =
   `Assoc [ "proactive_enabled", `Bool false ]
 
@@ -477,6 +542,14 @@ let () =
             test_fetched_text_is_sanitized_but_the_frame_is_not
         ; Alcotest.test_case "wrong-typed scalar is sanitized" `Quick
             test_wrong_typed_scalar_is_sanitized_at_the_row_boundary
+        ; Alcotest.test_case "composite revision assigned" `Quick
+            test_config_revision_projection_assigned
+        ; Alcotest.test_case "composite revision assignment missing" `Quick
+            test_config_revision_projection_assignment_missing
+        ; Alcotest.test_case "composite revision runtime missing" `Quick
+            test_config_revision_projection_runtime_missing
+        ; Alcotest.test_case "composite revision malformed runtime" `Quick
+            test_config_revision_projection_rejects_malformed_runtime
         ; Alcotest.test_case "strict composite revision" `Quick
             test_strict_config_revision_decoder
         ; Alcotest.test_case "strict runtime picker revision" `Quick

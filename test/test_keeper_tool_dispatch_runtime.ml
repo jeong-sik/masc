@@ -4732,6 +4732,36 @@ value = {}
 |}
 ;;
 
+let off_surface_memory_composition =
+  {|[[compositions]]
+name = "off-surface-memory"
+description = "Try one capability outside the turn surface."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "literal"
+value = { query = "must-not-run" }
+|}
+;;
+
+let off_surface_memory_async_composition =
+  {|[[compositions]]
+name = "off-surface-memory-async"
+description = "Try one async capability outside the turn surface."
+execution = "async"
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+[compositions.nodes.input]
+kind = "literal"
+value = { query = "must-not-queue" }
+|}
+;;
+
 (* #30220 made skills the only composition source: [make_tools] reads
    [Keeper_skill_catalog.composition_entries], not a bare catalog. The fixtures
    here are still composition TOML -- what changed is who carries it to the
@@ -4746,13 +4776,55 @@ let skill_catalog_of_composition ~name toml =
       name
       toml
   in
-  match Masc.Keeper_skill_catalog.partition_documents [ name, document ] with
+  let config_text =
+    {|[skills]
+activation-lifetime = "session"
+precedence = "earlier-source-wins"
+resource-read-max-bytes = 65536
+[[skills.sources]]
+id = "composition-fixture"
+anchor = "base-path"
+path = "skills"
+access = "read-write"
+|}
+  in
+  let skill_config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "composition Skill source fixture was rejected"
+  in
+  let source =
+    match skill_config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "composition Skill fixture must have one source"
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source =
+        Skill_source_config.resolve
+          ~base_path:"/workspace"
+          ~user_home:None
+          source
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = "/workspace/skills"; candidates = 1 }
+    ; candidates =
+        [ Skill_catalog_snapshot.Candidate_document
+            { directory = name; source_text = document }
+        ]
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config:skill_config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "composition Skill snapshot fixture was rejected"
+  in
+  match Masc.Keeper_skill_catalog.of_snapshot snapshot with
   | catalog, [] -> catalog
-  | _, { error; _ } :: _ ->
+  | _, diagnostic :: _ ->
     failf
       "composition fixture %S was rejected as a skill: %s"
       name
-      (Masc.Keeper_skill_catalog.error_to_string error)
+      (Masc.Keeper_skill_catalog.error_to_string diagnostic.error)
 ;;
 
 let one_node_terminal_composition =
@@ -5000,7 +5072,91 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
                  true
                  (List.mem_assoc "data" fields)
              | _ -> fail "nested action result lost typed result shape")
-          | _ -> fail "composition did not expose its single settled action"))
+         | _ -> fail "composition did not expose its single settled action"))
+;;
+
+let test_composition_and_plan_share_closed_turn_descriptor_set () =
+  with_exec_fixture "composition-closed-turn-descriptors"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let clock_descriptor = composition_descriptor "keeper_time_now" in
+       let descriptors =
+         [ { clock_descriptor with description = "forged descriptor description" } ]
+       in
+       let tools_for ~name composition =
+         let skill_catalog = skill_catalog_of_composition ~name composition in
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools_for_descriptors
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~descriptors
+           ~skill_catalog
+           ()
+       in
+       let inline_tools =
+         tools_for
+           ~name:"off-surface-memory"
+           off_surface_memory_composition
+       in
+       let async_tools =
+         tools_for
+           ~name:"off-surface-memory-async"
+           off_surface_memory_async_composition
+       in
+       let clock =
+         match find_tool_by_name inline_tools "keeper_time_now" with
+         | Some tool -> tool
+         | None -> fail "closed descriptor set lost keeper_time_now"
+       in
+       check string
+         "bundle resolves supplied descriptor to canonical authority"
+         clock_descriptor.description
+         clock.schema.description;
+       let assert_deterministic_refusal tools name input =
+         let tool =
+           match find_tool_by_name tools name with
+           | Some tool -> tool
+           | None -> failf "%s was not materialized" name
+         in
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             tool
+             input
+         with
+         | Ok _ -> failf "%s recovered a capability outside the turn surface" name
+         | Error error ->
+           check
+             (option bool)
+             (name ^ " returns a deterministic policy refusal")
+             (Some true)
+             (Option.map
+                (fun error_class ->
+                   error_class = Agent_core.Types.Deterministic)
+                error.Agent_core.Types.error_class)
+       in
+       assert_deterministic_refusal
+         inline_tools
+         "keeper_compose_off-surface-memory"
+         (`Assoc []);
+       assert_deterministic_refusal
+         async_tools
+         "keeper_compose_off-surface-memory-async"
+         (`Assoc []);
+       assert_deterministic_refusal
+         inline_tools
+         Masc.Keeper_tool_composition_surface.plan_execute_tool_name
+         (`Assoc
+            [ ( "nodes"
+              , `List
+                  [ `Assoc
+                      [ "id", `String "search"
+                      ; "tool", `String "keeper_memory_search"
+                      ]
+                  ] )
+            ]))
 ;;
 
 let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
@@ -6887,6 +7043,8 @@ let () =
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
         test_composition_catalog_materializes_and_executes_first_class_tool;
+      test_case "composition and plan share the closed turn descriptor set" `Quick
+        test_composition_and_plan_share_closed_turn_descriptor_set;
       test_case "composition feeds typed Shell IR output to later tool" `Quick
         test_composition_feeds_typed_shell_ir_output_to_later_tool;
       test_case "composition externalizes oversized Shell IR output" `Quick

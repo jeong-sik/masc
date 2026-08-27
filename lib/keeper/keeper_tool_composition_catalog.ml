@@ -744,29 +744,26 @@ let instantiation_error_to_string = function
    param-free copy built here, revalidated by the same [Plan.create] that
    admitted the declaration, so the executor never meets an unbound name. *)
 let instantiate ~descriptors ~args entry =
-  match entry.params with
-  | [] -> Ok entry.plan
-  | _ :: _ ->
-    let lookup name =
-      match args with
-      | `Assoc fields -> List.assoc_opt name fields
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
-      | `Tuple _ | `Variant _ -> None
-    in
-    let rec rebuild rebuilt = function
-      | [] ->
-        (match Plan.create ~descriptors (List.rev rebuilt) with
-         | Ok plan -> Ok plan
-         | Error error -> Error (Instantiated_plan_rejected error))
-      | (node : Plan.node) :: rest ->
-        (match Plan.Json_template.substitute_params ~lookup node.input with
-         | Error (Plan.Json_template.Missing_param param) ->
-           Error (Missing_argument param)
-         | Ok input ->
-           rebuild
-             (Plan.node ~id:node.id ~tool_name:node.tool_name ~after:node.after ~input ()
-              :: rebuilt)
-             rest)
-    in
-    rebuild [] (Plan.nodes entry.plan)
+  let lookup name =
+    match args with
+    | `Assoc fields -> List.assoc_opt name fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _
+    | `Tuple _ | `Variant _ -> None
+  in
+  let rec rebuild rebuilt = function
+    | [] ->
+      (match Plan.create ~descriptors (List.rev rebuilt) with
+       | Ok plan -> Ok plan
+       | Error error -> Error (Instantiated_plan_rejected error))
+    | (node : Plan.node) :: rest ->
+      (match Plan.Json_template.substitute_params ~lookup node.input with
+       | Error (Plan.Json_template.Missing_param param) ->
+         Error (Missing_argument param)
+       | Ok input ->
+         rebuild
+           (Plan.node ~id:node.id ~tool_name:node.tool_name ~after:node.after ~input ()
+            :: rebuilt)
+           rest)
+  in
+  rebuild [] (Plan.nodes entry.plan)
 ;;

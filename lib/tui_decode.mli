@@ -205,6 +205,7 @@ type effective_tool_delivery =
   | Effective_tools_suppressed_runtime_unsupported
 
 type effective_skill_profile = {
+  esp_reference : Skill_reference.t;
   esp_name : string;
   esp_kind : string;
   esp_execution : string;

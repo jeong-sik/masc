@@ -1462,6 +1462,7 @@ type effective_tool_delivery =
   | Effective_tools_suppressed_runtime_unsupported
 
 type effective_skill_profile = {
+  esp_reference : Skill_reference.t;
   esp_name : string;
   esp_kind : string;
   esp_execution : string;
@@ -1756,6 +1757,10 @@ let decode_effective_tool_delivery json =
 
 let decode_effective_skill_profile json =
   let* reference = required_object_field json "reference" in
+  let* esp_reference =
+    Skill_reference.of_yojson reference
+    |> Result.map_error (fun _ -> "effective Skill profile reference is invalid")
+  in
   let* identity = required_object_field reference "identity" in
   let* esp_name = required_string_field identity "name" in
   let* esp_kind = required_string_field json "kind" in
@@ -1768,7 +1773,8 @@ let decode_effective_skill_profile json =
   let* esp_batch_count = required_int_field plan "batch_count" in
   let* esp_max_parallelism = required_int_field plan "max_parallelism" in
   Ok
-    { esp_name
+    { esp_reference
+    ; esp_name
     ; esp_kind
     ; esp_execution
     ; esp_body_bytes

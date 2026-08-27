@@ -75,7 +75,7 @@ let test_harness_footer_links_to_overview_task () =
    can drift to any footer at all without a test noticing. *)
 let test_tools_footer_carries_the_keeper_axis () =
   check str "tools names the effective Keeper switch"
-    "j/k:scroll  [/]:Keeper  Esc:overview  r:refresh  Tab:next  q:quit"
+    "j/k:scroll  J/K:Skill  [/]:Keeper  e:edit Skill  Esc:overview  r:refresh  Tab:next  q:quit"
     (Masc_tui_keys.footer_hints Tools)
 
 let test_repositories_footer_offers_the_code_tree () =

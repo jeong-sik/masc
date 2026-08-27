@@ -1329,6 +1329,7 @@ type state = {
   mutable tools_inventory: Tui_decode.tool_snapshot option;
   mutable tools_error: string option;
   mutable tools_scroll: int;
+  mutable tools_skill_cursor: int;
   mutable connectors: Tui_decode.connector_snapshot option;
   mutable connectors_error: string option;
   mutable connectors_scroll: int;
@@ -1871,6 +1872,7 @@ let create_state
   tools_inventory = None;
   tools_error = None;
   tools_scroll = 0;
+  tools_skill_cursor = 0;
   connectors = None;
   connectors_error = None;
   connectors_scroll = 0;

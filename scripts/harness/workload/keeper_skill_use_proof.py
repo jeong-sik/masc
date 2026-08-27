@@ -665,6 +665,24 @@ def capture_dashboard_page(
     )
     panel = page.locator('[data-testid="skill-activation-ledger"]')
     panel.wait_for(state="visible", timeout=30_000)
+    page.wait_for_function(
+        """([selector, keeper, revision]) => {
+          const panel = document.querySelector(selector);
+          return panel !== null
+            && panel.getAttribute('data-keeper-name') === keeper
+            && panel.getAttribute('data-ledger-revision') === revision;
+        }""",
+        arg=[
+            '[data-testid="skill-activation-ledger"]',
+            keeper,
+            ledger_revision,
+        ],
+        timeout=30_000,
+    )
+    require(
+        panel.get_attribute("data-keeper-name") == keeper,
+        "Dashboard panel belongs to another Keeper after selection",
+    )
     require(
         panel.get_attribute("data-ledger-revision") == ledger_revision,
         "Dashboard advanced to another ledger revision during capture",

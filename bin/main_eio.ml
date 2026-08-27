@@ -1224,6 +1224,21 @@ let build_commit_cmd =
   let doc = "Print the Git commit embedded in this server binary at build time." in
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
+let build_source_fingerprint_cmd_exit () =
+  match Build_identity.embedded_source_fingerprint () with
+  | Some fingerprint ->
+      print_endline fingerprint;
+      0
+  | None ->
+      prerr_endline "build source fingerprint is not embedded";
+      1
+
+let build_source_fingerprint_cmd =
+  let doc = "Print the source-byte fingerprint embedded in this server binary." in
+  Cmd.v
+    (Cmd.info "build-source-fingerprint" ~doc)
+    Term.(const build_source_fingerprint_cmd_exit $ const ())
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -1253,6 +1268,7 @@ let cmd =
     ; schedule_prune_cmd
     ; keeper_github_cmd
     ; build_commit_cmd
+    ; build_source_fingerprint_cmd
     ]
 
 let () =

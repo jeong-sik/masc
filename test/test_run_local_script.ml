@@ -8,6 +8,11 @@ let source_root () =
 let run_local_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts") "run-local.sh"
 
+let source_binary_identity_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts")
+    "source-binary-identity.sh"
+
 let build_dashboard_if_needed_script_path () =
   Filename.concat
     (Filename.concat (source_root ()) "scripts")
@@ -112,7 +117,7 @@ let write_keeper_seed repo_root =
     (Filename.concat repo_root "config/keepers/alpha.toml")
     "[keeper]\nautoboot_enabled = true\ninstructions = \"Keep working autonomously.\"\n"
 
-let write_fake_eio_exe ~commit exe_path =
+let write_fake_eio_exe ~commit ~fingerprint exe_path =
   mkdir_p (Filename.dirname exe_path);
   let content =
     Printf.sprintf
@@ -120,6 +125,10 @@ let write_fake_eio_exe ~commit exe_path =
 #!/bin/sh
 set -eu
 if [ "${1:-}" = "build-commit" ]; then
+  printf '%%s\n' %s
+  exit 0
+fi
+if [ "${1:-}" = "build-source-fingerprint" ]; then
   printf '%%s\n' %s
   exit 0
 fi
@@ -134,6 +143,7 @@ capture="${FAKE_CAPTURE_FILE:?}"
 exit 0
 |}
       (Filename.quote commit)
+      (Filename.quote fingerprint)
   in
   write_executable exe_path content
 
@@ -151,7 +161,17 @@ let git_commit_all repo_root message =
     (run_git ~cwd:repo_root
        [ "-c"; "user.name=Run Local Test"; "-c";
          "user.email=run-local@example.invalid"; "commit"; "-q"; "-m";
-         message ])
+       message ])
+
+let source_fingerprint repo_root =
+  let script = Filename.concat repo_root "scripts/source-binary-identity.sh" in
+  let code, stdout, stderr =
+    run_process ~cwd:repo_root script [| script; "fingerprint" |]
+  in
+  if code <> 0 then
+    failf "source fingerprint failed (%d)\nstdout:\n%s\nstderr:\n%s"
+      code stdout stderr;
+  String.trim stdout
 
 let setup_fake_repo root =
   let repo_root = Filename.concat root "repo" in
@@ -160,10 +180,15 @@ let setup_fake_repo root =
   mkdir_p scripts_dir;
   ignore (make_config_root repo_root);
   copy_script (run_local_script_path ()) (Filename.concat scripts_dir "run-local.sh");
+  copy_script
+    (source_binary_identity_script_path ())
+    (Filename.concat scripts_dir "source-binary-identity.sh");
   ignore (run_git ~cwd:repo_root [ "init"; "-q" ]);
   git_commit_all repo_root "fixture";
   let commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
-  write_fake_eio_exe ~commit (Filename.concat build_dir "main_eio.exe");
+  let fingerprint = source_fingerprint repo_root in
+  write_fake_eio_exe ~commit ~fingerprint
+    (Filename.concat build_dir "main_eio.exe");
   repo_root
 
 let test_bootstraps_local_config_and_sets_http_only_env () =
@@ -422,6 +447,7 @@ let setup_linked_worktree_fixture ?(advance_head = true) ?(dirty_common = false)
     ~local_binary =
   let common_root = setup_fake_repo root in
   let old_commit = run_git ~cwd:common_root [ "rev-parse"; "HEAD" ] in
+  let old_fingerprint = source_fingerprint common_root in
   let worktree_root = Filename.concat root "worktree" in
   ignore
     (run_git ~cwd:common_root
@@ -435,15 +461,18 @@ let setup_linked_worktree_fixture ?(advance_head = true) ?(dirty_common = false)
     mkdir_p (Filename.concat common_root "lib");
     write_file (Filename.concat common_root "lib/dirty.ml") "let uncommitted = true\n";
     write_fake_eio_exe ~commit:old_commit
+      ~fingerprint:(source_fingerprint common_root)
       (Filename.concat common_root "_build/default/bin/main_eio.exe")
   end;
   let exact_commit = run_git ~cwd:worktree_root [ "rev-parse"; "HEAD" ] in
+  let exact_fingerprint = source_fingerprint worktree_root in
   let local_exe = Filename.concat worktree_root "_build/default/bin/main_eio.exe" in
   (match local_binary with
    | `Absent -> ()
-   | `Stale -> write_fake_eio_exe ~commit:old_commit local_exe);
+   | `Stale ->
+     write_fake_eio_exe ~commit:old_commit ~fingerprint:old_fingerprint local_exe);
   let built_exe = Filename.concat root "built-main-eio.exe" in
-  write_fake_eio_exe ~commit:exact_commit built_exe;
+  write_fake_eio_exe ~commit:exact_commit ~fingerprint:exact_fingerprint built_exe;
   let build_marker = Filename.concat root "build.marker" in
   write_executable
     (Filename.concat worktree_root "scripts/dune-local.sh")
@@ -522,8 +551,9 @@ let test_dirty_source_builds_local_and_reports_dirty () =
       let exact_commit = run_git ~cwd:repo_root [ "rev-parse"; "HEAD" ] in
       mkdir_p (Filename.concat repo_root "lib");
       write_file (Filename.concat repo_root "lib/dirty.ml") "let dirty = true\n";
+      let exact_fingerprint = source_fingerprint repo_root in
       let built_exe = Filename.concat dir "built-main-eio.exe" in
-      write_fake_eio_exe ~commit:exact_commit built_exe;
+      write_fake_eio_exe ~commit:exact_commit ~fingerprint:exact_fingerprint built_exe;
       let build_marker = Filename.concat dir "build.marker" in
       write_executable
         (Filename.concat repo_root "scripts/dune-local.sh")

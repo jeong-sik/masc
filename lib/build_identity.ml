@@ -315,6 +315,8 @@ let commit_resolution =
     ~probe:probe_git_commit
 ;;
 
+let embedded_source_fingerprint () = Build_commit_generated.source_fingerprint
+
 let resolved_repo_root = probe_repo_root ()
 let repo_root () = resolved_repo_root
 let repo_version = Option.bind resolved_repo_root probe_repo_version

@@ -15,11 +15,12 @@
  (targets build_commit_generated.ml)
  (deps
   (sandbox none)
-  (universe))
+  (universe)
+  ../../scripts/source-binary-identity.sh)
  (action
   (with-stdout-to
    %{targets}
    (run
     bash
     -c
-    "c=$(git rev-parse HEAD 2>/dev/null || true); if [ -n \"$c\" ]; then printf 'let commit : string option = Some \"%s\"\\n' \"$c\"; else printf 'let commit : string option = None\\n'; fi"))))
+    "c=$(git rev-parse HEAD 2>/dev/null || true); f=$(../../scripts/source-binary-identity.sh fingerprint 2>/dev/null || true); if [ -n \"$c\" ]; then printf 'let commit : string option = Some \"%s\"\\n' \"$c\"; else printf 'let commit : string option = None\\n'; fi; if [ -n \"$f\" ]; then printf 'let source_fingerprint : string option = Some \"%s\"\\n' \"$f\"; else printf 'let source_fingerprint : string option = None\\n'; fi"))))

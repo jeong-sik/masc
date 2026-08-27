@@ -187,12 +187,18 @@ class KeeperSkillUseProofTest(unittest.TestCase):
                 return True
 
         class Panel:
+            keeper_name = "previous-keeper"
+            ledger_revision = "previous-revision"
+
             def wait_for(self, *, state, timeout):
                 calls.append(("wait_for", state, timeout))
 
             def get_attribute(self, name):
                 calls.append(("panel_attribute", name))
-                return "ledger-revision"
+                return {
+                    "data-keeper-name": self.keeper_name,
+                    "data-ledger-revision": self.ledger_revision,
+                }.get(name)
 
             def locator(self, selector):
                 calls.append(("panel_locator", selector))
@@ -217,6 +223,7 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         class Page:
             def __init__(self):
                 self.keeper_select = KeeperSelect()
+                self.panel = Panel()
 
             def goto(self, url, *, wait_until, timeout):
                 calls.append(("goto", url, wait_until, timeout))
@@ -227,7 +234,12 @@ class KeeperSkillUseProofTest(unittest.TestCase):
 
             def locator(self, selector):
                 calls.append(("page_locator", selector))
-                return Panel()
+                return self.panel
+
+            def wait_for_function(self, expression, *, arg, timeout):
+                calls.append(("wait_for_function", tuple(arg), timeout))
+                self.panel.keeper_name = arg[1]
+                self.panel.ledger_revision = arg[2]
 
         with tempfile.TemporaryDirectory() as raw:
             proof.capture_dashboard_page(
@@ -253,6 +265,18 @@ class KeeperSkillUseProofTest(unittest.TestCase):
         )
         self.assertIn(("get_by_role", "combobox", "Keeper", True), calls)
         self.assertIn(("select_option", "keeper-one"), calls)
+        self.assertIn(
+            (
+                "wait_for_function",
+                (
+                    '[data-testid="skill-activation-ledger"]',
+                    "keeper-one",
+                    "ledger-revision",
+                ),
+                30_000,
+            ),
+            calls,
+        )
         self.assertIn(("panel_locator", '[data-testid="skill-activation-row"]'), calls)
         self.assertIn(("scroll_row", "call-skill-1"), calls)
         self.assertIn(("row_visible", "call-skill-1"), calls)

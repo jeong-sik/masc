@@ -59,6 +59,14 @@ source_commit() {
   git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null
 }
 
+source_fingerprint() {
+  "$REPO_ROOT/scripts/source-binary-identity.sh" fingerprint
+}
+
+source_state() {
+  "$REPO_ROOT/scripts/source-binary-identity.sh" state
+}
+
 binary_embedded_commit() {
   local exe="$1"
   if [ ! -x "$exe" ]; then
@@ -67,20 +75,26 @@ binary_embedded_commit() {
   "$exe" build-commit 2>/dev/null
 }
 
-binary_matches_source_commit() {
+binary_embedded_source_fingerprint() {
   local exe="$1"
-  local expected_commit="$2"
-  local embedded_commit=""
-  embedded_commit="$(binary_embedded_commit "$exe" 2>/dev/null || true)"
-  [ -n "$embedded_commit" ] && [ "$embedded_commit" = "$expected_commit" ]
+  if [ ! -x "$exe" ]; then
+    return 1
+  fi
+  "$exe" build-source-fingerprint 2>/dev/null
 }
 
-source_affecting_binary_is_dirty() {
-  if ! git -C "$REPO_ROOT" diff --quiet HEAD -- bin lib proto dune-project 2>/dev/null; then
-    return 0
-  fi
-  git -C "$REPO_ROOT" ls-files --others --exclude-standard -- bin lib proto dune-project \
-    2>/dev/null | grep -q .
+binary_matches_source() {
+  local exe="$1"
+  local expected_commit="$2"
+  local expected_fingerprint="$3"
+  local embedded_commit=""
+  local embedded_fingerprint=""
+  embedded_commit="$(binary_embedded_commit "$exe" 2>/dev/null || true)"
+  embedded_fingerprint="$(binary_embedded_source_fingerprint "$exe" 2>/dev/null || true)"
+  [ -n "$embedded_commit" ] \
+    && [ "$embedded_commit" = "$expected_commit" ] \
+    && [ -n "$embedded_fingerprint" ] \
+    && [ "$embedded_fingerprint" = "$expected_fingerprint" ]
 }
 
 bootstrap_local_config() {
@@ -138,12 +152,13 @@ build_dashboard_if_requested() {
 
 resolve_built_exe() {
   local expected_commit="$1"
+  local expected_fingerprint="$2"
   local -a candidates=(
     "$REPO_ROOT/_build/default/bin/main_eio.exe"
   )
   local candidate
   for candidate in "${candidates[@]}"; do
-    if binary_matches_source_commit "$candidate" "$expected_commit"; then
+    if binary_matches_source "$candidate" "$expected_commit" "$expected_fingerprint"; then
       printf '%s\n' "$candidate"
       return 0
     fi
@@ -216,16 +231,24 @@ SOURCE_COMMIT="$(source_commit)" || {
   echo "Failed to resolve source commit for $REPO_ROOT" >&2
   exit 1
 }
-SOURCE_STATE="clean"
-if source_affecting_binary_is_dirty; then
-  SOURCE_STATE="dirty"
-fi
-EXE="$(resolve_built_exe "$SOURCE_COMMIT" || true)"
+SOURCE_FINGERPRINT="$(source_fingerprint)" || {
+  echo "Failed to fingerprint binary source inputs for $REPO_ROOT" >&2
+  exit 1
+}
+SOURCE_STATE="$(source_state)"
+EXE="$(resolve_built_exe "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT" || true)"
 
-if [ -z "$EXE" ] || [ "$SOURCE_STATE" = "dirty" ]; then
+if [ -z "$EXE" ]; then
   echo "[local-run] Building local binary..." >&2
   "$REPO_ROOT/scripts/dune-local.sh" build bin/main_eio.exe
-  EXE="$(resolve_built_exe "$SOURCE_COMMIT" || true)"
+  AFTER_COMMIT="$(source_commit)" || true
+  AFTER_FINGERPRINT="$(source_fingerprint)" || true
+  if [ "$AFTER_COMMIT" != "$SOURCE_COMMIT" ] \
+    || [ "$AFTER_FINGERPRINT" != "$SOURCE_FINGERPRINT" ]; then
+    echo "Source changed while building the local binary; refusing a raced executable" >&2
+    exit 1
+  fi
+  EXE="$(resolve_built_exe "$SOURCE_COMMIT" "$SOURCE_FINGERPRINT" || true)"
 fi
 
 if [ -z "$EXE" ]; then
@@ -239,6 +262,7 @@ if [ "$BOOTSTRAP_ONLY" = "1" ]; then
   echo "  Config root: $LOCAL_CONFIG_DIR" >&2
   echo "  Binary: $EXE" >&2
   echo "  Binary commit: $SOURCE_COMMIT" >&2
+  echo "  Source fingerprint: $SOURCE_FINGERPRINT" >&2
   echo "  Source state: $SOURCE_STATE" >&2
   exit 0
 fi

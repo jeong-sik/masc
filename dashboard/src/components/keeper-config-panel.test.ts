@@ -103,6 +103,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       compaction_count: 1,
     },
     ...overrides,
+    skills: overrides.skills ?? { names: null },
   }
 }
 
@@ -413,6 +414,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     proactive: {
       enabled: false,
     } as KeeperConfig['proactive'],
+    skills: { names: null },
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
@@ -1717,4 +1719,3 @@ describe('KeeperConfigPanel — keeper-v2 design blocks', () => {
     expect(link?.classList.contains('set-link')).toBe(true)
   })
 })
-

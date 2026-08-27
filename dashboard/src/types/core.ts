@@ -1382,6 +1382,11 @@ interface KeeperConfigProactive {
   enabled: boolean
 }
 
+export interface KeeperConfigSkills {
+  /** null inherits every published Skill; [] explicitly selects none. */
+  names: string[] | null
+}
+
 export interface RuntimeRef {
   group: string
   item: string | null
@@ -1490,6 +1495,7 @@ export interface KeeperConfig {
   prompt: KeeperConfigPrompt
   execution: KeeperConfigExecution
   proactive: KeeperConfigProactive
+  skills: KeeperConfigSkills
   hooks?: KeeperHookIntrospection
   runtime: KeeperConfigRuntime
   runtime_trust?: KeeperConfigRuntimeTrust | null

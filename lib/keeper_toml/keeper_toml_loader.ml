@@ -91,7 +91,46 @@ let assignment_equals_index line =
   loop 0 None false
 ;;
 
-let assignment_key_of_line trimmed =
+let rec singleton_table_path = function
+  | Otoml.TomlTable [] -> Some []
+  | Otoml.TomlTable [ key, nested ] ->
+    Option.map (fun path -> key :: path) (singleton_table_path nested)
+  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+    | Otoml.TomlArray _ | Otoml.TomlTable (_ :: _) | Otoml.TomlInlineTable _
+    | Otoml.TomlTableArray _ ) -> None
+;;
+
+let rec singleton_bool_path = function
+  | Otoml.TomlBoolean true -> Some []
+  | Otoml.TomlTable [ key, nested ] ->
+    Option.map (fun path -> key :: path) (singleton_bool_path nested)
+  | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+    | Otoml.TomlBoolean false | Otoml.TomlOffsetDateTime _
+    | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _
+    | Otoml.TomlArray _ | Otoml.TomlTable [] | Otoml.TomlTable (_ :: _)
+    | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ ) -> None
+;;
+
+type table_header =
+  | Standard_table of string list
+  | Other_table_header
+  | Not_table_header
+
+let table_header_of_line trimmed =
+  if not (String.starts_with ~prefix:"[" trimmed)
+  then Not_table_header
+  else
+    match Otoml.Parser.from_string_result trimmed with
+    | Ok value ->
+      (match singleton_table_path value with
+       | Some path -> Standard_table path
+       | None -> Other_table_header)
+    | Error _ -> Other_table_header
+;;
+
+let assignment_path_of_line trimmed =
   match assignment_equals_index trimmed with
   | None -> None
   | Some equals_at ->
@@ -99,9 +138,9 @@ let assignment_key_of_line trimmed =
     if String.equal raw_key ""
     then None
     else
-      match parse_toml (raw_key ^ " = true") with
-      | Ok [ parsed_key, _ ] -> Some parsed_key
-      | Ok _ | Error _ -> None
+      match Otoml.Parser.from_string_result (raw_key ^ " = true") with
+      | Ok value -> singleton_bool_path value
+      | Error _ -> None
 ;;
 
 let assignment_end lines start =
@@ -121,8 +160,54 @@ let assignment_end lines start =
   loop start ""
 ;;
 
-let is_table_header trimmed =
-  String.length trimmed > 0 && Char.equal trimmed.[0] '['
+let rec path_is_prefix prefix path =
+  match prefix, path with
+  | [], _ -> true
+  | prefix_head :: prefix_tail, path_head :: path_tail
+    when String.equal prefix_head path_head -> path_is_prefix prefix_tail path_tail
+  | _ -> false
+;;
+
+let rec drop_prefix prefix path =
+  match prefix, path with
+  | [], path -> Some path
+  | prefix_head :: prefix_tail, path_head :: path_tail
+    when String.equal prefix_head path_head -> drop_prefix prefix_tail path_tail
+  | _ -> None
+;;
+
+let longest_target_table_path ~base_path ~target_path lines =
+  let choose best path =
+    if path_is_prefix base_path path
+       && path_is_prefix path target_path
+       && List.length path < List.length target_path
+    then
+      match best with
+      | Some best when List.length best >= List.length path -> Some best
+      | Some _ | None -> Some path
+    else best
+  in
+  let rec loop index best =
+    if index >= Array.length lines
+    then Ok best
+    else
+      let trimmed = String.trim lines.(index) in
+      match table_header_of_line trimmed with
+      | Standard_table path -> loop (index + 1) (choose best path)
+      | Other_table_header -> loop (index + 1) best
+      | Not_table_header ->
+        (match assignment_path_of_line trimmed with
+         | None -> loop (index + 1) best
+         | Some assignment_path ->
+           (match assignment_end lines index with
+            | Some last_index -> loop (last_index + 1) best
+            | None ->
+              Error
+                (Printf.sprintf
+                   "unterminated TOML assignment while locating %s"
+                   (Otoml.string_of_path assignment_path))))
+  in
+  loop 0 None
 ;;
 
 let rewrite_field_in_content
@@ -138,88 +223,99 @@ let rewrite_field_in_content
     |> List.map String_util.strip_trailing_cr
     |> Array.of_list
   in
-  let table_header = Printf.sprintf "[%s]" table in
-  let output = ref [] in
-  let add_line line = output := line :: !output in
-  let add_range first last =
-    let rec loop index =
-      if index <= last
-      then (
-        add_line lines.(index);
-        loop (index + 1))
-    in
-    loop first
-  in
-  let replacement_line () =
-    match replacement with
-    | Some rendered -> Some (Printf.sprintf "%s = %s" key rendered)
-    | None -> None
-  in
-  let rec loop index in_target_table found =
-    if index >= Array.length lines
-    then
-      let found =
-        if in_target_table && not found
-        then (
-          match replacement_line () with
-          | Some line -> add_line line; true
-          | None -> found)
-        else found
-      in
-      if (match replacement with Some _ -> not found | None -> false)
-      then Error (Printf.sprintf "table [%s] not found in TOML" table)
-      else Ok (String.concat "\n" (List.rev !output))
-    else
-      let line = lines.(index) in
-      let trimmed = String.trim line in
-      if String.equal trimmed table_header
-      then (
-        add_line line;
-        loop (index + 1) true found)
-      else if in_target_table && is_table_header trimmed
-      then (
-        let found =
-          if not found
-          then (
-            match replacement_line () with
-            | Some replacement_line -> add_line replacement_line; true
-            | None -> found)
-          else found
-        in
-        add_line line;
-        loop (index + 1) false found)
-      else if in_target_table
-      then (
-        match assignment_key_of_line trimmed with
-        | None ->
-          add_line line;
-          loop (index + 1) true found
-        | Some parsed_key ->
-          (match assignment_end lines index with
-           | None ->
-             Error
-               (Printf.sprintf
-                  "unterminated TOML assignment while editing [%s].%s"
-                  table
-                  parsed_key)
-           | Some last_index ->
-             if (not found) && String.equal key parsed_key
-             then (
-               (match replacement_line () with
-                | Some replacement_line -> add_line replacement_line
-                | None -> ());
-               loop (last_index + 1) true true)
-             else (
-               add_range index last_index;
-               loop (last_index + 1) true found)))
-      else (
-        add_line line;
-        loop (index + 1) false found)
-  in
-  loop 0 false false
+  match
+    ( (match table_header_of_line (Printf.sprintf "[%s]" table) with
+       | Standard_table path -> Some path
+       | Other_table_header | Not_table_header -> None)
+    , assignment_path_of_line (key ^ " = true") )
+  with
+  | Some base_path, Some key_path ->
+    let target_path = base_path @ key_path in
+    (match longest_target_table_path ~base_path ~target_path lines with
+     | Error _ as error -> error
+     | Ok None -> Error (Printf.sprintf "table [%s] not found in TOML" table)
+     | Ok (Some insertion_table_path) ->
+       let insertion_key_path =
+         match drop_prefix insertion_table_path target_path with
+         | Some (_ :: _ as path) -> path
+         | Some [] | None -> key_path
+       in
+       let output = ref [] in
+       let add_line line = output := line :: !output in
+       let add_range first last =
+         let rec loop index =
+           if index <= last
+           then (
+             add_line lines.(index);
+             loop (index + 1))
+         in
+         loop first
+       in
+       let replacement_line path =
+         match replacement with
+         | Some rendered ->
+           Some
+             (Printf.sprintf "%s = %s" (Otoml.string_of_path path) rendered)
+         | None -> None
+       in
+       let insert_if_missing current_table_path found =
+         if (not found) && current_table_path = Some insertion_table_path
+         then
+           match replacement_line insertion_key_path with
+           | Some line -> add_line line; true
+           | None -> found
+         else found
+       in
+       let rec loop index current_table_path found =
+         if index >= Array.length lines
+         then (
+           let found = insert_if_missing current_table_path found in
+           if (match replacement with Some _ -> not found | None -> false)
+           then Error (Printf.sprintf "table [%s] not found in TOML" table)
+           else Ok (String.concat "\n" (List.rev !output)))
+         else
+           let line = lines.(index) in
+           let trimmed = String.trim line in
+           match table_header_of_line trimmed with
+           | Standard_table next_table_path ->
+             let found = insert_if_missing current_table_path found in
+             add_line line;
+             loop (index + 1) (Some next_table_path) found
+           | Other_table_header ->
+             let found = insert_if_missing current_table_path found in
+             add_line line;
+             loop (index + 1) None found
+           | Not_table_header ->
+             (match current_table_path, assignment_path_of_line trimmed with
+              | Some table_path, Some assignment_path ->
+                (match assignment_end lines index with
+                 | None ->
+                   Error
+                     (Printf.sprintf
+                        "unterminated TOML assignment while editing %s"
+                        (Otoml.string_of_path (table_path @ assignment_path)))
+                 | Some last_index ->
+                   if (not found) && table_path @ assignment_path = target_path
+                   then (
+                     (match replacement_line assignment_path with
+                      | Some line -> add_line line
+                      | None -> ());
+                     loop (last_index + 1) current_table_path true)
+                   else (
+                     add_range index last_index;
+                     loop (last_index + 1) current_table_path found))
+              | Some _, None | None, _ ->
+                add_line line;
+                loop (index + 1) current_table_path found)
+       in
+       loop 0 None false)
+  | None, _ | _, None ->
+    Error (Printf.sprintf "invalid TOML field path [%s].%s" table key)
 ;;
 
 (** Update or insert a key under a [table] in a TOML file.
+    Dotted keys follow their parsed TOML path, so an existing nested table is
+    edited in place instead of creating a second definition in its parent.
     Preserves comments, formatting, and other fields.
     Returns [Ok new_content] or [Error reason]. *)
 let update_rendered_field_in_content ~table ~key ~rendered_value content =

@@ -42,6 +42,8 @@ val toml_string_list : toml_doc -> string -> string list
 (** {1 TOML writer} *)
 
 (** Update or insert a key under a [\[table\]] in a TOML string.
+    Dotted keys follow their parsed TOML path, so an existing nested table is
+    edited in place instead of creating a second definition in its parent.
     Preserves comments, formatting, and other fields.
     Returns [Ok new_content] or [Error reason] if the table is not found. *)
 val update_field_in_content :

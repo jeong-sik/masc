@@ -150,14 +150,16 @@ materialize_executable_provenance() {
     if IFS= read -r _extra; then receipt_extra=1; fi
   } <"$receipt"
   rm -f "$receipt"
-  if ! [ "$receipt_extra" = "0" ] \
-    && [ "$schema" = "masc.run-local-launch-binding.v1" ] \
-    && [ -x "$EXE" ] \
-    && [ -f "$EXE_PROVENANCE" ] \
-    && masc_runtime_artifact_valid_hash "$EXE_SHA256" \
-    && masc_runtime_artifact_valid_hash "$EXE_PROVENANCE_SHA256" \
-    && [ "$EXE_PROVENANCE_DEVICE" -ge 0 ] \
-    && [ "$EXE_PROVENANCE_INODE" -ge 0 ]
+  if ! {
+    [ "$receipt_extra" = "0" ] \
+      && [ "$schema" = "masc.run-local-launch-binding.v1" ] \
+      && [ -x "$EXE" ] \
+      && [ -f "$EXE_PROVENANCE" ] \
+      && masc_runtime_artifact_valid_hash "$EXE_SHA256" \
+      && masc_runtime_artifact_valid_hash "$EXE_PROVENANCE_SHA256" \
+      && [ "$EXE_PROVENANCE_DEVICE" -ge 0 ] \
+      && [ "$EXE_PROVENANCE_INODE" -ge 0 ]
+  }
   then
     echo "Executable binding did not return an exact launch receipt" >&2
     return 1

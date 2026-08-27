@@ -775,6 +775,59 @@ fi
         (String_util.contains_substring stderr
            "Materialized executable differs from the initial Dune executable"))
 
+let test_malformed_binding_receipt_is_rejected () =
+  List.iter
+    (fun (corruption, label) ->
+       with_temp_dir ("run-local-receipt-" ^ corruption) (fun dir ->
+           let repo_root = setup_fake_repo dir in
+           let target = Filename.concat dir "target" in
+           mkdir_p target;
+           let scripts_dir = Filename.concat repo_root "scripts" in
+           let binding_script = Filename.concat scripts_dir "run-local-executable-binding.py" in
+           let real_binding_script = binding_script ^ ".real" in
+           Sys.rename binding_script real_binding_script;
+           write_executable binding_script
+             {|
+#!/bin/sh
+set -eu
+receipt="$(mktemp "${TMPDIR:-/tmp}/fake-launch-receipt.XXXXXX")"
+trap 'rm -f "$receipt"' EXIT
+"$(dirname "$0")/run-local-executable-binding.py.real" "$@" >"$receipt"
+{
+  IFS= read -r schema
+  IFS= read -r executable
+  IFS= read -r executable_sha
+  IFS= read -r provenance
+  IFS= read -r provenance_sha
+  IFS= read -r provenance_device
+  IFS= read -r provenance_inode
+} <"$receipt"
+case "${FAKE_RECEIPT_CORRUPTION:?}" in
+  schema) schema='masc.invalid-launch-binding.v1' ;;
+  metadata) provenance_device='not-an-integer' ;;
+  *) exit 2 ;;
+esac
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+  "$schema" "$executable" "$executable_sha" "$provenance" \
+  "$provenance_sha" "$provenance_device" "$provenance_inode"
+|};
+           let capture = Filename.concat dir "captured-env.txt" in
+           let script = Filename.concat repo_root "scripts/run-local.sh" in
+           let code, _stdout, stderr =
+             run_process ~cwd:repo_root script
+               ~env:
+                 [ "FAKE_RECEIPT_CORRUPTION", corruption
+                 ; "FAKE_CAPTURE_FILE", capture
+                 ]
+               [| script; "--target-dir"; target |]
+           in
+           check bool (label ^ " rejected") true (code <> 0);
+           check bool (label ^ " never launched") false (Sys.file_exists capture);
+           check bool (label ^ " exact error") true
+             (String_util.contains_substring stderr
+                "Executable binding did not return an exact launch receipt")))
+    [ "schema", "malformed schema"; "metadata", "malformed metadata" ]
+
 let () =
   run "run_local_script"
     [
@@ -815,5 +868,7 @@ let () =
             test_mutable_build_path_replacement_blocks_exec;
           test_case "same-commit swap before binding is rejected before rebuild" `Quick
             test_same_commit_swap_before_binding_is_rejected_before_rebuild;
+          test_case "malformed binding receipt is rejected" `Quick
+            test_malformed_binding_receipt_is_rejected;
         ] );
     ]

@@ -61,9 +61,15 @@ val observe_action :
 
 val observe_native_action :
   config:Workspace.config -> t -> active_skill_tool_use_ids:string list ->
-  runtime_id:string -> official_turn:int ->
+  runtime_id:string -> agent_core_turn:int ->
   identity:Runtime_native_tools.action_identity -> tool_name:string ->
   (int, error) result
+(** [agent_core_turn] is the MASC agent-core turn of the delivery boundary the
+    action attaches to — the same axis the ledger compares against
+    [delivery.agent_core_turn]. The official client's own session turn counter
+    resets per CLI session and must never reach the ledger: a long-lived Keeper
+    at agent-core turn N driving a fresh CLI session at claim turn 1 would have
+    every legitimate native action rejected as before-delivery. *)
 
 val error_code : error -> string
 val error_to_string : error -> string

@@ -60,3 +60,15 @@ val partition : t -> partition
     they are not setup failures or executable composition tools. *)
 
 val skills : t -> Keeper_skill_catalog.skill list
+
+val exact_task_surfaces :
+  snapshot:Skill_catalog_snapshot.t ->
+  selection:t ->
+  current_task:Keeper_world_observation_inputs.current_task_observation ->
+  held_task_skills:Keeper_world_observation_inputs.held_task_skills list ->
+  (string * Keeper_skill_catalog.exact_surface list) list
+(** Project the per-task exact Skill surfaces a turn advertises and executes,
+    keyed by task id in observation order (current task first). Takes the
+    already-resolved frozen [selection] and never re-resolves, so prompt,
+    bundle, and preview consumers share one computation without breaking the
+    turn-boundary freeze. *)

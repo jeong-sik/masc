@@ -27,9 +27,11 @@ Keeper, `Turn_ref`, and `skill_tool_use_id`.
 | source/server/process identity changes during proof | 0 | source and `/health?full=1` snapshots |
 | `INCOMPLETE` markers after success | 0 | every evidence directory |
 
-`no_skill_observed`, `multiple_skill_activations`, and `not_recorded` are
-truthful observations, but none passes this matrix. Dashboard rollover is not a
-failure when the exact historical projection remains typed and stable.
+`no_skill_observed`, `multiple_skill_activations`,
+`operator_selection_required`, and `historical_projection_unavailable` are
+truthful join observations, but none passes this matrix — only
+`exact_skill_invocation` does. Dashboard rollover is not a failure when the
+exact historical projection remains typed and stable.
 
 ## Time order
 

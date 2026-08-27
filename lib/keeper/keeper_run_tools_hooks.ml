@@ -146,13 +146,24 @@ module Skill_delivery_state = struct
   type t =
     { mutable pending : staged option
     ; mutable active_skill_tool_use_ids : string list
+      (* The delivery boundary's MASC agent-core turn. Native actions reported
+         by official clients carry only a per-CLI-session counter, so the
+         ledger comparison against [delivery.agent_core_turn] must reuse this
+         value — the two counters share no axis (#31081 review P1). *)
+    ; mutable active_agent_core_turn : int option
     }
 
-  let create () = { pending = None; active_skill_tool_use_ids = [] }
+  let create () =
+    { pending = None
+    ; active_skill_tool_use_ids = []
+    ; active_agent_core_turn = None
+    }
+  ;;
 
   let clear state =
     state.pending <- None;
-    state.active_skill_tool_use_ids <- []
+    state.active_skill_tool_use_ids <- [];
+    state.active_agent_core_turn <- None
   ;;
 
   let begin_turn = clear
@@ -162,19 +173,34 @@ module Skill_delivery_state = struct
     state.pending <- Some { runtime_id; agent_core_turn; tool_results }
   ;;
 
+  let set_active state ~agent_core_turn ids =
+    state.active_skill_tool_use_ids <- ids;
+    state.active_agent_core_turn
+    <- (match ids with
+        | [] -> None
+        | _ :: _ -> Some agent_core_turn)
+  ;;
+
+  let clear_active state =
+    state.active_skill_tool_use_ids <- [];
+    state.active_agent_core_turn <- None
+  ;;
+
   let commit_model_response state ~agent_core_turn ~observe =
     match state.pending with
     | Some staged when staged.agent_core_turn = agent_core_turn ->
       state.pending <- None;
-      state.active_skill_tool_use_ids <- observe staged
+      set_active state ~agent_core_turn (observe staged)
     | Some _ | None -> ()
   ;;
 
-  let set_active state ids =
-    state.active_skill_tool_use_ids <- ids
-  ;;
-
   let active state = state.active_skill_tool_use_ids
+
+  let active_delivery state =
+    match state.active_skill_tool_use_ids, state.active_agent_core_turn with
+    | (_ :: _ as ids), Some agent_core_turn -> Some (ids, agent_core_turn)
+    | _, _ -> None
+  ;;
 end
 
 let relative_path_has_segment_prefix prefix raw =
@@ -355,7 +381,13 @@ let assemble_hooks
     let observe_skill_delivery ~runtime_id ~boundary tool_results =
       (* Every handoff is a new causal boundary. A failed ledger observation
          cannot leave ids from an older successful handoff active. *)
-      Skill_delivery_state.set_active skill_delivery_state [];
+      Skill_delivery_state.clear_active skill_delivery_state;
+      let boundary_agent_core_turn =
+        match boundary with
+        | Keeper_skill_activation_ledger.Model_response { agent_core_turn }
+        | Keeper_skill_activation_ledger.Official_client_result_handoff
+            { agent_core_turn } -> agent_core_turn
+      in
       match
         Keeper_skill_activation_recorder.observe_delivery
           ~config
@@ -367,6 +399,7 @@ let assemble_hooks
       | Ok delivered ->
         Skill_delivery_state.set_active
           skill_delivery_state
+          ~agent_core_turn:boundary_agent_core_turn
           (List.sort_uniq String.compare delivered)
       | Error error ->
         Log.Keeper.warn
@@ -404,24 +437,30 @@ let assemble_hooks
     in
     let observe_official_client_native_action
           ~runtime_id ~official_turn ~identity ~tool_name =
-      let active_skill_tool_use_ids = Skill_delivery_state.active skill_delivery_state in
-      if active_skill_tool_use_ids <> [] then
-        try
-          match
-            Keeper_skill_activation_recorder.observe_native_action
-              ~config ctx.skill_activation_context ~active_skill_tool_use_ids
-              ~runtime_id ~official_turn ~identity ~tool_name
-          with
-          | Ok _ -> ()
-          | Error error ->
-            Log.Keeper.warn "Official native Skill action observation failed keeper=%s runtime=%s tool=%s error=%s"
-              meta.name runtime_id tool_name
-              (Keeper_skill_activation_recorder.error_to_string error)
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s tool=%s error=%s"
-            meta.name runtime_id tool_name (Printexc.to_string exn)
+      (* [official_turn] is the CLI's own per-session counter and shares no
+         axis with the ledger's agent-core turns; it stays in log lines as
+         provenance only. The ledger receives the delivery boundary's
+         agent-core turn, which the delivery state carries alongside the
+         active ids (#31081 review P1). *)
+      match Skill_delivery_state.active_delivery skill_delivery_state with
+      | None -> ()
+      | Some (active_skill_tool_use_ids, agent_core_turn) ->
+        (try
+           match
+             Keeper_skill_activation_recorder.observe_native_action
+               ~config ctx.skill_activation_context ~active_skill_tool_use_ids
+               ~runtime_id ~agent_core_turn ~identity ~tool_name
+           with
+           | Ok _ -> ()
+           | Error error ->
+             Log.Keeper.warn "Official native Skill action observation failed keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
+               meta.name runtime_id official_turn tool_name
+               (Keeper_skill_activation_recorder.error_to_string error)
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn ->
+           Log.Keeper.warn "Official native Skill action observer raised keeper=%s runtime=%s official_turn=%d tool=%s error=%s"
+             meta.name runtime_id official_turn tool_name (Printexc.to_string exn))
     in
     let on_runtime_attempt attempt =
       (* An official-client handoff belongs only to the runtime that produced

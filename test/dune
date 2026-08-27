@@ -3465,10 +3465,12 @@
  (modules test_keeper_skill_activation_recorder)
  (libraries
   alcotest
+  digestif
   masc
   masc.agent_core
   masc.keeper_registry
   masc.masc_types
+  masc.runtime
   masc.skill_config
   masc.skill_reference
   masc.skill_snapshot

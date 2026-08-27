@@ -131,8 +131,31 @@ let keeper_config_json (config : Workspace.config) (name : string)
           let current_task =
             Keeper_world_observation_inputs.read_current_task ~config ~meta:m
           in
+          (* The preview must advertise the same per-task Skill surfaces the
+             real turn computes; omitting them renders every Task Skill as
+             unavailable, the exact false signal the comment below promises
+             not to send. Same resolve + same projection as the turn — a
+             resolution failure previews as no surfaces, which is also what
+             the failing turn would advertise. *)
+          let task_skill_surfaces =
+            let skill_snapshot =
+              Keeper_agent_run.capture_skill_snapshot
+                ~base_path:config.base_path
+            in
+            match
+              Keeper_task_skill_turn.resolve_observations
+                ~snapshot:skill_snapshot ~current_task
+                ~held_task_skills:observation.held_task_skills
+            with
+            | Error _ -> []
+            | Ok selection ->
+              Keeper_task_skill_turn.exact_task_surfaces
+                ~snapshot:skill_snapshot ~selection ~current_task
+                ~held_task_skills:observation.held_task_skills
+          in
           Keeper_unified_prompt.build_prompt_preview ~meta:m ~config
-            ~profile_defaults:defaults ~current_task ~active_goal_summaries ~observation ()
+            ~profile_defaults:defaults ~current_task ~active_goal_summaries
+            ~task_skill_surfaces ~observation ()
         in
         (* Match what a turn actually sends: the observation frame rides the
            per-turn dynamic context (system side), and the persisted user

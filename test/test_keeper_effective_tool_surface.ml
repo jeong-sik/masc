@@ -729,6 +729,132 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
       (delivery |> member "reason" |> to_string)
 ;;
 
+(* #31078 review P1: the earlier freeze assertions stayed green when [project]
+   was mutated to ignore [task_selection], because the fixture skill also sat
+   in the global effective catalog and [project_turn] always bundles the
+   global instruction skills. A shadowed exact reference closes that
+   blindness: earlier-source-wins keeps only the primary "guide" on the
+   effective catalog, so the shadow source's revision can reach the bundle
+   through the frozen selection alone. The empty-selection control pins that
+   the shadowed revision has no other route in — a projection that re-resolves
+   or drops the selection fails the first check. *)
+let shadowed_guide_snapshot () =
+  let config_text =
+    "[skills]\n\
+     activation-lifetime = \"session\"\n\
+     precedence = \"earlier-source-wins\"\n\
+     resource-read-max-bytes = 65536\n\
+     [[skills.sources]]\n\
+     id = \"primary-catalog\"\n\
+     anchor = \"base-path\"\n\
+     path = \"skills\"\n\
+     access = \"read-only\"\n\
+     [[skills.sources]]\n\
+     id = \"shadow-catalog\"\n\
+     anchor = \"base-path\"\n\
+     path = \"shadow-skills\"\n\
+     access = \"read-only\"\n"
+  in
+  let config =
+    match Skill_source_config.parse_text config_text with
+    | Ok config -> config
+    | Error _ -> fail "shadowed guide fixture config was rejected"
+  in
+  let primary, shadow =
+    match config.Skill_source_config.sources with
+    | [ primary; shadow ] -> primary, shadow
+    | _ -> fail "shadowed guide fixture did not contain exactly two sources"
+  in
+  let scan source path documents : Skill_catalog_snapshot.source_scan =
+    { source = Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source
+    ; observation =
+        Skill_catalog_snapshot.Source_ready
+          { resolved_path = path; candidates = List.length documents }
+    ; candidates =
+        List.map
+          (fun (directory, source_text) ->
+             Skill_catalog_snapshot.Candidate_document { directory; source_text })
+          documents
+    }
+  in
+  let snapshot =
+    match
+      Skill_catalog_snapshot.configured
+        ~config
+        [ scan primary "skills" [ "guide", instruction_skill "guide" ]
+        ; scan
+            shadow
+            "shadow-skills"
+            [ ( "guide"
+              , instruction_skill
+                  ~description:"Shadowed revision of the guide."
+                  "guide" )
+            ]
+        ]
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "shadowed guide fixture snapshot was rejected"
+  in
+  let package_id =
+    match Skill_reference.package_id_of_directory "guide" with
+    | Ok value -> value
+    | Error _ -> fail "shadowed guide fixture package id was rejected"
+  in
+  let identity =
+    Skill_reference.make_identity
+      ~source_id:shadow.Skill_source_config.id
+      ~package_id
+      ~name:"guide"
+  in
+  match Skill_catalog_snapshot.find_exact snapshot identity with
+  | Some entry -> snapshot, Skill_catalog_snapshot.entry_reference entry
+  | None -> fail "shadowed guide entry is absent from the snapshot"
+;;
+
+let test_frozen_selection_carries_the_shadowed_exact_reference () =
+  let snapshot, shadowed_reference = shadowed_guide_snapshot () in
+  let selection =
+    match
+      Keeper_task_skill_turn.resolve_for_task
+        ~snapshot
+        ~task_id:"task-shadow"
+        [ shadowed_reference ]
+    with
+    | Ok selection -> selection
+    | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  in
+  let project ~task_selection =
+    Keeper_effective_tool_surface.For_testing.project
+      ~keeper_name:"skill-shadow"
+      ~runtime_id:"fixture.runtime"
+      ~official_client_kind:"agent_core"
+      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
+      ~native_posture:None
+      ~tool_groups:(Some [ "board" ])
+      ~current_task_id:None
+      ~skills_left_out:[]
+      ~task_skill_references:[]
+      ~task_selection
+      ~skill_snapshot:snapshot
+  in
+  (match project ~task_selection:(Some selection) with
+   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+   | Ok surface ->
+     check bool "frozen selection carries the shadowed exact revision" true
+       (List.exists
+          (Skill_reference.equal shadowed_reference)
+          surface.Keeper_effective_tool_surface.instruction_skills));
+  match project ~task_selection:(Some Keeper_task_skill_turn.empty) with
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+  | Ok control ->
+    check bool
+      "the shadowed revision has no route besides the frozen selection"
+      false
+      (List.exists
+         (Skill_reference.equal shadowed_reference)
+         control.Keeper_effective_tool_surface.instruction_skills)
+;;
+
 let () =
   Alcotest.run
     "keeper effective tool surface"
@@ -755,6 +881,8 @@ let () =
             test_global_instruction_is_present_in_receipt
         ; test_case "runtime capability suppression is explicit and empty" `Quick
             test_runtime_capability_suppression_is_explicit_and_empty
+        ; test_case "frozen selection carries the shadowed exact reference" `Quick
+            test_frozen_selection_carries_the_shadowed_exact_reference
         ] )
     ]
 ;;

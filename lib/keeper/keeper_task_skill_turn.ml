@@ -182,3 +182,48 @@ let partition selection =
 ;;
 
 let skills selection = List.map (fun selected -> selected.skill) selection.selected
+
+(* One computation feeds every surface that advertises a turn's per-task
+   Skills: the unified turn prompt, the direct turn prompt, and the dashboard
+   prompt preview. The preview regression that motivated this (#31076 review
+   P1) came from the preview reassembling the projection by hand and passing
+   nothing, which rendered every Task Skill as unavailable while the real turn
+   advertised it. Callers pass the already-frozen [selection]; this function
+   never re-resolves, so the turn-boundary freeze contract stays intact. *)
+let exact_task_surfaces ~snapshot ~selection ~current_task ~held_task_skills =
+  let global, _ = Keeper_skill_catalog.of_snapshot snapshot in
+  let projection =
+    Keeper_skill_catalog.project_turn ~global ~task:(skills selection)
+  in
+  let task_ids =
+    let current =
+      match current_task with
+      | Keeper_world_observation_inputs.Current_task task
+      | Recovered_current_task { task; _ } -> [ task.id ]
+      | No_current_task
+      | Current_task_missing _
+      | Current_task_unavailable _ -> []
+    in
+    let held =
+      List.map
+        (fun (entry : Keeper_world_observation_inputs.held_task_skills) ->
+           entry.held_task_id)
+        held_task_skills
+    in
+    List.fold_left
+      (fun seen task_id ->
+         if List.mem task_id seen then seen else seen @ [ task_id ])
+      []
+      (current @ held)
+  in
+  List.map
+    (fun task_id ->
+       let task =
+         selection.selected
+         |> List.filter (fun (selected : selected) ->
+              List.mem task_id selected.task_ids)
+         |> List.map (fun (selected : selected) -> selected.skill)
+       in
+       task_id, Keeper_skill_catalog.exact_surfaces projection ~task)
+    task_ids
+;;

@@ -548,37 +548,11 @@ let run_keeper_invocation_turn_admitted_inner
               match task_skill_selection with
               | Error _ -> []
               | Ok selection ->
-                let global, _ = Keeper_skill_catalog.of_snapshot skill_snapshot in
-                let projection =
-                  Keeper_skill_catalog.project_turn
-                    ~global ~task:(Keeper_task_skill_turn.skills selection)
-                in
-                let task_ids =
-                  let current =
-                    match current_task with
-                    | Keeper_world_observation_inputs.Current_task task
-                    | Recovered_current_task { task; _ } -> [ task.id ]
-                    | No_current_task
-                    | Current_task_missing _
-                    | Current_task_unavailable _ -> []
-                  in
-                  current
-                  @ List.map
-                      (fun (held : Keeper_world_observation_inputs.held_task_skills) ->
-                         held.held_task_id)
-                      held_task_skills
-                  |> List.sort_uniq String.compare
-                in
-                List.map (fun task_id ->
-                     let task =
-                       selection.selected
-                       |> List.filter (fun (selected : Keeper_task_skill_turn.selected) ->
-                            List.mem task_id selected.task_ids)
-                       |> List.map (fun (selected : Keeper_task_skill_turn.selected) ->
-                            selected.skill)
-                     in
-                     task_id, Keeper_skill_catalog.exact_surfaces projection ~task)
-                  task_ids
+                Keeper_task_skill_turn.exact_task_surfaces
+                  ~snapshot:skill_snapshot
+                  ~selection
+                  ~current_task
+                  ~held_task_skills
             in
             let build_turn_prompt ~base_system_prompt ~messages:_
                 : Keeper_agent_run.turn_prompt =

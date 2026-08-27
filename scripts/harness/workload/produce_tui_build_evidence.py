@@ -263,50 +263,63 @@ def produce(
             )
             producer = producer_identity(isolated_repo)
 
-            with tempfile.TemporaryDirectory(prefix="masc-tui-build-") as directory:
-                build_dir = Path(directory).resolve()
-                build_argv = (
-                    str(isolated_repo / PRODUCER),
-                    "build",
-                    "--build-dir",
-                    str(build_dir),
-                    TARGET,
-                )
-                build = runner(build_argv, isolated_repo, environment)
-                require(
-                    build.returncode == 0,
-                    f"TUI build failed with exit {build.returncode}: "
-                    f"{build.stderr.strip()}",
-                )
-                built_tui = build_dir / "default" / TARGET
-                built_artifact = inspect_tui(built_tui, expected_source_sha)
+            # The build tree must live inside the isolated worktree: dune's
+            # build_commit rule runs `git rev-parse HEAD` from the build
+            # sandbox cwd, and only a cwd under this worktree resolves to the
+            # expected source SHA. A tempdir outside any repo yields no
+            # embedded commit and the SHA-embed gate below rejects every real
+            # build; the parent repo would embed the wrong HEAD (#31097
+            # review P0, reproduced on dune 3.24.1). The detached worktree
+            # starts without _build, so the build stays separately fresh, and
+            # source_snapshot ignores untracked files, so the invariance gate
+            # is unaffected. The worktree removal in [finally] cleans it up.
+            build_dir = (isolated_repo / "_build").resolve()
+            require(
+                not build_dir.exists(),
+                "isolated source checkout already contains _build",
+            )
+            build_argv = (
+                str(isolated_repo / PRODUCER),
+                "build",
+                "--build-dir",
+                str(build_dir),
+                TARGET,
+            )
+            build = runner(build_argv, isolated_repo, environment)
+            require(
+                build.returncode == 0,
+                f"TUI build failed with exit {build.returncode}: "
+                f"{build.stderr.strip()}",
+            )
+            built_tui = build_dir / "default" / TARGET
+            built_artifact = inspect_tui(built_tui, expected_source_sha)
 
-                copied_tui = output / ARTIFACT
-                shutil.copy2(built_tui, copied_tui, follow_symlinks=False)
-                artifact = inspect_tui(copied_tui, expected_source_sha)
-                require(
-                    artifact["bytes"] == built_artifact["bytes"]
-                    and artifact["sha256"] == built_artifact["sha256"],
-                    "copied TUI does not equal the built artifact",
-                )
+            copied_tui = output / ARTIFACT
+            shutil.copy2(built_tui, copied_tui, follow_symlinks=False)
+            artifact = inspect_tui(copied_tui, expected_source_sha)
+            require(
+                artifact["bytes"] == built_artifact["bytes"]
+                and artifact["sha256"] == built_artifact["sha256"],
+                "copied TUI does not equal the built artifact",
+            )
 
-                probe_argv = (str(copied_tui), "--help")
-                probe = runner(probe_argv, isolated_repo, environment)
-                require(
-                    probe.returncode == 0,
-                    f"TUI help probe failed with exit {probe.returncode}: "
-                    f"{probe.stderr.strip()}",
-                )
-                require(
-                    "masc-tui" in probe.stdout,
-                    "TUI help probe did not identify masc-tui",
-                )
+            probe_argv = (str(copied_tui), "--help")
+            probe = runner(probe_argv, isolated_repo, environment)
+            require(
+                probe.returncode == 0,
+                f"TUI help probe failed with exit {probe.returncode}: "
+                f"{probe.stderr.strip()}",
+            )
+            require(
+                "masc-tui" in probe.stdout,
+                "TUI help probe did not identify masc-tui",
+            )
 
-                isolated_after = source_snapshot(isolated_repo, runner, environment)
-                require(
-                    isolated_after == isolated_before,
-                    "isolated source snapshot changed during TUI build",
-                )
+            isolated_after = source_snapshot(isolated_repo, runner, environment)
+            require(
+                isolated_after == isolated_before,
+                "isolated source snapshot changed during TUI build",
+            )
         finally:
             removed = runner(
                 ("git", "worktree", "remove", "--force", str(isolated_repo)),

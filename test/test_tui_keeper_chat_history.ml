@@ -920,6 +920,62 @@ let test_live_row_keeps_its_file () =
           Alcotest.failf "expected one attachment, got %d" (List.length other))
      | other -> Alcotest.failf "expected one row, got %d" (List.length other))
 
+(* A file posted with no caption arrives with the text empty. Joining on it
+   anyway put a blank line above the file, so the reader saw a gap where a
+   sentence would be (task-552). *)
+let bytes_only n = Printf.sprintf "%dB" n
+
+let test_a_captionless_file_has_no_blank_line_above_it () =
+  let notes =
+    [ { History.att_name = "shot.png"; att_mime = "image/png"; att_bytes = 12 } ]
+  in
+  let body =
+    History.text_with_attachments ~format_bytes:bytes_only ~text:"" ~notes
+  in
+  Alcotest.(check bool) "no leading newline" false (String.length body > 0 && body.[0] = '\n');
+  Alcotest.(check bool) "names the file" true
+    (String.length body > 0 && body <> "");
+  match String.split_on_char '\n' body with
+  | [ only ] -> Alcotest.(check bool) "one line" true (only <> "")
+  | other ->
+    Alcotest.failf "expected one line, got %d" (List.length other)
+;;
+
+(* Whitespace is not a caption either. *)
+let test_a_blank_caption_is_treated_as_none () =
+  let notes =
+    [ { History.att_name = "shot.png"; att_mime = ""; att_bytes = 0 } ]
+  in
+  let body =
+    History.text_with_attachments ~format_bytes:bytes_only ~text:"   \n  " ~notes
+  in
+  Alcotest.(check int) "one line" 1
+    (List.length (String.split_on_char '\n' body))
+;;
+
+let test_a_caption_stays_above_its_files () =
+  let notes =
+    [ { History.att_name = "a.png"; att_mime = ""; att_bytes = 0 }
+    ; { History.att_name = "b.png"; att_mime = ""; att_bytes = 0 }
+    ]
+  in
+  let body =
+    History.text_with_attachments ~format_bytes:bytes_only ~text:"look" ~notes
+  in
+  match String.split_on_char '\n' body with
+  | [ first; second; third ] ->
+    Alcotest.(check string) "caption first" "look" first;
+    Alcotest.(check bool) "then a" true (second <> "");
+    Alcotest.(check bool) "then b" true (third <> "")
+  | other -> Alcotest.failf "expected three lines, got %d" (List.length other)
+;;
+
+let test_a_row_with_no_files_is_untouched () =
+  Alcotest.(check string) "unchanged" "just words"
+    (History.text_with_attachments ~format_bytes:bytes_only ~text:"just words"
+       ~notes:[])
+;;
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -976,6 +1032,14 @@ let () =
             test_one_unreadable_row_does_not_cost_the_transcript
         ; test_case "a non-array payload is an error" `Quick
             test_a_non_array_payload_is_an_error
+        ; test_case "a caption-less file has no blank line above it" `Quick
+            test_a_captionless_file_has_no_blank_line_above_it
+        ; test_case "a blank caption is treated as none" `Quick
+            test_a_blank_caption_is_treated_as_none
+        ; test_case "a caption stays above its files" `Quick
+            test_a_caption_stays_above_its_files
+        ; test_case "a row with no files is untouched" `Quick
+            test_a_row_with_no_files_is_untouched
         ; test_case "a live row keeps its file" `Quick
             test_live_row_keeps_its_file
         ; test_case "a row names the file it carries" `Quick

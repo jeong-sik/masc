@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import shutil
 import socket
+import stat
 import subprocess
 import time
 from typing import Any, Iterator
@@ -139,8 +140,26 @@ def string_field(value: Any, field: str, context: str) -> str:
     return child
 
 
-def read_json_url(url: str, timeout: float) -> dict[str, Any]:
-    request = Request(url, headers={"Accept": "application/json"})
+def read_token(path: Path) -> str:
+    require(not path.is_symlink(), "token file must not be a symlink")
+    try:
+        require(stat.S_ISREG(path.stat().st_mode), "token file must be regular")
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise CaptureError(f"cannot read token file: {error}") from error
+    require(token != "", "token file is empty")
+    require("\r" not in token and "\n" not in token, "token file has multiple lines")
+    return token
+
+
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def read_json_url(url: str, timeout: float, token: str) -> dict[str, Any]:
+    request = Request(
+        url, headers={"Accept": "application/json", **auth_headers(token)}
+    )
     try:
         with urlopen(request, timeout=timeout) as response:
             return decode_object(response.read(), f"response from {url}")
@@ -524,7 +543,7 @@ def wait_port(port: int, process: subprocess.Popen[bytes], timeout: float) -> No
     raise CaptureError("ttyd did not listen before the configured timeout")
 
 
-def safe_environment(base_path: str, host: str) -> dict[str, str]:
+def safe_environment(base_path: str, host: str, token: str) -> dict[str, str]:
     keys = (
         "PATH",
         "LANG",
@@ -540,6 +559,7 @@ def safe_environment(base_path: str, host: str) -> dict[str, str]:
             "MASC_BASE_PATH": base_path,
             "MASC_HOST": host,
             "MASC_TUI_SYNC": "off",
+            "MASC_TOKEN": token,
             "TERM": "xterm-256color",
             "NO_PROXY": "127.0.0.1,localhost",
             "no_proxy": "127.0.0.1,localhost",
@@ -560,6 +580,7 @@ def ttyd_session(
     cols: int,
     rows: int,
     timeout: float,
+    token: str,
 ) -> Iterator[Any]:
     web_port = free_port()
     command = [
@@ -590,7 +611,7 @@ def ttyd_session(
     process = subprocess.Popen(
         command,
         cwd=Path(__file__).resolve().parents[3],
-        env=safe_environment(base_path, host),
+        env=safe_environment(base_path, host, token),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,
@@ -749,6 +770,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proof", required=True, type=Path)
     parser.add_argument("--expected-proof-sha256", required=True)
+    parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--ttyd", type=Path)
     parser.add_argument("--out", required=True, type=Path)
     parser.add_argument("--cols", type=int, default=180)
@@ -759,6 +781,7 @@ def main() -> int:
     require(args.timeout > 0, "timeout must be positive")
     require(args.cols > 0 and args.rows > 0, "terminal size must be positive")
     require(not args.out.exists(), f"output path already exists: {args.out}")
+    token = read_token(args.token_file)
     repo = Path(__file__).resolve().parents[3]
     source_before = source_snapshot(repo)
     proof_payload = args.proof.read_bytes()
@@ -782,13 +805,15 @@ def main() -> int:
 
     parsed = urlsplit(selected["base_url"])
     api_port = parsed.port or 80
-    health_before = read_json_url(f"{selected['base_url']}/health?full=1", args.timeout)
+    health_before = read_json_url(
+        f"{selected['base_url']}/health?full=1", args.timeout, token
+    )
     server_identity = validate_live_server(evidence, health_before)
     live_dashboard_url = (
         f"{selected['base_url']}/api/v1/dashboard/tools?keeper="
         f"{quote(selected['keeper'], safe='')}"
     )
-    live_dashboard_before = read_json_url(live_dashboard_url, args.timeout)
+    live_dashboard_before = read_json_url(live_dashboard_url, args.timeout, token)
     validate_live_dashboard(selected, live_dashboard_before)
 
     ttyd_value = args.ttyd
@@ -824,6 +849,7 @@ def main() -> int:
                 cols=args.cols,
                 rows=args.rows,
                 timeout=args.timeout,
+                token=token,
             ) as page:
                 wait_screen(page, "MASC Overview", args.timeout)
                 goto_tools(page, args.timeout)
@@ -859,12 +885,14 @@ def main() -> int:
         finally:
             browser.close()
 
-    health_after = read_json_url(f"{selected['base_url']}/health?full=1", args.timeout)
+    health_after = read_json_url(
+        f"{selected['base_url']}/health?full=1", args.timeout, token
+    )
     require(
         validate_live_server(evidence, health_after) == server_identity,
         "live server identity changed after TUI capture",
     )
-    live_dashboard_after = read_json_url(live_dashboard_url, args.timeout)
+    live_dashboard_after = read_json_url(live_dashboard_url, args.timeout, token)
     validate_live_dashboard(selected, live_dashboard_after)
     source_after = source_snapshot(repo)
     require(

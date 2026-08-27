@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -158,6 +159,52 @@ def refresh_projection(dashboard, ledger):
 
 
 class KeeperSkillUseProofTest(unittest.TestCase):
+    def test_strict_http_reads_send_bearer_without_serializing_it(self):
+        token = "strict-proof-token"
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self):
+                return b'{"ok":true}'
+
+        def open_request(request, timeout):
+            self.assertEqual(timeout, 3.0)
+            self.assertEqual(
+                request.get_header("Authorization"), f"Bearer {token}"
+            )
+            return Response()
+
+        with mock.patch.object(proof, "urlopen", side_effect=open_request):
+            value, raw = proof.read_json("https://masc.invalid/strict", 3.0, token)
+
+        self.assertEqual(value, {"ok": True})
+        self.assertNotIn(token.encode(), raw)
+        options = proof.dashboard_context_options(token)
+        self.assertEqual(
+            options["extra_http_headers"], {"Authorization": f"Bearer {token}"}
+        )
+
+    def test_token_file_is_one_regular_non_symlink_line(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            token_file = root / "token"
+            token_file.write_text("exact-token\n", encoding="utf-8")
+            self.assertEqual(proof.read_token(token_file), "exact-token")
+            token_file.write_text("first\nsecond\n", encoding="utf-8")
+            with self.assertRaisesRegex(proof.ProofError, "multiple lines"):
+                proof.read_token(token_file)
+            target = root / "target"
+            target.write_text("secret", encoding="utf-8")
+            link = root / "link"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(proof.ProofError, "symlink"):
+                proof.read_token(link)
+
     def test_rejects_base_url_credentials(self):
         with self.assertRaisesRegex(proof.ProofError, "must not contain credentials"):
             proof.canonical_base_url("http://user:secret@127.0.0.1:8935")

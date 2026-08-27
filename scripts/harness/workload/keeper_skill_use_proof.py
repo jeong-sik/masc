@@ -199,8 +199,34 @@ def canonical_base_url(value: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
-def read_json(url: str, timeout: float) -> tuple[dict[str, Any], bytes]:
-    request = Request(url, headers={"Accept": "application/json"})
+def read_token(path: Path) -> str:
+    require(not path.is_symlink(), "token file must not be a symlink")
+    try:
+        require(stat.S_ISREG(path.stat().st_mode), "token file must be regular")
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as error:
+        raise ProofError(f"cannot read token file: {error}") from error
+    require(token != "", "token file is empty")
+    require("\r" not in token and "\n" not in token, "token file has multiple lines")
+    return token
+
+
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def dashboard_context_options(token: str) -> dict[str, Any]:
+    return {
+        "viewport": {"width": 1440, "height": 1000},
+        "device_scale_factor": 1,
+        "extra_http_headers": auth_headers(token),
+    }
+
+
+def read_json(url: str, timeout: float, token: str) -> tuple[dict[str, Any], bytes]:
+    request = Request(
+        url, headers={"Accept": "application/json", **auth_headers(token)}
+    )
     try:
         with urlopen(request, timeout=timeout) as response:
             payload = response.read()
@@ -603,6 +629,7 @@ def capture_dashboard(
     skill_tool_use_id: str,
     ledger_revision: str,
     output: Path,
+    token: str,
 ) -> dict[str, Any]:
     try:
         from playwright.sync_api import sync_playwright
@@ -612,10 +639,10 @@ def capture_dashboard(
     screenshot = output / "dashboard-skill-use.png"
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
+        context = None
         try:
-            page = browser.new_page(
-                viewport={"width": 1440, "height": 1000}, device_scale_factor=1
-            )
+            context = browser.new_context(**dashboard_context_options(token))
+            page = context.new_page()
             page.goto(
                 f"{base_url}/dashboard/#lab?section=tools",
                 wait_until="networkidle",
@@ -650,6 +677,8 @@ def capture_dashboard(
                 "Dashboard activation rows changed while taking the screenshot",
             )
         finally:
+            if context is not None:
+                context.close()
             browser.close()
     payload = screenshot.read_bytes()
     return {
@@ -674,6 +703,7 @@ def write_json(path: Path, value: Any) -> bytes:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", required=True)
+    parser.add_argument("--token-file", required=True, type=Path)
     parser.add_argument("--keeper", required=True)
     parser.add_argument("--expected-source-sha", required=True)
     parser.add_argument("--tui-build-evidence", required=True, type=Path)
@@ -684,6 +714,7 @@ def main() -> int:
     args = parser.parse_args()
 
     base_url = canonical_base_url(args.base_url)
+    token = read_token(args.token_file)
     require(args.timeout > 0, "timeout must be positive")
     require(not args.out.exists(), f"output path already exists: {args.out}")
     repo = Path(__file__).resolve().parents[3]
@@ -703,11 +734,13 @@ def main() -> int:
         expected_source_tree=source_before["tree"],
     )
 
-    health, health_raw = read_json(f"{base_url}/health?full=1", args.timeout)
+    health, health_raw = read_json(
+        f"{base_url}/health?full=1", args.timeout, token
+    )
     dashboard_url = (
         f"{base_url}/api/v1/dashboard/tools?keeper={quote(args.keeper, safe='')}"
     )
-    dashboard, dashboard_raw = read_json(dashboard_url, args.timeout)
+    dashboard, dashboard_raw = read_json(dashboard_url, args.timeout, token)
     projection = object_field(dashboard, "skill_activations", "dashboard")
     ledger = object_field(projection, "ledger", "skill_activations")
     session_id = string_field(ledger, "session_id", "skill ledger")
@@ -755,6 +788,7 @@ def main() -> int:
         skill_tool_use_id=args.skill_tool_use_id,
         ledger_revision=proof["ledger_revision"],
         output=args.out,
+        token=token,
     )
     source_after = source_snapshot(repo)
     require(

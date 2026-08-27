@@ -882,7 +882,7 @@ export function deriveFleetTickerEvents({
       timestamp: post.updated_at || post.created_at,
       actor: firstNonEmptyTrimmed(post.author) ?? 'board',
       label: post.post_kind ?? '(unknown post_kind)',
-      text: firstNonEmptyTrimmed(post.title, post.content, post.body) ?? '',
+      text: firstNonEmptyTrimmed(post.title, post.body) ?? '',
       kind: 'board',
       tone: post.post_kind === 'system' ? 'warn' : 'info',
     })

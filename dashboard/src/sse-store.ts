@@ -604,7 +604,6 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
     author_identity: event.author_identity ?? null,
     title: event.title ?? '',
     body: content,
-    content,
     tags: [],
     created_at: now,
     updated_at: now,

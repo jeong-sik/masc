@@ -363,7 +363,7 @@ function fusionRunFromPost(post: BoardPost): FusionRunView | null {
     rawStartedAt !== null && Number.isFinite(rawStartedAt) && rawStartedAt >= 0
       ? rawStartedAt
       : null
-  const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.content ?? post.title
+  const question = firstString(meta, ['question', 'prompt']) ?? post.body ?? post.title
   const status = statusFor(judge, panel)
   const tone = toneFor(status, judge.decision)
 

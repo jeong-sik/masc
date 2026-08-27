@@ -104,7 +104,7 @@ let test_create_and_get_post () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok fetched ->
           Alcotest.(check string) "content matches"
-            "dispatch test post" fetched.content
+            "dispatch test post" fetched.body
 
 let test_update_post_by_owner () =
   match
@@ -121,7 +121,7 @@ let test_update_post_by_owner () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok updated -> (
           Alcotest.(check string) "content updated" "edited body after change"
-            updated.content;
+            updated.body;
           Alcotest.(check string) "body updated" "edited body after change"
             updated.body;
           Alcotest.(check bool) "updated_at not regressed" true
@@ -131,7 +131,7 @@ let test_update_post_by_owner () =
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "edit persisted via get"
-                "edited body after change" fetched.content))
+                "edited body after change" fetched.body))
 
 let test_update_post_rejects_non_owner () =
   match
@@ -152,7 +152,7 @@ let test_update_post_rejects_non_owner () =
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
               Alcotest.(check string) "original preserved on rejected edit"
-                "body owned by owner-agent" fetched.content)
+                "body owned by owner-agent" fetched.body)
       | Error e ->
           Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
 
@@ -173,7 +173,7 @@ let test_update_post_transfers_author_by_owner () =
           Alcotest.(check string) "author transferred" "transfer-next"
             (Board.Agent_id.to_string updated.author);
           Alcotest.(check string) "content updated during transfer"
-            "transfer updated body" updated.content;
+            "transfer updated body" updated.body;
           match Board_dispatch.get_post ~post_id:pid with
           | Error e -> Alcotest.fail (Board.show_board_error e)
           | Ok fetched ->
@@ -202,7 +202,7 @@ let test_update_post_rejects_non_owner_transfer () =
                 "transfer-owner"
                 (Board.Agent_id.to_string fetched.author);
               Alcotest.(check string) "original content preserved"
-                "non-owner transfer original" fetched.content)
+                "non-owner transfer original" fetched.body)
       | Error e ->
           Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
 
@@ -227,7 +227,7 @@ let test_update_post_rejects_invalid_new_author () =
                 "transfer-owner"
                 (Board.Agent_id.to_string fetched.author);
               Alcotest.(check string) "content preserved after invalid transfer"
-                "invalid transfer original" fetched.content)
+                "invalid transfer original" fetched.body)
       | Error e ->
           Alcotest.fail
             ("expected Validation_error, got " ^ Board.show_board_error e))
@@ -283,7 +283,7 @@ let test_update_post_with_explicit_title_and_body () =
           Alcotest.(check string) "body from ?body" "Explicit body text"
             updated.body;
           Alcotest.(check string) "content tracks body" "Explicit body text"
-            updated.content;
+            updated.body;
           Alcotest.(check bool) "post_kind preserved" true
             (updated.post_kind = post.post_kind);
           Alcotest.(check bool) "visibility preserved" true
@@ -338,7 +338,7 @@ let test_keeper_signal_hook_failure_does_not_abort_create_post () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       Alcotest.(check string) "content persisted despite hook failure"
-        "post must survive keeper wake failure" post.content
+        "post must survive keeper wake failure" post.body
 
 let test_keeper_signal_hook_cancellation_propagates () =
   Board_dispatch.set_board_signal_hook (fun _ ->
@@ -440,7 +440,7 @@ let test_structured_post_roundtrip () =
       | Ok fetched ->
           Alcotest.(check string) "roundtrip title" "Explicit title" fetched.title;
           Alcotest.(check string) "roundtrip content alias"
-            "Visible line\n\nSupporting detail" fetched.content;
+            "Visible line\n\nSupporting detail" fetched.body;
           Alcotest.(check string) "roundtrip body"
             "Visible line\n\nSupporting detail" fetched.body;
           Alcotest.(check string) "roundtrip kind" "automation"
@@ -972,7 +972,7 @@ let test_get_post_and_comments_atomic () =
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok (fetched, comments) ->
           Alcotest.(check string) "post content matches"
-            "atomic read body" fetched.content;
+            "atomic read body" fetched.body;
           Alcotest.(check int) "comment count" 2 (List.length comments)
 
 let test_get_post_and_comments_pagination_clamps () =

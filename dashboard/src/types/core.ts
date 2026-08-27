@@ -183,7 +183,6 @@ export interface BoardPost {
   classification_reason?: string | null
   title: string
   body: string
-  content: string
   meta?: BoardPostMeta | null
   attachments?: BoardAttachmentDecode[]
   tags: string[]

@@ -86,7 +86,6 @@ function makeBoardPost(partial: Partial<BoardPost>): BoardPost {
     author: 'keeper',
     title: 'post',
     body: 'body',
-    content: 'content',
     tags: [],
     votes: 0,
     comment_count: 0,
@@ -356,14 +355,14 @@ describe('deriveFleetTickerEvents', () => {
     const events = deriveFleetTickerEvents({
       taskList: [makeTask({ id: 'bad-task', title: 'Bad', updated_at: 'not-a-date' })],
       messageList: [makeMessage({ id: 'blank-message', content: '   ', timestamp: localIsoAt(4) })],
-      boardPostList: [makeBoardPost({ id: 'blank-post', title: '', body: '', content: '', updated_at: localIsoAt(3) })],
+      boardPostList: [makeBoardPost({ id: 'blank-post', title: '', body: '', updated_at: localIsoAt(3) })],
       keeperList: [makeKeeper({ name: 'no-heartbeat' })],
     })
 
     expect(events).toEqual([])
   })
 
-  it('uses trimmed board content fallback when title or author is whitespace', () => {
+  it('uses trimmed board body fallback when title or author is whitespace', () => {
     const events = deriveFleetTickerEvents({
       taskList: [],
       messageList: [],
@@ -372,7 +371,6 @@ describe('deriveFleetTickerEvents', () => {
           id: 'post-whitespace-title',
           author: '   ',
           title: '   ',
-          content: '  usable content  ',
           body: 'body fallback',
           updated_at: localIsoAt(3),
         }),
@@ -383,7 +381,7 @@ describe('deriveFleetTickerEvents', () => {
     expect(events).toHaveLength(1)
     expect(events[0]?.id).toBe('board:post-whitespace-title')
     expect(events[0]?.actor).toBe('board')
-    expect(events[0]?.text).toBe('usable content')
+    expect(events[0]?.text).toBe('body fallback')
   })
 
   it('limits output and maps operational tones', () => {

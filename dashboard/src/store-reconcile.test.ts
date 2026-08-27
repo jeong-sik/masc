@@ -10,7 +10,6 @@ function makePost(overrides: Partial<BoardPost> = {}): BoardPost {
     classification_reason: null,
     title: 'title',
     body: 'body',
-    content: 'content',
     tags: [],
     votes: 0,
     comment_count: 0,

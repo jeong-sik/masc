@@ -532,7 +532,7 @@ let persist_board_signal (signal : Board_dispatch.board_signal) =
         Board.audience_for_post
           ~visibility:post.visibility
           ~title:post.title
-          ~content:post.content
+          ~content:post.body
       with
       | Ok audience -> audience
       | Error error -> fail (Board.show_board_error error)

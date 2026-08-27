@@ -21,14 +21,12 @@ let post_field_names =
   ; "title"
   ; "body"
   ; "post_kind"
-  ; "content"
   ; "visibility"
   ; "created_at"
   ; "updated_at"
   ; "expires_at"
   ; "votes_up"
   ; "votes_down"
-  ; "score"
   ; "reply_count"
   ; "pinned"
   ; "hearth"
@@ -49,7 +47,6 @@ let comment_field_names =
   ; "expires_at"
   ; "votes_up"
   ; "votes_down"
-  ; "score"
   ]
 ;;
 
@@ -137,7 +134,6 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , required_string fields "author"
        , required_string fields "title"
        , required_string fields "body"
-       , required_string fields "content"
        , required_string fields "post_kind"
        , required_string fields "visibility"
        , required_float fields "created_at"
@@ -145,7 +141,6 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , required_float fields "expires_at"
        , required_int fields "votes_up"
        , required_int fields "votes_down"
-       , required_int fields "score"
        , required_int fields "reply_count"
        , required_bool fields "pinned"
        , optional_string fields "hearth"
@@ -158,7 +153,6 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Some author_str
        , Some title
        , Some body
-       , Some content
        , Some post_kind_raw
        , Some vis_str
        , Some created_at
@@ -166,7 +160,6 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
        , Some expires_at
        , Some votes_up
        , Some votes_down
-       , Some score
        , Some reply_count
        , Some pinned
        , Ok hearth
@@ -182,44 +175,40 @@ let post_of_yojson (json : Yojson.Safe.t) : post option =
       Log.BoardLog.warn
         "dropping persisted board post %s: missing or invalid post_kind"
         id_str;
-    if not (String.equal content body) || score <> votes_up - votes_down
-    then None
-    else
-      (match
-         ( Post_id.of_string id_str
-         , Agent_id.of_string author_str
-         , visibility_of_string vis_str
-         , post_kind_opt )
-       with
-       | Ok id, Ok author, Some visibility, Some post_kind ->
-          let post =
-            { id
-            ; author
-            ; title
-            ; body
-            ; content = body
-            ; post_kind
-            ; meta_json
-            ; visibility
-            ; created_at
-            ; updated_at
-            ; expires_at
-            ; votes_up
-            ; votes_down
-            ; reply_count
-            ; pinned
-            ; hearth
-            ; thread_id
-            ; origin
-            }
-          in
-          if Option.equal
-               String.equal
-               classification_reason
-               (post_classification_reason post)
-          then Some post
-          else None
-       | _ -> None)
+    (match
+       ( Post_id.of_string id_str
+       , Agent_id.of_string author_str
+       , visibility_of_string vis_str
+       , post_kind_opt )
+     with
+     | Ok id, Ok author, Some visibility, Some post_kind ->
+        let post =
+          { id
+          ; author
+          ; title
+          ; body
+          ; post_kind
+          ; meta_json
+          ; visibility
+          ; created_at
+          ; updated_at
+          ; expires_at
+          ; votes_up
+          ; votes_down
+          ; reply_count
+          ; pinned
+          ; hearth
+          ; thread_id
+          ; origin
+          }
+        in
+        if Option.equal
+             String.equal
+             classification_reason
+             (post_classification_reason post)
+        then Some post
+        else None
+     | _ -> None)
      | _ -> None)
   | `Assoc _ | _ -> None
 ;;
@@ -246,7 +235,6 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , required_float fields "expires_at"
        , required_int fields "votes_up"
        , required_int fields "votes_down"
-       , required_int fields "score"
        , parent_id )
      with
      | ( Some id_str
@@ -257,12 +245,8 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
        , Some expires_at
        , Some votes_up
        , Some votes_down
-       , Some score
        , Ok parent_id ) ->
-       if score <> votes_up - votes_down
-       then None
-       else
-         (match
+       (match
           ( Comment_id.of_string id_str
           , Post_id.of_string post_id_str
           , Agent_id.of_string author_str )

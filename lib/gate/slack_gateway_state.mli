@@ -27,6 +27,31 @@ type envelope_kind =
   | Reconnect_env          (** [type: "reconnect"] — Slack asks for a fresh connection. *)
   | Ignored_env of string  (** Known envelope type we don't act on (slash_commands, interactive). *)
 
+(** Whether the app may see a file's metadata. Slack documents [visible] and
+    [check_file_info] but does not enumerate the field, so an unrecognised value
+    is carried through rather than folded into either known case. *)
+type file_access =
+  | Visible
+  | Check_file_info  (** Slack Connect: metadata needs a separate files.info call. *)
+  | Unknown_access of string
+
+(** A file on an inbound message. Slack guarantees only [id]: [name] may be null
+    for unnamed files, and [permalink]/[url_private] need the files:read scope.
+    Everything else is therefore optional rather than required. *)
+type inbound_file =
+  { if_id : string
+  ; if_name : string option
+  ; if_mimetype : string option
+  ; if_size : int option  (** Bytes. *)
+  ; if_permalink : string option
+  ; if_access : file_access option
+  }
+
+(** The readable body of a message: its text, plus one line per file. A file
+    posted with no message arrives with [text] empty, so the files are the whole
+    message and dropping them drops it entirely. *)
+val text_with_files : text:string -> files:inbound_file list -> string
+
 (** A Slack event inside an [events_api] envelope ([payload.event]). Closed sum of
     the events this gateway surfaces to the caller; others are {!Ignored_event}. *)
 type slack_event =
@@ -39,6 +64,7 @@ type slack_event =
       ; ts : string
       ; mentions_bot : bool
       ; bot_id : string option  (** Set when the author is a bot/app — suppresses loop-prone turns. *)
+      ; files : inbound_file list
       }
   | App_mention of
       { channel_id : string
@@ -46,6 +72,7 @@ type slack_event =
       ; user_id : string
       ; text : string
       ; ts : string
+      ; files : inbound_file list
       }
   | Reaction_added of
       { channel_id : string

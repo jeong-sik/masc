@@ -59,6 +59,7 @@ let mk_event_message ?(channel = "C1") ?(ts = "1700000000.000100")
     ; ts
     ; mentions_bot = mentions
     ; bot_id = None
+    ; files = []
     }
 
 (* ---------------------------------------------------------------- *)
@@ -189,7 +190,13 @@ let test_app_mention_always_emits () =
   let (t, _) = S.step t ~now_mono:0.0 (S.Envelope_received hello) in
   let ev =
     S.App_mention
-      { channel_id = "C1"; thread_ts = None; user_id = "U1"; text = "hey"; ts = "1" }
+      { channel_id = "C1"
+      ; thread_ts = None
+      ; user_id = "U1"
+      ; text = "hey"
+      ; ts = "1"
+      ; files = []
+      }
   in
   let env = env_events_api ~envelope_id:"E3" ev in
   let effects = effects_of t (S.Envelope_received env) in
@@ -239,6 +246,7 @@ let test_bot_message_is_not_ambient () =
       ; ts = "1700000000.000300"
       ; mentions_bot = false
       ; bot_id = Some "B1"
+      ; files = []
       }
   in
   let env = env_events_api ~envelope_id:"EA3" ev in
@@ -350,6 +358,181 @@ let test_parse_envelope_events_api_message () =
     ()
   | Ok _ -> fail "events_api message: kind/event/envelope_id mismatch"
   | Error e -> failf "events_api parse error: %s" e
+
+(* Slack guarantees only [id] on a file object. [name] may be null, and
+   [permalink]/[url_private] need the files:read scope this app does not hold,
+   so a file with almost nothing on it is the normal case, not corruption. *)
+
+let contains haystack needle =
+  let hn = String.length haystack and nn = String.length needle in
+  let rec at i = i + nn <= hn && (String.sub haystack i nn = needle || at (i + 1)) in
+  at 0
+
+let message_with_files ?(text = "") files =
+  `Assoc
+    [ ("type", `String "events_api")
+    ; ("envelope_id", `String "EE9")
+    ; ( "payload"
+      , `Assoc
+          [ ("type", `String "event_callback")
+          ; ("team_id", `String "T1")
+          ; ( "event"
+            , `Assoc
+                [ ("type", `String "message")
+                ; ("channel", `String "C9")
+                ; ("user", `String "U9")
+                ; ("text", `String text)
+                ; ("ts", `String "1700000000.000200")
+                ; ("files", `List files)
+                ] )
+          ] )
+    ]
+
+let files_of ?text items =
+  match S.parse_envelope ~bot_user_id:None (message_with_files ?text items) with
+  | Ok { S.event = Some (S.Message_create { files; _ }); _ } -> files
+  | Ok _ -> fail "expected a message event"
+  | Error e -> failf "parse error: %s" e
+
+let test_decode_file_with_everything () =
+  match
+    files_of
+      [ `Assoc
+          [ ("id", `String "F1")
+          ; ("name", `String "shot.png")
+          ; ("mimetype", `String "image/png")
+          ; ("size", `Int 4211)
+          ; ("permalink", `String "https://x.slack.com/files/F1")
+          ; ("file_access", `String "visible")
+          ]
+      ]
+  with
+  | [ f ] ->
+    Alcotest.(check string) "id" "F1" f.S.if_id;
+    Alcotest.(check (option string)) "name" (Some "shot.png") f.S.if_name;
+    Alcotest.(check (option int)) "size" (Some 4211) f.S.if_size;
+    Alcotest.(check (option string))
+      "mimetype" (Some "image/png") f.S.if_mimetype;
+    Alcotest.(check bool)
+      "access" true
+      (f.S.if_access = Some S.Visible)
+  | other -> failf "expected one file, got %d" (List.length other)
+
+(* Only [id] is promised, so an id-only file is kept and described as best we
+   can rather than dropped. *)
+let test_decode_file_with_only_an_id () =
+  match files_of [ `Assoc [ ("id", `String "F2") ] ] with
+  | [ f ] ->
+    Alcotest.(check string) "id" "F2" f.S.if_id;
+    Alcotest.(check (option string)) "no name" None f.S.if_name;
+    Alcotest.(check (option int)) "no size" None f.S.if_size
+  | other -> failf "expected one file, got %d" (List.length other)
+
+(* Without an id there is nothing to name or fetch later. *)
+let test_decode_file_without_an_id_is_dropped () =
+  Alcotest.(check int)
+    "dropped" 0
+    (List.length (files_of [ `Assoc [ ("name", `String "orphan.txt") ] ]))
+
+(* Slack documents [visible] and [check_file_info] but does not enumerate the
+   field, so an unseen value is carried through, not folded into either. *)
+let test_decode_unknown_file_access_is_carried () =
+  match
+    files_of
+      [ `Assoc
+          [ ("id", `String "F3"); ("file_access", `String "some_future_value") ]
+      ]
+  with
+  | [ f ] ->
+    Alcotest.(check bool)
+      "carried verbatim" true
+      (f.S.if_access = Some (S.Unknown_access "some_future_value"))
+  | other -> failf "expected one file, got %d" (List.length other)
+
+let test_message_with_no_files_decodes_empty () =
+  match
+    S.parse_envelope ~bot_user_id:None
+      (`Assoc
+        [ ("type", `String "events_api")
+        ; ("envelope_id", `String "EE8")
+        ; ( "payload"
+          , `Assoc
+              [ ("type", `String "event_callback")
+              ; ( "event"
+                , `Assoc
+                    [ ("type", `String "message")
+                    ; ("channel", `String "C9")
+                    ; ("user", `String "U9")
+                    ; ("text", `String "words only")
+                    ; ("ts", `String "1700000000.000200")
+                    ] )
+              ] )
+        ])
+  with
+  | Ok { S.event = Some (S.Message_create { files = []; _ }); _ } -> ()
+  | Ok _ -> fail "expected a message with no files"
+  | Error e -> failf "parse error: %s" e
+
+(* The bug this closes: a file posted with no message left [text] empty and the
+   gateway threw the whole thing away as blank. *)
+let test_file_only_message_is_not_blank () =
+  let body =
+    S.text_with_files
+      ~text:""
+      ~files:
+        [ { S.if_id = "F1"
+          ; if_name = Some "shot.png"
+          ; if_mimetype = Some "image/png"
+          ; if_size = Some 4211
+          ; if_permalink = Some "https://x.slack.com/files/F1"
+          ; if_access = Some S.Visible
+          }
+        ]
+  in
+  Alcotest.(check bool) "not blank" false (String.trim body = "");
+  Alcotest.(check bool) "names it" true (contains body "shot.png");
+  Alcotest.(check bool)
+    "points at it" true (contains body "https://x.slack.com/files/F1")
+
+let test_unnamed_file_still_says_something () =
+  let body =
+    S.text_with_files
+      ~text:""
+      ~files:
+        [ { S.if_id = "F2"
+          ; if_name = None
+          ; if_mimetype = None
+          ; if_size = None
+          ; if_permalink = None
+          ; if_access = None
+          }
+        ]
+  in
+  Alcotest.(check bool) "not blank" false (String.trim body = "");
+  Alcotest.(check bool) "falls back to the id" true (contains body "F2")
+
+(* Slack Connect withholds the metadata until the app asks for it. Saying so
+   beats showing a blank where a name would go. *)
+let test_withheld_file_says_it_is_withheld () =
+  let body =
+    S.text_with_files
+      ~text:""
+      ~files:
+        [ { S.if_id = "F3"
+          ; if_name = None
+          ; if_mimetype = None
+          ; if_size = None
+          ; if_permalink = None
+          ; if_access = Some S.Check_file_info
+          }
+        ]
+  in
+  Alcotest.(check bool) "explains" true (contains body "withheld")
+
+let test_text_only_message_is_untouched () =
+  Alcotest.(check string)
+    "unchanged" "just words"
+    (S.text_with_files ~text:"just words" ~files:[])
 
 let test_parse_envelope_events_api_missing_payload_rejected () =
   let json = `Assoc [ ("type", `String "events_api") ] in
@@ -479,6 +662,24 @@ let () =
             test_parse_envelope_disconnect_missing_payload_rejected
         ; test_case "unknown envelope type rejected" `Quick
             test_parse_envelope_unknown_type_rejected
+        ; test_case "decode file with everything" `Quick
+            test_decode_file_with_everything
+        ; test_case "decode file with only an id" `Quick
+            test_decode_file_with_only_an_id
+        ; test_case "decode file without an id is dropped" `Quick
+            test_decode_file_without_an_id_is_dropped
+        ; test_case "decode unknown file_access is carried" `Quick
+            test_decode_unknown_file_access_is_carried
+        ; test_case "message with no files decodes empty" `Quick
+            test_message_with_no_files_decodes_empty
+        ; test_case "file-only message is not blank" `Quick
+            test_file_only_message_is_not_blank
+        ; test_case "unnamed file still says something" `Quick
+            test_unnamed_file_still_says_something
+        ; test_case "withheld file says it is withheld" `Quick
+            test_withheld_file_says_it_is_withheld
+        ; test_case "text-only message is untouched" `Quick
+            test_text_only_message_is_untouched
         ; test_case "decode message missing fields errors" `Quick
             test_decode_event_message_missing_fields
         ; test_case "decode reaction_added" `Quick

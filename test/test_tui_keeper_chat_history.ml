@@ -879,6 +879,47 @@ let test_a_row_without_a_file_says_nothing () =
   | rows -> failf "expected one row, got %d" (List.length rows)
 ;;
 
+(* A row copied verbatim from a live keeper transcript
+   (~/.masc/keeper_chat/analyst.jsonl, 2026-08-25). The pane could not be made
+   to scroll back this far by hand, so the row itself is the check: whatever
+   the runtime writes has to survive this decoder. *)
+let live_attachment_row =
+  {json|[{
+    "id": "msg-1787650428127921-11",
+    "role": "user",
+    "content": "첨부한 이미지에 무엇이 보이나요?",
+    "ts": 1787650428.127921,
+    "attachments": [
+      { "id": "probe-1"
+      , "type": "image"
+      , "name": "vision_probe.png"
+      , "size": 2129
+      , "mime_type": "image/png"
+      , "data": "masc://attachment/probe-1/b40a4fdf6d377a7f23c18089f04b66dfaf8ebed1036aa4faa539ae9d47e6639b"
+      }
+    ],
+    "surface": { "kind": "dashboard" },
+    "speaker_authority": "owner",
+    "delivery_key": { "kind": "operation", "operation_id": "vision-probe-7431" },
+    "transcript_slot": { "kind": "accepted_user" }
+  }]|json}
+
+let test_live_row_keeps_its_file () =
+  match History.rows_of_json (Yojson.Safe.from_string live_attachment_row) with
+  | Error msg -> Alcotest.failf "live row did not decode: %s" msg
+  | Ok decoded ->
+    Alcotest.(check int) "nothing dropped" 0 decoded.History.dropped;
+    (match decoded.History.rows with
+     | [ row ] ->
+       (match row.History.attachments with
+        | [ att ] ->
+          Alcotest.(check string) "name" "vision_probe.png" att.History.att_name;
+          Alcotest.(check string) "mime" "image/png" att.History.att_mime;
+          Alcotest.(check int) "bytes" 2129 att.History.att_bytes
+        | other ->
+          Alcotest.failf "expected one attachment, got %d" (List.length other))
+     | other -> Alcotest.failf "expected one row, got %d" (List.length other))
+
 let () =
   run "tui_keeper_chat_history"
     [ ( "rows"
@@ -935,6 +976,8 @@ let () =
             test_one_unreadable_row_does_not_cost_the_transcript
         ; test_case "a non-array payload is an error" `Quick
             test_a_non_array_payload_is_an_error
+        ; test_case "a live row keeps its file" `Quick
+            test_live_row_keeps_its_file
         ; test_case "a row names the file it carries" `Quick
             test_a_row_names_the_file_it_carries
         ; test_case "a row without a file says nothing" `Quick

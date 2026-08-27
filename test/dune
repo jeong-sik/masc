@@ -67,7 +67,6 @@
   test_keeper_memory_lane
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
-  test_broadcast_wakeup_policy
   test_broadcast_stores_raw_text
   test_keeper_mention_scope
   test_keeper_lane_mentions
@@ -250,7 +249,6 @@
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_keeper_supervisor
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -406,7 +404,6 @@
   test_keeper_connector_attention_wake
   test_keeper_raw_task_signal_wake
   test_broadcast_stores_raw_text
-  test_broadcast_wakeup_policy
   test_keeper_mention_scope
   test_keeper_lane_mentions
   test_keeper_chat_delivery_identity
@@ -592,7 +589,6 @@
   test_keeper_registry_provenance
   test_keeper_registry_hardening
   test_keeper_fd_pressure_fleet
-  test_keeper_supervisor
   test_workspace_telemetry_drop_non_eio
   test_keeper_contract_classifier_pure
   test_compaction_llm_summarizer
@@ -780,7 +776,39 @@
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot))
 
-; Repository catalog tests depend only on the focused repo_manager library.
+; Extracted from the big (tests ...) group above: the keeper fixture TOMLs
+; seed sandbox_profile = "local" (incidental — the suite measures mention
+; wakeup/delivery policy, not sandbox isolation), and keeper-up validation
+; now rejects Local fail-closed without the hatch.
+(test
+ (name test_broadcast_wakeup_policy)
+ (modules test_broadcast_wakeup_policy)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the declarative keeper
+; fixture TOMLs seed sandbox_profile = "local" (incidental — the suite
+; measures supervisor boot/meta materialization, not sandbox isolation),
+; and keeper-up validation now rejects Local fail-closed without the hatch.
+(test
+ (name test_keeper_supervisor)
+ (modules test_keeper_supervisor)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
 ; because it builds a fixture chat.db rather than reading the real one, which
 ; is 240MB of personal correspondence and only exists on a Mac.

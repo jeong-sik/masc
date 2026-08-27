@@ -163,7 +163,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
@@ -502,7 +501,6 @@
   test_progress
   test_validation
   test_channel_gate_binding_store
-  test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
   test_dashboard
@@ -809,6 +807,26 @@
   masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
   masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
   masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Extracted from the big (tests ...) group above: the connector route
+; fixtures boot keepers whose sandbox_profile resolves to Local (incidental —
+; the suite measures channel-gate connector route contracts, not sandbox
+; isolation), and keeper-up validation now rejects Local fail-closed without
+; the hatch.
+(test
+ (name test_channel_gate_connector_routes)
+ (modules test_channel_gate_connector_routes)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
+ (libraries
+  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+  masc.embedded_config masc.keeper_identity masc.mcp_client masc.tool_spawn
+  masc.skill_config masc.skill_reference masc.skill_snapshot))
+
+; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
 ; because it builds a fixture chat.db rather than reading the real one, which
 ; is 240MB of personal correspondence and only exists on a Mac.

@@ -2,23 +2,43 @@
 
 type ledger_revision = private string
 
+type task_id_set = private
+  | Task_ids of
+      { first : Keeper_id.Task_id.t
+      ; rest : Keeper_id.Task_id.t list
+      }
+
 type instruction_origin =
-  | Task_instruction of { task_id : Keeper_id.Task_id.t }
+  | Task_instruction of { task_ids : task_id_set }
   | Session_instruction
 
 type composition_origin =
   | Task_composition of
-      { task_id : Keeper_id.Task_id.t }
+      { task_ids : task_id_set }
   | Session_composition
 
+type delivery_boundary =
+  | Model_response of { agent_core_turn : int }
+  | Official_client_result_handoff of { agent_core_turn : int }
+
 type delivery =
-  { agent_core_turn : int
+  { boundary : delivery_boundary
+  ; runtime_id : string
   ; delivered_at : string
+  ; content_bytes : int
+  ; content_sha256 : string
+  }
+
+type tool_result_receipt =
+  { tool_use_id : string
+  ; content_bytes : int
+  ; content_sha256 : string
   }
 
 type action =
   { tool_use_id : string
   ; tool_name : string
+  ; runtime_id : string
   ; agent_core_turn : int
   ; observed_at : string
   }
@@ -101,13 +121,20 @@ type summary =
 type summary_scope =
   { snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
+  ; invocation_runtime_id : string
   ; reference : Skill_reference.t
+  }
+
+type runtime_count =
+  { runtime_id : string
+  ; count : int
   }
 
 type scoped_summary =
   { scope : summary_scope
   ; summary : summary
+  ; delivery_runtime_counts : runtime_count list
+  ; action_runtime_counts : runtime_count list
   }
 
 type record_outcome =
@@ -135,6 +162,8 @@ type decode_error =
   | Invalid_session_id of string
   | Invalid_origin_kind of string
   | Invalid_task_id of string
+  | Empty_task_ids
+  | Duplicate_task_id of string
   | Invalid_tool_name of string
   | Invalid_turn_ref of string
   | Turn_ref_session_mismatch
@@ -146,6 +175,7 @@ type decode_error =
   | Invalid_served_content_bytes of int
   | Invalid_served_content_sha256 of Skill_reference.revision_error
   | Invalid_delivery_agent_core_turn of int
+  | Invalid_delivery_boundary_kind of string
   | Invalid_delivery_time of string
   | Invalid_action_tool_use_id_field
   | Invalid_action_tool_name_field of string
@@ -194,6 +224,8 @@ val workspace_key : t -> string
 val session_id : t -> Keeper_id.Trace_id.t
 val summarize : t -> summary
 val summary_to_yojson : summary -> Yojson.Safe.t
+val task_id_set_of_list : Keeper_id.Task_id.t list -> (task_id_set, decode_error) result
+val task_id_set_to_list : task_id_set -> Keeper_id.Task_id.t list
 val summarize_by_scope : t -> scoped_summary list
 val scoped_summary_to_yojson : scoped_summary -> Yojson.Safe.t
 
@@ -239,13 +271,16 @@ val observe_delivery :
   config:Workspace.config ->
   trace_id:Keeper_id.Trace_id.t ->
   turn_ref:Ids.Turn_ref.t ->
-  tool_result_ids:string list ->
-  agent_core_turn:int ->
+  tool_results:tool_result_receipt list ->
+  boundary:delivery_boundary ->
+  runtime_id:string ->
   delivered_at:string ->
   (t * string list, store_error) result
 (** Mark exact Skill results that are present in a later provider request.
-    Unrelated tool-result ids are ignored. The returned ids are the matching
-    Skill invocations, including an idempotently re-observed delivery. *)
+    Unrelated tool results are ignored. Instruction results are matched by
+    exact id and content digest; composition results retain their observed
+    digest because no result digest exists before execution. The returned ids
+    are matching Skill invocations, including idempotent re-observations. *)
 
 val observe_action :
   config:Workspace.config ->
@@ -254,6 +289,7 @@ val observe_action :
   active_skill_tool_use_ids:string list ->
   action_tool_use_id:string ->
   tool_name:string ->
+  runtime_id:string ->
   agent_core_turn:int ->
   observed_at:string ->
   (t * int, store_error) result

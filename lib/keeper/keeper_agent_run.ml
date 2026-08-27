@@ -1119,6 +1119,11 @@ let run_turn
                           ~max_request_body_bytes
                           ~body_bytes
                         ->
+                           Option.iter
+                             (s.Keeper_run_tools.stage_skill_delivery_on_wire
+                                ~runtime_id
+                                ~agent_core_turn:acc.current_turn)
+                             !current_request_input_messages_ref;
                            Keeper_request_wire_observation.record
                              ~keeper_name:meta.name
                              ~runtime_id
@@ -1134,6 +1139,8 @@ let run_turn
                                ; input_messages =
                                    !current_request_input_messages_ref
                                })
+                      ~on_official_client_result_handoff:
+                        s.Keeper_run_tools.observe_official_client_result_handoff
                       ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]

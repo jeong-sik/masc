@@ -236,6 +236,7 @@ export {
 
 export {
   parseDashboardKeeperWaitingSource,
+  normalizeSkillActivationProjection,
 } from './dashboard-tools-prompts'
 
 export {

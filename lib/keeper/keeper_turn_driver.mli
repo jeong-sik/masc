@@ -120,6 +120,11 @@ val run_named :
      max_request_body_bytes:int ->
      body_bytes:int ->
      unit) ->
+  ?on_official_client_result_handoff:
+    (runtime_id:string ->
+     invocation:Agent_core.Tool_contract.Invocation.t ->
+     content:string ->
+     unit) ->
   ?on_model_input_window_observation:
     (measurement:Turn_record.model_input_measurement
      -> Runtime_model_input_tail_window.window_observation

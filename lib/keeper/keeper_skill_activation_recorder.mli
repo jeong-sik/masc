@@ -21,7 +21,7 @@ val make :
   turn_ref:Ids.Turn_ref.t ->
   runtime_id:(unit -> string option) ->
   snapshot_revision:Skill_catalog_snapshot.snapshot_revision ->
-  task_scope:Keeper_task_skill_turn.task_scope ->
+  task_selection:Keeper_task_skill_turn.t ->
   (t, error) result
 (** Capture the immutable facts used by every Skill call in one turn. The
     runtime provider resolves the concrete candidate selected for the active
@@ -46,8 +46,9 @@ val record_composition :
 val observe_delivery :
   config:Workspace.config ->
   t ->
-  tool_result_ids:string list ->
-  agent_core_turn:int ->
+  tool_results:Keeper_skill_activation_ledger.tool_result_receipt list ->
+  boundary:Keeper_skill_activation_ledger.delivery_boundary ->
+  runtime_id:string ->
   (string list, error) result
 
 val observe_action :

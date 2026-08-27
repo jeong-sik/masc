@@ -67,6 +67,63 @@ let reference ?(package = "review") ?(name = "review") revision =
     ~content_revision:(content_revision revision)
 ;;
 
+let task_snapshot () =
+  let config =
+    match
+      Skill_source_config.parse_text
+        "[skills]\nactivation-lifetime = \"session\"\nprecedence = \"earlier-source-wins\"\nresource-read-max-bytes = 65536\n[[skills.sources]]\nid = \"workspace\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-write\"\n"
+    with
+    | Ok config -> config
+    | Error _ -> fail "Skill source fixture config rejected"
+  in
+  let source =
+    match config.Skill_source_config.sources with
+    | [ source ] -> source
+    | _ -> fail "expected one Skill source"
+  in
+  let resolved = Skill_source_config.resolve ~base_path:"/workspace" ~user_home:None source in
+  let resolved_path =
+    match resolved.resolution with
+    | Skill_source_config.Resolved path -> path
+    | _ -> fail "Skill source fixture did not resolve"
+  in
+  let document name =
+    Printf.sprintf "---\nname: %s\ndescription: fixture\n---\n%s body" name name
+  in
+  let scan : Skill_catalog_snapshot.source_scan =
+    { source = resolved
+    ; observation = Source_ready { resolved_path; candidates = 2 }
+    ; candidates =
+        [ Candidate_document { directory = "review"; source_text = document "review" }
+        ; Candidate_document { directory = "global"; source_text = document "global" }
+        ]
+    }
+  in
+  let snapshot =
+    match Skill_catalog_snapshot.configured ~config [ scan ] with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "Skill snapshot fixture rejected"
+  in
+  let exact package name =
+    let identity =
+      Skill_reference.make_identity
+        ~source_id:source.id
+        ~package_id:(package_id package)
+        ~name
+    in
+    match Skill_catalog_snapshot.find_exact snapshot identity with
+    | Some entry -> Skill_catalog_snapshot.entry_reference entry
+    | None -> fail "Skill snapshot fixture entry absent"
+  in
+  snapshot, exact "review" "review", exact "global" "global"
+;;
+
+let resolve_for_task snapshot ~task_id references =
+  match Keeper_task_skill_turn.resolve_for_task ~snapshot ~task_id references with
+  | Ok selection -> selection
+  | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+;;
+
 let with_session operation =
   let root = Filename.temp_dir "skill-activation-recorder-" "" in
   let config = Workspace.default_config root in
@@ -78,7 +135,7 @@ let with_session operation =
     (fun () -> operation config trace_id)
 ;;
 
-let make_context ~trace_id ~task_scope =
+let make_context ?(task_selection = Keeper_task_skill_turn.empty) ~trace_id () =
   match
     Recorder.make
       ~trace_id
@@ -88,22 +145,20 @@ let make_context ~trace_id ~task_scope =
            ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
            ~absolute_turn:3)
       ~snapshot_revision
-      ~task_scope
+      ~task_selection
   with
   | Ok context -> context
   | Error error -> fail (Recorder.error_to_string error)
 ;;
 
-let test_task_and_session_origins_are_derived_from_exact_refs () =
+let test_held_only_and_session_origins_are_derived_from_exact_refs () =
   with_session @@ fun config trace_id ->
-  let task_reference = reference 'a' in
-  let session_reference = reference ~package:"global" ~name:"global" 'b' in
+  let snapshot, task_reference, session_reference = task_snapshot () in
+  let task_selection =
+    resolve_for_task snapshot ~task_id:"task-held" [ task_reference ]
+  in
   let context =
-    make_context
-      ~trace_id
-      ~task_scope:
-        (Keeper_task_skill_turn.Task
-           { task_id = "task-007"; references = [ task_reference ] })
+    make_context ~trace_id ~task_selection ()
   in
   (match
      Recorder.record_instruction
@@ -133,11 +188,13 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
          (Ledger.activations ledger)
      with
      | [ Ledger.Instruction_invocation
-           { origin = Ledger.Task_instruction { task_id = observed }; _ }
+           { origin = Ledger.Task_instruction { task_ids }; _ }
        ; Ledger.Composition_invocation
            { origin = Ledger.Session_composition; tool_name }
        ] ->
-       check string "Task origin" "task-007" (Keeper_id.Task_id.to_string observed);
+       check (list string) "held Task origin" [ "task-held" ]
+         (Ledger.task_id_set_to_list task_ids
+          |> List.map Keeper_id.Task_id.to_string);
        check string "composition origin" "keeper_compose_global" tool_name;
        let summary = Ledger.summarize ledger in
        check int "one instruction body" 1 summary.skill_bodies_served;
@@ -165,9 +222,67 @@ let test_task_and_session_origins_are_derived_from_exact_refs () =
      | _ -> fail "exact references did not derive the expected origins")
 ;;
 
+let test_shared_reference_keeps_all_task_ids () =
+  with_session @@ fun config trace_id ->
+  let snapshot, shared_reference, _ = task_snapshot () in
+  let task_selection =
+    Keeper_task_skill_turn.merge
+      [ resolve_for_task snapshot ~task_id:"task-b" [ shared_reference ]
+      ; resolve_for_task snapshot ~task_id:"task-a" [ shared_reference ]
+      ]
+  in
+  let context = make_context ~trace_id ~task_selection () in
+  (match
+     Recorder.record_instruction
+       ~config
+       context
+       ~invocation:(invocation "call-shared-instruction")
+       ~content:(Recorder.Body "shared body")
+       shared_reference
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Recorder.error_to_string error));
+  (match
+     Recorder.record_composition
+       ~config
+       context
+       ~invocation:(invocation "call-shared-composition")
+       ~tool_name:"keeper_compose_shared"
+       shared_reference
+   with
+   | Ok _ -> ()
+   | Error error -> fail (Recorder.error_to_string error));
+  let expected = [ "task-a"; "task-b" ] in
+  let strings task_ids =
+    Ledger.task_id_set_to_list task_ids |> List.map Keeper_id.Task_id.to_string
+  in
+  match Ledger.load ~config ~trace_id with
+  | Error error -> fail (Ledger.store_error_to_string error)
+  | Ok ledger ->
+    (match Ledger.activations ledger with
+     | [ { invocation =
+             Ledger.Instruction_invocation
+               { origin = Ledger.Task_instruction { task_ids }; _ }
+         ; _
+         }
+       ; { invocation =
+             Ledger.Composition_invocation
+               { origin = Ledger.Task_composition { task_ids = composition_ids }
+               ; _
+               }
+         ; _
+         }
+       ] ->
+       check (list string) "instruction Task set" expected (strings task_ids);
+       check (list string) "composition Task set" expected
+         (strings composition_ids)
+     | _ -> fail "shared exact reference lost merged Task provenance")
+;;
+
 let test_invalid_task_scope_fails_closed () =
   let trace_id = trace_id "trace-recorder" in
-  let task_reference = reference 'a' in
+  let snapshot, task_reference, _ = task_snapshot () in
+  let task_selection = resolve_for_task snapshot ~task_id:"" [ task_reference ] in
   match
     Recorder.make
       ~trace_id
@@ -175,9 +290,7 @@ let test_invalid_task_scope_fails_closed () =
       ~turn_ref:
         (Ids.Turn_ref.make ~trace_id:"trace-recorder" ~absolute_turn:1)
       ~snapshot_revision
-      ~task_scope:
-        (Keeper_task_skill_turn.Task
-           { task_id = ""; references = [ task_reference ] })
+      ~task_selection
   with
   | Error (Recorder.Invalid_task_id task_id) ->
     check string "rejected exact id" "" task_id
@@ -189,7 +302,7 @@ let test_resource_receipt_keeps_path_size_and_digest () =
   with_session @@ fun config trace_id ->
   let reference = reference 'a' in
   let context =
-    make_context ~trace_id ~task_scope:Keeper_task_skill_turn.No_task
+    make_context ~trace_id ()
   in
   let relative_path =
     match Skill_resource_path.of_string "references/PROOF.md" with
@@ -233,7 +346,7 @@ let test_turn_scope_mismatch_is_rejected_before_recording () =
       ~runtime_id:(fun () -> Some "test.runtime")
       ~turn_ref:(Ids.Turn_ref.make ~trace_id:"another-trace" ~absolute_turn:1)
       ~snapshot_revision
-      ~task_scope:Keeper_task_skill_turn.No_task
+      ~task_selection:Keeper_task_skill_turn.empty
   with
   | Error Recorder.Turn_scope_mismatch -> ()
   | Error error -> fail (Recorder.error_to_string error)
@@ -252,7 +365,7 @@ let test_runtime_attempt_is_required_before_recording () =
              ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
              ~absolute_turn:1)
         ~snapshot_revision
-        ~task_scope:Keeper_task_skill_turn.No_task
+        ~task_selection:Keeper_task_skill_turn.empty
     with
     | Ok context -> context
     | Error error -> fail (Recorder.error_to_string error)
@@ -283,7 +396,7 @@ let test_runtime_provider_tracks_candidate_failover () =
              ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
              ~absolute_turn:1)
         ~snapshot_revision
-        ~task_scope:Keeper_task_skill_turn.No_task
+        ~task_selection:Keeper_task_skill_turn.empty
     with
     | Ok context -> context
     | Error error -> fail (Recorder.error_to_string error)
@@ -319,8 +432,10 @@ let () =
   run
     "keeper Skill activation recorder"
     [ ( "recording"
-      , [ test_case "exact refs derive Task and session origins" `Quick
-            test_task_and_session_origins_are_derived_from_exact_refs
+      , [ test_case "held-only exact ref keeps Task origin" `Quick
+            test_held_only_and_session_origins_are_derived_from_exact_refs
+        ; test_case "shared exact ref keeps every Task id" `Quick
+            test_shared_reference_keeps_all_task_ids
         ; test_case "invalid Task scope fails closed" `Quick
             test_invalid_task_scope_fails_closed
         ; test_case "resource receipt is exact" `Quick

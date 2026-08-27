@@ -1670,6 +1670,8 @@ let skill_activation_json
               ; "sha256", `String (String.make 64 'c')
               ] )
         ])
+    ?(delivery = `Null)
+    ?(actions = `List [])
     ?(revision = 'a') () =
   match skill_activation_reference_json "ocaml-coding" revision with
   | `Assoc reference_fields ->
@@ -1681,8 +1683,8 @@ let skill_activation_json
            ; "skill_tool_use_id", `String (Printf.sprintf "call-%c" revision)
            ; "agent_core_turn", `Int 0
            ; "invocation", invocation
-           ; "delivery", `Null
-           ; "actions", `List []
+           ; "delivery", delivery
+           ; "actions", actions
            ; "activated_at", `String "2026-08-26T10:30:00Z"
            ])
   | _ -> assert false
@@ -1706,7 +1708,7 @@ let skill_activation_projection_json activations =
     ; "keeper_name", `String "codex-mcp-client"
     ; ( "ledger"
       , `Assoc
-          [ "schema", `String "masc.skill-activations/v3"
+          [ "schema", `String "masc.skill-activations/v4"
           ; "workspace_key", `String workspace_key
           ; "session_id", `String session_id
           ; "revision", `String revision
@@ -1722,14 +1724,38 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
       ; ( "origin"
         , `Assoc
             [ "kind", `String "task_composition"
-            ; "task_id", `String "task-470"
+            ; "task_ids", `List [ `String "task-470"; `String "task-held" ]
             ] )
       ; "tool_name", `String "run-checks"
       ]
   in
   let activations =
     skill_activation_projection_json
-      [ skill_activation_json ~invocation:task_invocation ()
+      [ skill_activation_json
+          ~invocation:task_invocation
+          ~delivery:
+            (`Assoc
+               [ ( "boundary"
+                 , `Assoc
+                     [ "kind", `String "official_client_result_handoff"
+                     ; "agent_core_turn", `Int 0
+                     ] )
+               ; "runtime_id", `String "codex.runtime"
+               ; "delivered_at", `String "2026-08-26T10:30:01Z"
+               ; "content_bytes", `Int 12
+               ; "content_sha256", `String (String.make 64 'c')
+               ])
+          ~actions:
+            (`List
+               [ `Assoc
+                   [ "tool_use_id", `String "call-action"
+                   ; "tool_name", `String "keeper_time_now"
+                   ; "runtime_id", `String "claude.runtime"
+                   ; "agent_core_turn", `Int 0
+                   ; "observed_at", `String "2026-08-26T10:30:02Z"
+                   ]
+               ])
+          ()
       ; skill_activation_json ~revision:'b'
           ~invocation:
             (`Assoc
@@ -1762,11 +1788,12 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
         | [ first; second ] -> first, second
         | _ -> Alcotest.fail "expected two canonical activation rows"
       in
-      let sao_task_id, sao_tool_name =
+      let sao_task_ids, sao_tool_name =
         match first.invocation with
         | Keeper_skill_activation_ledger.Composition_invocation
-            { origin = Task_composition { task_id }; tool_name } ->
-          task_id, tool_name
+            { origin = Task_composition { task_ids }; tool_name } ->
+          ( Keeper_skill_activation_ledger.task_id_set_to_list task_ids
+          , tool_name )
         | _ -> Alcotest.fail "expected task composition origin"
       in
       let session_tool =
@@ -1793,10 +1820,24 @@ let test_decode_skill_activations_keeps_exact_receipt_and_origin () =
            first.snapshot_revision);
       Alcotest.(check string) "turn" "trace-activation#7"
         (Ids.Turn_ref.to_string first.turn_ref);
-      Alcotest.(check string) "task" "task-470"
-        (Keeper_id.Task_id.to_string sao_task_id);
+      Alcotest.(check (list string)) "tasks" [ "task-470"; "task-held" ]
+        (List.map Keeper_id.Task_id.to_string sao_task_ids);
       Alcotest.(check string) "task tool" "run-checks" sao_tool_name;
-      Alcotest.(check string) "session tool" "summarize" session_tool
+      Alcotest.(check string) "session tool" "summarize" session_tool;
+      (match first.delivery, first.actions with
+       | ( Some
+             { boundary = Official_client_result_handoff { agent_core_turn }
+             ; runtime_id
+             ; content_bytes
+             ; _
+             }
+         , [ action ] ) ->
+         Alcotest.(check int) "handoff turn" 0 agent_core_turn;
+         Alcotest.(check string) "delivery runtime" "codex.runtime" runtime_id;
+         Alcotest.(check int) "delivery bytes" 12 content_bytes;
+         Alcotest.(check string) "action runtime" "claude.runtime"
+           action.runtime_id
+       | _ -> Alcotest.fail "v4 delivery/action provenance was not decoded")
   | Ok _ -> Alcotest.fail "expected two typed Skill activation receipts"
 
 let test_decode_skill_activations_keeps_no_session_distinct () =

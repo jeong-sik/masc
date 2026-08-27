@@ -289,6 +289,17 @@ let test_invalid_judgment_fails_loud () =
       (Astring.String.is_infix ~affix:"maybe" reason)
 ;;
 
+let thinking_blocks_key = "keeper.hitl.thinking_blocks"
+
+let with_thinking_blocks_kept n f =
+  let restore () =
+    ignore (Masc.Runtime_params.clear_by_key thinking_blocks_key)
+  in
+  (match Masc.Runtime_params.set_by_key thinking_blocks_key (`Int n) with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "could not set the knob: %s" detail);
+  Fun.protect ~finally:restore f
+
 (* The live shape, 2026-08-27: request_context.initial.history_messages[] with
    content_blocks[] carrying a Keeper's own reasoning beside what it did. *)
 let context_with_thinking =
@@ -342,6 +353,10 @@ let test_the_judge_is_not_shown_the_keepers_reasoning () =
   with_temp_dir "hitl-thinking" @@ fun base_path ->
   install_queue base_path;
   let entry = pending_entry ~base_path () in
+  (* Explicitly at zero. The default keeps the newest few, and a test of
+     "drops them all" that relied on the default would go quiet the day
+     somebody changes it. *)
+  with_thinking_blocks_kept 0 @@ fun () ->
   let bundle =
     Worker.For_testing.build_context_bundle
       ~entry:{ entry with request_context = Some context_with_thinking }
@@ -353,6 +368,11 @@ let test_the_judge_is_not_shown_the_keepers_reasoning () =
      that never reasoned. *)
   check yojson "and the judge is told how much was cut" (`Int 1)
     (bundle |> member "thinking_blocks_omitted")
+
+let test_the_default_keeps_the_newest_few () =
+  (* The default is a shape, not a tuning: more room than one, less than five.
+     Pinned so a change to it is a change somebody made on purpose. *)
+  check int "default" 3 (Masc.Keeper_config.keeper_hitl_thinking_blocks ())
 
 let test_a_turn_without_reasoning_reports_nothing_cut () =
   with_temp_dir "hitl-no-thinking" @@ fun base_path ->
@@ -380,17 +400,6 @@ let test_a_context_of_another_shape_is_carried_through () =
 
 (* Through the real knob, so the wiring is covered and not just the trimming.
    Restored afterwards: a leaked runtime param would decide the next test. *)
-let thinking_blocks_key = "keeper.hitl.thinking_blocks"
-
-let with_thinking_blocks_kept n f =
-  let restore () =
-    ignore (Masc.Runtime_params.clear_by_key thinking_blocks_key)
-  in
-  (match Masc.Runtime_params.set_by_key thinking_blocks_key (`Int n) with
-   | Ok () -> ()
-   | Error detail -> Alcotest.failf "could not set the knob: %s" detail);
-  Fun.protect ~finally:restore f
-
 let test_the_newest_reasoning_can_be_kept () =
   (* The knob exists because the two sides pull opposite ways: the bundle is
      smaller without reasoning, and the judge's deny rationales cite the
@@ -2047,6 +2056,8 @@ let () =
         ; test_case "exact context bundle" `Quick test_context_bundle_is_exact
         ; test_case "the judge is not shown the Keeper's reasoning" `Quick
             test_the_judge_is_not_shown_the_keepers_reasoning
+        ; test_case "the default keeps the newest few" `Quick
+            test_the_default_keeps_the_newest_few
         ; test_case "a turn without reasoning reports nothing cut" `Quick
             test_a_turn_without_reasoning_reports_nothing_cut
         ; test_case "a context of another shape is carried through" `Quick

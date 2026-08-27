@@ -59,13 +59,21 @@ let keeper_status_fast_default () : bool =
    Newest rather than oldest: a constraint a Keeper set for itself is the one
    it just wrote down, and the bulk is the reasoning it has since moved past.
 
-   Left at 0 so this knob changes nothing on its own. Raising it is how an
-   operator buys the deny evidence back, and how the two settings can be
-   compared against the same durable queue. *)
+   Three, and the reason is a shape rather than a measurement. Live queue,
+   same day: Keepers carried 9-19 thinking blocks per approval, 9.4-22.7 kB.
+   Keeping the newest three leaves 1.9-6.6 kB -- 3-8% of the bundle -- so the
+   size win survives while the newest self-imposed constraints do too. It is
+   "more room than one, less than five", not a tuned number, and nothing has
+   yet measured which value a judge actually needs.
+
+   The two values this has had were both accidents of something else: every
+   block, because nobody trimmed, then none, because #31172 trimmed all of
+   them. Neither was chosen. This one at least has the distribution behind it,
+   and the knob is what lets the next value be chosen by measurement. *)
 let keeper_hitl_thinking_blocks_rp =
   _rp_int ~key:"keeper.hitl.thinking_blocks"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_HITL_THINKING_BLOCKS"
-                          ~default:0 ~min_v:0 ~max_v:1000)
+                          ~default:3 ~min_v:0 ~max_v:1000)
     ~min_v:0 ~max_v:1000
     ~description:"Newest keeper thinking blocks kept in the HITL judgment bundle (0 = drop all)" ()
 let keeper_hitl_thinking_blocks () : int =

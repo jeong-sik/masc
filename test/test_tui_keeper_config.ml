@@ -13,6 +13,7 @@ let observed =
       "prompt": {"instructions": "be exact"},
       "execution": {"selected_runtime_id": "codex_subscription.gpt-5.6-sol"},
       "proactive": {"enabled": true},
+      "skills": {"names": null},
       "workspace": {"mention_targets": ["@alpha"]},
       "sources": {
         "has_live_override": true,
@@ -40,8 +41,11 @@ let test_editor_starts_from_observed_values () =
     ; "network_mode"
     ; "instructions"
     ; "proactive_enabled"
+    ; "skills"
     ]
     (assoc_keys projected);
+  Alcotest.(check string) "all Skills use the write contract" "{}"
+    (projected |> Yojson.Safe.Util.member "skills" |> Yojson.Safe.to_string);
   Alcotest.(check string) "stem round-trips observed projection"
     (Yojson.Safe.to_string projected)
     (editor_stem observed |> Yojson.Safe.from_string |> Yojson.Safe.to_string)
@@ -71,6 +75,55 @@ let test_deleted_field_means_unchanged () =
   | Ok patch ->
       Alcotest.(check string) "empty patch" "{}" (Yojson.Safe.to_string patch)
 
+let with_edited_skills before skills =
+  match editable_snapshot before with
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+             if String.equal key "skills" then key, skills else key, value)
+           fields)
+  | _ -> assert false
+
+let check_skill_patch ~label ~before ~skills ~expected =
+  let after = with_edited_skills before skills in
+  match patch_of_edit ~before ~after with
+  | Error detail -> Alcotest.fail detail
+  | Ok patch ->
+      Alcotest.(check string) label expected (Yojson.Safe.to_string patch)
+
+let with_observed_skill_names names =
+  match observed with
+  | `Assoc fields ->
+      `Assoc
+        (("skills", `Assoc [ "names", names ])
+        :: List.remove_assoc "skills" fields)
+  | _ -> assert false
+
+let test_skill_selection_patch_modes () =
+  check_skill_patch ~label:"none" ~before:observed
+    ~skills:(`Assoc [ "names", `List [] ])
+    ~expected:{|{"skills":{"names":[]}}|};
+  check_skill_patch ~label:"exact names" ~before:observed
+    ~skills:(`Assoc [ "names", `List [ `String "review"; `String "research" ] ])
+    ~expected:{|{"skills":{"names":["review","research"]}}|};
+  let exact_before =
+    with_observed_skill_names (`List [ `String "review" ])
+  in
+  check_skill_patch ~label:"all" ~before:exact_before ~skills:(`Assoc [])
+    ~expected:{|{"skills":{}}|}
+
+let test_skill_selection_view_modes () =
+  let check label expected json =
+    Alcotest.(check bool) label true (List.mem expected (view_lines json))
+  in
+  check "all" "Skills                 all published Skills" observed;
+  check "none" "Skills                 none"
+    (with_observed_skill_names (`List []));
+  check "exact names" "Skills                 review, research"
+    (with_observed_skill_names
+       (`List [ `String "review"; `String "research" ]))
+
 let test_unknown_field_is_rejected () =
   match
     patch_of_edit ~before:observed ~after:(`Assoc [ "mystery", `Bool true ])
@@ -94,6 +147,7 @@ let test_view_explains_effective_values_and_sources () =
     [ "# effective settings"
     ; "codex_subscription.gpt-5.6-sol"
     ; "docker / none"
+    ; "Skills                 all published Skills"
     ; "# provenance"
     ; "/config/keepers/alpha.toml"
     ; "Only changed fields are sent"
@@ -108,6 +162,10 @@ let () =
             test_patch_contains_only_changed_fields
         ; Alcotest.test_case "deleted means unchanged" `Quick
             test_deleted_field_means_unchanged
+        ; Alcotest.test_case "skill selection modes" `Quick
+            test_skill_selection_patch_modes
+        ; Alcotest.test_case "skill selection view modes" `Quick
+            test_skill_selection_view_modes
         ; Alcotest.test_case "reject unknown" `Quick
             test_unknown_field_is_rejected
         ; Alcotest.test_case "view meaning" `Quick

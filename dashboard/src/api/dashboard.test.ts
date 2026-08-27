@@ -2979,6 +2979,9 @@ describe('fetchKeeperConfig', () => {
       proactive: {
         enabled: 'true',
       },
+      skills: {
+        names: ['ocaml-coding', 'proof-harness'],
+      },
       hooks: {
         scope: 'keeper_runtime_composite',
         slots: {
@@ -3055,6 +3058,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.selected_runtime_id).toBe('keeper_unified')
     expect(result.execution.selected_runtime_canonical).toBe('keeper_unified')
     expect(result.execution.runtime_options).toEqual(['keeper_unified', 'runpod_mtp.qwen36-35b-a3b-mtp'])
+    expect(result.skills.names).toEqual(['ocaml-coding', 'proof-harness'])
     expect(result.hooks?.scope).toBe('keeper_runtime_composite')
     expect(result.hooks?.slots.pre_tool_use?.features).toEqual(['tool_start_timing'])
     expect(result.sources.precedence).toEqual(['live_meta'])
@@ -3107,7 +3111,7 @@ describe('fetchKeeperConfig', () => {
 
   it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+      new Response('{"name":"keeper-sangsu","max_context_override":null,"skills":{"names":null}}', {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -3118,12 +3122,27 @@ describe('fetchKeeperConfig', () => {
     expect(result.autonomous_wake_prompt).toBeNull()
   })
 
+  it('rejects a response that omits the Skill selection authority', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
+      'Invalid keeper config response: skills.names is required',
+    )
+  })
+
   it('tracks raw keeper config field presence before defaults are normalized', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           name: 'keeper-sangsu',
           max_context_override: null,
+          skills: { names: null },
           prompt: {
             instructions: 'raw instructions only',
           },
@@ -3152,6 +3171,7 @@ describe('fetchKeeperConfig', () => {
         JSON.stringify({
           name: 'keeper-sangsu',
           max_context_override: null,
+          skills: { names: null },
           field_presence: {
             schema: 'keeper.config.field_presence.v1',
             producer: 'dashboard_http_keeper_snapshot',
@@ -3192,6 +3212,7 @@ describe('fetchKeeperConfig', () => {
           JSON.stringify({
             name: 'keeper-sangsu',
             max_context_override: null,
+            skills: { names: null },
             metrics,
           }),
           {
@@ -3227,6 +3248,7 @@ describe('fetchKeeperConfig', () => {
           JSON.stringify({
             name: 'keeper-sangsu',
             max_context_override: null,
+            skills: { names: null },
             runtime: {
               runtime_blocker_class: blockerClass,
               runtime_blocker_summary: blockerClass,
@@ -3254,6 +3276,7 @@ describe('keeper config mutation API', () => {
       new Response(JSON.stringify({
         name: 'keeper-sangsu',
         max_context_override: null,
+        skills: { names: null },
         execution: {
           selected_runtime_id: 'b.two',
           selected_runtime_canonical: 'b.two',
@@ -3282,6 +3305,30 @@ describe('keeper config mutation API', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ runtime_id: 'b.two' })
     expect(result.execution.selected_runtime_id).toBe('b.two')
+  })
+
+  it('posts an exact Skill name selection without changing its shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        name: 'keeper-sangsu',
+        max_context_override: null,
+        skills: { names: ['ocaml-coding'] },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchKeeperConfig('keeper-sangsu', {
+      skills: { names: ['ocaml-coding'] },
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({
+      skills: { names: ['ocaml-coding'] },
+    })
+    expect(result.skills.names).toEqual(['ocaml-coding'])
   })
 })
 

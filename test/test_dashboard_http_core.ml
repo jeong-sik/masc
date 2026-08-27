@@ -3052,6 +3052,33 @@ let test_config_patch_accepts_autonomous_wake_prompt () =
     [ ("autonomous_wake_promptt", `String "typo") ]
 ;;
 
+let test_config_patch_accepts_typed_skills () =
+  let meta = shrink_base_meta () in
+  let validate fields =
+    Keeper_config_post.validate_dashboard_config_patch ~meta fields
+  in
+  let check_ok label fields =
+    match validate fields with
+    | Ok () -> ()
+    | Error error -> Alcotest.failf "%s: %s" label error
+  in
+  let check_error label fields =
+    match validate fields with
+    | Error _ -> ()
+    | Ok () -> Alcotest.failf "%s unexpectedly accepted" label
+  in
+  check_ok "empty object selects all" [ "skills", `Assoc [] ];
+  check_ok "empty names select none"
+    [ "skills", `Assoc [ "names", `List [] ] ];
+  check_ok "exact names are accepted"
+    [ ( "skills"
+      , `Assoc
+          [ "names", `List [ `String "ocaml-coding"; `String "proof-harness" ] ]
+      )
+    ];
+  check_error "skills must be an object" [ "skills", `List [] ]
+;;
+
 let prepare_config_sync_keeper ~sw config name =
   let runtime_path = Filename.concat config.Workspace.base_path "runtime.toml" in
   write_file runtime_path config_sync_runtime_toml;
@@ -3359,6 +3386,84 @@ let test_config_post_round_trips_typed_tools_patch () =
          (String.starts_with ~prefix:"HTTP/1.1 400" invalid_raw))
 ;;
 
+let test_config_post_round_trips_typed_skills_patch () =
+  with_test_env @@ fun ~env ~sw ~config ->
+  let name = "config-sync-skills" in
+  prepare_config_sync_keeper ~sw config name;
+  let toml_path = write_config_sync_toml config name in
+  let parse_toml label =
+    match
+      Keeper_toml_loader.parse_toml
+        (In_channel.with_open_bin toml_path In_channel.input_all)
+    with
+    | Ok doc -> doc
+    | Error error -> failf "%s: %s" label error
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           name))
+    (fun () ->
+       let open Yojson.Safe.Util in
+       let _, before = Dashboard_http_keeper_snapshot.keeper_config_json config name in
+       check bool "absent selection reads as all" true
+         (before |> member "skills" |> member "names" = `Null);
+       let exact_raw, exact_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{"names":["ocaml-coding","proof-harness"]}}|}
+       in
+       check bool "exact selection HTTP 200" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" exact_raw);
+       check (list string) "exact selection reads back"
+         [ "ocaml-coding"; "proof-harness" ]
+         (exact_json
+          |> member "skills"
+          |> member "names"
+          |> to_list
+          |> List.map to_string);
+       let exact_doc = parse_toml "parse exact selection TOML" in
+       check (list string) "exact selection persisted"
+         [ "ocaml-coding"; "proof-harness" ]
+         (Keeper_toml_loader.toml_string_list
+            exact_doc
+            "keeper.skills.names");
+       ignore
+         (Masc.Keeper_keepalive.stop_keepalive_and_await
+            ~base_path:config.base_path
+            name);
+       let none_raw, none_json =
+         post_config
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~state:
+             (Lib.Mcp_server.For_testing.create_state
+                ~base_path:config.base_path)
+           ~name
+           {|{"skills":{"names":[]}}|}
+       in
+       check bool "empty selection HTTP 200" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" none_raw);
+       check (list string) "empty selection reads back" []
+         (none_json
+          |> member "skills"
+          |> member "names"
+          |> to_list
+          |> List.map to_string);
+       let none_doc = parse_toml "parse empty selection TOML" in
+       check (list string) "empty selection persisted" []
+         (Keeper_toml_loader.toml_string_list
+            none_doc
+            "keeper.skills.names"))
+;;
+
 (* #10710 regression: [keepers_dashboard_json] must aggregate every persisted
    keeper through the bounded fiber pool. Before the fiber-batch change the
    per-keeper enrich ran as an unbounded fan-out; this pins that all registered
@@ -3656,6 +3761,8 @@ let () =
             test_context_shrink_detection;
           test_case "config patch accepts the autonomous wake prompt" `Quick
             test_config_patch_accepts_autonomous_wake_prompt;
+          test_case "config patch accepts typed Skills" `Quick
+            test_config_patch_accepts_typed_skills;
           test_case "config POST atomically restarts runtime" `Quick
             test_config_post_restarts_from_atomic_toml;
           test_case "runtime sync failure preserves commit" `Quick
@@ -3664,5 +3771,7 @@ let () =
             test_config_post_prevalidates_mixed_request;
           test_case "typed tools patch round-trips and previews admission" `Quick
             test_config_post_round_trips_typed_tools_patch;
+          test_case "typed Skills patch preserves all, exact and none" `Quick
+            test_config_post_round_trips_typed_skills_patch;
         ] );
     ]

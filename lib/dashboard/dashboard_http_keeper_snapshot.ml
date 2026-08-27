@@ -254,6 +254,14 @@ let keeper_config_json (config : Workspace.config) (name : string)
                   ] )
           ]
       in
+      let skills =
+        `Assoc
+          [ ( "names"
+            , match defaults.skill_names with
+              | None -> `Null
+              | Some names -> Json_util.json_string_list names )
+          ]
+      in
       let metrics =
         `Assoc [
           ("total_turns", `Int m.runtime.usage.total_turns);
@@ -338,6 +346,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("execution", execution);
          ("proactive", proactive);
          ("tools", tools);
+         ("skills", skills);
          ("auto_execution_session", auto_execution_session_surface_json ());
          ("hooks", Keeper_hooks_agent_core.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);

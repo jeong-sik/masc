@@ -549,6 +549,7 @@ let confirm_context_shrink_field = "confirm_context_shrink"
 let dashboard_config_patch_allowed_fields =
   [ "name"
   ; "tools"
+  ; "skills"
   ; "max_context_override"
   ; "autonomous_wake_prompt"
   ; confirm_context_shrink_field
@@ -701,6 +702,10 @@ let validate_dashboard_config_field key value =
     | `String _ -> Ok ()
     | other -> dashboard_field_type_error key "a string" other
   else if key = "tools" then
+    (match value with
+     | `Assoc _ -> Ok ()
+     | other -> dashboard_field_type_error key "an object" other)
+  else if key = "skills" then
     (match value with
      | `Assoc _ -> Ok ()
      | other -> dashboard_field_type_error key "an object" other)

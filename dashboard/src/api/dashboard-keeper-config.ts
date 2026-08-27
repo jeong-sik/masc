@@ -39,6 +39,16 @@ function decodeMaxContextOverride(value: unknown): number | null {
   )
 }
 
+function decodeSkillNames(value: unknown): string[] | null {
+  if (value === null) return null
+  if (Array.isArray(value) && value.every(name => typeof name === 'string')) {
+    return [...value]
+  }
+  throw new Error(
+    'Invalid keeper config response: skills.names must be an array of strings or null',
+  )
+}
+
 function normalizeStringList(value: unknown): string[] {
   const array = asStringArray(value)
   if (array.length > 0) return array
@@ -180,10 +190,15 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   if (data.config_error !== undefined && data.config_error !== null) {
     throw new Error(keeperConfigUnavailableMessage(data.config_error))
   }
+  const maxContextOverride = decodeMaxContextOverride(data.max_context_override)
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
+  const skills = isRecord(data.skills) ? data.skills : null
+  if (!skills || !Object.hasOwn(skills, 'names')) {
+    throw new Error('Invalid keeper config response: skills.names is required')
+  }
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
@@ -195,7 +210,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   return {
     name: asNullableString(data.name) ?? requestedName,
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
-    max_context_override: decodeMaxContextOverride(data.max_context_override),
+    max_context_override: maxContextOverride,
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
@@ -227,6 +242,9 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
+    },
+    skills: {
+      names: decodeSkillNames(skills.names),
     },
     hooks: hooks
       ? {
@@ -304,6 +322,7 @@ export type KeeperConfigUpdatePayload = {
   instructions?: string
   // Proactive
   proactive_enabled?: boolean
+  skills?: { names?: string[] }
 }
 
 export async function patchKeeperConfig(

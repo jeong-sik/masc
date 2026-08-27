@@ -278,6 +278,40 @@ let test_elapsed_text_picks_a_unit () =
     [ "32ms"; "1.2s"; "2m05s" ]
     (List.map Acting.elapsed_text [ 32.; 1200.; 125_000. ])
 
+(* The feed used to render keeper_skill and keeper_compose_* as anonymous
+   "call"/"returned" rows, so skill use was invisible in the chat-side surfaces
+   and only the Tools screen knew. The label now says it is a skill. *)
+let test_skill_tools_wear_a_skill_label () =
+  let row event =
+    Acting.row_of_entry ~duration_ms:None { Acting.ae_at = 100.; ae_event = event }
+  in
+  check string "skill body read is named" "skill call"
+    (row (agent_core ~tool:"keeper_skill" "sangsu")).Acting.label;
+  check string "composition run is named" "skill call"
+    (row (agent_core ~tool:"keeper_compose_work-intake" "sangsu")).Acting.label;
+  check string "a plain tool stays a call" "call"
+    (row (agent_core ~tool:"masc_board_stats" "sangsu")).Acting.label;
+  check string "completion keeps the tag" "skill returned"
+    (row (agent_core ~kind:Observer.Tool_completed ~tool:"keeper_skill" "sangsu"))
+      .Acting.label;
+  let keeper_tool_call ?disposition tool : Observer.event =
+    Observer.Keeper_tool_call
+      { Observer.kt_keeper = "sangsu"
+      ; kt_tool = tool
+      ; kt_duration_ms = None
+      ; kt_disposition = disposition
+      ; kt_at = 100.
+      }
+  in
+  check string "keeper skill call is named" "skill call"
+    (row (keeper_tool_call "keeper_skill")).Acting.label;
+  check string "a disposition keeps the tag beside it" "skill \xc2\xb7 delivered"
+    (row (keeper_tool_call ~disposition:"delivered" "keeper_compose_work-intake"))
+      .Acting.label;
+  check string "a plain keeper tool stays a tool call" "tool call"
+    (row (keeper_tool_call "masc_board_stats")).Acting.label
+;;
+
 let () =
   run "tui acting"
     [ ( "rows"
@@ -306,5 +340,7 @@ let () =
         ; test_case "a lane-named event is attributed by its trace" `Quick
             test_a_lane_named_event_is_attributed_by_its_trace
         ; test_case "elapsed text picks a unit" `Quick test_elapsed_text_picks_a_unit
+        ; test_case "skill tools wear a skill label in the feed" `Quick
+            test_skill_tools_wear_a_skill_label
         ] )
     ]

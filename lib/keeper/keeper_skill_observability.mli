@@ -49,7 +49,6 @@ type profile = private
   ; flow : flow option
   }
 
-val of_skill : Keeper_skill_catalog.skill -> profile option
 val of_skill_with_reference : Skill_reference.t -> Keeper_skill_catalog.skill -> profile
 (** Candidate-profile projection for a validated edited document that is not
     published yet. The caller supplies the exact candidate revision. *)

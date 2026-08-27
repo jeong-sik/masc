@@ -31,8 +31,6 @@ type composition =
 
 type t = skill list
 
-type named_skill_error = Missing_named_skill of { name : string }
-
 type error =
   | Definition_rejected of
       { directory : string
@@ -512,20 +510,6 @@ let instruction_entries catalog =
        | Instruction -> Some (skill.name, skill.description, skill.body)
        | Composition _ -> None)
     catalog
-;;
-
-let instruction_names_for catalog names =
-  let rec resolve instruction_names = function
-    | [] -> Ok (List.rev instruction_names)
-    | name :: rest ->
-      (match find catalog name with
-       | None -> Error (Missing_named_skill { name })
-       | Some skill ->
-         (match skill.surface with
-          | Instruction -> resolve (name :: instruction_names) rest
-          | Composition _ -> resolve instruction_names rest))
-  in
-  resolve [] names
 ;;
 
 let compositions catalog =

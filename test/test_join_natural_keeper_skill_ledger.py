@@ -218,6 +218,21 @@ def dashboard(value):
     }
 
 
+def historical(value):
+    return {
+        "schema": "masc.dashboard.skill-activations/v1",
+        "status": "available",
+        "trace_id": value["session_id"],
+        "ledger": value,
+        "summary": proof.summarize(
+            value["activations"], value["transition_rejections"]
+        ),
+        "scoped_summaries": proof.scoped_summaries(
+            value["activations"], value["transition_rejections"]
+        ),
+    }
+
+
 def validate(activations):
     producer, raw = receipt()
     durable = ledger(activations)
@@ -232,6 +247,8 @@ def validate(activations):
         health_after=health(),
         dashboard_before=projected,
         dashboard_after=copy.deepcopy(projected),
+        historical_before=historical(durable),
+        historical_after=historical(copy.deepcopy(durable)),
         durable_ledger=durable,
         durable_ledger_after=copy.deepcopy(durable),
     )
@@ -275,6 +292,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
             health_after=health(),
             dashboard_before=dashboard(current),
             dashboard_after=dashboard(copy.deepcopy(current)),
+            historical_before=historical(durable),
+            historical_after=historical(copy.deepcopy(durable)),
             durable_ledger=durable,
             durable_ledger_after=copy.deepcopy(durable),
         )
@@ -357,6 +376,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 health_after=health(),
                 dashboard_before=dashboard(projected_ledger),
                 dashboard_after=dashboard(projected_ledger),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
             )
@@ -379,6 +400,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 health_after=health(),
                 dashboard_before=dashboard(durable),
                 dashboard_after=dashboard(durable),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
             )
@@ -417,6 +440,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                         health_after=health(),
                         dashboard_before=dashboard(durable),
                         dashboard_after=dashboard(durable),
+                        historical_before=historical(durable),
+                        historical_after=historical(copy.deepcopy(durable)),
                         durable_ledger=durable,
                         durable_ledger_after=copy.deepcopy(durable),
                     )
@@ -437,6 +462,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 health_after=health("2026-08-27T00:01:00Z"),
                 dashboard_before=projected,
                 dashboard_after=projected,
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
             )
@@ -460,6 +487,8 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 health_after=health(),
                 dashboard_before=before,
                 dashboard_after=dashboard(advanced),
+                historical_before=historical(durable),
+                historical_after=historical(copy.deepcopy(durable)),
                 durable_ledger=durable,
                 durable_ledger_after=copy.deepcopy(durable),
             )
@@ -483,8 +512,64 @@ class NaturalKeeperSkillLedgerJoinTest(unittest.TestCase):
                 health_after=health(),
                 dashboard_before=projected,
                 dashboard_after=projected,
+                historical_before=historical(durable),
+                historical_after=historical(advanced),
                 durable_ledger=durable,
                 durable_ledger_after=advanced,
+            )
+
+    def test_typed_historical_projection_must_equal_raw_durable_ledger(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        forged = ledger([activation("forged-call")])
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "typed historical Skill projection differs"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=dashboard(durable),
+                dashboard_after=dashboard(copy.deepcopy(durable)),
+                historical_before=historical(forged),
+                historical_after=historical(copy.deepcopy(forged)),
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
+            )
+
+    def test_unavailable_typed_historical_projection_is_rejected(self):
+        producer, raw = receipt()
+        durable = ledger([activation("call-skill-1")])
+        unavailable = {
+            "schema": "masc.dashboard.skill-activations/v1",
+            "status": "unavailable",
+            "trace_id": "trace-one",
+            "reason": "activation_ledger_unreadable",
+            "detail": "typed decoder rejected durable ledger",
+        }
+
+        with self.assertRaisesRegex(
+            joiner.JoinError, "historical Skill projection fields differ"
+        ):
+            joiner.validate_join(
+                receipt=producer,
+                receipt_raw=raw,
+                expected_receipt_sha256=proof.digest_bytes(raw),
+                source_before=source(),
+                source_after=source(),
+                health_before=health(),
+                health_after=health(),
+                dashboard_before=dashboard(durable),
+                dashboard_after=dashboard(copy.deepcopy(durable)),
+                historical_before=unavailable,
+                historical_after=unavailable,
+                durable_ledger=durable,
+                durable_ledger_after=copy.deepcopy(durable),
             )
 
     def test_duplicate_key_receipt_is_rejected_by_shared_strict_decoder(self):

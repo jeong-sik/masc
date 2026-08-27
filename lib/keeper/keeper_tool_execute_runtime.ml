@@ -342,7 +342,8 @@ let handle_tool_execute_typed
               then (
                 local_hatch_warned := true;
                 Log.Keeper.warn
-                  "local playground enabled via MASC_EXEC_ALLOW_LOCAL_PLAYGROUND (dev/test only)");
+                  "local playground enabled via MASC_EXEC_ALLOW_LOCAL_PLAYGROUND keeper=%s (dev/test only)"
+                  meta.name);
               local_dispatch_sandbox ())
             else
               Error

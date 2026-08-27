@@ -467,6 +467,7 @@ describe('ScheduledAutomationPanel', () => {
         payload_kind: 'masc.keeper_wake',
         payload_support: 'supported',
         payload_target: 'keeper:schedule-keeper',
+        payload_keeper_name: 'schedule-keeper',
         payload_summary: 'Scheduled lane wake',
         last_wake: {
           schedule_id: 'sched-keeper-wake',
@@ -602,6 +603,12 @@ describe('ScheduledAutomationPanel', () => {
     expect(v2ReactionEvidence).not.toBeNull()
     expect(v2ReactionEvidence?.textContent).toContain('keeper_reaction_ledger')
     expect(v2ReactionEvidence?.textContent).toContain('matched stimulus')
+    // The detail drawer links to the woken keeper so an operator can read what
+    // the turn actually did instead of stopping at the wake receipt.
+    const keeperLink = container.querySelector<HTMLAnchorElement>('[data-testid="schedule-detail-keeper-link"]')
+    expect(keeperLink).not.toBeNull()
+    expect(keeperLink?.getAttribute('href')).toContain('keeper=schedule-keeper')
+    expect(keeperLink?.textContent).toContain('schedule-keeper')
 
     const wakeRequest = auto.requests[0]!
     const ackedAuto = automation([

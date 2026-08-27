@@ -320,6 +320,16 @@ export function ScheduleSurface() {
             >≡ 목록</button>
           </div>
           <${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />
+          <${ActionButton}
+            variant="danger"
+            size="sm"
+            onClick=${handlePrune}
+            disabled=${pruning}
+            ariaBusy=${pruning}
+            testId="schedule-prune-btn"
+          >
+            ${pruning ? '정리 중...' : '완료된 예약 정리'}
+          <//>
         </div>`}
 
         ${blockingError
@@ -357,18 +367,6 @@ export function ScheduleSurface() {
           >Keeper 진단 · wake evidence · background ${diagOpen ? '▴' : '▾'}</button>
           ${diagOpen
             ? html`
-                <div class="sch-diag-actions">
-                  <${ActionButton}
-                    variant="danger"
-                    size="sm"
-                    onClick=${handlePrune}
-                    disabled=${pruning}
-                    ariaBusy=${pruning}
-                    testId="schedule-prune-btn"
-                  >
-                    ${pruning ? '정리 중...' : '완료된 예약 정리'}
-                  <//>
-                </div>
                 <section class="mt-3" aria-label="Keeper lane inventory" data-testid="schedule-keeper-lanes">
                   <div class="ov-card-h"><h3>Keeper Lanes · wake evidence</h3></div>
                   <${KeeperLaneInventoryPanel} inventory=${waitingInventory} />

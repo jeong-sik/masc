@@ -31,6 +31,9 @@ function snapshot() {
     generated_at: '2026-08-27T00:00:00Z',
     observed_at_unix: 20,
     observation_only: true,
+    exact_run_projection_count: 4,
+    exact_run_source_total: 4,
+    exact_run_projection_truncated: false,
     lanes: [
       row('board_attention_exact', 'running'),
       row('hitl_auto_judge'),

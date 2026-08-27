@@ -1273,7 +1273,7 @@ type async_msg =
         string )
       result
   | Standalone_lanes_loaded of
-      (Masc.Tui_decode.standalone_lanes_snapshot, string) result
+      int * (Masc.Tui_decode.standalone_lanes_snapshot, string) result
   | Verification_loaded of (Masc.Tui_decode.verification_snapshot, string) result
   | Harness_loaded of (Masc.Tui_decode.harness_snapshot, string) result
   | Fusion_runs_loaded of
@@ -2992,6 +2992,8 @@ let launch_fusion_detail_load state ~mailbox ~run_id =
 let launch_lanes_load state ~mailbox =
   let host = server_peer_host in
   let port = state.port in
+  state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
+  let standalone_generation = state.standalone_lanes_generation in
   let run () =
     let keeper_result =
       try Masc_tui_loader.load_keeper_lanes ~host ~port with
@@ -3004,14 +3006,19 @@ let launch_lanes_load state ~mailbox =
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
     in
-    enqueue_async mailbox (Standalone_lanes_loaded standalone_result)
+    enqueue_async mailbox
+      (Standalone_lanes_loaded (standalone_generation, standalone_result))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
       Eio.Fiber.fork_daemon ~sw (fun () ->
           run ();
           `Stop_daemon)
-  | None -> enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"))
+  | None ->
+      enqueue_async mailbox (Lanes_loaded (Error "Eio switch is unavailable"));
+      enqueue_async mailbox
+        (Standalone_lanes_loaded
+           (standalone_generation, Error "Eio switch is unavailable"))
 
 let launch_verification_load state ~mailbox =
   let host = server_peer_host in
@@ -7177,12 +7184,13 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
              stale; clearing them would turn a failed refresh into an empty
              reading. *)
           state.lanes_error <- Some detail)
-  | Standalone_lanes_loaded result -> (
-      match result with
-      | Ok snapshot ->
-          state.standalone_lanes <- Some snapshot;
-          state.standalone_lanes_error <- None
-      | Error detail -> state.standalone_lanes_error <- Some detail)
+  | Standalone_lanes_loaded (generation, result) ->
+      if generation = state.standalone_lanes_generation then (
+        match result with
+        | Ok snapshot ->
+            state.standalone_lanes <- Some snapshot;
+            state.standalone_lanes_error <- None
+        | Error detail -> state.standalone_lanes_error <- Some detail)
   | Harness_loaded result -> (
       match result with
       | Ok snapshot ->

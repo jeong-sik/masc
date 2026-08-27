@@ -1335,6 +1335,7 @@ type state = {
   mutable lanes: Tui_decode.keeper_lanes_snapshot option;
   mutable standalone_lanes: Tui_decode.standalone_lanes_snapshot option;
   mutable standalone_lanes_error: string option;
+  mutable standalone_lanes_generation: int;
   (* Read from the same composite body as [lanes]. A Keeper the producer has
      not projected is simply absent from this list, which the Secrets tab
      shows as "no projection" rather than as an empty credential set. *)
@@ -1890,6 +1891,7 @@ let create_state
   lanes = None;
   standalone_lanes = None;
   standalone_lanes_error = None;
+  standalone_lanes_generation = 0;
   keeper_secrets = [];
   lanes_error = None;
   lanes_action_error = None;
@@ -2260,7 +2262,31 @@ let surface_body_rows (state : state) ~terminal_rows =
      - agenda_chrome_rows state)
 ;;
 
+let standalone_lanes_chrome ~row_count ~error ~truncated =
+  let evidence_rows = match row_count with None -> 1 | Some count -> count in
+  let stale_error_row =
+    if Option.is_some row_count && Option.is_some error then 1 else 0
+  in
+  2 + evidence_rows + stale_error_row + (if truncated then 1 else 0)
+;;
+
 let lanes_scrolled (state : state) =
+  (* The renderer draws one title and one divider around either the five
+     standalone rows or its single loading/error row. This belongs in the
+     typed scroll model: subtracting it only while drawing lets key movement
+     land on Keeper rows the frame cannot show. *)
+  let standalone_chrome =
+    standalone_lanes_chrome
+      ~row_count:
+        (Option.map
+           (fun snapshot -> List.length snapshot.Tui_decode.sls_lanes)
+           state.standalone_lanes)
+      ~error:state.standalone_lanes_error
+      ~truncated:
+        (match state.standalone_lanes with
+         | None -> false
+         | Some snapshot -> snapshot.sls_exact_run_projection_truncated)
+  in
   { sc_count =
       (match state.lanes with
        | None -> 0
@@ -2268,6 +2294,7 @@ let lanes_scrolled (state : state) =
   ; sc_chrome =
       lanes_listing_chrome ~load_error:state.lanes_error
         ~action_error:state.lanes_action_error
+      + standalone_chrome
   ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }

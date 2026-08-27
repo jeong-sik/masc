@@ -53,6 +53,9 @@ export interface StandaloneLanesSnapshot {
   generatedAt: string
   observedAtUnix: number
   observationOnly: true
+  exactRunProjectionCount: number
+  exactRunSourceTotal: number
+  exactRunProjectionTruncated: boolean
   lanes: StandaloneLaneSnapshotRow[]
 }
 
@@ -150,6 +153,15 @@ export function parseStandaloneLanesSnapshot(raw: unknown): StandaloneLanesSnaps
   if (!isRecord(raw)) fail('root must be an object')
   if (raw.schema !== 'masc.standalone_llm_lanes.v1') fail('root.schema is unknown')
   if (raw.observation_only !== true) fail('root.observation_only must be true')
+  if (typeof raw.exact_run_projection_truncated !== 'boolean') {
+    fail('root.exact_run_projection_truncated must be a boolean')
+  }
+  const exactRunProjectionCount = count(raw.exact_run_projection_count, 'root.exact_run_projection_count')
+  const exactRunSourceTotal = count(raw.exact_run_source_total, 'root.exact_run_source_total')
+  if (exactRunProjectionCount > exactRunSourceTotal) fail('root exact run projection exceeds source total')
+  if (raw.exact_run_projection_truncated !== (exactRunProjectionCount < exactRunSourceTotal)) {
+    fail('root.exact_run_projection_truncated does not match counts')
+  }
   if (!Array.isArray(raw.lanes)) fail('root.lanes must be an array')
   const lanes = raw.lanes.map(parseLane)
   if (lanes.length !== LANE_IDS.length || new Set(lanes.map(lane => lane.laneId)).size !== LANE_IDS.length) {
@@ -160,6 +172,9 @@ export function parseStandaloneLanesSnapshot(raw: unknown): StandaloneLanesSnaps
     generatedAt: string(raw.generated_at, 'root.generated_at'),
     observedAtUnix: number(raw.observed_at_unix, 'root.observed_at_unix'),
     observationOnly: true,
+    exactRunProjectionCount,
+    exactRunSourceTotal,
+    exactRunProjectionTruncated: raw.exact_run_projection_truncated,
     lanes,
   }
 }

@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot, KeeperManifestRevision, KeeperRuntimeAssignmentRevision, KeeperConfigRevision } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -51,7 +51,7 @@ function decodeSkillNames(value: unknown): string[] | null {
 
 function decodeManifestRevision(value: unknown): KeeperManifestRevision {
   if (!isRecord(value)) {
-    throw new Error('Invalid keeper config response: manifest_revision must be an object')
+    throw new Error('Invalid keeper config response: config_revision.manifest must be an object')
   }
   if (value.state === 'missing' && Object.keys(value).length === 1) {
     return { state: 'missing' }
@@ -67,10 +67,51 @@ function decodeManifestRevision(value: unknown): KeeperManifestRevision {
   const detail = value.state === 'unavailable' && typeof value.detail === 'string'
     ? `: ${value.detail}`
     : ''
-  throw new Error(`Invalid keeper config response: manifest_revision is unavailable or malformed${detail}`)
+  throw new Error(`Invalid keeper config response: config_revision.manifest is unavailable or malformed${detail}`)
 }
 
-function decodeManifestWarnings(value: unknown): KeeperConfig['manifest_transaction_warnings'] {
+function decodeRuntimeAssignmentRevision(value: unknown): KeeperRuntimeAssignmentRevision {
+  if (!isRecord(value)) {
+    throw new Error('Invalid keeper config response: runtime_assignment revision is malformed')
+  }
+  if (value.state === 'runtime_config_missing' && Object.keys(value).length === 1) {
+    return { state: 'runtime_config_missing' }
+  }
+  if (value.state !== 'runtime_config_present' || typeof value.source_revision !== 'string'
+    || !/^[0-9a-f]{64}$/.test(value.source_revision) || !isRecord(value.assignment)
+    || Object.keys(value).length !== 3) {
+    throw new Error('Invalid keeper config response: runtime_assignment revision is malformed')
+  }
+  const assignment = value.assignment
+  if (assignment.state === 'missing' && Object.keys(assignment).length === 1) {
+    return {
+      state: 'runtime_config_present',
+      source_revision: value.source_revision,
+      assignment: { state: 'missing' },
+    }
+  }
+  if (assignment.state === 'assigned' && typeof assignment.runtime_id === 'string'
+    && assignment.runtime_id.trim() !== '' && Object.keys(assignment).length === 2) {
+    return {
+      source_revision: value.source_revision,
+      state: 'runtime_config_present',
+      assignment: { state: 'assigned', runtime_id: assignment.runtime_id },
+    }
+  }
+  throw new Error('Invalid keeper config response: runtime_assignment state is malformed')
+}
+
+function decodeConfigRevision(value: unknown): KeeperConfigRevision {
+  if (!isRecord(value) || Object.keys(value).length !== 2) {
+    throw new Error('Invalid keeper config response: config_revision must be an object')
+  }
+  return {
+    manifest: decodeManifestRevision(value.manifest),
+    runtime_assignment: decodeRuntimeAssignmentRevision(value.runtime_assignment),
+  }
+}
+
+function decodeManifestWarnings(value: unknown): KeeperConfig['config_transaction_warnings'] {
   if (value === undefined) return undefined
   if (!Array.isArray(value)) {
     throw new Error('Invalid keeper config response: manifest warnings must be an array')
@@ -87,13 +128,13 @@ function decodeManifestWarnings(value: unknown): KeeperConfig['manifest_transact
   })
 }
 
-function decodeManifestWrite(value: unknown): KeeperConfig['manifest_write'] {
+function decodeConfigWrite(value: unknown): KeeperConfig['config_write'] {
   if (value === undefined) return undefined
   if (!isRecord(value) || typeof value.applied !== 'boolean') {
-    throw new Error('Invalid keeper config response: manifest_write is malformed')
+    throw new Error('Invalid keeper config response: config_write is malformed')
   }
   return {
-    revision: decodeManifestRevision(value.revision),
+    revision: decodeConfigRevision(value.revision),
     applied: value.applied,
     warnings: decodeManifestWarnings(value.warnings) ?? [],
   }
@@ -259,10 +300,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
 
   return {
     name: asNullableString(data.name) ?? requestedName,
-    manifest_revision: decodeManifestRevision(data.manifest_revision),
-    manifest_write: decodeManifestWrite(data.manifest_write),
-    manifest_transaction_warnings:
-      decodeManifestWarnings(data.manifest_transaction_warnings),
+    config_revision: decodeConfigRevision(data.config_revision),
+    config_write: decodeConfigWrite(data.config_write),
+    config_transaction_warnings:
+      decodeManifestWarnings(data.config_transaction_warnings),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: maxContextOverride,
     autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
@@ -382,14 +423,14 @@ export type KeeperConfigUpdatePayload = {
 export async function patchKeeperConfig(
   name: string,
   payload: KeeperConfigUpdatePayload,
-  expectedManifestRevision: KeeperManifestRevision,
+  expectedConfigRevision: KeeperConfigRevision,
 ): Promise<KeeperConfig> {
   await ensureDevToken()
   return post<unknown>(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     {
       ...payload,
-      expected_manifest_revision: expectedManifestRevision,
+      expected_config_revision: expectedConfigRevision,
     },
   ).then(raw => normalizeKeeperConfig(raw, name))
 }

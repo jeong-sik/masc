@@ -86,8 +86,8 @@ let create_owner_meta_exn config meta =
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
-let manifest_revision_exn config keeper_name =
-  match Turn_up_config_persistence.current_revision ~config ~keeper_name with
+let config_revision_exn config keeper_name =
+  match Turn_up_config_persistence.current_config_revision ~config ~keeper_name with
   | Ok revision -> revision
   | Error error -> fail error
 ;;
@@ -1774,7 +1774,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       in
       let result =
         Turn_up_update.update_keeper
-          ~expected_manifest_revision:(manifest_revision_exn config live_name)
+          ~expected_config_revision:(config_revision_exn config live_name)
           ctx
           parsed
           live_meta
@@ -1822,15 +1822,16 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         }
       in
       let initial_revision =
+        let missing_revision = config_revision_exn config stale_name in
         match
           Turn_up_config_persistence.persist
-            ~expected_revision:Turn_up_config_persistence.Missing
+            ~expected_revision:missing_revision
             ~config
             ~parsed:stale_parsed
             ~meta:{ stale_meta with instructions = "initial manifest" }
             ()
         with
-        | Ok { value = { revision; _ }; _ } -> revision
+        | Ok _ -> config_revision_exn config stale_name
         | Error error ->
           fail (Turn_up_config_persistence.error_to_string error)
       in
@@ -1875,7 +1876,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
           ~session_id:trace_id
       in
       let runtime_path =
-        Fusion_config_loader.runtime_toml_path ~base_path:config.base_path
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.base_path
       in
       let meta_snapshot () =
         match Keeper_meta_store.read_meta config stale_name with
@@ -1894,14 +1896,14 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       let before_stale_update = authority_snapshot () in
       let stale_result =
         Turn_up_update.update_keeper
-          ~expected_manifest_revision:initial_revision
+          ~expected_config_revision:initial_revision
           ctx
           stale_parsed
           stale_meta
       in
       check bool "stale paused update is rejected by manifest CAS" true
         (Option.is_some
-           (Turn_up_update.manifest_revision_conflict_of_result stale_result));
+           (Turn_up_update.config_revision_conflict_of_result stale_result));
       check bool
         "stale paused update leaves manifest, receipt, runtime, checkpoint, and meta unchanged"
         true
@@ -1918,7 +1920,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
             Error
               (Keeper_owner_registry.Command_lookup_failed
                  (Keeper_owner_registry.Owner_not_found keeper_name)))
-          ~expected_manifest_revision:(manifest_revision_exn config stale_name)
+          ~expected_config_revision:(config_revision_exn config stale_name)
           ctx
           stale_parsed
           stale_meta
@@ -1945,7 +1947,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       in
       let stopped_result =
         Turn_up_update.update_keeper
-          ~expected_manifest_revision:(manifest_revision_exn config stopped_name)
+          ~expected_config_revision:(config_revision_exn config stopped_name)
           ctx
           stopped_parsed
           stopped_meta
@@ -2046,7 +2048,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
            ~keeper_name:name
            (fun () ->
              Turn_up_update.update_keeper
-               ~expected_manifest_revision:(manifest_revision_exn config name)
+               ~expected_config_revision:(config_revision_exn config name)
                ctx
                parsed
                meta)
@@ -2086,7 +2088,7 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
               ~keeper_name:name));
       let retry =
         Turn_up_update.update_keeper
-          ~expected_manifest_revision:(manifest_revision_exn config name)
+          ~expected_config_revision:(config_revision_exn config name)
           ctx
           parsed
           after
@@ -2205,7 +2207,7 @@ let test_update_keeper_cancellation_finishes_lane_swap () =
             Eio.Promise.resolve resolve_update_switch update_sw;
             ignore
               (Turn_up_update.update_keeper
-                 ~expected_manifest_revision:(manifest_revision_exn config name)
+                 ~expected_config_revision:(config_revision_exn config name)
                  ctx
                  parsed
                  meta);
@@ -4729,6 +4731,30 @@ let test_crashed_cycle_records_health_failure () =
   let summary = Health.get_summary ~agent_name:keeper_name in
   check int "crashed cycles are observed" 3 summary.failure_count
 
+let test_invalid_keeper_config_revision_name_creates_no_artifact () =
+  let base_path = temp_dir "invalid-config-revision-name" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path
+      in
+      let escaped =
+        Filename.concat (Filename.dirname keepers_dir) "escaped.toml.lock"
+      in
+      (match
+         Turn_up_config_persistence.current_config_revision
+           ~config
+           ~keeper_name:"../escaped"
+       with
+       | Ok _ -> fail "invalid Keeper name unexpectedly acquired a revision"
+       | Error _ -> ());
+      check bool "invalid name created no escaped lock artifact" false
+        (Sys.file_exists escaped);
+      check bool "invalid name created no keepers directory" false
+        (Sys.file_exists keepers_dir))
+
 (* ── Test runner ──────────────────────────────────────────── *)
 
 let () =
@@ -4839,6 +4865,8 @@ let () =
         test_pipeline_stage_sensitivity;
     ];
     "scheduling", [
+      test_case "invalid config revision name creates no artifact" `Quick
+        test_invalid_keeper_config_revision_name_creates_no_artifact;
       test_case "runtime observations cannot block requested turn" `Quick
         test_runtime_observation_cannot_block_requested_turn;
       test_case "explicit stop blocks requested turn" `Quick

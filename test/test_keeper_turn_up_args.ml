@@ -191,10 +191,20 @@ let with_persisting_context f =
 
 let current_revision_exn config keeper_name =
   match
-    Keeper_turn_up_config_persistence.current_revision ~config ~keeper_name
+    Keeper_turn_up_config_persistence.current_config_revision ~config ~keeper_name
   with
   | Ok revision -> revision
   | Error error -> failf "current revision: %s" error
+
+let missing_config_revision :
+    Keeper_turn_up_config_persistence.config_revision =
+  { manifest = Keeper_turn_up_config_persistence.Missing
+  ; runtime_assignment = Runtime.Runtime_config_missing
+  }
+
+let config_revision_with_manifest manifest :
+    Keeper_turn_up_config_persistence.config_revision =
+  { manifest; runtime_assignment = Runtime.Runtime_config_missing }
 
 (* End-to-end for the settable surface behind the dashboard PATCH and
    masc_keeper_up: parse -> TOML persist -> profile-defaults read-back, then
@@ -450,13 +460,13 @@ let test_manifest_revision_allows_only_one_stale_writer () =
   let initial =
     match
       Keeper_turn_up_config_persistence.persist
-        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~expected_revision:missing_config_revision
         ~config:ctx.config
         ~parsed:(parse "initial")
         ~meta
         ()
     with
-    | Ok { value = outcome; _ } -> outcome.revision
+    | Ok _ -> current_revision_exn ctx.config name
     | Error error ->
       failf "initial persist: %s"
         (Keeper_turn_up_config_persistence.error_to_string error)
@@ -471,7 +481,7 @@ let test_manifest_revision_allows_only_one_stale_writer () =
   in
   let first_revision =
     match first with
-    | Ok { value = outcome; _ } -> outcome.revision
+    | Ok _ -> current_revision_exn ctx.config name
     | Error error ->
       failf "first writer: %s"
         (Keeper_turn_up_config_persistence.error_to_string error)
@@ -482,7 +492,8 @@ let test_manifest_revision_allows_only_one_stale_writer () =
        ~config:ctx.config
        ~parsed:(parse "publication rejected")
        ~meta:{ meta with instructions = "publication rejected" }
-       ~publish:(fun _ -> Keeper_turn_up_config_persistence.Rollback `Rejected)
+       ~publish:(fun _runtime_transaction _ ->
+         Keeper_turn_up_config_persistence.Rollback `Rejected)
        ()
    with
    | Ok { value = `Rejected; _ } -> ()
@@ -492,7 +503,7 @@ let test_manifest_revision_allows_only_one_stale_writer () =
        (Keeper_turn_up_config_persistence.error_to_string error));
   let after_rollback =
     match
-      Keeper_turn_up_config_persistence.current_revision
+      Keeper_turn_up_config_persistence.current_config_revision
         ~config:ctx.config
         ~keeper_name:name
     with
@@ -564,11 +575,12 @@ let test_rejected_create_publication_removes_manifest () =
   in
   (match
      Keeper_turn_up_config_persistence.persist_with_publication
-       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~expected_revision:missing_config_revision
        ~config:ctx.config
        ~parsed
        ~meta
-       ~publish:(fun _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ~publish:(fun _runtime_transaction _ ->
+         Keeper_turn_up_config_persistence.Rollback ())
        ()
    with
    | Ok { value = (); _ } -> ()
@@ -576,14 +588,87 @@ let test_rejected_create_publication_removes_manifest () =
      failf "create rollback: %s"
        (Keeper_turn_up_config_persistence.error_to_string error));
   match
-    Keeper_turn_up_config_persistence.current_revision
+    Keeper_turn_up_config_persistence.current_config_revision
       ~config:ctx.config
       ~keeper_name:name
   with
-  | Ok Keeper_turn_up_config_persistence.Missing -> ()
-  | Ok (Keeper_turn_up_config_persistence.Sha256 _) ->
+  | Ok { manifest = Keeper_turn_up_config_persistence.Missing; _ } -> ()
+  | Ok { manifest = Keeper_turn_up_config_persistence.Sha256 _; _ } ->
     fail "rejected create left a manifest behind"
   | Error error -> failf "revision after create rollback: %s" error
+;;
+
+let test_publication_rollback_restores_manifest_and_runtime_bytes () =
+  with_persisting_context @@ fun ctx ->
+  let name = "composite-rollback-fixture" in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
+  Fs_compat.mkdir_p (Filename.dirname runtime_path);
+  let runtime_source =
+    Fs_compat.load_file (Masc_test_deps.source_path "config/runtime.toml")
+  in
+  Fs_compat.save_file runtime_path runtime_source;
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String name; "instructions", `String "initial" ])
+    with
+    | Ok meta -> meta
+    | Error error -> fail error
+  in
+  let parse instructions =
+    match
+      Keeper_turn_up_args.parse ctx
+        (`Assoc [ "name", `String name; "instructions", `String instructions ])
+    with
+    | Ok parsed -> parsed
+    | Error result -> fail (Keeper_types_profile.tool_result_body result)
+  in
+  let initial_revision = current_revision_exn ctx.config name in
+  (match
+     Keeper_turn_up_config_persistence.persist
+       ~expected_revision:initial_revision
+       ~config:ctx.config
+       ~parsed:(parse "initial")
+       ~meta
+       ()
+   with
+   | Ok _ -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error));
+  let manifest_path =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:ctx.config.base_path
+    |> fun dir -> Filename.concat dir (name ^ ".toml")
+  in
+  let manifest_before = Fs_compat.load_file manifest_path in
+  let runtime_before = Fs_compat.load_file runtime_path in
+  let revision = current_revision_exn ctx.config name in
+  (match
+     Keeper_turn_up_config_persistence.persist_with_publication
+       ~expected_revision:revision
+       ~config:ctx.config
+       ~parsed:(parse "rejected")
+       ~meta:{ meta with instructions = "rejected" }
+       ~publish:(fun runtime_transaction _ ->
+         match
+           Runtime.commit_keeper_assignment runtime_transaction
+             ~runtime_id:(Some "ollama_cloud.deepseek-v4-flash")
+         with
+         | Error detail -> fail detail
+         | Ok _ -> Keeper_turn_up_config_persistence.Rollback ())
+       ()
+   with
+   | Ok { value = (); _ } -> ()
+   | Error error ->
+     fail (Keeper_turn_up_config_persistence.error_to_string error));
+  check string "Rollback restores exact manifest bytes"
+    manifest_before (Fs_compat.load_file manifest_path);
+  check string "Rollback restores exact runtime.toml bytes"
+    runtime_before (Fs_compat.load_file runtime_path)
 ;;
 
 let run_cas_child base name expected_hex instructions ready_path start_path =
@@ -628,7 +713,9 @@ let run_cas_child base name expected_hex instructions ready_path start_path =
   in
   match
     Keeper_turn_up_config_persistence.persist
-      ~expected_revision:(Keeper_turn_up_config_persistence.Sha256 expected_hex)
+      ~expected_revision:
+        (config_revision_with_manifest
+           (Keeper_turn_up_config_persistence.Sha256 expected_hex))
       ~config:ctx.config
       ~parsed
       ~meta
@@ -663,7 +750,7 @@ let test_two_processes_same_revision_have_one_winner () =
   let expected =
     match
       Keeper_turn_up_config_persistence.persist
-        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~expected_revision:missing_config_revision
         ~config:ctx.config
         ~parsed
         ~meta
@@ -750,20 +837,26 @@ let test_revision_projection_holds_manifest_lock () =
   let initial =
     match
       Keeper_turn_up_config_persistence.persist
-        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~expected_revision:missing_config_revision
         ~config:ctx.config
         ~parsed:(parse "initial")
         ~meta
         ()
     with
-    | Ok { value = { revision; _ }; _ } -> revision
+    | Ok _ -> current_revision_exn ctx.config name
     | Error error ->
       fail (Keeper_turn_up_config_persistence.error_to_string error)
   in
   let writer_started, resolve_writer_started = Eio.Promise.create () in
   let writer_done, resolve_writer_done = Eio.Promise.create () in
+  let runtime_reader_started, resolve_runtime_reader_started = Eio.Promise.create () in
+  let runtime_reader_done, resolve_runtime_reader_done = Eio.Promise.create () in
+  let runtime_path =
+    Config_dir_resolver.runtime_toml_path_for_base_path
+      ~base_path:ctx.config.base_path
+  in
   let projected =
-    Keeper_turn_up_config_persistence.with_current_revision
+    Keeper_turn_up_config_persistence.with_current_config_revision
       ~config:ctx.config
       ~keeper_name:name
       (fun revision ->
@@ -778,10 +871,20 @@ let test_revision_projection_holds_manifest_lock () =
               ()
           in
           Eio.Promise.resolve resolve_writer_done result);
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve resolve_runtime_reader_started ();
+          let result =
+            Runtime.observe_keeper_assignment ~runtime_config_path:runtime_path
+              ~keeper_name:name ()
+          in
+          Eio.Promise.resolve resolve_runtime_reader_done result);
         Eio.Promise.await writer_started;
+        Eio.Promise.await runtime_reader_started;
         Eio.Fiber.yield ();
         check bool "writer is fenced during projection" true
           (Option.is_none (Eio.Promise.peek writer_done));
+        check bool "runtime projection is fenced during paired GET" true
+          (Option.is_none (Eio.Promise.peek runtime_reader_done));
         revision)
   in
   (match projected with
@@ -792,6 +895,10 @@ let test_revision_projection_holds_manifest_lock () =
    | Ok _ -> ()
    | Error error ->
      fail (Keeper_turn_up_config_persistence.error_to_string error))
+  ;
+  (match Eio.Promise.await runtime_reader_done with
+   | Ok _ -> ()
+   | Error error -> fail error)
 ;;
 
 let test_release_failure_preserves_committed_receipt () =
@@ -834,7 +941,7 @@ let test_release_failure_preserves_committed_receipt () =
   match
     Keeper_turn_up_config_persistence.For_testing.persist_with_release_failure
       ~release_failure
-      ~expected_revision:Keeper_turn_up_config_persistence.Missing
+      ~expected_revision:missing_config_revision
       ~config:ctx.config
       ~parsed
       ~meta
@@ -877,13 +984,13 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
   let initial =
     match
       Keeper_turn_up_config_persistence.persist
-        ~expected_revision:Keeper_turn_up_config_persistence.Missing
+        ~expected_revision:missing_config_revision
         ~config:ctx.config
         ~parsed:(parse "initial")
         ~meta:(meta "initial")
         ()
     with
-    | Ok { value = { revision; _ }; _ } -> revision
+    | Ok _ -> current_revision_exn ctx.config name
     | Error error ->
       fail (Keeper_turn_up_config_persistence.error_to_string error)
   in
@@ -895,10 +1002,12 @@ let test_rollback_after_rename_failure_requires_reconciliation () =
        ~meta:(meta "rejected")
        ()
    with
-   | Error (Keeper_turn_up_config_persistence.Reconciliation_required state) ->
+   | Error
+       (Keeper_turn_up_config_persistence.Composite_reconciliation_required
+          { manifest = Some state; runtime_assignment = None }) ->
      check bool "observed authority is the restored snapshot" true
        (state.observed
-        = Keeper_turn_up_config_persistence.Observed_revision initial)
+        = Keeper_turn_up_config_persistence.Observed_revision initial.manifest)
    | Error error ->
      fail
        ("unexpected rollback error: "
@@ -929,11 +1038,12 @@ let test_publication_exception_restores_missing_manifest () =
   in
   (match
      Keeper_turn_up_config_persistence.persist_with_publication
-       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~expected_revision:missing_config_revision
        ~config:ctx.config
        ~parsed
        ~meta
-       ~publish:(fun _ -> raise (Failure "injected publication exception"))
+       ~publish:(fun _runtime_transaction _ ->
+         raise (Failure "injected publication exception"))
        ()
    with
    | Error (Keeper_turn_up_config_persistence.Publication_exception _) -> ()
@@ -944,7 +1054,7 @@ let test_publication_exception_restores_missing_manifest () =
    | Ok _ -> fail "raising publication was reported as committed");
   check bool "publication exception leaves no orphan manifest" true
     (current_revision_exn ctx.config name
-     = Keeper_turn_up_config_persistence.Missing)
+     = missing_config_revision)
 ;;
 
 let test_post_write_revision_failure_restores_missing_manifest () =
@@ -969,7 +1079,7 @@ let test_post_write_revision_failure_restores_missing_manifest () =
   (match
      Keeper_turn_up_config_persistence.For_testing
      .persist_with_post_write_revision_failure
-       ~expected_revision:Keeper_turn_up_config_persistence.Missing
+       ~expected_revision:missing_config_revision
        ~config:ctx.config
        ~parsed
        ~meta
@@ -983,7 +1093,7 @@ let test_post_write_revision_failure_restores_missing_manifest () =
    | Ok _ -> fail "post-write revision failure was reported as committed");
   check bool "post-write revision failure leaves no orphan manifest" true
     (current_revision_exn ctx.config name
-     = Keeper_turn_up_config_persistence.Missing)
+     = missing_config_revision)
 ;;
 
 (* masc#25767: masc_keeper_up described itself as "Create or update a durable keeper"
@@ -1153,6 +1263,10 @@ let () =
             "rejected create publication leaves manifest missing"
             `Quick
             test_rejected_create_publication_removes_manifest
+        ; test_case
+            "publication rollback restores both config authorities"
+            `Quick
+            test_publication_rollback_restores_manifest_and_runtime_bytes
         ; test_case
             "two processes with one revision produce one winner"
             `Quick

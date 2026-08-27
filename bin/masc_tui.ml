@@ -1314,7 +1314,7 @@ type async_msg =
   | Runtime_assignment_set of
       string
       * string option
-      * (Masc_tui_http.runtime_config_commit_receipt, string) result
+      * (Masc_tui_http.runtime_assignment_write_result, string) result
       (** keeper, the runtime it was pointed at ([None] = back to default),
           and whether the server took it. *)
   | Keeper_chat_approval_answered of
@@ -3667,8 +3667,19 @@ let launch_runtime_assignment_set state ~mailbox ~keeper_name ~runtime_id =
   let run () =
     let result =
       try
-        Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
-          ~runtime_id
+        match
+          Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
+        with
+        | Error detail -> Error detail
+        | Ok json ->
+          (match Json_util.assoc_member_opt "config_revision" json with
+           | Some config_revision ->
+             (match Json_util.assoc_member_opt "runtime_assignment" config_revision with
+              | Some expected_assignment_revision ->
+                Masc_tui_http.post_runtime_assignment ~host ~port ~keeper_name
+                  ~runtime_id ~expected_assignment_revision
+              | None -> Error "Keeper config has no runtime assignment revision")
+           | None -> Error "Keeper config has no composite revision")
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Error (Printexc.to_string exn)
@@ -7244,14 +7255,20 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
       | Error detail -> state.runtime_catalog_error <- Some detail)
   | Runtime_assignment_set (keeper_name, runtime_id, result) -> (
       match result with
-      | Ok receipt ->
+      | Ok write ->
+          let summary =
+            match write with
+            | Masc_tui_http.Runtime_assignment_committed receipt ->
+              Masc_tui_http.runtime_config_commit_receipt_summary receipt
+            | Masc_tui_http.Runtime_assignment_unchanged -> "unchanged"
+          in
           add_event state "system"
             ((match runtime_id with
               | Some id -> Printf.sprintf "%s now runs on %s" keeper_name id
               | None ->
                   Printf.sprintf "%s is back on the default runtime" keeper_name)
              ^ " · "
-             ^ Masc_tui_http.runtime_config_commit_receipt_summary receipt);
+             ^ summary);
           (* The assignment table just changed under the picker; re-read it
              rather than patching a local copy the server may disagree with. *)
           launch_runtime_catalog_load state ~mailbox

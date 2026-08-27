@@ -359,14 +359,14 @@ describe('typed API errors', () => {
       '/api/v1/keepers/alpha/config',
       new Response(JSON.stringify({
         error: {
-          code: 'keeper_manifest_revision_conflict',
+          code: 'keeper_config_revision_conflict',
           expected: { state: 'missing' },
           observed: { state: 'sha256', value: 'a'.repeat(64) },
         },
       }), { status: 409 }),
     )
 
-    expect(error.errorCode).toBe('keeper_manifest_revision_conflict')
+    expect(error.errorCode).toBe('keeper_config_revision_conflict')
     expect(error.status).toBe(409)
   })
 

@@ -34,8 +34,8 @@ let with_keeper_config_field_presence = function
   | other -> other
 ;;
 
-let keeper_manifest_revision_json = function
-  | Ok revision -> Keeper_turn_up_config_persistence.revision_to_yojson revision
+let keeper_config_revision_json = function
+  | Ok revision -> Keeper_turn_up_config_persistence.config_revision_to_yojson revision
   | Error detail ->
     `Assoc
       [ "state", `String "unavailable"
@@ -45,7 +45,7 @@ let keeper_manifest_revision_json = function
 
 (** Build a structured config JSON for a single keeper, grouped by category.
     Returns (http_status, json). *)
-let keeper_config_json_once ~manifest_revision (config : Workspace.config) (name : string)
+let keeper_config_json_once ~config_revision (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match Keeper_meta_store.read_meta config name with
   | Error msg ->
@@ -90,7 +90,7 @@ let keeper_config_json_once ~manifest_revision (config : Workspace.config) (name
          let body =
            `Assoc
              [ "name", `String raw_meta.name
-             ; "manifest_revision", keeper_manifest_revision_json manifest_revision
+             ; "config_revision", keeper_config_revision_json config_revision
              ; "effective_config", `Null
              ; ( "config_error"
                , Keeper_types_profile.keeper_toml_config_error_to_json
@@ -321,7 +321,7 @@ let keeper_config_json_once ~manifest_revision (config : Workspace.config) (name
       let body =
        `Assoc [
          ("name", `String m.name);
-         ("manifest_revision", keeper_manifest_revision_json manifest_revision);
+         ("config_revision", keeper_config_revision_json config_revision);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          (* Keeper-level override only ([None] = inherit the fleet
@@ -372,16 +372,16 @@ let keeper_config_json_once ~manifest_revision (config : Workspace.config) (name
 let keeper_config_json (config : Workspace.config) (name : string)
     : [ `OK | `Not_found ] * Yojson.Safe.t =
   match
-    Keeper_turn_up_config_persistence.with_current_revision
+    Keeper_turn_up_config_persistence.with_current_config_revision
       ~config
       ~keeper_name:name
       (fun revision ->
-        keeper_config_json_once ~manifest_revision:(Ok revision) config name)
+        keeper_config_json_once ~config_revision:(Ok revision) config name)
   with
   | Ok { value = status, `Assoc fields; warnings } ->
     ( status
     , `Assoc
-        (( "manifest_transaction_warnings"
+        (( "config_transaction_warnings"
          , `List
              (List.map
                 Keeper_turn_up_config_persistence.warning_to_yojson
@@ -389,7 +389,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          :: fields) )
   | Ok { value; warnings = _ } -> value
   | Error detail ->
-    keeper_config_json_once ~manifest_revision:(Error detail) config name
+    keeper_config_json_once ~config_revision:(Error detail) config name
 ;;
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.

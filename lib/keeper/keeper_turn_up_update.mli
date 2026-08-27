@@ -11,13 +11,13 @@
     message on the typed error payload. *)
 val update_keeper :
   ?preserve_prompt_defaults:bool ->
-  expected_manifest_revision:Keeper_turn_up_config_persistence.revision ->
+  expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   Keeper_meta_contract.keeper_meta ->
   Keeper_types_profile.tool_result
 
-val manifest_revision_conflict_of_result :
+val config_revision_conflict_of_result :
   Keeper_types_profile.tool_result ->
   Keeper_turn_up_config_persistence.conflict option
 
@@ -37,7 +37,7 @@ module For_testing : sig
        , Keeper_owner_registry.command_error )
        result) ->
     ?preserve_prompt_defaults:bool ->
-    expected_manifest_revision:Keeper_turn_up_config_persistence.revision ->
+    expected_config_revision:Keeper_turn_up_config_persistence.config_revision ->
     _ Keeper_types_profile.context ->
     Keeper_turn_up_args.parsed_args ->
     Keeper_meta_contract.keeper_meta ->

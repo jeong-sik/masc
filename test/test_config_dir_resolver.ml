@@ -426,6 +426,12 @@ let test_rfc0121_keeper_repo_mappings_toml () =
     "/x/.masc/config/keeper_repo_mappings.toml"
     (Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path:"/x")
 
+let test_runtime_toml_path_uses_explicit_base_path () =
+  with_env "MASC_CONFIG_DIR" None (fun () ->
+    check string "runtime.toml under explicit workspace config root"
+      "/x/.masc/config/runtime.toml"
+      (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path:"/x"))
+
 let test_rfc0121_masc_root_agrees_with_common () =
   (* SSOT bridge — resolver helper must produce the same path as the
      pre-existing [Common] helper that callers historically used. *)
@@ -570,6 +576,8 @@ let () =
             test_rfc0121_repositories_toml;
           test_case "keeper_repo_mappings_toml under config" `Quick
             test_rfc0121_keeper_repo_mappings_toml;
+          test_case "runtime.toml uses explicit workspace config root" `Quick
+            test_runtime_toml_path_uses_explicit_base_path;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
         ] );

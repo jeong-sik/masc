@@ -93,6 +93,7 @@ const baseConfig = {
   path: MOCK_RUNTIME_PATH,
   file_name: 'runtime.toml',
   source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
+  source_revision: 'a'.repeat(64),
   reloaded: false,
   provider_protocols: providerProtocols,
 }
@@ -493,7 +494,15 @@ describe('RuntimeTomlEditor', () => {
     fireEvent.change(select, { target: { value: 'openai.gpt' } })
 
     await waitFor(() => {
-      expect(apiMocks.patchRuntimeAssignment).toHaveBeenCalledWith('sangsu', 'openai.gpt')
+      expect(apiMocks.patchRuntimeAssignment).toHaveBeenCalledWith(
+        'sangsu',
+        'openai.gpt',
+        {
+          state: 'runtime_config_present',
+          source_revision: baseConfig.source_revision,
+          assignment: { state: 'missing' },
+        },
+      )
     })
 
     await waitFor(() => {

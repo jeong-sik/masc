@@ -971,6 +971,9 @@ let fetch_runtime_probe ~(host : string) ~(port : int) ~(force : bool) :
   get_json ~host ~port ~path
 
 type runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.t
+type runtime_assignment_write_result =
+  | Runtime_assignment_committed of runtime_config_commit_receipt
+  | Runtime_assignment_unchanged
 
 let decode_runtime_config_commit_receipt = Masc_tui_runtime_config_receipt.decode
 let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summary
@@ -978,8 +981,9 @@ let runtime_config_commit_receipt_summary = Masc_tui_runtime_config_receipt.summ
 (** POST /api/v1/runtime/config/assignment — point a keeper at a runtime.
     [runtime_id = None] clears the explicit assignment back to the default. *)
 let post_runtime_assignment ~(host : string) ~(port : int)
-    ~(keeper_name : string) ~(runtime_id : string option) :
-    (runtime_config_commit_receipt, string) result =
+    ~(keeper_name : string) ~(runtime_id : string option)
+    ~(expected_assignment_revision : Yojson.Safe.t) :
+    (runtime_assignment_write_result, string) result =
   let body =
     Yojson.Safe.to_string
       (`Assoc
@@ -987,13 +991,20 @@ let post_runtime_assignment ~(host : string) ~(port : int)
           ::
           (match runtime_id with
            | Some id -> [ ("runtime_id", `String id) ]
-           | None -> [])))
+           | None -> [])
+          @ [ "expected_assignment_revision", expected_assignment_revision ]))
   in
   match
     post_json ~host ~port ~path:"/api/v1/runtime/config/assignment" ~body
   with
   | Error detail -> Error detail
-  | Ok json -> decode_runtime_config_commit_receipt json
+  | Ok (`Assoc fields as json) ->
+    (match List.assoc_opt "applied" fields with
+     | Some (`Bool false) -> Ok Runtime_assignment_unchanged
+     | Some _ | None ->
+       decode_runtime_config_commit_receipt json
+       |> Result.map (fun receipt -> Runtime_assignment_committed receipt))
+  | Ok _ -> Error "runtime assignment response must be an object"
 
 (** GET /api/v1/keepers/tool-approvals — the tool calls keepers are holding. *)
 let fetch_keeper_tool_approvals ~(host : string) ~(port : int) :
@@ -1290,7 +1301,7 @@ type keeper_config_post_error =
 let keeper_config_post_error_to_string = function
   | Keeper_config_transport_error detail -> detail
   | Keeper_config_revision_conflict _ ->
-    "keeper manifest revision conflict; authoritative reload required"
+    "keeper config revision conflict; authoritative reload required"
   | Keeper_config_reconciliation_required _ ->
     "keeper manifest reconciliation required; authoritative reload required"
   | Keeper_config_runtime_sync_failed _ ->
@@ -1329,7 +1340,7 @@ let post_keeper_config ~(host : string) ~(port : int) ~(keeper_name : string)
       | None -> None
     in
     (match status, code, parsed with
-     | 409, Some "keeper_manifest_revision_conflict", Some json ->
+     | 409, Some "keeper_config_revision_conflict", Some json ->
        Error (Keeper_config_revision_conflict json)
      | 503, Some "keeper_manifest_reconciliation_required", Some json ->
        Error (Keeper_config_reconciliation_required json)

@@ -38,13 +38,13 @@ let declarative_manifest_revision (p : Keeper_turn_up_args.parsed_args) =
   | Declarative_manifest_present { sha256; _ } ->
     Keeper_turn_up_config_persistence.Sha256 sha256
 
-let manifest_revision_conflict ~expected ~observed =
+let config_revision_conflict ~expected ~observed =
   tool_result_error_data
     ~class_:Tool_result.Workflow_rejection
     (`Assoc
-       [ "code", `String "keeper_manifest_revision_conflict"
-       ; "expected", Keeper_turn_up_config_persistence.revision_to_yojson expected
-       ; "observed", Keeper_turn_up_config_persistence.revision_to_yojson observed
+       [ "code", `String "keeper_config_revision_conflict"
+       ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
+       ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
        ])
 
 let handle_keeper_up ctx args : tool_result =
@@ -52,7 +52,7 @@ let handle_keeper_up ctx args : tool_result =
   | Error result -> result
   | Ok p ->
     (match
-       Keeper_turn_up_config_persistence.with_current_revision
+       Keeper_turn_up_config_persistence.with_current_config_revision
          ~config:ctx.config
          ~keeper_name:p.name
          (fun revision -> revision, read_meta ctx.config p.name)
@@ -63,18 +63,19 @@ let handle_keeper_up ctx args : tool_result =
        tool_result_error ~class_:Tool_result.Runtime_failure (Printf.sprintf "%s" e)
        |> with_manifest_read_warnings warnings
      | Ok { value = observed, Ok None; warnings } ->
-       let expected = declarative_manifest_revision p in
+       let expected_manifest = declarative_manifest_revision p in
+       let expected = { observed with manifest = expected_manifest } in
        (if expected = observed
         then
           Keeper_turn_up_create.create_keeper
-            ~expected_manifest_revision:expected
+            ~expected_config_revision:expected
             ctx
             p
-        else manifest_revision_conflict ~expected ~observed)
+        else config_revision_conflict ~expected ~observed)
        |> with_manifest_read_warnings warnings
      | Ok { value = revision, Ok (Some old); warnings } ->
        Keeper_turn_up_update.update_keeper
-         ~expected_manifest_revision:revision
+         ~expected_config_revision:revision
          ctx
          p
          old

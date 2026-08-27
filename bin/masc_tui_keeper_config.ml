@@ -60,10 +60,10 @@ let editor_stem json =
 
 let editable_field_names = List.map editable_field_name editable_fields
 
-let expected_manifest_revision before =
-  match member "manifest_revision" before with
+let expected_config_revision before =
+  match member "config_revision" before with
   | Some (`Assoc _ as revision) -> Ok revision
-  | Some _ | None -> Error "keeper manifest revision was not observed"
+  | Some _ | None -> Error "keeper config revision was not observed"
 
 let patch_of_edit ~before ~after =
   match after with
@@ -93,8 +93,8 @@ let patch_of_edit ~before ~after =
         else
           Result.map
             (fun revision ->
-              `Assoc (("expected_manifest_revision", revision) :: changed))
-            (expected_manifest_revision before)
+              `Assoc (("expected_config_revision", revision) :: changed))
+            (expected_config_revision before)
   | _ -> Error "keeper settings must remain a JSON object"
 
 (* Marker column. The glyph carries the editable/read-only split on its own,
@@ -196,9 +196,13 @@ let counted = function
   | [ _ ] -> "1 line"
   | lines -> Printf.sprintf "%d lines" (List.length lines)
 
-let manifest_revision_value = function
-  | Some (`Assoc [ ("state", `String "missing") ]) -> "missing"
-  | Some (`Assoc fields) -> string_value (List.assoc_opt "value" fields)
+let config_revision_value = function
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "manifest" fields with
+     | Some (`Assoc [ ("state", `String "missing") ]) -> "manifest missing"
+     | Some (`Assoc manifest) -> string_value (List.assoc_opt "value" manifest)
+     | Some value -> string_value (Some value)
+     | None -> "not observed")
   | value -> string_value value
 
 (* One document, but the reader has to be able to answer "will [e] change
@@ -251,8 +255,8 @@ let view_lines ~sanitize json =
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
   ; section "derived" "read-only"
-  ; read_only_value_row "Manifest revision"
-      (fun () -> manifest_revision_value (at [ "manifest_revision" ]))
+  ; read_only_value_row "Config revision"
+      (fun () -> config_revision_value (at [ "config_revision" ]))
   ; read_only_value_row "Effective paths"
       (fun () -> string_list_value (at [ "effective_allowed_paths" ]))
   ; ""

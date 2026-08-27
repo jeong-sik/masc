@@ -11,7 +11,10 @@ describe('keeper config source projection', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
-        manifest_revision: { state: 'sha256', value: 'a'.repeat(64) },
+        config_revision: {
+          manifest: { state: 'sha256', value: 'a'.repeat(64) },
+          runtime_assignment: { state: 'runtime_config_missing' },
+        },
         max_context_override: null,
         proactive: { enabled: true },
         skills: { names: null },
@@ -89,13 +92,16 @@ describe('keeper config source projection', () => {
     )
   })
 
-  it('preserves manifest write and durability warning receipts', async () => {
-    const revision = { state: 'sha256', value: 'a'.repeat(64) }
+  it('preserves composite config write and durability warning receipts', async () => {
+    const revision = {
+      manifest: { state: 'sha256', value: 'a'.repeat(64) },
+      runtime_assignment: { state: 'runtime_config_missing' },
+    }
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         name: 'rtprobe',
-        manifest_revision: revision,
-        manifest_write: {
+        config_revision: revision,
+        config_write: {
           revision,
           applied: true,
           warnings: [{
@@ -103,7 +109,7 @@ describe('keeper config source projection', () => {
             detail: 'parent fsync failed',
           }],
         },
-        manifest_transaction_warnings: [{
+        config_transaction_warnings: [{
           code: 'keeper_manifest_lock_release_unconfirmed',
           detail: 'unlock failed',
         }],
@@ -116,7 +122,7 @@ describe('keeper config source projection', () => {
     ))
 
     const config = await fetchKeeperConfig('rtprobe')
-    expect(config.manifest_write).toEqual({
+    expect(config.config_write).toEqual({
       revision,
       applied: true,
       warnings: [{
@@ -124,7 +130,7 @@ describe('keeper config source projection', () => {
         detail: 'parent fsync failed',
       }],
     })
-    expect(config.manifest_transaction_warnings).toEqual([{
+    expect(config.config_transaction_warnings).toEqual([{
       code: 'keeper_manifest_lock_release_unconfirmed',
       detail: 'unlock failed',
     }])

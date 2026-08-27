@@ -605,7 +605,7 @@ let dashboard_config_string_list_fields =
    (#25062/#25268) — a silent shrink converts a settings edit into a next-turn
    overflow. *)
 let confirm_context_shrink_field = "confirm_context_shrink"
-let expected_manifest_revision_field = "expected_manifest_revision"
+let expected_config_revision_field = "expected_config_revision"
 
 let dashboard_config_patch_allowed_fields =
   [ "name"
@@ -614,7 +614,7 @@ let dashboard_config_patch_allowed_fields =
   ; "max_context_override"
   ; "autonomous_wake_prompt"
   ; confirm_context_shrink_field
-  ; expected_manifest_revision_field
+  ; expected_config_revision_field
   ]
   @
   dashboard_config_string_fields
@@ -779,8 +779,9 @@ let validate_dashboard_config_field key value =
     (match value with
      | `Bool _ -> Ok ()
      | other -> dashboard_field_type_error key "a boolean" other)
-  else if key = expected_manifest_revision_field then
-    Keeper_turn_up_config_persistence.revision_of_yojson value |> Result.map ignore
+  else if key = expected_config_revision_field then
+    Keeper_turn_up_config_persistence.config_revision_of_yojson value
+    |> Result.map ignore
   else if List.mem key dashboard_config_string_fields then
     match value with
     | `String _ -> Ok ()
@@ -864,7 +865,7 @@ let invalidate_config_surfaces ~(config : Workspace.config) ~name runtime_event 
   | None -> invalidate_keeper_execution_surfaces ~config ()
 
 let respond_config_sync_error
-      ?manifest_write
+      ?config_write
       ~request
       reqd
       ~status
@@ -885,14 +886,14 @@ let respond_config_sync_error
        ; "error", `Assoc [ "code", `String code; "detail", `String detail ]
        ]
        @
-       match manifest_write with
-       | Some receipt -> [ "manifest_write", receipt ]
+       match config_write with
+       | Some receipt -> [ "config_write", receipt ]
        | None -> []))
     reqd
 
-let manifest_write_receipt result =
+let config_write_receipt result =
   match Tool_result.metadata result with
-  | Some (`Assoc fields) -> List.assoc_opt "keeper_manifest_write" fields
+  | Some (`Assoc fields) -> List.assoc_opt "keeper_config_write" fields
   | Some _ | None -> None
 
 let respond_manifest_reconciliation ~request reqd ~name ~error =
@@ -909,7 +910,7 @@ let respond_manifest_reconciliation ~request reqd ~name ~error =
        ])
     reqd
 
-let respond_manifest_revision_conflict ~request reqd ~name
+let respond_config_revision_conflict ~request reqd ~name
       ({ expected; observed } : Keeper_turn_up_config_persistence.conflict)
   =
   Http.Response.json_value
@@ -922,9 +923,9 @@ let respond_manifest_revision_conflict ~request reqd ~name
       ; "runtime_sync", `Bool false
       ; ( "error"
         , `Assoc
-            [ "code", `String "keeper_manifest_revision_conflict"
-            ; "expected", Keeper_turn_up_config_persistence.revision_to_yojson expected
-            ; "observed", Keeper_turn_up_config_persistence.revision_to_yojson observed
+            [ "code", `String "keeper_config_revision_conflict"
+            ; "expected", Keeper_turn_up_config_persistence.config_revision_to_yojson expected
+            ; "observed", Keeper_turn_up_config_persistence.config_revision_to_yojson observed
             ] )
       ])
     reqd
@@ -953,15 +954,15 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
            in
            match fields_opt with
            | Some fields ->
-               let expected_manifest_revision =
-                 match List.assoc_opt expected_manifest_revision_field fields with
-                 | None -> Error "expected_manifest_revision is required"
+               let expected_config_revision =
+                 match List.assoc_opt expected_config_revision_field fields with
+                 | None -> Error "expected_config_revision is required"
                  | Some value ->
-                   Keeper_turn_up_config_persistence.revision_of_yojson value
+                   Keeper_turn_up_config_persistence.config_revision_of_yojson value
                in
-               (match expected_manifest_revision with
+               (match expected_config_revision with
                 | Error detail -> respond_error reqd detail
-                | Ok expected_manifest_revision ->
+                | Ok expected_config_revision ->
                let body_name =
                  match List.assoc_opt "name" fields with
                  | Some (`String value) ->
@@ -989,7 +990,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                       (* Control field: consumed here, never persisted. *)
                       let fields =
                         List.remove_assoc confirm_context_shrink_field fields
-                        |> List.remove_assoc expected_manifest_revision_field
+                        |> List.remove_assoc expected_config_revision_field
                       in
                       (match context_shrink_of_patch ~meta:meta0 fields with
                        | Some (previous, new_v) when not confirm_context_shrink ->
@@ -1033,16 +1034,16 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                            let result =
                              Keeper_turn_up_update.update_keeper
                                ~preserve_prompt_defaults:true
-                               ~expected_manifest_revision
+                               ~expected_config_revision
                                keeper_ctx parsed
                                meta0
                            in
                            (match
                               Keeper_turn_up_update
-                              .manifest_revision_conflict_of_result result
+                              .config_revision_conflict_of_result result
                             with
                             | Some conflict ->
-                              respond_manifest_revision_conflict
+                              respond_config_revision_conflict
                                 ~request:req reqd ~name conflict
                             | None ->
                            (match
@@ -1062,7 +1063,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                             with
                             | Some detail ->
                               respond_config_sync_error
-                                ?manifest_write:(manifest_write_receipt result)
+                                ?config_write:(config_write_receipt result)
                                 ~request:req
                                 reqd
                                 ~status:`Service_unavailable
@@ -1082,7 +1083,7 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                detail;
                              invalidate_config_surfaces ~config ~name None;
                              respond_config_sync_error
-                               ?manifest_write:(manifest_write_receipt result)
+                               ?config_write:(config_write_receipt result)
                                ~request:req
                                reqd
                                ~status:`Service_unavailable
@@ -1106,9 +1107,9 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                                  name
                              in
                              let json =
-                               match manifest_write_receipt result, json with
+                               match config_write_receipt result, json with
                                | Some receipt, `Assoc fields ->
-                                 `Assoc (("manifest_write", receipt) :: fields)
+                                 `Assoc (("config_write", receipt) :: fields)
                                | Some _, _ | None, _ -> json
                              in
                              Http.Response.json_value ~compress:true

@@ -340,6 +340,9 @@ let runtime_config_commit_json (receipt : Runtime.config_commit_receipt) =
           (match receipt.durability with
            | Runtime.Durable -> "durable"
            | Durability_unconfirmed _ -> "unconfirmed") )
+    ; ( "warnings"
+      , `List
+          (List.map Runtime.config_lock_warning_to_yojson receipt.lock_warnings) )
     ]
 ;;
 
@@ -370,6 +373,7 @@ let runtime_config_application_json
 let runtime_config_raw_json
       ?commit
       ?skill_application
+      ~source_revision
       ~path
       ~source_text
       ~operation
@@ -379,6 +383,8 @@ let runtime_config_raw_json
   let validation, keeper_settings, overlay = keeper_setting_payload source_text in
   `Assoc
     ([ ("ok", `Bool true)
+    ; ( "source_revision"
+      , `String (Runtime.config_source_revision_to_string source_revision) )
     ; ("path", `String path)
     ; ("file_name", `String "runtime.toml")
     ; ("source_text", `String source_text)
@@ -644,9 +650,16 @@ let parse_runtime_assignment_body body_str =
       (match required_string_field json "keeper_name" with
        | Error _ as err -> err
        | Ok keeper_name ->
-         (match optional_string_field json "runtime_id" with
+         if not (Keeper_config.validate_name keeper_name)
+         then Error (Printf.sprintf "invalid keeper name: %S" keeper_name)
+         else (match optional_string_field json "runtime_id" with
           | Error _ as err -> err
-          | Ok runtime_id -> Ok (keeper_name, runtime_id)))
+          | Ok runtime_id ->
+            (match Json_util.assoc_member_opt "expected_assignment_revision" json with
+             | None -> Error "expected_assignment_revision required"
+             | Some value ->
+               Runtime.keeper_assignment_revision_of_yojson value
+               |> Result.map (fun expected -> keeper_name, runtime_id, expected))))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -814,6 +827,7 @@ let respond_runtime_config_commit
       runtime_config_raw_json
         ~commit:receipt
         ~skill_application
+        ~source_revision:observation.source_revision
         ~path:observation.path
         ~source_text:observation.source_text
         ~operation:(runtime_config_write_operation_label operation)
@@ -823,6 +837,72 @@ let respond_runtime_config_commit
   Http.Response.json_value ~compress:true ~request
     response_json
     reqd
+
+let handle_runtime_assignment_post_with ~set_assignment state agent_name req reqd
+    body_str =
+  match parse_runtime_assignment_body body_str with
+  | Error msg ->
+    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Ok (keeper_name, runtime_id, expected) ->
+    (match
+       set_assignment
+         ~runtime_config_path:
+           (Config_dir_resolver.runtime_toml_path_for_base_path
+              ~base_path:
+                (Mcp_server.workspace_config state).Workspace.base_path)
+         ~keeper_name ~runtime_id ~expected ()
+     with
+     | Error (Runtime.Assignment_io_error msg) ->
+       audit_runtime_config_write state agent_name
+         ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
+         ~text:body_str ~outcome:(Audit_log.Failure msg) ();
+       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+     | Error (Runtime.Assignment_revision_conflict observed) ->
+       audit_runtime_config_write state agent_name
+         ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
+         ~text:body_str
+         ~outcome:(Audit_log.Failure "runtime assignment revision conflict")
+         ();
+       Http.Response.json_value ~status:`Conflict ~request:req
+         (`Assoc
+            [ "ok", `Bool false
+            ; ( "error"
+              , `Assoc
+                  [ "code", `String "runtime_assignment_revision_conflict"
+                  ; "expected", Runtime.keeper_assignment_revision_to_yojson expected
+                  ; "observed", Runtime.keeper_assignment_revision_to_yojson observed
+                  ] )
+            ])
+         reqd
+     | Ok locked ->
+       (match locked.Runtime.value with
+        | Runtime.Assignment_unchanged revision ->
+          audit_runtime_config_write state agent_name
+            ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
+            ~text:body_str ~outcome:Audit_log.Success ();
+          Http.Response.json_value ~request:req
+            (`Assoc
+               [ "ok", `Bool true
+               ; "applied", `Bool false
+               ; "assignment_revision", Runtime.keeper_assignment_revision_to_yojson revision
+               ; ( "warnings"
+                 , `List
+                     (List.map Runtime.config_lock_warning_to_yojson
+                        locked.warnings) )
+               ])
+            reqd
+        | Runtime.Assignment_committed { receipt; _ } ->
+          respond_runtime_config_commit state agent_name
+            ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
+            ~receipt req reqd))
+
+let handle_runtime_assignment_post state agent_name req reqd body_str =
+  handle_runtime_assignment_post_with
+    ~set_assignment:(fun ~runtime_config_path ~keeper_name ~runtime_id
+                          ~expected () ->
+      Runtime.set_keeper_assignment_if_revision ~runtime_config_path
+        ~keeper_name ~runtime_id ~expected ())
+    state agent_name req reqd body_str
 
 type gate_mode_recovery =
   | Recovery_completed of Keeper_gate.operator_recovery_report
@@ -875,6 +955,8 @@ module For_testing = struct
   let gate_mode_change_json = gate_mode_change_json
   let exact_lane_run_permission = exact_lane_run_permission
   let runtime_probe_read_permission = runtime_probe_read_permission
+  let handle_runtime_assignment_post = handle_runtime_assignment_post
+  let handle_runtime_assignment_post_with = handle_runtime_assignment_post_with
   let fusion_run_detail_response = fusion_run_detail_response
   let fusion_run_list_response = fusion_run_list_response
 end
@@ -1732,6 +1814,7 @@ let add_routes ~sw ~clock router =
            | Ok observation ->
              Http.Response.json_value ~compress:true ~request:req
                (runtime_config_raw_json
+                  ~source_revision:observation.source_revision
                   ~path:observation.path
                   ~source_text:observation.source_text
                   ~operation:"read"
@@ -1903,38 +1986,7 @@ let add_routes ~sw ~clock router =
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
-             match parse_runtime_assignment_body body_str with
-             | Error msg ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-             | Ok (keeper_name, Some runtime_id) ->
-               (match
-                  Runtime.set_runtime_id_for_keeper
-                    ~keeper_name
-                    ~runtime_id
-                    ()
-                with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
-                    ~receipt req reqd)
-             | Ok (keeper_name, None) ->
-               (match Runtime.clear_runtime_id_for_keeper ~keeper_name () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:(Runtime_config_assignment (keeper_name, None))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok receipt ->
-                  respond_runtime_config_commit state agent_name
-                    ~operation:(Runtime_config_assignment (keeper_name, None))
-                    ~receipt req reqd)
+             handle_runtime_assignment_post state agent_name req reqd body_str
            )
          ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders

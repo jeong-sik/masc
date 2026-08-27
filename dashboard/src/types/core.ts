@@ -1390,6 +1390,23 @@ export type KeeperManifestRevision =
   | { state: 'missing' }
   | { state: 'sha256'; value: string }
 
+export type KeeperRuntimeAssignmentState =
+  | { state: 'missing' }
+  | { state: 'assigned'; runtime_id: string }
+
+export type KeeperRuntimeAssignmentRevision =
+  | { state: 'runtime_config_missing' }
+  | {
+      state: 'runtime_config_present'
+      source_revision: string
+      assignment: KeeperRuntimeAssignmentState
+    }
+
+export interface KeeperConfigRevision {
+  manifest: KeeperManifestRevision
+  runtime_assignment: KeeperRuntimeAssignmentRevision
+}
+
 export interface RuntimeRef {
   group: string
   item: string | null
@@ -1474,8 +1491,8 @@ export interface KeeperManifestWarning {
   detail: string
 }
 
-export interface KeeperManifestWriteReceipt {
-  revision: KeeperManifestRevision
+export interface KeeperConfigWriteReceipt {
+  revision: KeeperConfigRevision
   applied: boolean
   warnings: KeeperManifestWarning[]
 }
@@ -1495,9 +1512,9 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  manifest_revision: KeeperManifestRevision
-  manifest_write?: KeeperManifestWriteReceipt
-  manifest_transaction_warnings?: KeeperManifestWarning[]
+  config_revision: KeeperConfigRevision
+  config_write?: KeeperConfigWriteReceipt
+  config_transaction_warnings?: KeeperManifestWarning[]
   autoboot_enabled: boolean
   max_context_override: number | null
   /** Keeper-level autonomous wake prompt override; null inherits the fleet

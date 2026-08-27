@@ -1708,7 +1708,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaveRequest.value = saveRequest
     runtimeSaving.value = true
     try {
-      const updated = await patchKeeperConfig(keeperName, payload, c.manifest_revision)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== saveRequest.owner.keeperName
@@ -1716,7 +1716,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       applyKeeperConfigUpdate(keeperName, updated)
       void refreshKeeperSurfacesAfterConfigSave()
-      if ((updated.manifest_write?.warnings.length ?? 0) > 0) {
+      if ((updated.config_write?.warnings.length ?? 0) > 0) {
         showToast('Keeper 설정은 적용됐지만 manifest durability 경고가 있습니다', 'warning')
       } else {
         showToast('Keeper 설정 저장 완료', 'success')
@@ -1729,7 +1729,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       if (
         err instanceof ApiRequestError
-        && err.errorCode === 'keeper_manifest_revision_conflict'
+        && err.errorCode === 'keeper_config_revision_conflict'
       ) {
         runtimeDraft.value = null
         await loadKeeperConfig(keeperName, { force: true })
@@ -1812,7 +1812,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     saving.value = true
     saveError.value = null
     try {
-      const updated = await patchKeeperConfig(keeperName, payload, c.manifest_revision)
+      const updated = await patchKeeperConfig(keeperName, payload, c.config_revision)
       const activeOwner = activeKeeperConfigOwner.value
       if (
         activeOwner?.keeperName !== panelOwner.keeperName
@@ -1823,7 +1823,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()
-      if ((updated.manifest_write?.warnings.length ?? 0) > 0) {
+      if ((updated.config_write?.warnings.length ?? 0) > 0) {
         showToast('프롬프트는 적용됐지만 manifest durability 경고가 있습니다', 'warning')
       } else {
         showToast('프롬프트 저장 완료', 'success')
@@ -1836,7 +1836,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ) return
       if (
         err instanceof ApiRequestError
-        && err.errorCode === 'keeper_manifest_revision_conflict'
+        && err.errorCode === 'keeper_config_revision_conflict'
       ) {
         editMode.value = false
         editDraft.value = null

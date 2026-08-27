@@ -11,14 +11,20 @@ and revision =
   | Missing
   | Sha256 of string
 
+type config_revision =
+  { manifest : revision
+  ; runtime_assignment : Runtime.keeper_assignment_revision
+  }
+
 type conflict =
-  { expected : revision
-  ; observed : revision
+  { expected : config_revision
+  ; observed : config_revision
   }
 
 type warning =
   | Manifest_parent_sync_unconfirmed of string
   | Lock_release_unconfirmed of string
+  | Runtime_config_lock_release_unconfirmed of string
 
 type 'a receipt =
   { value : 'a
@@ -35,10 +41,21 @@ type reconciliation =
   ; observed : reconciliation_observation
   }
 
+type runtime_reconciliation =
+  { path : string option
+  ; detail : string
+  }
+
+type composite_reconciliation =
+  { manifest : reconciliation option
+  ; runtime_assignment : runtime_reconciliation option
+  }
+
 type error =
   | Io_error of string
   | Revision_conflict of conflict
   | Reconciliation_required of reconciliation
+  | Composite_reconciliation_required of composite_reconciliation
   | Publication_exception of
       { path : string
       ; detail : string
@@ -62,18 +79,44 @@ let revision_of_yojson = function
          && String.equal value (String.lowercase_ascii value) ->
     (match Digestif.SHA256.of_hex_opt value with
      | Some _ -> Ok (Sha256 value)
-     | None -> Error "expected_manifest_revision.value must be lowercase SHA-256 hex")
+     | None -> Error "config_revision.manifest.value must be lowercase SHA-256 hex")
   | `Assoc fields ->
     (match List.assoc_opt "state" fields with
      | Some (`String "missing") ->
-       Error "expected_manifest_revision missing state has unexpected fields"
+       Error "config_revision.manifest missing state has unexpected fields"
      | Some (`String "sha256") ->
-       Error "expected_manifest_revision sha256 state requires only a lowercase SHA-256 value"
+       Error "config_revision.manifest sha256 state requires only a lowercase SHA-256 value"
      | Some (`String state) ->
-       Error (Printf.sprintf "unsupported expected_manifest_revision.state: %S" state)
-     | Some _ -> Error "expected_manifest_revision.state must be a string"
-     | None -> Error "expected_manifest_revision.state is required")
-  | _ -> Error "expected_manifest_revision must be an object"
+       Error (Printf.sprintf "unsupported config_revision.manifest.state: %S" state)
+     | Some _ -> Error "config_revision.manifest.state must be a string"
+     | None -> Error "config_revision.manifest.state is required")
+  | _ -> Error "config_revision.manifest must be an object"
+
+let config_revision_to_yojson (revision : config_revision) =
+  `Assoc
+    [ "manifest", revision_to_yojson revision.manifest
+    ; ( "runtime_assignment"
+      , Runtime.keeper_assignment_revision_to_yojson revision.runtime_assignment )
+    ]
+;;
+
+let config_revision_of_yojson = function
+  | `Assoc fields when List.length fields = 2 ->
+    let ( let* ) = Result.bind in
+    let* manifest =
+      match List.assoc_opt "manifest" fields with
+      | Some value -> revision_of_yojson value
+      | None -> Error "expected_config_revision.manifest is required"
+    in
+    let* runtime_assignment =
+      match List.assoc_opt "runtime_assignment" fields with
+      | Some value -> Runtime.keeper_assignment_revision_of_yojson value
+      | None -> Error "expected_config_revision.runtime_assignment is required"
+    in
+    Ok ({ manifest; runtime_assignment } : config_revision)
+  | `Assoc _ -> Error "expected_config_revision has unexpected fields"
+  | _ -> Error "expected_config_revision must be an object"
+;;
 
 let revision_display = function
   | Missing -> "missing"
@@ -83,9 +126,9 @@ let error_to_string = function
   | Io_error detail -> detail
   | Revision_conflict { expected; observed } ->
     Printf.sprintf
-      "keeper manifest revision conflict (expected %s, observed %s)"
-      (revision_display expected)
-      (revision_display observed)
+      "keeper config revision conflict (expected %s, observed %s)"
+      (Yojson.Safe.to_string (config_revision_to_yojson expected))
+      (Yojson.Safe.to_string (config_revision_to_yojson observed))
   | Reconciliation_required { path; detail; observed } ->
     let observed =
       match observed with
@@ -97,6 +140,26 @@ let error_to_string = function
       path
       observed
       detail
+  | Composite_reconciliation_required { manifest; runtime_assignment } ->
+    let manifest_detail =
+      match manifest with
+      | None -> []
+      | Some state ->
+        [ Printf.sprintf "manifest path %s: %s" state.path state.detail ]
+    in
+    let runtime_detail =
+      match runtime_assignment with
+      | None -> []
+      | Some state ->
+        [ Printf.sprintf
+            "runtime path %s: %s"
+            (Option.value ~default:"unavailable" state.path)
+            state.detail
+        ]
+    in
+    "keeper config requires composite reconciliation ("
+    ^ String.concat "; " (manifest_detail @ runtime_detail)
+    ^ ")"
   | Publication_exception { path; detail } ->
     Printf.sprintf "keeper manifest publication raised (path %s): %s" path detail
 
@@ -109,6 +172,11 @@ let warning_to_yojson = function
   | Lock_release_unconfirmed detail ->
     `Assoc
       [ "code", `String "keeper_manifest_lock_release_unconfirmed"
+      ; "detail", `String detail
+      ]
+  | Runtime_config_lock_release_unconfirmed detail ->
+    `Assoc
+      [ "code", `String "runtime_config_lock_release_unconfirmed"
       ; "detail", `String detail
       ]
 
@@ -169,6 +237,11 @@ let manifest_path ~(config : Workspace.config) ~keeper_name =
   in
   Filename.concat keepers_dir (keeper_name ^ ".toml")
 
+let validate_keeper_name keeper_name =
+  if Keeper_config.validate_name keeper_name
+  then Ok ()
+  else Error (Printf.sprintf "invalid keeper name: %S" keeper_name)
+
 let with_manifest_lock_using observe path f =
   Fs_compat.mkdir_p (Filename.dirname path);
   let lock_path = path ^ ".lock" in
@@ -189,18 +262,38 @@ let with_manifest_lock_using observe path f =
 let with_manifest_lock path f =
   with_manifest_lock_using File_lock_eio.with_durable_lock_observed path f
 
-let with_current_revision ~config ~keeper_name project =
+let runtime_lock_warning = function
+  | Runtime.Config_lock_release_unconfirmed detail ->
+    Runtime_config_lock_release_unconfirmed detail
+;;
+
+let with_current_config_revision ~config ~keeper_name project =
+  let ( let* ) = Result.bind in
+  let* () = validate_keeper_name keeper_name in
   let path = manifest_path ~config ~keeper_name in
   match
     with_manifest_lock path (fun () ->
-      revision_of_path_unlocked path |> Result.map project)
+      let ( let* ) = Result.bind in
+      let* manifest = revision_of_path_unlocked path in
+      let runtime_config_path =
+        Config_dir_resolver.runtime_toml_path_for_base_path
+          ~base_path:config.base_path
+      in
+      let* runtime =
+        Runtime.observe_keeper_assignment ~runtime_config_path ~keeper_name ()
+      in
+      Ok
+        ( project
+            ({ manifest; runtime_assignment = runtime.value } : config_revision)
+        , List.map runtime_lock_warning runtime.warnings ))
   with
   | Error _ as error -> error
   | Ok { value = Error detail; _ } -> Error detail
-  | Ok { value = Ok value; warnings } -> Ok { value; warnings }
+  | Ok { value = Ok (value, runtime_warnings); warnings } ->
+    Ok { value; warnings = warnings @ runtime_warnings }
 
-let current_revision ~config ~keeper_name =
-  with_current_revision ~config ~keeper_name Fun.id
+let current_config_revision ~config ~keeper_name =
+  with_current_config_revision ~config ~keeper_name Fun.id
   |> Result.map (fun receipt -> receipt.value)
 
 let set_string value =
@@ -362,19 +455,33 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
     then Error "keeper instructions are required"
     else Ok ()
   in
-  match with_lock path (fun () ->
+  let transaction () =
+    match with_lock path (fun () ->
+    match
+      Runtime.with_keeper_assignment_transaction
+        ~runtime_config_path:
+          (Config_dir_resolver.runtime_toml_path_for_base_path
+             ~base_path:config.base_path)
+        ~keeper_name:meta.name
+        (fun runtime_transaction ->
       let ( let* ) = Result.bind in
       let* () = instructions_result |> Result.map_error (fun error -> Io_error error) in
       let* snapshot =
         read_snapshot_unlocked path |> Result.map_error (fun error -> Io_error error)
       in
-      let observed = revision_of_snapshot snapshot in
+      let observed_manifest = revision_of_snapshot snapshot in
+      let observed : config_revision =
+        { manifest = observed_manifest
+        ; runtime_assignment =
+            Runtime.keeper_assignment_revision runtime_transaction
+        }
+      in
       let* () =
         if expected_revision <> observed
         then Error (Revision_conflict { expected = expected_revision; observed })
         else Ok ()
       in
-      let created = observed = Missing in
+      let created = observed_manifest = Missing in
       let* write_warnings =
         (if created
          then
@@ -388,9 +495,40 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
            else Keeper_toml_loader.edit_keeper_toml_fields_strict_staged ~path edits)
         |> strict_write_result
       in
+      let restore_publication_state () =
+        Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
+        let runtime_restore =
+          Runtime.restore_keeper_assignment_transaction runtime_transaction
+        in
+        let manifest_restore = restore_snapshot path snapshot in
+        match manifest_restore, runtime_restore with
+        | Ok (), Ok _ -> Ok ()
+        | manifest_result, runtime_result ->
+          let manifest =
+            match manifest_result with
+            | Ok () -> None
+            | Error (Reconciliation_required state) -> Some state
+            | Error error ->
+              Some
+                { path
+                ; detail = error_to_string error
+                ; observed = observed_revision_after_failure path
+                }
+          in
+          let runtime_assignment =
+            match runtime_result with
+            | Ok _ -> None
+            | Error detail ->
+              Some
+                { path = Runtime.keeper_assignment_transaction_path runtime_transaction
+                ; detail
+                }
+          in
+          Error
+            (Composite_reconciliation_required { manifest; runtime_assignment })
+      in
       let rollback error =
-         Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-        match restore_snapshot path snapshot with
+        match restore_publication_state () with
         | Ok () -> Error error
         | Error reconciliation -> Error reconciliation
       in
@@ -404,12 +542,14 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
        | Ok revision ->
          let outcome = { path; created; revision } in
          let publication =
-           match publish outcome with
+           match publish runtime_transaction outcome with
            | decision -> Ok decision
            | exception (Eio.Cancel.Cancelled _ as exn) ->
              let backtrace = Printexc.get_raw_backtrace () in
              (match rollback (Io_error "publication cancelled") with
-              | Error (Reconciliation_required _ as error) ->
+              | Error
+                  ((Reconciliation_required _ | Composite_reconciliation_required _)
+                    as error) ->
                 Log.Keeper.error
                   "keeper manifest rollback failed during cancellation: %s"
                   (error_to_string error)
@@ -432,9 +572,16 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
             Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
             Ok { value; warnings = write_warnings }
           | Ok (Rollback value) ->
-            Keeper_types_profile.invalidate_keeper_profile_defaults_cache meta.name;
-            let* () = restore_snapshot path snapshot in
+            let* () = restore_publication_state () in
             Ok { value; warnings = [] })))
+    with
+    | Error detail -> Error (Io_error detail)
+    | Ok { value = Error error; _ } -> Error error
+    | Ok { value = Ok receipt; warnings } ->
+      Ok
+        { receipt with
+          warnings = receipt.warnings @ List.map runtime_lock_warning warnings
+        })
   with
   | Error error -> Error (Io_error error)
   | Ok { value = Error error; _ } -> Error error
@@ -443,6 +590,10 @@ let persist_with_publication_using ~with_lock ~restore_snapshot ~read_revision
       ; warnings = lock_warnings
       } ->
     Ok { value; warnings = write_warnings @ lock_warnings }
+  in
+  match validate_keeper_name meta.name with
+  | Error detail -> Error (Io_error detail)
+  | Ok () -> transaction ()
 
 let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish () =
   persist_with_publication_using
@@ -458,7 +609,7 @@ let persist_with_publication ~expected_revision ~config ~parsed ~meta ~publish (
 
 let persist ~expected_revision ~config ~parsed ~meta () =
   persist_with_publication ~expected_revision ~config ~parsed ~meta
-    ~publish:(fun outcome -> Commit outcome) ()
+    ~publish:(fun _runtime_transaction outcome -> Commit outcome) ()
 
 module For_testing = struct
   let persist_with_release_failure ~release_failure ~expected_revision ~config
@@ -480,7 +631,7 @@ module For_testing = struct
       ~config
       ~parsed
       ~meta
-      ~publish:(fun outcome -> Commit outcome)
+      ~publish:(fun _runtime_transaction outcome -> Commit outcome)
       ()
   ;;
 
@@ -510,7 +661,7 @@ module For_testing = struct
       ~config
       ~parsed
       ~meta
-      ~publish:(fun _ -> Rollback ())
+      ~publish:(fun _runtime_transaction _ -> Rollback ())
       ()
   ;;
 
@@ -524,7 +675,7 @@ module For_testing = struct
       ~config
       ~parsed
       ~meta
-      ~publish:(fun outcome -> Commit outcome)
+      ~publish:(fun _runtime_transaction outcome -> Commit outcome)
       ()
   ;;
 end

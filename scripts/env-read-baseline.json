@@ -1,188 +1,61 @@
 {
-  "_comment": "Syntax-aware direct Sys.getenv/Sys.getenv_opt sites in production implementations above masc.config's dependency floor. Regenerate with scripts/ci/check_env_reads_below_config.py --write-baseline.",
+  "_comment": "Per-file counts of syntax-aware direct Sys.getenv/Sys.getenv_opt sites in production implementations above masc.config's dependency floor. Regenerate with scripts/ci/check_env_reads_below_config.py --write-baseline.",
   "_issue": "#29353",
-  "direct_env_read_sites_above_config_floor": {
-    "lib/auth/auth_credential_base.ml": [
-      115
-    ],
-    "lib/auth/auth_strict_mode.ml": [
-      18
-    ],
-    "lib/config_dir_resolver/config_dir_resolver.ml": [
-      64
-    ],
-    "lib/dashboard/dashboard_cache.ml": [
-      68
-    ],
-    "lib/dashboard_tla_specs/dashboard_tla_specs.ml": [
-      32,
-      38
-    ],
-    "lib/exec/exec_dispatch.ml": [
-      278
-    ],
-    "lib/graphql_client.ml": [
-      14
-    ],
-    "lib/graphql_endpoint.ml": [
-      30,
-      72
-    ],
-    "lib/host_config/host_config.ml": [
-      62,
-      164,
-      183
-    ],
-    "lib/http_server_eio.ml": [
-      333
-    ],
-    "lib/keeper/keeper_event_bridge.ml": [
-      588
-    ],
-    "lib/keeper/keeper_sandbox_runtime_setup.ml": [
-      10,
-      14,
-      32,
-      282
-    ],
-    "lib/keeper/keeper_secret_projection.ml": [
-      29
-    ],
-    "lib/keeper/keeper_tool_surface_ops.ml": [
-      46
-    ],
-    "lib/keeper/keeper_tool_task_runtime.ml": [
-      330
-    ],
-    "lib/keeper/keeper_trace_emit.ml": [
-      21
-    ],
-    "lib/keeper/keeper_transition_audit.ml": [
-      65
-    ],
-    "lib/keeper/keeper_types_profile.ml": [
-      376
-    ],
-    "lib/local_runtime_pool/local_runtime_pool.ml": [
-      78
-    ],
-    "lib/notify.ml": [
-      51
-    ],
-    "lib/operator/operator_control_snapshot.ml": [
-      33
-    ],
-    "lib/process/exec_tap.ml": [
-      247,
-      250
-    ],
-    "lib/prompt_registry/prompt_registry.ml": [
-      143
-    ],
-    "lib/runtime/runtime_adapter.ml": [
-      146,
-      172
-    ],
-    "lib/runtime/runtime_claude_code.ml": [
-      313
-    ],
-    "lib/runtime_model/provider_runtime_projection.ml": [
-      37
-    ],
-    "lib/runtime_model/runtime_model_resolve.ml": [
-      33
-    ],
-    "lib/runtime_model/runtime_model_string.ml": [
-      120
-    ],
-    "lib/server/server_base_path_guard.ml": [
-      37
-    ],
-    "lib/server/server_bootstrap_http.ml": [
-      19
-    ],
-    "lib/server/server_bootstrap_loops.ml": [
-      1177
-    ],
-    "lib/server/server_bootstrap_maintenance.ml": [
-      550
-    ],
-    "lib/server/server_dashboard_http_perf.ml": [
-      105
-    ],
-    "lib/server/server_dashboard_http_runtime_info.ml": [
-      820
-    ],
-    "lib/server/server_discord_in_process_gateway.ml": [
-      22
-    ],
-    "lib/server/server_mcp_transport_http_headers.ml": [
-      34
-    ],
-    "lib/server/server_routes_http_runtime.ml": [
-      183
-    ],
-    "lib/server/server_routes_http_sidecar_paths.ml": [
-      75,
-      245
-    ],
-    "lib/server/server_runtime_bootstrap.ml": [
-      48,
-      72,
-      300,
-      318,
-      390
-    ],
-    "lib/server/server_runtime_config_root_bootstrap.ml": [
-      148
-    ],
-    "lib/server/server_runtime_startup_credentials.ml": [
-      58,
-      65
-    ],
-    "lib/server_base_path_diagnostics.ml": [
-      49,
-      59
-    ],
-    "lib/shutdown.ml": [
-      65
-    ],
-    "lib/shutdown_hooks.ml": [
-      144
-    ],
-    "lib/telemetry_eio.ml": [
-      135
-    ],
-    "lib/tool_library.ml": [
-      49
-    ],
-    "lib/transport_read_model.ml": [
-      74
-    ],
-    "lib/voice/voice_session_manager.ml": [
-      90
-    ],
-    "lib/voice_bridge_core/voice_bridge_core.ml": [
-      109
-    ],
-    "lib/voice_bridge_core/voice_bridge_transport.ml": [
-      39
-    ],
-    "lib/voice_runtime_overlay/voice_runtime_overlay.ml": [
-      184
-    ],
-    "lib/workspace/workspace_identity.ml": [
-      15
-    ],
-    "lib/workspace/workspace_utils_backend_setup.ml": [
-      251
-    ],
-    "packages/agent_core/lib/llm_provider/cli_common_env.ml": [
-      11
-    ],
-    "packages/agent_core/lib/llm_provider/env_parse.ml": [
-      10,
-      16
-    ]
+  "direct_env_read_counts_above_config_floor": {
+    "lib/auth/auth_credential_base.ml": 1,
+    "lib/auth/auth_strict_mode.ml": 1,
+    "lib/config_dir_resolver/config_dir_resolver.ml": 1,
+    "lib/dashboard/dashboard_cache.ml": 1,
+    "lib/dashboard_tla_specs/dashboard_tla_specs.ml": 2,
+    "lib/exec/exec_dispatch.ml": 1,
+    "lib/graphql_client.ml": 1,
+    "lib/graphql_endpoint.ml": 2,
+    "lib/host_config/host_config.ml": 3,
+    "lib/http_server_eio.ml": 1,
+    "lib/keeper/keeper_event_bridge.ml": 1,
+    "lib/keeper/keeper_sandbox_runtime_setup.ml": 4,
+    "lib/keeper/keeper_secret_projection.ml": 1,
+    "lib/keeper/keeper_tool_surface_ops.ml": 1,
+    "lib/keeper/keeper_tool_task_runtime.ml": 1,
+    "lib/keeper/keeper_trace_emit.ml": 1,
+    "lib/keeper/keeper_transition_audit.ml": 1,
+    "lib/keeper/keeper_types_profile.ml": 1,
+    "lib/local_runtime_pool/local_runtime_pool.ml": 1,
+    "lib/notify.ml": 1,
+    "lib/operator/operator_control_snapshot.ml": 1,
+    "lib/process/exec_tap.ml": 2,
+    "lib/prompt_registry/prompt_registry.ml": 1,
+    "lib/runtime/runtime_adapter.ml": 2,
+    "lib/runtime/runtime_claude_code.ml": 1,
+    "lib/runtime_model/provider_runtime_projection.ml": 1,
+    "lib/runtime_model/runtime_model_resolve.ml": 1,
+    "lib/runtime_model/runtime_model_string.ml": 1,
+    "lib/server/server_base_path_guard.ml": 1,
+    "lib/server/server_bootstrap_http.ml": 1,
+    "lib/server/server_bootstrap_loops.ml": 1,
+    "lib/server/server_bootstrap_maintenance.ml": 1,
+    "lib/server/server_dashboard_http_perf.ml": 1,
+    "lib/server/server_dashboard_http_runtime_info.ml": 1,
+    "lib/server/server_discord_in_process_gateway.ml": 1,
+    "lib/server/server_mcp_transport_http_headers.ml": 1,
+    "lib/server/server_routes_http_runtime.ml": 1,
+    "lib/server/server_routes_http_sidecar_paths.ml": 2,
+    "lib/server/server_runtime_bootstrap.ml": 5,
+    "lib/server/server_runtime_config_root_bootstrap.ml": 1,
+    "lib/server/server_runtime_startup_credentials.ml": 2,
+    "lib/server_base_path_diagnostics.ml": 2,
+    "lib/shutdown.ml": 1,
+    "lib/shutdown_hooks.ml": 1,
+    "lib/telemetry_eio.ml": 1,
+    "lib/tool_library.ml": 1,
+    "lib/transport_read_model.ml": 1,
+    "lib/voice/voice_session_manager.ml": 1,
+    "lib/voice_bridge_core/voice_bridge_core.ml": 1,
+    "lib/voice_bridge_core/voice_bridge_transport.ml": 1,
+    "lib/voice_runtime_overlay/voice_runtime_overlay.ml": 1,
+    "lib/workspace/workspace_identity.ml": 1,
+    "lib/workspace/workspace_utils_backend_setup.ml": 1,
+    "packages/agent_core/lib/llm_provider/cli_common_env.ml": 1,
+    "packages/agent_core/lib/llm_provider/env_parse.ml": 2
   }
 }

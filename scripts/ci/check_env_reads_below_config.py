@@ -3,7 +3,8 @@
 
 The dependency floor and each library's exact implementation files come from
 ``dune describe``. Source matching ignores comments and strings, and the
-baseline is per file so a removed read cannot become quota for another file.
+baseline stores a count per file so a removed read cannot become quota for
+another file. Counts stay stable when unrelated edits move an existing read.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import TypeAlias
 
@@ -366,52 +368,46 @@ def mask_ocaml_non_code(text: str) -> str:
     return "".join(masked)
 
 
-def read_sites(paths: set[pathlib.Path]) -> dict[str, list[int]]:
-    sites: dict[str, list[int]] = {}
+def read_counts(paths: set[pathlib.Path]) -> dict[str, int]:
+    counts: dict[str, int] = {}
     for path in sorted(paths):
         text = path.read_text(encoding="utf-8")
         code = mask_ocaml_non_code(text)
-        lines = [
-            code.count("\n", 0, match.start()) + 1
-            for match in DIRECT_ENV_READ.finditer(code)
-        ]
-        if lines:
-            sites[path.relative_to(REPO).as_posix()] = lines
-    return sites
+        count = sum(1 for _ in DIRECT_ENV_READ.finditer(code))
+        if count:
+            counts[path.relative_to(REPO).as_posix()] = count
+    return counts
 
 
-def load_baseline(path: pathlib.Path) -> dict[str, list[int]]:
+def load_baseline(path: pathlib.Path) -> dict[str, int]:
     data = json.loads(path.read_text(encoding="utf-8"))
-    sites = data.get("direct_env_read_sites_above_config_floor")
-    if not isinstance(sites, dict):
-        raise ValueError("baseline requires direct_env_read_sites_above_config_floor")
-    decoded: dict[str, list[int]] = {}
-    for source, lines in sites.items():
-        if (
-            not isinstance(source, str)
-            or not isinstance(lines, list)
-            or not all(isinstance(line, int) and line > 0 for line in lines)
-        ):
+    counts = data.get("direct_env_read_counts_above_config_floor")
+    if not isinstance(counts, dict):
+        raise ValueError("baseline requires direct_env_read_counts_above_config_floor")
+    decoded: dict[str, int] = {}
+    for source, count in counts.items():
+        if not isinstance(source, str) or type(count) is not int or count <= 0:
             raise ValueError(f"malformed baseline entry for {source!r}")
-        decoded[source] = lines
+        decoded[source] = count
     return decoded
 
 
-def write_baseline(path: pathlib.Path, sites: dict[str, list[int]]) -> None:
+def write_baseline(path: pathlib.Path, counts: dict[str, int]) -> None:
     data = {
         "_comment": (
-            "Syntax-aware direct Sys.getenv/Sys.getenv_opt sites in production "
-            "implementations above masc.config's dependency floor. Regenerate "
-            "with scripts/ci/check_env_reads_below_config.py --write-baseline."
+            "Per-file counts of syntax-aware direct Sys.getenv/Sys.getenv_opt "
+            "sites in production implementations above masc.config's dependency "
+            "floor. Regenerate with scripts/ci/check_env_reads_below_config.py "
+            "--write-baseline."
         ),
         "_issue": "#29353",
-        "direct_env_read_sites_above_config_floor": sites,
+        "direct_env_read_counts_above_config_floor": counts,
     }
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def site_diff(
-    current: dict[str, list[int]], baseline: dict[str, list[int]]
+    current: dict[str, int], baseline: dict[str, int]
 ) -> tuple[list[str], list[str], list[str]]:
     added = sorted(set(current) - set(baseline))
     removed = sorted(set(baseline) - set(current))
@@ -421,7 +417,7 @@ def site_diff(
     return added, removed, changed
 
 
-def collect() -> tuple[set[str], dict[str, list[int]], dict[str, list[int]]]:
+def collect() -> tuple[set[str], dict[str, int], dict[str, int]]:
     libraries, build_context = decode_workspace(describe())
     floor = config_floor(libraries)
     above = libraries_above_floor(libraries, floor)
@@ -435,15 +431,15 @@ def collect() -> tuple[set[str], dict[str, list[int]], dict[str, list[int]]]:
         raise ValueError(
             f"implementation files owned both above and below floor: {rendered}"
         )
-    return floor, read_sites(floor_files), read_sites(above_files)
+    return floor, read_counts(floor_files), read_counts(above_files)
 
 
 def main(write: bool = False) -> int:
     print("=== direct env reads above the config floor ===")
     try:
-        floor, below_sites, above_sites = collect()
+        floor, below_counts, above_counts = collect()
         if write:
-            write_baseline(BASELINE, above_sites)
+            write_baseline(BASELINE, above_counts)
             print(f"WROTE: {BASELINE.relative_to(REPO)}")
             return 0
         baseline = load_baseline(BASELINE)
@@ -451,12 +447,12 @@ def main(write: bool = False) -> int:
         print(f"FAIL: {error}", file=sys.stderr)
         return 2
 
-    below_count = sum(len(lines) for lines in below_sites.values())
-    above_count = sum(len(lines) for lines in above_sites.values())
+    below_count = sum(below_counts.values())
+    above_count = sum(above_counts.values())
     print(f"  config floor: {len(floor)} local librar(ies), {below_count} site(s)")
-    print(f"  above:        {len(above_sites)} file(s), {above_count} site(s)")
-    if above_sites != baseline:
-        added, removed, changed = site_diff(above_sites, baseline)
+    print(f"  above:        {len(above_counts)} file(s), {above_count} site(s)")
+    if above_counts != baseline:
+        added, removed, changed = site_diff(above_counts, baseline)
         print("\nFAIL: direct environment read sites differ from the baseline.")
         for label, paths in (
             ("added", added),
@@ -514,9 +510,36 @@ let quoted = {tag|Sys.getenv_opt COMMENT|tag}
     assert len(matches) == 2, matches
     assert [source.count("\n", 0, match.start()) + 1 for match in matches] == [2, 4]
     assert site_diff(
-        {"added.ml": [1], "changed.ml": [4]},
-        {"removed.ml": [2], "changed.ml": [3]},
+        {"added.ml": 1, "changed.ml": 4},
+        {"removed.ml": 2, "changed.ml": 3},
     ) == (["added.ml"], ["removed.ml"], ["changed.ml"])
+    shifted_matches = list(
+        DIRECT_ENV_READ.finditer(mask_ocaml_non_code("\n\n" + source))
+    )
+    assert len(shifted_matches) == len(matches)
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        baseline_path = pathlib.Path(temporary_directory) / "baseline.json"
+
+        def write_test_baseline(count: object) -> None:
+            baseline_path.write_text(
+                json.dumps(
+                    {"direct_env_read_counts_above_config_floor": {"app.ml": count}}
+                ),
+                encoding="utf-8",
+            )
+
+        write_test_baseline(2)
+        assert load_baseline(baseline_path) == {"app.ml": 2}
+        for malformed_count in (True, [], 0, -1, 1.5):
+            write_test_baseline(malformed_count)
+            try:
+                load_baseline(baseline_path)
+            except ValueError:
+                pass
+            else:
+                raise AssertionError(
+                    f"malformed baseline count accepted: {malformed_count!r}"
+                )
     print("PASS: env-read config-floor self-test")
     return 0
 

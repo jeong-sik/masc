@@ -61,7 +61,8 @@ val observe_action :
 
 val observe_native_action :
   config:Workspace.config -> t -> active_skill_tool_use_ids:string list ->
-  runtime_id:string -> official_turn:int -> call_id:string -> tool_name:string ->
+  runtime_id:string -> official_turn:int ->
+  identity:Runtime_native_tools.action_identity -> tool_name:string ->
   (int, error) result
 
 val error_code : error -> string

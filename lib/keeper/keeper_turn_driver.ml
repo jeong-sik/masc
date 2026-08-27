@@ -941,9 +941,9 @@ let run_named
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
             ~on_native_action:
-              (fun ~official_turn ~call_id ~tool_name ->
+              (fun ~official_turn ~identity ~tool_name ->
                  Option.iter
-                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
             ~event_bus
             ~raw_trace
@@ -1059,9 +1059,9 @@ let run_named
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
             ~on_native_action:
-              (fun ~official_turn ~call_id ~tool_name ->
+              (fun ~official_turn ~identity ~tool_name ->
                  Option.iter
-                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
             ~event_bus
             ~raw_trace
@@ -1160,9 +1160,9 @@ let run_named
                       observe ~runtime_id:attempt_runtime_id ~invocation ~content)
                    on_official_client_result_handoff)
             ~on_native_action:
-              (fun ~official_turn ~call_id ~tool_name ->
+              (fun ~official_turn ~identity ~tool_name ->
                  Option.iter
-                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~call_id ~tool_name)
+                   (fun observe -> observe ~runtime_id:attempt_runtime_id ~official_turn ~identity ~tool_name)
                    on_official_client_native_action)
             ~event_bus
             ~raw_trace

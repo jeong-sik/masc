@@ -985,9 +985,15 @@ let test_stream_events_preserve_native_tool_origin () =
         match List.rev !events with
         | [ Turn_started { turn_id = "assistant-native-1"; model = "claude-fixture" }
           ; Native_tool_started
-              { call_id = Some "native-call-1"; tool_name = Some "Read" }
+              { identity = Some (Runtime_native_tools.Call_id "native-call-1")
+              ; tool_name = Some "Read"
+              ; origin = Runtime_native_tools.Built_in
+              }
           ; Native_tool_finished
-              { call_id = Some "native-call-1"; tool_name = Some "Read" }
+              { identity = Some (Runtime_native_tools.Call_id "native-call-1")
+              ; tool_name = Some "Read"
+              ; origin = Runtime_native_tools.Built_in
+              }
           ; Text_delta "MASC_CLAUDE_OK"
           ; Turn_finished { text = "MASC_CLAUDE_OK" }
           ] -> ()

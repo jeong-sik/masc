@@ -12,7 +12,8 @@ type attempt_outcome =
 module For_testing : sig
   val observe_stream_native_action :
     turn_count:int ->
-    observe:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
+    observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->
+      tool_name:string -> unit) ->
     Runtime_claude_code.stream_event -> unit
   val bounded_probe_config
     :  fallback_timeout_s:float
@@ -52,7 +53,8 @@ val run :
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?on_official_client_result_handoff:
     (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
-  ?on_native_action:(official_turn:int -> call_id:string -> tool_name:string -> unit) ->
+  ?on_native_action:(official_turn:int ->
+    identity:Runtime_native_tools.action_identity -> tool_name:string -> unit) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->

@@ -601,11 +601,25 @@ let record_raw_native_tool ~keeper_name ~raw_trace_run ~phase observation =
         Native_tool_finish,
         Agent_core.Raw_trace.record_native_tool_finished
     in
+    let identity =
+      match observation.Runtime_native_tools.identity with
+      | Some (Runtime_native_tools.Call_id call_id) ->
+        Some (Agent_core.Raw_trace.Call_id call_id)
+      | Some (Runtime_native_tools.Provider_step { conversation_id; step_index }) ->
+        Some (Agent_core.Raw_trace.Provider_step { conversation_id; step_index })
+      | None -> None
+    in
+    let origin =
+      match observation.origin with
+      | Runtime_native_tools.Built_in -> Agent_core.Raw_trace.Built_in
+      | Runtime_native_tools.Mcp_wrapper -> Agent_core.Raw_trace.Mcp_wrapper
+    in
     ignore
       (observe_raw_trace ~keeper_name ~stage (fun () ->
          record
            active
-           ~call_id:observation.Runtime_native_tools.call_id
+           ~identity
+           ~origin
            ~tool_name:observation.tool_name))
 ;;
 

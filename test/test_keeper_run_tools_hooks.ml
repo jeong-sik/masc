@@ -1064,6 +1064,29 @@ let test_first_round_cross_turn_replay_stays_inactive () =
     (State.active state)
 ;;
 
+let test_runtime_attempt_clears_previous_runtime_delivery () =
+  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
+  let state = State.create () in
+  State.stage state ~runtime_id:"runtime-a" ~agent_core_turn:1
+    [ wire_receipt "call-skill" ];
+  State.commit_model_response state ~agent_core_turn:1
+    ~observe:(fun staged ->
+      List.map
+        (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
+           receipt.tool_use_id)
+        staged.tool_results);
+  check (list string) "runtime A activates its delivered Skill"
+    [ "call-skill" ] (State.active state);
+  State.stage state ~runtime_id:"runtime-a" ~agent_core_turn:2
+    [ wire_receipt "pending-a" ];
+  State.begin_runtime_attempt state;
+  check (list string) "runtime B inherits no active Skill" [] (State.active state);
+  let observed = ref false in
+  State.commit_model_response state ~agent_core_turn:2
+    ~observe:(fun _ -> observed := true; [ "pending-a" ]);
+  check bool "runtime B inherits no pending delivery" false !observed
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -1203,6 +1226,10 @@ let () =
             "first-round cross-turn replay stays inactive"
             `Quick
             test_first_round_cross_turn_replay_stays_inactive
+        ; test_case
+            "runtime failover clears previous delivery"
+            `Quick
+            test_runtime_attempt_clears_previous_runtime_delivery
         ] )
     ]
 ;;

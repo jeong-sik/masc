@@ -583,6 +583,10 @@ export type DashboardSkillActivationInvocation =
       tool_name: string
     }
 
+export type DashboardSkillActionIdentity =
+  | { kind: 'call_id'; call_id: string }
+  | { kind: 'provider_step'; conversation_id: string; step_index: number }
+
 export interface DashboardSkillActivation {
   identity: DashboardSkillReference['identity']
   content_revision: string
@@ -602,7 +606,7 @@ export interface DashboardSkillActivation {
     content_sha256: string
   } | null
   actions: Array<{
-    tool_use_id: string
+    identity: DashboardSkillActionIdentity
     tool_name: string
     runtime_id: string
     agent_core_turn: number
@@ -634,7 +638,7 @@ export type DashboardSkillTransitionRejection =
       skill_tool_use_id: string
       activation_turn_ref: string
       observed_turn_ref: string
-      action_tool_use_id: string
+      action_identity: DashboardSkillActionIdentity
       tool_name: string
       observed_agent_core_turn: number
       observed_at: string
@@ -674,7 +678,7 @@ export type DashboardSkillActivationProjection =
       summary: DashboardSkillActivationSummary
       scoped_summaries: DashboardSkillScopedSummary[]
       ledger: {
-        schema: 'masc.skill-activations/v4'
+        schema: 'masc.skill-activations/v5'
         workspace_key: string
         session_id: string
         revision: string
@@ -1177,6 +1181,39 @@ function decodeSkillActivationInvocation(
   throw new Error(`skill_activations ${label}.kind is unsupported`)
 }
 
+function decodeSkillActionIdentity(
+  value: unknown,
+  label: string,
+): DashboardSkillActionIdentity {
+  if (!isRecord(value)) throw new Error(`skill_activations ${label} is not an object`)
+  if (value.kind === 'call_id') {
+    const record = exactSkillActivationObject(value, label, ['kind', 'call_id'])
+    return {
+      kind: 'call_id',
+      call_id: skillActivationString(record.call_id, `${label}.call_id`),
+    }
+  }
+  if (value.kind === 'provider_step') {
+    const record = exactSkillActivationObject(
+      value,
+      label,
+      ['kind', 'conversation_id', 'step_index'],
+    )
+    return {
+      kind: 'provider_step',
+      conversation_id: skillActivationString(
+        record.conversation_id,
+        `${label}.conversation_id`,
+      ),
+      step_index: skillActivationNonnegativeInteger(
+        record.step_index,
+        `${label}.step_index`,
+      ),
+    }
+  }
+  throw new Error(`skill_activations ${label}.kind is unsupported`)
+}
+
 function decodeSkillActivation(value: unknown, label: string): DashboardSkillActivation {
   const record = exactSkillActivationObject(value, label, [
     'identity',
@@ -1230,14 +1267,14 @@ function decodeSkillActivation(value: unknown, label: string): DashboardSkillAct
   const actions = record.actions.map((action, index) => {
     const actionLabel = `${label}.actions[${index}]`
     const decoded = exactSkillActivationObject(action, actionLabel, [
-      'tool_use_id',
+      'identity',
       'tool_name',
       'runtime_id',
       'agent_core_turn',
       'observed_at',
     ])
     return {
-      tool_use_id: skillActivationString(decoded.tool_use_id, `${actionLabel}.tool_use_id`),
+      identity: decodeSkillActionIdentity(decoded.identity, `${actionLabel}.identity`),
       tool_name: skillActivationString(decoded.tool_name, `${actionLabel}.tool_name`),
       runtime_id: skillActivationString(decoded.runtime_id, `${actionLabel}.runtime_id`),
       agent_core_turn: skillActivationNonnegativeInteger(decoded.agent_core_turn, `${actionLabel}.agent_core_turn`),
@@ -1267,7 +1304,7 @@ function decodeTransitionRejection(value: unknown, label: string): DashboardSkil
     'activation_agent_core_turn',
     'observed_agent_core_turn',
     'observed_at',
-    'action_tool_use_id',
+    'action_identity',
     'tool_name',
   ])
   const common = {
@@ -1313,7 +1350,7 @@ function decodeTransitionRejection(value: unknown, label: string): DashboardSkil
       'skill_tool_use_id',
       'activation_turn_ref',
       'observed_turn_ref',
-      'action_tool_use_id',
+      'action_identity',
       'tool_name',
       'observed_agent_core_turn',
       'observed_at',
@@ -1321,7 +1358,7 @@ function decodeTransitionRejection(value: unknown, label: string): DashboardSkil
     return {
       kind: 'action_before_delivery',
       ...common,
-      action_tool_use_id: skillActivationString(record.action_tool_use_id, `${label}.action_tool_use_id`),
+      action_identity: decodeSkillActionIdentity(record.action_identity, `${label}.action_identity`),
       tool_name: skillActivationString(record.tool_name, `${label}.tool_name`),
     }
   }
@@ -1426,8 +1463,8 @@ export function normalizeSkillActivationProjection(
     'activations',
     'transition_rejections',
   ])
-  if (ledger.schema !== 'masc.skill-activations/v4') {
-    throw new Error('skill_activations schema is not v4')
+  if (ledger.schema !== 'masc.skill-activations/v5') {
+    throw new Error('skill_activations schema is not v5')
   }
   if (
     !Array.isArray(ledger.activations)
@@ -1443,7 +1480,7 @@ export function normalizeSkillActivationProjection(
     scoped_summaries: projection.scoped_summaries.map((scoped, index) =>
       decodeScopedSummary(scoped, `available.scoped_summaries[${index}]`)),
     ledger: {
-      schema: 'masc.skill-activations/v4',
+      schema: 'masc.skill-activations/v5',
       workspace_key: skillActivationSha256(ledger.workspace_key, 'available.ledger.workspace_key'),
       session_id: skillActivationString(ledger.session_id, 'available.ledger.session_id'),
       revision: skillActivationSha256(ledger.revision, 'available.ledger.revision'),

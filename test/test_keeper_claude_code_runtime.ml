@@ -266,7 +266,8 @@ let content_of_wire_message raw =
 
 let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = []) ?event_bus
     ?event_capture ?on_event ?agent_core_checkpoint ?runtime_manifest_context
-    ?runtime_manifest_append ?raw_trace ~base_path ~cli_path ~goal () =
+    ?runtime_manifest_append ?raw_trace ?on_official_client_native_action
+    ~base_path ~cli_path ~goal () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
     ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
@@ -306,6 +307,7 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                            ?runtime_manifest_context
                            ?runtime_manifest_append
                            ?raw_trace
+                           ?on_official_client_native_action
                            ~sw
                            ~net:(Eio.Stdenv.net env)
                            ())
@@ -678,6 +680,7 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
       ~parameters:[ marker_param ]
       (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
   in
+  let native_actions = ref [] in
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
@@ -685,7 +688,16 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
          [ Emit_and_read mcp_initialize
          ; Emit mcp_initialized_notification
          ; Emit_and_read mcp_list
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-mcp-1"
+                ~call_id:"provider-mcp-call-1"
+                ~tool_name:"mcp__masc__masc_probe")
          ; Emit_and_read mcp_call
+         ; Emit
+             (native_tool_result
+                ~call_id:"provider-mcp-call-1"
+                ~content:"MASC_TOOL_RESULT")
          ; Emit
              (native_tool_call_block
                 ~turn_id:"turn-native-1"
@@ -703,6 +715,11 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
                ~cli_path
                ~goal:"USE_NATIVE_AND_MASC_TOOLS"
                ~raw_trace
+               ~on_official_client_native_action:
+                 (fun ~runtime_id ~official_turn ~identity ~tool_name ->
+                    native_actions :=
+                      (runtime_id, official_turn, identity, tool_name)
+                      :: !native_actions)
                ()
            with
            | Error error -> fail (Agent_core.Error.to_string error)
@@ -724,11 +741,11 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
              in
              check int
                "native tool start count"
-               1
+               2
                (List.length (records_of_type Native_tool_started));
              check int
                "native tool finish count"
-               1
+               2
                (List.length (records_of_type Native_tool_finished));
              check int
                "MASC tool execution start count"
@@ -738,17 +755,28 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
                "MASC tool execution finish count"
                1
                (List.length (records_of_type Tool_execution_finished));
-             let native_start = List.hd (records_of_type Native_tool_started) in
-             check
-               (option string)
-               "native call id"
-               (Some "native-call-1")
-               native_start.tool_use_id;
-             check
-               (option string)
-               "native tool name"
-               (Some "Bash")
-               native_start.tool_name))
+             let native_starts = records_of_type Native_tool_started in
+             check bool "MCP wrapper is typed in RAW" true
+               (List.exists
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.native_tool_identity
+                     = Some (Agent_core.Raw_trace.Call_id "provider-mcp-call-1")
+                     && record.native_tool_origin = Some Agent_core.Raw_trace.Mcp_wrapper)
+                  native_starts);
+             check bool "built-in action is typed in RAW" true
+               (List.exists
+                  (fun (record : Agent_core.Raw_trace.record) ->
+                     record.native_tool_identity
+                     = Some (Agent_core.Raw_trace.Call_id "native-call-1")
+                     && record.native_tool_origin = Some Agent_core.Raw_trace.Built_in)
+                  native_starts);
+             check bool "only the built-in reaches Skill native action observer" true
+               (match List.rev !native_actions with
+                | [ ( "claude.claude"
+                    , 1
+                    , Runtime_native_tools.Call_id "native-call-1"
+                    , "Bash" ) ] -> true
+                | _ -> false)))
 ;;
 
 let test_keeper_streams_text_and_tool_events () =
@@ -1575,14 +1603,28 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
 
 let test_native_action_observer_keeps_exact_provider_identity () =
   let seen = ref [] in
-  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
+  let observe ~official_turn ~identity ~tool_name =
+    seen := (official_turn, identity, tool_name) :: !seen
+  in
   Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:9 ~observe
     (Runtime_claude_code.Native_tool_started
-       { Runtime_native_tools.call_id = Some "claude-call"; tool_name = Some "Edit" });
+       { Runtime_native_tools.identity = Some (Call_id "claude-call")
+       ; tool_name = Some "Edit"
+       ; origin = Built_in
+       });
   Keeper_claude_code_runtime.For_testing.observe_stream_native_action ~turn_count:10 ~observe
     (Runtime_claude_code.Native_tool_started
-       { Runtime_native_tools.call_id = Some "claude-call-2"; tool_name = None });
-  check (list (triple int string string)) "exact only" [ 9, "claude-call", "Edit" ] (List.rev !seen)
+       { Runtime_native_tools.identity = Some (Call_id "claude-call-2")
+       ; tool_name = None
+       ; origin = Built_in
+       });
+  check
+    bool
+    "exact only"
+    true
+    (match List.rev !seen with
+     | [ 9, Runtime_native_tools.Call_id "claude-call", "Edit" ] -> true
+     | _ -> false)
 ;;
 
 let () =

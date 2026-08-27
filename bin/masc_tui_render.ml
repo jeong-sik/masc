@@ -7363,13 +7363,21 @@ let skill_delivery_text ~has_action = function
 let skill_action_lines actions =
   List.map
     (fun (action : Masc.Keeper_skill_activation_ledger.action) ->
+       let identity =
+         match action.identity with
+         | Masc.Keeper_skill_activation_ledger.Call_id call_id ->
+           "call=" ^ call_id
+         | Masc.Keeper_skill_activation_ledger.Provider_step
+             { conversation_id; step_index } ->
+           Printf.sprintf "step=%s:%d" conversation_id step_index
+       in
        Ansi.dim,
        Printf.sprintf
-         "       action turn=%d runtime=%s tool=%s id=%s at=%s"
+         "       action turn=%d runtime=%s tool=%s %s at=%s"
          action.agent_core_turn
          (Terminal_text.single_line action.runtime_id)
          (Terminal_text.single_line action.tool_name)
-         (Terminal_text.single_line action.tool_use_id)
+         (Terminal_text.single_line identity)
          (Terminal_text.single_line action.observed_at))
     actions
 

@@ -10,9 +10,18 @@
 # rejected code comes back as HTTP 200 with {"ok":false,"error":"..."} --
 # which masc now reads as the refusal it is.
 #
-# Not measured: a completed exchange. Slack issues a refresh token and an
-# expiry only for apps with token rotation turned on, and masc refuses an
-# answer carrying neither. Turn rotation on for the app.
+# What an app without token rotation answers with: an access token alone,
+# no expires_in and no refresh_token. masc carries that instead of refusing
+# it -- a Slack user token without rotation is long-lived, so there is
+# nothing for a Keeper to renew and no moment for it to stop at.
+#
+# Still not measured: whether the MCP endpoint accepts a token of that
+# shape. The login completes; the first tool call is what would say.
+#
+# Turning rotation on gets an expiring token and a refresh token instead.
+# It cannot be turned off again, and installs the app already has are
+# migrated by calling oauth.v2.exchange rather than automatically -- so it
+# is not the first thing to reach for on an app other people use.
 
 id = "slack"
 label = "Slack"

@@ -6,7 +6,7 @@ module Provider = Keeper_oauth_provider
 type tokens = {
   access_token : string;
   refresh_token : string option;
-  expires_at : float;
+  expires_at : float option;
 }
 
 type pending = {
@@ -23,7 +23,6 @@ type exchange_error =
   | Provider_rejected of { status : int; body : string }
   | Malformed_response of string
   | State_mismatch
-  | No_refresh_token
 
 let exchange_error_to_string = function
   | Transport detail -> Printf.sprintf "the token request did not complete: %s" detail
@@ -33,9 +32,6 @@ let exchange_error_to_string = function
     Printf.sprintf "the provider's answer could not be read: %s" detail
   | State_mismatch ->
     "the callback echoed a state this exchange did not send"
-  | No_refresh_token ->
-    "the declaration asks for offline_access and the provider returned no \
-     refresh token"
 
 type post =
   url:string -> headers:(string * string) list -> body:string ->
@@ -139,16 +135,18 @@ let tokens_of_response ~now body =
          | Some (`Float seconds) -> Some seconds
          | Some _ | None -> None
        in
-       (match expires_in with
-        | None ->
-          Error (Malformed_response "the answer carries no readable expires_in")
-        | Some seconds ->
-          (* offline_access is in every authorize call this builds, so a
-             missing refresh token is the server answering differently than
-             it was asked, not a shape we chose not to request. *)
-          if refresh_token = None
-          then Error No_refresh_token
-          else Ok { access_token; refresh_token; expires_at = now +. seconds })
+       (* RFC 6749 5.1 makes both optional, and neither absence is a failure
+          to read the answer. A token that states no expiry is what Slack
+          issues for an app without token rotation; refusing it here read as
+          a parsing bug to an operator whose app was simply configured that
+          way. What a Keeper can do with what came back is a question for
+          whoever stores it, so both absences are carried rather than
+          decided here. *)
+       Ok
+         { access_token
+         ; refresh_token
+         ; expires_at = Option.map (fun seconds -> now +. seconds) expires_in
+         }
      | Some _ | None ->
        Error (Malformed_response "the answer carries no non-empty access_token"))
 

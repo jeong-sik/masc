@@ -267,8 +267,15 @@ let store_tokens ~base_path ~keeper_name ~(provider : Provider.t)
     set_env ~name:provider.Provider.access_token_env
       ~value:tokens.Keeper_oauth_flow.access_token
   in
+  (* A renewal that names no new expiry has not told us this credential is
+     younger than the one it replaced. Keeping the old moment would put the
+     renewal check against a clock that already ran out and send it back
+     every turn; empty says the moment is unknown, which is what stops it. *)
   set_env ~name:provider.Provider.expires_at_env
-    ~value:(Printf.sprintf "%.0f" tokens.Keeper_oauth_flow.expires_at)
+    ~value:
+      (match tokens.Keeper_oauth_flow.expires_at with
+       | None -> ""
+       | Some expires_at -> Printf.sprintf "%.0f" expires_at)
 ;;
 
 let stored_expires_at ~base_path ~keeper_name ~(provider : Provider.t) =

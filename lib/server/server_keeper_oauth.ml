@@ -218,7 +218,8 @@ type attached = {
   keeper : string;
   provider_id : string;
   provider_label : string;
-  expires_at : float;
+  expires_at : float option;
+  warning : string option;
   tool_discovery : (int, string) result;
 }
 
@@ -236,22 +237,37 @@ let finish ~base_path ~state ~code ~now =
     Keeper_secret_projection.set_env_entry ~base_path ~keeper_name
       ~scope:Keeper_secret_projection.Keeper_secret ~name ~value
   in
+  let refresh_token, expires_at =
+    match finished.Session.expiry with
+    | Session.Never -> None, None
+    | Session.Renewable { expires_at; refresh_token } -> Some refresh_token, expires_at
+    | Session.Expiring_without_renewal expires_at -> None, Some expires_at
+  in
   (* The refresh token first. Every other write can be repeated by logging in
      again; losing this one means the Keeper works until the access token
      expires and then stops with nothing on disk to say why. *)
   let* () =
-    Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
-      ~scope:Keeper_secret_projection.Keeper_secret
-      ~container_path:provider.Provider.refresh_token_file
-      ~value:finished.Session.refresh_token
+    match refresh_token with
+    | None -> Ok ()
+    | Some value ->
+      Keeper_secret_projection.set_file_entry ~base_path ~keeper_name
+        ~scope:Keeper_secret_projection.Keeper_secret
+        ~container_path:provider.Provider.refresh_token_file ~value
   in
   let* () =
     set_env ~name:provider.Provider.access_token_env
       ~value:finished.Session.access_token
   in
+  (* Written even when there is no expiry, and empty is what says so. A
+     Keeper that was attached to this provider before may have a moment
+     recorded from that login; leaving it there would have the renewal check
+     read a stale clock against a credential that does not answer to it. *)
   let* () =
     set_env ~name:provider.Provider.expires_at_env
-      ~value:(Printf.sprintf "%.0f" finished.Session.expires_at)
+      ~value:
+        (match expires_at with
+         | None -> ""
+         | Some expires_at -> Printf.sprintf "%.0f" expires_at)
   in
   (* The credentials are on disk by now, so this can fail without undoing
      the attachment. Its outcome is carried rather than logged: the operator
@@ -265,7 +281,8 @@ let finish ~base_path ~state ~code ~now =
     { keeper = keeper_name
     ; provider_id = provider.Provider.id
     ; provider_label = provider.Provider.label
-    ; expires_at = finished.Session.expires_at
+    ; expires_at
+    ; warning = Session.expiry_warning finished.Session.expiry
     ; tool_discovery
     }
 ;;

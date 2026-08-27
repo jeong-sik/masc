@@ -343,8 +343,8 @@ let test_completion_sends_the_verifier_and_dates_the_expiry () =
       (* expires_in is relative to the moment it was read, so what is stored
          is the instant. A later reader should not have to know when the
          exchange happened. *)
-      check (Alcotest.float 0.001) "expiry is dated from now" 4600.0
-        tokens.Keeper_oauth_flow.expires_at
+      check (Alcotest.option (Alcotest.float 0.001)) "expiry is dated from now"
+        (Some 4600.0) tokens.Keeper_oauth_flow.expires_at
 
 let test_a_foreign_state_is_refused_before_anything_is_sent () =
   let provider = load_or_fail atlassian_toml in
@@ -360,10 +360,11 @@ let test_a_foreign_state_is_refused_before_anything_is_sent () =
         (Keeper_oauth_flow.exchange_error_to_string other)
   | Ok _ -> Alcotest.fail "a code arriving under another state was redeemed"
 
-let test_a_missing_refresh_token_is_named () =
-  (* The declaration asks for offline_access. Storing only the access token
-     would leave the Keeper working for an hour and then stopping with no
-     record of why. *)
+let test_a_missing_refresh_token_is_carried_not_refused () =
+  (* RFC 6749 5.1 makes both fields optional, so an answer without one is a
+     shape rather than a failure to read it. What a Keeper can do with a
+     credential it cannot renew is decided where it is stored; refusing here
+     read to an operator as a parsing bug in masc. *)
   let provider = load_or_fail atlassian_toml in
   let pending = begin_for provider in
   let result, _ =
@@ -371,11 +372,37 @@ let test_a_missing_refresh_token_is_named () =
       ~answer:(Ok (200, {|{"access_token":"at-1","expires_in":3600}|}))
   in
   match result with
-  | Error Keeper_oauth_flow.No_refresh_token -> ()
-  | Error other ->
-      Alcotest.failf "wrong refusal: %s"
-        (Keeper_oauth_flow.exchange_error_to_string other)
-  | Ok _ -> Alcotest.fail "an access token with no refresh token was accepted"
+  | Ok tokens ->
+      Alcotest.(check (option string))
+        "no refresh token came back" None tokens.Keeper_oauth_flow.refresh_token;
+      Alcotest.(check (option (float 0.001)))
+        "the stated expiry is still dated from now" (Some 4600.0)
+        tokens.Keeper_oauth_flow.expires_at
+  | Error err ->
+      Alcotest.failf "refused an answer it should carry: %s"
+        (Keeper_oauth_flow.exchange_error_to_string err)
+
+let test_an_answer_stating_no_expiry_is_carried () =
+  (* Slack's token endpoint answers this way for an app without token
+     rotation: an access token, no expiry, no refresh token. Measured
+     2026-08-27 against a real login. *)
+  let provider = load_or_fail atlassian_toml in
+  let pending = begin_for provider in
+  let result, _ =
+    complete_with provider pending ~state:pending.Keeper_oauth_flow.state
+      ~answer:(Ok (200, {|{"access_token":"at-1","token_type":"user"}|}))
+  in
+  match result with
+  | Ok tokens ->
+      Alcotest.(check string)
+        "the access token is read" "at-1" tokens.Keeper_oauth_flow.access_token;
+      Alcotest.(check (option (float 0.001)))
+        "no moment was named" None tokens.Keeper_oauth_flow.expires_at;
+      Alcotest.(check (option string))
+        "and nothing to renew with" None tokens.Keeper_oauth_flow.refresh_token
+  | Error err ->
+      Alcotest.failf "refused a token that simply never expires: %s"
+        (Keeper_oauth_flow.exchange_error_to_string err)
 
 let test_a_refusal_keeps_the_providers_reason () =
   let provider = load_or_fail atlassian_toml in
@@ -444,12 +471,19 @@ let test_an_answer_without_expiry_is_not_guessed () =
     complete_with provider pending ~state:pending.Keeper_oauth_flow.state
       ~answer:(Ok (200, {|{"access_token":"at-1","refresh_token":"rt-1"}|}))
   in
+  (* Still the point of this test: no moment is made up. What changed is
+     where that shows -- an absent expiry rather than a refusal, so a token
+     the provider means to last is not read as an unreadable answer. *)
   match result with
-  | Error (Keeper_oauth_flow.Malformed_response _) -> ()
-  | Error other ->
-      Alcotest.failf "wrong refusal: %s"
-        (Keeper_oauth_flow.exchange_error_to_string other)
-  | Ok _ -> Alcotest.fail "an expiry was invented for an answer that carried none"
+  | Ok tokens ->
+      Alcotest.(check (option (float 0.001)))
+        "no expiry was invented" None tokens.Keeper_oauth_flow.expires_at;
+      Alcotest.(check (option string))
+        "and the refresh token it did carry is kept" (Some "rt-1")
+        tokens.Keeper_oauth_flow.refresh_token
+  | Error err ->
+      Alcotest.failf "refused instead of carrying the absence: %s"
+        (Keeper_oauth_flow.exchange_error_to_string err)
 
 let test_refresh_asks_for_a_refresh_grant () =
   let post, seen = recording_post ok_answer in
@@ -1009,10 +1043,73 @@ let test_the_callback_finishes_the_login_it_started () =
             finished.Keeper_oauth_session.provider_id;
           check str "access token" "at-1"
             finished.Keeper_oauth_session.access_token;
-          check str "refresh token" "rt-1"
-            finished.Keeper_oauth_session.refresh_token;
+          (match finished.Keeper_oauth_session.expiry with
+          | Keeper_oauth_session.Renewable { refresh_token; expires_at } ->
+              check str "refresh token" "rt-1" refresh_token;
+              Alcotest.(check (option (float 0.001)))
+                "and the expiry it stated" (Some 3601.0) expires_at
+          | Keeper_oauth_session.Never ->
+              Alcotest.fail "an answer with both fields read as neither"
+          | Keeper_oauth_session.Expiring_without_renewal _ ->
+              Alcotest.fail "an answer with a refresh token read as unrenewable");
           Alcotest.(check int) "and the login is no longer waiting" 0
             (Keeper_oauth_pending.waiting table ~now:2.0))
+
+(* The three shapes a finished login can land in, and what each one tells
+   the operator. Slack without token rotation is the first; a provider that
+   states an expiry and hands over no way to renew is the third, and that is
+   the only one anybody has to be warned about. *)
+let finish_answering answer =
+  let provider = load_or_fail atlassian_toml in
+  let table = Keeper_oauth_pending.create () in
+  match
+    start_login ~configured:(Some (credentials "client-abc")) ~discover:(stub_discover ())
+      ~register:never_register provider table
+  with
+  | Error err ->
+      Alcotest.failf "start failed: %s"
+        (Keeper_oauth_session.start_error_to_string err)
+  | Ok started ->
+      let post, _ = recording_post (Ok (200, answer)) in
+      Keeper_oauth_session.finish ~post ~pending:table
+        ~state:started.Keeper_oauth_session.state ~code:"the-code" ~now:1.0 ()
+
+let test_a_token_that_never_expires_needs_no_warning () =
+  match finish_answering {|{"access_token":"at-1","token_type":"user"}|} with
+  | Error err ->
+      Alcotest.failf "a login Slack completes was refused: %s"
+        (Keeper_oauth_session.finish_error_to_string err)
+  | Ok finished -> (
+      match finished.Keeper_oauth_session.expiry with
+      | Keeper_oauth_session.Never ->
+          Alcotest.(check (option string))
+            "nothing hangs over this one" None
+            (Keeper_oauth_session.expiry_warning finished.Keeper_oauth_session.expiry)
+      | Keeper_oauth_session.Renewable _ ->
+          Alcotest.fail "an answer carrying no refresh token read as renewable"
+      | Keeper_oauth_session.Expiring_without_renewal _ ->
+          Alcotest.fail "an answer naming no expiry read as expiring")
+
+let test_an_expiry_with_no_way_to_renew_is_warned_about () =
+  match finish_answering {|{"access_token":"at-1","expires_in":3600}|} with
+  | Error err ->
+      Alcotest.failf "finish failed: %s"
+        (Keeper_oauth_session.finish_error_to_string err)
+  | Ok finished -> (
+      match finished.Keeper_oauth_session.expiry with
+      | Keeper_oauth_session.Expiring_without_renewal expires_at ->
+          Alcotest.(check (float 0.001))
+            "dated from the moment it was read" 3601.0 expires_at;
+          (* The one shape that ends in a Keeper losing a provider with
+             nothing on disk to say why, so the page has to say it. *)
+          Alcotest.(check bool)
+            "the operator is told before they close the tab" true
+            (Keeper_oauth_session.expiry_warning finished.Keeper_oauth_session.expiry
+            <> None)
+      | Keeper_oauth_session.Never ->
+          Alcotest.fail "a stated expiry read as none"
+      | Keeper_oauth_session.Renewable _ ->
+          Alcotest.fail "an answer carrying no refresh token read as renewable")
 
 let test_a_callback_nobody_is_waiting_on_says_so () =
   let table = Keeper_oauth_pending.create () in
@@ -1184,8 +1281,10 @@ let () =
             test_completion_sends_the_verifier_and_dates_the_expiry;
           Alcotest.test_case "refuses a foreign state before sending" `Quick
             test_a_foreign_state_is_refused_before_anything_is_sent;
-          Alcotest.test_case "names a missing refresh token" `Quick
-            test_a_missing_refresh_token_is_named;
+          Alcotest.test_case "carries a missing refresh token" `Quick
+            test_a_missing_refresh_token_is_carried_not_refused;
+          Alcotest.test_case "carries an answer stating no expiry" `Quick
+            test_an_answer_stating_no_expiry_is_carried;
           Alcotest.test_case "keeps the provider's reason" `Quick
             test_a_refusal_keeps_the_providers_reason;
           Alcotest.test_case "a refusal inside a 200 is still a refusal" `Quick
@@ -1246,6 +1345,10 @@ let () =
             test_no_secret_means_no_parameter;
           Alcotest.test_case "the callback finishes the login it started" `Quick
             test_the_callback_finishes_the_login_it_started;
+          Alcotest.test_case "a token that never expires needs no warning" `Quick
+            test_a_token_that_never_expires_needs_no_warning;
+          Alcotest.test_case "an expiry with no way to renew is warned about"
+            `Quick test_an_expiry_with_no_way_to_renew_is_warned_about;
           Alcotest.test_case "a callback nobody is waiting on says so" `Quick
             test_a_callback_nobody_is_waiting_on_says_so;
         ] );

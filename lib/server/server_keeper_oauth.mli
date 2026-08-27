@@ -66,7 +66,16 @@ type attached = {
   keeper : string;
   provider_id : string;
   provider_label : string;
-  expires_at : float;
+  expires_at : float option;
+      (** When the provider said this credential lapses. Absent when it
+          named no moment, which is a shape some providers issue rather than
+          one this refuses -- see {!Keeper_oauth_session.expiry}. *)
+  warning : string option;
+      (** What the operator has to know before they walk away from the page,
+          or [None] when the login left nothing hanging. Carried beside the
+          success rather than raised as one: the credentials are on disk
+          either way, and the thing worth saying is about what happens
+          later. *)
   tool_discovery : (int, string) result;
       (** How many tools the provider named, or why asking did not work.
 

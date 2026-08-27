@@ -647,20 +647,57 @@ let identity_connectable ?(query = "") providers =
     provider that registers no client says what to make and where to put it,
     and a single truncated line is the half of that sentence an operator
     cannot act on. *)
+(** Whether the pane's notice reports something that worked.
+
+    One line reports both -- a refusal to start and an app recorded -- and
+    without this they are drawn the same, so a save that succeeded arrives in
+    the colour of a failure. *)
+(** A pasted value flattened to one line, for a field that holds one.
+
+    Control bytes become a space and runs of space collapse, because a scope
+    list copied out of a browser arrives with the newlines that separated
+    it and a secret carries the one that ended it.
+
+    Deliberately not the terminal's own single-line helper. That one is for
+    drawing untrusted text: it makes a newline visible by writing the four
+    characters "\x0A" into the string. Used on input, those four characters
+    were stored, sent to Slack as part of a scope name, and came back as
+    "Invalid permissions requested".
+
+    Bytes at or above 0x80 are left alone -- they are UTF-8, not control
+    characters. *)
+let identity_field_paste text =
+  let out = Buffer.create (String.length text) in
+  String.iter
+    (fun c ->
+      let code = Char.code c in
+      if code < 0x20 || code = 0x7f then Buffer.add_char out ' '
+      else Buffer.add_char out c)
+    text;
+  Buffer.contents out
+  |> String.split_on_char ' '
+  |> List.filter (fun part -> not (String.equal part ""))
+  |> String.concat " "
+
+type identity_notice_kind = Notice_ok | Notice_bad
+
 let identity_notice ~cols detail =
   match detail with
   | None -> []
-  | Some text ->
+  | Some (kind, text) ->
     (* Two for this indent, two for the one the pane adds, four for the box
        around it. Wrapping wider than that is a line the frame truncates --
        which is the whole failure this exists to undo. *)
     List.map
       (fun line -> "  " ^ line)
       (Masc_tui_message_layout.wrap_words ~max_cells:(max 20 (cols - 8)) text)
-    @ [ "  There is a form for it on the dashboard, in this panel, marked \
-         \xeb\x82\xb4 \xec\x95\xb1 \xec\x93\xb0\xea\xb8\xb0."
-      ; ""
-      ]
+    @
+    (* Only on a refusal, and pointing at the key on this pane rather than at
+       the dashboard: the form is here now. *)
+    (match kind with
+     | Notice_ok -> [ "" ]
+     | Notice_bad ->
+       [ "  A records an app for the row the cursor is on."; "" ])
 
 (** The filter's own two rows: what was typed, and how much of the set is
     left. Built here for the same reason the notice is -- the key handler
@@ -1112,7 +1149,7 @@ type state = {
   (* What one attempt answered, as against [identity_view_error], which is
      the list itself failing to load. A refusal from one provider is not a
      reason to take the other fifty-odd off the screen. *)
-  mutable identity_attempt_error: string option;
+  mutable identity_attempt_error: (identity_notice_kind * string) option;
   (* [None] is not filtering; [Some ""] is filtering with nothing typed yet,
      which is a different screen from not filtering -- one says the list is
      everything, the other says it is everything so far. *)

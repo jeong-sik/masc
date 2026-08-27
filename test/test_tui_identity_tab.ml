@@ -280,6 +280,27 @@ let test_a_closed_form_takes_no_rows () =
   check Alcotest.int "nothing reserved" 0
     (List.length (Masc_tui_types.identity_app_form_rows None))
 
+(* ── what a paste carries into a field ──────────────────────────────── *)
+
+let test_a_pasted_list_loses_its_newlines () =
+  (* A scope list copied out of a browser arrives one per line. The
+     terminal's own single-line helper is for drawing and turns a newline
+     into the four characters "\x0A"; those were stored, sent to Slack
+     inside a scope name, and came back as "Invalid permissions requested". *)
+  check Alcotest.string "one line, single spaces"
+    "chat:write files:read users:read"
+    (Masc_tui_types.identity_field_paste
+       "chat:write\nfiles:read\r\n  users:read\n")
+
+let test_a_pasted_secret_loses_its_trailing_newline () =
+  check Alcotest.string "nothing around it" "xoxp-abc123"
+    (Masc_tui_types.identity_field_paste "  xoxp-abc123\n")
+
+let test_a_paste_keeps_what_is_not_a_control_character () =
+  (* Bytes at or above 0x80 are UTF-8, not control characters. *)
+  check Alcotest.string "unharmed" "\xed\x95\x9c\xea\xb8\x80"
+    (Masc_tui_types.identity_field_paste "\xed\x95\x9c\xea\xb8\x80")
+
 let () =
   Alcotest.run "tui_identity_tab"
     [ ( "numbering",
@@ -307,6 +328,14 @@ let () =
       ( "which other Keepers hold a service",
         [ Alcotest.test_case "coverage is carried per provider" `Quick
             test_coverage_is_carried_per_provider;
+        ] );
+      ( "what a paste carries into a field",
+        [ Alcotest.test_case "a pasted list loses its newlines" `Quick
+            test_a_pasted_list_loses_its_newlines;
+          Alcotest.test_case "a pasted secret loses its trailing newline"
+            `Quick test_a_pasted_secret_loses_its_trailing_newline;
+          Alcotest.test_case "a paste keeps what is not a control character"
+            `Quick test_a_paste_keeps_what_is_not_a_control_character;
         ] );
       ( "the app form",
         [ Alcotest.test_case "the secret is never drawn" `Quick

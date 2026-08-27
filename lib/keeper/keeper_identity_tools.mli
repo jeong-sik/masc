@@ -57,8 +57,22 @@ val refresh :
     environment, so a variable of the same name here cannot be mistaken for
     a Keeper's credential. *)
 
+type offered_tool = {
+  schema : Agent_core.Types.tool_schema;
+      (** Model-facing name is the provider id prefixed onto the remote
+          name. A provider is free to call something [search], and so is
+          masc; the model would otherwise be handed two tools with one name
+          and no way to mean either. *)
+  read_only : bool option;
+      (** The provider's own [annotations.readOnlyHint], written down at
+          attach time. [None] means the service said nothing, which is not
+          the same as saying no. *)
+  provider : Keeper_oauth_provider.t;
+  remote_name : string;
+}
+
 type offering = {
-  offered : Agent_core.Tool.t list;
+  offered : offered_tool list;
   unusable : (string * string) list;
       (** Tools the provider named that cannot be offered, each with why.
           Kept rather than dropped: a shorter tool list with no reason for
@@ -66,7 +80,31 @@ type offering = {
           what happened. *)
 }
 
-val agent_tools :
+val agent_tools : provider:Keeper_oauth_provider.t -> catalog -> offering
+(** Project a written catalog onto data a Keeper's runtime can place.
+
+    Data rather than closures on purpose: what runs an offered tool is
+    {!Keeper_identity_gate}, which decides per call whether the durable Gate
+    is consulted first, and it needs the provider and remote name to do
+    that. This module keeps the catalog and the wire; it holds no
+    authorization opinion. *)
+
+type call_phase =
+  | Before_send  (** the [tools/call] was never sent; no effect happened *)
+  | After_send
+      (** the request reached the wire; whether the effect happened is the
+          service's answer, not this process's *)
+
+type call_error =
+  | Precondition of string
+      (** no credential, or a renewal this Keeper needed failed; nothing was
+          sent *)
+  | Mcp of {
+      phase : call_phase;
+      error : Mcp_client.error;
+    }
+
+val run_call :
   ?post:Mcp_client.post ->
       (** How a call reaches the provider. Injected for the same reason it is
           everywhere else here: a test that needs network is a test that does
@@ -74,15 +112,11 @@ val agent_tools :
   base_path:string ->
   keeper_name:string ->
   provider:Keeper_oauth_provider.t ->
-  catalog ->
-  offering
-(** Project a written catalog onto tools a Keeper's runtime can call.
-
-    Names are prefixed with the provider's id. A provider is free to call
-    something [search], and so is masc; the model would otherwise be handed
-    two tools with one name and no way to mean either. The prefix is what
-    the model sees -- the handler holds the remote name, so nothing has to
-    parse it back off.
+  remote_name:string ->
+  arguments:Yojson.Safe.t ->
+  unit ->
+  (Mcp_client.tool_result, call_error) result
+(** One call to one attached provider's tool, as this Keeper.
 
     A call that may change something there is put to the Gate first, and
     only runs on [Allow]. What counts as "may change something" is the
@@ -113,6 +147,14 @@ val agent_tools :
     latency and decides otherwise; holding one session per turn needs a
     mutable cell two fibers share, and that is the part to get right
     deliberately rather than on the way past. *)
+
+val tool_result_of_call :
+  (Mcp_client.tool_result, call_error) result ->
+  Agent_core.Types.tool_result
+(** The model's view of one call: a tool that ran and said no is a
+    recoverable answer, a refused credential is not, transport is transient.
+    Kept beside {!run_call} so the phases and the model vocabulary cannot
+    drift apart in two files. *)
 
 val for_turn : base_path:string -> keeper_name:string -> offering
 (** Every attached provider's tools, for one turn.

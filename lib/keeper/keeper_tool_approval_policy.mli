@@ -35,10 +35,13 @@ val verdict_for :
 
     A tool from a work service this Keeper is attached to is judged by what
     that service said: [annotations.readOnlyHint] on its own listing, carried
-    to here through {!Keeper_identity_tool_index}. A service that said
-    nothing leaves the call asked about -- silence is not permission, and
-    writing to somebody else's Jira unasked is the outcome that has to stay
-    unreachable.
+    to here through {!Keeper_identity_tool_index}. Only an explicit "this
+    tool only reads" runs on that word alone. Writes and silence run too —
+    but into the durable Gate ({!Keeper_identity_gate}), which defers them
+    to the approvals queue on the external-services lane. That queue, not
+    this stream-bound policy, is what keeps "writing to somebody else's
+    Jira unasked" unreachable: it also holds on the lanes that cannot ask,
+    which is where the 2026-08-27 incident ran.
 
     A call whose descriptor says this input only reads runs without asking,
     whatever its group. Reading a file to answer a question is the bulk of

@@ -649,7 +649,12 @@ let test_dispatch_covers_all_replayable_operations () =
     Alcotest.bool
     "an approved memory_write is host-replayed"
     true
-    (replayable_of_operation "memory_write" = Some Replay_memory_write)
+    (replayable_of_operation "memory_write" = Some Replay_memory_write);
+  Alcotest.check
+    Alcotest.bool
+    "an approved identity_call is host-replayed"
+    true
+    (replayable_of_operation "identity_call" = Some Replay_identity)
 ;;
 
 let test_memory_write_replay_preserves_exact_input () =

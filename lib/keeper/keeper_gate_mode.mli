@@ -99,6 +99,30 @@ val set_for_keeper :
 
 val keeper_change_json : keeper_change -> [ `Assoc of (string * Yojson.Safe.t) list ]
 
+(** The external-services lane: calls that leave the workspace for an
+    attached outside service (Jira, Slack, GitHub through a Keeper identity).
+
+    A separate lane with a separate default because the two switches answer
+    different questions. The workspace lane gets opened ([Always_allow]) for
+    internal velocity — tool_execute, memory writes — and that gesture must
+    not silently authorize writes into somebody else's service. An absent
+    external state file selects {!default_external}, which is [Manual]:
+    silence is not permission, in mode form. *)
+
+val default_external : t
+val read_external : base_path:string -> (t, string) result
+val status_json_external : base_path:string -> Yojson.Safe.t
+
+val set_external :
+  Workspace.config -> actor:string -> t -> (change, string) result
+
+val resolve_external :
+  base_path:string -> keeper_name:string -> (t, string) result
+(** {!resolve}'s twin for the external-services lane: the stricter of the
+    lane mode and this keeper's override. An operator who singled a Keeper
+    out for a higher bar meant it for everything that Keeper does, and
+    outside writes are the last place to quietly exempt. *)
+
 val change_json : change -> [ `Assoc of (string * Yojson.Safe.t) list ]
 (** Closed object projection; callers can extend its fields without an
     impossible non-object branch. *)

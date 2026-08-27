@@ -104,6 +104,46 @@ let dashboard_json ~base_path ~limit ~window_minutes =
           ; "error", `String (Keeper_approval_queue_rules_types.rule_store_error_to_string error)
           ] )
   in
+  (* What an operator singled out about individual Keepers. Beside the rules
+     rather than behind another request: a screen that can act on one of
+     these can act on all of them, and a second fetch is a second thing to be
+     out of date. Unreadable is carried as a state rather than an empty list
+     -- empty is a working configuration and a file nobody can read is
+     not. *)
+  let keeper_modes, keeper_modes_state =
+    match Keeper_gate_mode.keeper_overrides ~base_path with
+    | Ok rows ->
+      ( `List
+          (List.map
+             (fun (row : Keeper_gate_mode.keeper_override) ->
+               `Assoc
+                 [ "keeper_name", `String row.keeper_name
+                 ; "mode", `String (Keeper_gate_mode.to_string row.mode)
+                 ; "updated_by", `String row.actor
+                 ; "updated_at", `String row.changed_at
+                 ])
+             rows)
+      , `Assoc [ "state", `String "ready" ] )
+    | Error detail ->
+      `List [], `Assoc [ "state", `String "unavailable"; "error", `String detail ]
+  in
+  let keeper_judges, keeper_judges_state =
+    match Keeper_gate_judge_slot.all ~base_path with
+    | Ok rows ->
+      ( `List
+          (List.map
+             (fun (row : Keeper_gate_judge_slot.t) ->
+               `Assoc
+                 [ "keeper_name", `String row.keeper_name
+                 ; "slot_id", `String row.slot_id
+                 ; "updated_by", `String row.actor
+                 ; "updated_at", `String row.changed_at
+                 ])
+             rows)
+      , `Assoc [ "state", `String "ready" ] )
+    | Error detail ->
+      `List [], `Assoc [ "state", `String "unavailable"; "error", `String detail ]
+  in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; ( "note"
@@ -116,6 +156,10 @@ let dashboard_json ~base_path ~limit ~window_minutes =
     ; "recent_resolved_state", recent_resolved_state
     ; "approval_rules", approval_rules
     ; "approval_rules_state", approval_rules_state
+    ; "keeper_modes", keeper_modes
+    ; "keeper_modes_state", keeper_modes_state
+    ; "keeper_judges", keeper_judges
+    ; "keeper_judges_state", keeper_judges_state
     ; "hitl", hitl_status_json ~base_path
     ]
 ;;

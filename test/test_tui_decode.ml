@@ -3614,12 +3614,25 @@ let runtime_params_json =
               ; ("current", `Int 5)
               ; ("default", `Int 3)
               ; ("has_override", `Bool true)
+              ; ( "meta"
+                , `Assoc
+                    [ ("description", `String "How many thinking blocks to retain")
+                    ; ("value_type", `String "integer")
+                    ; ("min_value", `Int 0)
+                    ; ("max_value", `Int 20)
+                    ] )
               ]
           ; `Assoc
               [ ("key", `String "dashboard.agent_quiet_threshold_sec")
               ; ("current", `Float 300.0)
               ; ("default", `Float 300.0)
               ; ("has_override", `Bool false)
+              ]
+          ; `Assoc
+              [ ("key", `String "keeper.mode")
+              ; ("current", `String "careful")
+              ; ("default", `String "normal")
+              ; ("has_override", `Bool true)
               ]
           ] )
     ; ("surfaces", `List [])
@@ -3629,17 +3642,31 @@ let test_decode_runtime_params_reads_current_and_default () =
   match Tui_decode.decode_runtime_params runtime_params_json with
   | Error detail -> Alcotest.fail ("decode failed: " ^ detail)
   | Ok rows ->
-    (* Both numbers, because "5 (기본 3)" is the whole point of the row: the
-       operator has to be able to answer "back to what". *)
+    (* Current/default travel together, and strings retain quotes so the
+       inline editor can round-trip their JSON type. *)
     Alcotest.(check (list (triple string string string)))
       "key, current, default"
       [ ("keeper.hitl.thinking_blocks", "5", "3")
       ; ("dashboard.agent_quiet_threshold_sec", "300.0", "300.0")
+      ; ("keeper.mode", {|"careful"|}, {|"normal"|})
       ]
-      (List.map (fun (k, c, d, _) -> (k, c, d)) rows);
+      (List.map
+         (fun row ->
+           let open Tui_decode in
+           row.rpr_key, row.rpr_current_json, row.rpr_default_json)
+         rows);
     Alcotest.(check (list bool))
-      "and which one somebody moved" [ true; false ]
-      (List.map (fun (_, _, _, o) -> o) rows)
+      "and which one somebody moved" [ true; false; true ]
+      (List.map (fun row -> row.Tui_decode.rpr_has_override) rows);
+    (match rows with
+     | first :: _ ->
+       let open Tui_decode in
+       Alcotest.(check string) "description"
+         "How many thinking blocks to retain" first.rpr_description;
+       Alcotest.(check string) "type" "integer" first.rpr_value_type;
+       Alcotest.(check (option string)) "min" (Some "0") first.rpr_min_json;
+       Alcotest.(check (option string)) "max" (Some "20") first.rpr_max_json
+     | [] -> Alcotest.fail "expected runtime param rows")
 
 let test_decode_runtime_params_takes_an_empty_registry () =
   match

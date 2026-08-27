@@ -304,7 +304,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~trace_id
         ~turn_ref
         ~active_skill_tool_use_ids:[ "call-skill" ]
-        ~action_tool_use_id:"call-action"
+        ~action_identity:(Ledger.Call_id "call-action")
         ~tool_name:"keeper_time_now"
         ~runtime_id:"runtime-action"
         ~agent_core_turn:1
@@ -316,7 +316,8 @@ let test_delivery_and_later_action_form_one_exact_chain () =
   check int "one Skill linked to the action" 1 added;
   (match Ledger.activations with_action with
    | [ { actions = [ action ]; _ } ] ->
-     check string "later action id" "call-action" action.tool_use_id;
+     check bool "later action id" true
+       (action.identity = Ledger.Call_id "call-action");
      check string "later action tool" "keeper_time_now" action.tool_name
      ; check string "later action runtime" "runtime-action" action.runtime_id
    | _ -> fail "later action was not attached to the exact Skill invocation");
@@ -358,7 +359,7 @@ let test_delivery_and_later_action_form_one_exact_chain () =
         ~trace_id
         ~turn_ref
         ~active_skill_tool_use_ids:[ "call-skill" ]
-        ~action_tool_use_id:"call-action"
+        ~action_identity:(Ledger.Call_id "call-action")
         ~tool_name:"keeper_time_now"
         ~runtime_id:"runtime-action"
         ~agent_core_turn:1
@@ -454,7 +455,9 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
           ~trace_id
           ~turn_ref
           ~active_skill_tool_use_ids:[ "call-official" ]
-          ~action_tool_use_id:"call-after-handoff"
+          ~action_identity:
+            (Ledger.Provider_step
+               { conversation_id = "conversation-antigravity"; step_index = 7 })
           ~tool_name:"keeper_time_now"
           ~runtime_id:"codex-runtime"
           ~agent_core_turn:0
@@ -465,7 +468,13 @@ let test_official_client_handoff_delivers_in_invocation_turn () =
     in
     check int "later action completes official handoff proof" 1 added;
     check int "completed handoff has one action" 1
-      (Ledger.summarize completed).instruction_actions_observed
+      (Ledger.summarize completed).instruction_actions_observed;
+    (match Ledger.activations completed with
+     | [ { actions = [ { identity = Ledger.Provider_step step; _ } ]; _ } ] ->
+       check string "provider step conversation" "conversation-antigravity"
+         step.conversation_id;
+       check int "provider step index" 7 step.step_index
+     | _ -> fail "provider step action identity was not durable")
 ;;
 
 let test_cross_turn_tool_result_replay_is_not_delivery_or_rejection () =
@@ -558,7 +567,7 @@ let test_action_before_delivery_is_durable_transition_evidence () =
        ~trace_id
        ~turn_ref
        ~active_skill_tool_use_ids:[ "call-undelivered" ]
-       ~action_tool_use_id:"call-too-early"
+       ~action_identity:(Ledger.Call_id "call-too-early")
        ~tool_name:"keeper_time_now"
        ~runtime_id:"runtime-action"
        ~agent_core_turn:1
@@ -577,7 +586,7 @@ let test_action_before_delivery_is_durable_transition_evidence () =
   match Ledger.transition_rejections persisted with
   | [ Ledger.Action_before_delivery_rejected
         { skill_tool_use_id = "call-undelivered"
-        ; action_tool_use_id = "call-too-early"
+        ; action_identity = Ledger.Call_id "call-too-early"
         ; _
         } ] -> ()
   | _ -> fail "action-before-delivery rejection did not survive readback"
@@ -729,7 +738,7 @@ let test_duplicate_exact_key_is_rejected_during_decode () =
   in
   let json =
     `Assoc
-      [ "schema", `String "masc.skill-activations/v4"
+      [ "schema", `String "masc.skill-activations/v5"
       ; "workspace_key", `String workspace_key
       ; "session_id", `String session_id
       ; "revision", `String revision

@@ -309,13 +309,13 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
             let index = !next_tool_index in
             incr next_tool_index;
             Option.iter
-              (fun call_id -> Hashtbl.replace native_tool_indexes call_id index)
-              observation.call_id;
+              (fun identity -> Hashtbl.replace native_tool_indexes identity index)
+              observation.identity;
             emit
               (Agent_core.Types.ContentBlockStart
                  { index
                  ; content_type = Runtime_native_tools.stream_content_type
-                 ; tool_id = observation.call_id
+                 ; tool_id = Runtime_native_tools.call_id observation
                  ; tool_name = observation.tool_name
                  })
           | Runtime_antigravity.Native_tool_finished observation ->
@@ -325,13 +325,13 @@ let stream_projection ~keeper_name ~raw_trace_run ~turn_count ~on_native_action 
               ~phase:`Finished
               observation;
             Option.iter
-              (fun call_id ->
+              (fun identity ->
                  Option.iter
                    (fun index ->
-                      Hashtbl.remove native_tool_indexes call_id;
+                      Hashtbl.remove native_tool_indexes identity;
                       emit (Agent_core.Types.ContentBlockStop { index }))
-                   (Hashtbl.find_opt native_tool_indexes call_id))
-              observation.call_id
+                   (Hashtbl.find_opt native_tool_indexes identity))
+              observation.identity
           | Runtime_antigravity.Turn_finished { text = _ } ->
             emit
               (Agent_core.Types.MessageDelta
@@ -1070,17 +1070,6 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
 ;;
 
 module For_testing = struct
-  let observe_stream_native_action ~turn_count ~observe event =
-    let stream =
-      stream_projection
-        ~keeper_name:"test"
-        ~raw_trace_run:None
-        ~turn_count
-        ~on_native_action:(Some observe)
-        None
-    in
-    stream.on_runtime_event event
-  ;;
   let capacity_bounded_model_input_projection =
     capacity_bounded_model_input_projection
   ;;

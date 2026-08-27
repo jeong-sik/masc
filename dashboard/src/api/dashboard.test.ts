@@ -1094,7 +1094,7 @@ function validSkillActivationProjectionFixture() {
       action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
     }],
     ledger: {
-      schema: 'masc.skill-activations/v4',
+      schema: 'masc.skill-activations/v5',
       workspace_key: 'c'.repeat(64),
       session_id: 'trace-one',
       revision: 'd'.repeat(64),
@@ -1118,7 +1118,7 @@ function validSkillActivationProjectionFixture() {
           content_sha256: 'e'.repeat(64),
         },
         actions: [{
-          tool_use_id: 'call-action-1',
+          identity: { kind: 'call_id', call_id: 'call-action-1' },
           tool_name: 'keeper_time_now',
           runtime_id: 'anthropic.claude',
           agent_core_turn: 1,
@@ -1146,10 +1146,10 @@ describe('fetchDashboardTools', () => {
       keeper_name: 'keeper/one',
       scoped_summaries: [],
       ledger: { schema: 'masc.skill-activations/v3', activations: [] },
-    })).toThrow('skill_activations schema is not v4')
+    })).toThrow('skill_activations schema is not v5')
   })
 
-  it('decodes every nested field of an available v4 Skill activation projection', () => {
+  it('decodes every nested field of an available v5 Skill activation projection', () => {
     const projection = validSkillActivationProjectionFixture()
 
     expect(normalizeSkillActivationProjection(projection)).toEqual(projection)

@@ -36,8 +36,15 @@ type tool_result_receipt =
   ; content_sha256 : string
   }
 
+type action_identity = Runtime_native_tools.action_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+
 type action =
-  { tool_use_id : string
+  { identity : action_identity
   ; tool_name : string
   ; runtime_id : string
   ; agent_core_turn : int
@@ -85,7 +92,7 @@ type transition_rejection =
       { skill_tool_use_id : string
       ; activation_turn_ref : Ids.Turn_ref.t
       ; observed_turn_ref : Ids.Turn_ref.t
-      ; action_tool_use_id : string
+      ; action_identity : action_identity
       ; tool_name : string
       ; observed_agent_core_turn : int
       ; observed_at : string
@@ -187,14 +194,14 @@ type decode_error =
   | Invalid_delivery_agent_core_turn of int
   | Invalid_delivery_boundary_kind of string
   | Invalid_delivery_time of string
-  | Invalid_action_tool_use_id_field
+  | Invalid_action_identity_field
   | Invalid_action_tool_name_field of string
   | Invalid_action_agent_core_turn of int
   | Invalid_action_time of string
   | Invalid_transition_rejection_kind of string
   | Orphan_transition_rejection of string
   | Transition_rejection_activation_mismatch of string
-  | Duplicate_action_tool_use_id
+  | Duplicate_action_identity
   | Invalid_activated_at of string
   | Duplicate_skill_tool_use_id
   | Session_id_mismatch
@@ -207,6 +214,7 @@ type store_error =
   | Read_failed of Fs_compat.owned_regular_file_read_error
   | Decode_failed of decode_error
   | Invocation_id_collision of string
+  | Action_identity_collision of action_identity
   | Invalid_delivery_order of
       { skill_tool_use_id : string
       ; activation_turn : int
@@ -214,7 +222,7 @@ type store_error =
       }
   | Conflicting_delivery of string
   | Action_before_delivery of string
-  | Invalid_action_tool_use_id
+  | Invalid_action_identity
   | Invalid_action_tool_name of string
   | Invalid_action_turn of int
   | Invalid_action_observed_at of string
@@ -251,7 +259,7 @@ let decode_error_code = function
   | Invalid_delivery_agent_core_turn _ -> "invalid_delivery_agent_core_turn"
   | Invalid_delivery_boundary_kind _ -> "invalid_delivery_boundary_kind"
   | Invalid_delivery_time _ -> "invalid_delivery_time"
-  | Invalid_action_tool_use_id_field -> "invalid_action_tool_use_id"
+  | Invalid_action_identity_field -> "invalid_action_identity"
   | Invalid_action_tool_name_field _ -> "invalid_action_tool_name"
   | Invalid_action_agent_core_turn _ -> "invalid_action_agent_core_turn"
   | Invalid_action_time _ -> "invalid_action_time"
@@ -259,7 +267,7 @@ let decode_error_code = function
   | Orphan_transition_rejection _ -> "orphan_transition_rejection"
   | Transition_rejection_activation_mismatch _ ->
     "transition_rejection_activation_mismatch"
-  | Duplicate_action_tool_use_id -> "duplicate_action_tool_use_id"
+  | Duplicate_action_identity -> "duplicate_action_identity"
   | Invalid_activated_at _ -> "invalid_activated_at"
   | Duplicate_skill_tool_use_id -> "duplicate_skill_tool_use_id"
   | Session_id_mismatch -> "session_id_mismatch"
@@ -273,10 +281,11 @@ let store_error_code = function
   | Read_failed _ -> "read_failed"
   | Decode_failed error -> "decode_failed." ^ decode_error_code error
   | Invocation_id_collision _ -> "invocation_id_collision"
+  | Action_identity_collision _ -> "action_identity_collision"
   | Invalid_delivery_order _ -> "invalid_delivery_order"
   | Conflicting_delivery _ -> "conflicting_delivery"
   | Action_before_delivery _ -> "action_before_delivery"
-  | Invalid_action_tool_use_id -> "invalid_action_tool_use_id"
+  | Invalid_action_identity -> "invalid_action_identity"
   | Invalid_action_tool_name _ -> "invalid_action_tool_name"
   | Invalid_action_turn _ -> "invalid_action_turn"
   | Invalid_action_observed_at _ -> "invalid_action_observed_at"
@@ -291,6 +300,7 @@ let store_error_to_string = function
   | Decode_failed _ -> "decode failed"
   | Invocation_id_collision tool_use_id ->
     "Skill invocation id collision: " ^ tool_use_id
+  | Action_identity_collision _ -> "Skill action identity collision"
   | Invalid_delivery_order { skill_tool_use_id; activation_turn; delivery_turn } ->
     Printf.sprintf
       "Skill delivery precedes its activation: id=%s activation_turn=%d delivery_turn=%d"
@@ -301,7 +311,7 @@ let store_error_to_string = function
     "Skill delivery observation conflicts with its durable receipt: " ^ tool_use_id
   | Action_before_delivery tool_use_id ->
     "Skill action was observed before body delivery: " ^ tool_use_id
-  | Invalid_action_tool_use_id -> "Skill action tool_use_id is empty"
+  | Invalid_action_identity -> "Skill action identity is invalid"
   | Invalid_action_tool_name tool_name ->
     "Skill action tool name is invalid: " ^ tool_name
   | Invalid_action_turn turn ->
@@ -313,7 +323,7 @@ let store_error_to_string = function
   | Readback_mismatch -> "readback mismatch"
 ;;
 
-let schema = "masc.skill-activations/v4"
+let schema = "masc.skill-activations/v5"
 let filename = "skill-activations.json"
 let activations ledger = ledger.activations
 let transition_rejections ledger = ledger.transition_rejections
@@ -740,9 +750,26 @@ let delivery_to_yojson (delivery : delivery) =
     ]
 ;;
 
+let action_identity_valid = function
+  | Call_id call_id -> String.trim call_id <> ""
+  | Provider_step { conversation_id; step_index } ->
+    String.trim conversation_id <> "" && step_index >= 0
+;;
+
+let action_identity_to_yojson = function
+  | Call_id call_id ->
+    `Assoc [ "kind", `String "call_id"; "call_id", `String call_id ]
+  | Provider_step { conversation_id; step_index } ->
+    `Assoc
+      [ "kind", `String "provider_step"
+      ; "conversation_id", `String conversation_id
+      ; "step_index", `Int step_index
+      ]
+;;
+
 let action_to_yojson (action : action) =
   `Assoc
-    [ "tool_use_id", `String action.tool_use_id
+    [ "identity", action_identity_to_yojson action.identity
     ; "tool_name", `String action.tool_name
     ; "runtime_id", `String action.runtime_id
     ; "agent_core_turn", `Int action.agent_core_turn
@@ -818,7 +845,7 @@ let transition_rejection_to_yojson = function
       { skill_tool_use_id
       ; activation_turn_ref
       ; observed_turn_ref
-      ; action_tool_use_id
+      ; action_identity
       ; tool_name
       ; observed_agent_core_turn
       ; observed_at
@@ -828,7 +855,7 @@ let transition_rejection_to_yojson = function
       ; "skill_tool_use_id", `String skill_tool_use_id
       ; "activation_turn_ref", Ids.Turn_ref.to_yojson activation_turn_ref
       ; "observed_turn_ref", Ids.Turn_ref.to_yojson observed_turn_ref
-      ; "action_tool_use_id", `String action_tool_use_id
+      ; "action_identity", action_identity_to_yojson action_identity
       ; "tool_name", `String tool_name
       ; "observed_agent_core_turn", `Int observed_agent_core_turn
       ; "observed_at", `String observed_at
@@ -1109,13 +1136,45 @@ let decode_delivery = function
     Ok (Some { boundary; runtime_id; delivered_at; content_bytes; content_sha256 })
 ;;
 
+let decode_action_identity json =
+  let* fields = object_field "action identity" json in
+  let* kind = string_field "kind" fields in
+  match kind with
+  | "call_id" ->
+    let* () =
+      exact_fields
+        ~object_name:"action identity"
+        ~allowed:[ "kind"; "call_id" ]
+        fields
+    in
+    let* call_id = string_field "call_id" fields in
+    let identity = Call_id call_id in
+    if action_identity_valid identity
+    then Ok identity
+    else Error Invalid_action_identity_field
+  | "provider_step" ->
+    let* () =
+      exact_fields
+        ~object_name:"action identity"
+        ~allowed:[ "kind"; "conversation_id"; "step_index" ]
+        fields
+    in
+    let* conversation_id = string_field "conversation_id" fields in
+    let* step_index = int_field "step_index" fields in
+    let identity = Provider_step { conversation_id; step_index } in
+    if action_identity_valid identity
+    then Ok identity
+    else Error Invalid_action_identity_field
+  | _ -> Error Invalid_action_identity_field
+;;
+
 let decode_action json =
   let* fields = object_field "action" json in
   let* () =
     exact_fields
       ~object_name:"action"
       ~allowed:
-        [ "tool_use_id"
+        [ "identity"
         ; "tool_name"
         ; "runtime_id"
         ; "agent_core_turn"
@@ -1123,7 +1182,12 @@ let decode_action json =
         ]
       fields
   in
-  let* tool_use_id = string_field "tool_use_id" fields in
+  let* identity_json =
+    match List.assoc_opt "identity" fields with
+    | Some value -> Ok value
+    | None -> Error Invalid_action_identity_field
+  in
+  let* identity = decode_action_identity identity_json in
   let* tool_name = string_field "tool_name" fields in
   let* runtime_id = string_field "runtime_id" fields in
   let* agent_core_turn = int_field "agent_core_turn" fields in
@@ -1131,11 +1195,6 @@ let decode_action json =
   let* () =
     if String.equal (String.trim runtime_id) ""
     then Error Invalid_runtime_id
-    else Ok ()
-  in
-  let* () =
-    if String.equal (String.trim tool_use_id) ""
-    then Error Invalid_action_tool_use_id_field
     else Ok ()
   in
   let* () =
@@ -1153,7 +1212,7 @@ let decode_action json =
     |> Result.map ignore
     |> Result.map_error (fun _ -> Invalid_action_time observed_at)
   in
-  Ok { tool_use_id; tool_name; runtime_id; agent_core_turn; observed_at }
+  Ok { identity; tool_name; runtime_id; agent_core_turn; observed_at }
 ;;
 
 let decode_served_content json =
@@ -1269,7 +1328,7 @@ let decode_transition_rejection ~expected_trace_id json =
         ; "skill_tool_use_id"
         ; "activation_turn_ref"
         ; "observed_turn_ref"
-        ; "action_tool_use_id"
+        ; "action_identity"
         ; "tool_name"
         ; "observed_agent_core_turn"
         ; "observed_at"
@@ -1331,12 +1390,12 @@ let decode_transition_rejection ~expected_trace_id json =
          ; observed_at
          })
   | "action_before_delivery" ->
-    let* action_tool_use_id = string_field "action_tool_use_id" fields in
-    let* () =
-      if String.equal (String.trim action_tool_use_id) ""
-      then Error Invalid_action_tool_use_id_field
-      else Ok ()
+    let* action_identity_json =
+      match List.assoc_opt "action_identity" fields with
+      | Some value -> Ok value
+      | None -> Error Invalid_action_identity_field
     in
+    let* action_identity = decode_action_identity action_identity_json in
     let* tool_name = string_field "tool_name" fields in
     let* () =
       if Safe_identifier.is_portable_name tool_name
@@ -1348,7 +1407,7 @@ let decode_transition_rejection ~expected_trace_id json =
          { skill_tool_use_id
          ; activation_turn_ref
          ; observed_turn_ref
-         ; action_tool_use_id
+         ; action_identity
          ; tool_name
          ; observed_agent_core_turn
          ; observed_at
@@ -1434,11 +1493,12 @@ let decode_activation ~expected_trace_id json =
       |> Result.map List.rev
     | Some _ | None -> Error (Expected_object { field = "actions" })
   in
-  let rec ensure_unique_actions = function
+  let rec ensure_unique_actions (actions : action list) =
+    match actions with
     | [] -> Ok ()
     | action :: rest ->
-      if List.exists (fun other -> String.equal action.tool_use_id other.tool_use_id) rest
-      then Error Duplicate_action_tool_use_id
+      if List.exists (fun (other : action) -> action.identity = other.identity) rest
+      then Error Duplicate_action_identity
       else ensure_unique_actions rest
   in
   let* () = ensure_unique_actions actions in
@@ -1900,14 +1960,14 @@ let observe_action
       ~trace_id
       ~turn_ref
       ~active_skill_tool_use_ids
-      ~action_tool_use_id
+      ~action_identity
       ~tool_name
       ~runtime_id
       ~agent_core_turn
       ~observed_at
   =
-  if String.equal (String.trim action_tool_use_id) ""
-  then Error Invalid_action_tool_use_id
+  if not (action_identity_valid action_identity)
+  then Error Invalid_action_identity
   else if not (Safe_identifier.is_portable_name tool_name)
   then Error (Invalid_action_tool_name tool_name)
   else if String.equal (String.trim runtime_id) ""
@@ -1924,7 +1984,7 @@ let observe_action
         in
         let active = List.sort_uniq String.compare active_skill_tool_use_ids in
         let action =
-          { tool_use_id = action_tool_use_id
+          { identity = action_identity
           ; tool_name
           ; runtime_id
           ; agent_core_turn
@@ -1953,7 +2013,7 @@ let observe_action
                          { skill_tool_use_id = activation.skill_tool_use_id
                          ; activation_turn_ref = activation.turn_ref
                          ; observed_turn_ref = turn_ref
-                         ; action_tool_use_id
+                         ; action_identity
                          ; tool_name
                          ; observed_agent_core_turn = agent_core_turn
                          ; observed_at
@@ -1984,7 +2044,7 @@ let observe_action
                  | Some _ ->
                    (match
                       List.find_opt
-                        (fun known -> String.equal known.tool_use_id action_tool_use_id)
+                        (fun (known : action) -> known.identity = action_identity)
                         activation.actions
                     with
                     | Some known
@@ -1992,7 +2052,7 @@ let observe_action
                            && String.equal known.runtime_id action.runtime_id
                            && known.agent_core_turn = action.agent_core_turn ->
                       Ok (activation :: reversed, added)
-                    | Some _ -> Error (Invocation_id_collision action_tool_use_id)
+                    | Some _ -> Error (Action_identity_collision action_identity)
                     | None ->
                       let activation =
                         { activation with actions = activation.actions @ [ action ] }

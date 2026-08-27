@@ -3,27 +3,52 @@ type posture =
   | Native_read
   | Native_full
 
+type action_identity =
+  | Call_id of string
+  | Provider_step of
+      { conversation_id : string
+      ; step_index : int
+      }
+
+type origin =
+  | Built_in
+  | Mcp_wrapper
+
 type observation =
-  { call_id : string option
+  { identity : action_identity option
   ; tool_name : string option
+  ; origin : origin
   }
 
-type exact_action = string * string
+type exact_action = action_identity * string
+
+let valid_identity = function
+  | Call_id call_id -> String.trim call_id <> ""
+  | Provider_step { conversation_id; step_index } ->
+    String.trim conversation_id <> "" && step_index >= 0
+;;
 
 let exact_action (observation : observation) =
   match observation with
-  | { call_id = Some call_id; tool_name = Some tool_name }
-    when String.trim call_id <> "" && String.trim tool_name <> "" ->
-    Some (call_id, tool_name)
-  | { call_id = None; _ }
+  | { identity = Some identity; tool_name = Some tool_name; origin = Built_in }
+    when valid_identity identity && String.trim tool_name <> "" ->
+    Some (identity, tool_name)
+  | { origin = Mcp_wrapper; _ }
+  | { identity = None; _ }
   | { tool_name = None; _ }
-  | { call_id = Some _; tool_name = Some _ } -> None
+  | { identity = Some _; tool_name = Some _ } -> None
 ;;
 
 let observe_exact_action ~official_turn ~observe observation =
   Option.iter
-    (fun (call_id, tool_name) -> observe ~official_turn ~call_id ~tool_name)
+    (fun (identity, tool_name) -> observe ~official_turn ~identity ~tool_name)
     (exact_action observation)
+;;
+
+let call_id observation =
+  match observation.identity with
+  | Some (Call_id call_id) -> Some call_id
+  | Some (Provider_step _) | None -> None
 ;;
 
 let stream_content_type = "native_tool_use"

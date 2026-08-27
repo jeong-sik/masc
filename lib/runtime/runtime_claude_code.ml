@@ -702,7 +702,11 @@ let non_blank = function
   | Some _ | None -> None
 ;;
 
-let assistant_blocks ~stage content =
+let allowed_tool_name (tool : dynamic_tool) =
+  Printf.sprintf "mcp__%s__%s" mcp_server_name tool.name
+;;
+
+let assistant_blocks ~stage ~mcp_tool_names content =
   match content with
   | `List blocks ->
     let rec loop parsed = function
@@ -716,9 +720,22 @@ let assistant_blocks ~stage content =
          | "tool_use" ->
            let* call_id = optional_string stage "id" fields in
            let* tool_name = optional_string stage "name" fields in
+           let tool_name = non_blank tool_name in
+           let origin =
+             match tool_name with
+             | Some name when List.mem name mcp_tool_names ->
+               Runtime_native_tools.Mcp_wrapper
+             | Some _ | None -> Runtime_native_tools.Built_in
+           in
            loop
              (Assistant_native_tool
-                { call_id = non_blank call_id; tool_name = non_blank tool_name }
+                { identity =
+                    Option.map
+                      (fun call_id -> Runtime_native_tools.Call_id call_id)
+                      (non_blank call_id)
+                ; tool_name
+                ; origin
+                }
               :: parsed)
              rest
          | "thinking" -> loop parsed rest
@@ -732,7 +749,7 @@ let assistant_blocks ~stage content =
   | _ -> protocol_error stage "assistant content must be an array"
 ;;
 
-let parse_assistant ~expected_session_id fields =
+let parse_assistant ~expected_session_id ~tools fields =
   let stage = "assistant message" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id
@@ -743,7 +760,12 @@ let parse_assistant ~expected_session_id fields =
     let* message_fields = assoc_at stage message in
     let* model = required_string stage "model" message_fields in
     let* content = required_member stage "content" message_fields in
-    let* blocks = assistant_blocks ~stage content in
+    let* blocks =
+      assistant_blocks
+        ~stage
+        ~mcp_tool_names:(List.map allowed_tool_name tools)
+        content
+    in
     Ok (uuid, model, blocks)
 ;;
 
@@ -952,7 +974,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
   | "control_response" ->
     protocol_error "turn" "received an unsolicited control response"
   | "assistant" ->
-    let* uuid, model, blocks = parse_assistant ~expected_session_id fields in
+    let* uuid, model, blocks = parse_assistant ~expected_session_id ~tools fields in
     if not !stream_started
     then (
       stream_started := true;
@@ -967,7 +989,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
           native_tool_attempted := true;
           Option.iter
             (fun call_id -> Hashtbl.replace native_tool_calls call_id observation)
-            observation.call_id;
+            (Runtime_native_tools.call_id observation);
           emit_stream_event on_stream_event (Native_tool_started observation))
       blocks;
     let texts = List.rev !texts_rev in
@@ -1086,10 +1108,6 @@ let mcp_config tools =
                         ] )
                   ] )
             ]))
-;;
-
-let allowed_tool_name (tool : dynamic_tool) =
-  Printf.sprintf "mcp__%s__%s" mcp_server_name tool.name
 ;;
 
 let reasoning_args = function

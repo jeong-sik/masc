@@ -196,7 +196,7 @@ function keeperReceiptFixture(
         action_runtime_counts: [{ runtime_id: 'anthropic.claude', count: 1 }],
       }],
       ledger: {
-        schema: 'masc.skill-activations/v4',
+        schema: 'masc.skill-activations/v5',
         workspace_key: 'e'.repeat(64),
         session_id: sessionId,
         revision: 'c'.repeat(64),
@@ -225,7 +225,11 @@ function keeperReceiptFixture(
               content_sha256: 'f'.repeat(64),
             },
             actions: [{
-              tool_use_id: 'call-action-1',
+              identity: {
+                kind: 'provider_step',
+                conversation_id: 'conversation-antigravity',
+                step_index: 7,
+              },
               tool_name: 'keeper_time_now',
               runtime_id: 'anthropic.claude',
               agent_core_turn: 1,

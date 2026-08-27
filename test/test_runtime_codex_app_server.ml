@@ -309,12 +309,14 @@ let test_native_command_events_stay_distinct_from_dynamic_tools () =
          match List.rev !stream_events with
          | [ Turn_started { turn_id = "turn-1"; model = "gpt-fixture" }
            ; Native_tool_started
-               { call_id = Some "native-command-1"
+               { identity = Some (Runtime_native_tools.Call_id "native-command-1")
                ; tool_name = Some "commandExecution"
+               ; origin = Runtime_native_tools.Built_in
                }
            ; Native_tool_finished
-               { call_id = Some "native-command-1"
+               { identity = Some (Runtime_native_tools.Call_id "native-command-1")
                ; tool_name = Some "commandExecution"
+               ; origin = Runtime_native_tools.Built_in
                }
            ; Text_delta "MASC_"
            ; Turn_finished { text = "MASC_SUBSCRIPTION_OK" }
@@ -3492,14 +3494,28 @@ let test_official_client_host_text_projection_is_hard_cut () =
 
 let test_native_action_observer_keeps_exact_provider_identity () =
   let seen = ref [] in
-  let observe ~official_turn ~call_id ~tool_name = seen := (official_turn, call_id, tool_name) :: !seen in
+  let observe ~official_turn ~identity ~tool_name =
+    seen := (official_turn, identity, tool_name) :: !seen
+  in
   Keeper_codex_runtime.For_testing.observe_stream_native_action ~turn_count:7 ~observe
     (Runtime_codex_app_server.Native_tool_started
-       { Runtime_native_tools.call_id = Some "codex-call"; tool_name = Some "Read" });
+       { Runtime_native_tools.identity = Some (Call_id "codex-call")
+       ; tool_name = Some "Read"
+       ; origin = Built_in
+       });
   Keeper_codex_runtime.For_testing.observe_stream_native_action ~turn_count:8 ~observe
     (Runtime_codex_app_server.Native_tool_started
-       { Runtime_native_tools.call_id = None; tool_name = Some "Read" });
-  check (list (triple int string string)) "exact only" [ 7, "codex-call", "Read" ] (List.rev !seen)
+       { Runtime_native_tools.identity = None
+       ; tool_name = Some "Read"
+       ; origin = Built_in
+       });
+  check
+    bool
+    "exact only"
+    true
+    (match List.rev !seen with
+     | [ 7, Runtime_native_tools.Call_id "codex-call", "Read" ] -> true
+     | _ -> false)
 ;;
 
 let () =

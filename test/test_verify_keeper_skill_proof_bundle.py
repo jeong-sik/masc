@@ -166,6 +166,8 @@ def dashboard(value):
         "effective_keeper_surface": {
             "status": "available",
             "keeper_name": "keeper-one",
+            "runtime_id": "runtime-one",
+            "tool_delivery": {"status": "delivered"},
         },
         "skill_activations": {
             "status": "available",
@@ -336,6 +338,8 @@ def make_bundle(root: Path):
         historical_after=raw_values["historical-skill-activations-after.json"],
         durable_ledger=raw_values["durable-skill-activations-before.json"],
         durable_ledger_after=raw_values["durable-skill-activations-after.json"],
+        durable_ledger_raw=join_payloads["durable-skill-activations-before.json"],
+        durable_ledger_after_raw=join_payloads["durable-skill-activations-after.json"],
     )
     join = {
         "schema": verifier.JOIN_SCHEMA,
@@ -575,6 +579,23 @@ class VerifyKeeperSkillProofBundleTest(unittest.TestCase):
             (bundle["join_root"] / "health-before.json").write_bytes(b"tampered")
             with self.assertRaisesRegex(
                 verifier.VerificationError, "byte count differs"
+            ):
+                verify(bundle)
+
+    def test_durable_ledger_raw_byte_drift_reaches_offline_join_verifier(self):
+        with tempfile.TemporaryDirectory() as raw:
+            bundle = make_bundle(Path(raw))
+            name = "durable-skill-activations-after.json"
+            path = bundle["join_root"] / name
+            value = json.loads(path.read_bytes())
+            changed = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode()
+            self.assertNotEqual(path.read_bytes(), changed)
+            path.write_bytes(changed)
+            bundle["join"]["artifacts"][name] = file_identity(changed)
+
+            with self.assertRaisesRegex(
+                verifier.VerificationError,
+                "join raw authority is invalid: durable Skill ledger bytes changed",
             ):
                 verify(bundle)
 

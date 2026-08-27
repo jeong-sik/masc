@@ -32,13 +32,15 @@ description: Walk the release checklist before shipping.
   없거나 frontmatter 구조를 읽을 수 없을 때만 문서를 거부한다.
 - `metadata.openclaw` 같은 다른 런타임의 네임스페이스도 문서를 막지는 않는다. 편차의
   정확한 이유는 `/api/v1/skills`와 Monitor › Skills에 표시된다.
-- `masc-composition-tool`, `disable-model-invocation`, `allowed-tools`는 모두 거부한다.
-  composition의 존재와 표면은 본문 fence 하나가 전부 결정한다. 별도
-  invocation-policy 스위치를 두지 않으므로 선언과 본문이 서로 다른 상태도 없다. 문서용
-  fence 예시는 더 긴 CommonMark 외부 fence로 감싼다.
-- `allowed-tools`는 구현체별 사전 승인 힌트이지 이식 가능한 도구 제한 계약이 아니다.
-  MASC는 이 필드를 받아 놓고 무시하지 않는다. 스킬을 명시적으로 거부하며, 모든 도구
-  호출은 기존 MASC 승인 게이트만 따른다.
+- `masc-composition-tool`과 `disable-model-invocation`은 거부한다. composition의 존재와
+  표면은 본문 fence 하나가 전부 결정한다. 별도 invocation-policy 스위치를 두지 않으므로
+  선언과 본문이 서로 다른 상태도 없다. 문서용 fence 예시는 더 긴 CommonMark 외부
+  fence로 감싼다.
+- [Agent Skills 규격](https://agentskills.io/specification)의 실험적 선택 필드인
+  `allowed-tools`는 문자열일 때 받아들인다. MASC는 이 값을 런타임 권한이나 도구 제한으로
+  해석하지 않으며 저장하지도 않는다. MASC가 제공하는 도구 호출은 기존 MASC 승인 흐름을
+  그대로 따르고, 각 runtime의 native 도구는 해당 runtime의 sandbox와 권한 정책을 따른다.
+  문자열이 아닌 값은 frontmatter 오류다.
 - 잘못된 스킬 하나는 그 스킬만 Keeper 표면에서 제외한다. 다른 Keeper 턴은 계속 열리며,
   제외된 exact reference를 task가 지명한 경우에만 admission이 typed 오류를 반환한다.
   정확한 파싱 오류는 `/api/v1/skills`의 `rejections`와 exact surface diagnostic에 남는다.

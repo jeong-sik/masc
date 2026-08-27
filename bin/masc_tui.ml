@@ -1360,6 +1360,8 @@ type async_msg =
   | Keeper_calls_loaded of
       string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_config_view_loaded of string * (string list, string) result
+  | Keeper_sandbox_view_loaded of
+      string * (Masc_tui_keeper_sandbox.t, string) result
   | Runtime_config_view_loaded of (string * string list, string) result
   | Prompts_loaded of (Tui_decode.prompts_snapshot, string) result
   | Librarian_input_loaded of string * (string list, string) result
@@ -2466,6 +2468,27 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   | None ->
       enqueue_async mailbox
         (Keeper_config_view_loaded
+           (keeper_name, Error "Eio switch is unavailable"))
+
+let launch_keeper_sandbox_view state ~mailbox keeper_name =
+  let host = server_peer_host in
+  let port = state.port in
+  let run () =
+    let result =
+      try Masc_tui_loader.load_keeper_sandbox_view ~host ~port ~keeper_name with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn)
+    in
+    enqueue_async mailbox (Keeper_sandbox_view_loaded (keeper_name, result))
+  in
+  match Eio_context.get_switch_opt () with
+  | Some sw ->
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          run ();
+          `Stop_daemon)
+  | None ->
+      enqueue_async mailbox
+        (Keeper_sandbox_view_loaded
            (keeper_name, Error "Eio switch is unavailable"))
 
 let launch_github_identity_view state ~mailbox keeper_name =
@@ -4810,6 +4833,10 @@ let refresh_keeper_detail_selection state ~base_path ~mailbox =
       load_live_context_if_safe state base_path keeper;
       (match state.detail_tab with
        | Detail_info -> ()
+       | Detail_sandbox ->
+           state.keeper_sandbox_view <- None;
+           state.keeper_sandbox_view_error <- None;
+           launch_keeper_sandbox_view state ~mailbox keeper.k_name
        | Detail_instructions ->
            state.keeper_config_view <- None;
            state.keeper_config_view_error <- None;
@@ -4844,6 +4871,10 @@ let open_keeper_detail state ~base_path ~mailbox (keeper : keeper) =
      because the stamped answer names the previous keeper. *)
   match state.detail_tab with
   | Detail_info -> ()
+  | Detail_sandbox ->
+      state.keeper_sandbox_view <- None;
+      state.keeper_sandbox_view_error <- None;
+      launch_keeper_sandbox_view state ~mailbox keeper.k_name
   | Detail_instructions ->
       state.keeper_config_view <- None;
       state.keeper_config_view_error <- None;
@@ -6272,6 +6303,18 @@ let apply_async_message state ~base_path ~http_refresh_inflight ~mailbox =
             state.keeper_config_view <- Some (keeper_name, lines);
             state.keeper_config_view_error <- None
         | Error detail -> state.keeper_config_view_error <- Some detail)
+  | Keeper_sandbox_view_loaded (keeper_name, result) -> (
+      let still_selected =
+        match List.nth_opt state.keepers state.keeper_cursor with
+        | Some keeper -> String.equal keeper.k_name keeper_name
+        | None -> false
+      in
+      if still_selected then
+        match result with
+        | Ok reading ->
+            state.keeper_sandbox_view <- Some (keeper_name, reading);
+            state.keeper_sandbox_view_error <- None
+        | Error detail -> state.keeper_sandbox_view_error <- Some detail)
   | Prompts_loaded result ->
       (match result with
        | Ok snapshot ->
@@ -9182,6 +9225,11 @@ and is loaded on demand through keeper_skill.
            state.detail_tab <- List.nth tabs ((index + step) mod count);
            state.detail_scroll <- 0;
            (match selected_keeper state, state.detail_tab with
+            | Some keeper, Detail_sandbox ->
+                state.keeper_sandbox_view <- None;
+                state.keeper_sandbox_view_error <- None;
+                launch_keeper_sandbox_view state ~mailbox:async_messages
+                  keeper.k_name
             | Some keeper, Detail_instructions ->
                 state.keeper_config_view <- None;
                 state.keeper_config_view_error <- None;
@@ -9800,6 +9848,9 @@ and is loaded on demand through keeper_skill.
                      launch_keeper_calls_load state ~mailbox:async_messages
                        keeper.k_name
                  | None -> ())
+            | Keepers Keeper_detail ->
+                refresh_keeper_detail_selection state ~base_path
+                  ~mailbox:async_messages
             | Board ->
                 (match state.board_mode with
                  | Board_read post_id ->
@@ -9845,7 +9896,7 @@ and is loaded on demand through keeper_skill.
             | Schedules -> launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load state ~mailbox:async_messages
-            | Overview | Acting | Keepers Keeper_list | Keepers Keeper_detail
+            | Overview | Acting | Keepers Keeper_list
             | Approvals | Planning | System_logs -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" | Some "shift-tab" ->

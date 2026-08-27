@@ -4348,6 +4348,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let all_lines =
       match state.detail_tab with
       | Detail_info -> info_lines
+      | Detail_sandbox ->
+          stamped_or
+            (Option.map
+               (fun (stamp, reading) ->
+                 ( stamp
+                 , Masc_tui_keeper_sandbox.view_lines
+                     ~width:(max 24 (cols - 8))
+                     reading ))
+               state.keeper_sandbox_view)
+            state.keeper_sandbox_view_error
       | Detail_instructions ->
           stamped_or state.keeper_config_view state.keeper_config_view_error
       | Detail_secrets -> secret_lines state k
@@ -4381,6 +4391,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols buf =
     let tab_hint =
       match state.detail_tab with
       | Detail_github -> "[ ]:tab  L:login"
+      | Detail_sandbox -> "[ ]:tab  R:refresh"
       (* Arrows first: the digits only reach the first nine rows and the
          list is a declaration directory that can hold more. *)
       | Detail_identity ->

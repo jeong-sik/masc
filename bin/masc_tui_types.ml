@@ -558,17 +558,19 @@ type keeper_mode =
     case a tab earns (unrelated content would want its own surface). *)
 type keeper_detail_tab =
   | Detail_info
+  | Detail_sandbox
   | Detail_instructions
   | Detail_secrets
   | Detail_github
   | Detail_identity
 
 let keeper_detail_tabs =
-  [ Detail_info; Detail_instructions; Detail_secrets; Detail_github
+  [ Detail_info; Detail_sandbox; Detail_instructions; Detail_secrets; Detail_github
   ; Detail_identity ]
 
 let keeper_detail_tab_label = function
   | Detail_info -> "Info"
+  | Detail_sandbox -> "Sandbox"
   | Detail_instructions -> "Settings"
   | Detail_secrets -> "Secrets"
   | Detail_github -> "GitHub"
@@ -1137,6 +1139,8 @@ type state = {
   mutable runtime_config_view_error: string option;
   mutable config_scroll: int;
   mutable detail_tab: keeper_detail_tab;
+  mutable keeper_sandbox_view: (string * Masc_tui_keeper_sandbox.t) option;
+  mutable keeper_sandbox_view_error: string option;
   mutable keeper_config_view: (string * string list) option;
   mutable keeper_config_view_error: string option;
   mutable github_identity_view: (string * string list) option;
@@ -1787,6 +1791,8 @@ let create_state
   runtime_config_view_error = None;
   config_scroll = 0;
   detail_tab = Detail_info;
+  keeper_sandbox_view = None;
+  keeper_sandbox_view_error = None;
   keeper_config_view = None;
   keeper_config_view_error = None;
   github_identity_view = None;

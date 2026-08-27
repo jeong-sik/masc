@@ -1033,6 +1033,17 @@ let load_keeper_config_view ~(host : string) ~(port : int)
       (Masc_tui_keeper_config.view_lines
          ~sanitize:Masc.Tui_decode.sanitize_terminal_text json)
 
+let load_keeper_sandbox_view ~(host : string) ~(port : int)
+    ~(keeper_name : string) : (Masc_tui_keeper_sandbox.t, string) result =
+  match
+    Masc_tui_http.fetch_keeper_status_snapshot ~host ~port ~keeper_name
+  with
+  | Error err -> Error ("keeper sandbox status load failed: " ^ err)
+  | Ok json ->
+    Masc_tui_keeper_sandbox.decode
+      ~sanitize:Masc.Tui_decode.sanitize_terminal_text
+      json
+
 let load_keeper_config_editor ~(host : string) ~(port : int)
     ~(keeper_name : string) : (Yojson.Safe.t * string, string) result =
   match

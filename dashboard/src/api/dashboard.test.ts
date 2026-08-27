@@ -19,6 +19,7 @@ import {
   fetchDashboardTools,
   fetchKeeperWaitingInventory,
   parseDashboardKeeperWaitingSource,
+  normalizeSkillActivationProjection,
   fetchDashboardFullHealth,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
@@ -1055,6 +1056,15 @@ describe('fetchTlcResults', () => {
 })
 
 describe('fetchDashboardTools', () => {
+  it('hard-cuts stale Skill activation schemas before rendering', () => {
+    expect(() => normalizeSkillActivationProjection({
+      status: 'available',
+      keeper_name: 'keeper/one',
+      scoped_summaries: [],
+      ledger: { schema: 'masc.skill-activations/v3', activations: [] },
+    })).toThrow('skill_activations schema is not v4')
+  })
+
   it('requests an exact Keeper surface when selected', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

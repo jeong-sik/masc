@@ -95,6 +95,7 @@ let one_dynamic_tool
       ?(hooks = Agent_core.Hooks.empty)
       ?(pre_tool_rejects = ref [])
       ?tool_approval
+      ?on_result_handoff
       ~active
       handler
   =
@@ -121,12 +122,32 @@ let one_dynamic_tool
       ~terminal_effect_state
       ~terminal_error
       ~pre_tool_rejects
+      ?on_result_handoff
       ~raw_trace_run:(Some active)
+      ()
   in
   match projected with
   | Ok [ tool ] -> tool, terminal_error
   | Ok _ -> fail "expected one projected dynamic tool"
   | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let test_throwing_handoff_observer_preserves_result () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let handoffs = ref 0 in
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~active
+        ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
+          incr handoffs;
+          failwith "observer failure")
+        (fun _input ->
+          Ok { Agent_core.Types.content = "effect-complete"; _meta = None })
+    in
+    let result = tool.call ~call_id:"call-handoff-observer" (`Assoc []) in
+    check int "observer called once" 1 !handoffs;
+    check bool "authoritative success preserved" true result.success;
+    check string "authoritative content preserved" "effect-complete" result.content)
 ;;
 
 let test_raw_start_failure_does_not_block_tool () =
@@ -1515,6 +1536,10 @@ let () =
             "RAW start failure does not block tool"
             `Quick
             test_raw_start_failure_does_not_block_tool
+        ; test_case
+            "handoff observer failure preserves tool result"
+            `Quick
+            test_throwing_handoff_observer_preserves_result
         ; test_case
             "RAW observation preserves reserved exceptions"
             `Quick

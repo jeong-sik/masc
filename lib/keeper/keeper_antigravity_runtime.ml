@@ -369,6 +369,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
+    ~on_official_client_result_handoff
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -515,6 +516,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run:None
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
     in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
     let* home =
@@ -611,6 +614,8 @@ let run_without_lifecycle ~runtime_id ~keeper_name
         ~terminal_error
         ~pre_tool_rejects
         ~raw_trace_run
+        ~on_result_handoff:on_official_client_result_handoff
+        ()
     in
     let dynamic_tools =
       List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools
@@ -1024,6 +1029,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?on_model_input_window_observation
+    ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
@@ -1049,6 +1055,7 @@ let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
         ~context_injector
         ~context
         ~terminal_effect_state
+        ~on_official_client_result_handoff
         ~event_bus
         ~raw_trace
         ~on_event

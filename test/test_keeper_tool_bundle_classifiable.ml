@@ -279,6 +279,16 @@ let with_bundle_tools ?(record_activations = true) f =
          Skill_catalog_snapshot.snapshot_revision skill_snapshot
        in
        let skill_activation_context =
+         let task_selection =
+           match
+             Keeper_task_skill_turn.resolve_for_task
+               ~snapshot:skill_snapshot
+               ~task_id:"task-001"
+               [ reference ]
+           with
+           | Ok selection -> selection
+           | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
+         in
          match
            Keeper_skill_activation_recorder.make
              ~trace_id
@@ -288,9 +298,7 @@ let with_bundle_tools ?(record_activations = true) f =
                   ~trace_id:(Keeper_id.Trace_id.to_string trace_id)
                   ~absolute_turn:1)
              ~snapshot_revision
-             ~task_scope:
-               (Keeper_task_skill_turn.Task
-                  { task_id = "task-001"; references = [ reference ] })
+             ~task_selection
          with
          | Ok context -> context
          | Error error ->

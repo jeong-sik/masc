@@ -958,7 +958,7 @@ let test_first_round_survives_a_replayed_tool_tail () =
        [ user ])
 
 
-let test_trailing_tool_results_keep_exact_invocation_ids () =
+let test_trailing_tool_results_keep_exact_receipts () =
   let tool_message : Agent_core.Types.message =
     { role = Agent_core.Types.Tool
     ; content =
@@ -982,17 +982,68 @@ let test_trailing_tool_results_keep_exact_invocation_ids () =
     ; metadata = []
     }
   in
+  let receipts =
+    Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts [ tool_message ]
+  in
   check
-    (list string)
-    "exact trailing ids"
-    [ "call-skill"; "call-other" ]
-    (Masc.Keeper_run_tools_hooks.trailing_tool_result_ids [ tool_message ]);
+    (list (pair string int))
+    "exact trailing ids and bytes"
+    [ "call-skill", 4; "call-other", 5 ]
+    (List.map
+       (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
+          receipt.tool_use_id, receipt.content_bytes)
+       receipts);
   check
     (list string)
     "a later non-tool message means no provider-bound tool result"
     []
-    (Masc.Keeper_run_tools_hooks.trailing_tool_result_ids
+    (List.map
+       (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
+          receipt.tool_use_id)
+       (Masc.Keeper_run_tools_hooks.trailing_tool_result_receipts
        [ tool_message; Agent_core.Types.user_msg "later" ])
+    )
+;;
+
+let wire_receipt tool_use_id =
+  Masc.Keeper_skill_activation_ledger.
+    { tool_use_id
+    ; content_bytes = 4
+    ; content_sha256 = Digestif.SHA256.(digest_string "body" |> to_hex)
+    }
+;;
+
+let test_skill_delivery_requires_serialization_and_success_response () =
+  let module State = Masc.Keeper_run_tools_hooks.Skill_delivery_state in
+  let state = State.create () in
+  let observations = ref [] in
+  let observe (staged : State.staged) =
+    observations := staged.runtime_id :: !observations;
+    List.map
+      (fun (receipt : Masc.Keeper_skill_activation_ledger.tool_result_receipt) ->
+         receipt.tool_use_id)
+      staged.tool_results
+  in
+  State.begin_turn state;
+  State.commit_model_response state ~agent_core_turn:1 ~observe;
+  check (list string) "serialization failure has no delivery" [] !observations;
+  State.stage state ~runtime_id:"runtime-failed" ~agent_core_turn:1
+    [ wire_receipt "call-skill" ];
+  State.begin_turn state;
+  State.commit_model_response state ~agent_core_turn:1 ~observe;
+  check (list string) "failed response clears staged delivery" [] !observations;
+  State.stage state ~runtime_id:"runtime-success" ~agent_core_turn:2
+    [ wire_receipt "call-skill" ];
+  State.commit_model_response state ~agent_core_turn:2 ~observe;
+  check (list string) "successful response commits staged runtime"
+    [ "runtime-success" ] !observations;
+  check (list string) "successful response activates exact id"
+    [ "call-skill" ] (State.active state);
+  State.stage state ~runtime_id:"runtime-error" ~agent_core_turn:3
+    [ wire_receipt "call-skill" ];
+  State.commit_model_response state ~agent_core_turn:3 ~observe:(fun _ -> []);
+  check (list string) "failed observer leaves no stale active id"
+    [] (State.active state)
 ;;
 
 let () =
@@ -1125,7 +1176,11 @@ let () =
       , [ test_case
             "keeps exact trailing ToolResult ids"
             `Quick
-            test_trailing_tool_results_keep_exact_invocation_ids
+            test_trailing_tool_results_keep_exact_receipts
+        ; test_case
+            "requires serialization and successful response"
+            `Quick
+            test_skill_delivery_requires_serialization_and_success_response
         ] )
     ]
 ;;

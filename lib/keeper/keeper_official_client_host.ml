@@ -678,7 +678,7 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
     ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
-    ~next_dynamic_invocation_index ~repeated_call_state
+    ~next_dynamic_invocation_index ~repeated_call_state ~on_result_handoff
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -889,9 +889,10 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
             dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
           in
           let repeated_count = observe_repeated_call repeated_call_state fingerprint in
-          if repeated_count < repeated_call_abort_threshold
-          then result
-          else
+          let final_result =
+            if repeated_count < repeated_call_abort_threshold
+            then result
+            else
             let detail =
               Printf.sprintf
                 "repeated exact dynamic tool call detected: tool=%s count=%d"
@@ -899,10 +900,23 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
                 repeated_count
             in
             Log.Keeper.warn ~keeper_name "%s" detail;
-            { result with
-              abort_turn =
-                Some (Repeated_tool_call { tool_name = tool.schema.name; repeated_count })
-            }
+              { result with
+                abort_turn =
+                  Some
+                    (Repeated_tool_call
+                       { tool_name = tool.schema.name; repeated_count })
+              }
+          in
+          (try on_result_handoff ~invocation ~content:final_result.content with
+           | exn ->
+             Llm_provider.Reserved_exn.reraise_if_reserved exn;
+             Log.Keeper.warn
+               ~keeper_name
+               "official-client result handoff observation failed: tool=%s call_id=%s error=%s"
+               tool.schema.name
+               (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+               (Printexc.to_string exn));
+          final_result
         | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -918,7 +932,8 @@ let dynamic_tool_of_agent_core ~tool_approval ~runtime_label ~keeper_name
 
 let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
-    ~terminal_error ~pre_tool_rejects ~raw_trace_run =
+    ~terminal_error ~pre_tool_rejects
+    ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ()) ~raw_trace_run () =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -946,7 +961,8 @@ let dynamic_tools ~tool_approval ~runtime_label ~keeper_name ~turn_count ~tools
             ~pre_tool_rejects
             ~raw_trace_run
             ~next_dynamic_invocation_index
-            ~repeated_call_state)
+            ~repeated_call_state
+            ~on_result_handoff)
          tools)
 ;;
 

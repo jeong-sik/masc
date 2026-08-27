@@ -7301,16 +7301,22 @@ let tool_domain_rule =
   String.concat "" (List.init tool_domain_rule_cells (fun _ -> Ansi.box_h))
 
 let skill_instruction_origin_text = function
-  | Masc.Keeper_skill_activation_ledger.Task_instruction { task_id } ->
-      "task_instruction task=" ^ Keeper_id.Task_id.to_string task_id
+  | Masc.Keeper_skill_activation_ledger.Task_instruction { task_ids } ->
+      "task_instruction tasks="
+      ^ (Masc.Keeper_skill_activation_ledger.task_id_set_to_list task_ids
+         |> List.map Keeper_id.Task_id.to_string
+         |> String.concat ",")
   | Masc.Keeper_skill_activation_ledger.Session_instruction ->
       "session_instruction"
 
 let skill_composition_origin_text ~tool_name = function
   | Masc.Keeper_skill_activation_ledger.Task_composition
-      { task_id } ->
-      Printf.sprintf "task_composition task=%s tool=%s"
-        (Keeper_id.Task_id.to_string task_id) tool_name
+      { task_ids } ->
+      Printf.sprintf "task_composition tasks=%s tool=%s"
+        (Masc.Keeper_skill_activation_ledger.task_id_set_to_list task_ids
+         |> List.map Keeper_id.Task_id.to_string
+         |> String.concat ",")
+        tool_name
   | Masc.Keeper_skill_activation_ledger.Session_composition ->
       "session_composition tool=" ^ tool_name
 
@@ -7333,15 +7339,30 @@ let skill_invocation_text = function
 let skill_delivery_text = function
   | None -> "pending"
   | Some (delivery : Masc.Keeper_skill_activation_ledger.delivery) ->
-      Printf.sprintf "turn=%d at=%s" delivery.agent_core_turn delivery.delivered_at
+      let kind, turn =
+        match delivery.boundary with
+        | Masc.Keeper_skill_activation_ledger.Model_response { agent_core_turn } ->
+          "model_response", agent_core_turn
+        | Official_client_result_handoff { agent_core_turn } ->
+          "official_client_result_handoff", agent_core_turn
+      in
+      Printf.sprintf
+        "%s turn=%d runtime=%s bytes=%d sha256=%s at=%s"
+        kind
+        turn
+        (Terminal_text.single_line delivery.runtime_id)
+        delivery.content_bytes
+        (Terminal_text.single_line delivery.content_sha256)
+        delivery.delivered_at
 
 let skill_action_lines actions =
   List.map
     (fun (action : Masc.Keeper_skill_activation_ledger.action) ->
        Ansi.dim,
        Printf.sprintf
-         "       action turn=%d tool=%s id=%s at=%s"
+         "       action turn=%d runtime=%s tool=%s id=%s at=%s"
          action.agent_core_turn
+         (Terminal_text.single_line action.runtime_id)
          (Terminal_text.single_line action.tool_name)
          (Terminal_text.single_line action.tool_use_id)
          (Terminal_text.single_line action.observed_at))
@@ -7683,17 +7704,28 @@ let render_tools (state : state) =
                  |> Yojson.Safe.to_string
                in
                let scoped_summary = scoped.summary in
+               let runtime_counts values =
+                 match values with
+                 | [] -> "none"
+                 | values ->
+                   values
+                   |> List.map
+                        (fun (item : Masc.Keeper_skill_activation_ledger.runtime_count) ->
+                           Printf.sprintf "%s:%d" item.runtime_id item.count)
+                   |> String.concat ","
+               in
                [ Ansi.dim,
                  "   proof exact=" ^ Terminal_text.single_line exact
                ; Ansi.dim,
                  Printf.sprintf
-                   "     snapshot=%s keeper_turn=%s runtime=%s"
+                   "     snapshot=%s keeper_turn=%s invocation_runtime=%s"
                    (Skill_catalog_snapshot.snapshot_revision_to_string
                       scoped.scope.snapshot_revision
                     |> Terminal_text.single_line)
                    (Ids.Turn_ref.to_string scoped.scope.turn_ref
                     |> Terminal_text.single_line)
-                   (Terminal_text.single_line scoped.scope.runtime_id)
+                   (Terminal_text.single_line
+                      scoped.scope.invocation_runtime_id)
                ; Ansi.dim,
                  Printf.sprintf
                    "     invoked=%d bodies=%d resources=%d delivered=%d actions=%d composition=%d/%d/%d invalid=%d"
@@ -7706,6 +7738,11 @@ let render_tools (state : state) =
                    scoped_summary.composition_deliveries
                    scoped_summary.composition_actions_observed
                    scoped_summary.invalid_transitions
+               ; Ansi.dim,
+                 Printf.sprintf
+                   "     delivery_runtimes=%s action_runtimes=%s"
+                   (runtime_counts scoped.delivery_runtime_counts)
+                   (runtime_counts scoped.action_runtime_counts)
                ])
             scoped_summaries
         in

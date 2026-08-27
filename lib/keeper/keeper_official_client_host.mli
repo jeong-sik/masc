@@ -209,7 +209,10 @@ val dynamic_tools :
   terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   terminal_error:string option ref ->
   pre_tool_rejects:rejected_tool_call list ref ->
+  ?on_result_handoff:
+    (invocation:Agent_core.Tool_contract.Invocation.t -> content:string -> unit) ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
+  unit ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn.
 

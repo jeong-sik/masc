@@ -557,11 +557,11 @@ export type DashboardEffectiveKeeperSurface =
     }
 
 export type DashboardSkillInstructionOrigin =
-  | { kind: 'task_instruction'; task_id: string }
+  | { kind: 'task_instruction'; task_ids: string[] }
   | { kind: 'session_instruction' }
 
 export type DashboardSkillCompositionOrigin =
-  | { kind: 'task_composition'; task_id: string }
+  | { kind: 'task_composition'; task_ids: string[] }
   | { kind: 'session_composition' }
 
 export type DashboardSkillActivationInvocation =
@@ -592,10 +592,19 @@ export interface DashboardSkillActivation {
   skill_tool_use_id: string
   agent_core_turn: number
   invocation: DashboardSkillActivationInvocation
-  delivery: { agent_core_turn: number; delivered_at: string } | null
+  delivery: {
+    boundary:
+      | { kind: 'model_response'; agent_core_turn: number }
+      | { kind: 'official_client_result_handoff'; agent_core_turn: number }
+    runtime_id: string
+    delivered_at: string
+    content_bytes: number
+    content_sha256: string
+  } | null
   actions: Array<{
     tool_use_id: string
     tool_name: string
+    runtime_id: string
     agent_core_turn: number
     observed_at: string
   }>
@@ -647,10 +656,12 @@ export interface DashboardSkillScopedSummary {
   scope: {
     snapshot_revision: string
     turn_ref: string
-    runtime_id: string
+    invocation_runtime_id: string
     reference: DashboardSkillReference
   }
   summary: DashboardSkillActivationSummary
+  delivery_runtime_counts: Array<{ runtime_id: string; count: number }>
+  action_runtime_counts: Array<{ runtime_id: string; count: number }>
 }
 
 export type DashboardSkillActivationProjection =
@@ -979,6 +990,90 @@ export interface DashboardToolsRequestOptions extends AbortableRequestOptions {
   keeperName?: string
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function normalizeSkillActivationProjection(
+  value: unknown,
+): DashboardSkillActivationProjection | null | undefined {
+  if (value === null || value === undefined) return value
+  if (!isRecord(value) || typeof value.status !== 'string') {
+    throw new Error('skill_activations is not a typed projection')
+  }
+  if (value.status === 'no_session') {
+    if (typeof value.keeper_name !== 'string') throw new Error('skill_activations keeper_name missing')
+    return value as unknown as DashboardSkillActivationProjection
+  }
+  if (value.status === 'unavailable') {
+    if (typeof value.keeper_name !== 'string' || typeof value.reason !== 'string' || typeof value.detail !== 'string') {
+      throw new Error('skill_activations unavailable projection is incomplete')
+    }
+    return value as unknown as DashboardSkillActivationProjection
+  }
+  if (value.status !== 'available' || !isRecord(value.ledger)) {
+    throw new Error('skill_activations status is unsupported')
+  }
+  if (value.ledger.schema !== 'masc.skill-activations/v4') {
+    throw new Error('skill_activations schema is not v4')
+  }
+  if (!Array.isArray(value.ledger.activations) || !Array.isArray(value.scoped_summaries)) {
+    throw new Error('skill_activations arrays are missing')
+  }
+  for (const row of value.ledger.activations) {
+    if (!isRecord(row) || typeof row.runtime_id !== 'string' || !Array.isArray(row.actions)) {
+      throw new Error('skill activation runtime evidence is incomplete')
+    }
+    if (!isRecord(row.invocation) || !isRecord(row.invocation.origin)) {
+      throw new Error('skill activation origin is missing')
+    }
+    const originKind = row.invocation.origin.kind
+    if (originKind === 'task_instruction' || originKind === 'task_composition') {
+      const taskIds = row.invocation.origin.task_ids
+      if (
+        !Array.isArray(taskIds)
+        || taskIds.length === 0
+        || taskIds.some(taskId => typeof taskId !== 'string')
+        || new Set(taskIds).size !== taskIds.length
+      ) {
+        throw new Error('skill activation task_ids is not a nonempty set')
+      }
+    }
+    if (row.delivery !== null) {
+      if (!isRecord(row.delivery) || !isRecord(row.delivery.boundary)) {
+        throw new Error('skill delivery boundary is missing')
+      }
+      const boundaryKind = row.delivery.boundary.kind
+      if (boundaryKind !== 'model_response' && boundaryKind !== 'official_client_result_handoff') {
+        throw new Error('skill delivery boundary kind is unsupported')
+      }
+      if (
+        typeof row.delivery.boundary.agent_core_turn !== 'number'
+        || typeof row.delivery.runtime_id !== 'string'
+        || typeof row.delivery.content_bytes !== 'number'
+        || typeof row.delivery.content_sha256 !== 'string'
+      ) {
+        throw new Error('skill delivery provenance is incomplete')
+      }
+    }
+    if (row.actions.some(action => !isRecord(action) || typeof action.runtime_id !== 'string')) {
+      throw new Error('skill action runtime evidence is incomplete')
+    }
+  }
+  for (const scoped of value.scoped_summaries) {
+    if (
+      !isRecord(scoped)
+      || !isRecord(scoped.scope)
+      || typeof scoped.scope.invocation_runtime_id !== 'string'
+      || !Array.isArray(scoped.delivery_runtime_counts)
+      || !Array.isArray(scoped.action_runtime_counts)
+    ) {
+      throw new Error('skill scoped runtime evidence is incomplete')
+    }
+  }
+  return value as unknown as DashboardSkillActivationProjection
+}
+
 export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): Promise<DashboardToolsResponse> {
   await ensureDevToken()
   const keeperQuery = opts?.keeperName
@@ -998,6 +1093,7 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
   const normalizedWaitingInventory = raw.keeper_waiting_inventory
     ? normalizeKeeperWaitingInventory(raw.keeper_waiting_inventory)
     : undefined
+  const normalizedSkillActivations = normalizeSkillActivationProjection(raw.skill_activations)
   return {
     ...raw,
     tool_inventory: {
@@ -1006,6 +1102,9 @@ export async function fetchDashboardTools(opts?: DashboardToolsRequestOptions): 
     },
     ...(normalizedWaitingInventory
       ? { keeper_waiting_inventory: normalizedWaitingInventory }
+      : {}),
+    ...(normalizedSkillActivations !== undefined
+      ? { skill_activations: normalizedSkillActivations }
       : {}),
   }
 }

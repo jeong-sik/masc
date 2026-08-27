@@ -327,7 +327,7 @@ let prepare_agent_setup
            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~absolute_turn:keeper_turn_id)
       ~snapshot_revision:(Skill_catalog_snapshot.snapshot_revision skill_snapshot)
-      ~task_scope:task_skill_scope
+      ~task_selection:task_skill_selection
     |> Result.map_error (fun error ->
          Agent_core.Error.Internal
            (Keeper_skill_activation_recorder.error_to_string error))
@@ -671,7 +671,6 @@ let prepare_agent_setup
     ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
     ; on_runtime_attempt
-    ; checkpoint_owner = (fun () -> !active_checkpoint_owner)
     ; tool_result_commit_required
     ; on_tool_stream_observation
     ; skill_activation_context

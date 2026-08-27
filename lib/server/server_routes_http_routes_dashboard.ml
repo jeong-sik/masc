@@ -879,6 +879,60 @@ module For_testing = struct
   let fusion_run_list_response = fusion_run_list_response
 end
 
+(* One keeper held to a higher bar than the workspace. Its own handler
+   rather than a field on the workspace one: the two answer different
+   questions, and a body that omitted [keeper_name] would otherwise move
+   every keeper at once. *)
+let handle_gate_keeper_mode_body state operator_name request reqd body_str =
+  let refuse message =
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (operator_error_json message)
+  in
+  try
+    let fields =
+      match Yojson.Safe.from_string body_str with
+      | `Assoc fields -> fields
+      | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+        []
+    in
+    match List.assoc_opt "keeper_name" fields with
+    | Some (`String keeper_name) when String.trim keeper_name <> "" -> (
+      (* An absent mode clears the override; a present one has to parse.
+         Absent and unreadable are different answers and only one of them is
+         a request to stop singling this keeper out. *)
+      match
+        match List.assoc_opt "mode" fields with
+        | None | Some `Null -> Ok None
+        | Some mode_json ->
+          Result.map Option.some (Keeper_gate_mode.parse_json mode_json)
+      with
+      | Error message -> refuse message
+      | Ok mode -> (
+        let config = Mcp_server.workspace_config state in
+        match
+          Keeper_gate_mode.set_for_keeper config ~actor:operator_name
+            ~keeper_name mode
+        with
+        | Error message -> refuse message
+        | Ok change ->
+          Dashboard_cache.invalidate_prefix
+            (Printf.sprintf "gate:%s;" config.base_path);
+          Sse.broadcast
+            (`Assoc
+               [ "type", `String "gate_keeper_mode_changed"
+               ; "keeper_name", `String keeper_name
+               ; ( "mode"
+                 , match mode with
+                   | Some mode -> `String (Keeper_gate_mode.to_string mode)
+                   | None -> `Null )
+               ]);
+          respond_json_value_with_cors request reqd
+            (match Keeper_gate_mode.keeper_change_json change with
+             | `Assoc fields -> `Assoc fields)))
+    | Some _ | None -> refuse "keeper_name is required"
+  with Yojson.Json_error message -> refuse message
+;;
+
 let handle_gate_mode_body state operator_name request reqd body_str =
   try
     let args = Yojson.Safe.from_string body_str in
@@ -2013,6 +2067,12 @@ let add_routes ~sw ~clock router =
          (fun state operator_name _req reqd ->
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
+         request reqd)
+  |> Http.Router.post "/api/v1/dashboard/gate/keeper-mode" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state operator_name _req reqd ->
+           Http.Request.read_body_async reqd
+             (handle_gate_keeper_mode_body state operator_name request reqd))
          request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->

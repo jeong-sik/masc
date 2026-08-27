@@ -10,3 +10,6 @@ let replay_results ~base_path =
 
 let always_allowed ~base_path = Filename.concat (dir ~base_path) "always-allowed.json"
 ;;
+
+let keeper_modes ~base_path = Filename.concat (dir ~base_path) "keeper-modes.json"
+;;

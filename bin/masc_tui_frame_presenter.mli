@@ -54,3 +54,19 @@ val present :
     [Presented] means the terminal accepted output for this frame;
     [Unchanged] means no bytes were necessary, so semantic input authority
     must remain with the last frame that was actually emitted. *)
+
+val sync_background :
+  write:(string -> unit) ->
+  flush:(unit -> unit) ->
+  Masc_tui_terminal_palette.rgb option ->
+  unit
+(** Ask the terminal to paint its own background this colour, or [None] to put
+    it back.
+
+    Without this a scheme changes only the ink. A light scheme picks dark text
+    because it expects a light page, so on a dark terminal it is less readable
+    than the scheme it replaced -- the shape "light theme is still black".
+
+    A terminal that does not know OSC 11 ignores it, so this is sent without
+    asking first. {!cleanup} resets on the way out; a caller that changes the
+    scheme mid-session has to send the new colour itself. *)

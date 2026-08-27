@@ -274,6 +274,43 @@ let test_viewport_discards_offscreen_rows () =
   check bool "last visible row is painted" true (contains painted "visible two");
   check bool "offscreen row is not emitted" false (contains painted "offscreen")
 
+(* A scheme changes the ink; without this it does not change the page. A light
+   scheme picks dark text because it expects a light background, so on a dark
+   terminal it reads worse than the one it replaced. *)
+let test_a_scheme_repaints_the_terminals_own_background () =
+  let captured = sink () in
+  let rgb =
+    Masc_tui_terminal_palette.make_rgb ~red:0x00 ~green:0x2b ~blue:0x36
+  in
+  Presenter.sync_background ~write:(write captured) ~flush:(flush captured)
+    (Some rgb);
+  let sent = output captured in
+  check bool "OSC 11 carries the scheme's own background" true
+    (contains sent "\027]11;rgb:00/2b/36\027\\")
+
+let test_withdrawing_a_scheme_puts_the_background_back () =
+  (* [None] is "follow the terminal", which is a reset rather than a colour:
+     masc has no opinion to send once the reader has withdrawn theirs. *)
+  let captured = sink () in
+  Presenter.sync_background ~write:(write captured) ~flush:(flush captured) None;
+  check bool "OSC 111 restores the terminal's own" true
+    (contains (output captured) "\027]111\027\\")
+
+let test_cleanup_returns_the_background_before_the_screen () =
+  (* The failure this exists for: quit with a scheme in force and the reader's
+     shell keeps masc's colours until they close the window. Order matters --
+     the reset has to land while the alternate screen is still up, so the
+     screen that comes back is already wearing its own. *)
+  let presenter = Presenter.create ~synchronized_output:false () in
+  let captured = sink () in
+  Presenter.cleanup presenter ~write:(write captured) ~flush:(flush captured);
+  let left = output captured in
+  check bool "cleanup returns the background" true
+    (contains left "\027]111\027\\");
+  let reset_at = Str.search_forward (Str.regexp_string "\027]111") left 0 in
+  let leave_at = Str.search_forward (Str.regexp_string "\027[?1049l") left 0 in
+  check bool "before leaving the alternate screen" true (reset_at < leave_at)
+
 let test_alternate_screen_is_taken_and_given_back () =
   let presenter = Presenter.create ~synchronized_output:false () in
   let captured = sink () in
@@ -319,5 +356,11 @@ let () =
             test_viewport_discards_offscreen_rows
         ; test_case "alternate screen" `Quick
             test_alternate_screen_is_taken_and_given_back
+        ; test_case "a scheme repaints the terminal's background" `Quick
+            test_a_scheme_repaints_the_terminals_own_background
+        ; test_case "withdrawing puts the background back" `Quick
+            test_withdrawing_a_scheme_puts_the_background_back
+        ; test_case "cleanup returns the background first" `Quick
+            test_cleanup_returns_the_background_before_the_screen
         ] )
     ]

@@ -13,4 +13,5 @@ export {
   retryKeeperAutoJudge,
   deleteKeeperApprovalRule,
   setKeeperGateMode,
+  setKeeperExternalGateMode,
 } from './gate-actions'

@@ -95,6 +95,7 @@ function responseWithQueue(
   approval_rules: KeeperApprovalRule[] = [],
   hitl: DashboardGateResponse['hitl'] = {
     gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+    external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
     judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
   },
   approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
@@ -200,12 +201,28 @@ async function loadSurface(
         approval_rules_state,
         recent_resolved_state,
       )
+  const setExternalGateMode = vi
+    .fn()
+    .mockResolvedValue({
+      ok: true,
+      mode: 'always_allow',
+      previous_mode: 'manual',
+      actor: 'op',
+      changed_at: '2026-06-19T00:00:00Z',
+      recovery_status: 'not_requested',
+      recovery_error: null,
+      started: 0,
+      queued: 0,
+      recovery_failure_count: 0,
+      recovery_failures: [],
+    })
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
     resolveGateApproval,
     retryGateAutoJudge,
     deleteGateApprovalRule,
     setGateMode,
+    setExternalGateMode,
   })
   vi.doMock('../../api', apiMock)
   vi.doMock('../../api/dashboard-gate', apiMock)
@@ -229,6 +246,7 @@ async function loadSurface(
     retryGateAutoJudge,
     deleteGateApprovalRule,
     setGateMode,
+    setExternalGateMode,
     navigate,
     gateSignals,
   }
@@ -984,6 +1002,7 @@ describe('ApprovalsSurface', () => {
   it('names the judge lane model in the Gate mode card, and its unavailability', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
       judge_lane: {
         status: 'available',
         lane_id: 'hitl_auto_judge',
@@ -1000,6 +1019,7 @@ describe('ApprovalsSurface', () => {
 
     const { ApprovalsSurface: UnavailableSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
       judge_lane: {
         status: 'unavailable',
         lane_id: 'hitl_auto_judge',
@@ -1176,6 +1196,7 @@ describe('ApprovalsSurface', () => {
       retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+      setExternalGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
@@ -1183,6 +1204,7 @@ describe('ApprovalsSurface', () => {
       retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+      setExternalGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../sse-store', () => ({
       registerGateRefresh: vi.fn(),
@@ -1219,6 +1241,7 @@ describe('ApprovalsSurface', () => {
       retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+      setExternalGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../api/dashboard-gate', () => ({
       fetchDashboardGate,
@@ -1226,6 +1249,7 @@ describe('ApprovalsSurface', () => {
       retryGateAutoJudge: vi.fn().mockResolvedValue({ ok: true }),
       deleteGateApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
       setGateMode: vi.fn().mockResolvedValue({ ok: true }),
+      setExternalGateMode: vi.fn().mockResolvedValue({ ok: true }),
     }))
     vi.doMock('../../sse-store', () => ({
       registerGateRefresh: vi.fn(),
@@ -1348,6 +1372,7 @@ describe('ApprovalsSurface', () => {
   it('binds the three non-hierarchical choices to hitl.gate_mode', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'auto_judge', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
       judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
@@ -1367,6 +1392,7 @@ describe('ApprovalsSurface', () => {
   it('shows Human as the selected Gate mode when configured', async () => {
     const { ApprovalsSurface } = await loadSurface([], [], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
       judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
@@ -1381,6 +1407,7 @@ describe('ApprovalsSurface', () => {
   it('routes a Gate mode choice through setGateMode', async () => {
     const { ApprovalsSurface, setGateMode } = await loadSurface([], [], [], {
       gate_mode: { mode: 'manual', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
       judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
     })
 
@@ -1394,6 +1421,63 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(setGateMode).toHaveBeenCalledWith('auto_judge')
+  }, 20000)
+
+  it('binds the external-services lane to hitl.external_gate_mode and routes through setExternalGateMode', async () => {
+    // The lane exists because on 2026-08-27 the workspace lane was open
+    // (374 of 379 decisions rode workspace always-allow) and outside-service
+    // writes must not inherit that switch. The selector must read the
+    // external lane, not the workspace one, and its choice must reach the
+    // external endpoint.
+    const { ApprovalsSurface, setExternalGateMode, setGateMode } = await loadSurface([], [], [], {
+      gate_mode: { mode: 'always_allow', configured: true, state: 'ready' },
+      external_gate_mode: { mode: 'manual', configured: false, state: 'ready' },
+      judge_lane: { status: 'available', lane_id: 'gate-judge', slots: ['judge'] },
+    })
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const selector = container.querySelector('[data-testid="gate-external-mode-selector"]')
+    expect(selector?.getAttribute('role')).toBe('radiogroup')
+    const choices = Array.from(selector?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [])
+    // The workspace lane says always_allow; the external selector must show manual.
+    expect(choices.find(choice => choice.textContent === 'Human')?.getAttribute('aria-checked')).toBe('true')
+    expect(choices.find(choice => choice.textContent === 'Always Allow')?.getAttribute('aria-checked')).toBe('false')
+
+    choices.find(choice => choice.textContent === 'Auto Judge')?.click()
+    await flushUi()
+    expect(setExternalGateMode).toHaveBeenCalledWith('auto_judge')
+    expect(setGateMode).not.toHaveBeenCalled()
+
+    const aside = container.querySelector('[data-testid="approvals-aside"]')
+    expect(aside?.textContent).toContain('바깥 서비스 쓰기')
+  }, 20000)
+
+  it('renders an identity_call row by its provider and remote tool, not the closed operation name', async () => {
+    // Every outside-service call submits under one operation identity; a
+    // human deciding "may this run" needs the provider and the real tool,
+    // which ride in the input.
+    const { ApprovalsSurface } = await loadSurface([
+      queueItem({
+        id: 'appr-identity',
+        keeper_name: 'kidsnote',
+        tool_name: 'identity_call',
+        input: {
+          provider_id: 'atlassian',
+          remote_name: 'addCommentToJiraIssue',
+          arguments: { issueIdOrKey: 'PK-1', body: 'hello' },
+        },
+        input_preview: '{"provider_id":"atlassian","remote_name":"addCommentToJiraIssue",…}',
+      }),
+    ])
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const card = container.querySelector('[data-approval-id="appr-identity"]')
+    expect(card?.querySelector('.ap-tool')?.textContent).toBe('atlassian · addCommentToJiraIssue')
+    expect(card?.textContent).toContain('atlassian · addCommentToJiraIssue Gate 요청')
   }, 20000)
 
   it('surfaces a visible error and re-enables the actions when a decision fails (no silent failure)', async () => {

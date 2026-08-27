@@ -289,6 +289,12 @@ export interface DashboardGateResponse {
   approval_rules_state: KeeperApprovalRulesState
   hitl: {
     gate_mode: GateModeStatus
+    /** The external-services lane: calls that leave for an attached outside
+     *  service (Jira, Slack, GitHub through a Keeper identity). A separate
+     *  switch from `gate_mode` on purpose — opening the workspace lane must
+     *  not silently open writes into somebody else's service. Absent state
+     *  file defaults to manual server-side. */
+    external_gate_mode: GateModeStatus
     judge_lane: GateJudgeLane
   } | null
 }

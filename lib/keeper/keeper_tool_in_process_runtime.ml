@@ -38,19 +38,24 @@ let handle_tools_list ~(meta : keeper_meta) ~args =
        in
        Keeper_tool_execution.failure_data
          ~class_
+         ~metadata:data
          ~message:"Keeper capability search rejected the query."
          data)
   | Some other ->
-    Keeper_tool_execution.failure_data
-      ~class_:Tool_result.Policy_rejection
-      ~message:"keeper_tools_list query must be a string."
-      (`Assoc
+    let data =
+      `Assoc
          [ ( "error"
            , `Assoc
                [ "kind", `String "invalid_query_type"
                ; "received", `String (Json_util.kind_name other)
                ] )
-         ])
+         ]
+    in
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Policy_rejection
+      ~metadata:data
+      ~message:"keeper_tools_list query must be a string."
+      data
 ;;
 
 type external_gate_block =

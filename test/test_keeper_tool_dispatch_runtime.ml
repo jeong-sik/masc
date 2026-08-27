@@ -4810,6 +4810,50 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
+let test_tools_search_error_reaches_agent_core_as_typed_payload () =
+  with_exec_fixture
+    "tools-search-agent-core-error"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.For_testing.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_tools_list" with
+         | Some tool -> tool
+         | None -> fail "keeper_tools_list is absent from Agent Core bundle"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [ "query", `String "  " ])
+       with
+       | Ok _ -> fail "empty capability search unexpectedly completed"
+       | Error error ->
+         check
+           (option bool)
+           "policy rejection remains deterministic"
+           (Some true)
+           (Option.map
+              (fun class_ -> class_ = Agent_core.Types.Deterministic)
+              error.Agent_core.Types.error_class);
+         let payload =
+           parse_json error.Agent_core.Types.message
+           |> Yojson.Safe.Util.member "masc.payload"
+         in
+         check string
+           "Agent Core receives the typed search error kind"
+           "empty_query"
+           Yojson.Safe.Util.(payload |> member "error" |> member "kind" |> to_string))
+;;
+
 let one_node_clock_composition =
   {|[[compositions]]
 name = "clock"
@@ -7020,6 +7064,8 @@ let () =
     ("keeper_tools_list_json", [
       test_case "uses typed groups" `Quick
         test_keeper_tools_list_json_uses_typed_groups;
+      test_case "Agent Core receives typed search failures" `Quick
+        test_tools_search_error_reaches_agent_core_as_typed_payload;
       test_case "descriptor route miss is typed runtime failure" `Quick
         test_descriptor_route_miss_payload_is_typed_runtime_failure;
     ]);

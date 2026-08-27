@@ -59,6 +59,7 @@ val failure
 val failure_data
   :  class_:Tool_result.tool_failure_class
   -> ?effect_disposition:Tool_result.failure_effect_disposition
+  -> ?metadata:Yojson.Safe.t
   -> message:string
   -> Yojson.Safe.t
   -> t

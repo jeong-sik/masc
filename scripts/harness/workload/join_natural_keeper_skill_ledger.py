@@ -466,6 +466,66 @@ def validate_dashboard_ledger(
     return ledger
 
 
+def validate_current_skill_projection(
+    dashboard: dict[str, Any],
+    *,
+    durable_ledger: dict[str, Any],
+    keeper: str,
+    trace_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    projection_value = dashboard.get("skill_activations")
+    if projection_value is None:
+        return {"status": "missing"}, None
+    require(
+        isinstance(projection_value, dict),
+        "current Skill projection is not an object",
+    )
+    projection = cast(dict[str, Any], projection_value)
+    status = required_string(projection, "status", "current Skill projection")
+    require(
+        status in {"available", "unavailable", "no_session"},
+        f"current Skill projection status is unsupported: {status}",
+    )
+    projection_keeper = required_string(
+        projection, "keeper_name", "current Skill projection"
+    )
+    require(projection_keeper == keeper, "Skill ledger Keeper differs")
+    observation: dict[str, Any] = {
+        "status": status,
+        "keeper_name": projection_keeper,
+    }
+    if status == "unavailable":
+        observation.update(
+            {
+                "reason": required_string(
+                    projection, "reason", "current Skill projection"
+                ),
+                "detail": required_string(
+                    projection, "detail", "current Skill projection"
+                ),
+            }
+        )
+        return observation, None
+    if status == "no_session":
+        return observation, None
+
+    current = required_object(projection, "ledger", "current Skill projection")
+    current_session = required_string(current, "session_id", "Skill ledger projection")
+    expected_current = durable_ledger if current_session == trace_id else current
+    validated = validate_dashboard_ledger(
+        dashboard,
+        durable_ledger=expected_current,
+        keeper=keeper,
+    )
+    observation.update(
+        {
+            "session_id": current_session,
+            "revision": required_string(validated, "revision", "Skill ledger"),
+        }
+    )
+    return observation, validated
+
+
 def validate_effective_keeper_surface(
     dashboard: dict[str, Any],
     *,
@@ -781,37 +841,30 @@ def validate_join(
         keeper=producer["keeper"],
         expected_runtime_id=expected_runtime_id,
     )
-    current_ledgers: list[dict[str, Any]] = []
-    for dashboard, surface in (
-        (dashboard_before, surface_before),
-        (dashboard_after, surface_after),
-    ):
-        if surface["status"] != "available":
-            continue
-        projection = required_object(dashboard, "skill_activations", "dashboard")
-        current = required_object(projection, "ledger", "Skill ledger projection")
-        current_session = required_string(
-            current, "session_id", "Skill ledger projection"
-        )
-        expected_current = (
-            ledger if current_session == producer["trace_id"] else current
-        )
-        current_ledgers.append(
-            validate_dashboard_ledger(
-                dashboard,
-                durable_ledger=expected_current,
-                keeper=producer["keeper"],
-            )
-        )
-    if len(current_ledgers) == 2:
+    projection_before, current_before = validate_current_skill_projection(
+        dashboard_before,
+        durable_ledger=ledger,
+        keeper=producer["keeper"],
+        trace_id=producer["trace_id"],
+    )
+    projection_after, current_after = validate_current_skill_projection(
+        dashboard_after,
+        durable_ledger=durable_ledger_after,
+        keeper=producer["keeper"],
+        trace_id=producer["trace_id"],
+    )
+    current_ledgers = [
+        current for current in (current_before, current_after) if current is not None
+    ]
+    if current_before is not None and current_after is not None:
         require(
-            current_ledgers[1] == current_ledgers[0],
+            current_after == current_before,
             "Dashboard ledger changed during join",
         )
 
     result = exact_turn_join(ledger=ledger, turn_ref=producer["turn_ref"])
-    surface_statuses = [surface_before["status"], surface_after["status"]]
-    if surface_statuses == ["available", "available"]:
+    projection_statuses = [projection_before["status"], projection_after["status"]]
+    if projection_statuses == ["available", "available"]:
         projected_session = required_string(
             current_ledgers[0], "session_id", "Skill ledger projection"
         )
@@ -823,12 +876,12 @@ def validate_join(
         )
     else:
         dashboard_equals_durable = False
-        if surface_statuses[0] == surface_statuses[1]:
+        if projection_statuses[0] == projection_statuses[1]:
             dashboard_projection_kind = (
-                f"current_surface_{surface_statuses[0]}_historical_exact"
+                f"current_projection_{projection_statuses[0]}_historical_exact"
             )
         else:
-            dashboard_projection_kind = "current_surface_changed_historical_exact"
+            dashboard_projection_kind = "current_projection_changed_historical_exact"
     return {
         "producer": producer,
         "server": before_identity,
@@ -843,6 +896,10 @@ def validate_join(
         "current_surface": {
             "before": surface_before,
             "after": surface_after,
+        },
+        "current_projection": {
+            "before": projection_before,
+            "after": projection_after,
         },
         "result": result,
     }

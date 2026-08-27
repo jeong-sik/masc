@@ -387,7 +387,7 @@ let descriptor_discovery_json active_name_set descriptor =
        ])
 ;;
 
-let keeper_tools_list_json ~(meta : keeper_meta) =
+let active_descriptor_names ~(meta : keeper_meta) =
   let active_name_set =
     Keeper_tool_policy.keeper_model_tool_schemas_for meta.tool_groups ()
     |> List.fold_left
@@ -395,13 +395,18 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
             StringSet.add schema.name names)
          StringSet.empty
   in
-  let active_descriptor_names =
+  let descriptors =
     Keeper_tool_descriptor.model_visible_descriptors ()
     |> List.concat_map (fun descriptor ->
       Keeper_tool_descriptor.keeper_model_names descriptor
       |> List.filter_map (fun name ->
         if StringSet.mem name active_name_set then Some (name, descriptor) else None))
   in
+  active_name_set, descriptors
+;;
+
+let keeper_tools_list_json ~(meta : keeper_meta) =
+  let active_name_set, active_descriptor_names = active_descriptor_names ~meta in
   let map =
     List.fold_left
       (fun acc (name, descriptor) ->
@@ -431,4 +436,60 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   in
   Yojson.Safe.to_string
     (`Assoc (assoc @ [ "descriptor_surface", `List descriptor_surface ]))
+;;
+
+let keeper_tools_search_json ~(meta : keeper_meta) ~query =
+  let active_name_set, active_descriptors = active_descriptor_names ~meta in
+  let documents =
+    List.map
+      (fun (name, descriptor) ->
+         let category =
+           Keeper_tool_descriptor.keeper_tool_group_to_string
+             descriptor.Keeper_tool_descriptor.keeper_tool_group
+         in
+         Keeper_capability_search.
+           { id = descriptor.id; name; description = descriptor.description; category })
+      active_descriptors
+  in
+  match Keeper_capability_search.search ~query documents with
+  | Error _ as error -> error
+  | Ok hits ->
+       let rec render index rows = function
+         | [] ->
+           Ok
+             (`Assoc
+                [ "query", `String query
+                ; "match_count", `Int (List.length rows)
+                ; "matches", `List (List.rev rows)
+                ])
+         | (hit : Keeper_capability_search.hit) :: rest ->
+           (match
+              List.find_map
+                (fun (name, descriptor) ->
+                   if String.equal name hit.document.name
+                      && String.equal descriptor.Keeper_tool_descriptor.id hit.document.id
+                   then Some descriptor
+                   else None)
+                active_descriptors
+            with
+            | None ->
+              Error
+                (Keeper_capability_search.Index_unavailable
+                   "capability index returned an identity outside its authorized input")
+            | Some descriptor ->
+              let row =
+                `Assoc
+                  ([ "rank", `Int index
+                   ; "score", `Float hit.rank
+                   ; "matched_name", `String hit.document.name
+                   ; "category", `String hit.document.category
+                   ]
+                   @ Keeper_tool_descriptor.discovery_fields descriptor
+                   @ [ ( "active_names"
+                       , Json_util.json_string_list
+                           (descriptor_active_names active_name_set descriptor) ) ])
+              in
+              render (index + 1) (row :: rows) rest)
+       in
+       render 1 [] hits
 ;;

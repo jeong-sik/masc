@@ -15,8 +15,42 @@ let handle_time_now ~args:_ =
   `Assoc [ "now_iso", `String now_iso; "now_unix", `Float now_unix ]
 ;;
 
-let handle_tools_list ~(meta : keeper_meta) ~args:_ =
-  Keeper_tool_shared_runtime.keeper_tools_list_json ~meta
+let handle_tools_list ~(meta : keeper_meta) ~args =
+  match Json_util.assoc_member_opt "query" args with
+  | None ->
+    Keeper_tool_execution.success
+      (Keeper_tool_shared_runtime.keeper_tools_list_json ~meta)
+  | Some (`String query) ->
+    (match Keeper_tool_shared_runtime.keeper_tools_search_json ~meta ~query with
+     | Ok data -> Keeper_tool_execution.success_data data
+     | Error error ->
+       let data =
+         `Assoc
+           [ "error", Keeper_capability_search.error_to_yojson error ]
+       in
+       let class_ =
+         match error with
+         | Keeper_capability_search.Index_unavailable _ ->
+           Tool_result.Runtime_failure
+         | Keeper_capability_search.Empty_query
+         | Keeper_capability_search.Invalid_query _ ->
+           Tool_result.Policy_rejection
+       in
+       Keeper_tool_execution.failure_data
+         ~class_
+         ~message:"Keeper capability search rejected the query."
+         data)
+  | Some other ->
+    Keeper_tool_execution.failure_data
+      ~class_:Tool_result.Policy_rejection
+      ~message:"keeper_tools_list query must be a string."
+      (`Assoc
+         [ ( "error"
+           , `Assoc
+               [ "kind", `String "invalid_query_type"
+               ; "received", `String (Json_util.kind_name other)
+               ] )
+         ])
 ;;
 
 type external_gate_block =

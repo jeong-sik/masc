@@ -966,6 +966,12 @@ let base_schema_input name =
     Canonical_registry, schema.input_schema
   | None -> invalid_arg ("missing base tool schema for " ^ name)
 
+let keeper_tools_list_schema =
+  match find_base_schema_opt "keeper_tools_list" with
+  | Some schema -> schema
+  | None -> invalid_arg "missing base tool schema for keeper_tools_list"
+;;
+
 (* Declared twice until now: here and in the library shard, whose file is
    config/tools/keeper_library_*.toml. The parameters agreed to a full stop,
    but the tool descriptions did not -- this side said "Search the keeper
@@ -1905,12 +1911,8 @@ let internal_descriptors : t list =
        ~keeper_model_projection:Internal_name
        ~id:"keeper.tools_list"
        ~name:"keeper_tools_list"
-       ~description:
-         "List the active keeper tool surface from descriptors and registered schemas. \
-          This is capability introspection, not connector content lookup. Use \
-          keeper_surface_read only for current conversation context. \
-          No arguments."
-       ~input_schema:empty_object_schema
+       ~description:keeper_tools_list_schema.description
+       ~input_schema:keeper_tools_list_schema.input_schema
        (* Concurrent: pure projection over the boot-time descriptor
           registry and registered schemas; no shared mutable state. *)
        ~ordinary_execution_mode:Concurrent

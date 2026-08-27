@@ -1647,6 +1647,10 @@
  (modules test_server_bootstrap_durable_demand_owner)
  (libraries alcotest masc_test_deps masc_test_runtime))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: a bootstrap fixture TOML seeds
+; sandbox_profile = "local" (incidental — the suite measures server runtime
+; bootstrap/health wiring, not sandbox isolation), and keeper-up validation
+; now rejects Local fail-closed without the hatch.
 (test
  (name test_server_runtime_bootstrap)
  (modules test_server_runtime_bootstrap)
@@ -1657,7 +1661,8 @@
   bigstringaf)
  (deps ../bin/main_eio.exe)
   (action
-   (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test}))))
+   (setenv MASC_EXEC_ALLOW_LOCAL_PLAYGROUND true
+    (setenv MASC_MAIN_EIO_EXE %{dep:../bin/main_eio.exe} (run %{test})))))
 
 ; Stable dashboard behavior contracts only. The HTTP core executable also
 ; contains source-shape assertions, so CI selects its behavior suite; the
@@ -1886,9 +1891,19 @@
   unix
   yojson))
 
+; MASC_EXEC_ALLOW_LOCAL_PLAYGROUND: the schedule tool fixtures create a
+; keeper whose sandbox_profile resolves to Local (incidental — the suite
+; measures schedule tool create/list/get/cancel wiring, not sandbox
+; isolation), and keeper-up validation now rejects Local fail-closed without
+; the hatch.
 (test
  (name test_schedule_tool_wiring)
  (modules test_schedule_tool_wiring)
+ (action
+  (setenv
+   MASC_EXEC_ALLOW_LOCAL_PLAYGROUND
+   true
+   (run %{test})))
  (libraries masc_test_deps masc_schedule))
 
 ; Typed TOML field resolution.
